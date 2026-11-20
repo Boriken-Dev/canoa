@@ -28,7 +28,7 @@ pub(crate) mod limits;
 mod probe;
 
 use crate::accounts::{Held, NoAccounts};
-use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
+use crate::config::{Config, EntryKind, Settings, cache_lifetime_label, cache_lifetime_name};
 use crate::kind;
 
 /// How long the program's `--version` is waited for.
@@ -93,7 +93,7 @@ pub struct Choices {
     /// What the provider does with a start request's cache lifetime, in its own sentence (`ignored: ...` when it has no
     /// control for it); `None` when it did not say.
     pub cache_lifetime: Option<String>,
-    /// The lifetimes beyond the default the provider honours, each with its own label: the only ones a session may ask.
+    /// The lifetimes beyond the default the provider honours, each with the host's label for it: the only ones a session may ask.
     pub cache_choices: Vec<(CacheLifetime, String)>,
     /// The entry's own `cache_lifetime`, when canoa.cfg sets one: what its sessions ask unless the person chooses.
     pub configured_cache_lifetime: Option<String>,
@@ -640,7 +640,7 @@ fn ask(
             .map(|info| {
                 info.cache_choices
                     .into_iter()
-                    .map(|choice| (choice.lifetime, choice.label))
+                    .map(|lifetime| (lifetime, cache_lifetime_label(lifetime).to_owned()))
                     .collect()
             })
             .unwrap_or_default(),

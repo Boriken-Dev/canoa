@@ -8,12 +8,12 @@ use std::collections::BTreeMap;
 use canoa::usage_reader::UsageReader;
 use canoa::vendor::{AgentVendor, VendorInfo};
 use coqui_acp_api::guatiao::library::Registry;
-use coqui_acp_api::{AccountProvider, AcpHarness};
+use coqui_acp_api::{AccountProvider, AccountsLink, AcpHarness};
 use serde_json::{Value, json};
 
 use crate::bundled::{self, Bundle};
 use crate::config::{Config, EntryKind, Origin, Settings};
-use crate::kind::{account_provider, instance};
+use crate::kind::{account_instance, account_provider, instance};
 use crate::makers::{ACCOUNTS_SUFFIX, Makers, makers_in};
 
 /// What the loaded providers say of one agent, from every registry that offers a part of it.
@@ -205,6 +205,8 @@ pub(crate) fn rows_of(
     let mut rows: BTreeMap<String, Row> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     for (origin, registry) in registries {
+        // The account providers the harnesses of this registry declare, with the harness each belongs to.
+        let mut declared: BTreeMap<String, (String, AccountsLink)> = BTreeMap::new();
         for offer in registry.offers::<dyn AgentVendor>() {
             let Some(info) = offer
                 .default_instance()
@@ -234,6 +236,9 @@ pub(crate) fn rows_of(
                 && let Ok(info) = harness.describe()
             {
                 slot.title.get_or_insert(info.title);
+                if let Some(link) = info.accounts {
+                    declared.insert(link.provider.clone(), (offer.id().to_owned(), link));
+                }
             }
         }
         let made: Vec<String> = makers_in(registry)
@@ -246,21 +251,34 @@ pub(crate) fn rows_of(
             if made.contains(&provider_id) || makers.ids().contains(&provider_id) {
                 continue;
             }
-            let harness = provider_id
-                .strip_suffix(ACCOUNTS_SUFFIX)
-                .unwrap_or(&provider_id)
-                .to_owned();
-            let provider = if provider_id.ends_with(ACCOUNTS_SUFFIX) {
-                account_provider(
-                    registry,
-                    &harness,
-                    &Settings::default(),
-                    &Settings::default(),
-                )
-                .ok()
-                .flatten()
-            } else {
-                offer.shared()
+            // A harness names its account provider; one no harness names belongs to the agent its id says (`<agent>_accounts`).
+            let (harness, provider) = match declared.get(&provider_id) {
+                Some((harness, link)) => (
+                    harness.clone(),
+                    account_provider(registry, link, &Settings::default(), &Settings::default())
+                        .ok()
+                        .flatten(),
+                ),
+                None => {
+                    let agent = provider_id
+                        .strip_suffix(ACCOUNTS_SUFFIX)
+                        .unwrap_or(&provider_id)
+                        .to_owned();
+                    let provider = if provider_id.ends_with(ACCOUNTS_SUFFIX) {
+                        account_instance(
+                            registry,
+                            &provider_id,
+                            &[],
+                            &Settings::default(),
+                            &Settings::default(),
+                        )
+                        .ok()
+                        .flatten()
+                    } else {
+                        offer.shared()
+                    };
+                    (agent, provider)
+                }
             };
             let id = touch(&mut rows, &mut order, &harness, origin);
             let Some(slot) = rows.get_mut(&id) else {

@@ -528,11 +528,9 @@ fn a_profile_reaches_claude_code_as_the_table_says_in_both_versions() {
         let started = records(&record);
         let first = &started[0];
         let args = first["args"].as_array().expect("arguments");
-        assert!(
-            args.contains(&json!(
-                "--append-system-prompt=Context from the host's profile."
-            )),
-            "v{version}: {args:?}"
+        assert_eq!(
+            first["system_prompt"], "Context from the host's profile.",
+            "v{version}: the context is the text of the file the program was given: {args:?}"
         );
         assert_eq!(first["plugin_skills"], json!(["review"]), "v{version}");
         assert_eq!(first["mcp_servers"], json!(["probe"]), "v{version}");

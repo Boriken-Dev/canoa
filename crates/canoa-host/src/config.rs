@@ -1348,6 +1348,17 @@ pub const fn cache_lifetime_name(lifetime: CacheLifetime) -> &'static str {
     }
 }
 
+/// What a menu calls `lifetime`: the host's own words, the same whichever provider honours it.
+#[must_use]
+pub const fn cache_lifetime_label(lifetime: CacheLifetime) -> &'static str {
+    match lifetime {
+        CacheLifetime::Off => "Off",
+        CacheLifetime::Short => "5 minutes",
+        CacheLifetime::Long => "1 hour",
+        _ => "Default",
+    }
+}
+
 /// Claude Code's setting sources.
 pub const SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 

@@ -15,7 +15,7 @@ publish = false
 
 [dependencies]
 canoa = { workspace = true, features = ["api-gateway"] }
-coqui-acp-api.workspace = true
+coqui-acp-api = { workspace = true, features = ["reader"] }
 guatiao-serde.workspace = true
 getrandom.workspace = true
 percent-encoding.workspace = true

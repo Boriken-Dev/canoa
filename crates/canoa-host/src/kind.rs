@@ -20,8 +20,8 @@ use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
 use coqui_acp_api::{
-    AccountCatalog, AccountKindInfo, AccountProvider, AcpHarness, CacheLifetime, Environment,
-    HARNESS_LOGIN, HarnessNotice, LOCAL_ACCOUNT, ProcessSpawner, StartRequest,
+    AccountCatalog, AccountKindInfo, AccountProvider, AccountsLink, AcpHarness, CacheLifetime,
+    Environment, HARNESS_LOGIN, HarnessNotice, LOCAL_ACCOUNT, ProcessSpawner, StartRequest,
 };
 
 use crate::accounts::matching::Runs;
@@ -145,8 +145,8 @@ impl fmt::Debug for Harness {
 impl Harness {
     /// The provider `id` of `registry`, configured with `settings`; with `profiles`, also the same with client plugins
     /// allowed. `roots` are the entry's working roots, which every connection's provider holds a session and a resumed
-    /// thread to. The account provider the same library offers as `<id>_accounts` is configured with the second of
-    /// `settings`, and with the harness's `executable`, `harness`, `node` and `script` settings where it declares them.
+    /// thread to. The account provider the harness declares (`HarnessInfo::accounts`) is configured with the second of
+    /// `settings`, and with the harness's settings the link names where the account provider declares them.
     ///
     /// # Errors
     ///
@@ -167,9 +167,11 @@ impl Harness {
                 other => other,
             })?;
         let catalog = plain.accounts().ok();
+        let link = plain.describe().ok().and_then(|info| info.accounts);
         let (accounts_of, listing, local) = account_side(
             registry,
             id,
+            link.as_ref(),
             (settings, account_settings),
             catalog.as_ref(),
             &makers,
@@ -324,7 +326,7 @@ impl Harness {
     ///
     /// # Errors
     ///
-    /// Why this harness has none: its library offers no `<id>_accounts`.
+    /// Why this harness has none: it declares no account provider, or its library does not offer the one it declares.
     pub(crate) fn account_provider(&self) -> Result<&Arc<dyn AccountProvider>, String> {
         self.accounts_of.as_ref().ok_or_else(|| {
             format!(
@@ -694,11 +696,9 @@ fn honoured(harness: &dyn AcpHarness, lifetime: CacheLifetime) -> CacheLifetime 
     if lifetime != CacheLifetime::Off {
         return lifetime;
     }
-    let offered = harness.describe().is_ok_and(|info| {
-        info.cache_choices
-            .iter()
-            .any(|choice| choice.lifetime == lifetime)
-    });
+    let offered = harness
+        .describe()
+        .is_ok_and(|info| info.cache_choices.contains(&lifetime));
     if offered {
         lifetime
     } else {
@@ -769,19 +769,23 @@ pub(crate) fn instance(
 /// offers the harness's own login as the automatic `local` account.
 type AccountSide = (Option<Arc<dyn AccountProvider>>, AccountCatalog, bool);
 
-/// The account provider the library of harness `harness` offers as `<harness>_accounts`, what it offers listed with the kinds the
-/// account makers offer that the harness can run (`accepts` is what it takes). `own` configures it; the harness's `executable`,
-/// `harness`, `node` and `script` settings are given to it where it declares them, so that it runs the program the harness runs. A
-/// library with no such provider has no accounts to make, and its listing holds only the login a program has where it runs.
+/// The account provider `link` names (the one harness `harness` declares), what it offers listed with the kinds the account
+/// makers offer that the harness can run (`accepts` is what it takes). `own` configures it; the harness's settings the link names
+/// are given to it where it declares them, so that it runs the program the harness runs. A harness that declares none has no
+/// accounts to make, and its listing holds only the login a program has where it runs.
 fn account_side(
     registry: &Registry,
     harness: &str,
+    link: Option<&AccountsLink>,
     (settings, own): (&Settings, &Settings),
     accepts: Option<&AccountCatalog>,
     makers: &Makers,
 ) -> Result<AccountSide, ProviderError> {
     let mut listing = AccountCatalog::new();
-    let provider = account_provider(registry, harness, settings, own)?;
+    let provider = match link {
+        Some(link) => account_provider(registry, link, settings, own)?,
+        None => None,
+    };
     let mut local = false;
     if let Some(provider) = &provider {
         let offer = provider
@@ -795,14 +799,32 @@ fn account_side(
     Ok((provider, listing, local))
 }
 
+/// The account provider `link` names, configured with `own` and with the keys of `settings` the link shares.
 pub(crate) fn account_provider(
     registry: &Registry,
-    harness: &str,
+    link: &AccountsLink,
     settings: &Settings,
     own: &Settings,
 ) -> Result<Option<Arc<dyn AccountProvider>>, ProviderError> {
-    let Some(Ok(offer)) = registry.offer::<dyn AccountProvider>(&format!("{harness}_accounts"))
-    else {
+    account_instance(
+        registry,
+        &link.provider,
+        &link.shared_settings,
+        settings,
+        own,
+    )
+}
+
+/// The account provider `id`, configured with `own` and with the keys `shared` of `settings` where it declares them; `None` when
+/// the registry offers none.
+pub(crate) fn account_instance(
+    registry: &Registry,
+    id: &str,
+    shared: &[String],
+    settings: &Settings,
+    own: &Settings,
+) -> Result<Option<Arc<dyn AccountProvider>>, ProviderError> {
+    let Some(Ok(offer)) = registry.offer::<dyn AccountProvider>(id) else {
         return Ok(None);
     };
     let accounts = |error: ProviderError| match error {
@@ -822,12 +844,12 @@ pub(crate) fn account_provider(
                 .is_some_and(|schema| schema.find(key).is_some())
         };
         let mut map = own.as_map().clone();
-        for key in ["executable", "harness", "node", "script"] {
+        for key in shared {
             if !map.contains_key(key)
                 && declares(key)
                 && let Some(value) = settings.as_map().get(key)
             {
-                map.insert(key.to_owned(), value.clone());
+                map.insert(key.clone(), value.clone());
             }
         }
         let config = Value::from(

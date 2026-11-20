@@ -70,7 +70,7 @@ pub use config::{
     INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, MailAccount, MailAuth, MailBackend,
     MailConfig, NativeConfig, NetworkConfig, Origin, PoolConfig, Preset, ResolvedLoadout, Settings,
     StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, WebConfig, WebMode,
-    cache_lifetime_name, cache_lifetime_named, merge_into,
+    cache_lifetime_label, cache_lifetime_name, cache_lifetime_named, merge_into,
 };
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.

@@ -159,3 +159,198 @@ fn only_a_kind_the_account_provider_offers_is_accepted_for_an_account() {
         .expect_err("a key is not offered");
     assert!(why.contains("pi-api-key"), "{why}");
 }
+
+/// A harness whose account provider's id does not follow `<harness>_accounts`: the host finds it through what the harness
+/// declares.
+mod declared_link {
+    use coqui_acp_api::guatiao::Provider;
+    use coqui_acp_api::guatiao::Secret;
+    use coqui_acp_api::guatiao::library::{Object, ProviderError};
+    use coqui_acp_api::{
+        AccountCatalog, AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer,
+        AccountProvider, AccountProviderInfo, AccountRef, AccountUsage, AccountUsageQuery,
+        AccountWatch, AccountsLink, AcpHarness, Channel, ChannelSink, Environment, ExportPage,
+        HarnessInfo, ImportReport, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest,
+        ProcessSpawner, RenewReport, RenewRequest, Requirement, SessionExport, SessionImport,
+        StartRequest, WatchRequest,
+    };
+
+    use super::*;
+
+    fn unsupported() -> ProviderError {
+        ProviderError::new(
+            coqui_acp_api::guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+            "a stand-in",
+        )
+    }
+
+    #[derive(Default, Debug, Provider)]
+    #[provider(AcpHarness, id = "ember", crate = ::coqui_acp_api::guatiao)]
+    struct Ember;
+
+    impl AcpHarness for Ember {
+        fn describe(&self) -> Result<HarnessInfo, ProviderError> {
+            let mut info = HarnessInfo::new("Ember", vec![1]);
+            info.accounts = Some(AccountsLink::new("vault_logins"));
+            Ok(info)
+        }
+
+        fn accounts(&self) -> Result<AccountCatalog, ProviderError> {
+            Ok(AccountCatalog::new())
+        }
+
+        fn start(
+            &self,
+            _: StartRequest,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn ChannelSink>,
+        ) -> Result<Object<dyn Channel>, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn refusal(
+            &self,
+            _: Vec<Requirement>,
+            _: Secret<Environment>,
+            _: Option<AccountRef>,
+        ) -> Result<Option<String>, ProviderError> {
+            Ok(None)
+        }
+
+        fn program(&self) -> Result<Option<String>, ProviderError> {
+            Ok(None)
+        }
+
+        fn import_session(
+            &self,
+            _: SessionImport,
+            _: Object<dyn ProcessSpawner>,
+        ) -> Result<ImportReport, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn export_session(
+            &self,
+            _: SessionExport,
+            _: Object<dyn ProcessSpawner>,
+        ) -> Result<ExportPage, ProviderError> {
+            Err(unsupported())
+        }
+    }
+
+    #[derive(Default, Debug, Provider)]
+    #[provider(AccountProvider, id = "vault_logins", crate = ::coqui_acp_api::guatiao)]
+    struct Vault;
+
+    impl AccountProvider for Vault {
+        fn describe(&self) -> Result<AccountProviderInfo, ProviderError> {
+            Ok(AccountProviderInfo::new("Vault"))
+        }
+
+        fn offers(&self) -> Result<AccountOffer, ProviderError> {
+            let mut offer = AccountOffer::new();
+            offer
+                .kinds
+                .push(AccountKindInfo::new("vault-key", "Vault key"));
+            offer
+                .logins
+                .push(LoginMethodInfo::new("key", "Paste a key", "vault-key"));
+            Ok(offer)
+        }
+
+        fn login(
+            &self,
+            _: LoginRequest,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn LoginPrompter>,
+        ) -> Result<LoginOutcome, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn renew(
+            &self,
+            _: RenewRequest,
+            _: Object<dyn ProcessSpawner>,
+        ) -> Result<RenewReport, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn watch(
+            &self,
+            _: WatchRequest,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn AccountKeeper>,
+        ) -> Result<Object<dyn AccountWatch>, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn usage(
+            &self,
+            _: AccountUsageQuery,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn AccountKeeper>,
+        ) -> Result<AccountUsage, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn models(
+            &self,
+            _: AccountModelsQuery,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn AccountKeeper>,
+        ) -> Result<coqui_acp_api::ModelListing, ProviderError> {
+            Err(unsupported())
+        }
+    }
+
+    coqui_acp_api::guatiao::local_providers!(
+        id = "ember",
+        version = "0.0.0",
+        providers = [Ember, Vault]
+    );
+
+    fn registry_of_ember() -> Registry {
+        let mut registry = Registry::new("canoa", "0.0.0");
+        registry
+            .register_local("ember", library)
+            .expect("registered");
+        registry
+    }
+
+    #[test]
+    fn a_harness_finds_the_account_provider_it_declares_whatever_its_id() {
+        let registry = registry_of_ember();
+        assert!(
+            registry
+                .offer::<dyn AccountProvider>("ember_accounts")
+                .is_none(),
+            "no provider follows the old naming"
+        );
+        let ember = Harness::new(
+            &Arc::new(registry),
+            "ember",
+            (&Settings::default(), &Settings::default()),
+            false,
+            Vec::new(),
+            Arc::default(),
+        )
+        .expect("builds");
+        assert!(ember.account_provider().is_ok());
+        assert!(ember.listing().kind("vault-key").is_some());
+        assert!(
+            ember
+                .listing()
+                .logins
+                .iter()
+                .any(|method| method.id == "key")
+        );
+    }
+
+    #[test]
+    fn an_account_provider_a_harness_declares_is_not_a_maker() {
+        assert!(
+            crate::makers::makers_in(&registry_of_ember()).is_empty(),
+            "the harness owns the provider it names"
+        );
+    }
+}

@@ -14,7 +14,7 @@
 //! Each prompt asks one permission, a file write for Claude Code and a command for Codex, then answers `Done: <prompt>`
 //! when it was allowed, writing `standin.txt` in its directory, or `Refused: <prompt>`. When `STANDIN_RECORD` names a file,
 //! one JSON line is appended to it per process and per thing it was given: its arguments, the MCP servers its
-//! configuration file names, the skills in each plugin directory, the variables `STANDIN_ENV` names (comma-separated) with
+//! configuration file names, the skills in each plugin directory, the text of the file `--append-system-prompt-file` names, the variables `STANDIN_ENV` names (comma-separated) with
 //! their values, its process id, and each request.
 #![allow(
     clippy::std_instead_of_core,
@@ -89,6 +89,10 @@ fn record_start(harness: &str, args: &[String]) {
         .flatten()
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
+    let system_prompt = args
+        .iter()
+        .find_map(|arg| arg.strip_prefix("--append-system-prompt-file="))
+        .and_then(|path| std::fs::read_to_string(path).ok());
     let names: Vec<String> = std::env::vars().map(|(name, _)| name).collect();
     let config = std::env::var("CLAUDE_CONFIG_DIR").ok();
     let login = config
@@ -102,7 +106,7 @@ fn record_start(harness: &str, args: &[String]) {
         });
     record(
         &json!({"harness": harness, "pid": std::process::id(), "args": args, "mcp_servers": servers,
-        "plugin_skills": plugin_skills, "env": env, "env_names": names, "config": config, "login": login}),
+        "plugin_skills": plugin_skills, "system_prompt": system_prompt, "env": env, "env_names": names, "config": config, "login": login}),
     );
 }
 

@@ -61,23 +61,30 @@ impl Maker {
     }
 }
 
-/// The makers `registry` offers: its account providers that are not `<agent>_accounts` of an agent it also offers (an `acp_harness`,
-/// or an `agent_vendor` describing a program that has none).
+/// The makers `registry` offers: its account providers that no agent it also offers owns. A harness (an `acp_harness`) owns the
+/// one it declares (`<id>_accounts` when it cannot be built with no settings to ask); an `agent_vendor` describing a program that
+/// has none owns `<agent>_accounts`.
 pub(crate) fn makers_in(registry: &Registry) -> Vec<Maker> {
-    let mut harnesses: Vec<String> = registry
+    let mut owned: Vec<String> = registry
         .offers::<dyn AcpHarness>()
-        .map(|offer| offer.id().to_owned())
+        .filter_map(|offer| {
+            let described =
+                crate::kind::instance(registry, offer.id(), &crate::config::Settings::default())
+                    .ok()
+                    .and_then(|(harness, _)| harness.describe().ok());
+            match described {
+                Some(info) => Some(info.accounts?.provider),
+                None => Some(format!("{}{ACCOUNTS_SUFFIX}", offer.id())),
+            }
+        })
         .collect();
-    harnesses.extend(registry.offers::<dyn AgentVendor>().filter_map(|offer| {
+    owned.extend(registry.offers::<dyn AgentVendor>().filter_map(|offer| {
         let info = offer.default_instance()?.describe().ok()?;
-        Some(info.agent)
+        Some(format!("{}{ACCOUNTS_SUFFIX}", info.agent))
     }));
     registry
         .offers::<dyn AccountProvider>()
-        .filter(|offer| {
-            let owner = offer.id().strip_suffix(ACCOUNTS_SUFFIX);
-            !owner.is_some_and(|harness| harnesses.iter().any(|each| each == harness))
-        })
+        .filter(|offer| !owned.iter().any(|each| each == offer.id()))
         .filter_map(|offer| {
             let id = offer.id().to_owned();
             let provider = offer.shared()?;
