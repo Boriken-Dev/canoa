@@ -464,7 +464,7 @@ pub trait ModelStore: Send + Sync {
 }
 pub const KIND: &str = "model_store";   pub const RESERVED_TABLES: [&str; 29] = [...];   pub const MOST_OUTPUT: usize = 8 MiB;
 // Every model is #[non_exhaustive] with `new` (or Default) and public fields; `include/canoa.model_store.{kinds,schemas}.json` describe them.
-pub struct ModelStoreInfo { pub title, pub catalog, pub publisher, pub missing: String, pub settings: Option<ModelSettings>, pub speech: Option<SpeechService> }   // new(title, catalog, publisher, missing); problem()
+pub struct ModelStoreInfo { pub title, pub catalog, pub publisher, pub missing: String, pub settings: Option<ModelSettings>, pub speech: Option<SpeechService>, pub voice: Option<String> }   // new(title, catalog, publisher, missing); problem()
 pub struct ModelSettings { pub table: String, pub help: Option<String>, pub schema: Value, pub form: Option<Value> }   // asking::<S: Schema + Screen>(table)
 pub struct SpeechService { pub title, pub summary: String, pub license: Option<String>, pub location, pub route: String, pub local_file: bool, pub command: bool }   // new(title, summary, location, route) for a server; program(title, summary, location) for a program run for each recording
 pub struct ModelQuery { pub program: Option<String>, pub home: Option<String> }
@@ -476,7 +476,7 @@ pub struct Section { pub title: String, pub facts: Vec<Fact>, pub paragraphs: Ve
 pub struct Fact { pub label, pub value: String }   pub struct SpeechUse { pub text: String, pub caution: Option<String> }
 pub struct ModelAct { pub program: Option<String>, pub home: Option<String>, pub model: String, pub action: String }   pub struct ModelActed { pub note: Option<String> }
 pub struct ModelKeep { pub home: Option<String>, pub model: String, pub values: String }   pub struct ModelKept { pub values: String, pub note: Option<String> }
-pub struct ServiceQuery { pub home: Option<String>, pub program: Option<String>, pub models: bool }   pub struct ServiceReport { pub address: Option<String>, pub models: Vec<ServedModel>, pub unavailable: Option<String>, pub command: Option<SpeechRun> }
+pub struct ServiceQuery { pub home: Option<String>, pub program: Option<String>, pub models: bool }   pub struct ServiceReport { pub address: Option<String>, pub models: Vec<ServedModel>, pub unavailable: Option<String>, pub command: Option<SpeechRun>, pub voice: Option<Value> }
 pub struct SpeechRun { pub program: String, pub args: Vec<String>, pub input: String, pub model: String }   // new(program, args, input, model)
 pub struct Finished { pub code: Option<i64>, pub out: String, pub err: String }
 pub fn run(spawner: &Object<dyn ProcessSpawner>, program: &str, args: &[String], limit: Duration) -> Result<Finished, ProviderError>;   // to its end, or killed with its tree at `limit` (GONE)
@@ -486,7 +486,7 @@ pub fn run(spawner: &Object<dyn ProcessSpawner>, program: &str, args: &[String],
 - `list`: the rows now, never changing anything. `query.program` is the program the type's `program_store`s found (the host's own verified copy first, then the first copy found on the computer), none when there is none, which the provider answers as `unavailable`; `query.home` is the person's home. A row's `actions` are what it can do, `+` doing the first: its confirmation (`title`, `confirm`, the button's `label`) and the `steps` the host's `store/model` is asked for in order. A `Section` with `settings` draws the form of the type's settings after its paragraphs. A row with `speech` may be made the person's speech-to-text. A refusal is in the program's own words.
 - `act`: one action of a row to its end, through `spawner` (`run` does it, with a limit): `BAD_VALUE` for a name or an action that is none, the program's refusal as it said it.
 - `keep`: settles a row's values (`values` is a JSON object keyed by the schema's members, already checked against it, a member left empty absent) and answers what the host writes, `{}` taking the row's settings away; a library holds a number to what its model allows and says so in `note`.
-- `service`: where the service that runs the models is now: `address` when it is up, and with `query.models` the models that can transcribe; `unavailable` says in the offer's words why a recording cannot be taken. For a program, `query.program` is the launch path of the host's own copy (none when the host has none) and the answer's `command` says how to run that copy (`SpeechRun`: the program, its arguments with `{language_code|auto}` and `{vocabulary}` for the speech command provider to fill, how the audio reaches it, and the model the copy runs); the host writes it as the person's `speech_command` provider.
+- `service`: where the service that runs the models is now: `address` when it is up, and with `query.models` the models that can transcribe; `unavailable` says in the offer's words why a recording cannot be taken. For a program, `query.program` is the launch path of the host's own copy (none when the host has none) and the answer's `command` says how to run that copy (`SpeechRun`: the program, its arguments with `{language_code|auto}` and `{vocabulary}` for the speech command provider to fill, how the audio reaches it, and the model the copy runs); the host writes it as the person's `speech_command` provider. A store whose program reads text aloud names, in `describe().voice`, the id of the `speech_output` provider of its library that speaks with it, and `service` answers that provider's settings in `voice` (none, with `unavailable`, when there is no copy); the host offers the type's voices under the type's id, built from them, and never writes them to canoa.cfg.
 
 ## `catalog_source` (`canoa::store::source`, feature `store`)
 
@@ -807,15 +807,12 @@ ended and the read says so; a non-zero exit is an error carrying the end of its 
   choices are `CANOA_SAY_VOICE`, `_MODEL`, `_STYLE`, `_SPEED` and `_LANGUAGE`. `input` is `stdin` (default, a line a sentence) or `argument` (`{text}`, the whole text); `output` is raw
   samples at `rate` (default 22050) or a WAV stream read from its `data` chunk on. `voices`, `models` and `styles` are lists the settings give (the program is not asked), and a
   request outside a non-empty list is refused; `speed` says the program takes one (0.5 to 2). The text goes where the program sends it: `leaves` is `Maybe`.
-- `speech_say_piper` (`PiperSettings`, `PiperSpeech`): Piper, a local neural engine, over a folder of voices (`NAME.onnx` and `NAME.onnx.json`). A voice's id is `NAME`; its language,
-  sample rate and speakers come from the json, and a speaker of a model that has several is `NAME#N` (the first 32 named in the model are listed). The program gets `--model`,
-  `--output-raw`, `--quiet`, `--length_scale` (1 / speed, 0.5 to 2) and `--speaker`. A voice left out is `default_voice`, else the first in the request's language, else the first. The text stays on the computer.
 - `speech_say_system` (`SystemSettings`, `SystemSpeech`): the operating system's own synthesizer, through the program the spawner's system gives: Windows PowerShell with `System.Speech` (its
   desktop voices, a sentence at a time), `say` on macOS, `espeak-ng` elsewhere. `voices` runs the listing program (`say -v ?`, `espeak-ng --voices`). Speed 0.5 to 2. The text stays on the computer.
 - `speech_say_endpoint` (`EndpointSaySettings`, `EndpointSay`): `POST` of JSON in the shape of OpenAI's `audio/speech` (`model`, `input`, `voice`, `response_format: "pcm"`, `speed` held to 0.25 to 4, and the chosen
   style's text as `instructions`), the key as `Authorization: Bearer`, the answer read as it arrives as raw samples at `rate` (default 24000). A status outside 2xx is an error with the first 300 bytes of its body.
-  For `api.openai.com` the lists are the documented ones until the settings give others (models `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`; thirteen voices, of which `ballad`, `verse`, `marin` and `cedar` work with
-  `gpt-4o-mini-tts` only, which a request is refused for; four styles); for any other address they are `models`, `voices` and `styles` (`name=instruction`) as written. `leaves` is `Yes` and `words` names the host and
+  The lists are the settings' `models`, `voices` and `styles` (`name=instruction`) as written and none of any service's own: a library that knows a service's lists builds this provider over them
+  (`canoa-openai`'s `speech_say_openai`; Piper's `speech_say_piper` is `canoa-piper`'s). `leaves` is `Yes` and `words` names the host and
   whether a key goes with it. The text is at most `max_chars` (default 4096).
 
 ## `account_speech` (`canoa::speech::account`, feature `speech`)
