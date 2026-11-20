@@ -8,6 +8,7 @@ import '../providers/provider_catalog.dart';
 import '../mail/mail_accounts.dart';
 import '../mail/mail_section.dart';
 import '../permissions/permission_rules.dart';
+import '../profile/profile_editor.dart' show ProfileChoices;
 import '../profile/profile_home.dart';
 import '../profile/profiles_panel.dart' show ProfilesPanel;
 import '../selectable.dart';
@@ -71,6 +72,7 @@ class SettingsPage extends StatefulWidget {
     this.hostWorkspacePreview,
     this.onAllowNotifications,
     this.profileAgents = const [],
+    this.profileChoices,
     this.home,
     this.onPin,
     this.onLoadout,
@@ -119,6 +121,9 @@ class SettingsPage extends StatefulWidget {
 
   /// The agents a profile or an MCP choice is made for.
   final List<String> profileAgents;
+
+  /// What the agent of a source offers before a session starts, for the choices a profile's editor lists.
+  final Future<ProfileChoices?> Function(String source)? profileChoices;
   final ProfileHome? home;
 
   /// Pins the overlay [name] in canoa.cfg to the tree digest just installed, and gives the configuration saved.
@@ -195,6 +200,7 @@ class SettingsPageState extends State<SettingsPage> {
         key: const Key('settings-profiles-panel'),
         config: controller.config,
         agents: widget.profileAgents,
+        choicesFor: widget.profileChoices,
         home: widget.home,
         onPin: widget.onPin,
         onLoadout: widget.onLoadout,

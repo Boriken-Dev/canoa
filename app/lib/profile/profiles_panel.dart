@@ -26,7 +26,10 @@ import '../settings/settings_row.dart' show ScopeBar;
 /// only on a click that shows what changes; and the trusted project directories, each revocable.
 class ProfilesPanel extends StatefulWidget {
   const ProfilesPanel({super.key, required this.config, required this.agents, this.home, this.workingDirectory,
-      this.onPin, this.onLoadout, this.onChange});
+      this.onPin, this.onLoadout, this.onChange, this.choicesFor});
+
+  /// What the agent of a source offers before a session starts, which a profile's editor offers beside its model, effort and mode.
+  final Future<ProfileChoices?> Function(String source)? choicesFor;
 
   final CanoaConfig config;
 
@@ -186,6 +189,7 @@ class ProfilesPanelState extends State<ProfilesPanel> {
           taken: presets.keys.toSet(),
           sources: widget.agents,
           loadouts: config.loadouts.keys.toList(),
+          choicesFor: widget.choicesFor,
           onSave: (name, preset) async {
             final refused = await _savePreset(editing.original, name, preset);
             if (refused == null && mounted) setState(() => _editing = null);

@@ -9,12 +9,29 @@ import 'package:flutter/material.dart';
 import '../chat/cache_lifetime.dart';
 import '../config/canoa_config.dart';
 import '../forms/schema_fields.dart';
+import '../sources/source_choices.dart' show ModelChoice;
 import 'profile.dart' show ProfileAccess;
 import 'profile_items.dart';
 
 /// The items the editor draws a row of its own for, which the host also lists: the rest of the host's list is drawn from the forms
 /// the providers describe.
 const _ownRows = {'model', 'effort', 'mode', 'context'};
+
+/// What a source's agent is known to offer before a session starts: its models, each with the efforts it takes, and its modes as
+/// (id, name). The editor offers them beside a box that takes any text, since an agent may accept what it did not list.
+final class ProfileChoices {
+  const ProfileChoices({this.models = const [], this.modes = const []});
+
+  final List<ModelChoice> models;
+  final List<(String, String)> modes;
+
+  /// The efforts to offer for [model]: those that model takes when it is listed, else every effort any listed model takes.
+  List<String> effortsFor(String? model) {
+    final listed = models.where((each) => each.id == model).firstOrNull;
+    if (listed != null && listed.efforts.isNotEmpty) return listed.efforts;
+    return {for (final each in models) ...each.efforts}.toList();
+  }
+}
 
 class ProfileEditor extends StatefulWidget {
   const ProfileEditor({
@@ -28,7 +45,11 @@ class ProfileEditor extends StatefulWidget {
     required this.onCancel,
     this.catalog,
     this.certificates,
+    this.choicesFor,
   });
+
+  /// What the agent a profile runs on offers, asked when the source is chosen; none offers nothing to pick from.
+  final Future<ProfileChoices?> Function(String source)? choicesFor;
 
   /// The items the host lists, which the editor draws a form for; [profileItems] when none is given.
   final ProfileItemCatalog? catalog;
@@ -72,6 +93,26 @@ class _ProfileEditorState extends State<ProfileEditor> {
   late Map<String, Map<String, Object?>> _items = {for (final MapEntry(:key, :value) in widget.preset.items.entries) key: {...value}};
   String? _problem;
   bool _saving = false;
+  ProfileChoices? _offered;
+
+  @override
+  void initState() {
+    super.initState();
+    _ask();
+  }
+
+  /// Asks what the chosen source's agent offers; what was asked for a source since left is dropped.
+  void _ask() {
+    final source = _source;
+    final ask = widget.choicesFor;
+    if (source == null || ask == null) {
+      _offered = null;
+      return;
+    }
+    ask(source).then((offered) {
+      if (mounted && _source == source) setState(() => _offered = offered);
+    }, onError: (Object _) {});
+  }
 
   @override
   void dispose() {
@@ -181,31 +222,41 @@ class _ProfileEditorState extends State<ProfileEditor> {
             _none('The session\'s own'),
             for (final label in sources) DropdownMenuItem<String?>(value: label, child: Text(label)),
           ],
-          onChanged: (value) => setState(() => _source = value),
+          onChanged: (value) => setState(() {
+            _source = value;
+            _offered = null;
+            _ask();
+          }),
         ),
         const SizedBox(height: 8),
         Row(children: [
           Expanded(
-            child: TextField(
-              key: const Key('profile-edit-model'),
+            child: _ChoiceField(
+              id: 'model',
+              label: 'Model',
               controller: _model,
-              decoration: const InputDecoration(labelText: 'Model', hintText: 'The agent\'s own'),
+              choices: [for (final model in _offered?.models ?? const <ModelChoice>[]) (model.id, model.name == model.id ? model.id : '${model.name} (${model.id})')],
+              onPicked: () => setState(() {}),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              key: const Key('profile-edit-effort'),
+            child: _ChoiceField(
+              id: 'effort',
+              label: 'Effort',
               controller: _effort,
-              decoration: const InputDecoration(labelText: 'Effort', hintText: 'The agent\'s own'),
+              choices: [for (final effort in _offered?.effortsFor(_text(_model)) ?? const <String>[]) (effort, effort)],
+              onPicked: () => setState(() {}),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              key: const Key('profile-edit-mode'),
+            child: _ChoiceField(
+              id: 'mode',
+              label: 'Mode',
               controller: _mode,
-              decoration: const InputDecoration(labelText: 'Mode', hintText: 'The agent\'s own'),
+              choices: _offered?.modes ?? const [],
+              onPicked: () => setState(() {}),
             ),
           ),
         ]),
@@ -304,6 +355,41 @@ class _ProfileEditorState extends State<ProfileEditor> {
       ],
     );
   }
+}
+
+/// A box that takes any text, with a menu of what the agent is known to offer beside it: picking fills the box, and what is typed that
+/// the agent did not list is kept as typed.
+class _ChoiceField extends StatelessWidget {
+  const _ChoiceField({required this.id, required this.label, required this.controller, required this.choices, required this.onPicked});
+
+  final String id, label;
+  final TextEditingController controller;
+
+  /// (value, label) of what the agent offers; empty when it is not known, which leaves only the box.
+  final List<(String, String)> choices;
+  final VoidCallback onPicked;
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    key: Key('profile-edit-$id'),
+    controller: controller,
+    decoration: InputDecoration(
+      labelText: label,
+      hintText: 'The agent\'s own',
+      suffixIcon: choices.isEmpty
+          ? null
+          : PopupMenuButton<String>(
+              key: Key('profile-edit-$id-pick'),
+              tooltip: 'What the agent offers',
+              icon: const Icon(Icons.arrow_drop_down),
+              onSelected: (value) {
+                controller.text = value;
+                onPicked();
+              },
+              itemBuilder: (context) => [for (final (value, title) in choices) PopupMenuItem<String>(value: value, child: Text(title))],
+            ),
+    ),
+  );
 }
 
 /// The form one item's provider describes, drawn from its schema and form: it holds the values the person gave and nothing else.

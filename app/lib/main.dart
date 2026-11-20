@@ -16,6 +16,7 @@ import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'sources/control_choices.dart';
 import 'sources/source_choices.dart';
+import 'sources/source_options.dart' show knownModes;
 import 'providers/provider_catalog.dart';
 import 'profile/profile_items.dart';
 import 'sources/source_icons.dart' show sourceProvider;
@@ -107,6 +108,7 @@ import 'popout/popout_hub.dart';
 import 'permissions/protected_paths.dart' show ProtectedPaths;
 import 'permissions/rule_log.dart';
 import 'profile/overlays.dart' show NoOverlays;
+import 'profile/profile_editor.dart' show ProfileChoices;
 import 'profile/profile_home.dart' show ProfileHome;
 import 'served/control_overlays.dart' show ControlOverlayManager;
 import 'served/control_profile_home.dart' show ControlProfileHome;
@@ -836,6 +838,7 @@ class _CanoaAppState extends State<CanoaApp> {
       checkSource: _sourceChecks.check,
       programs: _programs,
       profileAgents: _profileAgents,
+      profileChoices: _profileChoices,
       home: _home,
       onPin: (name, digest) async {
         final changed = config.withOverlayPin(name, digest);
@@ -927,6 +930,16 @@ class _CanoaAppState extends State<CanoaApp> {
       ),
     );
     return ok ?? false;
+  }
+
+  /// What the agent of the source called [label] offers before a session starts, for a profile's model, effort and mode; null for a
+  /// source the host does not run or cannot ask.
+  Future<ProfileChoices?> _profileChoices(String label) async {
+    final source = _sources.where((each) => each.label == label).firstOrNull;
+    if (source == null) return null;
+    final asked = await _askChoices(source);
+    final known = [for (final option in knownModes(source)) for (final choice in option.choices) (choice.value, choice.label)];
+    return ProfileChoices(models: asked?.models ?? const [], modes: asked != null && asked.modes.isNotEmpty ? asked.modes : known);
   }
 
   /// The agents the app offers a profile for: the host's own sources, the commands in canoa.cfg and any agent with a profile.
