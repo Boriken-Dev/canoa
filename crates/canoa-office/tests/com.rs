@@ -19,7 +19,7 @@ use canoa_office::{
 };
 use windows::Win32::Foundation::{
     CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME,
-    E_NOTIMPL, E_POINTER, HWND, RECT, S_FALSE, S_OK,
+    E_FAIL, E_NOTIMPL, E_POINTER, HWND, RECT, S_FALSE, S_OK,
 };
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -31,7 +31,7 @@ use windows::Win32::System::Ole::{
     IOleInPlaceSite, IOleInPlaceSite_Impl, IOleInPlaceUIWindow, IOleObject, IOleWindow_Impl,
     IViewObject2, OLEINPLACEFRAMEINFO, OLEIVERB_HIDE, OLEIVERB_INPLACEACTIVATE,
 };
-use windows::Win32::System::Variant::{VARIANT, VT_ERROR};
+use windows::Win32::System::Variant::{VARIANT, VT_DISPATCH, VT_ERROR};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GetClientRect, GetParent, IsWindow, IsWindowVisible,
     WINDOW_EX_STYLE, WS_POPUP,
@@ -44,6 +44,8 @@ use windows::core::{
 #[derive(Default)]
 struct Seen {
     created: RefCell<Vec<(String, String, u16)>>,
+    /// Office answers E_FAIL while there is no window to put a pane in.
+    no_window: Cell<bool>,
     visible: Cell<i16>,
     dock: Cell<i32>,
     site_events: RefCell<Vec<&'static str>>,
@@ -166,6 +168,9 @@ impl ICTPFactory_Impl for FakeFactory_Impl {
             )
         };
         self.seen.created.borrow_mut().push((prog_id, title, vt));
+        if self.seen.no_window.get() {
+            return E_FAIL;
+        }
         let made: ICustomTaskPane = FakePane {
             seen: self.seen.clone(),
         }
@@ -304,6 +309,35 @@ fn assert_well_formed(xml: &str) {
     );
 }
 
+/// The picture is a 32 by 32 bitmap whose pixels keep the mark's transparency: some opaque, some clear.
+fn assert_picture_is_the_mark(picture: &IDispatch) {
+    use windows::Win32::Graphics::Gdi::{BITMAP, GetObjectW, HBITMAP, HGDIOBJ};
+    use windows::Win32::System::Ole::IPicture;
+    let picture: IPicture = picture.cast().expect("IPicture");
+    // SAFETY: plain property reads on a live picture; the bitmap belongs to it.
+    let handle = unsafe { picture.Handle().unwrap() };
+    let mut bitmap = BITMAP::default();
+    // SAFETY: `bitmap` is a live BITMAP and the size says so.
+    let got = unsafe {
+        GetObjectW(
+            HGDIOBJ(handle.0 as usize as *mut c_void),
+            size_of::<BITMAP>() as i32,
+            Some(&mut bitmap as *mut BITMAP as *mut c_void),
+        )
+    };
+    assert_ne!(got, 0);
+    assert_eq!(
+        (bitmap.bmWidth, bitmap.bmHeight, bitmap.bmBitsPixel),
+        (32, 32, 32)
+    );
+    // SAFETY: a DIB section's bits are `width * height * 4` bytes, alive as long as the picture.
+    let pixels = unsafe { core::slice::from_raw_parts(bitmap.bmBits as *const u8, 32 * 32 * 4) };
+    let alphas: Vec<u8> = pixels.chunks(4).map(|px| px[3]).collect();
+    assert!(alphas.contains(&0), "a transparent pixel was lost");
+    assert!(alphas.contains(&255), "no opaque pixel");
+    let _ = HBITMAP::default();
+}
+
 fn class_factory(clsid: &GUID) -> IClassFactory {
     let mut out: *mut c_void = ptr::null_mut();
     // SAFETY: valid GUIDs and a writable slot.
@@ -350,7 +384,10 @@ fn entry_points_refuse_what_they_do_not_make() {
 fn the_add_in_and_the_pane_work_through_com() {
     // SAFETY: the log variable is set before any object exists; this test is the only one in this process that makes objects.
     let log = std::env::temp_dir().join(format!("canoa-office-test-{}.log", std::process::id()));
-    unsafe { std::env::set_var("CANOA_OFFICE_LOG", &log) };
+    unsafe {
+        std::env::set_var("CANOA_OFFICE_LOG", &log);
+        std::env::set_var("CANOA_OFFICE_NO_DIALOG", "1");
+    }
     // SAFETY: first COM call on this thread.
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().unwrap() };
     assert_eq!(DllCanUnloadNow(), S_OK, "nothing is alive yet");
@@ -472,16 +509,75 @@ fn the_add_in_and_the_pane_work_through_com() {
                 .is_ok()
         )
     };
-    assert_eq!(
-        *seen.created.borrow(),
-        vec![(PANE_PROG_ID.to_owned(), "Canoa".to_owned(), VT_ERROR.0)]
+    // Word hands the factory over before any window exists: nothing is made yet.
+    assert!(
+        seen.created.borrow().is_empty(),
+        "no pane before the first click"
     );
-    assert_eq!(seen.dock.get(), 2, "docked right");
+
+    // A click while Office has no window: it fails, the log and the person are told, and the next click asks again.
+    seen.no_window.set(true);
+    invoke(1).unwrap();
+    assert_eq!(seen.created.borrow().len(), 1);
     assert_eq!(seen.visible.get(), 0);
+    let lines = std::fs::read_to_string(&log).unwrap();
+    assert!(lines.contains("button clicked"), "{lines}");
+    assert!(lines.contains("CreateCTP failed hr=0x80004005"), "{lines}");
+    assert!(
+        lines.contains("told the person: Canoa could not open its pane (error 0x80004005)"),
+        "{lines}"
+    );
+
+    // With a window the same click makes the pane for it, docked right, and shows it; the next click hides it.
+    seen.no_window.set(false);
     invoke(1).unwrap();
-    assert_eq!(seen.visible.get(), -1, "the button shows the pane");
+    assert_eq!(
+        seen.created.borrow()[1],
+        (PANE_PROG_ID.to_owned(), "Canoa".to_owned(), VT_ERROR.0)
+    );
+    assert_eq!(seen.created.borrow().len(), 2);
+    assert_eq!(seen.dock.get(), 2, "docked right");
+    assert_eq!(seen.visible.get(), -1, "the first click shows the pane");
     invoke(1).unwrap();
-    assert_eq!(seen.visible.get(), 0, "and hides it again");
+    assert_eq!(seen.visible.get(), 0, "the second hides it");
+    invoke(1).unwrap();
+    assert_eq!(seen.visible.get(), -1, "and the third shows it again");
+    assert_eq!(seen.created.borrow().len(), 2, "one pane, made once");
+    let lines = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        lines.contains("pane shown") && lines.contains("pane hidden"),
+        "{lines}"
+    );
+
+    // The button's picture: Office asks for it by name and gets the mark as a picture in the call's result.
+    let image = [w!("GetImage")];
+    let mut image_id = 0_i32;
+    // SAFETY: one name in, one id out.
+    unsafe {
+        dispatch
+            .GetIDsOfNames(&GUID::zeroed(), image.as_ptr(), 1, 0, &mut image_id)
+            .unwrap()
+    };
+    assert_eq!(image_id, 2);
+    let mut result = VARIANT::default();
+    // SAFETY: empty parameters and a result slot, as Office calls a getImage callback.
+    unsafe {
+        dispatch
+            .Invoke(
+                image_id,
+                &GUID::zeroed(),
+                0,
+                DISPATCH_METHOD,
+                &DISPPARAMS::default(),
+                Some(&mut result),
+                None,
+                None,
+            )
+            .unwrap()
+    };
+    // SAFETY: the variant was filled by the call above.
+    assert_eq!(unsafe { result.Anonymous.Anonymous.vt }, VT_DISPATCH);
+    assert_picture_is_the_mark(&IDispatch::try_from(&result).unwrap());
 
     // A class that is not the add-in's own is refused aggregation.
     // SAFETY: no outer unknown, the ordinary call.

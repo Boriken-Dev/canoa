@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-office`: Canoa's COM add-in for classic desktop Office (Word, Excel, PowerPoint, Outlook) on Windows. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `crate-type = ["cdylib", "rlib"]`: the DLL is what Office loads, the rlib is what the tests link. The crate is **empty off Windows** (`#![cfg(windows)]`). Depends on `windows` and `windows-core` (the `implement` and `interface` macros name the second in what they write); `windows-registry` in tests. `unsafe_code = "deny"`; the four COM-glue files `addin.rs`, `exports.rs`, `interfaces.rs` and `pane.rs` each `#![allow(unsafe_code)]`, every block carries `// SAFETY:`, and `tests/unsafe_files.rs` lists them and fails when another file gains `unsafe`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `crate-type = ["cdylib", "rlib"]`: the DLL is what Office loads, the rlib is what the tests link. The crate is **empty off Windows** (`#![cfg(windows)]`). Depends on `windows` and `windows-core` (the `implement` and `interface` macros name the second in what they write); `windows-registry` in tests. `unsafe_code = "deny"`; the five COM-glue files `addin.rs`, `exports.rs`, `icon.rs`, `interfaces.rs` and `pane.rs` each `#![allow(unsafe_code)]`, every block carries `// SAFETY:`, and `tests/unsafe_files.rs` lists them and fails when another file gains `unsafe`.
 
 ## What the DLL exports
 
@@ -16,13 +16,13 @@ No `DllRegisterServer`, `DllMain` or definition file: registration is `tools/off
 | Class | CLSID | ProgID | Interfaces |
 | --- | --- | --- | --- |
 | `AddIn` | `CLSID_ADDIN` `{F1780EA2-B255-41D0-9014-97A28C29EB01}` | `PROG_ID` `dev.boriken.canoa` | `IDTExtensibility2`, `IRibbonExtensibility`, `ICustomTaskPaneConsumer`, `IDispatch` |
-| `PaneControl` | `CLSID_PANE` `{9A886EBD-07B1-4695-B5AF-C082D892E989}` | `PANE_PROG_ID` `dev.boriken.canoa.pane` | `IOleObject`, `IOleInPlaceObject`, `IViewObject2`, `IPersistStreamInit` |
+| `PaneControl` | `CLSID_PANE` `{9A886EBD-07B1-4695-B5AF-C082D892E989}` | `PANE_PROG_ID` `dev.boriken.canoa.pane` | `IOleObject`, `IOleInPlaceObject`, `IViewObject2`, `IPersistStreamInit`, `IOleControl` |
 
-Both are apartment-threaded, never aggregated (`CLASS_E_NOAGGREGATION`). Office creates the add-in by ProgID from its `Addins` key and, when it hands over its task pane factory (`CTPFactoryAvailable`), the add-in asks the factory for a pane hosting `PANE_PROG_ID`, docked right and hidden. The ribbon button (`onAction="OnTogglePane"`) shows and hides it; Office reaches the callback by name through `IDispatch` (`GetIDsOfNames` answers that one name, case-insensitively). `ribbon_xml(id)` is the ribbon XML for Word, Excel, PowerPoint and Outlook's explorer, read and compose ribbons, `None` for any other id.
+Both are apartment-threaded, never aggregated (`CLASS_E_NOAGGREGATION`). Office creates the add-in by ProgID from its `Addins` key. It hands over its task pane factory (`CTPFactoryAvailable`) before any window exists, so the add-in only keeps it. The ribbon button (`onAction="OnTogglePane"`) makes the pane on its first click, for the active window (`CreateCTP` with `PANE_PROG_ID`, docked right), shows it, and then shows and hides it. A failed `CreateCTP` is logged with its HRESULT and told to the person in a message box (`CANOA_OFFICE_NO_DIALOG` set: no box, for tests); the next click asks again. Office reaches the callbacks by name through `IDispatch` (`GetIDsOfNames` answers `OnTogglePane` and `GetImage`, case-insensitively). `GetImage` returns Canoa's mark (`MARK_PNG`, the browser extension's 32 px PNG, embedded at build time) as an `IPictureDisp` over a 32-bit premultiplied bitmap (`mark_picture()`, WIC), so its transparency is kept. `ribbon_xml(id)` is the ribbon XML for Word, Excel, PowerPoint and Outlook's explorer, read and compose ribbons, `None` for any other id.
 
 `pub mod interfaces` declares what Office defines in type libraries and `windows` does not carry: `IDTExtensibility2`, `IRibbonExtensibility`, `ICustomTaskPaneConsumer`, `ICTPFactory`, `ICustomTaskPane`. Method order is the type library's, hence the vtable's; boolean properties are `VARIANT_BOOL` (0 or -1) and incoming strings `*const u16` (a BSTR the caller owns).
 
-The pane's control makes one child window on `DoVerb` (`OLEIVERB_INPLACEACTIVATE`, `SHOW`, `UIACTIVATE`, `PRIMARY`) inside the container's window, follows `SetObjectRects`, and destroys it on `InPlaceDeactivate`, `Close`, `SetClientSite(null)` and drop. Its window paints a name only.
+The pane's control makes one child window on `DoVerb` (`OLEIVERB_INPLACEACTIVATE`, `SHOW`, `UIACTIVATE`, `PRIMARY`) inside the container's window, follows `SetObjectRects`, and destroys it on `InPlaceDeactivate`, `Close`, `SetClientSite(null)` and drop. Its window paints a name only. `IOleControl` is answered with no control info. Each step (created, SetClientSite, DoVerb) is logged.
 
 ## Registration: `tools/office_addin.ps1`
 

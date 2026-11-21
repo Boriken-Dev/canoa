@@ -6,7 +6,7 @@ process. It is not published. The crate is empty on other platforms.
 It offers three things Office asks every COM add-in for:
 
 - `IDTExtensibility2`, the add-in contract: Office tells the add-in it was connected, disconnected and started.
-- `IRibbonExtensibility`: one ribbon tab, Canoa, with one button that shows or hides the task pane.
+- `IRibbonExtensibility`: one ribbon tab, Canoa, with one button (Canoa's mark) that shows or hides the task pane.
 - `ICustomTaskPaneConsumer`: Office hands the add-in the factory that makes task panes. The pane hosts an ActiveX control the
   DLL also provides; its window is empty for now.
 

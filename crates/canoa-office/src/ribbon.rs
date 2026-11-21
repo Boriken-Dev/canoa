@@ -6,10 +6,13 @@ pub(crate) const TOGGLE_CALLBACK: &str = "OnTogglePane";
 const XML: &str = concat!(
     r#"<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui"><ribbon><tabs>"#,
     r#"<tab id="canoaTab" label="Canoa"><group id="canoaGroup" label="Canoa">"#,
-    r#"<button id="canoaPane" label="Canoa chat" size="large" imageMso="HappyFace" "#,
+    r#"<button id="canoaPane" label="Canoa chat" size="large" getImage="GetImage" "#,
     r#"screentip="Show or hide the Canoa pane" onAction="OnTogglePane"/>"#,
     r#"</group></tab></tabs></ribbon></customUI>"#
 );
+
+/// The callback that returns the button's picture.
+pub(crate) const IMAGE_CALLBACK: &str = "GetImage";
 
 /// The ribbons Office asks the add-in for, by the id it asks with.
 const RIBBON_IDS: &[&str] = &[

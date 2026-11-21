@@ -26,11 +26,11 @@ use windows::Win32::System::LibraryLoader::{
     GetModuleHandleExW,
 };
 use windows::Win32::System::Ole::{
-    IEnumOLEVERB, IOleClientSite, IOleInPlaceFrame, IOleInPlaceObject, IOleInPlaceObject_Impl,
-    IOleInPlaceSite, IOleInPlaceUIWindow, IOleObject, IOleObject_Impl, IOleWindow_Impl,
-    IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE, OLEGETMONIKER,
-    OLEINPLACEFRAMEINFO, OLEIVERB, OLEIVERB_HIDE, OLEIVERB_INPLACEACTIVATE, OLEIVERB_PRIMARY,
-    OLEIVERB_SHOW, OLEIVERB_UIACTIVATE, OLEMISC, OLEWHICHMK, USERCLASSTYPE,
+    CONTROLINFO, IEnumOLEVERB, IOleClientSite, IOleControl, IOleControl_Impl, IOleInPlaceFrame,
+    IOleInPlaceObject, IOleInPlaceObject_Impl, IOleInPlaceSite, IOleInPlaceUIWindow, IOleObject,
+    IOleObject_Impl, IOleWindow_Impl, IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE,
+    OLEGETMONIKER, OLEINPLACEFRAMEINFO, OLEIVERB, OLEIVERB_HIDE, OLEIVERB_INPLACEACTIVATE,
+    OLEIVERB_PRIMARY, OLEIVERB_SHOW, OLEIVERB_UIACTIVATE, OLEMISC, OLEWHICHMK, USERCLASSTYPE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, MSG, MoveWindow, RegisterClassW,
@@ -43,6 +43,7 @@ use windows::core::{
 
 use crate::exports::Live;
 use crate::ids::CLSID_PANE;
+use crate::log::log;
 
 /// `OLEMISC_RECOMPOSEONRESIZE | CANTLINKINSIDE | INSIDEOUT | ACTIVATEWHENVISIBLE | SETCLIENTSITEFIRST`: what an ATL control reports.
 const MISC_STATUS: u32 = 0x0002_0191;
@@ -56,7 +57,13 @@ const DEFAULT_EXTENT: SIZE = SIZE {
 const WINDOW_CLASS: PCWSTR = w!("CanoaOfficePane");
 
 /// The pane's control. Office creates it from `PANE_PROG_ID` and drives it through the OLE container interfaces.
-#[implement(IOleObject, IOleInPlaceObject, IViewObject2, IPersistStreamInit)]
+#[implement(
+    IOleObject,
+    IOleInPlaceObject,
+    IViewObject2,
+    IPersistStreamInit,
+    IOleControl
+)]
 #[derive(Debug)]
 pub struct PaneControl {
     site: RefCell<Option<IOleClientSite>>,
@@ -70,6 +77,7 @@ pub struct PaneControl {
 impl PaneControl {
     /// A new control with no site and no window.
     pub fn new() -> Self {
+        log("pane control created");
         Self {
             site: RefCell::new(None),
             in_place: RefCell::new(None),
@@ -248,6 +256,7 @@ unsafe extern "system" fn window_proc(
 
 impl IOleObject_Impl for PaneControl_Impl {
     fn SetClientSite(&self, site: Ref<'_, IOleClientSite>) -> Result<()> {
+        log(&format!("pane SetClientSite null={}", site.is_null()));
         *self.site.borrow_mut() = site.as_ref().cloned();
         if site.is_null() {
             self.deactivate();
@@ -298,6 +307,7 @@ impl IOleObject_Impl for PaneControl_Impl {
         _parent: HWND,
         _position: *const RECT,
     ) -> Result<()> {
+        log(&format!("pane DoVerb {verb}"));
         match OLEIVERB(verb) {
             OLEIVERB_PRIMARY | OLEIVERB_SHOW | OLEIVERB_UIACTIVATE | OLEIVERB_INPLACEACTIVATE => {
                 let site = active_site
@@ -534,6 +544,24 @@ impl IPersistStreamInit_Impl for PaneControl_Impl {
     }
 
     fn InitNew(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl IOleControl_Impl for PaneControl_Impl {
+    fn GetControlInfo(&self, _info: *mut CONTROLINFO) -> Result<()> {
+        Err(E_NOTIMPL.into())
+    }
+
+    fn OnMnemonic(&self, _message: *const MSG) -> Result<()> {
+        Ok(())
+    }
+
+    fn OnAmbientPropertyChange(&self, _dispid: i32) -> Result<()> {
+        Ok(())
+    }
+
+    fn FreezeEvents(&self, _freeze: BOOL) -> Result<()> {
         Ok(())
     }
 }

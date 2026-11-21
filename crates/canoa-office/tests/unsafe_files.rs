@@ -16,6 +16,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "the DLL's two C entry points, and the class factory's out-slot",
     ),
     (
+        "icon.rs",
+        "WIC decoding and the DIB section behind the ribbon picture",
+    ),
+    (
         "interfaces.rs",
         "COM interface declarations; the macro writes `unsafe` vtables for interfaces only Office's type libraries define",
     ),

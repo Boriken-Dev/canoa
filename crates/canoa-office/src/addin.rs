@@ -5,7 +5,6 @@
 use core::cell::RefCell;
 use core::ffi::c_void;
 use core::ptr;
-use std::io::Write;
 use windows::Win32::Foundation::{
     DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME, E_NOTIMPL, E_POINTER, S_OK,
 };
@@ -13,19 +12,39 @@ use windows::Win32::System::Com::{
     DISPATCH_FLAGS, DISPPARAMS, EXCEPINFO, IDispatch_Impl, ITypeInfo, SAFEARRAY,
 };
 use windows::Win32::System::Variant::{VARIANT, VT_ERROR};
-use windows::core::{BSTR, GUID, HRESULT, Interface, PCWSTR, Result, implement};
+use windows::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MessageBoxW};
+use windows::core::{BSTR, GUID, HRESULT, HSTRING, Interface, PCWSTR, Result, implement, w};
 
 use crate::exports::Live;
+use crate::icon::mark_picture;
 use crate::ids::PANE_PROG_ID;
 use crate::interfaces::{
     DOCK_RIGHT, ICTPFactory, ICustomTaskPane, ICustomTaskPaneConsumer,
     ICustomTaskPaneConsumer_Impl, IDTExtensibility2, IDTExtensibility2_Impl, IRibbonExtensibility,
     IRibbonExtensibility_Impl,
 };
-use crate::ribbon::{TOGGLE_CALLBACK, ribbon_xml};
+use crate::log::log;
+use crate::ribbon::{IMAGE_CALLBACK, TOGGLE_CALLBACK, ribbon_xml};
+
+/// Says something to the person in a message box, for a click that cannot do what it was for.
+/// A test sets `CANOA_OFFICE_NO_DIALOG` so none opens.
+fn tell_person(text: &str) {
+    log(&format!("told the person: {text}"));
+    if std::env::var_os("CANOA_OFFICE_NO_DIALOG").is_some() {
+        return;
+    }
+    let text = HSTRING::from(text);
+    // SAFETY: both strings outlive the call; no owner window, so the box is the desktop's.
+    unsafe {
+        MessageBoxW(None, &text, w!("Canoa"), MB_OK | MB_ICONWARNING);
+    }
+}
 
 /// The dispatch id of the button's callback.
 const TOGGLE_ID: i32 = 1;
+
+/// The dispatch id of the button's picture callback.
+const IMAGE_ID: i32 = 2;
 
 /// `DISP_E_PARAMNOTFOUND`: how a COM caller says an optional argument is absent.
 const PARAM_NOT_FOUND: i32 = 0x8002_0004_u32 as i32;
@@ -34,6 +53,8 @@ const PARAM_NOT_FOUND: i32 = 0x8002_0004_u32 as i32;
 #[implement(IDTExtensibility2, IRibbonExtensibility, ICustomTaskPaneConsumer)]
 #[derive(Debug)]
 pub struct AddIn {
+    /// Office's pane factory, kept from `CTPFactoryAvailable`: a pane is made on the first click, when a window exists.
+    factory: RefCell<Option<ICTPFactory>>,
     pane: RefCell<Option<ICustomTaskPane>>,
     _live: Live,
 }
@@ -42,13 +63,63 @@ impl AddIn {
     /// A new add-in with no pane yet.
     pub fn new() -> Self {
         Self {
+            factory: RefCell::new(None),
             pane: RefCell::new(None),
             _live: Live::new(),
         }
     }
 
-    /// Shows the pane when it is hidden and hides it when it shows.
+    /// Asks the kept factory for the pane, for the active window.
+    fn create_pane(&self) -> HRESULT {
+        let Some(factory) = self.factory.borrow().clone() else {
+            log("no pane factory yet: Office has not handed it over");
+            return S_OK;
+        };
+        let prog_id = BSTR::from(PANE_PROG_ID);
+        let title = BSTR::from("Canoa");
+        let mut parent = VARIANT::default();
+        // SAFETY: `parent` was just made empty, so its union is a plain variant this block fills in as VT_ERROR.
+        unsafe {
+            let inner = &mut *parent.Anonymous.Anonymous;
+            inner.vt = VT_ERROR;
+            inner.Anonymous.scode = PARAM_NOT_FOUND;
+        }
+        let mut raw: *mut c_void = ptr::null_mut();
+        // SAFETY: both strings outlive the call, `parent` is a plain variant and `raw` is a writable slot.
+        let hr = unsafe { factory.CreateCTP(prog_id.as_ptr(), title.as_ptr(), parent, &mut raw) };
+        if hr.is_err() {
+            log(&format!("CreateCTP failed hr={:#010x}", hr.0));
+            return hr;
+        }
+        // SAFETY: on success `raw` is an owned interface pointer of the pane, which `from_raw` takes over.
+        let pane = unsafe { ICustomTaskPane::from_raw(raw) };
+        // SAFETY: plain value arguments on a live interface.
+        let docked = unsafe { pane.put_DockPosition(DOCK_RIGHT) };
+        log(&format!(
+            "task pane created, dock right hr={:#010x}",
+            docked.0
+        ));
+        *self.pane.borrow_mut() = Some(pane);
+        S_OK
+    }
+
+    /// The button: makes the pane on the first click, then shows it when it is hidden and hides it when it shows.
     fn toggle_pane(&self) -> HRESULT {
+        log("button clicked");
+        if self.pane.borrow().is_none() {
+            let hr = self.create_pane();
+            if hr.is_err() || self.pane.borrow().is_none() {
+                // Nothing to show; the next click asks again. Failing the callback would only raise an error box in Office,
+                // so the person is told here instead.
+                if hr.is_err() {
+                    tell_person(&format!(
+                        "Canoa could not open its pane (error {:#010x}). The add-in's log says more.",
+                        hr.0
+                    ));
+                }
+                return S_OK;
+            }
+        }
         let pane = self.pane.borrow();
         let Some(pane) = pane.as_ref() else {
             return S_OK;
@@ -57,10 +128,18 @@ impl AddIn {
         // SAFETY: `visible` is a live local the call writes through.
         let hr = unsafe { pane.get_Visible(&mut visible) };
         if hr.is_err() {
+            log(&format!("get_Visible failed hr={:#010x}", hr.0));
             return hr;
         }
+        let show = visible == 0;
         // SAFETY: a plain value argument.
-        unsafe { pane.put_Visible(if visible == 0 { -1 } else { 0 }) }
+        let hr = unsafe { pane.put_Visible(if show { -1 } else { 0 }) };
+        log(&format!(
+            "pane {} hr={:#010x}",
+            if show { "shown" } else { "hidden" },
+            hr.0
+        ));
+        hr
     }
 }
 
@@ -68,43 +147,6 @@ impl Default for AddIn {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// One line of metadata per event, so a person can see whether and when Office loaded the DLL. No content is ever written.
-/// `CANOA_OFFICE_LOG` names the file; otherwise it is `office-addin.log` in `%LOCALAPPDATA%\Canoa`.
-fn log(event: &str) {
-    let path = match std::env::var_os("CANOA_OFFICE_LOG") {
-        Some(path) => std::path::PathBuf::from(path),
-        None => match std::env::var_os("LOCALAPPDATA") {
-            Some(base) => std::path::Path::new(&base)
-                .join("Canoa")
-                .join("office-addin.log"),
-            None => return,
-        },
-    };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    else {
-        return;
-    };
-    let ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis());
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
-    let _ = writeln!(
-        file,
-        "{ms} pid={} exe={} arch={} {event}",
-        std::process::id(),
-        exe.as_deref().unwrap_or("?"),
-        std::env::consts::ARCH
-    );
 }
 
 impl IDTExtensibility2_Impl for AddIn_Impl {
@@ -122,6 +164,7 @@ impl IDTExtensibility2_Impl for AddIn_Impl {
     unsafe fn OnDisconnection(&self, remove_mode: i32, _custom: *mut *mut SAFEARRAY) -> HRESULT {
         log(&format!("OnDisconnection mode={remove_mode}"));
         self.pane.borrow_mut().take();
+        self.factory.borrow_mut().take();
         S_OK
     }
 
@@ -137,6 +180,7 @@ impl IDTExtensibility2_Impl for AddIn_Impl {
     unsafe fn OnBeginShutdown(&self, _custom: *mut *mut SAFEARRAY) -> HRESULT {
         log("OnBeginShutdown");
         self.pane.borrow_mut().take();
+        self.factory.borrow_mut().take();
         S_OK
     }
 }
@@ -167,30 +211,8 @@ impl ICustomTaskPaneConsumer_Impl for AddIn_Impl {
             return E_POINTER;
         };
 
-        let prog_id = BSTR::from(PANE_PROG_ID);
-        let title = BSTR::from("Canoa");
-        let mut parent = VARIANT::default();
-        // SAFETY: `parent` was just made empty, so its union is a plain variant this block fills in as VT_ERROR.
-        unsafe {
-            let inner = &mut *parent.Anonymous.Anonymous;
-            inner.vt = VT_ERROR;
-            inner.Anonymous.scode = PARAM_NOT_FOUND;
-        }
-        let mut raw: *mut c_void = ptr::null_mut();
-        // SAFETY: both strings outlive the call, `parent` is a plain variant and `raw` is a writable slot.
-        let hr = unsafe { factory.CreateCTP(prog_id.as_ptr(), title.as_ptr(), parent, &mut raw) };
-        if hr.is_err() {
-            log(&format!("CreateCTP failed hr={:#010x}", hr.0));
-            return hr;
-        }
-        // SAFETY: on success `raw` is an owned interface pointer of the pane, which `from_raw` takes over.
-        let pane = unsafe { ICustomTaskPane::from_raw(raw) };
-        // SAFETY: plain value arguments on a live interface.
-        unsafe {
-            let _ = pane.put_DockPosition(DOCK_RIGHT);
-        }
-        log("task pane created");
-        *self.pane.borrow_mut() = Some(pane);
+        log("CTPFactoryAvailable: factory kept, the pane is made on the first click");
+        *self.factory.borrow_mut() = Some(factory.clone());
         S_OK
     }
 }
@@ -221,13 +243,20 @@ impl IDispatch_Impl for AddIn_Impl {
             // SAFETY: the caller passes `count` names and room for `count` ids.
             let (name, id) = unsafe { (*names.add(index), ids.add(index)) };
             // SAFETY: each name is a NUL-terminated string the caller owns.
-            let known = index == 0
-                && unsafe { name.to_string() }
-                    .is_ok_and(|n| n.eq_ignore_ascii_case(TOGGLE_CALLBACK));
+            let dispid = if index == 0 {
+                match unsafe { name.to_string() } {
+                    Ok(n) if n.eq_ignore_ascii_case(TOGGLE_CALLBACK) => TOGGLE_ID,
+                    Ok(n) if n.eq_ignore_ascii_case(IMAGE_CALLBACK) => IMAGE_ID,
+                    _ => -1,
+                }
+            } else {
+                -1
+            };
             // SAFETY: `id` is within the `count` slots the caller provided.
-            unsafe { id.write(if known { TOGGLE_ID } else { -1 }) };
-            unknown |= !known;
+            unsafe { id.write(dispid) };
+            unknown |= dispid < 0;
         }
+        log(&format!("GetIDsOfNames count={count} known={}", !unknown));
         if unknown {
             Err(DISP_E_UNKNOWNNAME.into())
         } else {
@@ -242,13 +271,30 @@ impl IDispatch_Impl for AddIn_Impl {
         _lcid: u32,
         _flags: DISPATCH_FLAGS,
         _params: *const DISPPARAMS,
-        _result: *mut VARIANT,
+        result: *mut VARIANT,
         _exception: *mut EXCEPINFO,
         _arg_error: *mut u32,
     ) -> Result<()> {
-        if id != TOGGLE_ID {
-            return Err(DISP_E_MEMBERNOTFOUND.into());
+        log(&format!("Invoke id={id}"));
+        match id {
+            TOGGLE_ID => self.toggle_pane().ok(),
+            IMAGE_ID => {
+                let picture = match mark_picture() {
+                    Ok(picture) => picture,
+                    Err(error) => {
+                        log(&format!("GetImage failed hr={:#010x}", error.code().0));
+                        return Err(error);
+                    }
+                };
+                log("GetImage: picture returned");
+                if result.is_null() {
+                    return Err(E_POINTER.into());
+                }
+                // SAFETY: `result` is non-null and the caller's variant slot; `write` takes the picture's reference over.
+                unsafe { result.write(VARIANT::from(picture)) };
+                Ok(())
+            }
+            _ => Err(DISP_E_MEMBERNOTFOUND.into()),
         }
-        self.toggle_pane().ok()
     }
 }
