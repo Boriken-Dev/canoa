@@ -19,13 +19,21 @@ crate-type = ["cdylib", "rlib"]
 
 [target.'cfg(windows)'.dependencies]
 windows-core.workspace = true
+windows-registry.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+url.workspace = true
+percent-encoding.workspace = true
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",
     "Win32_System_Com",
     "Win32_System_LibraryLoader",
+    "Win32_Security",
     "Win32_System_Ole",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
     "Win32_System_Variant",
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
@@ -33,7 +41,7 @@ windows = { workspace = true, features = [
 
 # The registry, read by the registration test.
 [target.'cfg(windows)'.dev-dependencies]
-windows-registry.workspace = true
+windows = { workspace = true, features = ["Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes"] }
 
 [lints.rust]
 unsafe_code = "deny"

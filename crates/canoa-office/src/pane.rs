@@ -8,16 +8,14 @@
 use core::cell::{Cell, RefCell};
 use core::ffi::c_void;
 use core::mem::size_of;
+use std::rc::Rc;
 use std::sync::Once;
 use windows::Win32::Foundation::{
     DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME, E_FAIL, E_NOTIMPL, E_POINTER, HINSTANCE, HMODULE,
-    HWND, LPARAM, LRESULT, OLE_E_ADVISENOTSUPPORTED, OLEOBJ_E_INVALIDVERB, OLEOBJ_E_NOVERBS, RECT,
-    RECTL, S_FALSE, SIZE, WPARAM,
+    HWND, OLE_E_ADVISENOTSUPPORTED, OLEOBJ_E_INVALIDVERB, OLEOBJ_E_NOVERBS, RECT, RECTL, S_FALSE,
+    SIZE,
 };
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, COLOR_WINDOW, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DrawTextW, EndPaint, FillRect,
-    GetSysColorBrush, HDC, LOGPALETTE, PAINTSTRUCT,
-};
+use windows::Win32::Graphics::Gdi::{COLOR_WINDOW, GetSysColorBrush, HDC, LOGPALETTE};
 use windows::Win32::System::Com::{
     DISPATCH_FLAGS, DISPPARAMS, DVASPECT, DVTARGETDEVICE, EXCEPINFO, IAdviseSink, IConnectionPoint,
     IConnectionPointContainer, IConnectionPointContainer_Impl, IDataObject, IDispatch,
@@ -39,9 +37,8 @@ use windows::Win32::System::Ole::{
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, MSG, MoveWindow, RegisterClassW,
-    SW_HIDE, SW_SHOW, ShowWindow, WINDOW_EX_STYLE, WM_PAINT, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS,
-    WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, MSG, MoveWindow, RegisterClassW, SW_HIDE, SW_SHOW, ShowWindow,
+    WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
 };
 use windows::core::{
     BOOL, GUID, HRESULT, Interface, OutRef, PCWSTR, PWSTR, Ref, Result, implement, w,
@@ -50,6 +47,7 @@ use windows::core::{
 use crate::exports::Live;
 use crate::ids::CLSID_PANE;
 use crate::log::log;
+use crate::surface::PaneState;
 
 /// `OLEMISC_RECOMPOSEONRESIZE | CANTLINKINSIDE | INSIDEOUT | ACTIVATEWHENVISIBLE | SETCLIENTSITEFIRST`: what an ATL control reports.
 const MISC_STATUS: u32 = 0x0002_0191;
@@ -81,6 +79,7 @@ pub struct PaneControl {
     advise: RefCell<Option<IAdviseSink>>,
     window: Cell<HWND>,
     extent: Cell<SIZE>,
+    state: Rc<PaneState>,
     _live: Live,
 }
 
@@ -94,6 +93,7 @@ impl PaneControl {
             advise: RefCell::new(None),
             window: Cell::new(HWND::default()),
             extent: Cell::new(DEFAULT_EXTENT),
+            state: PaneState::for_next_control(),
             _live: Live::new(),
         }
     }
@@ -169,7 +169,9 @@ impl PaneControl {
         if window.is_invalid() {
             let made = create_window(parent, &position);
             step("CreateWindow", &made);
-            self.window.set(made?);
+            let made = made?;
+            self.window.set(made);
+            self.state.attach(made);
         } else {
             // SAFETY: `window` is the live window this control made.
             unsafe {
@@ -224,6 +226,7 @@ impl PaneControl {
 
     /// Destroys the window and tells the site the control is no longer active.
     fn deactivate(&self) {
+        self.state.detach();
         let window = self.window.replace(HWND::default());
         if !window.is_invalid() {
             // SAFETY: `window` is the live window this control made, and it is not used again.
@@ -272,7 +275,7 @@ fn create_window(parent: HWND, position: &RECT) -> Result<HWND> {
     let instance = module();
     REGISTER.call_once(|| {
         let class = WNDCLASSW {
-            lpfnWndProc: Some(window_proc),
+            lpfnWndProc: Some(crate::surface::window_proc),
             hInstance: instance,
             lpszClassName: WINDOW_CLASS,
             // SAFETY: a stock system brush, never freed.
@@ -301,40 +304,6 @@ fn create_window(parent: HWND, position: &RECT) -> Result<HWND> {
             None,
         )
     }
-}
-
-/// Paints the pane's background and its name.
-///
-/// # Safety
-///
-/// Windows calls it with the window's own handle and message arguments.
-unsafe extern "system" fn window_proc(
-    window: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if message == WM_PAINT {
-        let mut paint = PAINTSTRUCT::default();
-        // SAFETY: `window` is the window being painted and `paint` is a live local `BeginPaint` fills; `EndPaint` pairs it.
-        unsafe {
-            let dc: HDC = BeginPaint(window, &mut paint);
-            let mut area = RECT::default();
-            let _ = GetClientRect(window, &mut area);
-            FillRect(dc, &area, GetSysColorBrush(COLOR_WINDOW));
-            let mut text: Vec<u16> = "Canoa".encode_utf16().collect();
-            DrawTextW(
-                dc,
-                &mut text,
-                &mut area,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-            );
-            let _ = EndPaint(window, &paint);
-        }
-        return LRESULT(0);
-    }
-    // SAFETY: the arguments are the ones Windows passed.
-    unsafe { DefWindowProcW(window, message, wparam, lparam) }
 }
 
 impl IOleObject_Impl for PaneControl_Impl {

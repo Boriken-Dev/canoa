@@ -46,6 +46,8 @@ struct Seen {
     created: RefCell<Vec<(String, String, u16)>>,
     /// Office answers E_FAIL while there is no window to put a pane in.
     no_window: Cell<bool>,
+    /// Each pane's visibility changes, as (the pane's number, the value).
+    visible_log: RefCell<Vec<(usize, i16)>>,
     visible: Cell<i16>,
     dock: Cell<i32>,
     width: Cell<i32>,
@@ -91,6 +93,9 @@ macro_rules! no_type_info {
 #[implement(ICustomTaskPane)]
 struct FakePane {
     seen: Rc<Seen>,
+    /// Which pane this is, in the order the factory made them.
+    serial: usize,
+    own: Cell<i16>,
 }
 no_type_info!(FakePane_Impl);
 
@@ -105,11 +110,16 @@ impl ICustomTaskPane_Impl for FakePane_Impl {
         E_NOTIMPL
     }
     unsafe fn get_Visible(&self, visible: *mut i16) -> HRESULT {
-        unsafe { visible.write(self.seen.visible.get()) };
+        unsafe { visible.write(self.own.get()) };
         S_OK
     }
     unsafe fn put_Visible(&self, visible: i16) -> HRESULT {
+        self.own.set(visible);
         self.seen.visible.set(visible);
+        self.seen
+            .visible_log
+            .borrow_mut()
+            .push((self.serial, visible));
         S_OK
     }
     unsafe fn get_ContentControl(&self, _: *mut *mut c_void) -> HRESULT {
@@ -175,10 +185,62 @@ impl ICTPFactory_Impl for FakeFactory_Impl {
         }
         let made: ICustomTaskPane = FakePane {
             seen: self.seen.clone(),
+            serial: self.seen.created.borrow().len(),
+            own: Cell::new(0),
         }
         .into();
         unsafe { pane.write(made.into_raw()) };
         S_OK
+    }
+}
+
+/// A stand-in Office window: an object with an identity and no properties.
+#[implement(IDispatch)]
+struct FakeWindow;
+no_type_info!(FakeWindow_Impl);
+
+/// A stand-in `IRibbonControl`: its `Context` is the window the button was clicked in.
+#[implement(IDispatch)]
+struct FakeControl {
+    window: IDispatch,
+}
+
+impl IDispatch_Impl for FakeControl_Impl {
+    fn GetTypeInfoCount(&self) -> Result<u32> {
+        Ok(0)
+    }
+    fn GetTypeInfo(&self, _: u32, _: u32) -> Result<ITypeInfo> {
+        Err(E_NOTIMPL.into())
+    }
+    fn GetIDsOfNames(
+        &self,
+        _: *const GUID,
+        names: *const PCWSTR,
+        _: u32,
+        _: u32,
+        ids: *mut i32,
+    ) -> Result<()> {
+        // SAFETY: the add-in passes one NUL-terminated name and room for one id.
+        let name = unsafe { (*names).to_string().unwrap() };
+        assert_eq!(name, "Context");
+        unsafe { ids.write(5) };
+        Ok(())
+    }
+    fn Invoke(
+        &self,
+        id: i32,
+        _: *const GUID,
+        _: u32,
+        _: DISPATCH_FLAGS,
+        _: *const DISPPARAMS,
+        result: *mut VARIANT,
+        _: *mut EXCEPINFO,
+        _: *mut u32,
+    ) -> Result<()> {
+        assert_eq!(id, 5);
+        // SAFETY: a result slot the add-in provided.
+        unsafe { result.write(VARIANT::from(self.window.clone())) };
+        Ok(())
     }
 }
 
@@ -426,6 +488,15 @@ fn the_add_in_and_the_pane_work_through_com() {
     unsafe {
         std::env::set_var("CANOA_OFFICE_LOG", &log);
         std::env::set_var("CANOA_OFFICE_NO_DIALOG", "1");
+        // A pane looks for the host in this home, which holds nothing: the person's own is never read or started from a test.
+        std::env::set_var(
+            "COQUI_AGENTIC_PEER_HOME",
+            std::env::temp_dir().join(format!("canoa-office-test-home-{}", std::process::id())),
+        );
+        std::env::set_var(
+            "CANOA_OFFICE_DATA",
+            std::env::temp_dir().join(format!("canoa-office-test-data-{}", std::process::id())),
+        );
     }
     // SAFETY: first COM call on this thread.
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().unwrap() };
@@ -621,6 +692,71 @@ fn the_add_in_and_the_pane_work_through_com() {
     // SAFETY: the variant was filled by the call above.
     assert_eq!(unsafe { result.Anonymous.Anonymous.vt }, VT_DISPATCH);
     assert_picture_is_the_mark(&IDispatch::try_from(&result).unwrap());
+
+    // Outlook has a window per message and one for the folders: a pane per window, each made on its own first click. The window is the
+    // `Context` of the ribbon control that was clicked.
+    let window_a: IDispatch = FakeWindow.into();
+    let window_b: IDispatch = FakeWindow.into();
+    let click = |window: &IDispatch| {
+        let control: IDispatch = FakeControl {
+            window: window.clone(),
+        }
+        .into();
+        let mut argument = VARIANT::from(control);
+        let params = DISPPARAMS {
+            rgvarg: &mut argument,
+            rgdispidNamedArgs: ptr::null_mut(),
+            cArgs: 1,
+            cNamedArgs: 0,
+        };
+        // SAFETY: parameters that outlive the call, as Office passes them.
+        unsafe {
+            dispatch
+                .Invoke(
+                    1,
+                    &GUID::zeroed(),
+                    0,
+                    DISPATCH_METHOD,
+                    &params,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap()
+        };
+    };
+    let made_before = seen.created.borrow().len();
+    seen.visible_log.borrow_mut().clear();
+    click(&window_a);
+    assert_eq!(
+        seen.created.borrow().len(),
+        made_before + 1,
+        "the first window's first click makes its pane"
+    );
+    assert_eq!(
+        seen.created.borrow()[made_before].2,
+        VT_DISPATCH.0,
+        "for that window, not the active one"
+    );
+    click(&window_b);
+    assert_eq!(
+        seen.created.borrow().len(),
+        made_before + 2,
+        "another window gets a pane of its own"
+    );
+    click(&window_a);
+    assert_eq!(
+        seen.created.borrow().len(),
+        made_before + 2,
+        "the same window's next click makes none"
+    );
+    let changes = seen.visible_log.borrow().clone();
+    let (a, b) = (made_before + 1, made_before + 2);
+    assert_eq!(
+        changes,
+        vec![(a, -1), (b, -1), (a, 0)],
+        "the third click hides the first window's pane and leaves the other"
+    );
 
     // A class that is not the add-in's own is refused aggregation.
     // SAFETY: no outer unknown, the ordinary call.

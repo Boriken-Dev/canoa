@@ -16,6 +16,22 @@ const ALLOWED: &[(&str, &str)] = &[
         "the DLL's two C entry points, and the class factory's out-slot",
     ),
     (
+        "automation.rs",
+        "late-bound IDispatch calls on Office's objects: names, arguments, variants",
+    ),
+    (
+        "surface.rs",
+        "the pane window's procedure and the posted search result",
+    ),
+    (
+        "webview.rs",
+        "the WebView2 runtime's entry point and the COM interfaces of its control",
+    ),
+    (
+        "owner.rs",
+        "the user of the process that holds a pipe's server end, from its token",
+    ),
+    (
         "icon.rs",
         "WIC decoding and the DIB section behind the ribbon picture",
     ),
@@ -61,7 +77,8 @@ fn only_the_listed_files_hold_unsafe() {
         }
     }
     holding.sort();
-    let allowed: Vec<_> = ALLOWED.iter().map(|(name, _)| (*name).to_owned()).collect();
+    let mut allowed: Vec<_> = ALLOWED.iter().map(|(name, _)| (*name).to_owned()).collect();
+    allowed.sort();
     assert_eq!(
         holding, allowed,
         "the files with unsafe differ from the list"

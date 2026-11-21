@@ -2,13 +2,20 @@
 #![cfg(windows)]
 
 mod addin;
+pub mod automation;
+pub mod context;
 mod exports;
+pub mod host;
 mod icon;
 mod ids;
 pub mod interfaces;
 mod log;
+mod owner;
 mod pane;
+pub mod relation;
 mod ribbon;
+pub mod surface;
+pub mod webview;
 
 pub use addin::{AddIn, pane_width};
 pub use exports::{DllCanUnloadNow, DllGetClassObject};
