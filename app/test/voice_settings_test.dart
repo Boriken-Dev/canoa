@@ -53,9 +53,9 @@ void main() {
       expect(() => CanoaConfig.parse('[voice]\nacknowledged = "system"\n'), throwsFormatException);
     });
 
-    test('a mode that is neither toggle nor hold, and a key it does not have, are refused', () {
+    test('a mode that is neither toggle nor hold is refused, and a key it does not have is kept', () {
       expect(() => CanoaConfig.parse('[voice]\nmode = "always"\n'), throwsFormatException);
-      expect(() => CanoaConfig.parse('[voice]\nmicrophone = "on"\n'), throwsFormatException);
+      expect(CanoaConfig.parse('[voice]\nmicrophone = "on"\n').encode(), allOf(contains('microphone'), contains('on')));
     });
   });
 

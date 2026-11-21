@@ -184,7 +184,7 @@ void main() {
     expect(CanoaConfig.parse(read.encode()).notifications.finished, isFalse);
     expect(CanoaConfig.parse(read.encode()).notifications.permission, isTrue);
     expect(() => CanoaConfig.parse('[notifications]\nfinished = "no"\n'), throwsFormatException);
-    expect(() => CanoaConfig.parse('[notifications]\nerrors = true\n'), throwsFormatException);
+    expect(CanoaConfig.parse('[notifications]\nerrors = true\n').encode(), contains('errors = true'), reason: 'a key it does not know is kept');
   });
 
   testWidgets('Settings turns a kind off', (tester) async {

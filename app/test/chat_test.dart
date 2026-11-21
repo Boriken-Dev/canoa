@@ -477,7 +477,7 @@ void main() {
         expect(() => CanoaConfig.parse('[appearance]\nlook = "$notAnId"\n'), throwsFormatException);
       }
       expect(() => CanoaConfig.parse('[appearance]\nbrightness = "dim"\n'), throwsFormatException);
-      expect(() => CanoaConfig.parse('[appearance]\nsomething = 1\n'), throwsFormatException);
+      expect(CanoaConfig.parse('[appearance]\nsomething = 1\n').encode(), contains('something = 1'), reason: 'a key it does not know is kept');
     });
 
     test('canoa.cfg keeps the density, reads a file without one as Normal, and refuses one it does not know', () {

@@ -105,6 +105,7 @@ void main() {
         home: MemoryHome(overlays),
         index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last),
         agents: const ['Claude'],
+        catalogTypes: standInCatalogTypes,
         onSave: (changed) async {
           saved.add(changed);
           return changed;

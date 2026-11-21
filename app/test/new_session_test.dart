@@ -62,7 +62,7 @@ void main() {
     expect((read.pasteAsFile, read.embedLimit), (100, 2048));
     expect((const CanoaConfig().pasteAsFile, const CanoaConfig().embedLimit), (8000, 1024 * 1024));
     expect(() => CanoaConfig.parse('[sources]\nhidden = [1]\n'), throwsFormatException);
-    expect(() => CanoaConfig.parse('[sources]\nother = true\n'), throwsFormatException);
+    expect(CanoaConfig.parse('[sources]\nother = true\n').encode(), contains('other = true'), reason: 'a key it does not know is kept');
     expect(() => CanoaConfig.parse('[attachments]\nembed_limit = -1\n'), throwsFormatException);
   });
 

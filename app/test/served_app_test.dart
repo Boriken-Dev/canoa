@@ -134,7 +134,7 @@ void main() {
 
     test('a table this page cannot read fails the whole read, and nothing is then written, so nothing is removed', () async {
       final (link, files) = hostWith({
-        'permissions': {'a_key_this_build_does_not_know': true},
+        'permissions': {'default_mode': 'a_value_this_build_does_not_know'},
         'overlays': {'docs': 'https://example.com/docs.git'},
       });
       final store = HostConfigStore(files);
@@ -219,13 +219,13 @@ void main() {
     test('the app reads none of it when a table is unreadable: no config, a fixed sentence, and nothing to write against', () async {
       final link = _Link((method, params) => {
         'section': params['section'],
-        'value': params['section'] == 'permissions' ? {'a_key_this_build_does_not_know': true} : null,
+        'value': params['section'] == 'permissions' ? {'default_mode': 'a_value_this_build_does_not_know'} : null,
       });
       final app = ServedApp.over(_host(), HostControl.dialing(() async => link));
       expect(await app.loadConfig(), isNull);
       expect(app.configLoaded, isFalse);
       expect(app.configProblem, isNotNull);
-      expect(app.configProblem, isNot(contains('a_key_this_build_does_not_know')));
+      expect(app.configProblem, isNot(contains('a_value_this_build_does_not_know')));
     });
 
     test('the host\'s operating system comes from what it lists, and an overlay is read for it', () {

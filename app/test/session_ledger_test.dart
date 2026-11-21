@@ -269,7 +269,7 @@ void main() {
       expect(again.sessions.harnesses, {'my-acp': 'My Harness'});
       expect(const CanoaConfig().sessions.keepText, isFalse);
       expect(const CanoaConfig().sessions.keep, LedgerSettings.defaultKeep);
-      for (final bad in ['[sessions]\nkeep = -1\n', '[sessions]\nkeep_text = "yes"\n', '[harnesses]\nx = 3\n', '[sessions]\nother = 1\n']) {
+      for (final bad in ['[sessions]\nkeep = -1\n', '[sessions]\nkeep_text = "yes"\n', '[harnesses]\nx = 3\n']) {
         expect(() => CanoaConfig.parse(bad), throwsFormatException, reason: bad);
       }
     });
