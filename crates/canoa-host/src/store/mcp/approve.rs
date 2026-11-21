@@ -135,9 +135,7 @@ impl Questions {
         let number = self.next.fetch_add(1, Ordering::SeqCst);
         let id = format!(
             "{ID_PREFIX}{number}-{}",
-            salt.iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
+            data_encoding::HEXLOWER.encode(&salt)
         );
         let waiting = Arc::new(Waiting {
             answer: Mutex::new(None),

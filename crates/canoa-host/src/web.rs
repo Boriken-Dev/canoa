@@ -1031,37 +1031,7 @@ pub(crate) fn host_allowed(value: &str, hosts: &[String]) -> bool {
 
 /// `time` as HTTP writes a date: `Sun, 06 Nov 1994 08:49:37 GMT`.
 pub(crate) fn http_date(time: SystemTime) -> String {
-    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let seconds = time
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs());
-    let days = seconds / 86_400;
-    let of_day = seconds % 86_400;
-    // The civil date of a day count from 1970-01-01, in the proleptic Gregorian calendar, by eras of 400 years.
-    let shifted = days + 719_468;
-    let era = shifted / 146_097;
-    let of_era = shifted % 146_097;
-    let year_of_era = (of_era - of_era / 1460 + of_era / 36_524 - of_era / 146_096) / 365;
-    let day_of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 {
-        month_index + 2
-    } else {
-        month_index - 10
-    };
-    let year = year_of_era + era * 400 + u64::from(month < 2);
-    format!(
-        "{}, {day:02} {} {year} {:02}:{:02}:{:02} GMT",
-        DAYS[usize::try_from(days % 7).unwrap_or(0)],
-        MONTHS[usize::try_from(month).unwrap_or(0)],
-        of_day / 3600,
-        of_day % 3600 / 60,
-        of_day % 60
-    )
+    crate::utc::http_date(time)
 }
 
 /// A connection's socket, whose every read waits only until its deadline and every write at most the send limit, and
@@ -1873,14 +1843,7 @@ fn parse_http_date(text: &str) -> Option<u64> {
     if !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 || year < 1970 {
         return None;
     }
-    // Days from the civil date, the inverse of the conversion in `http_date`.
-    let shifted_year = if month <= 2 { year - 1 } else { year };
-    let era = shifted_year / 400;
-    let year_of_era = shifted_year % 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = (era * 146_097 + of_era).checked_sub(719_468)?;
-    Some(days * 86_400 + hour * 3600 + minute * 60 + second)
+    crate::utc::unix_from_ymdhms(year, month, day, hour, minute, second)
 }
 
 /// Whether an `If-None-Match` value names `tag`, compared weakly as a `GET` is.
@@ -2002,11 +1965,7 @@ fn content_tag(real: &Path, length: u64, nanos: u128) -> Option<String> {
         hash.update(&chunk[..read]);
     }
     let digest = hash.finalize();
-    let mut tag = String::from("\"");
-    for byte in &digest[..16] {
-        tag.push_str(&format!("{byte:02x}"));
-    }
-    tag.push('"');
+    let tag = format!("\"{}\"", data_encoding::HEXLOWER.encode(&digest[..16]));
     TAGS.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .insert(real.to_path_buf(), (length, nanos, tag.clone()));

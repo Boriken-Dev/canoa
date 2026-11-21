@@ -148,16 +148,12 @@ impl core::fmt::Debug for Forward {
 fn random_hex() -> std::io::Result<String> {
     let mut random = [0_u8; 16];
     getrandom::fill(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
-    Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(data_encoding::HEXLOWER.encode(&random))
 }
 
 /// Whether two strings are the same, taking as long for any two of the same length.
 fn same(a: &str, b: &str) -> bool {
-    a.len() == b.len()
-        && a.bytes()
-            .zip(b.bytes())
-            .fold(0_u8, |all, (a, b)| all | (a ^ b))
-            == 0
+    bool::from(subtle::ConstantTimeEq::ct_eq(a.as_bytes(), b.as_bytes()))
 }
 
 impl Forward {

@@ -441,7 +441,9 @@ impl Network {
         let identity = self
             .identities()?
             .into_iter()
-            .find(|identity| hex(identity.info().fingerprint()) == wanted)
+            .find(|identity| {
+                data_encoding::HEXLOWER.encode(identity.info().fingerprint()) == wanted
+            })
             .ok_or_else(|| {
                 NetworkError::new(alloc::format!(
                     "no client certificate with the thumbprint {wanted} is available here"
@@ -473,7 +475,7 @@ impl Network {
             .map(|identity| {
                 let info = identity.info();
                 ClientIdentity {
-                    thumbprint: hex(info.fingerprint()),
+                    thumbprint: data_encoding::HEXLOWER.encode(info.fingerprint()),
                     subject: info.subject().to_owned(),
                     issuer: info.issuer().to_owned(),
                     not_after: info
@@ -546,7 +548,9 @@ impl Network {
         let server = ServerIdentity {
             name: host,
             subject: certificate.as_ref().map(|info| info.subject().to_owned()),
-            sha256: certificate.as_ref().map(|info| hex(info.fingerprint())),
+            sha256: certificate
+                .as_ref()
+                .map(|info| data_encoding::HEXLOWER.encode(info.fingerprint())),
         };
         Ok(SecureConnection { stream, server })
     }
@@ -620,14 +624,6 @@ impl Network {
             .map(|environment| environment.pairs())
             .unwrap_or_default()
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use core::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut text, byte| {
-        let _ = write!(text, "{byte:02x}");
-        text
-    })
 }
 
 fn read_roots(path: &Path) -> Result<Vec<CertificateDer<'static>>, NetworkError> {

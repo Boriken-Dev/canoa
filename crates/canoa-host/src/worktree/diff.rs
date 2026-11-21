@@ -84,11 +84,7 @@ impl Worktrees {
                 digest.update([0]);
                 digest.update(file.patch.as_deref().unwrap_or("").as_bytes());
                 digest.update(format!("{}{}{}", file.added, file.removed, file.binary).as_bytes());
-                let print: String = digest
-                    .finalize()
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect();
+                let print = data_encoding::HEXLOWER.encode(&digest.finalize());
                 json!({
                     "path": file.path,
                     "status": file.status.to_string(),

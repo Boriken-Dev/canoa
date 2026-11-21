@@ -104,11 +104,7 @@ fn name_in(home: &Path, file: &str, suffix: &str) -> Result<PipeName, pipe::Erro
         text = text.to_lowercase();
     }
     let digest = Sha256::digest(text.as_bytes());
-    let hex: String = digest
-        .iter()
-        .take(8)
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let hex = data_encoding::HEXLOWER.encode(&digest[..8]);
     let named = format!("canoa-native-{hex}{suffix}");
     if cfg!(windows) {
         return PipeName::named(&named);

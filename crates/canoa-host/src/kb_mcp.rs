@@ -391,7 +391,7 @@ impl Link {
         if getrandom::fill(&mut secret).is_err() {
             return false;
         }
-        let token: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+        let token: String = data_encoding::HEXLOWER.encode(&secret);
         let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let entry = if http {
             json!({

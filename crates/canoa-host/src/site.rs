@@ -409,14 +409,14 @@ fn new_id() -> Option<String> {
     getrandom::fill(&mut bytes).ok()?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex: Vec<String> = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    let hex = data_encoding::HEXLOWER.encode(&bytes);
     Some(format!(
         "{}-{}-{}-{}-{}",
-        hex[..4].concat(),
-        hex[4..6].concat(),
-        hex[6..8].concat(),
-        hex[8..10].concat(),
-        hex[10..].concat()
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..],
     ))
 }
 

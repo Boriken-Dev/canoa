@@ -536,10 +536,7 @@ impl Worktrees {
                 fields.next();
             }
         }
-        let digest: String = Sha256::digest(listed.as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let digest = data_encoding::HEXLOWER.encode(&Sha256::digest(listed.as_bytes()));
         Ok((count, digest))
     }
 

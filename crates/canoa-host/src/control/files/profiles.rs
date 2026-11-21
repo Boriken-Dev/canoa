@@ -214,7 +214,7 @@ impl Files {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let bytes = project_profile(&real)?
             .ok_or_else(|| refused("that folder has no project profile to trust"))?;
-        let digest = hex(&Sha256::digest(&bytes));
+        let digest = data_encoding::HEXLOWER.encode(&Sha256::digest(&bytes));
         if !digest.eq_ignore_ascii_case(shown) {
             return Err(refused(
                 "the project profile is not the one that was shown: it changed, so look at it again",
@@ -281,12 +281,4 @@ fn same_place(a: &str, b: &str) -> bool {
     } else {
         a == b
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use core::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut text, byte| {
-        let _ = write!(text, "{byte:02x}");
-        text
-    })
 }

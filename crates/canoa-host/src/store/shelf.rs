@@ -459,10 +459,7 @@ impl Locked<'_> {
         }
         let mut nonce = [0u8; 4];
         getrandom::fill(&mut nonce).map_err(|e| io::Error::other(e.to_string()))?;
-        let name = format!(
-            "{version}-{}",
-            nonce.iter().map(|b| format!("{b:02x}")).collect::<String>()
-        );
+        let name = format!("{version}-{}", data_encoding::HEXLOWER.encode(&nonce));
         let dir = self.versions().join(name);
         make_private(&dir)?;
         Ok(dir)

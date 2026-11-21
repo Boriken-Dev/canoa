@@ -29,6 +29,7 @@ guatiao-intake.workspace = true
 guatiao-serde.workspace = true
 getrandom.workspace = true
 serde_json.workspace = true
+data-encoding.workspace = true
 tracing.workspace = true
 ureq = { workspace = true, optional = true }
 foundry-local-sdk = { workspace = true, optional = true }

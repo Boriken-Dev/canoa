@@ -423,7 +423,7 @@ impl Running {
     pub(crate) fn mint(self: &Arc<Self>) -> Result<Ticket, getrandom::Error> {
         let mut random = [0_u8; 32];
         getrandom::fill(&mut random)?;
-        let bearer: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let bearer = data_encoding::HEXLOWER.encode(&random);
         let key = loopback::digest(&bearer);
         self.gateway.sessions().insert(
             key,

@@ -754,6 +754,7 @@ dependencies = [
  "coqui-acp-api",
  "coqui-acp-harness",
  "coqui-syshttp",
+ "data-encoding",
  "guatiao",
  "guatiao-intake",
  "guatiao-serde",
@@ -838,6 +839,7 @@ dependencies = [
  "canoa",
  "coqui-acp-api",
  "coqui-acp-harness",
+ "data-encoding",
  "foundry-local-sdk",
  "getrandom 0.4.3",
  "guatiao",
@@ -947,6 +949,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2 0.11.1",
+ "subtle",
  "tar",
  "time",
  "toml",
@@ -969,6 +972,7 @@ dependencies = [
 name = "canoa-launch"
 version = "0.0.0-alpha.0"
 dependencies = [
+ "data-encoding",
  "flate2",
  "object 0.41.0",
  "sha2 0.11.1",
@@ -984,6 +988,7 @@ dependencies = [
  "canoa",
  "coqui-acp-api",
  "coqui-acp-harness",
+ "data-encoding",
  "getrandom 0.4.3",
  "guatiao-serde",
  "percent-encoding",

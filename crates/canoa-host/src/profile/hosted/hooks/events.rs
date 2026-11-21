@@ -202,13 +202,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         let mut random = [0_u8; 12];
         let _ = getrandom::fill(&mut random);
         let session = SessionHooks {
-            id: format!(
-                "canoa-session-{}",
-                random
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>()
-            ),
+            id: format!("canoa-session-{}", data_encoding::HEXLOWER.encode(&random)),
             allowed: BTreeSet::new(),
             cwd: self
                 .connection
@@ -337,13 +331,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             .as_ref()
             .and_then(|agent| self.hold().book.sessions.get(agent).cloned());
         let session = known.unwrap_or_else(|| SessionHooks {
-            id: format!(
-                "canoa-session-{}",
-                random
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>()
-            ),
+            id: format!("canoa-session-{}", data_encoding::HEXLOWER.encode(&random)),
             allowed: allowed.clone(),
             cwd: params
                 .get("cwd")

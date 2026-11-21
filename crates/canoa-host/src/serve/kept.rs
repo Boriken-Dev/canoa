@@ -44,11 +44,7 @@ impl Kept {
         digest.update(entry.as_bytes());
         digest.update([0]);
         digest.update(session.as_bytes());
-        let name: String = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let name = data_encoding::HEXLOWER.encode(&digest.finalize());
         self.dir.join(format!("{name}.jsonl"))
     }
 

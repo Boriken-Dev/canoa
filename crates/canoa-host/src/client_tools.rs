@@ -102,7 +102,7 @@ fn plain_name(name: &str) -> bool {
 fn random_hex(bytes: usize) -> Option<String> {
     let mut buffer = vec![0_u8; bytes];
     getrandom::fill(&mut buffer).ok()?;
-    Some(buffer.iter().map(|byte| format!("{byte:02x}")).collect())
+    Some(data_encoding::HEXLOWER.encode(&buffer))
 }
 
 /// How a session reached the host, which the provider tells the person.

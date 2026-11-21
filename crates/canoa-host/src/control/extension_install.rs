@@ -113,10 +113,6 @@ struct Wanted {
     token: String,
 }
 
-fn hex(bytes: &[u8]) -> String {
-    data_encoding::HEXLOWER.encode(bytes)
-}
-
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
@@ -282,7 +278,7 @@ impl Control {
             Digest::Tree(pin) => pin.to_ascii_lowercase(),
             Digest::File(sha256) => sha256.to_ascii_lowercase(),
         };
-        let token = hex(&Sha256::digest(
+        let token = data_encoding::HEXLOWER.encode(&Sha256::digest(
             format!(
                 "{catalog}\n{name}\n{}\n{}\n{digest}\n{}\n{}",
                 entry.provider,
@@ -456,7 +452,10 @@ impl Control {
         let mut random = [0_u8; 8];
         getrandom::fill(&mut random)
             .map_err(|_| (REFUSED, "no randomness to name the install".to_owned()))?;
-        let staging = home.join(format!(".install-{}", hex(&random)));
+        let staging = home.join(format!(
+            ".install-{}",
+            data_encoding::HEXLOWER.encode(&random)
+        ));
         super::private_dir(&staging)
             .map_err(|error| (REFUSED, format!("{}: {error}", staging.display())))?;
         let made = self.stage_extension(&wanted, &staging);

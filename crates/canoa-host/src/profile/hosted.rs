@@ -1709,7 +1709,7 @@ impl Written {
     fn create(under: &Path, files: &BTreeMap<String, Vec<u8>>) -> std::io::Result<Self> {
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
-        let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let name: String = data_encoding::HEXLOWER.encode(&random);
         let root = under.join(name);
         #[cfg(unix)]
         private::check(under)?;
@@ -3003,7 +3003,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
             // Unguessable, so nothing else can answer for the person.
             let mut nonce = [0_u8; 12];
             let _ = getrandom::fill(&mut nonce);
-            let hex: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+            let hex: String = data_encoding::HEXLOWER.encode(&nonce);
             (format!("canoa-approve-{}-{hex}", hold.asked), servers)
         };
         let ask = json!({

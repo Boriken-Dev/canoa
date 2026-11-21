@@ -110,6 +110,7 @@ serde.workspace = true
 serde_json.workspace = true
 # An upload travels in base64; already in the graph (the web_peer example reads it too).
 data-encoding.workspace = true
+subtle.workspace = true
 # An account's credential in the operating system's store, through keyring-core and the platform's store below.
 keyring-core.workspace = true
 # The file store's sealing, at the version the dependency graph already holds.

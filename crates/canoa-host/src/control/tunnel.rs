@@ -8,7 +8,6 @@
     reason = "sockets, threads and clocks are std's"
 )]
 
-use std::fmt::Write as _;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -147,11 +146,7 @@ impl Tunnel {
 fn new_token() -> Result<String, getrandom::Error> {
     let mut bytes = [0u8; TOKEN_BYTES];
     getrandom::fill(&mut bytes)?;
-    let mut text = String::with_capacity(TOKEN_BYTES * 2);
-    for byte in bytes {
-        let _ = write!(text, "{byte:02x}");
-    }
-    Ok(text)
+    Ok(data_encoding::HEXLOWER.encode(&bytes))
 }
 
 /// What the app's connection is carried to: the proxy's tunnel, or a server with the TLS made.
@@ -259,11 +254,8 @@ fn opens_with(client: &mut TcpStream, token: &[u8]) -> bool {
         return false;
     }
     // Every byte is looked at whatever the first difference, so how long this takes says nothing of how much matched.
-    let different = said
-        .iter()
-        .zip(token)
-        .fold(0u8, |different, (said, wanted)| different | (said ^ wanted));
-    different == 0 && client.set_read_timeout(None).is_ok()
+    let matched = bool::from(subtle::ConstantTimeEq::ct_eq(said.as_slice(), token));
+    matched && client.set_read_timeout(None).is_ok()
 }
 
 /// Both directions at once, each on its own thread; a half-close passes on, an error ends both. Each socket is one handle that both

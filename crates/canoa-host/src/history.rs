@@ -15,7 +15,7 @@ use std::fs;
 use std::io::{BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use coqui_acp_history::conversation::{derived_uuid, is_uuid};
 use coqui_acp_history::record::{Direction, SessionRecorder};
@@ -104,12 +104,7 @@ impl core::fmt::Debug for Store {
 /// The name of the file of the session `session` of the entry `entry`: a hash, so no recorded text is a path.
 fn file_name(entry: &str, session: &str) -> String {
     let digest = Sha256::digest(format!("{}\0{entry}\0{session}", entry.len()).as_bytes());
-    let mut name = String::with_capacity(70);
-    for byte in digest {
-        name.push_str(&format!("{byte:02x}"));
-    }
-    name.push_str(".jsonl");
-    name
+    format!("{}.jsonl", data_encoding::HEXLOWER.encode(&digest))
 }
 
 /// The UUID a session of `entry` goes by in a history: its own id when that is one, else one made from the two.
@@ -364,28 +359,7 @@ fn create_new(path: &Path) -> Result<fs::File, StoreError> {
 
 /// RFC 3339 UTC, to the second.
 fn rfc3339(at: SystemTime) -> Option<String> {
-    let secs = i64::try_from(at.duration_since(UNIX_EPOCH).ok()?.as_secs()).ok()?;
-    let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_part = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_part + 2) / 5 + 1;
-    let month = if month_part < 10 {
-        month_part + 3
-    } else {
-        month_part - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    Some(format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rest / 3600,
-        rest % 3600 / 60,
-        rest % 60
-    ))
+    crate::utc::rfc3339(at)
 }
 
 /// A session being recorded.

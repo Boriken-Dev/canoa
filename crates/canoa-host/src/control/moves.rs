@@ -51,7 +51,7 @@ pub(super) fn new_uuid() -> Result<String, (i32, String)> {
     getrandom::fill(&mut bytes).map_err(|e| (REFUSED, format!("no randomness: {e}")))?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let hex: String = data_encoding::HEXLOWER.encode(&bytes);
     Ok(format!(
         "{}-{}-{}-{}-{}",
         &hex[..8],

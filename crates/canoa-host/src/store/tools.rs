@@ -515,14 +515,6 @@ fn safe_part(part: &str) -> bool {
     !device && !part.ends_with(' ') && !part.ends_with('.')
 }
 
-fn hex(bytes: &[u8]) -> String {
-    use core::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
-}
-
 /// What a download is hashed with, as it is written.
 #[allow(
     clippy::large_enum_variant,
@@ -554,16 +546,18 @@ impl Hashes {
     fn finish(self, check: &Check) -> (String, bool) {
         match (self, check) {
             (Self::Plain(a), Check::Sha256 { value }) => {
-                let sha = hex(&a.finalize());
+                let sha = data_encoding::HEXLOWER.encode(&a.finalize());
                 let ok = sha.eq_ignore_ascii_case(value);
                 (sha, ok)
             }
             (Self::Both(a, b), Check::Sha512 { value }) => {
-                let ok = hex(&b.finalize()).eq_ignore_ascii_case(value);
-                (hex(&a.finalize()), ok)
+                let ok = data_encoding::HEXLOWER
+                    .encode(&b.finalize())
+                    .eq_ignore_ascii_case(value);
+                (data_encoding::HEXLOWER.encode(&a.finalize()), ok)
             }
-            (Self::Plain(a), _) => (hex(&a.finalize()), true),
-            (Self::Both(a, _), _) => (hex(&a.finalize()), true),
+            (Self::Plain(a), _) => (data_encoding::HEXLOWER.encode(&a.finalize()), true),
+            (Self::Both(a, _), _) => (data_encoding::HEXLOWER.encode(&a.finalize()), true),
         }
     }
 }

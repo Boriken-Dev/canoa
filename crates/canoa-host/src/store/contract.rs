@@ -282,7 +282,7 @@ impl Sandbox {
     pub fn new() -> Self {
         let mut nonce = [0u8; 6];
         getrandom::fill(&mut nonce).expect("random bytes");
-        let name: String = nonce.iter().map(|b| format!("{b:02x}")).collect();
+        let name: String = data_encoding::HEXLOWER.encode(&nonce);
         let root = std::env::temp_dir().join(format!("coqui-store-suite-{name}"));
         for dir in ["home", "bin", "work"] {
             fs::create_dir_all(root.join(dir)).expect("the sandbox is made");

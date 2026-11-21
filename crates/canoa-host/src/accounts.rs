@@ -385,7 +385,7 @@ impl Accounts {
         let mut random = [0_u8; 12];
         getrandom::fill(&mut random)
             .map_err(|error| StoreError(format!("no randomness: {error}")))?;
-        let name: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let name: String = data_encoding::HEXLOWER.encode(&random);
         let path = self.dir.join("login").join(name);
         private::create_dir(&path).map_err(|error| io_error(&path, &error))?;
         let lock =

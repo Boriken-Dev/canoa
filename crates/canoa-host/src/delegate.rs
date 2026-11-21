@@ -1040,7 +1040,7 @@ impl Conn {
         if getrandom::fill(&mut secret).is_err() {
             return false;
         }
-        let token: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+        let token: String = data_encoding::HEXLOWER.encode(&secret);
         let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let session = self.engine.new_session(self, cwd, digest);
         self.suggest(&session, state.reported.as_deref());
@@ -1260,7 +1260,7 @@ impl Conn {
         let number = self.asked.fetch_add(1, Ordering::SeqCst) + 1;
         let mut nonce = [0_u8; 8];
         let _ = getrandom::fill(&mut nonce);
-        let hex: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+        let hex: String = data_encoding::HEXLOWER.encode(&nonce);
         let request_id = format!("canoa-delegate-{number}-{hex}");
         let object = params.as_object_mut()?;
         object.insert("sessionId".to_owned(), json!(session));

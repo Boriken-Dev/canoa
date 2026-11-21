@@ -128,7 +128,7 @@ impl Private {
     pub(super) fn under(dir: &Path, prefix: &str) -> Self {
         let mut random = [0_u8; 16];
         let _ = getrandom::fill(&mut random);
-        let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let name: String = data_encoding::HEXLOWER.encode(&random);
         Self {
             path: dir.join(format!("{prefix}-{}-{name}", std::process::id())),
             made: OnceLock::new(),

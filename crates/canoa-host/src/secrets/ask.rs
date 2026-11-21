@@ -88,7 +88,7 @@ impl Asker {
     ) -> Result<(Value, Asked), String> {
         let mut random = [0_u8; 12];
         getrandom::fill(&mut random).map_err(|_| "no randomness".to_owned())?;
-        let hex: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let hex: String = data_encoding::HEXLOWER.encode(&random);
         let request_id = format!(
             "canoa-secret-{}-{hex}",
             self.next.fetch_add(1, Ordering::SeqCst)

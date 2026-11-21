@@ -193,7 +193,7 @@ pub(crate) fn serve<C: Channel>(
 fn token() -> io::Result<String> {
     let mut bytes = [0_u8; TOKEN_BYTES];
     getrandom::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(data_encoding::HEXLOWER.encode(&bytes))
 }
 
 /// Copies what the provider writes to this host's standard error until `budget` is spent, then reads and drops the rest,
@@ -281,10 +281,10 @@ fn proves(stream: &TcpStream, token: &str) -> bool {
         return false;
     }
     // Compared in time that does not depend on where the texts differ.
-    sent.iter()
-        .zip(token.as_bytes())
-        .fold(0_u8, |differ, (a, b)| differ | (a ^ b))
-        == 0
+    bool::from(subtle::ConstantTimeEq::ct_eq(
+        sent.as_slice(),
+        token.as_bytes(),
+    ))
 }
 
 /// Passes lines between `channel` and the provider's socket until either ends, and says which.

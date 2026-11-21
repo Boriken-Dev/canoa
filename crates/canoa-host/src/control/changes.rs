@@ -64,10 +64,6 @@ fn text<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|text| !text.is_empty())
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn same_digest(a: &str, b: &str) -> bool {
     a.trim().eq_ignore_ascii_case(b.trim())
 }
@@ -727,7 +723,7 @@ impl Control {
     fn loadout_digest(loadouts: &Value, defaults: &Value) -> String {
         format!(
             "loadout:{}",
-            hex(&Sha256::digest(
+            data_encoding::HEXLOWER.encode(&Sha256::digest(
                 json!([loadouts, defaults]).to_string().as_bytes()
             ))
         )
@@ -897,7 +893,10 @@ impl Control {
                     .plan_kept_for(caller.owner(), &provider, action, change.version.as_deref())
                     .map_err(why)?;
                 let token = text(&plan, "token").unwrap_or_default().to_owned();
-                let digest = format!("plan:{}", hex(&Sha256::digest(plan.to_string().as_bytes())));
+                let digest = format!(
+                    "plan:{}",
+                    data_encoding::HEXLOWER.encode(&Sha256::digest(plan.to_string().as_bytes()))
+                );
                 let mut prepared = Prepared {
                     token: token.clone(),
                     digest,
@@ -1003,7 +1002,10 @@ impl Control {
         let kept = stores
             .kept(caller.owner(), provider, &prepared.token)
             .ok_or("the host holds no such plan any more: nothing was changed")?;
-        let digest = format!("plan:{}", hex(&Sha256::digest(kept.to_string().as_bytes())));
+        let digest = format!(
+            "plan:{}",
+            data_encoding::HEXLOWER.encode(&Sha256::digest(kept.to_string().as_bytes()))
+        );
         if digest != prepared.digest {
             stores.forget(caller.owner(), provider, &prepared.token);
             return Err(

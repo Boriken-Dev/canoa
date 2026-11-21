@@ -144,11 +144,7 @@ pub(crate) trait SecretStore: Send + Sync + fmt::Debug {
 
 /// A digest of `text`, as 32 hex digits: a name that holds no character a store reads as structure.
 pub(crate) fn tag(text: &str) -> String {
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .take(16)
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    data_encoding::HEXLOWER.encode(&Sha256::digest(text.as_bytes())[..16])
 }
 
 /// The service under which `home`'s accounts rest, so two homes of one user never share a credential.

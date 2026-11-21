@@ -16,7 +16,7 @@ use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use coqui_aos::{
     EXCLUDED_COMPONENTS, TreeEntry, digest_entries, valid_overlay_name, valid_relative_path,
@@ -1768,29 +1768,5 @@ pub(in crate::control) fn find_git() -> Result<PathBuf, String> {
 
 /// Now as an ISO 8601 time in UTC, to the second.
 pub(crate) fn iso_now() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(0));
-    let (days, rest) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
-    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * shifted + 2) / 5 + 1;
-    let month = if shifted < 10 {
-        shifted + 3
-    } else {
-        shifted - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rest / 3600,
-        rest % 3600 / 60,
-        rest % 60
-    )
+    crate::utc::iso_now()
 }

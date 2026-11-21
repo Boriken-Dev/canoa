@@ -41,7 +41,7 @@ pub struct Manifest {
 /// Lower-case hex of `bytes`.
 #[must_use]
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    data_encoding::HEXLOWER.encode(bytes)
 }
 
 /// SHA-256 of `bytes`, as hex.

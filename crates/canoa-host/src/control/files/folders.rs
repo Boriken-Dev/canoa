@@ -14,7 +14,7 @@ use crate::spawn::{Command, Stdio};
 use std::fs;
 use std::io::Read as _;
 use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -606,34 +606,7 @@ fn when_of(now: Option<&str>) -> Result<(String, String), (i32, String)> {
         }
         return Err(bad("now is a local time as 2026-11-17T10:30:05"));
     }
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs());
-    let (days, rest) = (seconds / 86_400, seconds % 86_400);
-    let (year, month, day) = civil(i64::try_from(days).unwrap_or(0));
-    Ok((
-        format!("{year:04}-{month:02}-{day:02}"),
-        format!("{:02}{:02}{:02}", rest / 3600, rest % 3600 / 60, rest % 60),
-    ))
-}
-
-/// The date `days` after 1970-01-01.
-fn civil(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * shifted + 2) / 5 + 1;
-    let month = if shifted < 10 {
-        shifted + 3
-    } else {
-        shifted - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    (year, month, day)
+    Ok(crate::utc::today_and_clock())
 }
 
 /// `value` as one path segment: separators, `..`, control and reserved characters become `_`, and a trailing dot or space

@@ -363,7 +363,7 @@ impl Link {
         if getrandom::fill(&mut secret).is_err() {
             return false;
         }
-        let token: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+        let token: String = data_encoding::HEXLOWER.encode(&secret);
         let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let Some(servers) = value
             .get_mut("params")
@@ -643,9 +643,7 @@ impl Link {
         let id = format!(
             "{ID_PREFIX}{}-{}",
             self.next.fetch_add(1, Ordering::SeqCst),
-            salt.iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
+            data_encoding::HEXLOWER.encode(&salt)
         );
         let waiting = Arc::new(Waiting {
             answer: Mutex::new(None),

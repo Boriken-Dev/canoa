@@ -28,6 +28,7 @@ sha2.workspace = true
 zip.workspace = true
 # zip's deflate runs on flate2, which needs a backend chosen; the workspace picks the pure Rust one.
 flate2.workspace = true
+data-encoding.workspace = true
 
 # The owner of a folder, through safe wrappers (this crate forbids unsafe code); a message box for a launch that failed,
 # since the launcher has no console.

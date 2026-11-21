@@ -30,7 +30,7 @@ impl Dir {
     pub(crate) fn new(name: &str) -> Self {
         let mut nonce = [0u8; 4];
         getrandom::fill(&mut nonce).expect("random");
-        let hex: String = nonce.iter().map(|b| format!("{b:02x}")).collect();
+        let hex: String = data_encoding::HEXLOWER.encode(&nonce);
         let path = std::env::temp_dir().join(format!("canoa-net-{name}-{hex}"));
         fs::create_dir_all(&path).expect("a directory");
         Self(path)

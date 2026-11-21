@@ -138,7 +138,7 @@ pub(crate) fn context(
     let bundle = context::build(session, kind, engine.config.context_bytes)?;
     let mut secret = [0_u8; 16];
     getrandom::fill(&mut secret).map_err(|error| error.to_string())?;
-    let id: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+    let id: String = data_encoding::HEXLOWER.encode(&secret);
     let mut shown = bundle.describe(true);
     shown["contextId"] = json!(id);
     let mut held = lock(&session.prepared);

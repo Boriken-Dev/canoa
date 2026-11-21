@@ -592,14 +592,9 @@ fn loopback_variables(url: &str, bypass: &[String]) -> Vec<(String, String)> {
 }
 
 fn new_token() -> Result<String, getrandom::Error> {
-    use core::fmt::Write as _;
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes)?;
-    let mut text = String::with_capacity(32);
-    for byte in bytes {
-        let _ = write!(text, "{byte:02x}");
-    }
-    Ok(text)
+    Ok(data_encoding::HEXLOWER.encode(&bytes))
 }
 
 /// A proxy the host runs.
@@ -972,7 +967,7 @@ fn carry_decrypted(
 
 /// Whether `a` and `b` are the same bytes, whatever the first difference.
 fn same(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |bits, (x, y)| bits | (x ^ y)) == 0
+    bool::from(subtle::ConstantTimeEq::ct_eq(a, b))
 }
 
 fn reply(client: &mut Wire, status: &str, why: &str) {

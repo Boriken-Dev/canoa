@@ -15,7 +15,6 @@
 )]
 
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
@@ -894,14 +893,7 @@ fn card_of(account: &str, what: &[String], shown: &[Summary]) -> Card {
     for summary in shown {
         hash.update(summary.id.as_bytes());
     }
-    let digest: String = hash
-        .finalize()
-        .iter()
-        .take(8)
-        .fold(String::new(), |mut out, b| {
-            let _ = write!(out, "{b:02x}");
-            out
-        });
+    let digest = data_encoding::HEXLOWER.encode(&hash.finalize()[..8]);
     lines.push(format!("Bound to: {digest}"));
     Card {
         title,

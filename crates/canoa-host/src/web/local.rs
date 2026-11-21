@@ -74,7 +74,7 @@ impl Secret {
         std::fs::create_dir_all(dir)?;
         let mut bytes = [0_u8; 32];
         getrandom::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
-        let text: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        let text: String = data_encoding::HEXLOWER.encode(&bytes);
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
@@ -275,7 +275,7 @@ impl Tools {
                 json!({"why": "the system has no randomness to name the session"}),
             );
         }
-        let id: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
+        let id: String = data_encoding::HEXLOWER.encode(&id);
         let pane = Arc::new(Pane {
             app: app.to_owned(),
             link,
