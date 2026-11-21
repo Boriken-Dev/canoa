@@ -612,12 +612,27 @@ impl Connection {
             .collect();
         let mut account_first = starting_with.account.clone();
         account_first.extend(starting_with.host.iter().cloned());
+        let pre_lookup = |name: &str| {
+            starting_with
+                .host
+                .iter()
+                .find(|(key, _)| same_name(key, name))
+                .map(|(_, value)| value.clone())
+                .or_else(|| lookup(name))
+        };
+        let pre_finder = needs::Finder::new(&pre_lookup, &crate::sources::runtime_dirs());
+        let python = needs::program_for(&pre_finder, "python", None)
+            .ok()
+            .map(|path| path.to_string_lossy().into_owned());
+        let home = host.directory.to_string_lossy().into_owned();
         let session = Session::new(
             Who {
                 model: model.as_deref().or(starting_with.who.model),
                 effort: effort.as_deref().or(starting_with.who.effort),
                 profile: Some(name.as_str()),
                 loadout: role.as_deref(),
+                python: python.as_deref(),
+                home: Some(home.as_str()),
                 access: Some(effective.access.resolved()),
                 ..starting_with.who
             },
@@ -668,8 +683,15 @@ impl Connection {
                 Self::apply_session_network(&applied, lookup, &skills, &mut env, &mut notes);
             (hooks, pre_env, scripts, env, session_network)
         };
-        // An overlay prepared for this version tells its processes where its state directory is.
+        // An overlay prepared for this version tells its processes where its root and state directories are.
         for aos in &effective.aos {
+            let root_var = aos::root_variable(&aos.identity);
+            if !env
+                .iter()
+                .any(|(each, _)| each.eq_ignore_ascii_case(&root_var))
+            {
+                env.push((root_var, Secret(aos.root.clone())));
+            }
             let Some(state) = &aos.state else { continue };
             let name = aos::state_variable(&aos.identity);
             if !env.iter().any(|(each, _)| each.eq_ignore_ascii_case(&name)) {

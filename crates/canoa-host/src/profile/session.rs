@@ -41,6 +41,10 @@ pub(crate) struct Who<'a> {
     pub(crate) role: Option<&'a str>,
     /// The folder the session works in, where one is known.
     pub(crate) project: Option<&'a str>,
+    /// The resolved Python executable for overlay tools and hooks (`AGENTS_PYTHON`).
+    pub(crate) python: Option<&'a str>,
+    /// Canoa's home directory (`AGENTS_HOME`).
+    pub(crate) home: Option<&'a str>,
     /// The access the session runs with, where the profile's layers are known: `AGENTS_SANDBOX` (`none`, `workspace` or
     /// `read-only`), `AGENTS_NETWORK` (`true` or `false`) and `AGENTS_APPROVALS` (`ask`, `edits` or `never`).
     pub(crate) access: Option<coqui_acp_harness::Access>,
@@ -155,6 +159,8 @@ impl Session {
         put("AGENTS_LOADOUT", who.loadout);
         put("AGENTS_ROLE", who.role);
         put("AGENTS_PROJECT_ROOT", who.project);
+        put("AGENTS_PYTHON", who.python);
+        put("AGENTS_HOME", who.home);
         if let Some(access) = who.access {
             put("AGENTS_SANDBOX", Some(access.sandbox.id()));
             put(

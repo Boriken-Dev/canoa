@@ -335,6 +335,14 @@ pub(crate) fn run(
     finder: &Finder,
     environment: &[(OsString, OsString)],
 ) -> Result<Prepared, Failure> {
+    let mut run_env = environment.to_vec();
+    let has_python = run_env.iter().any(|(name, _)| {
+        name.to_str()
+            .is_some_and(|key| key.eq_ignore_ascii_case("AGENTS_PYTHON"))
+    });
+    if !has_python && let Ok(python) = program_for(finder, "python", None) {
+        run_env.push(("AGENTS_PYTHON".into(), python.into_os_string()));
+    }
     let identity = plan.identity.as_str();
     let record = home.record(identity);
     let steps = aos::preparation(
@@ -363,7 +371,7 @@ pub(crate) fn run(
                     .iter()
                     .filter(|each| each.runtime == *runtime)
                 {
-                    install(plan, dependency, home, finder, environment)?;
+                    install(plan, dependency, home, finder, &run_env)?;
                 }
             }
             Step::Setup => {
@@ -373,7 +381,7 @@ pub(crate) fn run(
                 };
                 std::fs::create_dir_all(home.state(identity))
                     .map_err(|error| failed("state directory", error.to_string()))?;
-                run_setup(plan, setup, phase, home, finder, environment)?;
+                run_setup(plan, setup, phase, home, finder, &run_env)?;
             }
             Step::Record => {
                 if let Some(record) = &steps.record {

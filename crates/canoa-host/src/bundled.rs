@@ -65,6 +65,19 @@ pub(crate) const ALL: &[Bundle] = &[
     },
 ];
 
+/// How `agent` (or its preset) accepts composed overlay context.
+pub(crate) fn context_delivery(agent: &str) -> canoa::preset::ContextDelivery {
+    ALL.iter()
+        .find(|bundle| {
+            bundle.preset.agent == agent
+                || bundle.preset.name.eq_ignore_ascii_case(agent)
+                || bundle.preset.agent_id().eq_ignore_ascii_case(agent)
+        })
+        .map_or(canoa::preset::ContextDelivery::STANDARD, |bundle| {
+            bundle.preset.context
+        })
+}
+
 fn register_one(registry: &mut Registry, name: &str, library: Library) -> Result<(), String> {
     let loading = registry
         .register_local(name, library)

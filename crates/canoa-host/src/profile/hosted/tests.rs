@@ -4,6 +4,7 @@ use coqui_aos as aos;
 
 use super::*;
 use crate::config::Config;
+use crate::scope::Scope;
 
 /// Where Codex looks for the skills of a directory it is given, which its description says.
 const AGENT_SKILLS: &str = ".agents/skills";
@@ -3614,4 +3615,269 @@ fn an_agents_plugin_meta_names_the_folder_it_was_written_to() {
         "not an object"
     );
     drop(written);
+}
+
+#[test]
+fn antigravity_overlay_context_applies_across_system_prompt_instruction_file_and_briefing() {
+    let temp = temp_with_skill();
+    temp.write(
+        "overlays/team/OVERLAY.md",
+        "---\nname: team\ndescription: Team\n---\nUse overlay rule alpha.\n",
+    );
+    temp.write("overlays/team/rules/guide.md", "Follow overlay guide.\n");
+    let digest = digest_of(&temp, "overlays/team");
+    temp.write(
+        "overlays/team.json",
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+    let cfg = "[host.agents.Antigravity]\nprogram = \"agent\"\nprofiles = [\"main\"]\n\
+               [host.profiles.main]\noverlays = [\"team\"]\n";
+    let offer = offer_of(&temp, cfg);
+    let connection = Connection::prepare(&offer, 0, "Antigravity", &lookup).expect("prepared");
+
+    // 1. Real agy capability shape (`_meta.antigravity.systemPrompt`): delivered via ACP systemPrompt.
+    let agy_init = antigravity_initialize();
+    let (agy_takes, agy_reported) = described(&agy_init);
+    let agy_parts = parts_with(
+        &connection,
+        harness_of(agy_reported, "Antigravity"),
+        agy_reported,
+        &agy_takes,
+        &lookup,
+    );
+    assert!(
+        agy_parts.system_prompt.as_deref().is_some_and(
+            |p| p.contains("Use overlay rule alpha.") && p.contains("Follow overlay guide.")
+        ),
+        "{agy_parts:?}"
+    );
+    assert_eq!(item(&agy_parts.report, "context")["state"], "applied");
+
+    // 2. Without systemPrompt, with additionalDirectories: written as `.agents/AGENTS.md`.
+    let dir_takes = Takes {
+        version: 1,
+        capabilities: json!({"sessionCapabilities": {"additionalDirectories": {}}}),
+    };
+    let dir_parts = parts_for(&connection, Some("antigravity"), &dir_takes, &lookup);
+    assert!(dir_parts.system_prompt.is_none());
+    assert_eq!(item(&dir_parts.report, "context")["state"], "applied");
+    let dir = PathBuf::from(&dir_parts.directories[0]);
+    let agents_md = std::fs::read_to_string(dir.join(".agents/AGENTS.md")).expect("written");
+    assert!(agents_md.contains("Use overlay rule alpha."));
+
+    // 3. Without systemPrompt or additionalDirectories: prepended to first session/prompt turn once.
+    let bare_takes = Takes::default();
+    let bare_parts = parts_for(&connection, Some("antigravity"), &bare_takes, &lookup);
+    assert_eq!(item(&bare_parts.report, "context")["state"], "applied");
+    assert!(!bare_parts.briefing_pieces.is_empty());
+
+    struct DummyChannel;
+    impl coqui_transport::Channel for DummyChannel {
+        fn send(&self, _: &[u8]) -> Result<(), coqui_transport::Failure> {
+            Ok(())
+        }
+        fn receive(
+            &self,
+            _: Option<core::time::Duration>,
+        ) -> Result<Option<Vec<u8>>, coqui_transport::Failure> {
+            Ok(None)
+        }
+        fn close(&self) {}
+        fn set_max_message(&self, _: usize) {}
+    }
+    let dummy = DummyChannel;
+    let scope = Scope::new(Vec::new());
+    let hosted = Hosted::in_process(&dummy, &scope, &connection);
+    hosted.hold().parts = Some(bare_parts);
+    let _ = hosted
+        .forward(
+            serde_json::to_vec(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": "/work/proj"}
+            }))
+            .expect("json"),
+            Vec::new(),
+        )
+        .expect("forwarded");
+    // Simulate agent sessionId response in Hold.
+    hosted
+        .hold()
+        .session_cwds
+        .insert("sess-1".to_owned(), Some("/work/proj".to_owned()));
+    let first = hosted
+        .forward(
+            serde_json::to_vec(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/prompt",
+                "params": {"sessionId": "sess-1", "prompt": [{"type": "text", "text": "Hello"}]}
+            }))
+            .expect("json"),
+            Vec::new(),
+        )
+        .expect("forwarded");
+    let first_val: Value = serde_json::from_slice(&first).expect("json");
+    let blocks = first_val["params"]["prompt"]
+        .as_array()
+        .expect("prompt array");
+    assert_eq!(blocks.len(), 2);
+    assert!(
+        blocks[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Use overlay rule alpha.")
+    );
+    assert_eq!(blocks[1]["text"], "Hello");
+
+    // Second prompt on the same session must not repeat the briefing.
+    let second = hosted
+        .forward(
+            serde_json::to_vec(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {"sessionId": "sess-1", "prompt": [{"type": "text", "text": "Next"}]}
+            }))
+            .expect("json"),
+            Vec::new(),
+        )
+        .expect("forwarded");
+    let second_val: Value = serde_json::from_slice(&second).expect("json");
+    assert_eq!(
+        second_val["params"]["prompt"]
+            .as_array()
+            .expect("prompt")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn session_environment_exports_agents_python_agents_home_and_overlay_root() {
+    let temp = temp_with_skill();
+    temp.write(&format!("bin/{}", program("python")), "");
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        temp.0.join(format!("bin/{}", program("python"))),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("executable");
+    temp.write(
+        "overlays/duho/overlay.cfg",
+        "name = \"duho\"\ndescription = \"Tools\"\n[scripts]\nduho-cli = \"bin/tool.py\"\n",
+    );
+    temp.write("overlays/duho/bin/tool.py", "print('help')\n");
+    let digest = digest_of(&temp, "overlays/duho");
+    temp.write(
+        "overlays/duho.json",
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+    let cfg = "[host.agents.a]\nprogram = \"agent\"\nprofiles = [\"main\"]\n\
+               [host.profiles.main]\noverlays = [\"duho\"]\n";
+    let offer = offer_of(&temp, cfg);
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    assert!(var(&connection, "AGENTS_PYTHON").is_some());
+    assert!(var(&connection, "AGENTS_HOME").is_some());
+    assert_eq!(
+        var(&connection, "DUHO_OVERLAY_ROOT"),
+        Some(
+            temp.0
+                .join("overlays")
+                .join("duho")
+                .to_string_lossy()
+                .as_ref()
+        )
+    );
+}
+
+#[test]
+fn mcp_skills_deduplicate_between_scripts_mode_and_mcp_only_mode() {
+    let temp = temp_with_skill();
+    temp.write(&format!("bin/{}", program("python")), "");
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        temp.0.join(format!("bin/{}", program("python"))),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("executable");
+    temp.write(
+        "overlays/duho/overlay.cfg",
+        "name = \"duho\"\ndescription = \"Tools\"\n\
+         [scripts]\nduho-cli = \"bin/tool.py\"\n\
+         [[mcp.servers]]\nname = \"duho-mcp\"\ntransport = \"stdio\"\ncommand = \"probe\"\n\
+         [[mcp.skills]]\nname = \"duho-skill\"\nserver = \"duho-mcp\"\n",
+    );
+    temp.write("overlays/duho/bin/tool.py", "print('ok')\n");
+    temp.write(
+        "overlays/duho/skills/duho-skill/SKILL.md",
+        "---\nname: duho-skill\ndescription: Tool help\n---\nRun `duho-cli --help-agents`.\n",
+    );
+    let overlay_digest = digest_of(&temp, "overlays/duho");
+    temp.write(
+        "overlays/duho.json",
+        &json!({"source": "x", "commit": "y", "digest": overlay_digest, "files": {}}).to_string(),
+    );
+
+    // Compute exact MCP definition digest without allow_mcp first.
+    let base_cfg = "[host.agents.a]\nprogram = \"agent\"\nprofiles = [\"main\"]\n\
+                    [host.profiles.main]\noverlays = [\"duho\"]\n";
+    let base_offer = offer_of(&temp, base_cfg);
+    let base_conn = Connection::prepare(&base_offer, 0, "a", &lookup).expect("prepared");
+
+    // 1. Coding harness (Claude with skills delivery + writable sandbox): keeps SKILL.md, deduplicates duplicate MCP schema.
+    let coding = parts_for(&base_conn, Some("claude-code"), &claude(), &lookup);
+    assert!(
+        coding.servers.is_empty(),
+        "MCP server suppressed when [scripts] + SKILL.md apply"
+    );
+    assert!(coding.written.is_some());
+    assert_eq!(
+        item(&coding.report, "skills.duho-skill")["state"],
+        "applied"
+    );
+    assert_eq!(item(&coding.report, "mcp.duho-mcp")["state"], "applied");
+    assert!(
+        item(&coding.report, "mcp.duho-mcp")["how"]
+            .as_str()
+            .unwrap()
+            .contains("deduplicated")
+    );
+
+    // Compute digest for allow_mcp using a shell-less agent take.
+    let mcp_takes = Takes {
+        version: 1,
+        capabilities: json!({"sessionCapabilities": {"systemPrompt": {}}}),
+    };
+    let probe_parts = parts_for(&base_conn, None, &mcp_takes, &lookup);
+    let digest = item(&probe_parts.report, "mcp.duho-mcp")["digest"]
+        .as_str()
+        .expect("digest")
+        .to_owned();
+    let mcp_cfg = format!(
+        "[host.agents.a]\nprogram = \"agent\"\nprofiles = [\"main\"]\n\
+         [host.profiles.main]\noverlays = [\"duho\"]\n\
+         allow_mcp = {{ duho-mcp = \"{digest}\" }}\n"
+    );
+    let mcp_offer = offer_of(&temp, &mcp_cfg);
+    let mcp_conn = Connection::prepare(&mcp_offer, 0, "a", &lookup).expect("prepared");
+
+    // 2. Shell-less / read-only harness: delivers MCP server and suppresses redundant SKILL.md.
+    let ro_parts = parts_for(&mcp_conn, None, &mcp_takes, &lookup);
+    assert_eq!(ro_parts.servers.len(), 1);
+    assert!(
+        ro_parts.written.is_none(),
+        "SKILL.md suppressed when MCP server is delivered"
+    );
+    assert_eq!(
+        item(&ro_parts.report, "skills.duho-skill")["state"],
+        "applied"
+    );
+    assert!(
+        item(&ro_parts.report, "skills.duho-skill")["how"]
+            .as_str()
+            .unwrap()
+            .contains("deduplicated")
+    );
 }

@@ -43,6 +43,8 @@ pub struct AosLayer {
     /// The skills it names that it does not bundle: by source, or by a name for a catalog to resolve. Canoa fetches and
     /// resolves nothing itself; what the app fetched for them is read when a session starts.
     pub elsewhere: Vec<aos::SkillEntry>,
+    /// Links `(skill_name, server_name)` from `[[mcp.skills]]` pairing a skill with an MCP server.
+    pub mcp_skills: Vec<(String, String)>,
     /// The digest canoa.cfg allows its hooks and env scripts at, when it names one.
     pub allowed: Option<String>,
     /// Each runtime's packages folder (`python`, `node`) when the overlay was prepared at this digest: what goes on `PYTHONPATH`
@@ -427,6 +429,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         };
         profile.mcp.insert(name, Change::Set(mapped));
     }
+    let mut mcp_skills = Vec::new();
     for link in manifest
         .get("mcp")
         .and_then(|mcp| mcp.get("skills"))
@@ -434,10 +437,17 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         .into_iter()
         .flatten()
     {
-        not_applied.push(format!(
-            "mcp.skills.{}",
-            link.get("name").and_then(Value::as_str).unwrap_or("")
-        ));
+        if let (Some(name), Some(server)) = (
+            link.get("name").and_then(Value::as_str),
+            link.get("server").and_then(Value::as_str),
+        ) {
+            mcp_skills.push((name.to_owned(), server.to_owned()));
+        } else {
+            not_applied.push(format!(
+                "mcp.skills.{}",
+                link.get("name").and_then(Value::as_str).unwrap_or("")
+            ));
+        }
     }
 
     profile.contexts.extend(
@@ -516,6 +526,7 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         texts,
         not_applied,
         elsewhere,
+        mcp_skills,
         allowed: None,
         packages: BTreeMap::new(),
         state: None,

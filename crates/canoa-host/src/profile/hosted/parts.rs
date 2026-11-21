@@ -14,13 +14,14 @@ use coqui_aos::{self as aos, StdFs};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
+use super::super::commands;
 use super::super::overlay::{Built, ScriptRuns, build_each, resolve_path};
 use super::super::{
     Context, Effective, EnvValue, LayerId, LayerKind, McpServer, Sourced, merge, resolve,
 };
 use super::overlays::{
     CHOSEN_PREFIX, Chosen, MAX_CONTEXT, ReadOverlay, context_not_taken, layers_of, mcp_words,
-    same_digest, skill_limits, skills_not_taken,
+    not_taken, same_digest, skill_limits, skills_not_taken,
 };
 use super::template::{Again, Templating};
 use super::{Connection, Item, State, fetched, private};
@@ -58,8 +59,10 @@ impl Takes {
     pub(super) fn system_prompt(&self) -> bool {
         if self.version == 2 {
             self.says(&["session", "systemPrompt"])
+                || self.says(&["_meta", "antigravity", "systemPrompt"])
         } else {
             self.says(&["sessionCapabilities", "systemPrompt"])
+                || self.says(&["_meta", "antigravity", "systemPrompt"])
         }
     }
 
@@ -182,6 +185,9 @@ pub(super) struct Parts {
     pub(super) system_prompt: Option<String>,
     /// The system prompt's texts in order, each with what replacing it again needs when it names `AOS_PROJECT_ROOT`.
     pub(super) pieces: Vec<(String, Option<Again>)>,
+    /// Fallback prompt briefing pieces prepended to a session's first `session/prompt` turn
+    /// when `systemPrompt` and instruction files are not used.
+    pub(super) briefing_pieces: Vec<(String, Option<Again>)>,
     /// Whether the agent takes a system prompt with a new session, whether the profile gives one or not.
     #[cfg_attr(
         not(test),
@@ -208,6 +214,33 @@ pub(super) struct Parts {
 }
 
 impl Parts {
+    fn render_pieces(
+        pieces: &[(String, Option<Again>)],
+        project: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        if pieces.is_empty() {
+            return Ok(None);
+        }
+        let mut texts = Vec::with_capacity(pieces.len());
+        for (text, again) in pieces {
+            texts.push(match again {
+                Some(again) if project.is_some() => again.render(project)?,
+                _ => text.clone(),
+            });
+        }
+        let joined = texts.join(
+            "
+
+",
+        );
+        if joined.len() > MAX_CONTEXT {
+            return Err(format!(
+                "the initial context passes {MAX_CONTEXT} bytes with this session's folder in it"
+            ));
+        }
+        Ok(Some(joined))
+    }
+
     /// The system prompt for a session opened in `project`: the texts that name `AOS_PROJECT_ROOT` replaced again with it.
     pub(super) fn system_prompt_for(
         &self,
@@ -221,20 +254,12 @@ impl Parts {
         else {
             return Ok(Some(prompt.clone()));
         };
-        let mut texts = Vec::new();
-        for (text, again) in &self.pieces {
-            texts.push(match again {
-                Some(again) => again.render(Some(project))?,
-                None => text.clone(),
-            });
-        }
-        let joined = texts.join("\n\n");
-        if joined.len() > MAX_CONTEXT {
-            return Err(format!(
-                "the initial context passes {MAX_CONTEXT} bytes with this session's folder in it"
-            ));
-        }
-        Ok(Some(joined))
+        Self::render_pieces(&self.pieces, Some(project))
+    }
+
+    /// The fallback initial prompt briefing for a session opened in `project`.
+    pub(super) fn briefing_for(&self, project: Option<&str>) -> Result<Option<String>, String> {
+        Self::render_pieces(&self.briefing_pieces, project)
     }
 }
 
@@ -706,8 +731,17 @@ pub(super) fn parts_with(
     }
     let mut system_prompt = None;
     let mut pieces = Vec::new();
+    let mut briefing_pieces = Vec::new();
+    let mut instruction_file_out: Option<(String, Vec<u8>)> = None;
+    let preset_context = harness
+        .and_then(|aos| {
+            crate::vendors::by_aos(aos).map(|v| crate::bundled::context_delivery(v.agent))
+        })
+        .or_else(|| harness.map(crate::bundled::context_delivery))
+        .unwrap_or(canoa::preset::ContextDelivery::STANDARD);
     if !texts.is_empty() {
         let taken = takes.system_prompt();
+        let has_context_blocker = not_taken(harness, |vendor| vendor.context_not_taken()).is_some();
         if taken {
             system_prompt = Some(
                 texts
@@ -720,126 +754,97 @@ pub(super) fn parts_with(
                 .iter()
                 .map(|(text, _, _, again)| (text.clone(), again.clone()))
                 .collect();
-        }
-        for (_, layer, source, _) in &texts {
-            items.push(if taken {
-                Item::new(
+            for (_, layer, source, _) in &texts {
+                items.push(Item::new(
                     "context",
                     layer,
                     State::Applied,
                     format!("ACP systemPrompt, appended ({source})"),
-                )
-            } else {
-                Item::new(
+                ));
+            }
+        } else if !has_context_blocker
+            && let Some(rel_path) = preset_context.instruction_file
+            && takes.additional_directories()
+        {
+            let joined = texts
+                .iter()
+                .map(|(text, ..)| text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            instruction_file_out = Some((rel_path.to_owned(), joined.into_bytes()));
+            for (_, layer, source, _) in &texts {
+                items.push(Item::new(
+                    "context",
+                    layer,
+                    State::Applied,
+                    format!("instruction file ({rel_path}) via additionalDirectories ({source})"),
+                ));
+            }
+        } else if !has_context_blocker && preset_context.prompt_briefing {
+            briefing_pieces = texts
+                .iter()
+                .map(|(text, _, _, again)| (text.clone(), again.clone()))
+                .collect();
+            for (_, layer, source, _) in &texts {
+                items.push(Item::new(
+                    "context",
+                    layer,
+                    State::Applied,
+                    format!("initial prompt briefing ({source})"),
+                ));
+            }
+        } else {
+            for (_, layer, _, _) in &texts {
+                items.push(Item::new(
                     "context",
                     layer,
                     State::Unsupported,
                     context_not_taken(harness),
-                )
-            });
+                ));
+            }
         }
     }
 
-    let mut written_files = BTreeMap::new();
-    let mut usable = Vec::new();
-    for (name, skill) in &effective.skills {
-        match skill_files(skill, &connection.overlays, &connection.chosen, &templating) {
-            Ok(files) => usable.push((name, &skill.layer, files)),
-            Err(why) => items.push(Item::new(
-                format!("skills.{name}"),
-                &skill.layer,
-                State::Refused,
-                why,
-            )),
-        }
-    }
-    let mut written = None;
-    let mut meta = None;
-    let mut directories = Vec::new();
-    if !usable.is_empty() {
-        let delivery = harness
-            .and_then(|aos| {
-                crate::vendors::behave_aos(aos, |vendor| {
-                    vendor.skills_delivery(SkillsRequest::new(takes.additional_directories()))
-                })
+    let skills_delivery = harness
+        .and_then(|aos| {
+            crate::vendors::behave_aos(aos, |vendor| {
+                vendor.skills_delivery(SkillsRequest::new(takes.additional_directories()))
             })
-            .and_then(Result::ok)
-            .flatten();
-        match delivery {
-            None => {
-                for (name, layer, _) in &usable {
-                    items.push(Item::new(
-                        format!("skills.{name}"),
-                        layer,
-                        State::Unsupported,
-                        skills_not_taken(harness),
-                    ));
-                }
-            }
-            Some(delivery) => {
-                for (name, _, files) in &usable {
-                    for (path, data) in files {
-                        written_files
-                            .insert(format!("{}/{name}/{path}", delivery.folder), data.clone());
-                    }
-                }
-                for file in &delivery.files {
-                    written_files.insert(file.path.clone(), file.text.clone().into_bytes());
-                }
-                match connection
-                    .private()
-                    .and_then(|under| Written::create(under, &written_files))
-                {
-                    Ok(done) => {
-                        let given = delivery
-                            .plugin
-                            .as_ref()
-                            .map(|plugin| plugin_meta(plugin, &done))
-                            .transpose();
-                        match given {
-                            Ok(given) => {
-                                for (name, layer, _) in &usable {
-                                    items.push(Item::new(
-                                        format!("skills.{name}"),
-                                        layer,
-                                        State::Applied,
-                                        delivery.how.replace("{name}", name),
-                                    ));
-                                }
-                                meta = given;
-                                if delivery.directory {
-                                    directories.push(done.0.to_string_lossy().into_owned());
-                                }
-                                written = Some(done);
-                            }
-                            Err(why) => {
-                                for (name, layer, _) in &usable {
-                                    items.push(Item::new(
-                                        format!("skills.{name}"),
-                                        layer,
-                                        State::Refused,
-                                        format!(
-                                            "the agent's delivery of them is not usable ({why})"
-                                        ),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        for (name, layer, _) in &usable {
-                            items.push(Item::new(
-                                format!("skills.{name}"),
-                                layer,
-                                State::Refused,
-                                format!("its files could not be written for the agent ({error})"),
-                            ));
-                        }
-                    }
-                }
+        })
+        .and_then(Result::ok)
+        .flatten();
+    let sandbox_writable =
+        effective.access.resolved().sandbox != coqui_acp_harness::Sandbox::ReadOnly;
+    let overlay_has_scripts = |overlay_name: &str| {
+        effective.aos.iter().any(|aos| {
+            (aos.identity == overlay_name || aos::normalize_name(&aos.identity) == overlay_name)
+                && !commands::declared(&aos.manifest, &aos.os).is_empty()
+        })
+    };
+    let mut linked_to_server: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    let mut skill_to_server: BTreeMap<String, String> = BTreeMap::new();
+    for aos in &effective.aos {
+        for (skill_name, server_name) in &aos.mcp_skills {
+            if effective.skills.contains_key(skill_name) && effective.mcp.contains_key(server_name)
+            {
+                linked_to_server
+                    .entry(server_name.clone())
+                    .or_default()
+                    .push((skill_name.clone(), aos.identity.clone()));
+                skill_to_server.insert(skill_name.clone(), server_name.clone());
             }
         }
     }
+    let shell_preferred_servers: BTreeSet<String> = if skills_delivery.is_some() && sandbox_writable
+    {
+        linked_to_server
+            .iter()
+            .filter(|(_, pairs)| pairs.iter().all(|(_, ov)| overlay_has_scripts(ov)))
+            .map(|(server, _)| server.clone())
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
 
     let after = environments_after(
         &effective,
@@ -850,6 +855,7 @@ pub(super) fn parts_with(
     let mut servers = Vec::new();
     let mut approvable = Vec::new();
     let mut names = Vec::new();
+    let mut delivered_servers = BTreeSet::new();
     let (mcp_skipped, mcp_note) = mcp_words(harness);
     for (name, sourced) in &effective.mcp {
         names.push(name.clone());
@@ -862,7 +868,14 @@ pub(super) fn parts_with(
                     .allow_mcp
                     .get(name)
                     .is_some_and(|digest| same_digest(digest, &ready.digest)));
-        let mut item = if let Some(why) = &ready.refused {
+        let mut item = if shell_preferred_servers.contains(name) {
+            Item::new(
+                key,
+                &ready.layer,
+                State::Applied,
+                "deduplicated: exposed through [scripts] and SKILL.md",
+            )
+        } else if let Some(why) = &ready.refused {
             Item::new(key, &ready.layer, State::Refused, why.clone())
         } else if !allowed {
             if !connection.host.off_mcp.contains(name)
@@ -904,6 +917,7 @@ pub(super) fn parts_with(
             )
         } else if let Some(server) = acp_server(&ready, takes.version) {
             servers.push(server);
+            delivered_servers.insert(name.clone());
             let mut said = vec!["ACP mcpServers".to_owned()];
             if let Some(note) = &mcp_note {
                 said.push(note.replace("{name}", name));
@@ -917,6 +931,127 @@ pub(super) fn parts_with(
         };
         item.digest = Some(ready.digest);
         items.push(item);
+    }
+
+    let mut written_files = BTreeMap::new();
+    let mut usable = Vec::new();
+    for (name, skill) in &effective.skills {
+        if let Some(server_name) = skill_to_server.get(name.as_str())
+            && !shell_preferred_servers.contains(server_name)
+            && delivered_servers.contains(server_name)
+        {
+            items.push(Item::new(
+                format!("skills.{name}"),
+                &skill.layer,
+                State::Applied,
+                format!("deduplicated: exposed through mcp.{server_name}"),
+            ));
+            continue;
+        }
+        match skill_files(skill, &connection.overlays, &connection.chosen, &templating) {
+            Ok(files) => usable.push((name, &skill.layer, files)),
+            Err(why) => items.push(Item::new(
+                format!("skills.{name}"),
+                &skill.layer,
+                State::Refused,
+                why,
+            )),
+        }
+    }
+    let mut written = None;
+    let mut meta = None;
+    let mut directories = Vec::new();
+    if !usable.is_empty() {
+        match &skills_delivery {
+            None => {
+                for (name, layer, _) in &usable {
+                    items.push(Item::new(
+                        format!("skills.{name}"),
+                        layer,
+                        State::Unsupported,
+                        skills_not_taken(harness),
+                    ));
+                }
+            }
+            Some(delivery) => {
+                for (name, _, files) in &usable {
+                    for (path, data) in files {
+                        written_files
+                            .insert(format!("{}/{name}/{path}", delivery.folder), data.clone());
+                    }
+                }
+                for file in &delivery.files {
+                    written_files.insert(file.path.clone(), file.text.clone().into_bytes());
+                }
+                if let Some((rel_path, bytes)) = instruction_file_out.take() {
+                    written_files.insert(rel_path, bytes);
+                }
+                match connection
+                    .private()
+                    .and_then(|under| Written::create(under, &written_files))
+                {
+                    Ok(done) => {
+                        let given = delivery
+                            .plugin
+                            .as_ref()
+                            .map(|plugin| plugin_meta(plugin, &done))
+                            .transpose();
+                        match given {
+                            Ok(given) => {
+                                for (name, layer, _) in &usable {
+                                    items.push(Item::new(
+                                        format!("skills.{name}"),
+                                        layer,
+                                        State::Applied,
+                                        delivery.how.replace("{name}", name),
+                                    ));
+                                }
+                                meta = given;
+                                if delivery.directory
+                                    || instruction_file_out.is_none()
+                                        && preset_context.instruction_file.is_some()
+                                {
+                                    directories.push(done.0.to_string_lossy().into_owned());
+                                }
+                                written = Some(done);
+                            }
+                            Err(why) => {
+                                for (name, layer, _) in &usable {
+                                    items.push(Item::new(
+                                        format!("skills.{name}"),
+                                        layer,
+                                        State::Refused,
+                                        format!(
+                                            "the agent's delivery of them is not usable ({why})"
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        for (name, layer, _) in &usable {
+                            items.push(Item::new(
+                                format!("skills.{name}"),
+                                layer,
+                                State::Refused,
+                                format!("its files could not be written for the agent ({error})"),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some((rel_path, bytes)) = instruction_file_out {
+        written_files.insert(rel_path, bytes);
+        if let Ok(done) = connection
+            .private()
+            .and_then(|under| Written::create(under, &written_files))
+        {
+            directories.push(done.0.to_string_lossy().into_owned());
+            written = Some(done);
+        }
     }
 
     for (key, value) in [
@@ -983,6 +1118,7 @@ pub(super) fn parts_with(
     Parts {
         system_prompt,
         pieces,
+        briefing_pieces,
         system_prompt_taken: takes.system_prompt(),
         servers,
         names,

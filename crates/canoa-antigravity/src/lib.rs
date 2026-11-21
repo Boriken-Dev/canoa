@@ -12,7 +12,7 @@ pub use usage::AgyUsage;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
-use canoa::preset::SourcePreset;
+use canoa::preset::{ContextDelivery, SourcePreset};
 use canoa::store::recipe::{Part, Recipe, Release, UnpackStep};
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, Platform,
@@ -40,7 +40,12 @@ pub const PRESET: SourcePreset = SourcePreset::new("Antigravity", "agy")
     .harness("antigravity")
     .args(&["acp"])
     .search(&["%LOCALAPPDATA%/agy/bin"])
-    .usage("antigravity");
+    .usage("antigravity")
+    .context(
+        ContextDelivery::STANDARD
+            .with_instruction_file(".agents/AGENTS.md")
+            .with_prompt_briefing(),
+    );
 
 /// Antigravity's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
 pub const MARK: &str = include_str!("../mark.svg");

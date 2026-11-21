@@ -109,6 +109,10 @@ pub(super) struct Hold {
     first: bool,
     pending: BTreeMap<String, Pending>,
     pub(super) parts: Option<Parts>,
+    /// Sessions that have already received the fallback initial prompt briefing.
+    briefed: BTreeSet<String>,
+    /// Working directory (`cwd`) remembered per pending/open session request for prompt briefing templates.
+    pub(super) session_cwds: BTreeMap<String, Option<String>>,
     /// Messages the client sent while the host waited for an approval, in order, to be read before any other.
     queued: alloc::collections::VecDeque<Vec<u8>>,
     asked: u64,
@@ -163,6 +167,8 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 first: true,
                 pending: BTreeMap::new(),
                 parts: None,
+                briefed: BTreeSet::new(),
+                session_cwds: BTreeMap::new(),
                 queued: alloc::collections::VecDeque::new(),
                 asked: 0,
                 approves: false,
@@ -327,6 +333,29 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
             return Ok(bytes);
         }
         if !tracked {
+            if method == "session/prompt"
+                && let Some(session_id) = value
+                    .pointer("/params/sessionId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                && !hold.briefed.contains(&session_id)
+                && let Some(parts) = &hold.parts
+                && let Some(briefing) = parts
+                    .briefing_for(
+                        hold.session_cwds
+                            .get(&session_id)
+                            .and_then(|cwd| cwd.as_deref()),
+                    )
+                    .map_err(|why| error(&id, INVALID_PARAMS, &why))?
+                && let Some(prompt) = value
+                    .pointer_mut("/params/prompt")
+                    .and_then(Value::as_array_mut)
+            {
+                prompt.insert(0, json!({"type": "text", "text": briefing}));
+                hold.briefed.insert(session_id);
+                return serde_json::to_vec(&value)
+                    .map_err(|_| error(&id, INTERNAL_ERROR, "the request could not be written"));
+            }
             return Ok(bytes);
         }
         let Some(parts) = &hold.parts else {
@@ -344,6 +373,11 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
             return Err(error(&id, INVALID_PARAMS, "params must be an object"));
         };
         add_parts(params, parts).map_err(|why| error(&id, INVALID_PARAMS, &why))?;
+        let cwd = params.get("cwd").and_then(Value::as_str).map(str::to_owned);
+        let session_id = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         if let Some(servers) = params.get_mut("mcpServers").and_then(Value::as_array_mut) {
             servers.extend(
                 parts
@@ -352,6 +386,11 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                     .filter(|each| allowed.contains(&each.name))
                     .map(|each| each.server.clone()),
             );
+        }
+        if let Some(session_id) = session_id {
+            hold.session_cwds.insert(session_id, cwd);
+        } else if let Some(cwd) = cwd {
+            hold.session_cwds.insert(id.to_string(), Some(cwd));
         }
         hold.pending
             .insert(id.to_string(), Pending::Session(allowed));
@@ -417,6 +456,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             }
             Some(Pending::Session(allowed)) => {
                 let key = value.get("id").map(ToString::to_string).unwrap_or_default();
+                if let Some(session_id) = value.pointer("/result/sessionId").and_then(Value::as_str)
+                    && let Some(cwd) = hold.session_cwds.remove(&key)
+                {
+                    hold.session_cwds.insert(session_id.to_owned(), cwd);
+                }
                 let notes = hold.book.notes_for(&key);
                 if let (Some(result), Some(parts)) = (value.get_mut("result"), &hold.parts) {
                     let mut report = parts.report.clone();

@@ -1,5 +1,40 @@
 //! [`SourcePreset`]: how the host starts one coding agent it knows about when `canoa.cfg` does not name it.
 
+/// How an agent receives composed overlay context when starting or opening a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ContextDelivery {
+    /// Send overlay context via ACP `session/new` `systemPrompt` when the agent advertises it.
+    pub system_prompt: bool,
+    /// Relative path inside a directory passed via `additionalDirectories` when `systemPrompt` is unavailable.
+    pub instruction_file: Option<&'static str>,
+    /// Prepend composed overlay context to the first `session/prompt` when neither `systemPrompt` nor an instruction file applies.
+    pub prompt_briefing: bool,
+}
+
+impl ContextDelivery {
+    /// Standard ACP `systemPrompt`-only delivery.
+    pub const STANDARD: Self = Self {
+        system_prompt: true,
+        instruction_file: None,
+        prompt_briefing: false,
+    };
+
+    /// Fallback relative instruction file written inside `additionalDirectories`.
+    #[must_use]
+    pub const fn with_instruction_file(mut self, path: &'static str) -> Self {
+        self.instruction_file = Some(path);
+        self
+    }
+
+    /// Fallback initial-turn prompt briefing when ACP `systemPrompt` and instruction files are unavailable.
+    #[must_use]
+    pub const fn with_prompt_briefing(mut self) -> Self {
+        self.prompt_briefing = true;
+        self
+    }
+}
+
 /// What one built-in source is: a harness the host runs in process, or a program that speaks ACP on its standard streams.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -23,6 +58,8 @@ pub struct SourcePreset {
     pub usage: Option<&'static str>,
     /// The program store whose managed copy runs in place of a program found on the computer, when it has one.
     pub managed: Option<&'static str>,
+    /// How this preset receives composed overlay context.
+    pub context: ContextDelivery,
 }
 
 impl SourcePreset {
@@ -49,6 +86,7 @@ impl SourcePreset {
             search: &[],
             usage: None,
             managed: None,
+            context: ContextDelivery::STANDARD,
         }
     }
 
@@ -98,6 +136,13 @@ impl SourcePreset {
     #[must_use]
     pub const fn managed(mut self, store: &'static str) -> Self {
         self.managed = Some(store);
+        self
+    }
+
+    /// Deliver overlay context using `context`.
+    #[must_use]
+    pub const fn context(mut self, context: ContextDelivery) -> Self {
+        self.context = context;
         self
     }
 }
