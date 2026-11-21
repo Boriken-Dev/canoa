@@ -31,3 +31,11 @@ The DLL must match the application: a 64-bit Office loads an x64 or ARM64EC DLL 
 
 Each event Office sends the add-in appends one line of metadata (time, process, architecture, event; never content) to
 `%LOCALAPPDATA%\Canoa\office-addin.log`, or to the file `CANOA_OFFICE_LOG` names.
+
+## The chat in the pane
+
+The pane's window hosts a WebView2 control (the runtime Windows ships) showing Canoa's chat-only page from the host on this
+computer. The add-in finds the host through its door in Canoa's home, starting `canoa` first when none answers; no address is set
+anywhere. The host must serve its web app for the add-in: `[host.web]` with `office = true` and `office_local = true` in
+canoa.cfg. Each Office window gets its own pane on its first click, and the chat lists the sessions that belong to the open
+document or mail conversation first.
