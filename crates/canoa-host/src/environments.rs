@@ -302,9 +302,15 @@ impl Environments {
             self.make(&config.kind, config.settings.as_map())
                 .map_err(|why| format!("environment {name}: {why}"))?
         };
+        let exec_seconds = self
+            .configured
+            .get(name)
+            .and_then(|config| config.exec_seconds)
+            .unwrap_or(crate::config::DEFAULT_EXEC_SECONDS);
         let env = Arc::new(Env {
             name: name.to_owned(),
             provider,
+            exec_seconds,
         });
         live.insert(name.to_owned(), Arc::clone(&env));
         Ok(env)
@@ -346,6 +352,8 @@ impl Environments {
 pub(crate) struct Env {
     name: String,
     provider: Arc<dyn Environment>,
+    /// `exec_seconds` of its table; `0` is no limit.
+    exec_seconds: u64,
 }
 
 impl core::fmt::Debug for Env {
@@ -355,6 +363,11 @@ impl core::fmt::Debug for Env {
 }
 
 impl Env {
+    /// How long the `exec` tool waits for a program, in seconds; `0` waits for ever.
+    pub(crate) fn exec_seconds(&self) -> u64 {
+        self.exec_seconds
+    }
+
     /// Its name in canoa.cfg, or `here`.
     pub(crate) fn name(&self) -> &str {
         &self.name

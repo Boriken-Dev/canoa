@@ -208,6 +208,7 @@ pub(super) struct RawEnvironment {
     pub(super) source: Option<String>,
     pub(super) source_settings: Option<toml::Table>,
     pub(super) import_search: Option<String>,
+    pub(super) exec_seconds: Option<u64>,
     #[serde(flatten)]
     pub(super) settings: toml::Table,
 }

@@ -682,6 +682,9 @@ impl Default for UsageConfig {
     }
 }
 
+/// How long the `exec` tool of an environment waits for a program when `exec_seconds` is not set: an hour.
+pub const DEFAULT_EXEC_SECONDS: u64 = 3600;
+
 /// One `[host.environments.NAME]`: a place an agent works, made by an `environment` provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -693,6 +696,9 @@ pub struct EnvironmentConfig {
     /// The provider's settings: every key of the table but `kind` and the ones that name its code, checked against the schema the
     /// provider declares when the environment is first used.
     pub settings: Settings,
+    /// How long a program the `exec` tool runs here may take before it is ended (`exec_seconds`), `0` for no limit; `None` is
+    /// [`DEFAULT_EXEC_SECONDS`]. The call has to return, so a program that never ends is ended at this and the tool says so.
+    pub exec_seconds: Option<u64>,
 }
 
 /// `[host.mcp_list]`: what listing the tools and resources of a session's MCP servers (`_canoa/mcp/list`) is held to. Each is at

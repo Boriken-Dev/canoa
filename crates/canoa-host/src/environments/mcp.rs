@@ -32,8 +32,6 @@ const MAX_SESSIONS: usize = 256;
 const MAX_PENDING: usize = 64;
 /// How much of an interactive terminal's output is kept for the agent to read.
 const TERMINAL_KEEP_BYTES: usize = 4 * 1024 * 1024;
-/// How long `exec` waits for a program that never ends before it ends it and says so.
-const EXEC_LIMIT_SECS: u64 = 3600;
 
 /// The name of the MCP server for the environment `name`: MCP names are words, so anything else becomes `_`.
 pub(crate) fn server_name(name: &str) -> String {
@@ -92,7 +90,7 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 }
 
 impl Access {
-    fn new(env: Arc<Env>) -> Self {
+    pub(super) fn new(env: Arc<Env>) -> Self {
         Self {
             exec: Served::new(Arc::clone(&env)),
             env,
@@ -196,7 +194,7 @@ impl Access {
     }
 
     /// `tools/call`: the result of the tool `name`. A refusal is a result with `isError`, which names the missing capability.
-    fn call(&self, name: &str, arguments: &Value) -> Value {
+    pub(super) fn call(&self, name: &str, arguments: &Value) -> Value {
         let done = match name {
             "exec" => self.run(arguments),
             "terminal_open" => self.open(arguments),
@@ -282,15 +280,23 @@ impl Access {
                 scope.spawn(|| {
                     let _ = tx.send(exec.answer("terminal/wait_for_exit", &by));
                 });
-                match rx.recv_timeout(core::time::Duration::from_secs(EXEC_LIMIT_SECS)) {
+                let limit = self.env.exec_seconds();
+                let waited = if limit == 0 {
+                    rx.recv().map_err(|_| ())
+                } else {
+                    rx.recv_timeout(core::time::Duration::from_secs(limit))
+                        .map_err(|_| ())
+                };
+                match waited {
                     Ok(done) => done,
-                    Err(_) => {
+                    Err(()) => {
                         let _ = exec.answer("terminal/kill", &by);
                         let _ = rx.recv();
                         Err((
                             -32000,
                             format!(
-                                "the program ran longer than {EXEC_LIMIT_SECS} seconds and was ended"
+                                "the program ran longer than {limit} seconds, the exec_seconds of environment {}, and was ended",
+                                self.env.name()
                             ),
                         ))
                     }

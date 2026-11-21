@@ -60,7 +60,7 @@ pub use types::{
     NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, StoreConfig,
     UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
-pub use types::EnvironmentConfig;
+pub use types::{DEFAULT_EXEC_SECONDS, EnvironmentConfig};
 
 struct TopLevel {
     secrets: Option<serde_json::Value>,
@@ -477,6 +477,7 @@ fn environment_of(
         kind,
         origin,
         settings,
+        exec_seconds: raw.exec_seconds,
     })
 }
 

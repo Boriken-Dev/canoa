@@ -350,3 +350,34 @@ fn an_agent_that_does_its_own_file_and_shell_work_is_told_that_serving_its_tools
     assert!(told(true).contains("use this environment's tools"));
     assert!(!told(false).contains("does its own file and shell work"));
 }
+
+#[test]
+fn the_time_exec_waits_is_the_environments_setting_an_hour_by_default() {
+    let table = |extra: &str| {
+        environments(&format!("[host.environments.x]\nkind = \"here\"\n{extra}"))
+            .get("x")
+            .expect("made")
+            .exec_seconds()
+    };
+    assert_eq!(table(""), 3600);
+    assert_eq!(table("exec_seconds = 86400\n"), 86400);
+    assert_eq!(table("exec_seconds = 0\n"), 0);
+}
+
+#[test]
+fn a_program_that_outlasts_exec_seconds_is_ended_and_the_refusal_names_the_setting() {
+    let env = environments("[host.environments.x]\nkind = \"here\"\nexec_seconds = 1\n")
+        .get("x")
+        .expect("made");
+    let access = super::mcp::Access::new(env);
+    let (program, args) = if cfg!(windows) {
+        ("ping.exe", json!(["-n", "30", "127.0.0.1"]))
+    } else {
+        ("sleep", json!(["30"]))
+    };
+    let result = access.call("exec", &json!({"program": program, "args": args}));
+    assert_eq!(result["isError"], true, "{result}");
+    let text = result["content"][0]["text"].as_str().expect("text");
+    assert!(text.contains("exec_seconds"), "{text}");
+    assert!(text.contains("longer than 1 seconds"), "{text}");
+}

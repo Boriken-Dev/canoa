@@ -502,6 +502,7 @@ An environment is where an agent works, which need not be the computer the host 
 ```toml
 [host.environments.build-box]          # made by the provider `kind` names; the other keys are its settings
 kind = "some_environment"             # an id a library offers
+exec_seconds = 3600                   # how long the exec tool waits for a program (0: for ever)
 library = "/path/to/library.so"       # or `source`, as a harness entry names its provider; none for a bundled one
 
 [host.agents.worker]
