@@ -6,6 +6,7 @@ use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 use core::time::Duration;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 
 use coqui_link::auth;
@@ -28,7 +29,7 @@ pub(super) type Doors = (Arc<Served>, Arc<Served>);
 pub(super) struct Door {
     listener: pipe::Listener,
     /// What `@hello` answers: a claim, with no proof, to a process of this user.
-    hello: Value,
+    hello: Arc<Mutex<Value>>,
     served: Vec<Arc<Served>>,
     /// `@control` and `@tools`.
     control: Doors,
@@ -45,11 +46,16 @@ impl Door {
     ) -> Self {
         Self {
             listener,
-            hello,
+            hello: Arc::new(Mutex::new(hello)),
             served,
             control,
             home,
         }
+    }
+
+    /// What `@hello` answers, to be added to once the web server has an address.
+    pub(super) fn hello(&self) -> Arc<Mutex<Value>> {
+        Arc::clone(&self.hello)
     }
 
     /// Takes connections until the host stops.
@@ -72,7 +78,11 @@ impl Door {
             };
             let channel = pipe::PipeChannel::new(stream, MAX_PREAMBLE);
             let shared = Arc::clone(shared);
-            let hello = self.hello.clone();
+            let hello = self
+                .hello
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
             let served = self.served.clone();
             let control = self.control.clone();
             let home = self.home.clone();

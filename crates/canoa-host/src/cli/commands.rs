@@ -230,6 +230,7 @@ pub(super) fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         print(front, &line.to_string())?;
     }
     if let Some(web) = &web {
+        serving.note_web(&web.local_url(), web.office(), web.office_local());
         print(front, &serde_json::json!({ "web": web.url() }).to_string())?;
     }
     print(

@@ -555,6 +555,23 @@ impl Serving {
         self.shared.office_dir.clone()
     }
 
+    /// Tells the native door's `hello` where this host's web app is, so a program on this computer that reached the door finds the
+    /// page with no address configured: `{"web": {"url", "office", "office_local"}}`. Nothing is added with no door. `url` is what
+    /// [`crate::web::WebServer::url`] says; a program decides for itself whether it will open it.
+    pub fn note_web(&self, url: &str, office: bool, office_local: bool) {
+        let Some(door) = &self.door else { return };
+        let hello = door.hello();
+        let mut hello = hello
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(claim) = hello.as_object_mut() {
+            claim.insert(
+                "web".to_owned(),
+                serde_json::json!({ "url": url, "office": office, "office_local": office_local }),
+            );
+        }
+    }
+
     /// A way into every entry from inside this process, which outlives [`Serving::run`] taking `self`.
     #[must_use]
     pub fn local(&self) -> Local {

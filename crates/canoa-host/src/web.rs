@@ -398,6 +398,33 @@ impl WebServer {
         }
     }
 
+    /// The address a program on this computer opens: [`WebServer::url`], except that a server bound to a loopback address names it
+    /// `localhost`, the name its certificate and the add-in's pages use.
+    #[must_use]
+    pub fn local_url(&self) -> String {
+        if self.bound.ip().is_loopback() {
+            let scheme = if self.shared.tls.is_some() {
+                "https"
+            } else {
+                "http"
+            };
+            return format!("{scheme}://localhost:{}", self.bound.port());
+        }
+        self.url()
+    }
+
+    /// Whether it serves the Office add-in's pages and app (`[host.web] office`).
+    #[must_use]
+    pub fn office(&self) -> bool {
+        self.shared.office.is_some()
+    }
+
+    /// Whether it accepts the key of the page it serves from this computer (`[host.web] office_local`).
+    #[must_use]
+    pub fn office_local(&self) -> bool {
+        self.shared.local
+    }
+
     /// Takes connections until [`WebStopper::stop`] or the process ends, each on a thread of its own, at most
     /// `max_connections` at once and `max_connections_per_address` from one address. It returns with the address free.
     pub fn run(self) {

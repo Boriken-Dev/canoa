@@ -816,6 +816,17 @@ mod tests {
         assert_ne!(door_name(&a).unwrap(), door_name(&b).unwrap());
     }
 
+    /// The Office add-in's COM library finds the door by making this name itself; its test holds the same vector.
+    #[cfg(windows)]
+    #[test]
+    fn the_door_name_of_a_path_is_what_the_office_add_in_makes() {
+        let name = door_name(Path::new(r"C:\canoa-test-home\x")).unwrap();
+        assert_eq!(
+            name,
+            PipeName::named("canoa-native-ce53970373d8428b").unwrap()
+        );
+    }
+
     #[test]
     fn only_this_users_door_is_spoken_to() {
         let mut identity = OsIdentity::default();

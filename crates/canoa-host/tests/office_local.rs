@@ -182,3 +182,39 @@ fn a_pages_key_stays_admitted_across_a_restart_with_its_grants() {
     assert!(!works(ledger(&second, &stranger)));
     second.stop();
 }
+
+/// What the native door's `@hello` answers, as a program on this computer asks it.
+fn door_hello(home: &Path) -> Value {
+    use coqui_transport::Channel as _;
+    let name = canoa_host::native::door_name(home).expect("a door name");
+    let channel =
+        canoa_host::pipe::PipeChannel::connect(&name, 64 * 1024).expect("the door answers");
+    channel
+        .send(br#"{"canoa_native":1,"open":"@hello","origin":""}"#)
+        .expect("sent");
+    let reply = channel
+        .receive(Some(Duration::from_secs(10)))
+        .expect("an answer")
+        .expect("a message");
+    serde_json::from_slice(&reply).expect("JSON")
+}
+
+#[test]
+fn the_native_door_says_where_the_web_app_is_so_the_add_in_needs_no_address() {
+    let host = Hosted::start_with_setup(config(false), &["--web", &site().to_string_lossy()]);
+    let authority = authority(&host);
+    let port = authority.rsplit(':').next().expect("a port");
+    let hello = door_hello(&host.scratch.0.join("home"));
+    assert_eq!(
+        hello["web"],
+        json!({ "url": format!("http://localhost:{port}"), "office": true, "office_local": true }),
+        "{hello}"
+    );
+}
+
+#[test]
+fn a_door_with_no_web_app_says_none() {
+    let host = Hosted::start_with_setup(|_| entry("agent", ""), &[]);
+    let hello = door_hello(&host.scratch.0.join("home"));
+    assert!(hello.get("web").is_none(), "{hello}");
+}
