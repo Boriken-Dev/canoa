@@ -185,6 +185,37 @@ impl ICTPFactory_Impl for FakeFactory_Impl {
 struct FakeSite {
     parent: HWND,
     seen: Rc<Seen>,
+    /// An in-place site that answers neither its window nor its context, as a host that carries both in `DoVerb` does.
+    blind: bool,
+}
+
+/// A container that is only a client site: no `IOleInPlaceSite` at all.
+#[implement(IOleClientSite)]
+struct BareSite;
+
+impl IOleClientSite_Impl for BareSite_Impl {
+    fn SaveObject(&self) -> Result<()> {
+        Ok(())
+    }
+    fn GetMoniker(
+        &self,
+        _: &windows::Win32::System::Ole::OLEGETMONIKER,
+        _: &windows::Win32::System::Ole::OLEWHICHMK,
+    ) -> Result<windows::Win32::System::Com::IMoniker> {
+        Err(E_NOTIMPL.into())
+    }
+    fn GetContainer(&self) -> Result<IOleContainer> {
+        Err(E_NOTIMPL.into())
+    }
+    fn ShowObject(&self) -> Result<()> {
+        Ok(())
+    }
+    fn OnShowWindow(&self, _: BOOL) -> Result<()> {
+        Ok(())
+    }
+    fn RequestNewObjectLayout(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl IOleClientSite_Impl for FakeSite_Impl {
@@ -214,6 +245,9 @@ impl IOleClientSite_Impl for FakeSite_Impl {
 
 impl IOleWindow_Impl for FakeSite_Impl {
     fn GetWindow(&self) -> Result<HWND> {
+        if self.blind {
+            return Err(E_FAIL.into());
+        }
         Ok(self.parent)
     }
     fn ContextSensitiveHelp(&self, _: BOOL) -> Result<()> {
@@ -240,6 +274,9 @@ impl IOleInPlaceSite_Impl for FakeSite_Impl {
         clip: *mut RECT,
         _: *mut OLEINPLACEFRAMEINFO,
     ) -> Result<()> {
+        if self.blind {
+            return Err(E_FAIL.into());
+        }
         // SAFETY: the control passes live locals.
         unsafe {
             position.write(RECT {
@@ -632,6 +669,7 @@ fn the_add_in_and_the_pane_work_through_com() {
     let site: IOleClientSite = FakeSite {
         parent,
         seen: seen.clone(),
+        blind: false,
     }
     .into();
     // SAFETY: calls on live interfaces with valid arguments.
@@ -677,6 +715,88 @@ fn the_add_in_and_the_pane_work_through_com() {
         let _ = DestroyWindow(parent);
     }
     assert_eq!(*seen.site_events.borrow(), vec!["activate", "deactivate"]);
+
+    // A host that carries the parent window and the room in DoVerb itself: the in-place site answers neither, or there is
+    // no in-place site at all. The control must still make its window where DoVerb says.
+    let hint = RECT {
+        left: 0,
+        top: 0,
+        right: 150,
+        bottom: 250,
+    };
+    for blind in [true, false] {
+        let site: IOleClientSite = if blind {
+            FakeSite {
+                parent,
+                seen: seen.clone(),
+                blind: true,
+            }
+            .into()
+        } else {
+            BareSite.into()
+        };
+        // SAFETY: the STATIC class is the system's; the window is destroyed below.
+        let parent = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                w!(""),
+                WS_POPUP,
+                0,
+                0,
+                500,
+                500,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        // SAFETY: the factory call has no outer unknown.
+        let control: IOleObject = unsafe {
+            class_factory(&CLSID_PANE)
+                .CreateInstance::<_, IOleObject>(None)
+                .unwrap()
+        };
+        let place: IOleInPlaceObject = control.cast().unwrap();
+        // SAFETY: calls on live interfaces; `hint` outlives them.
+        unsafe {
+            control.SetClientSite(&site).unwrap();
+            control
+                .DoVerb(
+                    OLEIVERB_INPLACEACTIVATE.0,
+                    ptr::null(),
+                    &site,
+                    0,
+                    parent,
+                    &hint,
+                )
+                .unwrap();
+            let window = place.GetWindow().unwrap();
+            assert_eq!(GetParent(window).unwrap(), parent, "blind={blind}");
+            assert_eq!(size(window), (150, 250), "blind={blind}");
+            place.InPlaceDeactivate().unwrap();
+            control.SetClientSite(None::<&IOleClientSite>).unwrap();
+            let _ = DestroyWindow(parent);
+        }
+        drop((place, control, site));
+    }
+    let lines = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        lines.contains("pane DoVerb -5 parent_given=true"),
+        "{lines}"
+    );
+    assert!(lines.contains("pane CanInPlaceActivate -> ok"), "{lines}");
+    assert!(
+        lines.contains("pane GetWindowContext -> hr=0x80004005"),
+        "{lines}"
+    );
+    assert!(
+        lines.contains("the client site has no IOleInPlaceSite"),
+        "{lines}"
+    );
+    assert!(lines.contains("pane DoVerb -> S_OK"), "{lines}");
 
     // Everything released: the DLL may unload.
     let _ = PaneControl::new;

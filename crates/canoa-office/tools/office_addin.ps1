@@ -95,6 +95,10 @@ switch ($Action) {
       New-Item -Path "$classes\CLSID\$paneClsid\Control" -Force | Out-Null
       Set-Default "$classes\CLSID\$paneClsid\MiscStatus" '0'
       Set-Default "$classes\CLSID\$paneClsid\MiscStatus\1" '131473'
+      Set-Default "$classes\CLSID\$paneClsid\Version" '1.0'
+      Set-Default "$classes\CLSID\$paneClsid\VersionIndependentProgID" $paneProgId
+      # The component category of controls, which a container may check before it hosts one.
+      New-Item -Path "$classes\CLSID\$paneClsid\Implemented Categories\{40FC6ED4-2438-11CF-A3DB-080036F12502}" -Force | Out-Null
 
       foreach ($key in $addinKeys) {
         New-Item -Path $key -Force | Out-Null

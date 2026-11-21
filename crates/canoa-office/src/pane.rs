@@ -10,28 +10,34 @@ use core::ffi::c_void;
 use core::mem::size_of;
 use std::sync::Once;
 use windows::Win32::Foundation::{
-    E_NOTIMPL, E_POINTER, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, OLE_E_ADVISENOTSUPPORTED,
-    OLEOBJ_E_NOVERBS, RECT, RECTL, S_FALSE, SIZE, WPARAM,
+    DISP_E_MEMBERNOTFOUND, DISP_E_UNKNOWNNAME, E_FAIL, E_NOTIMPL, E_POINTER, HINSTANCE, HMODULE,
+    HWND, LPARAM, LRESULT, OLE_E_ADVISENOTSUPPORTED, OLEOBJ_E_INVALIDVERB, OLEOBJ_E_NOVERBS, RECT,
+    RECTL, S_FALSE, SIZE, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, COLOR_WINDOW, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DrawTextW, EndPaint, FillRect,
     GetSysColorBrush, HDC, LOGPALETTE, PAINTSTRUCT,
 };
 use windows::Win32::System::Com::{
-    DVASPECT, DVTARGETDEVICE, IAdviseSink, IDataObject, IEnumSTATDATA, IMoniker, IPersist_Impl,
-    IPersistStreamInit, IPersistStreamInit_Impl, IStream,
+    DISPATCH_FLAGS, DISPPARAMS, DVASPECT, DVTARGETDEVICE, EXCEPINFO, IAdviseSink, IConnectionPoint,
+    IConnectionPointContainer, IConnectionPointContainer_Impl, IDataObject, IDispatch,
+    IDispatch_Impl, IEnumConnectionPoints, IEnumSTATDATA, IMoniker, IPersist_Impl,
+    IPersistStreamInit, IPersistStreamInit_Impl, IStream, ITypeInfo,
 };
 use windows::Win32::System::LibraryLoader::{
     GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
     GetModuleHandleExW,
 };
 use windows::Win32::System::Ole::{
-    CONTROLINFO, IEnumOLEVERB, IOleClientSite, IOleControl, IOleControl_Impl, IOleInPlaceFrame,
-    IOleInPlaceObject, IOleInPlaceObject_Impl, IOleInPlaceSite, IOleInPlaceUIWindow, IOleObject,
-    IOleObject_Impl, IOleWindow_Impl, IViewObject_Impl, IViewObject2, IViewObject2_Impl, OLECLOSE,
-    OLEGETMONIKER, OLEINPLACEFRAMEINFO, OLEIVERB, OLEIVERB_HIDE, OLEIVERB_INPLACEACTIVATE,
-    OLEIVERB_PRIMARY, OLEIVERB_SHOW, OLEIVERB_UIACTIVATE, OLEMISC, OLEWHICHMK, USERCLASSTYPE,
+    CONTROLINFO, IEnumOLEVERB, IOleClientSite, IOleControl, IOleControl_Impl,
+    IOleInPlaceActiveObject, IOleInPlaceActiveObject_Impl, IOleInPlaceFrame, IOleInPlaceObject,
+    IOleInPlaceObject_Impl, IOleInPlaceSite, IOleInPlaceUIWindow, IOleObject, IOleObject_Impl,
+    IOleWindow_Impl, IProvideClassInfo, IProvideClassInfo_Impl, IViewObject_Impl, IViewObject2,
+    IViewObject2_Impl, OLECLOSE, OLEGETMONIKER, OLEINPLACEFRAMEINFO, OLEIVERB, OLEIVERB_HIDE,
+    OLEIVERB_INPLACEACTIVATE, OLEIVERB_PRIMARY, OLEIVERB_SHOW, OLEIVERB_UIACTIVATE, OLEMISC,
+    OLEWHICHMK, USERCLASSTYPE,
 };
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, MSG, MoveWindow, RegisterClassW,
     SW_HIDE, SW_SHOW, ShowWindow, WINDOW_EX_STYLE, WM_PAINT, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS,
@@ -60,9 +66,13 @@ const WINDOW_CLASS: PCWSTR = w!("CanoaOfficePane");
 #[implement(
     IOleObject,
     IOleInPlaceObject,
+    IOleInPlaceActiveObject,
     IViewObject2,
     IPersistStreamInit,
-    IOleControl
+    IOleControl,
+    IProvideClassInfo,
+    IConnectionPointContainer,
+    IDispatch
 )]
 #[derive(Debug)]
 pub struct PaneControl {
@@ -90,38 +100,76 @@ impl PaneControl {
 
     /// Activates in place: asks the site's permission, finds the parent window and the room the control gets, and shows its
     /// window there.
-    fn activate(&self, site: &IOleClientSite) -> Result<()> {
-        let place: IOleInPlaceSite = site.cast()?;
-        // SAFETY: calls on a live interface the container gave us, with no pointer arguments.
-        unsafe {
-            place.CanInPlaceActivate()?;
-            place.OnInPlaceActivate()?;
-        }
-        // SAFETY: as above.
-        let parent = unsafe { place.GetWindow()? };
-        let mut frame: Option<IOleInPlaceFrame> = None;
-        let mut document: Option<IOleInPlaceUIWindow> = None;
-        let mut position = RECT::default();
-        let mut clip = RECT::default();
-        let mut info = OLEINPLACEFRAMEINFO {
-            cb: size_of::<OLEINPLACEFRAMEINFO>() as u32,
-            ..Default::default()
-        };
-        // SAFETY: every argument is a live local the call fills in.
-        unsafe {
-            place.GetWindowContext(
-                &mut frame,
-                &mut document,
-                &mut position,
-                &mut clip,
-                &mut info,
-            )?
-        };
-        *self.in_place.borrow_mut() = Some(place);
+    fn activate(
+        &self,
+        site: &IOleClientSite,
+        hint_parent: HWND,
+        hint_position: Option<RECT>,
+    ) -> Result<()> {
+        let mut parent = hint_parent;
+        let mut position = hint_position.unwrap_or(RECT {
+            left: 0,
+            top: 0,
+            right: 300,
+            bottom: 400,
+        });
 
+        // The in-place site, when the container has one: its answers win over the hints DoVerb carried.
+        match site.cast::<IOleInPlaceSite>() {
+            Err(error) => log(&format!(
+                "pane: the client site has no IOleInPlaceSite, hr={:#010x}",
+                error.code().0
+            )),
+            Ok(place) => {
+                // SAFETY: calls on a live interface the container gave us, with no pointer arguments.
+                let can = unsafe { place.CanInPlaceActivate() };
+                step("CanInPlaceActivate", &can);
+                // SAFETY: as above.
+                let on = unsafe { place.OnInPlaceActivate() };
+                step("OnInPlaceActivate", &on);
+                if on.is_ok() {
+                    *self.in_place.borrow_mut() = Some(place.clone());
+                }
+                // SAFETY: as above.
+                let window = unsafe { place.GetWindow() };
+                step("GetWindow", &window);
+                if let Ok(window) = window {
+                    parent = window;
+                }
+                let mut frame: Option<IOleInPlaceFrame> = None;
+                let mut document: Option<IOleInPlaceUIWindow> = None;
+                let mut rect = RECT::default();
+                let mut clip = RECT::default();
+                let mut info = OLEINPLACEFRAMEINFO {
+                    cb: size_of::<OLEINPLACEFRAMEINFO>() as u32,
+                    ..Default::default()
+                };
+                // SAFETY: every argument is a live local the call fills in.
+                let context = unsafe {
+                    place.GetWindowContext(
+                        &mut frame,
+                        &mut document,
+                        &mut rect,
+                        &mut clip,
+                        &mut info,
+                    )
+                };
+                step("GetWindowContext", &context);
+                if context.is_ok() && rect.right > rect.left && rect.bottom > rect.top {
+                    position = rect;
+                }
+            }
+        }
+
+        if parent.is_invalid() {
+            log("pane: no parent window from the site or from DoVerb");
+            return Err(E_FAIL.into());
+        }
         let window = self.window.get();
         if window.is_invalid() {
-            self.window.set(create_window(parent, &position)?);
+            let made = create_window(parent, &position);
+            step("CreateWindow", &made);
+            self.window.set(made?);
         } else {
             // SAFETY: `window` is the live window this control made.
             unsafe {
@@ -137,6 +185,41 @@ impl PaneControl {
             }
         }
         Ok(())
+    }
+
+    /// What a verb asks for: activate in place, or hide.
+    fn do_verb(
+        &self,
+        verb: i32,
+        active_site: Option<IOleClientSite>,
+        parent: HWND,
+        position: *const RECT,
+    ) -> Result<()> {
+        match OLEIVERB(verb) {
+            OLEIVERB_PRIMARY | OLEIVERB_SHOW | OLEIVERB_UIACTIVATE | OLEIVERB_INPLACEACTIVATE => {
+                let site = active_site
+                    .or_else(|| self.site.borrow().clone())
+                    .ok_or(E_POINTER)?;
+                // SAFETY: when non-null, `position` is the container's RECT for the call.
+                let hint = if position.is_null() {
+                    None
+                } else {
+                    Some(unsafe { *position })
+                };
+                self.activate(&site, parent, hint)
+            }
+            OLEIVERB_HIDE => {
+                let window = self.window.get();
+                if !window.is_invalid() {
+                    // SAFETY: `window` is the live window this control made.
+                    unsafe {
+                        let _ = ShowWindow(window, SW_HIDE);
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(OLEOBJ_E_INVALIDVERB.into()),
+        }
     }
 
     /// Destroys the window and tells the site the control is no longer active.
@@ -269,10 +352,12 @@ impl IOleObject_Impl for PaneControl_Impl {
     }
 
     fn SetHostNames(&self, _app: &PCWSTR, _object: &PCWSTR) -> Result<()> {
+        log("pane SetHostNames");
         Ok(())
     }
 
     fn Close(&self, _save: &OLECLOSE) -> Result<()> {
+        log("pane Close");
         self.deactivate();
         Ok(())
     }
@@ -304,31 +389,19 @@ impl IOleObject_Impl for PaneControl_Impl {
         _message: *const MSG,
         active_site: Ref<'_, IOleClientSite>,
         _index: i32,
-        _parent: HWND,
-        _position: *const RECT,
+        parent: HWND,
+        position: *const RECT,
     ) -> Result<()> {
-        log(&format!("pane DoVerb {verb}"));
-        match OLEIVERB(verb) {
-            OLEIVERB_PRIMARY | OLEIVERB_SHOW | OLEIVERB_UIACTIVATE | OLEIVERB_INPLACEACTIVATE => {
-                let site = active_site
-                    .as_ref()
-                    .cloned()
-                    .or_else(|| self.site.borrow().clone())
-                    .ok_or(E_POINTER)?;
-                self.activate(&site)
-            }
-            OLEIVERB_HIDE => {
-                let window = self.window.get();
-                if !window.is_invalid() {
-                    // SAFETY: `window` is the live window this control made.
-                    unsafe {
-                        let _ = ShowWindow(window, SW_HIDE);
-                    }
-                }
-                Ok(())
-            }
-            _ => Err(windows::Win32::Foundation::OLEOBJ_E_INVALIDVERB.into()),
+        log(&format!(
+            "pane DoVerb {verb} parent_given={}",
+            !parent.is_invalid()
+        ));
+        let result = self.do_verb(verb, active_site.as_ref().cloned(), parent, position);
+        match &result {
+            Ok(()) => log("pane DoVerb -> S_OK"),
+            Err(error) => log(&format!("pane DoVerb -> hr={:#010x}", error.code().0)),
         }
+        result
     }
 
     fn EnumVerbs(&self) -> Result<IEnumOLEVERB> {
@@ -344,6 +417,7 @@ impl IOleObject_Impl for PaneControl_Impl {
     }
 
     fn GetUserClassID(&self) -> Result<GUID> {
+        log("pane GetUserClassID");
         Ok(CLSID_PANE)
     }
 
@@ -352,6 +426,7 @@ impl IOleObject_Impl for PaneControl_Impl {
     }
 
     fn SetExtent(&self, _aspect: DVASPECT, size: *const SIZE) -> Result<()> {
+        log("pane SetExtent");
         if size.is_null() {
             return Err(E_POINTER.into());
         }
@@ -361,6 +436,7 @@ impl IOleObject_Impl for PaneControl_Impl {
     }
 
     fn GetExtent(&self, _aspect: DVASPECT) -> Result<SIZE> {
+        log("pane GetExtent");
         Ok(self.extent.get())
     }
 
@@ -377,6 +453,7 @@ impl IOleObject_Impl for PaneControl_Impl {
     }
 
     fn GetMiscStatus(&self, _aspect: DVASPECT) -> Result<OLEMISC> {
+        log("pane GetMiscStatus");
         Ok(OLEMISC(MISC_STATUS as i32))
     }
 
@@ -396,21 +473,25 @@ impl IOleWindow_Impl for PaneControl_Impl {
     }
 
     fn ContextSensitiveHelp(&self, _enter: BOOL) -> Result<()> {
+        log("pane ContextSensitiveHelp");
         Ok(())
     }
 }
 
 impl IOleInPlaceObject_Impl for PaneControl_Impl {
     fn InPlaceDeactivate(&self) -> Result<()> {
+        log("pane InPlaceDeactivate");
         self.deactivate();
         Ok(())
     }
 
     fn UIDeactivate(&self) -> Result<()> {
+        log("pane UIDeactivate");
         Ok(())
     }
 
     fn SetObjectRects(&self, position: *const RECT, _clip: *const RECT) -> Result<()> {
+        log("pane SetObjectRects");
         let window = self.window.get();
         if position.is_null() {
             return Err(E_POINTER.into());
@@ -482,6 +563,7 @@ impl IViewObject_Impl for PaneControl_Impl {
     }
 
     fn SetAdvise(&self, _aspects: DVASPECT, _flags: u32, sink: Ref<'_, IAdviseSink>) -> Result<()> {
+        log("pane SetAdvise");
         *self.advise.borrow_mut() = sink.as_ref().cloned();
         Ok(())
     }
@@ -516,12 +598,14 @@ impl IViewObject2_Impl for PaneControl_Impl {
         _index: i32,
         _device: *const DVTARGETDEVICE,
     ) -> Result<SIZE> {
+        log("pane GetExtent");
         Ok(self.extent.get())
     }
 }
 
 impl IPersist_Impl for PaneControl_Impl {
     fn GetClassID(&self) -> Result<GUID> {
+        log("pane GetClassID");
         Ok(CLSID_PANE)
     }
 }
@@ -532,6 +616,7 @@ impl IPersistStreamInit_Impl for PaneControl_Impl {
     }
 
     fn Load(&self, _stream: Ref<'_, IStream>) -> Result<()> {
+        log("pane Load");
         Ok(())
     }
 
@@ -544,12 +629,14 @@ impl IPersistStreamInit_Impl for PaneControl_Impl {
     }
 
     fn InitNew(&self) -> Result<()> {
+        log("pane InitNew");
         Ok(())
     }
 }
 
 impl IOleControl_Impl for PaneControl_Impl {
     fn GetControlInfo(&self, _info: *mut CONTROLINFO) -> Result<()> {
+        log("pane GetControlInfo");
         Err(E_NOTIMPL.into())
     }
 
@@ -558,10 +645,105 @@ impl IOleControl_Impl for PaneControl_Impl {
     }
 
     fn OnAmbientPropertyChange(&self, _dispid: i32) -> Result<()> {
+        log("pane OnAmbientPropertyChange");
         Ok(())
     }
 
     fn FreezeEvents(&self, _freeze: BOOL) -> Result<()> {
         Ok(())
+    }
+}
+
+/// Logs what a container call answered.
+fn step<T>(name: &str, result: &Result<T>) {
+    match result {
+        Ok(_) => log(&format!("pane {name} -> ok")),
+        Err(error) => log(&format!("pane {name} -> hr={:#010x}", error.code().0)),
+    }
+}
+
+/// `CONNECT_E_NOCONNECTION`: no connection point for the interface asked.
+const CONNECT_E_NOCONNECTION: HRESULT = HRESULT(0x8004_0200_u32 as i32);
+
+impl IOleInPlaceActiveObject_Impl for PaneControl_Impl {
+    fn TranslateAccelerator(&self, _message: *const MSG) -> Result<()> {
+        // Not handled: the container's own accelerators apply.
+        Err(S_FALSE.into())
+    }
+
+    fn OnFrameWindowActivate(&self, _activate: BOOL) -> Result<()> {
+        Ok(())
+    }
+
+    fn OnDocWindowActivate(&self, _activate: BOOL) -> Result<()> {
+        Ok(())
+    }
+
+    fn ResizeBorder(
+        &self,
+        _border: *const RECT,
+        _window: Ref<'_, IOleInPlaceUIWindow>,
+        _frame: BOOL,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn EnableModeless(&self, _enable: BOOL) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl IProvideClassInfo_Impl for PaneControl_Impl {
+    fn GetClassInfo(&self) -> Result<ITypeInfo> {
+        log("pane GetClassInfo -> E_NOTIMPL (the control has no type library)");
+        Err(E_NOTIMPL.into())
+    }
+}
+
+impl IConnectionPointContainer_Impl for PaneControl_Impl {
+    fn EnumConnectionPoints(&self) -> Result<IEnumConnectionPoints> {
+        Err(E_NOTIMPL.into())
+    }
+
+    fn FindConnectionPoint(&self, _riid: *const GUID) -> Result<IConnectionPoint> {
+        log("pane FindConnectionPoint -> CONNECT_E_NOCONNECTION");
+        Err(CONNECT_E_NOCONNECTION.into())
+    }
+}
+
+/// The control has no automation surface: Office may ask for `IDispatch` for ambient properties and gets nothing.
+impl IDispatch_Impl for PaneControl_Impl {
+    fn GetTypeInfoCount(&self) -> Result<u32> {
+        Ok(0)
+    }
+
+    fn GetTypeInfo(&self, _index: u32, _lcid: u32) -> Result<ITypeInfo> {
+        Err(E_NOTIMPL.into())
+    }
+
+    fn GetIDsOfNames(
+        &self,
+        _riid: *const GUID,
+        _names: *const PCWSTR,
+        _count: u32,
+        _lcid: u32,
+        _ids: *mut i32,
+    ) -> Result<()> {
+        Err(DISP_E_UNKNOWNNAME.into())
+    }
+
+    fn Invoke(
+        &self,
+        id: i32,
+        _riid: *const GUID,
+        _lcid: u32,
+        _flags: DISPATCH_FLAGS,
+        _params: *const DISPPARAMS,
+        _result: *mut VARIANT,
+        _exception: *mut EXCEPINFO,
+        _arg_error: *mut u32,
+    ) -> Result<()> {
+        log(&format!("pane Invoke id={id} -> DISP_E_MEMBERNOTFOUND"));
+        Err(DISP_E_MEMBERNOTFOUND.into())
     }
 }
