@@ -188,7 +188,7 @@ class SettingsPageState extends State<SettingsPage> {
       ready: true,
       build: () => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech, outputs: widget.voiceOutputs, reader: widget.reader),
     ),
-    'shortcuts': (ready: true, build: () => const ShortcutsSection()),
+    'shortcuts': (ready: true, build: () => ShortcutsSection(controller: controller)),
     'sources': (
       ready: true,
       build: () => SourcesSection(

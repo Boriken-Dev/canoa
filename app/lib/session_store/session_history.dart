@@ -587,7 +587,7 @@ extension SessionHistory on SessionStore {
     worktree: session.worktree != null || session.wantsWorktree,
     overlays: session.overlays,
     loadout: session.loadout,
-    title: 'Fork of ${session.title}',
+    title: 'New session like ${session.title}',
     keptSource: session.keptSource,
     cacheLifetime: session.cacheLifetime,
     account: session.account,

@@ -354,7 +354,7 @@ class _SessionRowState extends State<_SessionRow> {
       (session.pinned ? 'Unpin' : 'Pin', session.pinned ? Icons.push_pin : Icons.push_pin_outlined,
         const SingleActivator(LogicalKeyboardKey.keyP), () => widget.store.setPinned(session, !session.pinned)),
       ('Rename', Icons.edit_outlined, const SingleActivator(LogicalKeyboardKey.keyR), widget.onRename),
-      ('Fork', Icons.call_split, const SingleActivator(LogicalKeyboardKey.keyF), widget.onFork),
+      ('New session like this', Icons.call_split, const SingleActivator(LogicalKeyboardKey.keyF), widget.onFork),
       (session.archived ? 'Unarchive' : 'Archive', Icons.inventory_2_outlined,
         const SingleActivator(LogicalKeyboardKey.keyA), () => widget.store.setArchived(session, !session.archived)),
       ('Close', Icons.close, const SingleActivator(LogicalKeyboardKey.keyC), widget.onClose),

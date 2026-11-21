@@ -8,6 +8,7 @@ import '../chat/delegate_dialog.dart';
 import '../chat/delegation_setup_dialog.dart';
 import '../chat/inspector.dart' show changeTotals;
 import '../chat/palette.dart';
+import '../ledger/session_ledger.dart';
 import '../popout/popout_hub.dart';
 import '../rail/session_groups.dart';
 import '../selectable.dart';
@@ -38,7 +39,29 @@ final class ConversationHandle {
   PopoutHub? popout;
 }
 
-/// Opens the command palette (or only open sessions when [sessionsOnly] is true).
+List<PaletteItem> _closedLedgerItems(
+  SessionStore store,
+  SessionLedger? ledger,
+  Future<void> Function(LedgerEntry)? onReopen,
+) {
+  if (ledger == null || onReopen == null) return const [];
+  final open = {
+    for (final session in store.sessions)
+      if (session.peerId != null && session.remoteSessionId != null) (session.peerId!, session.remoteSessionId!),
+  };
+  return [
+    for (final entry in ledger.entries)
+      if (!open.contains((entry.peerId, entry.sessionId)))
+        PaletteItem(
+          entry.title ?? 'Earlier conversation',
+          () => unawaited(onReopen(entry)),
+          detail: '${entry.harness.isEmpty ? entry.entry : entry.harness} · Earlier conversation',
+          icon: Icons.history,
+        ),
+  ];
+}
+
+/// Opens the command palette (or only open and earlier conversations when [sessionsOnly] is true).
 Future<void> showAppPalette(
   BuildContext context, {
   required SessionStore store,
@@ -50,10 +73,13 @@ Future<void> showAppPalette(
   VoidCallback? onHosts,
   VoidCallback? onLoadout,
   VoidCallback? onLoadouts,
+  Future<void> Function(LedgerEntry)? onReopen,
+  Map<String, String> shortcutOverrides = const {},
   bool chatOnly = false,
   bool sessionsOnly = false,
 }) {
   final session = store.selected;
+  final earlier = _closedLedgerItems(store, store.ledger, onReopen);
   return showSelectableDialog<void>(
     context: context,
     builder: (_) => CommandPalette(
@@ -61,6 +87,7 @@ Future<void> showAppPalette(
           ? [
               for (final other in listOrder(store.listed, grouping.value))
                 PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
+              ...earlier,
             ]
           : [
               PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
@@ -98,10 +125,11 @@ Future<void> showAppPalette(
                 if (onLoadout != null) PaletteItem('Store', onLoadout, icon: Icons.storefront_outlined),
                 if (onHosts != null) PaletteItem('Hosts', onHosts, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
               ],
-              PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
+              PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context, overrides: shortcutOverrides)), icon: Icons.keyboard_outlined),
               for (final other in store.listed)
                 if (other.id != store.selectedId)
                   PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
+              ...earlier,
               for (final command in session?.commands ?? const <AgentCommandInfo>[])
                 PaletteItem(
                   '/${command.name}',

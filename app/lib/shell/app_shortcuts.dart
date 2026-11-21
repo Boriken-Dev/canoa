@@ -37,7 +37,7 @@ void stopActiveSession(SessionStore store) {
   }
 }
 
-/// Builds the window-wide keyboard shortcut table for the main shell.
+/// Builds the window-wide keyboard shortcut bindings from [appShortcutTable], with [overrides] from `[shortcuts]` in canoa.cfg.
 Map<ShortcutActivator, VoidCallback> buildAppShortcuts(
   BuildContext context, {
   required SessionStore store,
@@ -49,45 +49,56 @@ Map<ShortcutActivator, VoidCallback> buildAppShortcuts(
   required VoidCallback onNewSession,
   required VoidCallback onSettings,
   required Future<void> Function() onPalette,
-}) => {
-  chord(LogicalKeyboardKey.keyK): () => unawaited(onPalette()),
-  chord(LogicalKeyboardKey.keyN): onNewSession,
-  // The chat-only app has no panels.
-  if (surfaces.registry.isNotEmpty) ...{
-    chord(LogicalKeyboardKey.backquote): () {
-      if (store.selected case final session?) toggleBottomPanel(surfaces: surfaces, layout: layout, session: session);
+  Map<String, String> overrides = const {},
+}) {
+  final actions = <String, VoidCallback>{
+    'palette': () => unawaited(onPalette()),
+    'new_session': onNewSession,
+    'close_session': () {
+      if (store.selected case final session?) {
+        unawaited((conversation.close ?? store.close)(session));
+      }
     },
-    chord(LogicalKeyboardKey.keyB, alt: true): () {
-      if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.right)) layout.toggleRight();
+    if (surfaces.registry.isNotEmpty) ...{
+      'toggle_bottom': () {
+        if (store.selected case final session?) toggleBottomPanel(surfaces: surfaces, layout: layout, session: session);
+      },
+      'toggle_right': () {
+        if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.right)) layout.toggleRight();
+      },
     },
-  },
-  // The shell hears it too when focus is inside it; this is for focus above, where nothing in the shell is.
-  chord(LogicalKeyboardKey.keyB): () {
-    if (layout.section == ShellLayout.conversations) layout.toggleIndex(layout.section);
-  },
-  chord(LogicalKeyboardKey.comma): onSettings,
-  for (final (index, key) in const [
-    LogicalKeyboardKey.digit1,
-    LogicalKeyboardKey.digit2,
-    LogicalKeyboardKey.digit3,
-    LogicalKeyboardKey.digit4,
-    LogicalKeyboardKey.digit5,
-    LogicalKeyboardKey.digit6,
-    LogicalKeyboardKey.digit7,
-    LogicalKeyboardKey.digit8,
-    LogicalKeyboardKey.digit9,
-  ].indexed)
-    chord(key): () {
-      final ordered = listOrder(store.listed, grouping.value);
-      if (index < ordered.length) store.select(ordered[index].id);
+    'toggle_index': () {
+      if (layout.section == ShellLayout.conversations) layout.toggleIndex(layout.section);
     },
-  chord(LogicalKeyboardKey.tab): () => stepAppSession(store, grouping, 1),
-  chord(LogicalKeyboardKey.tab, shift: true): () => stepAppSession(store, grouping, -1),
-  chord(LogicalKeyboardKey.keyL): () => conversation.focusComposer?.call(),
-  chord(LogicalKeyboardKey.space, shift: true): () => unawaited(kit.dictation?.press() ?? Future.value()),
-  chord(LogicalKeyboardKey.period): () => stopActiveSession(store),
-  chord(LogicalKeyboardKey.keyA, shift: true): () => answerAppPermission(store, 'allow_once'),
-  chord(LogicalKeyboardKey.keyR, shift: true): () => answerAppPermission(store, 'reject_once'),
-  chord(LogicalKeyboardKey.keyD, shift: true): () => conversation.showChanges?.call(),
-  chord(LogicalKeyboardKey.slash): () => unawaited(showShortcutHelp(context)),
-};
+    'settings': onSettings,
+    'focus_composer': () => conversation.focusComposer?.call(),
+    'dictation': () => unawaited(kit.dictation?.press() ?? Future.value()),
+    'stop_turn': () => stopActiveSession(store),
+    'stop_turn_esc': () => stopActiveSession(store),
+    'allow_once': () => answerAppPermission(store, 'allow_once'),
+    'reject_once': () => answerAppPermission(store, 'reject_once'),
+    'show_changes': () => conversation.showChanges?.call(),
+    'shortcut_help': () => unawaited(showShortcutHelp(context, overrides: overrides)),
+  };
+
+  return {
+    for (final spec in appShortcutTable) ?spec.activatorWith(overrides): ?actions[spec.id],
+    for (final (index, key) in const [
+      LogicalKeyboardKey.digit1,
+      LogicalKeyboardKey.digit2,
+      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.digit4,
+      LogicalKeyboardKey.digit5,
+      LogicalKeyboardKey.digit6,
+      LogicalKeyboardKey.digit7,
+      LogicalKeyboardKey.digit8,
+      LogicalKeyboardKey.digit9,
+    ].indexed)
+      chord(key): () {
+        final ordered = listOrder(store.listed, grouping.value);
+        if (index < ordered.length) store.select(ordered[index].id);
+      },
+    chord(LogicalKeyboardKey.tab): () => stepAppSession(store, grouping, 1),
+    chord(LogicalKeyboardKey.tab, shift: true): () => stepAppSession(store, grouping, -1),
+  };
+}

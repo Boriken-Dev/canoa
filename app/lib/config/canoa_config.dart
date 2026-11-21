@@ -54,6 +54,7 @@ final class CanoaConfig {
     this.notifications = const NotificationSettings(),
     this.voice = const VoiceSettings(),
     this.hiddenSources = const {},
+    this.shortcuts = const {},
     this.pasteAsFile = defaultPasteAsFile,
     this.embedLimit = defaultEmbedLimit,
     this.warnPermille = defaultWarnPermille,
@@ -140,6 +141,9 @@ final class CanoaConfig {
   /// `[sources] hidden`: the presets, by label, that Settings keeps out of the new-session picker.
   final Set<String> hiddenSources;
 
+  /// `[shortcuts]`: per-shortcut key chord overrides by shortcut id (`palette = "Ctrl+Shift+K"`).
+  final Map<String, String> shortcuts;
+
   /// `light`, `dark`, or `system` to follow the machine.
   final String brightness;
 
@@ -156,7 +160,7 @@ final class CanoaConfig {
       bool? minimizeToTray, bool? preferWebTransport, num? connectTimeout,
       LookId? look, bool? followProvider, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
-      NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, int? warnPermille}) =>
+      NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -181,6 +185,7 @@ final class CanoaConfig {
         notifications: notifications ?? this.notifications,
         voice: voice ?? this.voice,
         hiddenSources: hiddenSources ?? this.hiddenSources,
+        shortcuts: shortcuts ?? this.shortcuts,
         pasteAsFile: pasteAsFile,
         embedLimit: embedLimit,
         warnPermille: warnPermille ?? this.warnPermille,
@@ -213,6 +218,7 @@ final class CanoaConfig {
     notifications: notifications,
     voice: voice,
     hiddenSources: hiddenSources,
+    shortcuts: shortcuts,
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
     warnPermille: warnPermille,
@@ -1229,6 +1235,7 @@ final class CanoaConfig {
     notifications: notifications,
     voice: voice,
     hiddenSources: hiddenSources,
+    shortcuts: shortcuts,
     pasteAsFile: pasteAsFile,
     embedLimit: embedLimit,
     warnPermille: warnPermille,
@@ -1296,7 +1303,7 @@ final class CanoaConfig {
   /// The tables of canoa.cfg this app reads; any other is kept as it was found.
   static const _ownTables = {
     'desktop', 'network', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile', 'permissions',
-    'notifications', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'attachments', 'usage', 'voice',
+    'notifications', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'shortcuts', 'attachments', 'usage', 'voice',
     'speech', 'connections',
   };
 
@@ -1520,6 +1527,15 @@ final class CanoaConfig {
     final rawStore = data['store'];
     if (rawStore != null && rawStore is! Map) throw const FormatException('canoa.cfg: store must be a table');
     if (rawStore is Map) StoreSettings.parse(rawStore);
+    final rawShortcuts = data['shortcuts'];
+    if (rawShortcuts != null && rawShortcuts is! Map) throw const FormatException('canoa.cfg: shortcuts must be a table');
+    final shortcuts = <String, String>{
+      if (rawShortcuts is Map)
+        for (final MapEntry(:key, :value) in rawShortcuts.entries)
+          '$key': value is String && value.trim().isNotEmpty
+              ? value.trim()
+              : throw FormatException('canoa.cfg: shortcuts.$key must be a key chord'),
+    };
     return CanoaConfig(
       source: readFrom,
       overlays: overlays,
@@ -1552,6 +1568,7 @@ final class CanoaConfig {
       allowOnceOnly: flag(permissions, 'allow_once_only', false),
       protectedPaths: protectedPaths,
       hiddenSources: {for (final name in hidden) name as String},
+      shortcuts: shortcuts,
       pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
       embedLimit: limit('embed_limit', defaultEmbedLimit),
       warnPermille: warn,
@@ -1648,7 +1665,7 @@ finished = ${notifications.finished}
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${_voiceToml()}${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly && protectedPaths == null ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}${protectedPaths == null ? '' : 'protected = [\n${protectedPaths!.map((line) => '  ${jsonEncode(line)},\n').join()}]\n'}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${_voiceToml()}${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly && protectedPaths == null ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}${protectedPaths == null ? '' : 'protected = [\n${protectedPaths!.map((line) => '  ${jsonEncode(line)},\n').join()}]\n'}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${shortcuts.isEmpty ? '' : '\n[shortcuts]\n${shortcuts.entries.map((e) => '${jsonEncode(e.key)} = ${jsonEncode(e.value)}\n').join()}'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}

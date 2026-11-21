@@ -16,34 +16,119 @@ String get dictationKeys => '${_onMac ? "⌘" : "Ctrl"}+Shift+Space';
 /// One line of the help sheet: the keys and what they do.
 typedef ShortcutLine = ({String keys, String what});
 
-/// Every shortcut the app has, as the help sheet lists them.
-List<ShortcutLine> get shortcutHelp {
-  final mod = _onMac ? '⌘' : 'Ctrl';
-  return [
-    (keys: '$mod+K', what: 'Open the command palette'),
-    (keys: '$mod+N', what: 'Start a new session'),
-    (keys: '$mod+B', what: 'Hide or show the section index'),
-    (keys: '$mod+Alt+B', what: 'Hide or show the right panel'),
-    (keys: '$mod+`', what: 'Hide or show the bottom panel'),
-    (keys: '$mod+,', what: 'Open Settings'),
-    (keys: dictationKeys, what: 'Dictate into the message, and stop'),
-    (keys: '$mod+V in a message', what: 'Paste: an image or files go with it, long text as a file'),
-    (keys: '$mod+A', what: 'Select all of the conversation, or of the message being written'),
-    (keys: '$mod+C', what: 'Copy what is selected'),
-    (keys: '$mod+1 … $mod+9', what: 'Go to that session in the list'),
-    (keys: '$mod+Tab, $mod+Shift+Tab', what: 'Go to the next or previous session'),
-    (keys: '$mod+L', what: 'Write a message'),
-    (keys: '↑ in an empty message', what: 'Bring back the last message sent here'),
-    (keys: '$mod+.', what: 'Stop the turn'),
-    (keys: '$mod+Shift+A', what: 'Allow once what the agent asks'),
-    (keys: '$mod+Shift+R', what: 'Refuse once what the agent asks'),
-    (keys: '$mod+Shift+D', what: 'Show the changes'),
-    (keys: '$mod+/', what: 'Show these shortcuts'),
-  ];
+/// One entry in the single shortcut table feeding both window bindings and help / Settings.
+final class ShortcutSpec {
+  const ShortcutSpec({
+    required this.id,
+    required this.what,
+    required String Function(String mod) defaultKeys,
+    this.defaultActivator,
+  }) : _defaultKeys = defaultKeys;
+
+  final String id;
+  final String what;
+  final String Function(String mod) _defaultKeys;
+  final SingleActivator Function()? defaultActivator;
+
+  bool get rebindable => defaultActivator != null;
+  String defaultLabel() => _defaultKeys(_onMac ? '⌘' : 'Ctrl');
+
+  String keysWith(Map<String, String> overrides) {
+    final custom = overrides[id];
+    return custom != null && custom.trim().isNotEmpty ? custom.trim() : defaultLabel();
+  }
+
+  SingleActivator? activatorWith(Map<String, String> overrides) {
+    final builder = defaultActivator;
+    if (builder == null) return null;
+    final custom = overrides[id];
+    if (custom != null && custom.trim().isNotEmpty) {
+      return parseShortcutActivator(custom) ?? builder();
+    }
+    return builder();
+  }
 }
 
+/// Parses a human-readable key chord (`Ctrl+Shift+K`, `Alt+B`, `Esc`) into a [SingleActivator], or null when invalid.
+SingleActivator? parseShortcutActivator(String spec) {
+  final parts = spec.split('+').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  if (parts.isEmpty) return null;
+  var control = false, meta = false, shift = false, alt = false;
+  for (var i = 0; i < parts.length - 1; i++) {
+    switch (parts[i].toLowerCase()) {
+      case 'ctrl' || 'control':
+        control = true;
+      case 'cmd' || 'command' || 'meta' || '⌘':
+        meta = true;
+      case 'mod':
+        if (_onMac) {
+          meta = true;
+        } else {
+          control = true;
+        }
+      case 'shift' || '⇧':
+        shift = true;
+      case 'alt' || 'option':
+        alt = true;
+      default:
+        return null;
+    }
+  }
+  final key = _parseKey(parts.last.toLowerCase());
+  if (key == null) return null;
+  return SingleActivator(key, control: control, meta: meta, shift: shift, alt: alt);
+}
+
+LogicalKeyboardKey? _parseKey(String name) => switch (name) {
+  'esc' || 'escape' => LogicalKeyboardKey.escape,
+  'tab' => LogicalKeyboardKey.tab,
+  'space' => LogicalKeyboardKey.space,
+  ',' || 'comma' => LogicalKeyboardKey.comma,
+  '.' || 'period' => LogicalKeyboardKey.period,
+  '/' || 'slash' => LogicalKeyboardKey.slash,
+  '`' || 'backquote' => LogicalKeyboardKey.backquote,
+  _ when name.length == 1 && name.codeUnitAt(0) >= 97 && name.codeUnitAt(0) <= 122 =>
+    LogicalKeyboardKey(LogicalKeyboardKey.keyA.keyId + name.codeUnitAt(0) - 97),
+  _ when name.length == 1 && name.codeUnitAt(0) >= 48 && name.codeUnitAt(0) <= 57 =>
+    LogicalKeyboardKey(LogicalKeyboardKey.digit0.keyId + name.codeUnitAt(0) - 48),
+  _ => null,
+};
+
+/// The one canonical shortcut table: bindings in `app_shortcuts.dart`, [showShortcutHelp], and Settings > Shortcuts all read this.
+final List<ShortcutSpec> appShortcutTable = [
+  ShortcutSpec(id: 'palette', what: 'Open the command palette', defaultKeys: (m) => '$m+K', defaultActivator: () => chord(LogicalKeyboardKey.keyK)),
+  ShortcutSpec(id: 'new_session', what: 'Start a new session', defaultKeys: (m) => '$m+N', defaultActivator: () => chord(LogicalKeyboardKey.keyN)),
+  ShortcutSpec(id: 'close_session', what: 'Close the active conversation', defaultKeys: (m) => '$m+W', defaultActivator: () => chord(LogicalKeyboardKey.keyW)),
+  ShortcutSpec(id: 'toggle_index', what: 'Hide or show the section index', defaultKeys: (m) => '$m+B', defaultActivator: () => chord(LogicalKeyboardKey.keyB)),
+  ShortcutSpec(id: 'toggle_right', what: 'Hide or show the right panel', defaultKeys: (m) => '$m+Alt+B', defaultActivator: () => chord(LogicalKeyboardKey.keyB, alt: true)),
+  ShortcutSpec(id: 'toggle_bottom', what: 'Hide or show the bottom panel', defaultKeys: (m) => '$m+`', defaultActivator: () => chord(LogicalKeyboardKey.backquote)),
+  ShortcutSpec(id: 'settings', what: 'Open Settings', defaultKeys: (m) => '$m+,', defaultActivator: () => chord(LogicalKeyboardKey.comma)),
+  ShortcutSpec(id: 'dictation', what: 'Dictate into the message, and stop', defaultKeys: (_) => dictationKeys, defaultActivator: () => chord(LogicalKeyboardKey.space, shift: true)),
+  ShortcutSpec(id: 'paste_file', what: 'Paste: an image or files go with it, long text as a file', defaultKeys: (m) => '$m+V in a message'),
+  ShortcutSpec(id: 'select_all', what: 'Select all of the conversation, or of the message being written', defaultKeys: (m) => '$m+A'),
+  ShortcutSpec(id: 'copy', what: 'Copy what is selected', defaultKeys: (m) => '$m+C'),
+  ShortcutSpec(id: 'session_digit', what: 'Go to that session in the list', defaultKeys: (m) => '$m+1 … $m+9'),
+  ShortcutSpec(id: 'next_session', what: 'Go to the next or previous session', defaultKeys: (m) => '$m+Tab, $m+Shift+Tab'),
+  ShortcutSpec(id: 'focus_composer', what: 'Write a message', defaultKeys: (m) => '$m+L', defaultActivator: () => chord(LogicalKeyboardKey.keyL)),
+  ShortcutSpec(id: 'recall_prompt', what: 'Bring back the last message sent here', defaultKeys: (_) => '↑ in an empty message'),
+  ShortcutSpec(id: 'stop_turn', what: 'Stop the turn', defaultKeys: (m) => '$m+.', defaultActivator: () => chord(LogicalKeyboardKey.period)),
+  ShortcutSpec(id: 'stop_turn_esc', what: 'Stop the working turn', defaultKeys: (_) => 'Esc', defaultActivator: () => const SingleActivator(LogicalKeyboardKey.escape)),
+  ShortcutSpec(id: 'allow_once', what: 'Allow once what the agent asks', defaultKeys: (m) => '$m+Shift+A', defaultActivator: () => chord(LogicalKeyboardKey.keyA, shift: true)),
+  ShortcutSpec(id: 'reject_once', what: 'Refuse once what the agent asks', defaultKeys: (m) => '$m+Shift+R', defaultActivator: () => chord(LogicalKeyboardKey.keyR, shift: true)),
+  ShortcutSpec(id: 'show_changes', what: 'Show the changes', defaultKeys: (m) => '$m+Shift+D', defaultActivator: () => chord(LogicalKeyboardKey.keyD, shift: true)),
+  ShortcutSpec(id: 'shortcut_help', what: 'Show these shortcuts', defaultKeys: (m) => '$m+/', defaultActivator: () => chord(LogicalKeyboardKey.slash)),
+];
+
+/// Every shortcut the app has, with any [overrides] from `[shortcuts]` in canoa.cfg applied.
+List<ShortcutLine> shortcutHelpFor([Map<String, String> overrides = const {}]) => [
+  for (final spec in appShortcutTable) (keys: spec.keysWith(overrides), what: spec.what),
+];
+
+/// Default shortcut help list, matching [appShortcutTable].
+List<ShortcutLine> get shortcutHelp => shortcutHelpFor();
+
 /// The keyboard shortcuts, for the person to read.
-Future<void> showShortcutHelp(BuildContext context) => showSelectableDialog<void>(
+Future<void> showShortcutHelp(BuildContext context, {Map<String, String> overrides = const {}}) => showSelectableDialog<void>(
   context: context,
   builder: (context) => AlertDialog(
     title: const Text('Keyboard shortcuts'),
@@ -51,7 +136,7 @@ Future<void> showShortcutHelp(BuildContext context) => showSelectableDialog<void
       width: 460,
       child: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final line in shortcutHelp)
+          for (final line in shortcutHelpFor(overrides))
             ListTile(
               dense: true,
               title: Text(line.what),

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:coqui_acp/coqui_acp.dart' show AcpSessionInfo, AcpSessionPage;
+import 'package:coqui_acp/coqui_acp.dart' show AcpPermissionOption, AcpSessionInfo, AcpSessionPage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
@@ -40,6 +40,28 @@ class SessionPermissionCard extends StatelessWidget {
     final folder = session.cwd ?? '';
     final canRemember = question.subject != null && folder.isNotEmpty;
     final task = question.task;
+    final isPlan = question.forPerson && question.diff == null && (question.detail?.trim().isNotEmpty ?? false);
+    if (isPlan) {
+      return _PlanApprovalCard(
+        agent: task == null ? session.agent : (shortLine(task.source) ?? session.agent),
+        title: question.title,
+        reason: question.reason,
+        planMarkdown: question.detail!,
+        options: question.options,
+        more: session.pendingPermissions.length - 1,
+        answerHints: answerKeys,
+        onChoose: (option) => store.choosePermission(session, option),
+        onCancel: () => store.cancelPermission(session),
+        notes: [
+          if (task != null)
+            Text(
+              'Asked by a subagent: ${task.title} (${task.source}).',
+              key: const Key('task-asks'),
+              style: small,
+            ),
+        ],
+      );
+    }
     return PermissionCard(
       agent: task == null ? session.agent : (shortLine(task.source) ?? session.agent),
       title: question.title,
@@ -79,6 +101,125 @@ class SessionPermissionCard extends StatelessWidget {
             child: Text('Always allow here: ${folderName(folder)}', maxLines: 2, overflow: TextOverflow.ellipsis),
           ),
       ],
+    );
+  }
+}
+
+/// Renders a plan awaiting person approval with Markdown formatting, a generous scroll height cap (420 px), and plan-worded actions.
+class _PlanApprovalCard extends StatelessWidget {
+  const _PlanApprovalCard({
+    required this.agent,
+    required this.title,
+    required this.planMarkdown,
+    required this.options,
+    required this.onChoose,
+    this.reason,
+    this.more = 0,
+    this.answerHints = const {},
+    this.onCancel,
+    this.notes = const [],
+  });
+
+  static const double maxPlanHeight = 420;
+
+  final String agent;
+  final String title;
+  final String? reason;
+  final String planMarkdown;
+  final List<AcpPermissionOption> options;
+  final ValueChanged<AcpPermissionOption> onChoose;
+  final int more;
+  final Map<String, String> answerHints;
+  final VoidCallback? onCancel;
+  final List<Widget> notes;
+
+  static String _labelFor(AcpPermissionOption option) {
+    final lower = option.name.toLowerCase();
+    if (option.kind.startsWith('allow') && (lower == 'allow' || lower == 'allow once' || lower == 'yes' || lower == 'approve')) {
+      return 'Approve plan';
+    }
+    if (option.rejects && (lower == 'deny' || lower == 'no' || lower == 'reject' || lower == 'reject once')) {
+      return 'Keep editing';
+    }
+    return shortLine(option.name) ?? option.kind;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final look = context.chatLook;
+    final allow = options.where((option) => option.kind.startsWith('allow')).firstOrNull;
+    final deny = options.where((option) => option.rejects).firstOrNull;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: look.messageWidth + 100),
+          child: Card(
+            key: const Key('permission-card'),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [
+                    const Chip(key: Key('needs-input'), label: Text('Plan approval'), visualDensity: VisualDensity.compact),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+                    if (more > 0) Text('+$more more', style: theme.textTheme.labelSmall),
+                  ]),
+                  if (reason != null && reason!.trim().isNotEmpty)
+                    Padding(padding: const EdgeInsets.only(top: 4), child: Text(reason!, style: theme.textTheme.bodySmall)),
+                  const SizedBox(height: 8),
+                  Container(
+                    key: const Key('permission-detail'),
+                    constraints: const BoxConstraints(maxHeight: maxPlanHeight),
+                    decoration: BoxDecoration(
+                      color: look.code,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: look.border),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: SingleChildScrollView(child: AgentMarkdown(text: planMarkdown)),
+                  ),
+                  if (notes.isNotEmpty) ...[const SizedBox(height: 8), ...notes],
+                  const SizedBox(height: 10),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    if (allow != null)
+                      FilledButton(
+                        key: Key('answer-${allow.kind}'),
+                        onPressed: () => onChoose(allow),
+                        child: Text([
+                          _labelFor(allow),
+                          if (answerHints[allow.kind] case final hint?) '($hint)',
+                        ].join(' ')),
+                      ),
+                    if (deny != null)
+                      OutlinedButton(
+                        key: Key('answer-${deny.kind}'),
+                        onPressed: () => onChoose(deny),
+                        child: Text([
+                          _labelFor(deny),
+                          if (answerHints[deny.kind] case final hint?) '($hint)',
+                        ].join(' ')),
+                      ),
+                    for (final extra in options)
+                      if (extra != allow && extra != deny)
+                        TextButton(
+                          key: Key('answer-${extra.kind}'),
+                          onPressed: () => onChoose(extra),
+                          child: Text(_labelFor(extra)),
+                        ),
+                    if (options.isEmpty && onCancel != null)
+                      OutlinedButton(onPressed: onCancel, child: const Text('Dismiss')),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

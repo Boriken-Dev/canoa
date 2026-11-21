@@ -7,10 +7,10 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
 import '../acp/client.dart' show AcpSessionInfo;
-import '../acp/local_agent.dart';
 import '../desktop/control_client.dart' show hostWords;
 import '../history/session_import.dart' show earlierPage;
 import '../profile/report.dart';
+import '../rail/session_groups.dart' show rowStateOf;
 import '../selectable.dart';
 import '../session_store.dart';
 import '../shell/app_palette.dart';
@@ -247,20 +247,14 @@ class _ConversationViewState extends State<ConversationView> {
         );
       }));
     } on StateError {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connect and verify an ACP peer before sending.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connect to a host before sending.')));
     }
     _transcript.currentState?.jumpToLatest();
   }
 
   static String _subtitle(ChatSession? session) => session == null ? 'Multi-session agent chat' : session.agent;
 
-  static String _state(ChatSession? session) => switch (session?.status) {
-    null => 'Offline',
-    SessionStatus.preview => 'Preview',
-    SessionStatus.draft => 'New',
-    SessionStatus.connecting when session!.isDraft => 'Starting',
-    final status => status.name,
-  };
+  static String _state(ChatSession? session) => session == null ? 'Offline' : rowStateOf(session).word;
 
   Future<void> _popOut(ChatSession session) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -422,10 +416,6 @@ class _ConversationViewState extends State<ConversationView> {
               constraints: BoxConstraints(maxWidth: context.chatLook.messageWidth + 100),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 _composerFor(session),
-                if (!canRunLocalAgents || session.place != SessionPlace.local) ...[
-                  const SizedBox(height: 8),
-                  Text('Remote sessions require verified peer authentication', style: TextStyle(fontSize: 11, color: context.chatLook.muted)),
-                ],
               ]),
             ),
           ),

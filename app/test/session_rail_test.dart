@@ -387,13 +387,13 @@ void main() {
   });
 
   group('the menu', () {
-    testWidgets('it lists Pin, Rename, Fork, Archive and Close, each with its key', (tester) async {
+    testWidgets('it lists Pin, Rename, New session like this, Archive and Close, each with its key', (tester) async {
       final store = SessionStore();
       final first = _open(store, 'First');
       store.select(first.id);
       await _show(tester, store);
       await _openMenu(tester, 'First');
-      for (final (label, key) in const [('Pin', 'P'), ('Rename', 'R'), ('Fork', 'F'), ('Archive', 'A'), ('Close', 'C')]) {
+      for (final (label, key) in const [('Pin', 'P'), ('Rename', 'R'), ('New session like this', 'F'), ('Archive', 'A'), ('Close', 'C')]) {
         final item = find.ancestor(of: find.text(label), matching: find.byType(MenuItemButton)).first;
         expect(find.descendant(of: item, matching: find.text(key)), findsOneWidget, reason: '$label has the key $key');
       }
@@ -461,7 +461,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.sessions, hasLength(2));
       final fork = store.selected!;
-      expect(fork.title, 'Fork of First');
+      expect(fork.title, 'New session like First');
       expect(fork.status, SessionStatus.draft);
       expect(fork.messages, isEmpty, reason: 'what was said is the agent\'s, not copied');
       store.dispose();

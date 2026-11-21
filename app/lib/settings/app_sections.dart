@@ -1,8 +1,10 @@
+import 'dart:async' show unawaited;
+
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, ChatLook;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-import '../chat/palette.dart' show shortcutHelp;
+import '../chat/palette.dart' show ShortcutSpec, appShortcutTable, parseShortcutActivator;
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
 import '../theme/look.dart';
@@ -455,16 +457,121 @@ class NotificationsSection extends StatelessWidget {
   );
 }
 
-/// The keyboard shortcuts, for reading.
+/// The keyboard shortcuts, read from the single shortcut table with any `[shortcuts]` overrides in canoa.cfg.
 class ShortcutsSection extends StatelessWidget {
-  const ShortcutsSection({super.key});
+  const ShortcutsSection({super.key, this.controller});
+
+  final SettingsController? controller;
+
+  static final Listenable _nothing = Listenable.merge(const []);
+
+  Future<void> _editShortcut(BuildContext context, ShortcutSpec spec, String current) async {
+    final editController = controller;
+    if (editController == null) return;
+    final nextValue = await showDialog<String?>(
+      context: context,
+      builder: (_) => _ShortcutEditDialog(
+        spec: spec,
+        initial: current,
+        hasOverride: editController.config.shortcuts.containsKey(spec.id),
+      ),
+    );
+    if (nextValue == null) return;
+    final updated = Map<String, String>.from(editController.config.shortcuts);
+    if (nextValue.isEmpty || nextValue == spec.defaultLabel()) {
+      updated.remove(spec.id);
+    } else {
+      updated[spec.id] = nextValue;
+    }
+    await editController.change((config) => config.copyWith(shortcuts: updated));
+  }
 
   @override
-  Widget build(BuildContext context) => SettingsGroup(children: [
-    for (final line in shortcutHelp)
-      SettingsRow(
-        title: line.what,
-        control: Text(line.keys, style: const TextStyle(fontWeight: FontWeight.w600)),
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller ?? _nothing,
+      builder: (context, _) {
+        final overrides = controller?.config.shortcuts ?? const <String, String>{};
+        return SettingsGroup(children: [
+          for (final spec in appShortcutTable)
+            SettingsRow(
+              title: spec.what,
+              control: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(spec.keysWith(overrides), style: const TextStyle(fontWeight: FontWeight.w600)),
+                if (spec.rebindable && controller != null) ...[
+                  const SizedBox(width: 8),
+                  TextButton(
+                    key: Key('shortcut-edit-${spec.id}'),
+                    onPressed: () => unawaited(_editShortcut(context, spec, spec.keysWith(overrides))),
+                    child: const Text('Edit'),
+                  ),
+                ],
+              ]),
+            ),
+          if (overrides.isNotEmpty && controller != null)
+            SettingsRow(
+              title: 'Reset shortcut overrides',
+              description: 'Restore the built-in keys above.',
+              control: TextButton(
+                key: const Key('shortcuts-reset'),
+                onPressed: () => unawaited(controller!.change((config) => config.copyWith(shortcuts: const {}))),
+                child: const Text('Reset'),
+              ),
+            ),
+        ]);
+      },
+    );
+  }
+}
+
+class _ShortcutEditDialog extends StatefulWidget {
+  const _ShortcutEditDialog({required this.spec, required this.initial, required this.hasOverride});
+
+  final ShortcutSpec spec;
+  final String initial;
+  final bool hasOverride;
+
+  @override
+  State<_ShortcutEditDialog> createState() => _ShortcutEditDialogState();
+}
+
+class _ShortcutEditDialogState extends State<_ShortcutEditDialog> {
+  late final TextEditingController _controller = TextEditingController(text: widget.initial);
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final trimmed = _controller.text.trim();
+    if (trimmed.isNotEmpty && parseShortcutActivator(trimmed) == null) {
+      setState(() => _error = 'Use a chord such as Ctrl+Shift+K or Esc.');
+      return;
+    }
+    Navigator.pop(context, trimmed);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.spec.what),
+    content: TextField(
+      key: Key('shortcut-input-${widget.spec.id}'),
+      controller: _controller,
+      autofocus: true,
+      decoration: InputDecoration(
+        labelText: 'Key chord',
+        hintText: widget.spec.defaultLabel(),
+        errorText: _error,
       ),
-  ]);
+      onSubmitted: (_) => _submit(),
+    ),
+    actions: [
+      if (widget.hasOverride) TextButton(onPressed: () => Navigator.pop(context, ''), child: const Text('Default')),
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      TextButton(key: Key('shortcut-save-${widget.spec.id}'), onPressed: _submit, child: const Text('Save')),
+    ],
+  );
 }

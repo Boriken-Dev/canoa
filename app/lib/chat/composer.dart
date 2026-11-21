@@ -541,7 +541,7 @@ class SessionComposer extends StatelessWidget {
 
   /// What the message field says while it is empty: who it goes to and the keys that send it.
   String _hint({required bool narrow}) {
-    if (!enabled) return store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect to an agent to chat';
+    if (!enabled) return store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect to a host to chat';
     if (session.pendingPermissions.isNotEmpty) return narrow ? narrowRedirectHint : redirectHint;
     final name = session.isDraft ? (session.source?.displayName ?? 'an agent') : (shortLine(session.agent) ?? 'the agent');
     if (narrow) return 'Message $name';

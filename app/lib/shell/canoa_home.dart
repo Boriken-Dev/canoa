@@ -71,6 +71,7 @@ class CanoaHome extends StatelessWidget {
     required this.onResumeRelated,
     this.onOpenFullApp,
     this.startOptions,
+    this.shortcutOverrides = const {},
   });
 
   final LocalHostBridge? localHost;
@@ -104,6 +105,7 @@ class CanoaHome extends StatelessWidget {
   final RunningSessions? running;
   final Future<void> Function(RunningSession)? onAttach;
   final ConversationHandle conversation;
+  final Map<String, String> shortcutOverrides;
 
   Widget _rail(BuildContext context) => SessionRail(
     store: store,
@@ -132,6 +134,8 @@ class CanoaHome extends StatelessWidget {
     onHosts: onHosts,
     onLoadout: onLoadout,
     onLoadouts: onLoadouts,
+    onReopen: onReopen,
+    shortcutOverrides: shortcutOverrides,
     chatOnly: chatOnly,
     sessionsOnly: sessionsOnly,
   );
@@ -150,6 +154,7 @@ class CanoaHome extends StatelessWidget {
         onNewSession: onNewSession,
         onSettings: onSettings,
         onPalette: () => _palette(context),
+        overrides: shortcutOverrides,
       ),
       child: Focus(
         autofocus: true,

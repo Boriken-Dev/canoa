@@ -3406,6 +3406,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onResumeRelated: _resumeRelated,
           onOpenFullApp: _openFullApp,
           startOptions: _startOptions(),
+          shortcutOverrides: config.shortcuts,
           grouping: _grouping,
           kit: _kit,
           renderers: widget.renderers,

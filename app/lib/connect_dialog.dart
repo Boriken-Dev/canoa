@@ -312,7 +312,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'The other end must be explicitly paired with $_here. Only enter a fingerprint verified out of band. '
+                'Remote sessions require verified peer authentication. The other end must be explicitly paired with $_here. Only enter a fingerprint verified out of band. '
                 'Canoa never trusts the first key it sees, and keeps no key or password here: only where to connect and the id to expect.',
               ),
               const SizedBox(height: 12),
