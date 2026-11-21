@@ -4,3 +4,13 @@ Canoa's package for Pi: the Store recipe that finds, checks for updates and inst
 starts it from when `canoa.cfg` does not name it, beside the re-exported coqui-acp provider that drives it in process. Not published; `canoa-host` depends on it.
 
 Every export is listed in [`AGENTS.md`](AGENTS.md).
+
+## Development
+
+```sh
+cargo test -p canoa-pi --all-features
+```
+
+## License
+
+MPL-2.0; see [LICENSE](../../LICENSE).

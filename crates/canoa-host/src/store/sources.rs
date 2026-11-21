@@ -41,19 +41,19 @@ static BUNDLE: Bundle = Bundle {
         ),
         (
             "catalog_sources/sdk/source.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/source.js"),
+            include_str!("../../extensions/sdk/source.js"),
         ),
         (
             "catalog_sources/sdk/kinds.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/kinds.js"),
+            include_str!("../../extensions/sdk/kinds.js"),
         ),
         (
             "catalog_sources/sdk/model.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/model.js"),
+            include_str!("../../extensions/sdk/model.js"),
         ),
         (
             "catalog_sources/sdk/wait.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/wait.js"),
+            include_str!("../../extensions/sdk/wait.js"),
         ),
     ],
 };

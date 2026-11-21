@@ -19,11 +19,5 @@ coqui-acp-api.workspace = true
 coqui-acp-harness.workspace = true
 serde_json.workspace = true
 
-[lints.rust]
-missing_docs = "warn"
-missing_debug_implementations = "warn"
-
-[lints.clippy]
-std_instead_of_core = "warn"
-std_instead_of_alloc = "warn"
-alloc_instead_of_core = "warn"
+[lints]
+workspace = true

@@ -25,15 +25,15 @@ static BUNDLE: Bundle = Bundle {
         ),
         (
             "profile_items/sdk/profile.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/profile.js"),
+            include_str!("../../extensions/sdk/profile.js"),
         ),
         (
             "profile_items/sdk/kinds.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/kinds.js"),
+            include_str!("../../extensions/sdk/kinds.js"),
         ),
         (
             "profile_items/sdk/model.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/model.js"),
+            include_str!("../../extensions/sdk/model.js"),
         ),
     ],
 };

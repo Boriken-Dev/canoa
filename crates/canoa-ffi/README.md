@@ -5,3 +5,13 @@ program on disk: the host's threads run in the application, and agents stay chil
 
 It is not published: the only consumer is the app's own plugin, `app/native`, which builds it with the app. The contract
 is in [`AGENTS.md`](AGENTS.md).
+
+## Development
+
+```sh
+cargo test -p canoa-ffi --all-features
+```
+
+## License
+
+MPL-2.0; see [LICENSE](../../LICENSE).

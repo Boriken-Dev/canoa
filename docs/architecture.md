@@ -51,6 +51,14 @@ The [roadmap](roadmap.md) is the one record of what exists.
 
 See [interop.md](interop.md) for the minimum interoperability profile.
 
+## Harnesses, accounts, and provider kinds
+
+Canoa itself only knows **`Harness`**, **`Account`**, its **Guatiao extension kinds** (defined in `canoa`), and extensions registered by bundled libraries or `[host.extensions.*]` in `canoa.cfg`: no vendor-specific agent, account, or speech logic is hardcoded into `canoa-host`.
+
+- **Discovery, not fixed lists:** Each `canoa-<vendor>` crate and bundled integration crate (`canoa-foundry`, `canoa-litellm`, `canoa-openai`, `canoa-whisper`) registers its providers through `crates/canoa-host/src/bundled.rs` via the same registration path an external Guatiao library or JavaScript/Python script package uses (`providers/list`).
+- **Accounts and standards:** An `account_provider` declares credential standards; `api-gateway` (`canoa::api_gateway`) covers any multi-standard proxy endpoint; `account_speech` (`canoa::speech::account`) matches transcription offers to accounts by standard and endpoint.
+- **Sessions and Store types:** `agent_vendor` supplies agent metadata, skill/hook delivery, access vocabulary translation, and session history import; `program_store`, `model_store`, `profile_item`, `settings_section`, `panel_tab`, `secret_provider`, `catalog_source`, `speech_provider`, `speech_output`, `model_gateway`, and `usage_reader` let both bundled crates and user extensions participate uniformly.
+
 ## Authentication and transport layering
 
 The sources of the browser's cryptographic handshakes are `Boriken-Dev/coqui-peer-noise` and `Boriken-Dev/coqui-peer-webcrypto`. The browser extension bundles an **unchanged, Git-blob-pinned copy** of each JavaScript module (`clients/browser/chromium/vendor`, recorded in `COQUI-SOURCE.json`) so that it works offline and satisfies MV3 local-code restrictions. The Flutter web build has no JavaScript of its own: `app/lib/auth/web/` runs the WebCrypto method over `package:web` and the Noise method as `coqui-peer-noise` compiled to WebAssembly (`app/web_noise`, built at build time, never committed), one step of a handshake or a PIN pairing at a time, with a key of each method's own; it contains no independent cryptographic handshake.

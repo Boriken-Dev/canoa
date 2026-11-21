@@ -1,5 +1,12 @@
 //! `CanoaUI.exe`, the portable launcher. See the crate's README for what it does and refuses.
 
+#![forbid(unsafe_code)]
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    clippy::alloc_instead_of_core,
+    reason = "desktop launcher uses std::fs, paths, and processes"
+)]
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use canoa_launch::{APP_PROGRAM, Error, Payload, install, prune};

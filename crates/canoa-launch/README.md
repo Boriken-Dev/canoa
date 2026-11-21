@@ -41,3 +41,7 @@ runs with its unpacked folder as working folder.
 An unsigned launcher shows SmartScreen's "unknown publisher" warning. Between checking the folder and starting the app, a
 process running as the same user could still change a file; the launcher defends against other users, a stale or damaged
 copy, and a planted file, not against code already running as the user.
+
+## License
+
+MPL-2.0; see [LICENSE](../../LICENSE).

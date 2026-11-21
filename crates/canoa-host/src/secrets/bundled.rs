@@ -33,15 +33,15 @@ static BUNDLE: Bundle = Bundle {
         // The SDK's modules the script imports, kept beside it.
         (
             "bitwarden/sdk/secret.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/secret.js"),
+            include_str!("../../extensions/sdk/secret.js"),
         ),
         (
             "bitwarden/sdk/kinds.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/kinds.js"),
+            include_str!("../../extensions/sdk/kinds.js"),
         ),
         (
             "bitwarden/sdk/model.js",
-            include_str!("../../../../bindings/js/canoa-sdk/src/model.js"),
+            include_str!("../../extensions/sdk/model.js"),
         ),
     ],
 };

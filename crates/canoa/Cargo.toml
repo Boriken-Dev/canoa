@@ -8,17 +8,14 @@ repository.workspace = true
 description = "A deny-by-default registry of services and client grants"
 readme = "README.md"
 exclude = [".*", "*.local.*"]
-# Nothing consumes it yet: published when the native host does.
 publish = false
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-[lints.clippy]
-std_instead_of_core = "warn"
-std_instead_of_alloc = "warn"
-alloc_instead_of_core = "warn"
+[lints]
+workspace = true
 
 [features]
 # The `program_store` kind: how a program is found, checked for updates and installed into a folder the host owns.

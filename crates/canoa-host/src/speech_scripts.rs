@@ -43,19 +43,19 @@ static BUNDLE: Bundle = Bundle {
         ),
         (
             "speech/sdk/speech.js",
-            include_str!("../../../bindings/js/canoa-sdk/src/speech.js"),
+            include_str!("../extensions/sdk/speech.js"),
         ),
         (
             "speech/sdk/kinds.js",
-            include_str!("../../../bindings/js/canoa-sdk/src/kinds.js"),
+            include_str!("../extensions/sdk/kinds.js"),
         ),
         (
             "speech/sdk/model.js",
-            include_str!("../../../bindings/js/canoa-sdk/src/model.js"),
+            include_str!("../extensions/sdk/model.js"),
         ),
         (
             "speech/sdk/wait.js",
-            include_str!("../../../bindings/js/canoa-sdk/src/wait.js"),
+            include_str!("../extensions/sdk/wait.js"),
         ),
     ],
 };

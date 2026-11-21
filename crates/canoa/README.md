@@ -18,7 +18,24 @@ entries and their grants in one: not a security boundary by itself. See the [doc
 
 ## Installation
 
-Not published. `publish = false` until `canoa-host` is. Cargo features: `store`, the `program_store` kind (a store for one agent program), which needs `coqui-acp-api` and `serde_json`; `speech`, the `speech_provider` kind (audio in, text and front matter out), which needs `guatiao` and `coqui-acp-api`; `api-gateway`, the account kind of an address that speaks one or several credential standards, with the account provider that makes it and the request, model list and sign-in form any account provider of such an address builds on (needs `network`); and `speech-builtin`, its providers: a program and an endpoint the person names for speech to text, and for the `speech_output` kind (text in, audio out) a program, an endpoint, Piper and the operating system voices.
+Not published (`publish = false`). A default build has no dependencies. Cargo features:
+
+| Feature | Enables | Purpose |
+| --- | --- | --- |
+| `store` | `canoa::store`, `canoa::store_provider!` | the `program_store` and `model_store` kinds and the recipe contract (`coqui-acp-api`, `serde_json`, `guatiao`, `guatiao-intake`, `sha2`) |
+| `vendor` | `canoa::vendor` | the `agent_vendor` kind: who an agent's vendor is and how it is shown (`coqui-acp-api`) |
+| `usage` | `canoa::usage_reader` | the `usage_reader` kind: how an agent's quota is read (`coqui-acp-api`) |
+| `profile-item` | `canoa::profile_item` | the `profile_item` kind: a setting a profile carries and applies (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `regex`) |
+| `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
+| `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
+| `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
+| `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
+| `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
+| `speech-builtin` | `canoa::speech::builtin` | built-in speech-to-text and speech-output providers (implies `speech`, `network`, `guatiao-intake`, `serde_json`) |
+| `loopback` | `canoa::loopback` | loopback HTTP server for host tools and local model gateways (`httparse`, `serde_json`, `sha2`, `rustix`) |
+| `gateway` | `canoa::gateway` | the `model_gateway` kind for local model APIs (`coqui-acp-api`) |
+| `api-gateway` | `canoa::api_gateway` | generic multi-standard API gateway accounts and helpers (implies `network`, `coqui-acp-api`, `guatiao`, `guatiao-serde`, `serde_json`, `percent-encoding`) |
+| `network` | `canoa::network`, `canoa::address` | system proxy, proxy auth, certificates, and URL/address checks (`coqui-syshttp`, `ureq`, `rustls`, `tracing`, `url`) |
 
 ## Quick start
 

@@ -43,7 +43,5 @@ object.workspace = true
 [build-dependencies]
 sha2.workspace = true
 
-[lints.rust]
-unsafe_code = "forbid"
-missing_docs = "warn"
-missing_debug_implementations = "warn"
+[lints]
+workspace = true

@@ -7,3 +7,13 @@ budget.
 A person makes the account by signing in through the proxy's own SSO (their browser, the key handed back to an address on this
 computer) or by setting a key they were given. The account lists the proxy's models and reports the key's budget and limits.
 Not published; `canoa-host` carries it. Every export is listed in [`AGENTS.md`](AGENTS.md).
+
+## Development
+
+```sh
+cargo test -p canoa-litellm --all-features
+```
+
+## License
+
+MPL-2.0; see [LICENSE](../../LICENSE).

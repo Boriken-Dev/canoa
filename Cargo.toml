@@ -9,6 +9,15 @@ rust-version = "1.89"
 license = "MPL-2.0"
 repository = "https://github.com/Boriken-Dev/canoa"
 
+[workspace.lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
+
 [workspace.dependencies]
 # The command line.
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "env"] }
@@ -19,7 +28,6 @@ toml = { version = "1", default-features = false, features = ["parse", "serde", 
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 # canoa.cfg in any format its first line names: found, layered and read through anycfg, which is not published yet.
 anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
-# canoa.cfg in YAML.
 serde-saphyr = { version = "2", default-features = false, features = ["serialize", "deserialize"] }
 indexmap = { version = "2", default-features = false, features = ["std", "serde"] }
 # ACP messages a client sends, read to keep a program launch from reaching the agent.
@@ -40,13 +48,13 @@ qrcode = { version = "0.15", default-features = false, features = ["svg"] }
 # The password and certificate providers are libraries the portal loads from a path (its tests build them).
 coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
-# The web app's server: requests parsed by tungstenite's own parser, request paths percent-decoded by url's, TLS by
-# coqui-transport-web's rustls; each already in the graph at these versions.
+# Foundry Local's Rust SDK (`canoa-foundry` feature `sdk`).
 foundry-local-sdk = "2.4"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync"] }
+# HTTP request parsing and percent-decoding for the loopback server and API-gateway helpers.
 httparse = { version = "1.10", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3", default-features = false, features = ["std"] }
-# The include and exclude filters of a knowledge index; already in the graph.
+# TLS for the web app's server (`coqui-transport-web`); already in the graph at this version.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # The blocking HTTP client every fetch uses. It has no TLS of its own: coqui-syshttp makes each connection, through the system's proxy and
 # with the operating system's certificate verifier and client certificates.
@@ -106,10 +114,11 @@ guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4
 guatiao-source-js = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d" }
 guatiao-bridge = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", features = ["json"] }
 guatiao-libffi = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d" }
-# How a provider's settings are shown: the speech providers' forms.
+# Schema and form metadata for providers, settings, profile items, and accounts.
 guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", default-features = false, features = ["derive"] }
 
 # Crates the member crates share.
+# Pre-1.0 Windows and binary inspection crates pinned for platform OS integration (registry, ACLs, Job Objects, elevation, dialogs, PE imports).
 tungstenite = { version = "0.30", default-features = false }
 getrandom = "0.4"
 url = "2.5"

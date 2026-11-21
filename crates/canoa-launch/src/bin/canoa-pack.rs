@@ -1,6 +1,14 @@
 //! `canoa-pack <app folder> <version> <payload.zip>`: packs the built app folder for the launcher and prints the
 //! archive's SHA-256. The packaging step runs it, then builds `canoa-launch` with CANOA_LAUNCH_PAYLOAD naming the archive.
 
+#![forbid(unsafe_code)]
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    clippy::alloc_instead_of_core,
+    reason = "packager CLI uses std::fs, paths, and std::process"
+)]
+
 use canoa_launch::{APP_PROGRAM, Error, Payload, pack, sha256_hex};
 use std::path::Path;
 use std::process::ExitCode;

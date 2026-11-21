@@ -1,6 +1,11 @@
 //! The launcher program itself: built with a payload that carries a stand-in for the app, copied alone into an empty folder
 //! and started. Needs the example built (`cargo test` builds it; a narrower run needs `--examples`), and builds the launcher
 //! once more, with the payload, into its own target folder.
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    reason = "tests name what they use from std"
+)]
 
 use canoa_launch::pack;
 use std::fs;

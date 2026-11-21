@@ -23,6 +23,7 @@ use super::portal::PortalArgs;
 const AFTER_HELP: &str = "\
 Environment:
   CANOA_CONFIG             canoa.cfg to read, below --config and above the platform's default
+  CANOA_INSTALLED_DIR      the folder whose canoa.cfg is the installed copy (default: beside the program)
   CANOA_LOG                what to log on standard error, as a tracing filter (default: info)
   COQUI_AGENTIC_PEER_HOME  the directory of this host's identity and trust store (default: .canoa in the user's home folder)
   NO_COLOR                 no colour in the log

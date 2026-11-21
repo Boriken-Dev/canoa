@@ -6,3 +6,13 @@ installed copy, so dictation runs on the host's own processor and the audio goes
 
 A build that does not carry it has no whisper.cpp program, models or offer. Not published; `canoa-host` carries it. Every export
 is listed in [`AGENTS.md`](AGENTS.md).
+
+## Development
+
+```sh
+cargo test -p canoa-whisper --all-features
+```
+
+## License
+
+MPL-2.0; see [LICENSE](../../LICENSE).

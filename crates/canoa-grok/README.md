@@ -4,3 +4,13 @@ Canoa's package for Grok: the Store recipe that finds, checks for updates and in
 starts it from when `canoa.cfg` does not name it. Not published; `canoa-host` depends on it.
 
 Every export is listed in [`AGENTS.md`](AGENTS.md).
+
+## Development
+
+```sh
+cargo test -p canoa-grok --all-features
+```
+
+## License
+
+MPL-2.0; see [LICENSE](../../LICENSE).

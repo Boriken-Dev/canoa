@@ -34,14 +34,21 @@
 | `crates/canoa/` | Rust registry and authorization model |
 | `crates/canoa-host/` | `canoa-host`: the `canoa` program, which serves the agents and providers canoa.cfg names to paired keys (loopback by default, or a pipe or socket), the web app, and `canoa portal` |
 | `crates/canoa-{claude,codex,grok,pi,antigravity,opencode}/` | One agent each: its source preset and Store recipe (and its coqui-acp provider where it has one) |
+| `crates/canoa-foundry/` | Foundry Local gateway (OpenAI and Anthropic APIs over a local model) and `foundry-local` account provider |
+| `crates/canoa-litellm/` | LiteLLM proxy account provider (one virtual key for OpenAI and Anthropic APIs, SSO or key, budget reporting) |
+| `crates/canoa-openai/` | OpenAI `account_speech` provider for accounts that hold an OpenAI API key |
+| `crates/canoa-whisper/` | whisper.cpp Store program, models, and `speech_provider` offer |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI |
 | `crates/canoa-launch/` | The portable `CanoaUI.exe` launcher and `canoa-pack` |
+| `bindings/python/canoa-sdk/`, `bindings/js/canoa-sdk/` | Python and JavaScript SDKs for writing Canoa providers (`UsageReader`, `ProfileItem`, `ProgramStore`, etc.) |
+| `examples/providers/` | Example script providers per kind in Python and JavaScript |
 | `app/native/` | The app's own plugin: builds `canoa-ffi` with the desktop runner |
 | `tools/` | Offline dependency mirroring |
 | `app/web_noise/` | `coqui-peer-noise` as WebAssembly for the web app's Noise method, built by `app/tool/build_noise.py` |
 | `app/` | Canonical Flutter chat, canoa.cfg settings and desktop tray UI |
 | `crates/canoa-host/examples/` | Test fixtures, built by `cargo build -p canoa-host --examples`: `stdio_agent` is an ACP agent to serve with `canoa serve` |
 | `clients/browser/chromium/` | Chromium extension, browser permissions and tools |
+| `clients/office/` | Office add-in manifests and task pane pages served by the host (`[host.web] office = true`) |
 | `docs/` | Architecture, protocols, browser support and developer guides |
 
 ## Try the current UI
@@ -82,6 +89,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 (cd clients/browser/chromium && npm test)
+(cd clients/office && npm test)
+(cd bindings/js/canoa-sdk && npm test && node tools/write_kinds.mjs --check)
+(cd bindings/python/canoa-sdk && python tools/write_kinds.py --check)
 ```
 
 The [documentation](https://boriken-dev.github.io/canoa/) contains the [architecture](https://boriken-dev.github.io/canoa/architecture/), [interoperability profile](https://boriken-dev.github.io/canoa/interop/), [browser design](https://boriken-dev.github.io/canoa/browser/), and [roadmap](https://boriken-dev.github.io/canoa/roadmap/).

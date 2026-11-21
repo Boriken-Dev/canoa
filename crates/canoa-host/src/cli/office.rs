@@ -322,4 +322,23 @@ mod office_login_tests {
         assert!(Cli::try_parse_from(["canoa", "office-launcher", "--install"]).is_ok());
         assert!(Cli::try_parse_from(["canoa", "office-launcher", "--detach"]).is_ok());
     }
+
+    #[test]
+    fn after_help_lists_every_environment_variable_read_at_startup() {
+        use clap::CommandFactory as _;
+        let help = super::super::Cli::command().render_help().to_string();
+        for name in [
+            "CANOA_CONFIG",
+            "CANOA_INSTALLED_DIR",
+            "CANOA_LOG",
+            "COQUI_AGENTIC_PEER_HOME",
+            "NO_COLOR",
+        ] {
+            assert!(
+                help.contains(name),
+                "missing {name} in --help:
+{help}"
+            );
+        }
+    }
 }

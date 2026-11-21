@@ -2,7 +2,24 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Twelve Cargo features (`api-gateway` is the generic account kind of an address and a key, below; `mail-backend` is the `mail_backend` kind, below; `usage` is the `usage_reader` kind, `vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind, `settings-section` the `settings_section` kind and `panel-tab` the `panel_tab` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = false`). The 14 Cargo features:
+
+| Feature | Enables | Purpose |
+| --- | --- | --- |
+| `store` | `canoa::store`, `canoa::store_provider!` | the `program_store` and `model_store` kinds and the recipe contract (`coqui-acp-api`, `serde_json`, `guatiao`, `guatiao-intake`, `sha2`) |
+| `vendor` | `canoa::vendor` | the `agent_vendor` kind: who an agent's vendor is and how it is shown (`coqui-acp-api`) |
+| `usage` | `canoa::usage_reader` | the `usage_reader` kind: how an agent's quota is read (`coqui-acp-api`) |
+| `profile-item` | `canoa::profile_item` | the `profile_item` kind: a setting a profile carries and applies (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `regex`) |
+| `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
+| `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
+| `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
+| `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
+| `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
+| `speech-builtin` | `canoa::speech::builtin` | built-in speech-to-text and speech-output providers (implies `speech`, `network`, `guatiao-intake`, `serde_json`) |
+| `loopback` | `canoa::loopback` | loopback HTTP server for host tools and local model gateways (`httparse`, `serde_json`, `sha2`, `rustix`) |
+| `gateway` | `canoa::gateway` | the `model_gateway` kind for local model APIs (`coqui-acp-api`) |
+| `api-gateway` | `canoa::api_gateway` | generic multi-standard API gateway accounts and helpers (implies `network`, `coqui-acp-api`, `guatiao`, `guatiao-serde`, `serde_json`, `percent-encoding`) |
+| `network` | `canoa::network`, `canoa::address` | system proxy, proxy auth, certificates, and URL/address checks (`coqui-syshttp`, `ureq`, `rustls`, `tracing`, `url`) |
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`), the `account_speech` kind from `canoa::speech::account`, the `mail_backend` kind from `canoa::mail_backend` (feature `mail-backend`), and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
@@ -239,7 +256,7 @@ impl Network {
 }
 ```
 
-`agent` takes the timeouts, redirects and limits of the `Config` and none of its proxy or TLS settings: every request asks the resolver for its proxy, connects through it with its login (Negotiate or NTLM through SSPI on Windows when `negotiate` is not `Some(false)`; Basic from `proxy_user`), verifies with the system's verifier (or exactly `ca_file`) and answers a certificate request from the keystores (or `client_certificate`). `login_agent` also answers a server's own `401` for the hosts its `OriginAuth` names (`OriginAuth::builder().basic(hosts, Credentials)`, `.negotiate(hosts)` for the logon session, Windows only here, `.negotiate_as(hosts, Credentials)`): only requests sent through `LoginAgent::run` are answered, with the body held in memory and sent once per leg; the person's `negotiate` setting is about a proxy and does not gate it. Loopback is never sent through a proxy unless `no_proxy` holds `<-loopback>`. `child_variables` and `variables_for` are `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lower case too off Windows) for a program: a proxy chosen per URL is resolved for the endpoints named, and nothing is given when everything goes direct. The credentials are in the proxy URL, so the variables belong to the child only. The `speech_endpoint` and `speech_say_endpoint` providers build their client from `Network::current()`.
+`Network::install` stores the process's installed network in `network::CURRENT` (`static CURRENT: RwLock<Option<Arc<Network>>>`), read by `Network::current()` (falling back to `Network::system()` until installed). `agent` takes the timeouts, redirects and limits of the `Config` and none of its proxy or TLS settings: every request asks the resolver for its proxy, connects through it with its login (Negotiate or NTLM through SSPI on Windows when `negotiate` is not `Some(false)`; Basic from `proxy_user`), verifies with the system's verifier (or exactly `ca_file`) and answers a certificate request from the keystores (or `client_certificate`). `login_agent` also answers a server's own `401` for the hosts its `OriginAuth` names (`OriginAuth::builder().basic(hosts, Credentials)`, `.negotiate(hosts)` for the logon session, Windows only here, `.negotiate_as(hosts, Credentials)`): only requests sent through `LoginAgent::run` are answered, with the body held in memory and sent once per leg; the person's `negotiate` setting is about a proxy and does not gate it. Loopback is never sent through a proxy unless `no_proxy` holds `<-loopback>`. `child_variables` and `variables_for` are `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lower case too off Windows) for a program: a proxy chosen per URL is resolved for the endpoints named, and nothing is given when everything goes direct. The credentials are in the proxy URL, so the variables belong to the child only. The `speech_endpoint` and `speech_say_endpoint` providers build their client from `Network::current()`.
 
 ## `Registry`
 

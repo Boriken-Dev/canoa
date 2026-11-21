@@ -1,4 +1,9 @@
 //! The store against real folders: what an install reuses, repairs, replaces and refuses.
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    reason = "tests name what they use from std"
+)]
 
 use canoa_launch::{
     Entry, Error, MARKER, Manifest, Payload, differs, install, pack, prune, sha256_hex,
