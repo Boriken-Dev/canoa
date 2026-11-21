@@ -12,6 +12,7 @@ use windows::Win32::System::Com::{
     DISPATCH_FLAGS, DISPPARAMS, EXCEPINFO, IDispatch_Impl, ITypeInfo, SAFEARRAY,
 };
 use windows::Win32::System::Variant::{VARIANT, VT_ERROR};
+use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MessageBoxW};
 use windows::core::{BSTR, GUID, HRESULT, HSTRING, Interface, PCWSTR, Result, implement, w};
 
@@ -38,6 +39,13 @@ fn tell_person(text: &str) {
     unsafe {
         MessageBoxW(None, &text, w!("Canoa"), MB_OK | MB_ICONWARNING);
     }
+}
+
+/// The width a pane starts with: about 400 pixels at 96 dpi, scaled to the system's density.
+pub fn pane_width() -> i32 {
+    // SAFETY: a call with no arguments.
+    let dpi = unsafe { GetDpiForSystem() };
+    (400 * dpi.max(96) / 96) as i32
 }
 
 /// The dispatch id of the button's callback.
@@ -95,9 +103,13 @@ impl AddIn {
         let pane = unsafe { ICustomTaskPane::from_raw(raw) };
         // SAFETY: plain value arguments on a live interface.
         let docked = unsafe { pane.put_DockPosition(DOCK_RIGHT) };
+        // The width the pane starts with, once: the pane keeps whatever width the person drags it to afterwards.
+        let width = pane_width();
+        // SAFETY: a plain value argument on a live interface.
+        let sized = unsafe { pane.put_Width(width) };
         log(&format!(
-            "task pane created, dock right hr={:#010x}",
-            docked.0
+            "task pane created, dock right hr={:#010x}, width {width} px hr={:#010x}",
+            docked.0, sized.0
         ));
         *self.pane.borrow_mut() = Some(pane);
         S_OK

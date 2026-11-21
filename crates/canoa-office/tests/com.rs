@@ -48,6 +48,7 @@ struct Seen {
     no_window: Cell<bool>,
     visible: Cell<i16>,
     dock: Cell<i32>,
+    width: Cell<i32>,
     site_events: RefCell<Vec<&'static str>>,
 }
 
@@ -123,8 +124,9 @@ impl ICustomTaskPane_Impl for FakePane_Impl {
     unsafe fn get_Width(&self, _: *mut i32) -> HRESULT {
         E_NOTIMPL
     }
-    unsafe fn put_Width(&self, _: i32) -> HRESULT {
-        E_NOTIMPL
+    unsafe fn put_Width(&self, width: i32) -> HRESULT {
+        self.seen.width.set(width);
+        S_OK
     }
     unsafe fn get_DockPosition(&self, position: *mut i32) -> HRESULT {
         unsafe { position.write(self.seen.dock.get()) };
@@ -574,9 +576,13 @@ fn the_add_in_and_the_pane_work_through_com() {
     );
     assert_eq!(seen.created.borrow().len(), 2);
     assert_eq!(seen.dock.get(), 2, "docked right");
+    assert_eq!(seen.width.get(), canoa_office::pane_width());
+    assert!(seen.width.get() >= 400, "a sensible starting width");
     assert_eq!(seen.visible.get(), -1, "the first click shows the pane");
+    seen.width.set(555); // the person drags the pane
     invoke(1).unwrap();
     assert_eq!(seen.visible.get(), 0, "the second hides it");
+    assert_eq!(seen.width.get(), 555, "their width is kept");
     invoke(1).unwrap();
     assert_eq!(seen.visible.get(), -1, "and the third shows it again");
     assert_eq!(seen.created.borrow().len(), 2, "one pane, made once");

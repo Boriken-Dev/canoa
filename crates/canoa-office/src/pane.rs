@@ -426,7 +426,6 @@ impl IOleObject_Impl for PaneControl_Impl {
     }
 
     fn SetExtent(&self, _aspect: DVASPECT, size: *const SIZE) -> Result<()> {
-        log("pane SetExtent");
         if size.is_null() {
             return Err(E_POINTER.into());
         }
@@ -436,7 +435,6 @@ impl IOleObject_Impl for PaneControl_Impl {
     }
 
     fn GetExtent(&self, _aspect: DVASPECT) -> Result<SIZE> {
-        log("pane GetExtent");
         Ok(self.extent.get())
     }
 
@@ -491,7 +489,6 @@ impl IOleInPlaceObject_Impl for PaneControl_Impl {
     }
 
     fn SetObjectRects(&self, position: *const RECT, _clip: *const RECT) -> Result<()> {
-        log("pane SetObjectRects");
         let window = self.window.get();
         if position.is_null() {
             return Err(E_POINTER.into());
@@ -598,7 +595,6 @@ impl IViewObject2_Impl for PaneControl_Impl {
         _index: i32,
         _device: *const DVTARGETDEVICE,
     ) -> Result<SIZE> {
-        log("pane GetExtent");
         Ok(self.extent.get())
     }
 }
