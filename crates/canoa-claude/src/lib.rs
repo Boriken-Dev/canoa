@@ -15,10 +15,14 @@ use alloc::string::String;
 pub use coqui_acp_claude as acp;
 
 use canoa::preset::SourcePreset;
-use canoa::store::recipe::{Part, Recipe, Release};
+use canoa::status::{bad_value, internal, unsupported};
+use canoa::store::recipe::{
+    HOMEBREW_MARKERS, Part, Recipe, Release, classify_by, dotted, get_json, hex_digest,
+    latest_report, measured_platforms, pinned, platform_names,
+};
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
+    MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
     AccessTarget, AgentVendor, GatewayRoute, HistoryAnswer, HistoryRequest, HookSupport,
@@ -28,9 +32,6 @@ use canoa::vendor::{
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-
-use canoa::status::{bad_value, internal, unsupported};
-use canoa::store::recipe::{dotted, get_json, measured_platforms, path_has, pinned, spell};
 
 const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
 
@@ -202,45 +203,31 @@ impl Recipe for ClaudeRecipe {
     }
 
     fn classify(&self, path: &str) -> (&'static str, Updatable) {
-        if path_has(path, "node_modules") {
-            (
-                MANAGER_NPM,
-                Updatable::Elsewhere {
-                    how: "npm install -g @anthropic-ai/claude-code@latest".to_owned(),
-                },
-            )
-        } else if path_has(path, "winget") {
-            (
-                MANAGER_WINGET,
-                Updatable::Elsewhere {
-                    how: "winget upgrade Anthropic.ClaudeCode".to_owned(),
-                },
-            )
-        } else if path_has(path, "homebrew")
-            || path_has(path, "/cellar/")
-            || path_has(path, "linuxbrew")
-        {
-            (
-                MANAGER_HOMEBREW,
-                Updatable::Elsewhere {
-                    how: "brew upgrade claude-code".to_owned(),
-                },
-            )
-        } else if path_has(path, ".local/bin") || path_has(path, ".claude/local") {
-            (
-                MANAGER_NATIVE,
-                Updatable::Elsewhere {
-                    how: "claude update".to_owned(),
-                },
-            )
-        } else {
-            (
-                MANAGER_UNKNOWN,
-                Updatable::No {
-                    why: "its origin is not known".to_owned(),
-                },
-            )
-        }
+        classify_by(
+            path,
+            &[
+                (
+                    &["node_modules"],
+                    MANAGER_NPM,
+                    "npm install -g @anthropic-ai/claude-code@latest",
+                ),
+                (
+                    &["winget"],
+                    MANAGER_WINGET,
+                    "winget upgrade Anthropic.ClaudeCode",
+                ),
+                (
+                    &HOMEBREW_MARKERS,
+                    MANAGER_HOMEBREW,
+                    "brew upgrade claude-code",
+                ),
+                (
+                    &[".local/bin", ".claude/local"],
+                    MANAGER_NATIVE,
+                    "claude update",
+                ),
+            ],
+        )
     }
 
     fn launch_environment(&self) -> BTreeMap<String, String> {
@@ -248,14 +235,10 @@ impl Recipe for ClaudeRecipe {
     }
 
     fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        match Self::newest(channel, tools) {
-            Ok(version) => {
-                let mut report = LatestReport::known(version);
-                report.channel = Some(channel.unwrap_or("latest").to_owned());
-                report
-            }
-            Err(error) => LatestReport::unknown(error.message().to_owned()),
-        }
+        latest_report(
+            Self::newest(channel, tools),
+            Some(channel.unwrap_or("latest")),
+        )
     }
 
     fn release(
@@ -269,17 +252,16 @@ impl Recipe for ClaudeRecipe {
             Some(version) => pinned(version)?,
             None => Self::newest(channel, tools)?,
         };
-        let os = spell(
-            &platform.os,
+        let (os, arch) = platform_names(
+            "Claude Code",
+            platform,
             &[
                 ("windows", "win32"),
                 ("linux", "linux"),
                 ("macos", "darwin"),
             ],
-        )
-        .ok_or_else(|| unsupported("Claude Code is not published for this system"))?;
-        let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported("Claude Code is not published for this processor"))?;
+            &[("x86_64", "x64"), ("aarch64", "arm64")],
+        )?;
         let key = format!("{os}-{arch}");
         let manifest = get_json(tools, &format!("{BASE}/{version}/manifest.json"))?;
         if manifest["version"].as_str() != Some(version.as_str()) {
@@ -298,14 +280,12 @@ impl Recipe for ClaudeRecipe {
         }
         let checksum = entry["checksum"]
             .as_str()
-            .filter(|c| c.len() == 64 && c.bytes().all(|b| b.is_ascii_hexdigit()))
+            .and_then(|c| hex_digest(c, 64))
             .ok_or_else(|| internal("the manifest gives no SHA-256 for this build"))?;
         let download = Download::new(
             format!("{BASE}/{version}/{key}/{binary}"),
             entry["size"].as_u64(),
-            Check::Sha256 {
-                value: checksum.to_ascii_lowercase(),
-            },
+            Check::Sha256 { value: checksum },
         );
         let mut release = Release::new(
             version,

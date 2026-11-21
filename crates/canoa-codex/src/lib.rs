@@ -16,10 +16,14 @@ use alloc::string::String;
 pub use coqui_acp_codex as acp;
 
 use canoa::preset::SourcePreset;
-use canoa::store::recipe::{Part, Recipe, Release, UnpackStep};
+use canoa::status::{internal, unsupported};
+use canoa::store::recipe::{
+    HOMEBREW_MARKERS, Part, Recipe, Release, UnpackStep, classify_by, dotted, exe_suffix, get_json,
+    latest_report, measured_platforms, pinned, platform_names, sha256_from_sums,
+};
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
+    Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
     AccessTarget, AgentVendor, DeliveredFile, GatewayRoute, HistoryAnswer, HistoryRequest,
@@ -28,11 +32,6 @@ use canoa::vendor::{
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-
-use canoa::status::{internal, unsupported};
-use canoa::store::recipe::{
-    dotted, exe_suffix, get_json, measured_platforms, path_has, pinned, spell,
-};
 
 const ORIGIN: &str = "https://releases.openai.com";
 const LATEST: &str = "https://releases.openai.com/codex/channels/latest";
@@ -213,38 +212,26 @@ impl Recipe for CodexRecipe {
     }
 
     fn classify(&self, path: &str) -> (&'static str, Updatable) {
-        if path_has(path, "node_modules") {
-            (
-                MANAGER_NPM,
-                Updatable::Elsewhere {
-                    how: "npm install -g @openai/codex".to_owned(),
-                },
-            )
-        } else if path_has(path, "homebrew") || path_has(path, "/cellar/") {
-            (
-                MANAGER_HOMEBREW,
-                Updatable::Elsewhere {
-                    how: "brew upgrade --cask codex".to_owned(),
-                },
-            )
-        } else if path_has(path, "openai/codex")
-            || path_has(path, ".codex")
-            || path_has(path, ".local/bin")
-        {
-            (
-                MANAGER_NATIVE,
-                Updatable::Elsewhere {
-                    how: "codex update".to_owned(),
-                },
-            )
-        } else {
-            (
-                MANAGER_UNKNOWN,
-                Updatable::No {
-                    why: "its origin is not known".to_owned(),
-                },
-            )
-        }
+        classify_by(
+            path,
+            &[
+                (
+                    &["node_modules"],
+                    MANAGER_NPM,
+                    "npm install -g @openai/codex",
+                ),
+                (
+                    &HOMEBREW_MARKERS,
+                    MANAGER_HOMEBREW,
+                    "brew upgrade --cask codex",
+                ),
+                (
+                    &["openai/codex", ".codex", ".local/bin"],
+                    MANAGER_NATIVE,
+                    "codex update",
+                ),
+            ],
+        )
     }
 
     fn self_updates(&self) -> bool {
@@ -256,10 +243,7 @@ impl Recipe for CodexRecipe {
     }
 
     fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        match Self::channel(tools) {
-            Ok((version, _)) => LatestReport::known(version),
-            Err(error) => LatestReport::unknown(error.message().to_owned()),
-        }
+        latest_report(Self::channel(tools).map(|(version, _)| version), None)
     }
 
     fn release(
@@ -274,29 +258,20 @@ impl Recipe for CodexRecipe {
             Some(version) => pinned(version)?,
             None => newest.clone(),
         };
-        let os = spell(
-            &platform.os,
+        let (os, arch) = platform_names(
+            "Codex",
+            platform,
             &[
                 ("windows", "pc-windows-msvc"),
                 ("linux", "unknown-linux-musl"),
                 ("macos", "apple-darwin"),
             ],
-        )
-        .ok_or_else(|| unsupported("Codex is not published for this system"))?;
-        let arch = spell(
-            &platform.arch,
             &[("x86_64", "x86_64"), ("aarch64", "aarch64")],
-        )
-        .ok_or_else(|| unsupported("Codex is not published for this processor"))?;
+        )?;
         let asset = format!("codex-package-{arch}-{os}.tar.gz");
         let base = format!("{ORIGIN}/codex/releases/{version}");
         let sums = tools.fetch_text(&format!("{base}/codex-package_SHA256SUMS"), 64 * 1024)?;
-        let digest = sums
-            .lines()
-            .filter_map(|line| line.split_once(char::is_whitespace))
-            .find(|(_, name)| name.trim().trim_start_matches('*') == asset)
-            .map(|(hex, _)| hex.trim().to_ascii_lowercase())
-            .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        let digest = sha256_from_sums(&sums, &asset)
             .ok_or_else(|| unsupported(format!("release {version} lists no {asset}")))?;
         if version == newest {
             let published = document["assets"]

@@ -15,7 +15,7 @@ use std::path::Path;
 
 use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
-    Finish, Part, Recipe, Release, UnpackStep, dotted, get_json, pinned, sha256_sum_of, spell,
+    Finish, Part, Recipe, Release, UnpackStep, dotted, get_json, pinned, sha256_from_sums, spell,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -162,7 +162,7 @@ impl Recipe for NodeRecipe {
         let archive = format!("node-v{version}-{os}-{arch}.{format}");
         let base = format!("{NODE_ORIGIN}v{version}");
         let sums = tools.fetch_text(&format!("{base}/SHASUMS256.txt"), 64 * 1024)?;
-        let digest = sha256_sum_of(&sums, &archive)
+        let digest = sha256_from_sums(&sums, &archive)
             .ok_or_else(|| bad_value(format!("Node {version} lists no {archive}")))?;
         let download = Download::new(
             format!("{base}/{archive}"),

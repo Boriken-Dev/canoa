@@ -17,7 +17,7 @@ use std::path::Path;
 use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
     Finish, GITHUB_ASSET_HOSTS, Part, Recipe, Release, UnpackStep, dotted, measured_platforms,
-    pinned, sha256_sum_of,
+    pinned, sha256_from_sums,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -216,7 +216,7 @@ impl Recipe for PythonRecipe {
                 None => format!("the newest release lists no Python {channel}"),
             })
         })?;
-        let digest = sha256_sum_of(&sums, &build.file)
+        let digest = sha256_from_sums(&sums, &build.file)
             .ok_or_else(|| bad_value(format!("no digest for {}", build.file)))?;
         let url = format!(
             "{PYTHON_RELEASES}download/{}/{}",
@@ -310,14 +310,14 @@ dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  cpython-3.15.0
     #[test]
     fn a_digest_is_read_by_the_exact_file_name() {
         assert_eq!(
-            sha256_sum_of(
+            sha256_from_sums(
                 SUMS,
                 "cpython-3.13.9+20251014-x86_64-unknown-linux-gnu-install_only.tar.gz"
             )
             .as_deref(),
             Some("a".repeat(64).as_str())
         );
-        assert_eq!(sha256_sum_of(SUMS, "cpython-3.13.9"), None);
+        assert_eq!(sha256_from_sums(SUMS, "cpython-3.13.9"), None);
     }
 
     #[test]

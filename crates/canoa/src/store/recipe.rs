@@ -10,8 +10,8 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
 use super::{
-    Change, Download, InstallPlan, InstallTools, LatestReport, Launch, Platform, Serves, StoreInfo,
-    Updatable,
+    Change, Download, InstallPlan, InstallTools, LatestReport, Launch, MANAGER_UNKNOWN, Platform,
+    Serves, StoreInfo, Updatable,
 };
 
 /// What to unpack a fetched file with.
@@ -404,16 +404,6 @@ pub fn github_endpoints(api: &str, downloads: &str) -> Vec<String> {
         .collect()
 }
 
-/// The SHA-256 hex digest listed for `file` in a `SHASUMS256.txt` or `SHA256SUMS` document.
-#[must_use]
-pub fn sha256_sum_of(sums: &str, file: &str) -> Option<String> {
-    sums.lines()
-        .filter_map(|line| line.split_once(char::is_whitespace))
-        .find(|(_, name)| name.trim().trim_start_matches('*') == file)
-        .map(|(hex, _)| hex.trim().to_ascii_lowercase())
-        .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-}
-
 /// Parses `N` dot-separated unsigned integers from `text`.
 #[must_use]
 pub fn dotted_numbers<const N: usize>(text: &str) -> Option<[u64; N]> {
@@ -470,4 +460,158 @@ pub fn github_assets(release: &serde_json::Value) -> Vec<(String, String)> {
 #[must_use]
 pub fn newest_published<const N: usize>(all: Vec<Published<N>>) -> Option<Published<N>> {
     all.into_iter().max_by_key(|release| release.order)
+}
+
+/// Path substrings shared by Homebrew installations across macOS and Linux.
+pub const HOMEBREW_MARKERS: [&str; 3] = ["homebrew", "/cellar/", "linuxbrew"];
+
+/// Matches `path` against `(needles, manager, upgrade_command)` rows in order and returns the first matching package manager and
+/// [`Updatable::Elsewhere`], or `MANAGER_UNKNOWN` when no rule matches.
+#[must_use]
+pub fn classify_by(
+    path: &str,
+    rules: &[(&[&str], &'static str, &str)],
+) -> (&'static str, Updatable) {
+    for (needles, manager, how) in rules {
+        if needles.iter().any(|needle| path_has(path, needle)) {
+            return (
+                manager,
+                Updatable::Elsewhere {
+                    how: (*how).to_owned(),
+                },
+            );
+        }
+    }
+    (
+        MANAGER_UNKNOWN,
+        Updatable::No {
+            why: "its origin is not known".to_owned(),
+        },
+    )
+}
+
+/// Maps `platform.os` and `platform.arch` through `os_table` and `arch_table`, returning `UNSUPPORTED` naming `program` when
+/// either has no entry.
+///
+/// # Errors
+///
+/// `GUATIAO_ERR_UNSUPPORTED` when the OS or processor is not in the table.
+pub fn platform_names(
+    program: &str,
+    platform: &Platform,
+    os_table: &[(&str, &str)],
+    arch_table: &[(&str, &str)],
+) -> Result<(String, String), ProviderError> {
+    let os = spell(&platform.os, os_table).ok_or_else(|| {
+        crate::status::unsupported(format!("{program} is not published for this system"))
+    })?;
+    let arch = spell(&platform.arch, arch_table).ok_or_else(|| {
+        crate::status::unsupported(format!("{program} is not published for this processor"))
+    })?;
+    Ok((os, arch))
+}
+
+/// Normalizes a fixed-length ASCII hex digest (`64` for SHA-256, `128` for SHA-512) to lower case, returning `None` if `text` has
+/// any other length or non-hex byte.
+#[must_use]
+pub fn hex_digest(text: &str, hex_len: usize) -> Option<String> {
+    (text.len() == hex_len && text.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| text.to_ascii_lowercase())
+}
+
+/// Finds `filename` in a `SHA256SUMS`-formatted document (`<hex> [*]<filename>`) and returns its normalized lower-case SHA-256 hex.
+#[must_use]
+pub fn sha256_from_sums(sums: &str, filename: &str) -> Option<String> {
+    sums.lines()
+        .filter_map(|line| line.split_once(char::is_whitespace))
+        .find(|(_, name)| name.trim().trim_start_matches('*') == filename)
+        .and_then(|(hex, _)| hex_digest(hex.trim(), 64))
+}
+
+/// Turns a version lookup `result` into a [`LatestReport`], attaching `channel` when known.
+#[must_use]
+pub fn latest_report(result: Result<String, ProviderError>, channel: Option<&str>) -> LatestReport {
+    match result {
+        Ok(version) => {
+            let mut report = LatestReport::known(version);
+            report.channel = channel.map(str::to_owned);
+            report
+        }
+        Err(error) => LatestReport::unknown(error.message().to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_by_matches_the_first_rule_and_falls_back_to_unknown() {
+        let rules: &[(&[&str], &'static str, &str)] = &[
+            (&["node_modules"], "npm", "npm i -g p"),
+            (&HOMEBREW_MARKERS, "homebrew", "brew upgrade p"),
+            (&[".local/bin"], "native", "p update"),
+        ];
+        assert!(matches!(
+            classify_by("/home/linuxbrew/.linuxbrew/bin/p", rules),
+            ("homebrew", Updatable::Elsewhere { .. })
+        ));
+        assert!(matches!(
+            classify_by("/usr/local/bin/p", rules),
+            (MANAGER_UNKNOWN, Updatable::No { .. })
+        ));
+    }
+
+    #[test]
+    fn platform_names_maps_tables_and_refuses_unknowns() {
+        let ok = platform_names(
+            "Tool",
+            &Platform::new("windows", "x86_64"),
+            &[("windows", "win")],
+            &[("x86_64", "x64")],
+        )
+        .expect("mapped");
+        assert_eq!(ok, ("win".to_owned(), "x64".to_owned()));
+        let bad_os = platform_names(
+            "Tool",
+            &Platform::new("plan9", "x86_64"),
+            &[("windows", "win")],
+            &[("x86_64", "x64")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            bad_os.status,
+            coqui_acp_api::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
+        );
+        assert!(
+            bad_os
+                .message()
+                .contains("Tool is not published for this system")
+        );
+    }
+
+    #[test]
+    fn hex_digest_and_sha256_from_sums_validate_and_lowercase() {
+        let upper = "AB".repeat(32);
+        let lower = "ab".repeat(32);
+        assert_eq!(hex_digest(&upper, 64).as_deref(), Some(lower.as_str()));
+        assert_eq!(hex_digest("ab", 64), None);
+        assert_eq!(hex_digest(&"zz".repeat(32), 64), None);
+        let sums = format!("{upper}  *tool-x64.tar.gz\n");
+        assert_eq!(
+            sha256_from_sums(&sums, "tool-x64.tar.gz").as_deref(),
+            Some(lower.as_str())
+        );
+        assert_eq!(sha256_from_sums(&sums, "other.tar.gz"), None);
+    }
+
+    #[test]
+    fn latest_report_carries_version_or_error_reason() {
+        let known = latest_report(Ok("1.2.3".to_owned()), Some("stable"));
+        assert_eq!(known.version.as_deref(), Some("1.2.3"));
+        assert_eq!(known.channel.as_deref(), Some("stable"));
+        let unknown = latest_report(Err(crate::status::internal("offline")), Some("stable"));
+        assert!(unknown.version.is_none());
+        assert_eq!(unknown.unknown_because.as_deref(), Some("offline"));
+    }
 }

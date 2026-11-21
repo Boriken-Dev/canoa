@@ -577,6 +577,12 @@ pub fn dotted(line: &str) -> Option<String>;                      // the first w
 pub fn path_has(path: &str, needle: &str) -> bool;                // contains, ignoring case and the direction of slashes
 pub fn spell(value: &str, table: &[(&str, &str)]) -> Option<String>;   // the publisher's spelling from (ours, theirs) pairs
 pub const fn exe_suffix(os: &str) -> &'static str;                // ".exe" for exactly "windows", else ""
+pub const HOMEBREW_MARKERS: [&str; 3];                            // ["homebrew", "/cellar/", "linuxbrew"]
+pub fn classify_by(path: &str, rules: &[(&[&str], &'static str, &str)]) -> (&'static str, Updatable);
+pub fn platform_names(program: &str, platform: &Platform, os_table: &[(&str, &str)], arch_table: &[(&str, &str)]) -> Result<(String, String), ProviderError>;
+pub fn hex_digest(text: &str, hex_len: usize) -> Option<String>;
+pub fn sha256_from_sums(sums: &str, filename: &str) -> Option<String>;
+pub fn latest_report(result: Result<String, ProviderError>, channel: Option<&str>) -> LatestReport;
 ```
 
 ## `canoa::status` (any `coqui-acp-api` kind feature)
