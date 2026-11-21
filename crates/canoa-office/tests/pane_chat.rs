@@ -314,6 +314,13 @@ fn the_pane_finds_the_host_with_no_address_and_shows_the_chat_of_the_open_docume
         let _ = DestroyWindow(parent);
     }
     assert!(pane_state(7).unwrap().chat_address().is_none());
+    // The browser lets go of its data folder a moment after it is closed.
+    pump(Duration::from_secs(3), || false);
+    for name in ["home", "data", "log"] {
+        let _ = std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("canoa-office-{name}-{}", std::process::id())),
+        );
+    }
 }
 
 #[test]
