@@ -24,18 +24,12 @@ import { dataOf } from './model.js';
 export const NETWORK_MODES = ['system', 'none', 'proxy', 'pac', 'command'];
 
 /**
- * The values a profile holds for the item, as an object keyed by the schema's member names: what `apply` is asked with, parsed.
+ * The values a profile holds for the item, as an object keyed by the schema's member names: what `apply` is asked with.
  * @param {unknown} request `{ harness, values }`
  * @returns {Record<string, unknown>}
  */
 export function valuesOf(request) {
-  const text = request && typeof request === 'object' ? /** @type {{values?: unknown}} */ (request).values : undefined;
-  let values;
-  try {
-    values = typeof text === 'string' ? JSON.parse(text) : undefined;
-  } catch {
-    values = undefined;
-  }
+  const values = request && typeof request === 'object' ? /** @type {{values?: unknown}} */ (request).values : undefined;
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new BadValue('the values are a JSON object');
   return /** @type {Record<string, unknown>} */ (values);
 }
@@ -92,7 +86,7 @@ export class ProfileItem extends Provider {
 
   /**
    * What the values do to a session: `{ env, args, settings, network, notes }`, each optional (see `effect`).
-   * @param {{harness: string, values: string}} _request
+   * @param {{harness: string, values: Record<string, unknown>}} _request
    * @returns {object}
    */
   apply(_request) {

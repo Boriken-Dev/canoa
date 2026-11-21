@@ -96,12 +96,12 @@ impl Section<'_> {
     }
 
     /// What the provider holds, for a section stored with it.
-    pub(crate) fn read(&self) -> Result<String, String> {
+    pub(crate) fn read(&self) -> Result<coqui_acp_api::guatiao::Value, String> {
         self.entry.with(|section| section.read())
     }
 
     /// Hands `values` to the provider, for a section stored with it.
-    pub(crate) fn write(&self, values: String) -> Result<(), String> {
+    pub(crate) fn write(&self, values: coqui_acp_api::guatiao::Value) -> Result<(), String> {
         self.entry.with(|section| section.write(values))
     }
 }

@@ -36,16 +36,16 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
     fn hook_support(&self, request: HookSupportRequest) -> Result<Option<HookSupport>, ProviderError>;    // what its own hooks do for `cd`, `pre-compact` and a `session-start` after a `compact` or `clear`; default: nothing said
     fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError>;                      // how it is given a gateway the host runs for a session (its own account kind, credential, address setting, suffix, fixed settings); default none
     fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError>;       // the files it reads from its own folder to use a gateway at `address`; default none
-    fn entry_settings(&self, request: EntrySettingsRequest) -> Result<Option<String>, ProviderError>;   // the JSON object of its harness provider's settings the host's source for it is started with (a managed copy's launch, the person's protected places); default none
+    fn entry_settings(&self, request: EntrySettingsRequest) -> Result<Option<Value>, ProviderError>;   // the settings object of its harness provider the host's source for it is started with (a managed copy's launch, the person's protected places); default none
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError>;                      // the table of words (by registry id) for the access, and whether a program the host starts is given it at launch; default none
     fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError>;   // the sessions its program kept on this computer (None: cannot be brought in)
     fn session_history(&self, request: HistoryRequest) -> Result<HistoryAnswer, ProviderError>;     // one session file's text as a standard session history; default refuses UNSUPPORTED
 }
-// Plain data, `non_exhaustive` with `new`: Variable { name, value }, LoginFile { key, file }, ShellRequest { path, name, family: bash|zsh|powershell|cmd|other, wsl, windows },
+// Plain data, `non_exhaustive` with `new`: Variable { name, value }, LoginFile { key, file }, ShellFamily::{Bash, Zsh, Powershell, Cmd, Other}, ShellRequest { path, name, family: ShellFamily, wsl, windows },
 // ShellAdvice { env, notice } (`cannot(why)`, `sets(name, value)`), SessionsRequest { home?, limit, peek }, SessionFile { id, path, bytes, updated_ms, title?, cwd? },
 // SessionListing { home?, max_bytes, files (newest first; the newest `peek` carry title and cwd) }, HistoryRequest { text, session }, HistoryAnswer { history, title? }.
-// SkillsRequest { additional_directories }, SkillsDelivery { folder, files, plugin?, directory, how (`{name}`) }, PluginDelivery { folder, meta (JSON merged into the request's `_meta`; a string `PLUGIN_PATH` is the folder's path) },
-// DeliveredFile { path, text }, HooksRequest { commands: [HookCommand { kind: start|pre-compact|batch, command }], timeout_seconds }, HooksDelivery { files, plugin },
+// SkillsRequest { additional_directories }, SkillsDelivery { folder, files, plugin?, directory, how (`{name}`) }, PluginDelivery { folder, meta (value merged into the request's `_meta`; a string `PLUGIN_PATH` is the folder's path) },
+// DeliveredFile { path, text }, HookKind::{Start, PreCompact, Batch}, HooksRequest { commands: [HookCommand { kind: HookKind, command }], timeout_seconds }, HooksDelivery { files, plugin },
 // HookSupportRequest { event, reason? }, HookSupport { fires, text } (`fires`, `cannot`), AccessTarget { harness, at_launch },
 // GatewayRoute { kind, credential, address?, suffix, fixed: [Variable] } (`GatewayRoute::new(kind, credential)`),
 // EntrySettingsRequest { managed: [Variable] (the launch settings of the Store's copy, as text), protected? } (`EntrySettingsRequest::new()`).
@@ -92,20 +92,23 @@ impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn is_id(text: &str
 The `profile_item` kind: one thing a profile may set, and what it does to a session. Which items there are is not Canoa's to say: each is a provider, the ones Canoa carries and the ones an extension adds alike. The application's own pages (General to About) are providers of the host with no schema: the application draws such a section itself and chooses its widget by the id.
 
 ```rust
-pub const KIND: &str = "profile_item";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const NETWORK_MODES: [&str; 5] = [...];
+pub const KIND: &str = "profile_item";
+#[non_exhaustive] pub enum NetworkMode { System, None, Proxy, Pac, Command }   // .as_str(), ALL
+#[non_exhaustive] pub enum Error { EmptyPattern, PatternTooLong, BadPattern { pattern, reason }, BadThumbprint(String) }
 #[non_exhaustive] pub struct ItemInfo { pub id: String, pub title: String, pub help: Option<String>, pub harnesses: Vec<String>,
     pub schema: Option<Value>, pub form: Option<Value> }
-#[non_exhaustive] pub struct ApplyRequest { pub harness: String, pub values: String }   // values: a JSON object keyed by the schema's members
+#[non_exhaustive] pub struct ApplyRequest { pub harness: String, pub values: Value }   // values: an object keyed by the schema's members
 #[non_exhaustive] pub struct Variable { pub name: String, pub value: String }
 #[non_exhaustive] pub struct Setting { pub key: String, pub value: String }
-#[non_exhaustive] pub struct NetworkEffect { pub mode: String, pub url: Option<String>, pub command: Vec<String>, pub bypass: Vec<String>,
+#[non_exhaustive] pub struct NetworkEffect { pub mode: NetworkMode, pub url: Option<String>, pub command: Vec<String>, pub bypass: Vec<String>,
     pub user: Option<String>, pub password_variable: Option<String> }
 #[non_exhaustive] pub struct ItemEffect { pub env: Vec<Variable>, pub args: Vec<String>, pub settings: Vec<Setting>, pub network: Option<NetworkEffect>, pub notes: Vec<String> }
 #[guatiao::kind(name = "profile_item")] pub trait ProfileItem: Send + Sync {
     fn describe(&self) -> Result<ItemInfo, ProviderError>;                 // the same on every call, with nothing run
     fn apply(&self, request: ApplyRequest) -> Result<ItemEffect, ProviderError>;
 }
-pub fn bad_value_error(why) -> ProviderError;   pub fn internal_error(why) -> ProviderError;
+impl HostPattern { pub fn parse(text: &str) -> Result<Self, Error>; /* ... */ }
+impl ClientCertificateHost { pub fn thumbprint(&self) -> Result<Option<String>, Error>; pub fn compile(&self) -> Result<HostPattern, Error>; }
 ```
 
 - `id` is the key the profile keeps the item's values under; `harnesses` are AOS harness ids (`claude-code`, the value of `AGENTS_HARNESS`), none meaning every harness. A session on another harness (or on one with no id) does not apply the item and says so.
@@ -134,7 +137,6 @@ ProviderInfo::new(title); .problem() -> Option<String>
     fn forget(&self, request: Named, spawner: Object<dyn ProcessSpawner>) -> Result<(), ProviderError>;    // UNSUPPORTED unless can_store; not having it is no error
 }
 pub fn name_problem(name: &str) -> Option<String>;   // text of any length that is not empty, with no control character
-pub fn unsupported(why) / unavailable(why) / bad_value(why) / internal(why) -> ProviderError   // UNSUPPORTED, GONE, BAD_VALUE, INTERNAL
 ```
 
 - **One configuration, one instance.** A provider declares its settings as a guatiao schema (`config = ..., form = ...` on the provider, a secret setting a `Secret<String>`), and the host makes an instance for each entry of `[secrets.providers]`. Every setting has a default, so the host can make an instance with none to describe the provider.
@@ -153,17 +155,16 @@ Each kind's description is `include/canoa.<kind>.kinds.json` and every model's s
 The `settings_section` kind: a page, or a group on a page, of the application's Settings. Which sections Settings has beyond the ones the application draws itself is not Canoa's to say: each is a provider, the ones Canoa carries and the ones an extension adds alike.
 
 ```rust
-pub const KIND: &str = "settings_section";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const DEFAULT_GROUP: &str = "Extensions";   pub const MAX_VALUES: usize = 64 * 1024;
+pub const KIND: &str = "settings_section";   pub const DEFAULT_GROUP: &str = "Extensions";   pub const MAX_VALUES: usize = 64 * 1024;
 pub enum Stored { Config, Provider }    // where the values live: `[settings.ID]` of the host's canoa.cfg, or with the provider
 #[non_exhaustive] pub struct SectionInfo { pub id: String, pub title: String, pub help: Option<String>, pub icon: Option<String>,
     pub group: Option<String>, pub under: Option<String>, pub keywords: Option<String>, pub stored: Stored,
     pub schema: Option<Value>, pub form: Option<Value> }
 #[guatiao::kind(name = "settings_section")] pub trait SettingsSection: Send + Sync {
-    fn describe(&self) -> Result<SectionInfo, ProviderError>;     // the same on every call, with nothing run
-    fn read(&self) -> Result<String, ProviderError>;              // `Stored::Provider`: a JSON object of the values, a sensitive member left out
-    fn write(&self, values: String) -> Result<(), ProviderError>; // `Stored::Provider`: the values, already checked against `schema`
+    fn describe(&self) -> Result<SectionInfo, ProviderError>;    // the same on every call, with nothing run
+    fn read(&self) -> Result<Value, ProviderError>;              // `Stored::Provider`: an object of the values, a sensitive member left out
+    fn write(&self, values: Value) -> Result<(), ProviderError>; // `Stored::Provider`: the values, already checked against `schema`
 }
-pub fn bad_value_error(why) -> ProviderError;   pub fn internal_error(why) -> ProviderError;
 impl SectionInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Screen>(self) -> Result<Self, ProviderError>; pub fn problem(&self) -> Option<String> }
 ```
 
@@ -177,7 +178,7 @@ impl SectionInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Scre
 The `panel_tab` kind: a kind of tab the application's bottom panel can open. Which kinds of tab the panel offers is not Canoa's to say: each is a provider, the ones Canoa carries (a terminal, the host's log) and the ones an extension adds alike.
 
 ```rust
-pub const KIND: &str = "panel_tab";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const MAX_TAIL_LINES: u32 = 5000;
+pub const KIND: &str = "panel_tab";   pub const MAX_TAIL_LINES: u32 = 5000;
 pub enum Shows { Terminal, Log, Page }
 #[non_exhaustive] pub struct TabInfo { pub id: String, pub title: String, pub help: Option<String>, pub icon: Option<String>,
     pub shows: Shows, pub shell: Option<String>, pub url: Option<String> }
@@ -186,7 +187,6 @@ pub enum Shows { Terminal, Log, Page }
     fn describe(&self) -> Result<TabInfo, ProviderError>;                    // the same on every call, with nothing run
     fn tail(&self, request: TailRequest) -> Result<String, ProviderError>;   // `Shows::Log`: the latest lines, oldest first; empty for a terminal
 }
-pub fn internal_error(why) -> ProviderError;
 impl TabInfo { pub fn new(id, title, shows) -> Self; pub fn page(id, title, url) -> Self; pub fn problem(&self) -> Option<String> }
 pub fn loopback_problem(url: &str) -> Option<&'static str>;   // None for http/https on 127.0.0.1, [::1] or localhost, no user information, a numeric port if any
 ```
@@ -199,7 +199,8 @@ pub fn loopback_problem(url: &str) -> Option<&'static str>;   // None for http/h
 The http and https addresses a person types. Any is accepted; plain `http` beyond this computer is told of and never refused (a library does not decide what the person's own network may carry).
 
 ```rust
-pub fn parse(address: &str) -> Result<url::Url, String>;      // `http` or `https`, a host, no user information, no space or control character; the reason never repeats the address
+#[non_exhaustive] pub enum Error { ControlOrWhitespace, NotHttpOrHttps, MissingHost, HasCredentials }
+pub fn parse(address: &str) -> Result<url::Url, Error>;       // `http` or `https`, a host, no user information, no space or control character; the reason never repeats the address
 pub fn is_loopback(url: &url::Url) -> bool;                     // `localhost`, 127.0.0.0/8 or ::1
 pub fn plain_beyond_loopback(url: &url::Url) -> bool;           // `http` to anywhere else
 pub fn plain_http_note(what: &str, address: &str) -> Option<String>;  // the sentence for such an address (`WHAT is plain http to HOST: ...`), `None` for any other, valid or not
@@ -348,7 +349,7 @@ A model that runs on this computer, served to an agent the way a cloud endpoint 
 pub const KIND: &str = "model_gateway";
 #[non_exhaustive] pub struct GatewayInfo { pub kind: String, pub vendor: String, pub table: Option<String> }   // the account kind it serves; the vendor of what runs the model (AGENTS_ACCOUNT_PROVIDER); the table of canoa.cfg handed to `open` each time
 impl GatewayInfo { pub fn new(kind, vendor) -> Self; }
-#[non_exhaustive] pub struct GatewayRequest { pub account: String, pub settings: String, pub table: String, pub home: Option<String>, pub helper: Vec<String> }   // settings and table: JSON objects in text; home: the host's home folder; helper: the program and arguments that start the host's own helper command (empty: none)
+#[non_exhaustive] pub struct GatewayRequest { pub account: String, pub settings: Value, pub table: Value, pub home: Option<String>, pub helper: Vec<String> }   // settings and table: `guatiao::Value` objects; home: the host's home folder; helper: the program and arguments that start the host's own helper command (empty: none)
 impl GatewayRequest { pub fn new(account) -> Self; }
 pub trait ModelGateway {   // kind `model_gateway`
     fn describe(&self) -> Result<GatewayInfo, ProviderError>;   // the same on every call, with nothing run
@@ -366,7 +367,7 @@ pub trait GatewayLease {   // object kind `gateway_lease`; destroying it ends th
 The account kind of an address that speaks one or several credential standards (a gateway or proxy in front of many models), the `account_provider` that makes it, and the pieces any account provider of such an address builds on. It is no relation to `model_gateway` above, which serves a model that runs on this computer. Needs `network`, `coqui-acp-api`, `guatiao`, `guatiao-serde`, `serde_json` and `percent-encoding`.
 
 ```rust
-pub const KIND: &str = "api-gateway";           // the account kind, and the id of the sign-in method that makes it
+pub const ACCOUNT_KIND: &str = "api-gateway";   // the account kind, and the id of the sign-in method that makes it
 pub const LIBRARY: &str = "canoa-api-gateway";  // the name `library` is registered under
 pub const CREDENTIAL: &str = "api_key";         // the key of the credentials that holds the key
 pub const BASE_URL: &str = "base_url";          // the setting that holds the address
@@ -377,13 +378,14 @@ pub const BY_STANDARD_NOTE: &str = "x-by-standard";   // the schema annotation t
 pub const ADDRESSES: &str = "addresses";  pub const CREDENTIALS: &str = "credentials";   // the sign-in's inputs for it: `standard=address` and `standard=credential` pairs
 #[non_exhaustive] pub struct Settings { pub base_url: String, pub standards: Vec<String>, pub by_standard: BTreeMap<String, StandardSettings> }   // Debug, Clone, Eq
 #[non_exhaustive] pub struct StandardSettings { pub base_url: Option<String>, pub credential: Option<String> }   // Debug, Clone, Default, Eq
-impl Settings { pub fn from_map(&Map<String, Value>) -> Result<Self, String>; pub fn to_value(&self) -> Value; pub fn address_for(&self, standard: &str) -> &str; }   // `standards` is a list of ids or text of ids separated by commas or white space; `by_standard` is a table keyed by standard, and `addresses` and `credentials` (text pairs, as a sign-in's inputs have them) name the same things: each must be of a standard in `standards`, an address is checked as `check_address` and loses a trailing `/`, a credential key is one the standard names (`well_known`) or, for any other, a name; any other key is refused. `address_for` is the account's address for a standard: its own where `by_standard` names none
+#[non_exhaustive] pub enum Error { /* InvalidStandardId, NoStandards, MalformedPair, WrongStandardCredential, InvalidCredentialKey, Address, UnknownSetting, MissingBaseUrl, MissingStandards, ByStandardNotObject, ByStandardEntryNotObject, UnknownStandardSetting, StandardSettingNotText, PairsNotText, InvalidPair, StandardNotSpoken, InvalidStandardAddress */ }
+impl Settings { pub fn from_map(&Map<String, Value>) -> Result<Self, Error>; pub fn to_value(&self) -> Value; pub fn address_for(&self, standard: &str) -> &str; }   // `standards` is a list of ids or text of ids separated by commas or white space; `by_standard` is a table keyed by standard, and `addresses` and `credentials` (text pairs, as a sign-in's inputs have them) name the same things: each must be of a standard in `standards`, an address is checked as `check_address` and loses a trailing `/`, a credential key is one the standard names (`well_known`) or, for any other, a name; any other key is refused. `address_for` is the account's address for a standard: its own where `by_standard` names none
 pub fn offer() -> AccountOffer;                 // the kind (provides none of its own; its endpoint slot is `base_url`) and the one sign-in method
 pub fn settings_schema() -> Value;  pub fn inputs_schema() -> Value;   // the account's settings (the standards property is `"x-provides": true`, the key `writeOnly` and `x-sensitive`) and what the sign-in asks before it runs
-pub fn parse_standards(text: &str) -> Result<Vec<String>, String>;   // each once, in the order given; none, or one that is not an id (`coqui_acp_api::standard::is_standard`), is refused
-pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, String>;   // `name=value` pairs separated by commas or white space
-pub fn check_credential(standard: &str, key: &str) -> Result<(), String>;  // a key a well-known standard takes, else a name
-pub fn check_address(url: &str) -> Result<(), String>;               // `address::parse` without the `Url`: any `http` or `https` address, no login in it, no space
+pub fn parse_standards(text: &str) -> Result<Vec<String>, Error>;   // each once, in the order given; none, or one that is not an id (`coqui_acp_api::standard::is_standard`), is refused
+pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, Error>;   // `name=value` pairs separated by commas or white space
+pub fn check_credential(standard: &str, key: &str) -> Result<(), Error>;  // a key a well-known standard takes, else a name
+pub fn check_address(url: &str) -> Result<(), Error>;               // `address::parse` without the `Url`: any `http` or `https` address, no login in it, no space
 pub fn models_url(base: &str) -> String;                              // `/v1/models`, or `/models` when `base` already ends in `/v1`
 pub fn openai_models(base: &str, key: &str) -> ModelListing;         // GET it with `Authorization: Bearer KEY`; anything it cannot say is an unknown with the reason (the address does not answer, answers its status, or a list with no `data`)
 pub fn key_form(title: &str, what: &str) -> LoginForm;  pub fn key_of(&LoginAnswer) -> Result<String, ProviderError>;   // the sealed form that asks for a key, and the trimmed key it answers (BAD_VALUE when nothing was typed)
@@ -393,10 +395,11 @@ pub fn library(host: Host) -> Option<LibraryParts>;                  // what `Re
 pub mod http {
     pub const WAIT: Duration;                   // 30 s a request
     #[non_exhaustive] pub struct Reply { pub status: u16, pub body: Value }   // `body` is null when the answer was empty or not JSON
-    pub fn agent() -> Result<ureq::Agent, String>;                          // through `network::Network::current()`, no redirect, no error for a status
-    pub fn get_json(url: &str, bearer: Option<&str>) -> Result<Reply, String>;
-    pub fn post_form(url: &str, fields: &[(&str, &str)]) -> Result<Reply, String>;
-    pub fn post_json(url: &str, body: &Value) -> Result<Reply, String>;
+    #[non_exhaustive] pub enum Error { NetworkSetup(String), RequestFailed(String), ResponseCutOff(String) }
+    pub fn agent() -> Result<ureq::Agent, Error>;                          // through `network::Network::current()`, no redirect, no error for a status
+    pub fn get_json(url: &str, bearer: Option<&str>) -> Result<Reply, Error>;
+    pub fn post_form(url: &str, fields: &[(&str, &str)]) -> Result<Reply, Error>;
+    pub fn post_json(url: &str, body: &Value) -> Result<Reply, Error>;
 }
 ```
 
@@ -438,7 +441,7 @@ pub trait ModelStore: Send + Sync {
     fn keep(&self, request: ModelKeep, spawner: Object<dyn ProcessSpawner>) -> Result<ModelKept, ProviderError>;
     fn service(&self, query: ServiceQuery, spawner: Object<dyn ProcessSpawner>) -> Result<ServiceReport, ProviderError>;
 }
-pub const KIND: &str = "model_store";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const RESERVED_TABLES: [&str; 29] = [...];   pub const MOST_OUTPUT: usize = 8 MiB;
+pub const KIND: &str = "model_store";   pub const RESERVED_TABLES: [&str; 29] = [...];   pub const MOST_OUTPUT: usize = 8 MiB;
 // Every model is #[non_exhaustive] with `new` (or Default) and public fields; `include/canoa.model_store.{kinds,schemas}.json` describe them.
 pub struct ModelStoreInfo { pub title, pub catalog, pub publisher, pub missing: String, pub settings: Option<ModelSettings>, pub speech: Option<SpeechService> }   // new(title, catalog, publisher, missing); problem()
 pub struct ModelSettings { pub table: String, pub help: Option<String>, pub schema: Value, pub form: Option<Value> }   // asking::<S: Schema + Screen>(table)
@@ -466,7 +469,7 @@ pub fn run(spawner: &Object<dyn ProcessSpawner>, program: &str, args: &[String],
 
 ## `catalog_source` (`canoa::store::source`, feature `store`)
 
-A Guatiao kind for where a Store type's catalog comes from, and the form that names one. `describe() -> SourceInfo { id, title, help?, types: Vec<String>, schema?: Value, form?: Value }` is the same answer on every call with nothing run: `types` are the Store type ids it serves (none means every type), `schema` and `form` are what the source asks for (see "The form a provider asks for"), and `SourceInfo::problem` says why an id, a title or a form is refused. `read(ReadRequest { kind, label, fields }, spawner: Object<dyn ProcessSpawner>) -> String` answers with the catalog's text in the type's own format, or fails with the reason; the `spawner` is the host's and has the person's own reach (`spawn` starts a program as the person, `read_file` reads a file anywhere their account can by its absolute path; `write_file` and `remove_file` are refused), a script has no other way to do either, and the source destroys it; `fields` is a JSON object of what the form held (a member left empty is absent), and it runs on every refresh of the catalog. canoa.cfg keeps `{ provider = ID, ...fields }` for a catalog under `[store.<type>.catalogs.<label>]`, and a bare string for the provider `read`. `KIND` and `KIND_VERSIONS` name the kind and its versions.
+A Guatiao kind for where a Store type's catalog comes from, and the form that names one. `describe() -> SourceInfo { id, title, help?, types: Vec<String>, schema?: Value, form?: Value }` is the same answer on every call with nothing run: `types` are the Store type ids it serves (none means every type), `schema` and `form` are what the source asks for (see "The form a provider asks for"), and `SourceInfo::problem` says why an id, a title or a form is refused. `read(ReadRequest { kind, label, fields }, spawner: Object<dyn ProcessSpawner>) -> String` answers with the catalog's text in the type's own format, or fails with the reason; the `spawner` is the host's and has the person's own reach (`spawn` starts a program as the person, `read_file` reads a file anywhere their account can by its absolute path; `write_file` and `remove_file` are refused), a script has no other way to do either, and the source destroys it; `fields` is a JSON object of what the form held (a member left empty is absent), and it runs on every refresh of the catalog. canoa.cfg keeps `{ provider = ID, ...fields }` for a catalog under `[store.<type>.catalogs.<label>]`, and a bare string for the provider `read`. `KIND` names the kind.
 
 ## `program_store` (`canoa::store`, feature `store`)
 
@@ -574,9 +577,15 @@ pub fn dotted(line: &str) -> Option<String>;                      // the first w
 pub fn path_has(path: &str, needle: &str) -> bool;                // contains, ignoring case and the direction of slashes
 pub fn spell(value: &str, table: &[(&str, &str)]) -> Option<String>;   // the publisher's spelling from (ours, theirs) pairs
 pub const fn exe_suffix(os: &str) -> &'static str;                // ".exe" for exactly "windows", else ""
-pub fn unsupported_error(why: impl AsRef<str>) -> ProviderError; // status UNSUPPORTED
-pub fn internal_error(why: impl AsRef<str>) -> ProviderError;    // status INTERNAL
-pub fn bad_value_error(why: impl AsRef<str>) -> ProviderError;   // status BAD_VALUE
+```
+
+## `canoa::status` (any `coqui-acp-api` kind feature)
+
+```rust
+pub fn unsupported(why: impl AsRef<str>) -> ProviderError;  // status GUATIAO_ERR_UNSUPPORTED
+pub fn unavailable(why: impl AsRef<str>) -> ProviderError;  // status GUATIAO_ERR_GONE
+pub fn bad_value(why: impl AsRef<str>) -> ProviderError;    // status GUATIAO_ERR_BAD_VALUE
+pub fn internal(why: impl AsRef<str>) -> ProviderError;     // status GUATIAO_ERR_INTERNAL
 ```
 
 `canoa::store::engine::Engine<R: Recipe>` is the store that runs a recipe (`describe`, `program`, `latest`, `plan`, `apply`, with the `Run` of `canoa::store::exec` that
@@ -668,7 +677,7 @@ A provider's own settings are its Guatiao configuration, with a form that shows 
 Settings, form = Settings)]` with `Settings` deriving `Schema` and `guatiao_intake::Form`. Sections, titles, `advanced`, widgets and
 units ride the schema and the form, so any program that draws a provider's settings draws these.
 
-Helpers: `unsupported_format(format, takes)`, `bad_value(why)` and `internal(why)` build the three errors.
+Helpers: `unsupported_format(format, takes)` (and `canoa::status::{bad_value, internal}` for `BAD_VALUE` and `INTERNAL`).
 
 ### `canoa::speech::builtin` (feature `speech-builtin`)
 
@@ -746,8 +755,7 @@ pub struct SayRequest { pub text: String, pub voice: Option<String>, pub model: 
 `uses` names the `SayRequest` fields the provider acts on (`voice`, `model`, `style`, `speed`, `language`), so a form offers only what has an effect. `words` is a
 sentence on where the text goes; `endpoint` is the address when it goes to one. `VoiceList::speaking(language)` keeps the voices that speak the tag's primary
 subtag, and keeps a voice that names no language. Helpers: `sentences(text)` (the lines a program that speaks one line at a time is handed: a sentence each,
-a sentence over 400 characters cut at a comma or a space, nothing for text with nothing to say), `checked_text(request, max)`, `unknown_choice(what, wanted, has)`,
-`unsupported(why)`.
+a sentence over 400 characters cut at a comma or a space, nothing for text with nothing to say), `checked_text(request, max)`, `unknown_choice(what, wanted, has)` (and `canoa::status::unsupported`).
 
 ### `canoa::speech::builtin` speech-output providers (feature `speech-builtin`)
 
@@ -780,7 +788,7 @@ The speech-to-text services the accounts of some kinds can call, described by a 
 pub trait AccountSpeech: Send + Sync {
     fn describe(&self) -> Result<AccountSpeechInfo, ProviderError>;
 }
-pub const KIND: &str = "account_speech";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+pub const KIND: &str = "account_speech";
 pub struct AccountSpeechInfo { pub services: Vec<AccountSpeechService> }   // new(services); problem(): a service that cannot be offered, or an id used twice
 pub struct AccountSpeechService { pub id, pub title, pub summary, pub location, pub standard, pub address, pub url, pub credential: String, pub models: Vec<AccountSpeechModel> }
     // new(id, title, standard, address, url, credential); problem()

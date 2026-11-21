@@ -7,7 +7,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::guatiao::{Map, Status, Value};
+use coqui_acp_api::guatiao::{Map, Value};
 
 use super::{
     Change, Download, InstallPlan, InstallTools, LatestReport, Launch, Platform, Serves, StoreInfo,
@@ -318,31 +318,14 @@ pub fn serves_when(provider: &str, key: &str, value: &str) -> Serves {
     serves
 }
 
-/// An error with status `GUATIAO_ERR_UNSUPPORTED`.
-#[must_use]
-pub fn unsupported_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, why.as_ref())
-}
-
-/// An error with status `GUATIAO_ERR_INTERNAL`.
-#[must_use]
-pub fn internal_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, why.as_ref())
-}
-
-/// An error with status `GUATIAO_ERR_BAD_VALUE`.
-#[must_use]
-pub fn bad_value_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why.as_ref())
-}
-
 /// A JSON document fetched through the host.
 pub fn get_json(
     tools: &Object<dyn InstallTools>,
     url: &str,
 ) -> Result<serde_json::Value, ProviderError> {
     let text = tools.fetch_text(url, 4 << 20)?;
-    serde_json::from_str(&text).map_err(|e| internal_error(format!("{url} is not JSON: {e}")))
+    serde_json::from_str(&text)
+        .map_err(|e| crate::status::internal(format!("{url} is not JSON: {e}")))
 }
 
 /// Whether `version` is a plain version name a URL can carry.
@@ -359,7 +342,9 @@ pub fn pinned(version: &str) -> Result<String, ProviderError> {
     if valid_version(version) {
         Ok(version.to_owned())
     } else {
-        Err(bad_value_error(format!("{version:?} is not a version")))
+        Err(crate::status::bad_value(format!(
+            "{version:?} is not a version"
+        )))
     }
 }
 

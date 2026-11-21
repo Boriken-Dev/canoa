@@ -316,7 +316,8 @@ impl ModelStore for FoundryModels {
     ) -> Result<ModelActed, ProviderError> {
         let action = ModelAction::parse(&request.action)
             .ok_or_else(|| bad("action is download, load or unload"))?;
-        let args = models::action_args(action, &request.model).map_err(bad)?;
+        let args =
+            models::action_args(action, &request.model).map_err(|why| bad(why.to_string()))?;
         let program = request.program.ok_or_else(|| {
             failed("Foundry Local is not installed: install it from the Store's Foundry Local list")
         })?;

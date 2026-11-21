@@ -10,12 +10,37 @@
     reason = "a connection is std's"
 )]
 
+use std::fmt;
 use std::io::Read as _;
 use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::network::Network;
+
+/// Why a gateway HTTP request failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// The host's network configuration could not be applied.
+    NetworkSetup(String),
+    /// The remote address did not answer in time or refused the connection.
+    RequestFailed(String),
+    /// Reading the response body failed before the response finished.
+    ResponseCutOff(String),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NetworkSetup(error) => write!(f, "the network could not be set up: {error}"),
+            Self::RequestFailed(error) => write!(f, "the address did not answer: {error}"),
+            Self::ResponseCutOff(error) => write!(f, "the answer was cut off: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 /// How long one request may take, from the first byte sent to the last read.
 pub const WAIT: Duration = Duration::from_secs(30);
@@ -46,7 +71,7 @@ impl Reply {
 /// # Errors
 ///
 /// The network's own settings cannot be applied.
-pub fn agent() -> Result<ureq::Agent, String> {
+pub fn agent() -> Result<ureq::Agent, Error> {
     let config = ureq::Agent::config_builder()
         .max_redirects(0)
         .http_status_as_error(false)
@@ -54,10 +79,10 @@ pub fn agent() -> Result<ureq::Agent, String> {
         .build();
     Network::current()
         .agent(config)
-        .map_err(|error| format!("the network could not be set up: {error}"))
+        .map_err(|error| Error::NetworkSetup(error.to_string()))
 }
 
-fn read(response: ureq::http::Response<ureq::Body>) -> Result<Reply, String> {
+fn read(response: ureq::http::Response<ureq::Body>) -> Result<Reply, Error> {
     let status = response.status().as_u16();
     let mut text = String::new();
     response
@@ -65,15 +90,15 @@ fn read(response: ureq::http::Response<ureq::Body>) -> Result<Reply, String> {
         .into_reader()
         .take(ANSWER_LIMIT)
         .read_to_string(&mut text)
-        .map_err(|error| format!("the answer was cut off: {error}"))?;
+        .map_err(|error| Error::ResponseCutOff(error.to_string()))?;
     Ok(Reply {
         status,
         body: serde_json::from_str(&text).unwrap_or(Value::Null),
     })
 }
 
-fn failed(error: &ureq::Error) -> String {
-    format!("the address did not answer: {error}")
+fn failed(error: &ureq::Error) -> Error {
+    Error::RequestFailed(error.to_string())
 }
 
 /// `GET url`, with `Authorization: Bearer KEY` when a key is given.
@@ -81,7 +106,7 @@ fn failed(error: &ureq::Error) -> String {
 /// # Errors
 ///
 /// The address did not answer in time, refused the connection, or sent an answer that was cut off. A status is not an error.
-pub fn get_json(url: &str, bearer: Option<&str>) -> Result<Reply, String> {
+pub fn get_json(url: &str, bearer: Option<&str>) -> Result<Reply, Error> {
     let agent = agent()?;
     let mut request = agent.get(url).header("Accept", "application/json");
     if let Some(key) = bearer {
@@ -95,7 +120,7 @@ pub fn get_json(url: &str, bearer: Option<&str>) -> Result<Reply, String> {
 /// # Errors
 ///
 /// As [`get_json`].
-pub fn post_form(url: &str, fields: &[(&str, &str)]) -> Result<Reply, String> {
+pub fn post_form(url: &str, fields: &[(&str, &str)]) -> Result<Reply, Error> {
     let agent = agent()?;
     let body = fields
         .iter()
@@ -120,7 +145,7 @@ pub fn post_form(url: &str, fields: &[(&str, &str)]) -> Result<Reply, String> {
 /// # Errors
 ///
 /// As [`get_json`].
-pub fn post_json(url: &str, body: &Value) -> Result<Reply, String> {
+pub fn post_json(url: &str, body: &Value) -> Result<Reply, Error> {
     let agent = agent()?;
     let request = agent
         .post(url)

@@ -29,9 +29,9 @@ use canoa::vendor::{
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
+use canoa::status::{internal, unsupported};
 use canoa::store::recipe::{
-    dotted, exe_suffix, get_json, internal_error, measured_platforms, path_has, pinned, spell,
-    unsupported_error,
+    dotted, exe_suffix, get_json, measured_platforms, path_has, pinned, spell,
 };
 
 const ORIGIN: &str = "https://releases.openai.com";
@@ -174,7 +174,7 @@ impl CodexRecipe {
         let document = get_json(tools, LATEST)?;
         let tag = document["tag_name"]
             .as_str()
-            .ok_or_else(|| internal_error("the channel document names no release"))?;
+            .ok_or_else(|| internal("the channel document names no release"))?;
         let version = tag.strip_prefix("rust-v").unwrap_or(tag);
         Ok((pinned(version)?, document))
     }
@@ -282,12 +282,12 @@ impl Recipe for CodexRecipe {
                 ("macos", "apple-darwin"),
             ],
         )
-        .ok_or_else(|| unsupported_error("Codex is not published for this system"))?;
+        .ok_or_else(|| unsupported("Codex is not published for this system"))?;
         let arch = spell(
             &platform.arch,
             &[("x86_64", "x86_64"), ("aarch64", "aarch64")],
         )
-        .ok_or_else(|| unsupported_error("Codex is not published for this processor"))?;
+        .ok_or_else(|| unsupported("Codex is not published for this processor"))?;
         let asset = format!("codex-package-{arch}-{os}.tar.gz");
         let base = format!("{ORIGIN}/codex/releases/{version}");
         let sums = tools.fetch_text(&format!("{base}/codex-package_SHA256SUMS"), 64 * 1024)?;
@@ -297,7 +297,7 @@ impl Recipe for CodexRecipe {
             .find(|(_, name)| name.trim().trim_start_matches('*') == asset)
             .map(|(hex, _)| hex.trim().to_ascii_lowercase())
             .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| unsupported_error(format!("release {version} lists no {asset}")))?;
+            .ok_or_else(|| unsupported(format!("release {version} lists no {asset}")))?;
         if version == newest {
             let published = document["assets"]
                 .as_array()
@@ -309,7 +309,7 @@ impl Recipe for CodexRecipe {
                 .and_then(|a| a["digest"].as_str())
                 .and_then(|d| d.strip_prefix("sha256:"));
             if published.is_some_and(|d| !d.eq_ignore_ascii_case(&digest)) {
-                return Err(internal_error(
+                return Err(internal(
                     "the channel's digest and the release's checksums disagree",
                 ));
             }

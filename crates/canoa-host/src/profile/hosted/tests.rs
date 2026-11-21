@@ -3585,19 +3585,32 @@ fn an_agents_plugin_meta_names_the_folder_it_was_written_to() {
     let written = Written(dir.clone());
     let plugin = canoa::vendor::PluginDelivery::new(
         "inner/plug",
-        r#"{"x": {"plugins": [{"path": "{path}"}, {"path": "elsewhere"}]}}"#,
+        guatiao_serde::from_serde(
+            json!({"x": {"plugins": [{"path": "{path}"}, {"path": "elsewhere"}]}}),
+        )
+        .expect("value"),
     );
     let meta = plugin_meta(&plugin, &written).expect("a meta");
     let path = meta["x"]["plugins"][0]["path"].as_str().expect("text");
     assert!(path.ends_with("plug") && path.contains("inner"), "{path}");
     assert_eq!(meta["x"]["plugins"][1]["path"], "elsewhere");
-    let own = canoa::vendor::PluginDelivery::new("", r#"{"p": "{path}"}"#);
+    let own = canoa::vendor::PluginDelivery::new(
+        "",
+        guatiao_serde::from_serde(json!({"p": "{path}"})).expect("value"),
+    );
     assert_eq!(
         plugin_meta(&own, &written).expect("a meta")["p"],
         dir.to_string_lossy().as_ref()
     );
     assert!(
-        plugin_meta(&canoa::vendor::PluginDelivery::new("", "[]"), &written).is_err(),
+        plugin_meta(
+            &canoa::vendor::PluginDelivery::new(
+                "",
+                guatiao_serde::from_serde(json!([])).expect("value")
+            ),
+            &written
+        )
+        .is_err(),
         "not an object"
     );
     drop(written);

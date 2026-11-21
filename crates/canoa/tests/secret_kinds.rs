@@ -113,7 +113,7 @@ impl SecretProvider for Fixed {
         &self,
         _: Object<dyn ProcessSpawner>,
     ) -> Result<Names, guatiao::library::ProviderError> {
-        Err(canoa::secret_provider::unsupported("it lists nothing"))
+        Err(canoa::status::unsupported("it lists nothing"))
     }
     fn get(
         &self,
@@ -127,14 +127,14 @@ impl SecretProvider for Fixed {
         _: Keeping,
         _: Object<dyn ProcessSpawner>,
     ) -> Result<(), guatiao::library::ProviderError> {
-        Err(canoa::secret_provider::unsupported("it keeps nothing"))
+        Err(canoa::status::unsupported("it keeps nothing"))
     }
     fn forget(
         &self,
         _: Named,
         _: Object<dyn ProcessSpawner>,
     ) -> Result<(), guatiao::library::ProviderError> {
-        Err(canoa::secret_provider::unsupported("it keeps nothing"))
+        Err(canoa::status::unsupported("it keeps nothing"))
     }
 }
 

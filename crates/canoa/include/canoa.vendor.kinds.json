@@ -2,7 +2,7 @@
   "kinds": [
     {
       "name": "agent_vendor",
-      "floor_hash": 1928350951,
+      "floor_hash": 3784573487,
       "object": false,
       "doc": "Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with\nnothing run and no connection opened; every other method has a default that says the agent has nothing to add.",
       "slots": [
@@ -192,7 +192,7 @@
           "answer": {
             "type": "value"
           },
-          "doc": "The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed\ncopy's program, the person's protected places), or `None` when there are none to add. The default: none."
+          "doc": "The settings of the agent's own harness provider that the host's source for it is started with, as an object (a managed\ncopy's program, the person's protected places), or `None` when there are none to add. The default: none."
         },
         {
           "name": "access_target",

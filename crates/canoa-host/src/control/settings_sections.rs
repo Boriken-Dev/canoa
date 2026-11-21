@@ -215,8 +215,8 @@ fn held(section: &Section<'_>, files: &Files) -> Result<Map<String, Value>, (i32
             .and_then(|value| value.as_object().cloned())
             .unwrap_or_default()),
         Stored::Provider => {
-            let text = section.read().map_err(|why| (REFUSED, why))?;
-            match serde_json::from_str::<Value>(&text) {
+            let value = section.read().map_err(|why| (REFUSED, why))?;
+            match guatiao_serde::adapt::from_value::<Value>(&value) {
                 Ok(Value::Object(values)) => Ok(values),
                 _ => Err((
                     REFUSED,
@@ -320,9 +320,10 @@ pub(crate) fn set(
             }
         }
         Stored::Provider => {
-            let text = serde_json::to_string(&values).map_err(|why| (REFUSED, why.to_string()))?;
+            let value = guatiao_serde::from_serde(Value::Object(values))
+                .map_err(|why| (REFUSED, why.to_string()))?;
             section
-                .write(text)
+                .write(value)
                 .map_err(|why| (REFUSED, format!("its provider refused: {why}")))?;
         }
     }

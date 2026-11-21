@@ -10,22 +10,13 @@
 use alloc::string::String;
 
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue};
+use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
 
 /// The name of the `panel_tab` kind.
 pub const KIND: &str = "panel_tab";
 
-/// The versions of the `panel_tab` kind this host offers.
-pub const KIND_VERSIONS: [&str; 1] = ["1"];
-
 /// The most lines a [`PanelTab::tail`] answers.
 pub const MAX_TAIL_LINES: u32 = 5000;
-
-/// An error with status `GUATIAO_ERR_INTERNAL`.
-#[must_use]
-pub fn internal_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, why.as_ref())
-}
 
 /// What a tab shows.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]

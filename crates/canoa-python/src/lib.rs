@@ -14,9 +14,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
-    Finish, GITHUB_ASSET_HOSTS, Part, Recipe, Release, UnpackStep, bad_value_error, dotted,
-    internal_error, measured_platforms, pinned, sha256_sum_of, unsupported_error,
+    Finish, GITHUB_ASSET_HOSTS, Part, Recipe, Release, UnpackStep, dotted, measured_platforms,
+    pinned, sha256_sum_of,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -69,7 +70,7 @@ fn triple(platform: &Platform) -> Result<&'static str, ProviderError> {
         ("windows", "aarch64") => Ok("aarch64-pc-windows-msvc"),
         ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
         ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
-        _ => Err(unsupported_error("Python is not published for this system")),
+        _ => Err(unsupported("Python is not published for this system")),
     }
 }
 
@@ -120,9 +121,7 @@ impl PythonRecipe {
         if PYTHON_CHANNELS.contains(&channel) {
             Ok(channel)
         } else {
-            Err(bad_value_error(format!(
-                "Python has no channel {channel:?}"
-            )))
+            Err(bad_value(format!("Python has no channel {channel:?}")))
         }
     }
 }
@@ -188,7 +187,7 @@ impl Recipe for PythonRecipe {
                 .iter()
                 .find_map(|triple| Self::find(&sums, triple, None, channel))
                 .map(|build| (channel.to_owned(), build.version))
-                .ok_or_else(|| internal_error("the release lists no such Python"))
+                .ok_or_else(|| internal("the release lists no such Python"))
         });
         match found {
             Ok((channel, version)) => {
@@ -212,13 +211,13 @@ impl Recipe for PythonRecipe {
         let channel = Self::channel(channel)?;
         let sums = Self::listing(tools)?;
         let build = Self::find(&sums, triple, version.as_deref(), channel).ok_or_else(|| {
-            unsupported_error(match &version {
+            unsupported(match &version {
                 Some(version) => format!("the newest release lists no Python {version}"),
                 None => format!("the newest release lists no Python {channel}"),
             })
         })?;
         let digest = sha256_sum_of(&sums, &build.file)
-            .ok_or_else(|| bad_value_error(format!("no digest for {}", build.file)))?;
+            .ok_or_else(|| bad_value(format!("no digest for {}", build.file)))?;
         let url = format!(
             "{PYTHON_RELEASES}download/{}/{}",
             build.tag,
@@ -267,7 +266,7 @@ impl Recipe for PythonRecipe {
         ));
         for name in ["python3", "python"] {
             std::fs::copy(&own, bin.join(name))
-                .map_err(|error| internal_error(format!("{name}: {error}")))?;
+                .map_err(|error| internal(format!("{name}: {error}")))?;
         }
         Ok(())
     }

@@ -271,24 +271,9 @@ pub trait SpeechSession: Send + Sync {
 /// `UNSUPPORTED` for a recording in a format the provider does not read, naming the ones it does.
 #[must_use]
 pub fn unsupported_format(format: &AudioFormat, takes: &[&str]) -> ProviderError {
-    ProviderError::new(
-        guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
-        &alloc::format!(
-            "the encoding {:?} is not one this provider reads; it reads {}",
-            format.encoding,
-            takes.join(", ")
-        ),
-    )
-}
-
-/// `BAD_VALUE` with `why`.
-#[must_use]
-pub fn bad_value(why: impl Into<String>) -> ProviderError {
-    ProviderError::new(guatiao::Status::GUATIAO_ERR_BAD_VALUE, &why.into())
-}
-
-/// `INTERNAL` with `why`.
-#[must_use]
-pub fn internal(why: impl Into<String>) -> ProviderError {
-    ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, &why.into())
+    crate::status::unsupported(alloc::format!(
+        "the encoding {:?} is not one this provider reads; it reads {}",
+        format.encoding,
+        takes.join(", ")
+    ))
 }

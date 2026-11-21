@@ -48,8 +48,7 @@
         "description": "The id of the harness the session runs, as [`ItemInfo::harnesses`] names it; empty when it has none, so an item may differ by harness."
       },
       "values": {
-        "type": "string",
-        "description": "What the profile holds for the item, as a JSON object keyed by the schema's member names; a member left empty is absent."
+        "description": "What the profile holds for the item, as an object keyed by the schema's member names; a member left empty is absent."
       }
     },
     "additionalProperties": false,
@@ -124,7 +123,21 @@
         "properties": {
           "mode": {
             "type": "string",
-            "description": "One of [`NETWORK_MODES`]."
+            "enum": [
+              "system",
+              "none",
+              "proxy",
+              "pac",
+              "command"
+            ],
+            "x-enum-labels": {
+              "system": "The host runs a proxy on its loopback address for this session alone, which sends each connection as the host's own network would (the system's proxy with its PAC, WPAD and login), and the session's programs are given it.",
+              "none": "The session's programs are given no proxy, and what they inherit is theirs.",
+              "proxy": "The proxy at `url`, given to the programs as it is and used by the host's own requests for the session.",
+              "pac": "As `system`, choosing by the PAC script at `url`.",
+              "command": "A program the host starts for the session, which listens where it is told and is given to the programs as their proxy."
+            },
+            "description": "How the session reaches the network."
           },
           "url": {
             "type": [
@@ -250,7 +263,21 @@
     "properties": {
       "mode": {
         "type": "string",
-        "description": "One of [`NETWORK_MODES`]."
+        "enum": [
+          "system",
+          "none",
+          "proxy",
+          "pac",
+          "command"
+        ],
+        "x-enum-labels": {
+          "system": "The host runs a proxy on its loopback address for this session alone, which sends each connection as the host's own network would (the system's proxy with its PAC, WPAD and login), and the session's programs are given it.",
+          "none": "The session's programs are given no proxy, and what they inherit is theirs.",
+          "proxy": "The proxy at `url`, given to the programs as it is and used by the host's own requests for the session.",
+          "pac": "As `system`, choosing by the PAC script at `url`.",
+          "command": "A program the host starts for the session, which listens where it is told and is given to the programs as their proxy."
+        },
+        "description": "How the session reaches the network."
       },
       "url": {
         "type": [

@@ -131,7 +131,8 @@ pub mod models {
     pub enum ModelAction { Download, Load, Unload }               // ::parse(word), .word()
     pub enum Listing { All, Cached, Loaded }
     pub fn valid_model(id: &str) -> bool;                         // 1 to 128 of letters, digits and . _ - : + /, never opening with a dash
-    pub fn action_args(action: ModelAction, model: &str) -> Result<Vec<String>, String>;   // model <action> <model> -o json
+    #[non_exhaustive] pub enum Error { InvalidModel }
+    pub fn action_args(action: ModelAction, model: &str) -> Result<Vec<String>, Error>;   // model <action> <model> -o json
     pub fn list_args(which: Listing) -> Vec<String>;              // model list --variants [--cached|--loaded] -o json
     pub fn rows(answer: &Value) -> Vec<Row>;                      // a list, or an object holding one under models/items/data/results
     pub fn merge(all: Vec<Row>, cached: &[Row], loaded: &[Row]) -> Vec<Model>;   // loaded first, then downloaded, then by id
@@ -145,7 +146,8 @@ pub mod models {
 pub mod account {
     pub const KIND: &str = "foundry-local";
     #[non_exhaustive] pub struct Settings { pub model: String, pub endpoint: Option<String>, pub library: Option<String>, pub engine: EngineKind, pub window: Option<u64> }   // `window` is no key of the account: the host fills it from its own configuration
-    impl Settings { pub fn from_map(map: &Map<String, Value>) -> Result<Self, String>; }
+    #[non_exhaustive] pub enum Error { NotText(String), UnknownSetting(String), InvalidAnswerSeconds, MissingModel, InvalidEngine }
+    impl Settings { pub fn from_map(map: &Map<String, Value>) -> Result<Self, Error>; }
     #[non_exhaustive] pub enum EngineKind { Service, Sdk }
     pub fn settings_schema() -> Value;                                   // model (required), endpoint, engine, library
     pub fn offer() -> AccountOffer;                                      // the kind (state_dir, provides anthropic-api and openai-api) and the one sign-in method that makes it
@@ -170,7 +172,7 @@ pub fn run_helper(args: &[String]) -> io::Result<()>;   // the SDK engine's proc
 
 A lease's `models` lists what the engine could serve (each with what it can do in its description), the model the account serves marked as the default; `FoundryAccounts::models` answers unknown, since an account of this kind is listed by the gateway that serves it.
 
-`FoundryGateway::open` takes a `GatewayRequest`: the account's id and settings (JSON text), the host's own table of canoa.cfg named `foundry` (`models."<variant id>".window` is the window the model is run with: a whole number of tokens of at least 1, anything else is left out; the page of `foundry_models` writes it), the host's home and the command line of its helper command. One server (a `canoa::loopback` listener, a `canoa::loopback::Service` that answers `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/messages/count_tokens` and `/v1/models`) runs for an account while any session holds a lease; each lease has its own bearer, and dropping it ends that session's access (the last ends the server and unloads what the engine loaded). The settings' `engine` is `service` (`daemon::DaemonEngine`, in this process) or `sdk` (a child process started through the host's spawner: `<helper> canoa-foundry --model ...`, which opens `sdk::SdkEngine`, loads the model and answers `worker`'s lines; a crash there fails the request under way and the next request starts it again). Each request is recorded in `<home>/foundry-gateway.log` as a line of JSON (the route, the model, how it ended, how long it took, never what was said).
+`FoundryGateway::open` takes a `GatewayRequest`: the account's id and settings (`guatiao::Value`), the host's own table of canoa.cfg named `foundry` (`models."<variant id>".window` is the window the model is run with: a whole number of tokens of at least 1, anything else is left out; the page of `foundry_models` writes it), the host's home and the command line of its helper command. One server (a `canoa::loopback` listener, a `canoa::loopback::Service` that answers `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/messages/count_tokens` and `/v1/models`) runs for an account while any session holds a lease; each lease has its own bearer, and dropping it ends that session's access (the last ends the server and unloads what the engine loaded). The settings' `engine` is `service` (`daemon::DaemonEngine`, in this process) or `sdk` (a child process started through the host's spawner: `<helper> canoa-foundry --model ...`, which opens `sdk::SdkEngine`, loads the model and answers `worker`'s lines; a crash there fails the request under way and the next request starts it again). Each request is recorded in `<home>/foundry-gateway.log` as a line of JSON (the route, the model, how it ended, how long it took, never what was said).
 
 ## What a translation does
 

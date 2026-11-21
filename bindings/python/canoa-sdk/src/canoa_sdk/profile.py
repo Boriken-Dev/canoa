@@ -96,13 +96,9 @@ def _plain(value: Any) -> Any:
 
 
 def values_of(request: Ref) -> Dict[str, Any]:
-    """The values a profile holds for the item, as a dict keyed by the schema's member names: what `apply` is asked with, parsed."""
+    """The values a profile holds for the item, as a dict keyed by the schema's member names: what `apply` is asked with."""
     body = _plain(request)
-    text = body.get("values") if isinstance(body, dict) else None
-    try:
-        values = json.loads(text) if isinstance(text, str) else None
-    except ValueError:
-        values = None
+    values = _plain(body.get("values")) if isinstance(body, dict) else None
     if not isinstance(values, dict):
         raise BadValue("the values are a JSON object")
     return values

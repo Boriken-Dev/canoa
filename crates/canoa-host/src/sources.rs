@@ -313,7 +313,7 @@ fn entry_settings(
     let said = crate::vendors::behave(harness, |vendor| vendor.entry_settings(request))
         .and_then(Result::ok)
         .flatten()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        .and_then(|value| guatiao_serde::adapt::from_value::<serde_json::Value>(&value).ok());
     let Some(serde_json::Value::Object(settings)) = said else {
         return String::new();
     };

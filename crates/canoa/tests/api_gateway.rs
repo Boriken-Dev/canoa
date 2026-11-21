@@ -11,7 +11,7 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use canoa::api_gateway::{
-    self, ApiGatewayAccounts, CREDENTIAL, KIND, Settings, models_url, parse_standards,
+    self, ACCOUNT_KIND, ApiGatewayAccounts, CREDENTIAL, Settings, models_url, parse_standards,
 };
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -135,7 +135,7 @@ fn stand_in(models: &[&str]) -> (String, Requests) {
 }
 
 fn sign_in(inputs: &Value, key: &str) -> Result<coqui_acp_api::LoginOutcome, ProviderError> {
-    let request = LoginRequest::new(KIND, "unused").inputs(api_gateway::value(inputs));
+    let request = LoginRequest::new(ACCOUNT_KIND, "unused").inputs(api_gateway::value(inputs));
     let prompter = Typing {
         key: key.to_owned(),
         forms: Arc::default(),
@@ -146,7 +146,7 @@ fn sign_in(inputs: &Value, key: &str) -> Result<coqui_acp_api::LoginOutcome, Pro
 fn grant(address: &str, provides: &[&str]) -> AccountGrant {
     let mut credentials = Credentials::new();
     credentials.insert(CREDENTIAL, CANARY);
-    AccountGrant::new("id-one", KIND)
+    AccountGrant::new("id-one", ACCOUNT_KIND)
         .settings(api_gateway::value(&json!({"base_url": address})))
         .credentials(credentials)
         .provides(provides.iter().copied())
@@ -166,7 +166,7 @@ fn models(grant: AccountGrant) -> coqui_acp_api::ModelListing {
 fn the_kind_names_the_property_that_holds_the_standards_and_asks_the_address_a_host_may_send_a_key_to()
  {
     let offer = api_gateway::offer();
-    let kind = offer.kind(KIND).expect("the kind");
+    let kind = offer.kind(ACCOUNT_KIND).expect("the kind");
     assert!(
         kind.provides.is_empty(),
         "the account says what it provides"
@@ -174,7 +174,7 @@ fn the_kind_names_the_property_that_holds_the_standards_and_asks_the_address_a_h
     assert_eq!(kind.endpoints.len(), 1);
     assert_eq!(kind.endpoints[0].key.as_deref(), Some("base_url"));
     assert_eq!(offer.logins.len(), 1);
-    assert_eq!(offer.logins[0].produces, KIND);
+    assert_eq!(offer.logins[0].produces, ACCOUNT_KIND);
     let schema = api_gateway::settings_schema();
     assert_eq!(schema["properties"]["standards"]["x-provides"], json!(true));
     assert_eq!(schema["properties"][CREDENTIAL]["x-sensitive"], json!(true));
@@ -227,7 +227,7 @@ fn signing_in_makes_an_account_of_the_standards_named_and_keeps_the_key_out_of_i
         CANARY,
     )
     .expect("signed in");
-    assert_eq!(outcome.kind, KIND);
+    assert_eq!(outcome.kind, ACCOUNT_KIND);
     assert_eq!(outcome.label.as_deref(), Some("llm.example.com"));
     let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&outcome.settings)
         .expect("settings");
@@ -440,7 +440,7 @@ fn signing_in_with_an_address_for_a_standard_keeps_it_in_the_settings_and_the_mo
     );
     let mut credentials = Credentials::new();
     credentials.insert(CREDENTIAL, CANARY);
-    let account = AccountGrant::new("id-one", KIND)
+    let account = AccountGrant::new("id-one", ACCOUNT_KIND)
         .settings(api_gateway::value(
             &json!({"base_url": "https://never.example.com", "by_standard": by}),
         ))

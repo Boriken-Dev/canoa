@@ -75,11 +75,11 @@ class SettingsSection(WithForm, provide.Provider, kinds.SettingsSection, abstrac
     def describe(self) -> ValueAnswer:
         return self.info()
 
-    def read(self) -> str:
-        """What the section holds now, as JSON text of an object keyed by the schema's member names, a sensitive member left out.
-        Asked only of a `stored = "provider"` section."""
-        return "{}"
+    def read(self) -> ValueAnswer:
+        """What the section holds now, as an object keyed by the schema's member names, a sensitive member left out. Asked only of a
+        `stored = "provider"` section."""
+        return {}
 
     def write(self, values: Ref) -> None:
-        """Keeps `values`, JSON text of an object the host has already checked against the schema; a sensitive member the person
-        left empty is absent, so what was kept stays. Asked only of a `stored = "provider"` section."""
+        """Keeps `values`, an object the host has already checked against the schema; a sensitive member the person left empty is
+        absent, so what was kept stays. Asked only of a `stored = "provider"` section."""

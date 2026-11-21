@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from guatiao import Ref
+from guatiao import Ref, Value
 from guatiao.kinds import I64, U32, U64, KindProtocol, Taken, ValueAnswer, fallible, required
 
 
@@ -285,9 +285,9 @@ class SecretProvider(KindProtocol, Protocol, kind="secret_provider", floor_hash=
     every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
     to start one.
 
-    A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
-    reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
-    the person instead.
+    A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]); one
+    that cannot be reached or has not been unlocked answers `GONE` ([`crate::status::unavailable`]) with a reason that holds no
+    value, and the host asks the person instead.
     """
 
     @required
@@ -321,7 +321,7 @@ class SecretProvider(KindProtocol, Protocol, kind="secret_provider", floor_hash=
         ...
 
 
-class SettingsSection(KindProtocol, Protocol, kind="settings_section", floor_hash=3110564773):
+class SettingsSection(KindProtocol, Protocol, kind="settings_section", floor_hash=3479933161):
     """A page of Settings, or a group on one.
 
     `describe` answers the same on every call with nothing run. `read` and `write` are asked only for a [`Stored::Provider`]
@@ -336,13 +336,13 @@ class SettingsSection(KindProtocol, Protocol, kind="settings_section", floor_has
 
     @required
     @fallible
-    def read(self) -> str:
+    def read(self) -> ValueAnswer:
         """What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out."""
         ...
 
     @required
     @fallible
-    def write(self, values: Ref) -> None:
+    def write(self, values: Taken[Value]) -> None:
         """Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A
         sensitive member the person left empty is absent, so what was kept stays.
         """
@@ -649,7 +649,7 @@ class UsageReader(KindProtocol, Protocol, kind="usage_reader", floor_hash=179363
         ...
 
 
-class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=1928350951):
+class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=3784573487):
     """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
     nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
     """
@@ -742,7 +742,7 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=192835
 
     @fallible
     def entry_settings(self, request: Ref) -> ValueAnswer:
-        """The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+        """The settings of the agent's own harness provider that the host's source for it is started with, as an object (a managed
         copy's program, the person's protected places), or `None` when there are none to add. The default: none.
         """
         ...

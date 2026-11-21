@@ -1,8 +1,7 @@
 //! A stand-in extension: a library of its own that offers one item, as an extension of canoa.cfg would.
 
-use canoa::profile_item::{
-    ApplyRequest, ItemEffect, ItemInfo, ProfileItem, Setting, Variable, bad_value_error,
-};
+use canoa::profile_item::{ApplyRequest, ItemEffect, ItemInfo, ProfileItem, Setting, Variable};
+use canoa::status::bad_value;
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, ToValue};
 use guatiao_intake::Form;
@@ -67,7 +66,7 @@ impl ProfileItem for RegionItem {
         let name = values
             .get("name")
             .and_then(Value::as_str)
-            .ok_or_else(|| bad_value_error("a region has a name"))?;
+            .ok_or_else(|| bad_value("a region has a name"))?;
         let mut effect = ItemEffect::none();
         effect.env.push(Variable::new("REGION", name));
         if let Some(Value::Array(hosts)) = values.get("hosts") {

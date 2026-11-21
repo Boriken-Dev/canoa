@@ -2,9 +2,10 @@
 //! local plugin that the session request's `_meta` loads.
 
 use canoa::vendor::{
-    DeliveredFile, HookSupport, HookSupportRequest, HooksDelivery, HooksRequest, PLUGIN_PATH,
-    PluginDelivery, SkillsDelivery,
+    DeliveredFile, HookKind, HookSupport, HookSupportRequest, HooksDelivery, HooksRequest,
+    PLUGIN_PATH, PluginDelivery, SkillsDelivery,
 };
+use coqui_acp_api::guatiao::{Map, ToValue as _, Value};
 
 /// The plugin a profile's skills are given in: Claude Code names a plugin's skills `<plugin>:<skill>`.
 const SKILLS_PLUGIN: &str = "canoa-profile";
@@ -13,11 +14,20 @@ const SKILLS_PLUGIN: &str = "canoa-profile";
 const HOOKS_PLUGIN: &str = "canoa-hooks";
 
 /// What a session request gains to load the local plugin at the folder the host wrote.
-fn plugin_meta() -> String {
-    serde_json::json!({"claudeCode": {"options": {"plugins": [
-        {"type": "local", "path": PLUGIN_PATH}
-    ]}}})
-    .to_string()
+fn plugin_meta() -> Value {
+    let mut entry = Map::new();
+    entry.set("type", Value::from("local"));
+    entry.set("path", Value::from(PLUGIN_PATH));
+    let mut options = Map::new();
+    options.set(
+        "plugins",
+        vec![Value::from(entry)].to_value().expect("value"),
+    );
+    let mut claude = Map::new();
+    claude.set("options", Value::from(options));
+    let mut root = Map::new();
+    root.set("claudeCode", Value::from(claude));
+    Value::from(root)
 }
 
 fn manifest(name: &str, description: &str) -> String {
@@ -44,11 +54,11 @@ pub(crate) fn skills_delivery() -> SkillsDelivery {
 }
 
 /// Claude Code's name for the moment a hook of `kind` reports.
-fn hook_event(kind: &str) -> Option<&'static str> {
+fn hook_event(kind: HookKind) -> Option<&'static str> {
     match kind {
-        "start" => Some("SessionStart"),
-        "pre-compact" => Some("PreCompact"),
-        "batch" => Some("PostToolBatch"),
+        HookKind::Start => Some("SessionStart"),
+        HookKind::PreCompact => Some("PreCompact"),
+        HookKind::Batch => Some("PostToolBatch"),
         _ => None,
     }
 }
@@ -57,7 +67,7 @@ fn hook_event(kind: &str) -> Option<&'static str> {
 pub(crate) fn hooks_delivery(request: &HooksRequest) -> HooksDelivery {
     let mut hooks = serde_json::Map::new();
     for each in &request.commands {
-        let Some(event) = hook_event(&each.kind) else {
+        let Some(event) = hook_event(each.kind) else {
             continue;
         };
         hooks.insert(
@@ -110,15 +120,16 @@ pub(crate) fn hook_support(request: &HookSupportRequest) -> Option<HookSupport> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use canoa::vendor::HookCommand;
+    use canoa::vendor::{HookCommand, HookKind};
+    use coqui_acp_api::guatiao::FromValue as _;
 
     #[test]
     fn the_hooks_plugin_runs_each_command_for_the_moment_it_reports() {
+        assert!(HookKind::from_value(&Value::from("nothing")).is_err());
         let request = HooksRequest::new(
             vec![
-                HookCommand::new("pre-compact", "report pre-compact"),
-                HookCommand::new("batch", "report batch"),
-                HookCommand::new("nothing", "report nothing"),
+                HookCommand::new(HookKind::PreCompact, "report pre-compact"),
+                HookCommand::new(HookKind::Batch, "report batch"),
             ],
             130,
         );
@@ -151,7 +162,7 @@ mod tests {
         assert_eq!(delivery.folder, "canoa-profile/skills");
         let plugin = delivery.plugin.expect("a plugin");
         assert_eq!(plugin.folder, "canoa-profile");
-        assert!(plugin.meta.contains(PLUGIN_PATH));
+        assert_eq!(plugin.meta, plugin_meta());
         assert!(delivery.how.contains("canoa-profile:{name}"));
         assert!(!delivery.directory);
     }

@@ -282,7 +282,7 @@ def test_a_profile_item_describes_the_values_it_takes_from_its_dataclass() -> No
 
 
 def _apply(item: Any, values: dict, harness: str = "") -> Any:
-    return item.apply({"harness": harness, "values": json.dumps(values)})
+    return item.apply({"harness": harness, "values": values})
 
 
 def test_an_env_item_turns_text_members_and_name_value_lines_into_variables() -> None:
@@ -456,7 +456,7 @@ def test_a_settings_section_and_a_panel_tab_describe_themselves_from_their_class
 
     described = Region().describe()
     assert described["id"] == "region" and described["under"] == "network" and described["stored"] == "provider"
-    assert described["schema"]["required"] == ["name"] and Region().read() == "{}"
+    assert described["schema"]["required"] == ["name"] and Region().read() == {}
     assert provide.library("sections", "1", providers=[Region]).kinds == ("settings_section",)
 
     class Builds(sdk.LogPanelTab):

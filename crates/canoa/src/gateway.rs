@@ -16,7 +16,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
+use coqui_acp_api::guatiao::{FromValue, Map, Schema, ToValue, Value};
 use coqui_acp_api::{ModelListing, ProcessSpawner};
 
 /// The name of the `model_gateway` kind.
@@ -50,17 +50,17 @@ impl GatewayInfo {
 }
 
 /// What the host asks of a gateway for one session, from [`ModelGateway::open`].
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
 pub struct GatewayRequest {
     /// The account's id. A gateway shares one server among the sessions that hold the same account.
     pub account: String,
-    /// The account's settings, as a JSON object in text; the account kind's schema says what it holds.
-    pub settings: String,
-    /// The gateway's own table of canoa.cfg ([`GatewayInfo::table`]), as a JSON object in text as the file has it now: `{}` when
-    /// the gateway names no table or the file has none.
-    pub table: String,
+    /// The account's settings, as an object; the account kind's schema says what it holds.
+    pub settings: Value,
+    /// The gateway's own table of canoa.cfg ([`GatewayInfo::table`]), as an object as the file has it now: `{}` when the gateway
+    /// names no table or the file has none.
+    pub table: Value,
     /// The host's home folder, where a gateway may keep its logs and the files it makes.
     pub home: Option<String>,
     /// The command line that starts one of the host's own helper commands: the program, then its arguments. A gateway that runs
@@ -76,8 +76,8 @@ impl GatewayRequest {
     pub fn new(account: impl Into<String>) -> Self {
         Self {
             account: account.into(),
-            settings: String::from("{}"),
-            table: String::from("{}"),
+            settings: Value::from(Map::new()),
+            table: Value::from(Map::new()),
             home: None,
             helper: Vec::new(),
         }
@@ -124,8 +124,8 @@ mod tests {
     #[test]
     fn a_request_starts_with_empty_settings_and_no_helper() {
         let request = GatewayRequest::new("id-1");
-        assert_eq!(request.settings, "{}");
-        assert_eq!(request.table, "{}");
+        assert_eq!(request.settings, Value::from(Map::new()));
+        assert_eq!(request.table, Value::from(Map::new()));
         assert!(request.home.is_none() && request.helper.is_empty());
         assert!(GatewayInfo::new("a-kind", "a-vendor").table.is_none());
     }

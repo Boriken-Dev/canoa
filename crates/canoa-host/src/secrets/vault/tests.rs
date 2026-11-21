@@ -9,9 +9,8 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use canoa::secret_provider::{
-    Held, Keeping, Named, Names, ProviderInfo, SecretProvider, unavailable, unsupported,
-};
+use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProvider};
+use canoa::status::{unavailable, unsupported};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};

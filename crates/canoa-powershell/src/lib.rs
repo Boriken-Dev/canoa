@@ -14,10 +14,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
-    Finish, Part, Published, Recipe, Release, UnpackStep, bad_value_error, dotted_numbers,
-    get_json, github_assets, github_endpoints, internal_error, newest_published, path_has, pinned,
-    spell, unsupported_error,
+    Finish, Part, Published, Recipe, Release, UnpackStep, dotted_numbers, get_json, github_assets,
+    github_endpoints, newest_published, path_has, pinned, spell,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -151,7 +151,7 @@ impl Recipe for PowerShellRecipe {
         match get_json(tools, &format!("{RELEASES_API}?per_page={LISTED}"))
             .map(|doc| newest_published(powershell_releases(&doc)))
             .and_then(|found| {
-                found.ok_or_else(|| internal_error("the repository lists no stable release"))
+                found.ok_or_else(|| internal("the repository lists no stable release"))
             }) {
             Ok(release) => LatestReport::known(release.version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -166,11 +166,9 @@ impl Recipe for PowerShellRecipe {
         tools: &Object<dyn InstallTools>,
     ) -> Result<Release, ProviderError> {
         let os = spell(&platform.os, &[("windows", "win"), ("linux", "linux")])
-            .ok_or_else(|| unsupported_error("PowerShell is not published for this system here"))?;
-        let arch =
-            spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")]).ok_or_else(|| {
-                unsupported_error("PowerShell is not published for this processor here")
-            })?;
+            .ok_or_else(|| unsupported("PowerShell is not published for this system here"))?;
+        let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
+            .ok_or_else(|| unsupported("PowerShell is not published for this processor here"))?;
         let windows = platform.os == "windows";
         let doc = get_json(tools, &format!("{RELEASES_API}?per_page={LISTED}"))?;
         let all = powershell_releases(&doc);
@@ -181,7 +179,7 @@ impl Recipe for PowerShellRecipe {
             }
             None => newest_published(all),
         }
-        .ok_or_else(|| unsupported_error("the repository lists no such release"))?;
+        .ok_or_else(|| unsupported("the repository lists no such release"))?;
         // The Windows zip is spelled `PowerShell-`, the Linux archive `powershell-`.
         let (name, format) = if windows {
             (
@@ -195,7 +193,7 @@ impl Recipe for PowerShellRecipe {
             )
         };
         let digest = release.digest_of(&name).ok_or_else(|| {
-            bad_value_error(format!(
+            bad_value(format!(
                 "release {} lists no {name} with a digest",
                 release.tag
             ))
@@ -235,7 +233,7 @@ impl Recipe for PowerShellRecipe {
             let path = Path::new(finish.staging).join("powershell/pwsh");
             if path.is_file() {
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                    .map_err(|error| internal_error(format!("pwsh: {error}")))?;
+                    .map_err(|error| internal(format!("pwsh: {error}")))?;
             }
         }
         #[cfg(not(unix))]

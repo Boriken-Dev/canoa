@@ -273,8 +273,9 @@ impl Gateways {
             _ => serde_json::Value::Object(serde_json::Map::new()),
         };
         let mut request = GatewayRequest::new(grant.id.clone());
-        request.settings = serde_json::Value::Object(settings).to_string();
-        request.table = table.to_string();
+        request.settings = guatiao_serde::from_serde(serde_json::Value::Object(settings))
+            .map_err(|why| why.to_string())?;
+        request.table = guatiao_serde::from_serde(table).map_err(|why| why.to_string())?;
         request.home = self
             .home
             .as_ref()

@@ -23,9 +23,9 @@ use canoa::vendor::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
-    bad_value_error, dotted, exe_suffix, get_json, internal_error, measured_platforms, path_has,
-    pinned, serves_when, spell, unsupported_error,
+    dotted, exe_suffix, get_json, measured_platforms, path_has, pinned, serves_when, spell,
 };
 
 const MANIFESTS: &str =
@@ -147,9 +147,9 @@ impl AgyRecipe {
         tools: &Object<dyn InstallTools>,
     ) -> Result<serde_json::Value, ProviderError> {
         let os = spell(&platform.os, &[("windows", "windows"), ("linux", "linux")])
-            .ok_or_else(|| unsupported_error("Antigravity is not published for this system"))?;
+            .ok_or_else(|| unsupported("Antigravity is not published for this system"))?;
         let arch = spell(&platform.arch, &[("x86_64", "amd64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported_error("Antigravity is not published for this processor"))?;
+            .ok_or_else(|| unsupported("Antigravity is not published for this processor"))?;
         get_json(tools, &format!("{MANIFESTS}/{os}_{arch}.json"))
     }
 }
@@ -211,7 +211,7 @@ impl Recipe for AgyRecipe {
             m["version"]
                 .as_str()
                 .map(str::to_owned)
-                .ok_or_else(|| internal_error("the manifest names no version"))
+                .ok_or_else(|| internal("the manifest names no version"))
         }) {
             Ok(version) => LatestReport::known(version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -228,24 +228,22 @@ impl Recipe for AgyRecipe {
         let manifest = Self::manifest(platform, tools)?;
         let newest = manifest["version"]
             .as_str()
-            .ok_or_else(|| internal_error("the manifest names no version"))?;
+            .ok_or_else(|| internal("the manifest names no version"))?;
         let newest = pinned(newest)?;
         if let Some(asked) = version
             && asked != newest
         {
-            return Err(unsupported_error("only the newest build is served"));
+            return Err(unsupported("only the newest build is served"));
         }
         let url = manifest["url"]
             .as_str()
-            .ok_or_else(|| internal_error("the manifest names no file"))?;
+            .ok_or_else(|| internal("the manifest names no file"))?;
         let sha512 = manifest["sha512"]
             .as_str()
             .filter(|c| c.len() == 128 && c.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| internal_error("the manifest gives no SHA-512"))?;
+            .ok_or_else(|| internal("the manifest gives no SHA-512"))?;
         if !url.starts_with("https://") {
-            return Err(bad_value_error(
-                "the manifest names a file that is not https",
-            ));
+            return Err(bad_value("the manifest names a file that is not https"));
         }
         let download = Download::new(
             url.to_owned(),

@@ -520,7 +520,7 @@ const described = kindsOf({
     },
     {
       "name": "settings_section",
-      "floor_hash": 3110564773,
+      "floor_hash": 3479933161,
       "object": false,
       "slots": [
         {
@@ -538,7 +538,7 @@ const described = kindsOf({
           "fallible": true,
           "args": [],
           "answer": {
-            "type": "text"
+            "type": "value"
           }
         },
         {
@@ -549,7 +549,7 @@ const described = kindsOf({
             {
               "name": "values",
               "type": "value",
-              "pass": "borrowed"
+              "pass": "taken"
             }
           ]
         }
@@ -1078,7 +1078,7 @@ const described = kindsOf({
     },
     {
       "name": "agent_vendor",
-      "floor_hash": 1928350951,
+      "floor_hash": 3784573487,
       "object": false,
       "slots": [
         {
@@ -1369,9 +1369,9 @@ export const ProfileItem = described["profile_item"];
  * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
  * to start one.
  *
- * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
- * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
- * the person instead.
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]); one
+ * that cannot be reached or has not been unlocked answers `GONE` ([`crate::status::unavailable`]) with a reason that holds no
+ * value, and the host asks the person instead.
  */
 export const SecretProvider = described["secret_provider"];
 

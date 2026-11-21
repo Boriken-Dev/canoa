@@ -78,7 +78,7 @@ impl AccountProvider for FoundryAccounts {
         }
         let inputs = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.inputs)
             .map_err(|_| refused("the inputs are not a table"))?;
-        let settings = Settings::from_map(&inputs).map_err(refused)?;
+        let settings = Settings::from_map(&inputs).map_err(|why| refused(why.to_string()))?;
         let mut outcome = LoginOutcome::new(KIND, Credentials::new());
         outcome.settings = request.inputs;
         outcome.label = Some(settings.model);
@@ -258,10 +258,11 @@ impl ModelGateway for FoundryGateway {
         request: GatewayRequest,
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<Object<dyn GatewayLease>, ProviderError> {
-        let map = serde_json::from_str::<Map<String, Value>>(&request.settings)
+        let map = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.settings)
             .map_err(|_| refused("the account's settings are not a table"))?;
-        let mut settings = Settings::from_map(&map).map_err(refused)?;
-        let table = serde_json::from_str::<Value>(&request.table).unwrap_or(Value::Null);
+        let mut settings = Settings::from_map(&map).map_err(|why| refused(why.to_string()))?;
+        let table =
+            guatiao_serde::adapt::from_value::<Value>(&request.table).unwrap_or(Value::Null);
         settings.window = window_of(&table, &settings.model);
         let launch = Launch {
             spawner: Arc::new(spawner),
@@ -412,7 +413,7 @@ mod tests {
 
     fn request(account: &str, model: &str) -> GatewayRequest {
         let mut request = GatewayRequest::new(account);
-        request.settings = json!({"model": model}).to_string();
+        request.settings = guatiao_serde::from_serde(json!({"model": model})).expect("value");
         request
     }
 
@@ -640,7 +641,8 @@ mod tests {
         };
         assert_eq!(refused.message(), "no Foundry Local service is running");
         let mut stray = GatewayRequest::new("a");
-        stray.settings = json!({"model": "m", "password": "x"}).to_string();
+        stray.settings =
+            guatiao_serde::from_serde(json!({"model": "m", "password": "x"})).expect("value");
         let Err(stray) = gateway.open(stray, spawner()) else {
             panic!("a setting the kind does not have");
         };
@@ -666,7 +668,7 @@ mod tests {
         }));
         let with = |account: &str, model: &str, table: &Value| {
             let mut asked = request(account, model);
-            asked.table = table.to_string();
+            asked.table = guatiao_serde::from_serde(table.clone()).expect("value");
             asked
         };
         let table = json!({"models": {"local-model": {"window": 16384}, "other": {"window": 999}, "zero": {"window": 0}, "text": {"window": "big"}, "bare": {}}});

@@ -1,4 +1,4 @@
-use canoa::profile_item::{ItemEffect, NetworkEffect, Setting, Variable};
+use canoa::profile_item::{ItemEffect, NetworkEffect, NetworkMode, Setting, Variable};
 use coqui_acp_harness::{Approvals, Sandbox};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
@@ -224,10 +224,10 @@ fn a_setting_a_session_does_not_have_is_refused_by_key_and_the_rest_still_applie
 fn the_first_item_to_set_a_variable_keeps_it_and_the_last_to_ask_decides_the_network() {
     let mut first = ItemEffect::none();
     first.env = vec![Variable::new("A", "1"), Variable::new("B", "1")];
-    first.network = Some(NetworkEffect::new("none"));
+    first.network = Some(NetworkEffect::new(NetworkMode::None));
     let mut second = ItemEffect::none();
     second.env = vec![Variable::new("A", "2"), Variable::new("C", "2")];
-    second.network = Some(NetworkEffect::new("system"));
+    second.network = Some(NetworkEffect::new(NetworkMode::System));
     let applied = vec![
         Applied {
             id: "one".to_owned(),
@@ -297,8 +297,12 @@ fn the_bundled_proxy_asks_for_the_network_its_mode_names() {
         let applied = catalog.apply_all(&one("proxy", &held), None);
         done(&applied, "proxy").network.expect("a network")
     };
-    assert_eq!(mode(json!({})).mode, "system", "system is the default");
-    assert_eq!(mode(json!({"mode": "none"})).mode, "none");
+    assert_eq!(
+        mode(json!({})).mode,
+        NetworkMode::System,
+        "system is the default"
+    );
+    assert_eq!(mode(json!({"mode": "none"})).mode, NetworkMode::None);
     let own = mode(
         json!({"mode": "proxy", "url": "http://p.example:3128", "bypass": ["a.example"], "user": "me", "password_variable": "PW"}),
     );

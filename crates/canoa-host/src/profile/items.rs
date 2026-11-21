@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use canoa::profile_item::{
     ApplyRequest, ItemEffect, ItemInfo, NetworkEffect, ProfileItem, Setting, Variable,
-    bad_value_error,
 };
+use canoa::status::bad_value;
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
 use guatiao_intake::Form;
@@ -60,9 +60,9 @@ fn settings_of(key: &str, request: &ApplyRequest, note: &str) -> Result<ItemEffe
 
 /// The JSON object of `request`'s values.
 pub(crate) fn values_of(request: &ApplyRequest) -> Result<Map<String, Value>, ProviderError> {
-    match serde_json::from_str::<Value>(&request.values) {
+    match guatiao_serde::adapt::from_value::<Value>(&request.values) {
         Ok(Value::Object(values)) => Ok(values),
-        _ => Err(bad_value_error("the values are a JSON object")),
+        _ => Err(bad_value("the values are a JSON object")),
     }
 }
 
@@ -458,7 +458,10 @@ impl ItemCatalog {
                 "its values are longer than {MAX_VALUES_BYTES} bytes"
             ));
         }
-        let request = ApplyRequest::new(harness.unwrap_or(""), text);
+        let Ok(value) = guatiao_serde::from_serde(Value::Object(values.clone())) else {
+            return Outcome::Not("its values cannot be read".to_owned());
+        };
+        let request = ApplyRequest::new(harness.unwrap_or(""), value);
         match entry.with(|item| item.apply(request)) {
             Ok(effect) => match effect.problem() {
                 None => Outcome::Done(effect),
@@ -515,7 +518,7 @@ impl Applied {
         if let Some(network) = &effect.network {
             parts.push(format!(
                 "sets how its programs reach the network: {}",
-                network.mode
+                network.mode.as_str()
             ));
         }
         if parts.is_empty() {

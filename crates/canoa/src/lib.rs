@@ -37,6 +37,34 @@ mod settings;
 #[cfg(feature = "settings-section")]
 #[cfg_attr(docsrs, doc(cfg(feature = "settings-section")))]
 pub mod settings_section;
+#[cfg(any(
+    feature = "api-gateway",
+    feature = "gateway",
+    feature = "panel-tab",
+    feature = "profile-item",
+    feature = "secret",
+    feature = "settings-section",
+    feature = "speech",
+    feature = "store",
+    feature = "usage",
+    feature = "vendor"
+))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(
+        feature = "api-gateway",
+        feature = "gateway",
+        feature = "panel-tab",
+        feature = "profile-item",
+        feature = "secret",
+        feature = "settings-section",
+        feature = "speech",
+        feature = "store",
+        feature = "usage",
+        feature = "vendor"
+    )))
+)]
+pub mod status;
 
 #[cfg(feature = "network")]
 #[cfg_attr(docsrs, doc(cfg(feature = "network")))]

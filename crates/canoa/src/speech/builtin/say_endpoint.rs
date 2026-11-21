@@ -24,7 +24,8 @@ use crate::speech::output::{
     Choice, Leaves, OutputInfo, SayRequest, SpeechOutput, SpeechUtterance, SpeedRange, Voice,
     VoiceList, VoiceQuery, checked_text, unknown_choice,
 };
-use crate::speech::{AudioFormat, PCM_S16LE, bad_value, internal};
+use crate::speech::{AudioFormat, PCM_S16LE};
+use crate::status::{bad_value, internal};
 
 /// The most of an error answer's body that a message carries, in bytes.
 const MAX_ERROR_BODY: usize = 300;

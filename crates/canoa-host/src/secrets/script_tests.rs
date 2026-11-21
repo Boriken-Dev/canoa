@@ -86,7 +86,7 @@ impl SpawnedProcess for Canned {
         Ok(take(&self.err, dst))
     }
     fn resize(&self, _: TerminalSize) -> Result<(), ProviderError> {
-        Err(canoa::secret_provider::unsupported("no terminal"))
+        Err(canoa::status::unsupported("no terminal"))
     }
     fn wait(&self, _: u64) -> Result<ProcessExit, ProviderError> {
         Ok(if self.hangs {
@@ -217,16 +217,16 @@ impl ProcessSpawner for StandIn {
     }
 
     fn write_file(&self, _: &str, _: Secret<SecretBytes>, _: bool) -> Result<(), ProviderError> {
-        Err(canoa::secret_provider::unsupported("no files"))
+        Err(canoa::status::unsupported("no files"))
     }
     fn read_file(&self, _: &str, _: u64) -> Result<Secret<SecretBytes>, ProviderError> {
-        Err(canoa::secret_provider::unsupported("no files"))
+        Err(canoa::status::unsupported("no files"))
     }
     fn file_info(&self, _: &str) -> Result<Option<FileInfo>, ProviderError> {
-        Err(canoa::secret_provider::unsupported("no files"))
+        Err(canoa::status::unsupported("no files"))
     }
     fn remove_file(&self, _: &str) -> Result<(), ProviderError> {
-        Err(canoa::secret_provider::unsupported("no files"))
+        Err(canoa::status::unsupported("no files"))
     }
     fn notice(&self, _: HarnessNotice) -> Result<(), ProviderError> {
         Ok(())

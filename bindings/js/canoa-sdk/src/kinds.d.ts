@@ -401,9 +401,9 @@ export declare const ProfileItem: k.DescribedKind<ProfileItem, ProfileItemRemote
  * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
  * to start one.
  *
- * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
- * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
- * the person instead.
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]); one
+ * that cannot be reached or has not been unlocked answers `GONE` ([`crate::status::unavailable`]) with a reason that holds no
+ * value, and the host asks the person instead.
  *
  * The `secret_provider` kind: what a provider of it implements.
  */
@@ -442,9 +442,9 @@ export interface SecretProviderRemote extends k.RemoteBase<typeof SecretProvider
  * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
  * to start one.
  *
- * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
- * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
- * the person instead.
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]); one
+ * that cannot be reached or has not been unlocked answers `GONE` ([`crate::status::unavailable`]) with a reason that holds no
+ * value, and the host asks the person instead.
  */
 export declare const SecretProvider: k.DescribedKind<SecretProvider, SecretProviderRemote, false>;
 
@@ -460,12 +460,12 @@ export interface SettingsSection {
   /** What this section is and the form it asks for. */
   describe(): unknown;
   /** What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out. */
-  read(): string;
+  read(): unknown;
   /**
    * Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A
    * sensitive member the person left empty is absent, so what was kept stays.
    */
-  write(values: g.Ref): void;
+  write(values: g.Value): void;
 }
 
 /** A caller's handle on a `settings_section` table: a method per slot. */
@@ -473,7 +473,7 @@ export interface SettingsSectionRemote extends k.RemoteBase<typeof SettingsSecti
   /** What this section is and the form it asks for. */
   describe(): g.Value;
   /** What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out. */
-  read(): string;
+  read(): g.Value;
   /**
    * Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A
    * sensitive member the person left empty is absent, so what was kept stays.
@@ -1022,7 +1022,7 @@ export interface AgentVendor {
    */
   gatewayFiles?(address: g.Ref): unknown;
   /**
-   * The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+   * The settings of the agent's own harness provider that the host's source for it is started with, as an object (a managed
    * copy's program, the person's protected places), or `None` when there are none to add. The default: none.
    */
   entrySettings?(request: g.Ref): unknown;
@@ -1127,7 +1127,7 @@ export interface AgentVendorRemote extends k.RemoteBase<typeof AgentVendor> {
    */
   gatewayFiles(address: unknown): g.Value;
   /**
-   * The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+   * The settings of the agent's own harness provider that the host's source for it is started with, as an object (a managed
    * copy's program, the person's protected places), or `None` when there are none to add. The default: none.
    *
    * Throws `Unsupported` when the table lacks it: `has()` asks first.

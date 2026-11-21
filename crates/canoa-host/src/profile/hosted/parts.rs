@@ -1200,8 +1200,8 @@ pub(in crate::profile::hosted) fn plugin_meta(
             _ => {}
         }
     }
-    let mut meta: Value =
-        serde_json::from_str(&plugin.meta).map_err(|_| "its _meta is not JSON".to_owned())?;
+    let mut meta: Value = guatiao_serde::adapt::from_value(&plugin.meta)
+        .map_err(|_| "its _meta is not JSON".to_owned())?;
     if !meta.is_object() {
         return Err("its _meta is not an object".to_owned());
     }

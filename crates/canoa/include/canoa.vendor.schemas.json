@@ -226,7 +226,21 @@
       },
       "family": {
         "type": "string",
-        "description": "Its family: `bash`, `zsh`, `powershell`, `cmd`, or `other`."
+        "enum": [
+          "bash",
+          "zsh",
+          "powershell",
+          "cmd",
+          "other"
+        ],
+        "x-enum-labels": {
+          "bash": "POSIX Bourne-Again shell (`bash`).",
+          "zsh": "Z shell (`zsh`).",
+          "powershell": "PowerShell (`powershell` or `pwsh`).",
+          "cmd": "Windows Command Prompt (`cmd`).",
+          "other": "Any other shell."
+        },
+        "description": "Its family."
       },
       "wsl": {
         "type": "boolean",
@@ -502,8 +516,7 @@
         "description": "The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself."
       },
       "meta": {
-        "type": "string",
-        "description": "What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
+        "description": "What the session request's `_meta` gains, as an object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
       }
     },
     "additionalProperties": false,
@@ -568,8 +581,7 @@
             "description": "The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself."
           },
           "meta": {
-            "type": "string",
-            "description": "What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
+            "description": "What the session request's `_meta` gains, as an object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
           }
         },
         "additionalProperties": false,
@@ -601,7 +613,17 @@
     "properties": {
       "kind": {
         "type": "string",
-        "description": "What it reports: one of [`HOOK_KINDS`]. `start`: a session started again or was compacted into or cleared; `pre-compact`: a compaction is about to run, which the command's failure stops; `batch`: a batch of tool calls ended."
+        "enum": [
+          "start",
+          "pre-compact",
+          "batch"
+        ],
+        "x-enum-labels": {
+          "start": "A session started again or was compacted into or cleared.",
+          "pre-compact": "A compaction is about to run, which the command's failure stops.",
+          "batch": "A batch of tool calls ended."
+        },
+        "description": "What it reports: `start` (a session started again or was compacted into or cleared), `pre-compact` (a compaction is about to run, which the command's failure stops), or `batch` (a batch of tool calls ended)."
       },
       "command": {
         "type": "string",
@@ -625,7 +647,17 @@
           "properties": {
             "kind": {
               "type": "string",
-              "description": "What it reports: one of [`HOOK_KINDS`]. `start`: a session started again or was compacted into or cleared; `pre-compact`: a compaction is about to run, which the command's failure stops; `batch`: a batch of tool calls ended."
+              "enum": [
+                "start",
+                "pre-compact",
+                "batch"
+              ],
+              "x-enum-labels": {
+                "start": "A session started again or was compacted into or cleared.",
+                "pre-compact": "A compaction is about to run, which the command's failure stops.",
+                "batch": "A batch of tool calls ended."
+              },
+              "description": "What it reports: `start` (a session started again or was compacted into or cleared), `pre-compact` (a compaction is about to run, which the command's failure stops), or `batch` (a batch of tool calls ended)."
             },
             "command": {
               "type": "string",
@@ -687,8 +719,7 @@
             "description": "The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself."
           },
           "meta": {
-            "type": "string",
-            "description": "What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
+            "description": "What the session request's `_meta` gains, as an object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
           }
         },
         "additionalProperties": false,

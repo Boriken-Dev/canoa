@@ -494,10 +494,10 @@ pub fn for_harness(harness: &str, shell: &Shell, windows: bool) -> Applied {
         shell.path.to_string_lossy(),
         stem(&shell.path),
         match shell.family {
-            Family::Bash => "bash",
-            Family::Zsh => "zsh",
-            Family::PowerShell => "powershell",
-            Family::Other => "other",
+            Family::Bash => canoa::vendor::ShellFamily::Bash,
+            Family::Zsh => canoa::vendor::ShellFamily::Zsh,
+            Family::PowerShell => canoa::vendor::ShellFamily::Powershell,
+            Family::Other => canoa::vendor::ShellFamily::Other,
         },
     );
     request.wsl = shell.origin == Origin::Wsl;

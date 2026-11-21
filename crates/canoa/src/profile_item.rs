@@ -9,30 +9,16 @@
 //!
 //! The models are plain data, the same in every language.
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::fmt;
 
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue, Value};
+use coqui_acp_api::guatiao::{FromValue, Schema, ToValue, Value};
 use guatiao_intake::{Form, Screen};
 
 /// The name of the `profile_item` kind.
 pub const KIND: &str = "profile_item";
-
-/// The versions of the `profile_item` kind this host offers.
-pub const KIND_VERSIONS: [&str; 1] = ["1"];
-
-/// An error with status `GUATIAO_ERR_BAD_VALUE`: the values do not fit the item's form.
-#[must_use]
-pub fn bad_value_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why.as_ref())
-}
-
-/// An error with status `GUATIAO_ERR_INTERNAL`.
-#[must_use]
-pub fn internal_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, why.as_ref())
-}
 
 /// The most characters of a value or a note an effect may carry, so a provider cannot make a session's setup large.
 pub const MAX_TEXT: usize = 64 * 1024;
@@ -122,17 +108,17 @@ pub struct ApplyRequest {
     /// The id of the harness the session runs, as [`ItemInfo::harnesses`] names it; empty when it has none, so an item may differ by
     /// harness.
     pub harness: String,
-    /// What the profile holds for the item, as a JSON object keyed by the schema's member names; a member left empty is absent.
-    pub values: String,
+    /// What the profile holds for the item, as an object keyed by the schema's member names; a member left empty is absent.
+    pub values: Value,
 }
 
 impl ApplyRequest {
     /// A session on `harness` whose profile holds `values`.
     #[must_use]
-    pub fn new(harness: impl Into<String>, values: impl Into<String>) -> Self {
+    pub fn new(harness: impl Into<String>, values: Value) -> Self {
         Self {
             harness: harness.into(),
-            values: values.into(),
+            values,
         }
     }
 }
@@ -182,13 +168,54 @@ impl Setting {
     }
 }
 
+/// How [`NetworkEffect::mode`] says the session reaches the network.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum NetworkMode {
+    /// The host runs a proxy on its loopback address for this session alone, which sends each connection as the host's own network
+    /// would (the system's proxy with its PAC, WPAD and login), and the session's programs are given it.
+    System,
+    /// The session's programs are given no proxy, and what they inherit is theirs.
+    None,
+    /// The proxy at `url`, given to the programs as it is and used by the host's own requests for the session.
+    Proxy,
+    /// As `system`, choosing by the PAC script at `url`.
+    Pac,
+    /// A program the host starts for the session, which listens where it is told and is given to the programs as their proxy.
+    Command,
+}
+
+impl NetworkMode {
+    /// All supported network modes.
+    pub const ALL: [Self; 5] = [
+        Self::System,
+        Self::None,
+        Self::Proxy,
+        Self::Pac,
+        Self::Command,
+    ];
+
+    /// The mode's canonical lower-case name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::None => "none",
+            Self::Proxy => "proxy",
+            Self::Pac => "pac",
+            Self::Command => "command",
+        }
+    }
+}
+
 /// How the session's programs reach the network.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
 pub struct NetworkEffect {
-    /// One of [`NETWORK_MODES`].
-    pub mode: String,
+    /// How the session reaches the network.
+    pub mode: NetworkMode,
     /// The proxy's address for `proxy`, or the PAC script's location for `pac`.
     pub url: Option<String>,
     /// For `command`: the program and its arguments, in which `{listen}` stands for the loopback address `host:port` the host
@@ -235,6 +262,50 @@ pub struct ClientCertificateHost {
     pub identity: String,
 }
 
+/// Why a host pattern or certificate identity could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// The host pattern was empty.
+    EmptyPattern,
+    /// The host pattern exceeded [`HostPattern::MAX_LEN`].
+    PatternTooLong,
+    /// The host pattern is neither a host name, a `*.name`, an IP address nor a valid regular expression.
+    BadPattern {
+        /// The pattern text that failed to compile.
+        pattern: String,
+        /// What the regular expression parser reported.
+        reason: String,
+    },
+    /// The certificate identity is neither `system` nor a 64-hex-digit SHA-256 thumbprint.
+    BadThumbprint(String),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyPattern => f.write_str("a host pattern is empty"),
+            Self::PatternTooLong => {
+                write!(
+                    f,
+                    "a host pattern is at most {} characters",
+                    HostPattern::MAX_LEN
+                )
+            }
+            Self::BadPattern { pattern, reason } => write!(
+                f,
+                "{pattern:?} is no host name, *.name or address, and no regular expression: {reason}"
+            ),
+            Self::BadThumbprint(text) => write!(
+                f,
+                "{text:?} is neither system nor the SHA-256 thumbprint of a certificate (64 hex digits)"
+            ),
+        }
+    }
+}
+
+impl core::error::Error for Error {}
+
 impl ClientCertificateHost {
     /// The entry for `pattern`, presenting the keystores' own choice.
     #[must_use]
@@ -259,7 +330,7 @@ impl ClientCertificateHost {
     /// # Errors
     ///
     /// The identity is neither `system` nor a SHA-256 thumbprint.
-    pub fn thumbprint(&self) -> Result<Option<String>, String> {
+    pub fn thumbprint(&self) -> Result<Option<String>, Error> {
         let text = self.identity.trim();
         if text.is_empty() || text.eq_ignore_ascii_case(SYSTEM_IDENTITY) {
             return Ok(None);
@@ -272,9 +343,7 @@ impl ClientCertificateHost {
         if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             Ok(Some(hex))
         } else {
-            Err(alloc::format!(
-                "{text:?} is neither system nor the SHA-256 thumbprint of a certificate (64 hex digits)"
-            ))
+            Err(Error::BadThumbprint(text.to_owned()))
         }
     }
 
@@ -283,7 +352,7 @@ impl ClientCertificateHost {
     /// # Errors
     ///
     /// The pattern is none of a host name, a `*.name`, an address and a regular expression.
-    pub fn compile(&self) -> Result<HostPattern, String> {
+    pub fn compile(&self) -> Result<HostPattern, Error> {
         HostPattern::parse(&self.pattern)
     }
 }
@@ -311,16 +380,13 @@ impl HostPattern {
     /// # Errors
     ///
     /// `text` is empty, too long, or no regular expression.
-    pub fn parse(text: &str) -> Result<Self, String> {
+    pub fn parse(text: &str) -> Result<Self, Error> {
         let text = text.trim();
         if text.is_empty() {
-            return Err(String::from("a host pattern is empty"));
+            return Err(Error::EmptyPattern);
         }
         if text.len() > Self::MAX_LEN {
-            return Err(alloc::format!(
-                "a host pattern is at most {} characters",
-                Self::MAX_LEN
-            ));
+            return Err(Error::PatternTooLong);
         }
         let (under, name) = text
             .strip_prefix("*.")
@@ -350,10 +416,9 @@ impl HostPattern {
             .size_limit(1 << 20)
             .build()
             .map(Self::Expression)
-            .map_err(|error| {
-                alloc::format!(
-                    "{text:?} is no host name, *.name or address, and no regular expression: {error}"
-                )
+            .map_err(|error| Error::BadPattern {
+                pattern: text.to_owned(),
+                reason: error.to_string(),
             })
     }
 
@@ -390,21 +455,12 @@ impl HostPattern {
     }
 }
 
-/// The ways [`NetworkEffect::mode`] says the session reaches the network.
-///
-/// `system`: the host runs a proxy on its loopback address for this session alone, which sends each connection as the host's own
-/// network would (the system's proxy with its PAC, WPAD and login), and the session's programs are given it. `none`: the session's
-/// programs are given no proxy, and what they inherit is theirs. `proxy`: the proxy at `url`, given to the programs as it is and
-/// used by the host's own requests for the session. `pac`: as `system`, choosing by the PAC script at `url`. `command`: a program
-/// the host starts for the session, which listens where it is told and is given to the programs as their proxy.
-pub const NETWORK_MODES: [&str; 5] = ["system", "none", "proxy", "pac", "command"];
-
 impl NetworkEffect {
     /// A network of `mode`.
     #[must_use]
-    pub fn new(mode: impl Into<String>) -> Self {
+    pub const fn new(mode: NetworkMode) -> Self {
         Self {
-            mode: mode.into(),
+            mode,
             url: None,
             command: Vec::new(),
             bypass: Vec::new(),
@@ -417,28 +473,22 @@ impl NetworkEffect {
     /// Why this effect cannot be applied, or `None` when it can.
     #[must_use]
     pub fn problem(&self) -> Option<String> {
-        if !NETWORK_MODES.contains(&self.mode.as_str()) {
-            return Some(alloc::format!(
-                "the network mode {:?} is none of {NETWORK_MODES:?}",
-                self.mode
-            ));
-        }
         let needs = |what: &str, given: bool| {
-            (!given).then(|| alloc::format!("the network mode {} needs {what}", self.mode))
+            (!given).then(|| alloc::format!("the network mode {} needs {what}", self.mode.as_str()))
         };
         if let Some(why) = self.intercept_problem() {
             return Some(why);
         }
-        match self.mode.as_str() {
-            "proxy" | "pac" => needs(
+        match self.mode {
+            NetworkMode::Proxy | NetworkMode::Pac => needs(
                 "an address",
                 self.url.as_deref().is_some_and(|url| !url.is_empty()),
             ),
-            "command" => needs(
+            NetworkMode::Command => needs(
                 "a program",
                 self.command.first().is_some_and(|word| !word.is_empty()),
             ),
-            _ => None,
+            NetworkMode::System | NetworkMode::None => None,
         }
     }
 }
@@ -449,15 +499,19 @@ impl NetworkEffect {
         if self.intercept.is_empty() {
             return None;
         }
-        if !matches!(self.mode.as_str(), "system" | "pac") {
+        if !matches!(self.mode, NetworkMode::System | NetworkMode::Pac) {
             return Some(alloc::format!(
                 "a client certificate is carried by the host's own proxy, which the network mode {} does not run: use system or pac",
-                self.mode
+                self.mode.as_str()
             ));
         }
-        self.intercept
-            .iter()
-            .find_map(|entry| entry.compile().err().or_else(|| entry.thumbprint().err()))
+        self.intercept.iter().find_map(|entry| {
+            entry
+                .compile()
+                .err()
+                .map(|error| error.to_string())
+                .or_else(|| entry.thumbprint().err().map(|error| error.to_string()))
+        })
     }
 }
 
@@ -606,34 +660,33 @@ mod tests {
         let mut bad = ItemEffect::none();
         bad.env.push(Variable::new("A", "x\0"));
         assert!(bad.problem().is_some());
-        for mode in NETWORK_MODES {
+        for mode in NetworkMode::ALL {
             let mut with = ItemEffect::none();
             let mut network = NetworkEffect::new(mode);
             network.url = Some("http://proxy.example:3128".into());
             network.command = alloc::vec!["proxy".into(), "{listen}".into()];
             with.network = Some(network);
-            assert_eq!(with.problem(), None, "{mode}");
+            assert_eq!(with.problem(), None, "{}", mode.as_str());
         }
         for (mode, why) in [
-            ("proxy", "an address"),
-            ("pac", "an address"),
-            ("command", "a program"),
+            (NetworkMode::Proxy, "an address"),
+            (NetworkMode::Pac, "an address"),
+            (NetworkMode::Command, "a program"),
         ] {
             let mut bare = ItemEffect::none();
             bare.network = Some(NetworkEffect::new(mode));
             assert!(
                 bare.problem().is_some_and(|text| text.contains(why)),
-                "{mode}"
+                "{}",
+                mode.as_str()
             );
         }
-        let mut other = ItemEffect::none();
-        other.network = Some(NetworkEffect::new("tor"));
-        assert!(other.problem().is_some());
+        assert!(NetworkMode::from_value(&Value::from("tor")).is_err());
     }
 
     #[test]
     fn hosts_that_get_a_client_certificate_are_patterns_and_need_the_proxy_the_host_runs() {
-        for mode in ["system", "pac"] {
+        for mode in [NetworkMode::System, NetworkMode::Pac] {
             let mut network = NetworkEffect::new(mode);
             network.url = Some("proxy.pac".into());
             network.intercept = alloc::vec![
@@ -645,9 +698,9 @@ mod tests {
                 ClientCertificateHost::new(".*"),
                 ClientCertificateHost::presenting("mtls[.].*", "AB:".repeat(31) + "AB"),
             ];
-            assert_eq!(network.problem(), None, "{mode}");
+            assert_eq!(network.problem(), None, "{}", mode.as_str());
         }
-        for mode in ["none", "proxy", "command"] {
+        for mode in [NetworkMode::None, NetworkMode::Proxy, NetworkMode::Command] {
             let mut network = NetworkEffect::new(mode);
             network.url = Some("http://proxy.example:3128".into());
             network.command = alloc::vec!["proxy".into()];
@@ -656,16 +709,17 @@ mod tests {
                 network
                     .problem()
                     .is_some_and(|why| why.contains("system or pac")),
-                "{mode}"
+                "{}",
+                mode.as_str()
             );
         }
         for bad in ["", "(", "[a-", "*", "*.", "a{2,1}"] {
-            let mut network = NetworkEffect::new("system");
+            let mut network = NetworkEffect::new(NetworkMode::System);
             network.intercept = alloc::vec![ClientCertificateHost::new(bad)];
             assert!(network.problem().is_some(), "{bad:?}");
         }
         for bad in ["me", "abcd", &"zz".repeat(32)] {
-            let mut network = NetworkEffect::new("system");
+            let mut network = NetworkEffect::new(NetworkMode::System);
             network.intercept = alloc::vec![ClientCertificateHost::presenting(".*", bad)];
             assert!(
                 network

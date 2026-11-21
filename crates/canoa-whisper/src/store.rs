@@ -22,10 +22,8 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use canoa::store::recipe::{
-    Finish, Part, Recipe, Release, UnpackStep, bad_value_error, dotted, get_json, internal_error,
-    pinned, unsupported_error,
-};
+use canoa::status::{bad_value, internal, unsupported};
+use canoa::store::recipe::{Finish, Part, Recipe, Release, UnpackStep, dotted, get_json, pinned};
 use canoa::store::{
     Check, Download, InstallPlan, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo,
     Updatable,
@@ -283,7 +281,7 @@ fn asset_name(platform: &Platform) -> Result<&'static str, ProviderError> {
         ("windows", "aarch64") => Ok("whisper-bin-win-cpu-arm64.zip"),
         ("linux", "x86_64") => Ok("whisper-bin-ubuntu-x64.tar.gz"),
         ("linux", "aarch64") => Ok("whisper-bin-ubuntu-arm64.tar.gz"),
-        _ => Err(unsupported_error(alloc::format!(
+        _ => Err(unsupported(alloc::format!(
             "whisper.cpp publishes no program for {} on {}",
             platform.os,
             platform.arch
@@ -298,7 +296,7 @@ impl WhisperRecipe {
             .iter()
             .find(|model| Some(model.id) == id)
             .ok_or_else(|| {
-                bad_value_error(format!(
+                bad_value(format!(
                     "whisper.cpp has no model {:?}",
                     id.unwrap_or_default()
                 ))
@@ -368,7 +366,7 @@ impl Recipe for WhisperRecipe {
         match listing(tools).map(|doc| versions(&doc)).and_then(|all| {
             all.into_iter()
                 .max_by_key(|each| each.numeric)
-                .ok_or_else(|| internal_error("the repository lists no release with a program"))
+                .ok_or_else(|| internal("the repository lists no release with a program"))
         }) {
             Ok(found) => LatestReport::known(found.version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -403,9 +401,7 @@ impl Recipe for WhisperRecipe {
             })
             .max_by_key(|(each, _)| each.numeric)
             .ok_or_else(|| {
-                unsupported_error(
-                    "the repository lists no such release with a program for this system",
-                )
+                unsupported("the repository lists no such release with a program for this system")
             })?;
         let windows = platform.os == "windows";
         let program = Download::new(
@@ -464,7 +460,7 @@ impl Recipe for WhisperRecipe {
                 .join("whisper-cli");
             if path.is_file() {
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                    .map_err(|error| internal_error(format!("whisper-cli: {error}")))?;
+                    .map_err(|error| internal(format!("whisper-cli: {error}")))?;
             }
         }
         #[cfg(not(unix))]

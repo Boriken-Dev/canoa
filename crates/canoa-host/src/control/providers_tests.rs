@@ -472,7 +472,11 @@ fn extension_harnesses_get_behavior_lookups_and_gateways() {
     crate::vendors::note(&library);
 
     let advice = crate::vendors::behave("zed", |vendor| {
-        vendor.shell_advice(ShellRequest::new("sh", "sh", "bash"))
+        vendor.shell_advice(ShellRequest::new(
+            "sh",
+            "sh",
+            canoa::vendor::ShellFamily::Bash,
+        ))
     })
     .expect("noted extension agent answers behave")
     .expect("shell_advice");

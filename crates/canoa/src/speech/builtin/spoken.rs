@@ -18,8 +18,9 @@ use coqui_acp_api::{ProcessSpawner, READ_TIMED_OUT, SpawnSpec, SpawnedProcess};
 use guatiao::Status;
 use guatiao::library::{Object, ProviderError};
 
+use crate::speech::AudioFormat;
 use crate::speech::output::SpeechUtterance;
-use crate::speech::{AudioFormat, internal};
+use crate::status::internal;
 
 /// The most audio held between the program and the client, in bytes: about two seconds of 24 kHz mono.
 pub const BUFFER: usize = 96 * 1024;

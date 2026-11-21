@@ -7,6 +7,7 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::fmt;
 
 use canoa::api_gateway::{check_address, credential_schema, value};
 use coqui_acp_api::standard::{ANTHROPIC_API, OPENAI_API};
@@ -44,6 +45,36 @@ pub struct Settings {
     pub base_url: String,
 }
 
+/// Why LiteLLM proxy account settings could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// The settings map holds an unexpected key.
+    UnknownSetting(String),
+    /// The required `base_url` setting is missing or empty.
+    MissingBaseUrl,
+    /// The proxy address is invalid.
+    InvalidAddress(canoa::api_gateway::Error),
+}
+
+impl From<canoa::api_gateway::Error> for Error {
+    fn from(error: canoa::api_gateway::Error) -> Self {
+        Self::InvalidAddress(error)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownSetting(extra) => write!(f, "{extra} is not a setting of this kind"),
+            Self::MissingBaseUrl => f.write_str("base_url is the address of the LiteLLM proxy"),
+            Self::InvalidAddress(error) => error.fmt(f),
+        }
+    }
+}
+
+impl core::error::Error for Error {}
+
 impl Settings {
     /// Reads the settings from a table. A trailing `/` and a final `/v1` are dropped: the address is the proxy's root, where its
     /// management routes are, and each program adds the path of its own API.
@@ -51,16 +82,16 @@ impl Settings {
     /// # Errors
     ///
     /// A missing or wrong address, or a key the kind lacks.
-    pub fn from_map(map: &Map<String, Value>) -> Result<Self, String> {
+    pub fn from_map(map: &Map<String, Value>) -> Result<Self, Error> {
         if let Some(extra) = map.keys().find(|key| key.as_str() != BASE_URL) {
-            return Err(format!("{extra} is not a setting of this kind"));
+            return Err(Error::UnknownSetting(extra.clone()));
         }
         let given = map
             .get(BASE_URL)
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|url| !url.is_empty())
-            .ok_or_else(|| "base_url is the address of the LiteLLM proxy".to_owned())?;
+            .ok_or(Error::MissingBaseUrl)?;
         check_address(given)?;
         let root = given.trim_end_matches('/');
         let root = root.strip_suffix("/v1").unwrap_or(root);

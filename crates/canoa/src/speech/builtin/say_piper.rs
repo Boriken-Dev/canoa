@@ -21,7 +21,8 @@ use crate::speech::output::{
     Leaves, OutputInfo, SayRequest, SpeechOutput, SpeechUtterance, SpeedRange, Voice, VoiceList,
     VoiceQuery, checked_text, sentences, unknown_choice,
 };
-use crate::speech::{AudioFormat, PCM_S16LE, bad_value, internal};
+use crate::speech::{AudioFormat, PCM_S16LE};
+use crate::status::{bad_value, internal};
 
 /// The sample rate of a model whose json does not say.
 const DEFAULT_RATE: u32 = 22_050;

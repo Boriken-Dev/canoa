@@ -25,11 +25,10 @@ use canoa::vendor::{
     ShellAdvice, ShellRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::guatiao::{Map, Value};
+use coqui_acp_api::guatiao::{Map, ToValue as _, Value};
 
-use canoa::store::recipe::{
-    dotted, get_json, internal_error, measured_platforms, path_has, pinned,
-};
+use canoa::status::internal;
+use canoa::store::recipe::{dotted, get_json, measured_platforms, path_has, pinned};
 
 const PACKAGE: &str = "@earendil-works/pi-coding-agent";
 const REGISTRY: &str = "https://registry.npmjs.org";
@@ -105,17 +104,17 @@ impl AgentVendor for PiVendor {
     fn entry_settings(
         &self,
         request: EntrySettingsRequest,
-    ) -> Result<Option<String>, ProviderError> {
-        let mut settings = serde_json::Map::new();
+    ) -> Result<Option<Value>, ProviderError> {
+        let mut settings = Map::new();
         for key in ["node", "script"] {
             if let Some(held) = request.managed.iter().find(|each| each.name == key) {
-                settings.insert(key.to_owned(), held.value.clone().into());
+                settings.set(key, Value::from(held.value.as_str()));
             }
         }
         if let Some(protected) = request.protected {
-            settings.insert("protected".to_owned(), protected.into());
+            settings.set("protected", protected.to_value().expect("value"));
         }
-        Ok((!settings.is_empty()).then(|| serde_json::Value::Object(settings).to_string()))
+        Ok((!settings.is_empty()).then(|| Value::from(settings)))
     }
 
     fn mcp_not_taken(&self) -> Result<Option<String>, ProviderError> {
@@ -220,7 +219,7 @@ impl Recipe for PiRecipe {
             doc["version"]
                 .as_str()
                 .map(str::to_owned)
-                .ok_or_else(|| internal_error("the registry names no version"))
+                .ok_or_else(|| internal("the registry names no version"))
         }) {
             Ok(version) => LatestReport::known(version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -241,7 +240,7 @@ impl Recipe for PiRecipe {
                 pinned(
                     doc["version"]
                         .as_str()
-                        .ok_or_else(|| internal_error("the registry names no version"))?,
+                        .ok_or_else(|| internal("the registry names no version"))?,
                 )?
             }
         };
@@ -306,7 +305,7 @@ impl Recipe for PiRecipe {
         // Empty files: no user or project `.npmrc` is read.
         for path in ["npmrc-user", "npmrc-global"] {
             std::fs::write(staging.join(path), b"")
-                .map_err(|e| internal_error(format!("npm config: {e}")))?;
+                .map_err(|e| internal(format!("npm config: {e}")))?;
         }
         let user = staging.join("npmrc-user").to_string_lossy().into_owned();
         let global = staging.join("npmrc-global").to_string_lossy().into_owned();
@@ -339,7 +338,7 @@ impl Recipe for PiRecipe {
             ],
         )?;
         if output.code != Some(0) {
-            return Err(internal_error("npm could not install Pi"));
+            return Err(internal("npm could not install Pi"));
         }
         Ok(())
     }
@@ -374,28 +373,26 @@ mod tests {
     #[test]
     fn a_managed_copy_runs_as_its_node_and_script_and_the_protected_list_replaces_the_recommended_one()
      {
-        let said = |request: EntrySettingsRequest| {
-            PiVendor
-                .entry_settings(request)
-                .expect("answers")
-                .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("JSON"))
-        };
+        let said =
+            |request: EntrySettingsRequest| PiVendor.entry_settings(request).expect("answers");
         assert_eq!(said(EntrySettingsRequest::new()), None);
         let mut request = EntrySettingsRequest::new();
         request.managed = vec![
             Variable::new("node", "/p/node"),
             Variable::new("script", "/p/cli.js"),
         ];
-        assert_eq!(
-            said(request.clone()),
-            Some(serde_json::json!({"node": "/p/node", "script": "/p/cli.js"}))
-        );
+        let mut expected_managed = Map::new();
+        expected_managed.set("node", Value::from("/p/node"));
+        expected_managed.set("script", Value::from("/p/cli.js"));
+        assert_eq!(said(request.clone()), Some(Value::from(expected_managed)));
         request.managed.clear();
         request.protected = Some(vec!["~/.ssh".to_owned()]);
-        assert_eq!(
-            said(request),
-            Some(serde_json::json!({"protected": ["~/.ssh"]}))
+        let mut expected_protected = Map::new();
+        expected_protected.set(
+            "protected",
+            vec!["~/.ssh".to_owned()].to_value().expect("value"),
         );
+        assert_eq!(said(request), Some(Value::from(expected_protected)));
     }
 
     #[test]

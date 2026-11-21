@@ -19,11 +19,11 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
 use canoa::store::recipe::{
-    Finish, Part, Published, Recipe, Release, UnpackStep, bad_value_error, dotted, dotted_numbers,
-    get_json, github_assets, github_endpoints, internal_error, newest_published, path_has, pinned,
-    unsupported_error,
+    Finish, Part, Published, Recipe, Release, UnpackStep, dotted, dotted_numbers, get_json,
+    github_assets, github_endpoints, newest_published, path_has, pinned,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -106,7 +106,7 @@ fn spelled(platform: &Platform) -> Result<&'static str, ProviderError> {
         ("linux", "aarch64") => Ok("linux-arm64"),
         ("macos", "x86_64") => Ok("macos"),
         ("macos", "aarch64") => Ok("macos-arm64"),
-        _ => Err(unsupported_error(
+        _ => Err(unsupported(
             "Bitwarden's command line is not published for this system",
         )),
     }
@@ -184,9 +184,7 @@ impl Recipe for BitwardenRecipe {
         match listing(tools)
             .map(|doc| newest_published(cli_releases(&doc)))
             .and_then(|found| {
-                found.ok_or_else(|| {
-                    internal_error("the repository lists no release of the command line")
-                })
+                found.ok_or_else(|| internal("the repository lists no release of the command line"))
             }) {
             Ok(release) => LatestReport::known(release.version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -209,10 +207,10 @@ impl Recipe for BitwardenRecipe {
             }
             None => newest_published(all),
         }
-        .ok_or_else(|| unsupported_error("the repository lists no such release"))?;
+        .ok_or_else(|| unsupported("the repository lists no such release"))?;
         let name = format!("bw-{spelled}-{}.zip", release.version);
         let digest = release.digest_of(&name).ok_or_else(|| {
-            bad_value_error(format!(
+            bad_value(format!(
                 "release {} lists no {name} with a digest",
                 release.tag
             ))
@@ -247,7 +245,7 @@ impl Recipe for BitwardenRecipe {
             let path = Path::new(finish.staging).join("bw/bw");
             if path.is_file() {
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                    .map_err(|error| internal_error(format!("bw: {error}")))?;
+                    .map_err(|error| canoa::status::internal(format!("bw: {error}")))?;
             }
         }
         #[cfg(not(unix))]

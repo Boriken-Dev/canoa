@@ -29,9 +29,6 @@ use guatiao_intake::Screen;
 /// The name of the `model_store` kind.
 pub const KIND: &str = "model_store";
 
-/// The versions of the `model_store` kind this host offers.
-pub const KIND_VERSIONS: [&str; 1] = ["1"];
-
 /// The tables of canoa.cfg that are the host's own, which a provider's [`ModelSettings::table`] may not name.
 pub const RESERVED_TABLES: [&str; 29] = [
     "accounts",

@@ -3,8 +3,8 @@
 //! A section here has no form of its own, so nothing is asked of its provider but what it is called and where it sits.
 
 use canoa::settings_section::{SectionInfo, SettingsSection};
-use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
+use coqui_acp_api::guatiao::{Map, Provider, Value};
 
 /// A section the application draws, with the heading it sits under and the words Settings' search finds it by.
 macro_rules! built_in_sections {
@@ -23,11 +23,11 @@ macro_rules! built_in_sections {
                     Ok(info)
                 }
 
-                fn read(&self) -> Result<String, ProviderError> {
-                    Ok("{}".to_owned())
+                fn read(&self) -> Result<Value, ProviderError> {
+                    Ok(Value::from(Map::new()))
                 }
 
-                fn write(&self, _values: String) -> Result<(), ProviderError> {
+                fn write(&self, _values: Value) -> Result<(), ProviderError> {
                     Ok(())
                 }
             }

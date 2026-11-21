@@ -56,11 +56,13 @@ impl SettingsSection for RegionSection {
         info.taking::<RegionValues>()
     }
 
-    fn read(&self) -> Result<String, ProviderError> {
-        Ok("{}".to_owned())
+    fn read(&self) -> Result<coqui_acp_api::guatiao::Value, ProviderError> {
+        Ok(coqui_acp_api::guatiao::Value::from(
+            coqui_acp_api::guatiao::Map::new(),
+        ))
     }
 
-    fn write(&self, _values: String) -> Result<(), ProviderError> {
+    fn write(&self, _values: coqui_acp_api::guatiao::Value) -> Result<(), ProviderError> {
         Ok(())
     }
 }
@@ -90,17 +92,22 @@ impl SettingsSection for CacheSection {
         info.taking::<CacheValues>()
     }
 
-    fn read(&self) -> Result<String, ProviderError> {
+    fn read(&self) -> Result<coqui_acp_api::guatiao::Value, ProviderError> {
         let held = CACHE.lock().expect("held").clone();
-        Ok(if held.is_empty() {
-            "{}".to_owned()
+        if held.is_empty() {
+            Ok(coqui_acp_api::guatiao::Value::from(
+                coqui_acp_api::guatiao::Map::new(),
+            ))
         } else {
-            held
-        })
+            let parsed: serde_json::Value = serde_json::from_str(&held)
+                .unwrap_or(serde_json::Value::Object(Default::default()));
+            Ok(guatiao_serde::from_serde(parsed).expect("value"))
+        }
     }
 
-    fn write(&self, values: String) -> Result<(), ProviderError> {
-        *CACHE.lock().expect("held") = values;
+    fn write(&self, values: coqui_acp_api::guatiao::Value) -> Result<(), ProviderError> {
+        let json: serde_json::Value = guatiao_serde::adapt::from_value(&values).expect("json");
+        *CACHE.lock().expect("held") = json.to_string();
         Ok(())
     }
 }

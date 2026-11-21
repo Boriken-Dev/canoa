@@ -37,7 +37,9 @@ fn proxy_of(grant: &AccountGrant) -> Result<(String, String), ProviderError> {
     }
     let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&grant.settings)
         .map_err(|_| refused("the account's settings are not a table"))?;
-    let base = Settings::from_map(&settings).map_err(refused)?.base_url;
+    let base = Settings::from_map(&settings)
+        .map_err(|why| refused(why.to_string()))?
+        .base_url;
     let key = grant
         .credentials
         .expose()
@@ -75,7 +77,7 @@ impl AccountProvider for LiteLlmAccounts {
         }
         let inputs = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.inputs)
             .map_err(|_| refused("the inputs are not a table"))?;
-        let settings = Settings::from_map(&inputs).map_err(refused)?;
+        let settings = Settings::from_map(&inputs).map_err(|why| refused(why.to_string()))?;
         let host = settings
             .base_url
             .split("://")

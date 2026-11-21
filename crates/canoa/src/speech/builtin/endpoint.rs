@@ -27,8 +27,9 @@ use guatiao_intake::Form;
 use super::{WAV_HEADER_LEN, named_hints, wav_header};
 use crate::speech::{
     Heard, OpenRequest, PCM_S16LE, SpeechInfo, SpeechProvider, SpeechSession, Transcript,
-    bad_value, internal, unsupported_format,
+    unsupported_format,
 };
+use crate::status::{bad_value, internal};
 
 /// The most of an error answer's body that a message carries, in bytes.
 const MAX_ERROR_BODY: usize = 300;

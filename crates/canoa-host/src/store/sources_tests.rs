@@ -57,7 +57,7 @@ impl CatalogSourceProvider for Standin {
         _spawner: Object<dyn ProcessSpawner>,
     ) -> Result<String, ProviderError> {
         if is_down(&request.label) {
-            return Err(canoa::store::recipe::internal_error("the stand-in is down"));
+            return Err(canoa::status::internal("the stand-in is down"));
         }
         Ok(format!(
             "# {} {} {}\n",
@@ -82,7 +82,7 @@ impl CatalogSourceProvider for Everywhere {
         _spawner: Object<dyn ProcessSpawner>,
     ) -> Result<String, ProviderError> {
         if is_down(&request.label) {
-            return Err(canoa::store::recipe::internal_error("the stand-in is down"));
+            return Err(canoa::status::internal("the stand-in is down"));
         }
         Ok(format!(
             "name = \"From {}\"\n\n[overlays.made]\nsource = \"git+https://example.org/made.git@main\"\n",
@@ -109,7 +109,7 @@ impl CatalogSourceProvider for Lister {
         _spawner: Object<dyn ProcessSpawner>,
     ) -> Result<String, ProviderError> {
         if is_down(&request.label) {
-            return Err(canoa::store::recipe::internal_error("the stand-in is down"));
+            return Err(canoa::status::internal("the stand-in is down"));
         }
         Ok(if request.kind == "skills" {
             json!({"skills": [{"name": "from-extension", "description": "Listed by an extension.", "source": "owner/repo"}]})

@@ -390,26 +390,17 @@ fn cut(sentence: &str) -> Vec<String> {
     pieces
 }
 
-/// `UNSUPPORTED` with `why`.
-#[must_use]
-pub fn unsupported(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(guatiao::Status::GUATIAO_ERR_UNSUPPORTED, why.as_ref())
-}
-
 /// `UNSUPPORTED` for a choice the provider does not have, naming the ones it does.
 #[must_use]
 pub fn unknown_choice(what: &str, wanted: &str, has: &[String]) -> ProviderError {
-    ProviderError::new(
-        guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
-        &alloc::format!(
-            "this provider has no {what} {wanted:?}{}",
-            if has.is_empty() {
-                String::new()
-            } else {
-                alloc::format!("; it has {}", has.join(", "))
-            }
-        ),
-    )
+    crate::status::unsupported(alloc::format!(
+        "this provider has no {what} {wanted:?}{}",
+        if has.is_empty() {
+            String::new()
+        } else {
+            alloc::format!("; it has {}", has.join(", "))
+        }
+    ))
 }
 
 /// The request's own text, checked: empty text is `BAD_VALUE`, and text past `max` characters is too.
@@ -420,12 +411,12 @@ pub fn unknown_choice(what: &str, wanted: &str, has: &[String]) -> ProviderError
 pub fn checked_text(request: &SayRequest, max: Option<u32>) -> Result<&str, ProviderError> {
     let text = request.text.trim();
     if text.is_empty() {
-        return Err(super::bad_value("there is no text to speak"));
+        return Err(crate::status::bad_value("there is no text to speak"));
     }
     if let Some(max) = max
         && text.chars().count() > usize::try_from(max).unwrap_or(usize::MAX)
     {
-        return Err(super::bad_value(alloc::format!(
+        return Err(crate::status::bad_value(alloc::format!(
             "this provider takes at most {max} characters at once; send the text in parts"
         )));
     }

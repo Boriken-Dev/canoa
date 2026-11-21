@@ -409,7 +409,12 @@ pub(super) fn write_plugin(
         let Some(command) = command_for(program, before, &at, *kind, *refuse) else {
             return Ok(None);
         };
-        commands.push(HookCommand::new(kind.as_str(), command));
+        let hook_kind = match kind {
+            Kind::Start => canoa::vendor::HookKind::Start,
+            Kind::PreCompact => canoa::vendor::HookKind::PreCompact,
+            Kind::Batch => canoa::vendor::HookKind::Batch,
+        };
+        commands.push(HookCommand::new(hook_kind, command));
     }
     let request = HooksRequest::new(commands, ANSWER_LIMIT.as_secs());
     let delivery = harness

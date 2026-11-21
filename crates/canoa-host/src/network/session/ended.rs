@@ -461,7 +461,7 @@ fn files_under(dir: &Path) -> Vec<String> {
 #[test]
 fn what_a_session_is_given_to_trust_holds_the_authoritys_certificate_and_never_its_key() {
     let private = Dir::new("given-private");
-    let mut asked = NetworkEffect::new("system");
+    let mut asked = NetworkEffect::new(canoa::profile_item::NetworkMode::System);
     asked.intercept = entries(&["api.example.test"]);
     let services = Services {
         private: Some(&private.0),
@@ -538,7 +538,7 @@ fn what_a_session_is_given_to_trust_holds_the_authoritys_certificate_and_never_i
 #[test]
 fn sessions_that_name_the_same_hosts_are_given_the_same_authority_and_the_limit_decides_which() {
     let given = |patterns: &[&str], dir: &Dir| {
-        let mut asked = NetworkEffect::new("system");
+        let mut asked = NetworkEffect::new(canoa::profile_item::NetworkMode::System);
         // A bypass entry of its own keeps this test's proxies apart from the other tests' running ones.
         asked.bypass = vec!["authority.example.test".to_owned()];
         asked.intercept = entries(patterns);
@@ -577,11 +577,11 @@ fn sessions_that_name_the_same_hosts_are_given_the_same_authority_and_the_limit_
 
 #[test]
 fn ending_tls_needs_the_proxy_the_host_runs_and_a_directory_to_keep_what_programs_trust_in() {
-    let mut asked = NetworkEffect::new("system");
+    let mut asked = NetworkEffect::new(canoa::profile_item::NetworkMode::System);
     asked.intercept = entries(&["api.example.test"]);
     let why = start(&asked, &|_| None, &Services::default()).expect_err("refused");
     assert!(why.contains("private directory"), "{why}");
-    asked.mode = "proxy".to_owned();
+    asked.mode = canoa::profile_item::NetworkMode::Proxy;
     asked.url = Some("http://gateway.example:3128".to_owned());
     assert!(
         asked
@@ -799,7 +799,7 @@ fn sessions_whose_proxy_settings_are_equal_share_one_proxy_and_its_secret_and_di
  {
     let dirs: Vec<Dir> = (0..4).map(|n| Dir::new(&format!("shared-{n}"))).collect();
     let session = |bypass: &str, identity: Option<&str>, dir: &Dir| {
-        let mut asked = NetworkEffect::new("system");
+        let mut asked = NetworkEffect::new(canoa::profile_item::NetworkMode::System);
         asked.bypass = vec![bypass.to_owned()];
         asked.intercept = vec![match identity {
             Some(thumbprint) => {
@@ -872,7 +872,7 @@ fn running_proxy() -> Result<super::Running, String> {
 fn a_proxy_no_session_uses_is_kept_for_the_idle_time_for_the_next_session_and_then_ended() {
     let registry = super::Registry::new();
     registry.set_idle(std::time::Duration::from_secs(2));
-    let mut asked = NetworkEffect::new("system");
+    let mut asked = NetworkEffect::new(canoa::profile_item::NetworkMode::System);
     asked.bypass = vec!["idle.example.test".to_owned()];
     let key = super::ProxyKey::of(&asked, &|_| None).expect("a key");
     let first = registry.acquire(key.clone(), running_proxy).expect("made");

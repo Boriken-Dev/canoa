@@ -18,9 +18,6 @@ use guatiao_intake::Screen;
 /// The name of the `catalog_source` kind.
 pub const KIND: &str = "catalog_source";
 
-/// The versions of the `catalog_source` kind this host offers.
-pub const KIND_VERSIONS: [&str; 1] = ["1"];
-
 /// What a source provider is, from [`CatalogSourceProvider::describe`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]

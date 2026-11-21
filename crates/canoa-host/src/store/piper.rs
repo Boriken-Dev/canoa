@@ -20,9 +20,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
-    Finish, Part, Recipe, Release, UnpackStep, bad_value_error, dotted, internal_error,
-    measured_platforms, pinned, unsupported_error,
+    Finish, Part, Recipe, Release, UnpackStep, dotted, measured_platforms, pinned,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -257,7 +257,7 @@ impl Recipe for PiperRecipe {
         if let Some(version) = version {
             let version = pinned(version)?;
             if version != catalog.version {
-                return Err(unsupported_error(format!(
+                return Err(unsupported(format!(
                     "Piper has no release {version}: its last is {}",
                     catalog.version
                 )));
@@ -268,7 +268,7 @@ impl Recipe for PiperRecipe {
             "english" => Some("en"),
             "spanish" => Some("es"),
             other => {
-                return Err(bad_value_error(format!(
+                return Err(bad_value(format!(
                     "Piper has no channel {other:?}: standard, english or spanish"
                 )));
             }
@@ -277,7 +277,7 @@ impl Recipe for PiperRecipe {
             .engines
             .iter()
             .find(|engine| engine.os == platform.os && engine.arch == platform.arch)
-            .ok_or_else(|| unsupported_error("Piper is not published for this system"))?;
+            .ok_or_else(|| unsupported("Piper is not published for this system"))?;
         let windows = platform.os == "windows";
         let archive = Download::new(
             format!("{}{}", catalog.release, engine.file),
@@ -358,8 +358,8 @@ impl Recipe for PiperRecipe {
 /// For each `libNAME.so.A.B.C` in `dir`, the `libNAME.so.A` and `libNAME.so` the program asks for by name, as copies: the unpack
 /// leaves links out, and a library the program cannot find by name is a program that will not start.
 fn link_names(dir: &Path) -> Result<(), ProviderError> {
-    let entries = std::fs::read_dir(dir)
-        .map_err(|error| internal_error(format!("{}: {error}", dir.display())))?;
+    let entries =
+        std::fs::read_dir(dir).map_err(|error| internal(format!("{}: {error}", dir.display())))?;
     for entry in entries.flatten() {
         let Some(file) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
@@ -375,7 +375,7 @@ fn link_names(dir: &Path) -> Result<(), ProviderError> {
             let target = dir.join(&name);
             if !target.exists() {
                 std::fs::copy(entry.path(), &target)
-                    .map_err(|error| internal_error(format!("{}: {error}", target.display())))?;
+                    .map_err(|error| internal(format!("{}: {error}", target.display())))?;
             }
         }
     }

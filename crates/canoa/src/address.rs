@@ -3,8 +3,40 @@
 
 use alloc::format;
 use alloc::string::String;
+use core::fmt;
 
 use url::{Host, Url};
+
+/// Why [`parse`] could not read text as an `http` or `https` address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// The address holds whitespace or a control character.
+    ControlOrWhitespace,
+    /// The scheme is not `http` or `https`, or the text is not a URL.
+    NotHttpOrHttps,
+    /// The URL names no host.
+    MissingHost,
+    /// The URL holds user credentials.
+    HasCredentials,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ControlOrWhitespace => {
+                f.write_str("the address holds a space or a control character")
+            }
+            Self::NotHttpOrHttps => f.write_str("the address starts with https:// or http://"),
+            Self::MissingHost => f.write_str("the address names no host"),
+            Self::HasCredentials => f.write_str(
+                "the address holds a login: a key goes in the key field, a password in the password field",
+            ),
+        }
+    }
+}
+
+impl core::error::Error for Error {}
 
 /// `address` as an `http` or `https` address with a host, no user information and no space or control character.
 ///
@@ -13,27 +45,22 @@ use url::{Host, Url};
 /// # Errors
 ///
 /// Why it is not one, in words that never repeat the address.
-pub fn parse(address: &str) -> Result<Url, String> {
+pub fn parse(address: &str) -> Result<Url, Error> {
     if address.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err("the address holds a space or a control character".to_owned());
+        return Err(Error::ControlOrWhitespace);
     }
     let url = Url::parse(address).map_err(|error| match error {
-        url::ParseError::EmptyHost | url::ParseError::InvalidDomainCharacter => {
-            "the address names no host".to_owned()
-        }
-        _ => "the address starts with https:// or http://".to_owned(),
+        url::ParseError::EmptyHost | url::ParseError::InvalidDomainCharacter => Error::MissingHost,
+        _ => Error::NotHttpOrHttps,
     })?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err("the address starts with https:// or http://".to_owned());
+        return Err(Error::NotHttpOrHttps);
     }
     if url.host().is_none() {
-        return Err("the address names no host".to_owned());
+        return Err(Error::MissingHost);
     }
     if !url.username().is_empty() || url.password().is_some() {
-        return Err(
-            "the address holds a login: a key goes in the key field, a password in the password field"
-                .to_owned(),
-        );
+        return Err(Error::HasCredentials);
     }
     Ok(url)
 }

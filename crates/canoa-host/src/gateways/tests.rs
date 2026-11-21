@@ -446,9 +446,10 @@ fn the_gateway_is_asked_for_the_account_its_settings_its_home_its_own_table_and_
     let asked = record.asked();
     assert_eq!(asked.len(), 1);
     assert_eq!(asked[0].account, "id-local");
-    let kept: serde_json::Value = serde_json::from_str(&asked[0].settings).expect("JSON");
+    let kept: serde_json::Value =
+        guatiao_serde::adapt::from_value(&asked[0].settings).expect("JSON");
     assert_eq!(kept, json!({"model": "local-model"}));
-    let table: serde_json::Value = serde_json::from_str(&asked[0].table).expect("JSON");
+    let table: serde_json::Value = guatiao_serde::adapt::from_value(&asked[0].table).expect("JSON");
     assert_eq!(table, json!({"windows": {"local-model": 16384}}));
     assert_eq!(
         asked[0].home.as_deref().map(std::path::Path::new),
@@ -474,7 +475,10 @@ fn a_host_with_no_canoa_cfg_and_no_program_of_its_own_asks_for_no_table_and_no_h
         )
         .expect("begins");
     let asked = record.asked();
-    assert_eq!(asked[0].table, "{}");
+    assert_eq!(
+        asked[0].table,
+        coqui_acp_api::guatiao::Value::from(coqui_acp_api::guatiao::Map::new())
+    );
     assert!(asked[0].helper.is_empty());
 }
 

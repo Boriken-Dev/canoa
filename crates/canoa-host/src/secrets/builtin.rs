@@ -11,9 +11,9 @@ use std::collections::BTreeSet;
 use std::sync::{Mutex, PoisonError};
 
 use canoa::secret_provider::{
-    Held, Keeping, Named, Names, Other, ProviderInfo, SecretProvider, bad_value, internal,
-    name_problem, unavailable, unsupported,
+    Held, Keeping, Named, Names, Other, ProviderInfo, SecretProvider, name_problem,
 };
+use canoa::status::{bad_value, internal, unavailable, unsupported};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};

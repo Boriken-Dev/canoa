@@ -14,10 +14,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
-    Finish, Part, Published, Recipe, Release, bad_value_error, dotted_numbers, get_json,
-    github_assets, github_endpoints, internal_error, newest_published, path_has, pinned, spell,
-    unsupported_error,
+    Finish, Part, Published, Recipe, Release, dotted_numbers, get_json, github_assets,
+    github_endpoints, newest_published, path_has, pinned, spell,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -172,7 +172,7 @@ impl Recipe for GitBashRecipe {
         match get_json(tools, &format!("{RELEASES_API}?per_page={LISTED}"))
             .map(|doc| newest_published(git_releases(&doc)))
             .and_then(|found| {
-                found.ok_or_else(|| internal_error("the repository lists no portable release"))
+                found.ok_or_else(|| internal("the repository lists no portable release"))
             }) {
             Ok(release) => LatestReport::known(release.version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -187,7 +187,7 @@ impl Recipe for GitBashRecipe {
         tools: &Object<dyn InstallTools>,
     ) -> Result<Release, ProviderError> {
         if platform.os != "windows" {
-            return Err(unsupported_error(
+            return Err(unsupported(
                 "Git Bash is Git for Windows' own: other systems have a bash of their own",
             ));
         }
@@ -195,7 +195,7 @@ impl Recipe for GitBashRecipe {
             &platform.arch,
             &[("x86_64", "64-bit"), ("aarch64", "arm64")],
         )
-        .ok_or_else(|| unsupported_error("Git for Windows is not published for this processor"))?;
+        .ok_or_else(|| unsupported("Git for Windows is not published for this processor"))?;
         let doc = get_json(tools, &format!("{RELEASES_API}?per_page={LISTED}"))?;
         let all = git_releases(&doc);
         let release = match version {
@@ -205,10 +205,10 @@ impl Recipe for GitBashRecipe {
             }
             None => newest_published(all),
         }
-        .ok_or_else(|| unsupported_error("the repository lists no such release"))?;
+        .ok_or_else(|| unsupported("the repository lists no such release"))?;
         let name = format!("PortableGit-{}-{arch}.7z.exe", release.version);
         let digest = release.digest_of(&name).ok_or_else(|| {
-            bad_value_error(format!(
+            bad_value(format!(
                 "release {} lists no {name} with a digest",
                 release.tag
             ))
@@ -264,12 +264,12 @@ impl Recipe for GitBashRecipe {
             &[],
         )?;
         if output.code != Some(0) {
-            return Err(internal_error(
+            return Err(internal(
                 "the self-extracting archive ended with an error: nothing was installed",
             ));
         }
         std::fs::remove_file(&archive)
-            .map_err(|error| internal_error(format!("{SELF_EXTRACTING}: {error}")))
+            .map_err(|error| internal(format!("{SELF_EXTRACTING}: {error}")))
     }
 }
 

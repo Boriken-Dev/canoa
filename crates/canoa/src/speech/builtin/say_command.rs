@@ -22,7 +22,8 @@ use crate::speech::output::{
     Choice, Leaves, OutputInfo, SayRequest, SpeechOutput, SpeechUtterance, SpeedRange, Voice,
     VoiceList, VoiceQuery, checked_text, sentences, unknown_choice,
 };
-use crate::speech::{AudioFormat, PCM_S16LE, bad_value};
+use crate::speech::{AudioFormat, PCM_S16LE};
+use crate::status::bad_value;
 
 /// The slowest and fastest speech, as multiples of normal, for a program that takes a speed.
 const SPEED: SpeedRange = SpeedRange::new(0.5, 2.0);

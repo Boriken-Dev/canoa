@@ -10,9 +10,10 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
-    Finish, Part, Recipe, Release, UnpackStep, bad_value_error, dotted, get_json, internal_error,
-    measured_platforms, path_has, pinned, spell, unsupported_error,
+    Finish, Part, Recipe, Release, UnpackStep, dotted, get_json, measured_platforms, path_has,
+    pinned, spell,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
@@ -153,7 +154,7 @@ impl Recipe for FoundryRecipe {
         match listing(tools)
             .map(|doc| newest(clis(&doc)))
             .and_then(|found| {
-                found.ok_or_else(|| internal_error("the repository lists no command line release"))
+                found.ok_or_else(|| internal("the repository lists no command line release"))
             }) {
             Ok(cli) => LatestReport::known(cli.version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -171,15 +172,13 @@ impl Recipe for FoundryRecipe {
             &platform.os,
             &[("windows", "win"), ("linux", "linux"), ("macos", "osx")],
         )
-        .ok_or_else(|| unsupported_error("Foundry Local is not published for this system"))?;
-        let arch =
-            spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")]).ok_or_else(|| {
-                unsupported_error("Foundry Local is not published for this processor")
-            })?;
+        .ok_or_else(|| unsupported("Foundry Local is not published for this system"))?;
+        let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
+            .ok_or_else(|| unsupported("Foundry Local is not published for this processor"))?;
         let windows = platform.os == "windows";
         let mac = platform.os == "macos";
         if mac && arch != "arm64" {
-            return Err(unsupported_error(
+            return Err(unsupported(
                 "Foundry Local is published for Apple silicon Macs only",
             ));
         }
@@ -192,7 +191,7 @@ impl Recipe for FoundryRecipe {
             }
             None => newest(all),
         }
-        .ok_or_else(|| unsupported_error("the repository lists no such command line release"))?;
+        .ok_or_else(|| unsupported("the repository lists no such command line release"))?;
         let extension = match (windows, mac) {
             (true, _) => "msix",
             (_, true) => "zip",
@@ -205,7 +204,7 @@ impl Recipe for FoundryRecipe {
             .find(|(asset, _)| *asset == name)
             .map(|(_, digest)| digest.clone())
             .ok_or_else(|| {
-                bad_value_error(format!("release {} lists no {name} with a digest", cli.tag))
+                bad_value(format!("release {} lists no {name} with a digest", cli.tag))
             })?;
         let download = Download::new(
             format!("{DOWNLOADS}{}/{name}", cli.tag),
@@ -260,7 +259,7 @@ impl Recipe for FoundryRecipe {
         );
         if target.is_file() && !linked.exists() {
             std::fs::copy(&target, &linked)
-                .map_err(|error| internal_error(format!("libonnxruntime.1.dylib: {error}")))?;
+                .map_err(|error| internal(format!("libonnxruntime.1.dylib: {error}")))?;
         }
         #[cfg(unix)]
         {
@@ -272,7 +271,7 @@ impl Recipe for FoundryRecipe {
                     let path = dir.join(name);
                     if path.is_file() {
                         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                            .map_err(|error| internal_error(format!("{name}: {error}")))?;
+                            .map_err(|error| internal(format!("{name}: {error}")))?;
                     }
                 }
             }

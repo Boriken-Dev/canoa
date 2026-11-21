@@ -6,8 +6,29 @@
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::fmt;
 
 use serde_json::Value;
+
+/// Why a Foundry model action could not be prepared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// The model name does not match the allowed characters and length.
+    InvalidModel,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidModel => {
+                f.write_str("a model is 1 to 128 letters, digits and . _ - : + /")
+            }
+        }
+    }
+}
+
+impl core::error::Error for Error {}
 
 /// What the command line is asked to do with one model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,9 +80,9 @@ pub fn valid_model(id: &str) -> bool {
 /// # Errors
 ///
 /// `model` is not a model name.
-pub fn action_args(action: ModelAction, model: &str) -> Result<Vec<String>, String> {
+pub fn action_args(action: ModelAction, model: &str) -> Result<Vec<String>, Error> {
     if !valid_model(model) {
-        return Err("a model is 1 to 128 letters, digits and . _ - : + /".to_owned());
+        return Err(Error::InvalidModel);
     }
     Ok(["model", action.word(), model, "-o", "json"]
         .map(str::to_owned)

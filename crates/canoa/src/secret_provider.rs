@@ -18,7 +18,7 @@ use alloc::vec::Vec;
 
 use coqui_acp_api::ProcessSpawner;
 use guatiao::library::{Object, ProviderError};
-use guatiao::{FromValue, Schema, Secret, Status, ToValue};
+use guatiao::{FromValue, Schema, Secret, ToValue};
 
 /// The name of the `secret_provider` kind.
 pub const KIND: &str = "secret_provider";
@@ -205,9 +205,9 @@ impl Names {
 /// every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
 /// to start one.
 ///
-/// A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
-/// reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
-/// the person instead.
+/// A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]); one
+/// that cannot be reached or has not been unlocked answers `GONE` ([`crate::status::unavailable`]) with a reason that holds no
+/// value, and the host asks the person instead.
 #[guatiao::kind(name = "secret_provider")]
 pub trait SecretProvider: Send + Sync {
     /// What it is and can do. Cheap, and the same on every call.
@@ -247,30 +247,6 @@ pub fn name_problem(name: &str) -> Option<String> {
     name.chars()
         .any(char::is_control)
         .then(|| String::from("a secret's name has a control character"))
-}
-
-/// `UNSUPPORTED`: the provider does not do what was asked.
-#[must_use]
-pub fn unsupported(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, why.as_ref())
-}
-
-/// `GONE`: the provider cannot answer now (locked, not signed in, not reachable). The reason holds no secret.
-#[must_use]
-pub fn unavailable(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_GONE, why.as_ref())
-}
-
-/// `BAD_VALUE`: a name or a value the provider cannot use.
-#[must_use]
-pub fn bad_value(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why.as_ref())
-}
-
-/// `INTERNAL`: the provider failed. The reason holds no secret.
-#[must_use]
-pub fn internal(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, why.as_ref())
 }
 
 #[cfg(test)]

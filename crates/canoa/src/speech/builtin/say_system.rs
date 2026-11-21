@@ -21,9 +21,10 @@ use guatiao_intake::Form;
 use super::spoken::{self, Head, Spoken};
 use crate::speech::output::{
     Leaves, OutputInfo, SayRequest, SpeechOutput, SpeechUtterance, SpeedRange, Voice, VoiceList,
-    VoiceQuery, checked_text, sentences, unsupported,
+    VoiceQuery, checked_text, sentences,
 };
 use crate::speech::{AudioFormat, PCM_S16LE};
+use crate::status::unsupported;
 
 /// The rate Windows is asked to synthesize at.
 const WINDOWS_RATE: u32 = 22_050;

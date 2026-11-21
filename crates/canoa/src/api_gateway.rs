@@ -2,7 +2,7 @@
 //! address needs.
 //!
 //! A gateway or proxy (a service in front of many models) is an address and a key, and speaks the wire APIs it says: the OpenAI
-//! API, the Anthropic Messages API, any other a harness accepts. An account of the kind [`KIND`] holds the address, the standards
+//! API, the Anthropic Messages API, any other a harness accepts. An account of the kind [`ACCOUNT_KIND`] holds the address, the standards
 //! the person says it speaks and the key (a secret, never a setting), and every harness that accepts one of those standards
 //! runs on it, the address moved to the harness's own endpoint setting.
 //!
@@ -19,9 +19,10 @@
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
+use core::fmt;
 
+use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::guatiao::{Provider, Status};
 use coqui_acp_api::standard::{OPENAI_API, is_standard, well_known};
 use coqui_acp_api::{
     AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer, AccountProvider,
@@ -34,7 +35,7 @@ use serde_json::{Map, Value, json};
 pub mod http;
 
 /// The id of the account kind, and of the sign-in method that makes it.
-pub const KIND: &str = "api-gateway";
+pub const ACCOUNT_KIND: &str = "api-gateway";
 
 /// The name this library is registered under.
 pub const LIBRARY: &str = "canoa-api-gateway";
@@ -64,13 +65,136 @@ pub const ADDRESSES: &str = "addresses";
 /// The sign-in input that names how the key is sent for some standards: `standard=credential` pairs.
 pub const CREDENTIALS: &str = "credentials";
 
-fn refused(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why.as_ref())
+/// Why API gateway settings or inputs could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// A standard identifier in `standards` is invalid.
+    InvalidStandardId,
+    /// `standards` named no standard.
+    NoStandards,
+    /// An entry in `addresses` or `credentials` is not formatted as `standard=value`.
+    MalformedPair(String),
+    /// A well-known standard does not take the given credential key.
+    WrongStandardCredential {
+        /// The standard identifier.
+        standard: String,
+        /// The credential key that was supplied.
+        key: String,
+        /// The credential key names accepted by the standard.
+        expected: String,
+    },
+    /// A credential key does not have a valid key identifier format.
+    InvalidCredentialKey(String),
+    /// An address is not a valid `http` or `https` URL.
+    Address(crate::address::Error),
+    /// A settings map contains an unexpected key.
+    UnknownSetting(String),
+    /// The required `base_url` setting is missing or empty.
+    MissingBaseUrl,
+    /// The required `standards` setting is missing or not text/array.
+    MissingStandards,
+    /// The `by_standard` setting is not a table.
+    ByStandardNotObject,
+    /// An entry under `by_standard` is not a table.
+    ByStandardEntryNotObject {
+        /// The standard identifier whose entry was not a table.
+        standard: String,
+    },
+    /// A per-standard entry in `by_standard` contains an unexpected key.
+    UnknownStandardSetting {
+        /// The standard identifier.
+        standard: String,
+        /// The unexpected key name.
+        key: String,
+    },
+    /// A per-standard setting in `by_standard` is not text.
+    StandardSettingNotText {
+        /// The standard identifier.
+        standard: String,
+        /// The setting key name.
+        field: String,
+    },
+    /// An `addresses` or `credentials` sign-in input is not text.
+    PairsNotText {
+        /// The input field name (`addresses` or `credentials`).
+        input: String,
+    },
+    /// A `standard=value` pair inside `addresses` or `credentials` is malformed.
+    InvalidPair {
+        /// The input field name (`addresses` or `credentials`).
+        input: String,
+        /// The malformed pair entry.
+        part: String,
+    },
+    /// A standard was referenced in `by_standard`, `addresses`, or `credentials`, but is not listed in `standards`.
+    StandardNotSpoken(String),
+    /// A per-standard override address is not a valid `http` or `https` URL.
+    InvalidStandardAddress {
+        /// The standard identifier.
+        standard: String,
+        /// Why the address was rejected.
+        error: crate::address::Error,
+    },
 }
 
-fn unsupported(why: &str) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, why)
+impl From<crate::address::Error> for Error {
+    fn from(error: crate::address::Error) -> Self {
+        Self::Address(error)
+    }
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidStandardId => f.write_str(
+                "a standard is named by lower-case letters, digits and single hyphens, starting with a letter (`openai-api`)",
+            ),
+            Self::NoStandards => f.write_str("name at least one standard the address speaks"),
+            Self::MalformedPair(part) => write!(f, "`{part}` is not `standard=value`"),
+            Self::WrongStandardCredential {
+                standard,
+                key,
+                expected,
+            } => write!(f, "{standard} takes its key as {expected}, not {key}"),
+            Self::InvalidCredentialKey(key) => write!(
+                f,
+                "`{key}` is not a credential key (lower-case letters, digits and underscores, starting with a letter)"
+            ),
+            Self::Address(error) => error.fmt(f),
+            Self::UnknownSetting(extra) => write!(f, "{extra} is not a setting of this kind"),
+            Self::MissingBaseUrl => f.write_str("base_url is the address of the gateway"),
+            Self::MissingStandards => f.write_str("standards lists what the address speaks"),
+            Self::ByStandardNotObject => {
+                write!(f, "{BY_STANDARD} is a table of the standards' ids")
+            }
+            Self::ByStandardEntryNotObject { standard } => {
+                write!(f, "{BY_STANDARD}.{standard} is a table")
+            }
+            Self::UnknownStandardSetting { standard, key } => {
+                write!(f, "{key} is not a setting of {standard} in {BY_STANDARD}")
+            }
+            Self::StandardSettingNotText { standard, field } => {
+                write!(f, "{BY_STANDARD}.{standard}.{field} is text")
+            }
+            Self::PairsNotText { input } => {
+                write!(f, "{input} is `standard=value` pairs, as text")
+            }
+            Self::InvalidPair { input, part } => {
+                write!(f, "{input}: `{part}` is not `standard=value`")
+            }
+            Self::StandardNotSpoken(standard) => write!(
+                f,
+                "{standard} is named for an address or a key, and the address does not speak it"
+            ),
+            Self::InvalidStandardAddress { standard, error } => {
+                write!(f, "the address for {standard}: {error}")
+            }
+        }
+    }
+}
+
+impl core::error::Error for Error {}
 
 /// A JSON value as a Guatiao one, for a schema or a setting.
 ///
@@ -122,7 +246,9 @@ pub fn key_of(answer: &LoginAnswer) -> Result<String, ProviderError> {
         .trim()
         .to_owned();
     if key.is_empty() {
-        return Err(refused("login refused: nothing was entered"));
+        return Err(crate::status::bad_value(
+            "login refused: nothing was entered",
+        ));
     }
     Ok(key)
 }
@@ -132,24 +258,21 @@ pub fn key_of(answer: &LoginAnswer) -> Result<String, ProviderError> {
 /// # Errors
 ///
 /// No id, or one that is not an id a standard can be.
-pub fn parse_standards(text: &str) -> Result<Vec<String>, String> {
+pub fn parse_standards(text: &str) -> Result<Vec<String>, Error> {
     let mut found: Vec<String> = Vec::new();
     for id in text
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|id| !id.is_empty())
     {
         if !is_standard(id) {
-            return Err(
-                "a standard is named by lower-case letters, digits and single hyphens, starting with a letter (`openai-api`)"
-                    .to_owned(),
-            );
+            return Err(Error::InvalidStandardId);
         }
         if !found.iter().any(|each| each == id) {
             found.push(id.to_owned());
         }
     }
     if found.is_empty() {
-        return Err("name at least one standard the address speaks".to_owned());
+        return Err(Error::NoStandards);
     }
     Ok(found)
 }
@@ -159,14 +282,14 @@ pub fn parse_standards(text: &str) -> Result<Vec<String>, String> {
 /// # Errors
 ///
 /// A part that is not `name=value`.
-pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, String> {
+pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, Error> {
     text.split(|c: char| c == ',' || c.is_whitespace())
         .filter(|part| !part.is_empty())
         .map(|part| match part.split_once('=') {
             Some((name, value)) if !name.is_empty() && !value.is_empty() => {
                 Ok((name.to_owned(), value.to_owned()))
             }
-            _ => Err(format!("`{part}` is not `standard=value`")),
+            _ => Err(Error::MalformedPair(part.to_owned())),
         })
         .collect()
 }
@@ -177,15 +300,16 @@ pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, String> {
 /// # Errors
 ///
 /// Why it is not.
-pub fn check_credential(standard: &str, key: &str) -> Result<(), String> {
+pub fn check_credential(standard: &str, key: &str) -> Result<(), Error> {
     if let Some(known) = well_known(standard) {
         return if known.credentials.contains(&key) {
             Ok(())
         } else {
-            Err(format!(
-                "{standard} takes its key as {}, not {key}",
-                known.credentials.join(" or ")
-            ))
+            Err(Error::WrongStandardCredential {
+                standard: standard.to_owned(),
+                key: key.to_owned(),
+                expected: known.credentials.join(" or "),
+            })
         };
     }
     let name = key
@@ -198,9 +322,7 @@ pub fn check_credential(standard: &str, key: &str) -> Result<(), String> {
     if name {
         Ok(())
     } else {
-        Err(format!(
-            "`{key}` is not a credential key (lower-case letters, digits and underscores, starting with a letter)"
-        ))
+        Err(Error::InvalidCredentialKey(key.to_owned()))
     }
 }
 
@@ -210,8 +332,8 @@ pub fn check_credential(standard: &str, key: &str) -> Result<(), String> {
 /// # Errors
 ///
 /// Why it is not.
-pub fn check_address(url: &str) -> Result<(), String> {
-    crate::address::parse(url).map(|_| ())
+pub fn check_address(url: &str) -> Result<(), Error> {
+    crate::address::parse(url).map(|_| ()).map_err(Error::from)
 }
 
 /// The address of the model list of an OpenAI-API address `base`: `/v1/models`, or `/models` when `base` already ends in `/v1`.
@@ -232,11 +354,11 @@ pub fn models_url(base: &str) -> String {
 #[must_use]
 pub fn openai_models(base: &str, key: &str) -> ModelListing {
     if let Err(why) = check_address(base) {
-        return ModelListing::unavailable(UnknownKind::Failed, why);
+        return ModelListing::unavailable(UnknownKind::Failed, why.to_string());
     }
     let reply = match http::get_json(&models_url(base), Some(key)) {
         Ok(reply) => reply,
-        Err(why) => return ModelListing::unavailable(UnknownKind::Failed, why),
+        Err(why) => return ModelListing::unavailable(UnknownKind::Failed, why.to_string()),
     };
     if !(200..300).contains(&reply.status) {
         return ModelListing::unavailable(
@@ -290,18 +412,18 @@ impl Settings {
     ///
     /// A missing or wrong address or standard, a standard the address does not speak named for an address or a key, or a key the
     /// kind lacks.
-    pub fn from_map(map: &Map<String, Value>) -> Result<Self, String> {
+    pub fn from_map(map: &Map<String, Value>) -> Result<Self, Error> {
         if let Some(extra) = map.keys().find(|key| {
             ![BASE_URL, STANDARDS, BY_STANDARD, ADDRESSES, CREDENTIALS].contains(&key.as_str())
         }) {
-            return Err(format!("{extra} is not a setting of this kind"));
+            return Err(Error::UnknownSetting(extra.clone()));
         }
         let base_url = map
             .get(BASE_URL)
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|url| !url.is_empty())
-            .ok_or_else(|| "base_url is the address of the gateway".to_owned())?;
+            .ok_or(Error::MissingBaseUrl)?;
         check_address(base_url)?;
         let standards = match map.get(STANDARDS) {
             Some(Value::String(text)) => parse_standards(text)?,
@@ -312,7 +434,7 @@ impl Settings {
                     .collect::<Vec<_>>()
                     .join(" "),
             )?,
-            _ => return Err("standards lists what the address speaks".to_owned()),
+            _ => return Err(Error::MissingStandards),
         };
         let mut by_standard: BTreeMap<String, StandardSettings> = BTreeMap::new();
         match map.get(BY_STANDARD) {
@@ -320,22 +442,28 @@ impl Settings {
             Some(Value::Object(table)) => {
                 for (standard, entry) in table {
                     let Value::Object(entry) = entry else {
-                        return Err(format!("{BY_STANDARD}.{standard} is a table"));
+                        return Err(Error::ByStandardEntryNotObject {
+                            standard: standard.clone(),
+                        });
                     };
                     if let Some(extra) = entry
                         .keys()
                         .find(|key| ![BASE_URL, "credential"].contains(&key.as_str()))
                     {
-                        return Err(format!(
-                            "{extra} is not a setting of {standard} in {BY_STANDARD}"
-                        ));
+                        return Err(Error::UnknownStandardSetting {
+                            standard: standard.clone(),
+                            key: extra.clone(),
+                        });
                     }
                     let text = |field: &str| {
                         entry
                             .get(field)
                             .map(|value| {
                                 value.as_str().map(str::to_owned).ok_or_else(|| {
-                                    format!("{BY_STANDARD}.{standard}.{field} is text")
+                                    Error::StandardSettingNotText {
+                                        standard: standard.clone(),
+                                        field: field.to_owned(),
+                                    }
                                 })
                             })
                             .transpose()
@@ -345,14 +473,21 @@ impl Settings {
                     slot.credential = text("credential")?;
                 }
             }
-            Some(_) => return Err(format!("{BY_STANDARD} is a table of the standards' ids")),
+            Some(_) => return Err(Error::ByStandardNotObject),
         }
         for (input, address) in [(ADDRESSES, true), (CREDENTIALS, false)] {
             let Some(text) = map.get(input) else { continue };
-            let text = text
-                .as_str()
-                .ok_or_else(|| format!("{input} is `standard=value` pairs, as text"))?;
-            for (standard, value) in parse_pairs(text).map_err(|why| format!("{input}: {why}"))? {
+            let text = text.as_str().ok_or_else(|| Error::PairsNotText {
+                input: input.to_owned(),
+            })?;
+            let pairs = parse_pairs(text).map_err(|error| match error {
+                Error::MalformedPair(part) => Error::InvalidPair {
+                    input: input.to_owned(),
+                    part,
+                },
+                other => other,
+            })?;
+            for (standard, value) in pairs {
                 let slot = by_standard.entry(standard).or_default();
                 if address {
                     slot.base_url = Some(value);
@@ -363,12 +498,13 @@ impl Settings {
         }
         for (standard, slot) in &mut by_standard {
             if !standards.contains(standard) {
-                return Err(format!(
-                    "{standard} is named for an address or a key, and the address does not speak it"
-                ));
+                return Err(Error::StandardNotSpoken(standard.clone()));
             }
             if let Some(url) = &slot.base_url {
-                check_address(url).map_err(|why| format!("the address for {standard}: {why}"))?;
+                crate::address::parse(url).map_err(|error| Error::InvalidStandardAddress {
+                    standard: standard.clone(),
+                    error,
+                })?;
                 slot.base_url = Some(url.trim_end_matches('/').to_owned());
             }
             if let Some(key) = &slot.credential {
@@ -492,14 +628,15 @@ pub fn inputs_schema() -> Value {
 /// The kind and the sign-in method that make an account of it.
 #[must_use]
 pub fn offer() -> AccountOffer {
-    let mut kind = AccountKindInfo::new(KIND, "API gateway");
+    let mut kind = AccountKindInfo::new(ACCOUNT_KIND, "API gateway");
     kind.description = "An address that speaks one or several of the APIs agents use, and a key for it (a gateway or proxy in front of many models). Every program that takes one of the standards you name runs on it.".to_owned();
     kind.settings = value(&settings_schema());
     kind.endpoints = vec![EndpointSlot::new(MODEL_API).key(BASE_URL)];
     kind.notices = vec![
         "the key is sent to the address you gave, by each program that runs on the account: use an address you trust".to_owned(),
     ];
-    let mut method = LoginMethodInfo::new(KIND, "A gateway's address and key", KIND);
+    let mut method =
+        LoginMethodInfo::new(ACCOUNT_KIND, "A gateway's address and key", ACCOUNT_KIND);
     method.description = "Names an address, the standards it speaks and a key for it. The key is asked in the form only your application reads and kept as a secret.".to_owned();
     method.inputs = value(&inputs_schema());
     let mut offer = AccountOffer::new();
@@ -531,12 +668,15 @@ impl AccountProvider for ApiGatewayAccounts {
         prompter: Object<dyn LoginPrompter>,
     ) -> Result<LoginOutcome, ProviderError> {
         drop(spawner);
-        if request.method != KIND {
-            return Err(refused("an API gateway has no such way to sign in"));
+        if request.method != ACCOUNT_KIND {
+            return Err(crate::status::bad_value(
+                "an API gateway has no such way to sign in",
+            ));
         }
         let inputs = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.inputs)
-            .map_err(|_| refused("the inputs are not a table"))?;
-        let settings = Settings::from_map(&inputs).map_err(refused)?;
+            .map_err(|_| crate::status::bad_value("the inputs are not a table"))?;
+        let settings = Settings::from_map(&inputs)
+            .map_err(|error| crate::status::bad_value(error.to_string()))?;
         let label = settings
             .base_url
             .split("://")
@@ -554,7 +694,7 @@ impl AccountProvider for ApiGatewayAccounts {
         let key = key_of(&answer)?;
         let mut credentials = Credentials::new();
         credentials.insert(CREDENTIAL, key);
-        let mut outcome = LoginOutcome::new(KIND, credentials);
+        let mut outcome = LoginOutcome::new(ACCOUNT_KIND, credentials);
         outcome.settings = value(&settings.to_value());
         outcome.label = label;
         Ok(outcome)
@@ -566,7 +706,9 @@ impl AccountProvider for ApiGatewayAccounts {
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<RenewReport, ProviderError> {
         drop((request, spawner));
-        Err(unsupported("a key you were given is not renewed here"))
+        Err(crate::status::unsupported(
+            "a key you were given is not renewed here",
+        ))
     }
 
     fn watch(
@@ -576,7 +718,9 @@ impl AccountProvider for ApiGatewayAccounts {
         keeper: Object<dyn AccountKeeper>,
     ) -> Result<Object<dyn AccountWatch>, ProviderError> {
         drop((request, spawner, keeper));
-        Err(unsupported("a gateway key has no login to watch"))
+        Err(crate::status::unsupported(
+            "a gateway key has no login to watch",
+        ))
     }
 
     fn usage(
@@ -602,8 +746,10 @@ impl AccountProvider for ApiGatewayAccounts {
         drop((spawner, keeper));
         let grant = query.account;
         grant.check_id()?;
-        if grant.kind != KIND {
-            return Err(refused("this provider keeps no account of that kind"));
+        if grant.kind != ACCOUNT_KIND {
+            return Err(crate::status::bad_value(
+                "this provider keeps no account of that kind",
+            ));
         }
         if !grant.provides.iter().any(|standard| standard == OPENAI_API) {
             return Ok(ModelListing::unknown(format!(
@@ -616,15 +762,15 @@ impl AccountProvider for ApiGatewayAccounts {
             )));
         }
         let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&grant.settings)
-            .map_err(|_| refused("the account's settings are not a table"))?;
+            .map_err(|_| crate::status::bad_value("the account's settings are not a table"))?;
         let Some(base) = settings.get(BASE_URL).and_then(Value::as_str) else {
-            return Err(refused("the account names no address"));
+            return Err(crate::status::bad_value("the account names no address"));
         };
         let key = grant
             .credentials
             .expose()
             .get(CREDENTIAL)
-            .ok_or_else(|| refused("the account holds no key"))?
+            .ok_or_else(|| crate::status::bad_value("the account holds no key"))?
             .to_string();
         let address = settings
             .get(BY_STANDARD)

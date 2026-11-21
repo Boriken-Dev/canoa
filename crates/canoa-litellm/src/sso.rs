@@ -238,7 +238,8 @@ pub fn sign_in(
     prompter: &Object<dyn LoginPrompter>,
     deadline: Instant,
 ) -> Result<(Tokens, String), ProviderError> {
-    let found = http::get_json(&format!("{base}{DISCOVERY}"), None).map_err(internal)?;
+    let found = http::get_json(&format!("{base}{DISCOVERY}"), None)
+        .map_err(|why| internal(why.to_string()))?;
     if found.status != 200 {
         return Err(internal(format!(
             "the proxy offers no sign-in of this kind ({}): LiteLLM's CLI sign-in is a beta the proxy has to turn on and be recent enough for; use a key instead",
@@ -270,7 +271,7 @@ pub fn sign_in(
             "response_types": ["code"],
         }),
     )
-    .map_err(internal)?;
+    .map_err(|why| internal(why.to_string()))?;
     if !(200..300).contains(&registered.status) {
         return Err(internal(refused_by(
             "to register this application",
@@ -316,7 +317,7 @@ pub fn sign_in(
             ("resource", &resource),
         ],
     )
-    .map_err(internal)?;
+    .map_err(|why| internal(why.to_string()))?;
     if !(200..300).contains(&granted.status) {
         return Err(failure(
             Status::GUATIAO_ERR_BAD_VALUE,
@@ -342,7 +343,8 @@ pub enum RenewError {
 ///
 /// [`RenewError::Refused`] when the proxy turns the token down; [`RenewError::Failed`] when it could not be asked.
 pub fn refresh(base: &str, client: &str, refresh_token: &str) -> Result<Tokens, RenewError> {
-    let found = http::get_json(&format!("{base}{DISCOVERY}"), None).map_err(RenewError::Failed)?;
+    let found = http::get_json(&format!("{base}{DISCOVERY}"), None)
+        .map_err(|why| RenewError::Failed(why.to_string()))?;
     let resource = found
         .body
         .get("resource")
@@ -357,7 +359,7 @@ pub fn refresh(base: &str, client: &str, refresh_token: &str) -> Result<Tokens, 
             ("resource", &resource),
         ],
     )
-    .map_err(RenewError::Failed)?;
+    .map_err(|why| RenewError::Failed(why.to_string()))?;
     match reply.status {
         200..=299 => tokens_of(&reply).map_err(RenewError::Failed),
         400 | 401 | 403 => Err(RenewError::Refused(refused_by("the refresh token", &reply))),

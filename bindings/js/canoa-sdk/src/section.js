@@ -59,18 +59,18 @@ export class SettingsSection extends Provider {
   }
 
   /**
-   * What the section holds now, as JSON text of an object keyed by the schema's member names, a sensitive member left out. Asked only
-   * of a `stored = 'provider'` section.
-   * @returns {string}
+   * What the section holds now, as an object keyed by the schema's member names, a sensitive member left out. Asked only of a
+   * `stored = 'provider'` section.
+   * @returns {Record<string, unknown>}
    */
   read() {
-    return '{}';
+    return {};
   }
 
   /**
-   * Keeps `values`, JSON text of an object the host has already checked against the schema; a sensitive member the person left empty
-   * is absent, so what was kept stays. Asked only of a `stored = 'provider'` section.
-   * @param {string} _values
+   * Keeps `values`, an object the host has already checked against the schema; a sensitive member the person left empty is absent,
+   * so what was kept stays. Asked only of a `stored = 'provider'` section.
+   * @param {Record<string, unknown>} _values
    */
   write(_values) {}
 }

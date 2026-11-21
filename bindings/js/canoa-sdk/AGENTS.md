@@ -54,7 +54,7 @@ class CommandCatalogSource extends CatalogSource   // a program the person named
 class ReadCatalogSource extends CatalogSource      // a place the type reads itself; read answers a file on this computer
 fieldsOf(request); releaseSpawner(spawner); MAX_BYTES; DEFAULT_SECONDS; TAIL_BYTES
 class SettingsSection extends Provider {      // section.js: static section, title, help, icon, group, under, keywords, stored = 'config'|'provider', values, form
-  read()  // '{}' for a config section; write(values)
+  read()  // {} for a config section; write(values)
 }
 class PanelTab extends Provider {             // panel.js: static tab, title, help, icon, shows = 'log'|'terminal'|'page', shell, url; tail(request)
 }

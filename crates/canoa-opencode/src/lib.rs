@@ -19,9 +19,9 @@ use canoa::store::{
 use canoa::vendor::{AccessTarget, AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
+use canoa::status::{internal, unsupported};
 use canoa::store::recipe::{
-    dotted, exe_suffix, get_json, internal_error, measured_platforms, path_has, pinned,
-    serves_when, spell, unsupported_error,
+    dotted, exe_suffix, get_json, measured_platforms, path_has, pinned, serves_when, spell,
 };
 
 const API: &str = "https://api.github.com/repos/anomalyco/opencode/releases";
@@ -118,7 +118,7 @@ impl OpenCodeRecipe {
     fn version_of(document: &serde_json::Value) -> Result<String, ProviderError> {
         let tag = document["tag_name"]
             .as_str()
-            .ok_or_else(|| internal_error("the release names no tag"))?;
+            .ok_or_else(|| internal("the release names no tag"))?;
         pinned(tag.strip_prefix('v').unwrap_or(tag))
     }
 }
@@ -204,9 +204,9 @@ impl Recipe for OpenCodeRecipe {
         tools: &Object<dyn InstallTools>,
     ) -> Result<Release, ProviderError> {
         let os = spell(&platform.os, &[("windows", "windows"), ("linux", "linux")])
-            .ok_or_else(|| unsupported_error("OpenCode is not published for this system"))?;
+            .ok_or_else(|| unsupported("OpenCode is not published for this system"))?;
         let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported_error("OpenCode is not published for this processor"))?;
+            .ok_or_else(|| unsupported("OpenCode is not published for this processor"))?;
         let extension = if platform.os == "windows" {
             "zip"
         } else {
@@ -222,15 +222,13 @@ impl Recipe for OpenCodeRecipe {
                     .iter()
                     .find(|each| each["name"].as_str() == Some(asset.as_str()))
             })
-            .ok_or_else(|| unsupported_error(format!("release {version} lists no {asset}")))?;
+            .ok_or_else(|| unsupported(format!("release {version} lists no {asset}")))?;
         let digest = listed["digest"]
             .as_str()
             .and_then(|digest| digest.strip_prefix("sha256:"))
             .map(str::to_ascii_lowercase)
             .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| {
-                internal_error(format!("release {version} gives no SHA-256 for {asset}"))
-            })?;
+            .ok_or_else(|| internal(format!("release {version} gives no SHA-256 for {asset}")))?;
         let download = Download::new(
             format!("{DOWNLOADS}v{version}/{asset}"),
             listed["size"].as_u64(),

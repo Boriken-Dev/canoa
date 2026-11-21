@@ -14,32 +14,17 @@
 use alloc::string::String;
 
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue, Value};
+use coqui_acp_api::guatiao::{FromValue, Schema, ToValue, Value};
 use guatiao_intake::Screen;
 
 /// The name of the `settings_section` kind.
 pub const KIND: &str = "settings_section";
-
-/// The versions of the `settings_section` kind this host offers.
-pub const KIND_VERSIONS: [&str; 1] = ["1"];
 
 /// The heading a section sits under in Settings' list when it names none.
 pub const DEFAULT_GROUP: &str = "Extensions";
 
 /// The most bytes of values a section keeps, so a provider cannot make a section large.
 pub const MAX_VALUES: usize = 64 * 1024;
-
-/// An error with status `GUATIAO_ERR_BAD_VALUE`: the values do not fit the section's form.
-#[must_use]
-pub fn bad_value_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why.as_ref())
-}
-
-/// An error with status `GUATIAO_ERR_INTERNAL`.
-#[must_use]
-pub fn internal_error(why: impl AsRef<str>) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_INTERNAL, why.as_ref())
-}
 
 /// Where a section's values are kept.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,11 +152,11 @@ pub trait SettingsSection: Send + Sync {
     fn describe(&self) -> Result<SectionInfo, ProviderError>;
 
     /// What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out.
-    fn read(&self) -> Result<String, ProviderError>;
+    fn read(&self) -> Result<Value, ProviderError>;
 
     /// Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A
     /// sensitive member the person left empty is absent, so what was kept stays.
-    fn write(&self, values: String) -> Result<(), ProviderError>;
+    fn write(&self, values: Value) -> Result<(), ProviderError>;
 }
 
 #[cfg(test)]

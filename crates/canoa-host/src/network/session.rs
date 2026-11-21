@@ -102,8 +102,9 @@ pub(crate) fn start(
     lookup: &dyn Fn(&str) -> Option<String>,
     services: &Services<'_>,
 ) -> Result<SessionNetwork, String> {
-    match effect.mode.as_str() {
-        "none" => {
+    use canoa::profile_item::NetworkMode;
+    match effect.mode {
+        NetworkMode::None => {
             let network = Network::new(&settings(ProxyChoice::None, effect, lookup)?)
                 .map_err(|error| error.to_string())?;
             Ok(SessionNetwork {
@@ -113,7 +114,7 @@ pub(crate) fn start(
                 _keep: Keep::Nothing,
             })
         }
-        "proxy" => {
+        NetworkMode::Proxy => {
             let url = effect.url.clone().unwrap_or_default();
             let network = Arc::new(
                 Network::new(&settings(ProxyChoice::Proxy(url), effect, lookup)?)
@@ -126,7 +127,7 @@ pub(crate) fn start(
                 _keep: Keep::Nothing,
             })
         }
-        "pac" => {
+        NetworkMode::Pac => {
             let url = effect.url.clone().unwrap_or_default();
             middleman(
                 registry(),
@@ -141,8 +142,8 @@ pub(crate) fn start(
                 },
             )
         }
-        "command" => program(effect),
-        _ => middleman(
+        NetworkMode::Command => program(effect),
+        NetworkMode::System | _ => middleman(
             registry(),
             effect,
             lookup,
@@ -191,7 +192,7 @@ fn settings_over(
 /// are given the same proxy.
 #[derive(Clone, PartialEq, Eq)]
 struct ProxyKey {
-    mode: String,
+    mode: canoa::profile_item::NetworkMode,
     url: Option<String>,
     bypass: Vec<String>,
     user: Option<String>,
@@ -205,7 +206,7 @@ struct ProxyKey {
 
 impl ProxyKey {
     fn of(effect: &NetworkEffect, lookup: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
-        let login = effect.mode == "pac";
+        let login = effect.mode == canoa::profile_item::NetworkMode::Pac;
         let password = match (&effect.user, &effect.password_variable) {
             (Some(_), Some(name)) if login => Some(lookup(name).ok_or_else(|| {
                 format!("{name}, the variable the proxy's password is read from, is not set")
@@ -213,7 +214,7 @@ impl ProxyKey {
             _ => None,
         };
         Ok(Self {
-            mode: effect.mode.clone(),
+            mode: effect.mode,
             url: effect.url.clone(),
             bypass: effect.bypass.clone(),
             user: effect.user.clone().filter(|_| login),
@@ -508,9 +509,9 @@ impl Intercept {
             .iter()
             .map(|entry| {
                 Ok(Rule {
-                    pattern: entry.compile()?,
+                    pattern: entry.compile().map_err(|error| error.to_string())?,
                     text: entry.pattern.trim().to_owned(),
-                    thumbprint: entry.thumbprint()?,
+                    thumbprint: entry.thumbprint().map_err(|error| error.to_string())?,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -527,7 +528,8 @@ impl Intercept {
         let plain = entries
             .iter()
             .map(|entry| entry.compile().map(|pattern| pattern.is_plain()))
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
             .into_iter()
             .all(|plain| plain);
         let hosts: Vec<String> = entries

@@ -17,9 +17,6 @@ use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
 /// The name of the `account_speech` kind.
 pub const KIND: &str = "account_speech";
 
-/// The versions of the `account_speech` kind this host offers.
-pub const KIND_VERSIONS: [&str; 1] = ["1"];
-
 /// One model a service transcribes with.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]

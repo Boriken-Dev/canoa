@@ -16,7 +16,7 @@ use canoa::vendor::sessions::{
 };
 use canoa::vendor::{
     HistoryAnswer, HistoryRequest, LoginFile, SessionListing, SessionsRequest, ShellAdvice,
-    ShellRequest, Variable,
+    ShellFamily, ShellRequest, Variable,
 };
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_history::Body;
@@ -41,7 +41,7 @@ pub(crate) fn login_file(kind: &str) -> Option<LoginFile> {
 /// when the file is named `bash.exe`, `sh.exe`, `bash` or `sh`) and `CLAUDE_CODE_SHELL` elsewhere ("a path to a `bash` or `zsh`
 /// binary").
 pub(crate) fn shell_advice(shell: &ShellRequest) -> ShellAdvice {
-    let bash_like = matches!(shell.family.as_str(), "bash" | "zsh");
+    let bash_like = matches!(shell.family, ShellFamily::Bash | ShellFamily::Zsh);
     let name = shell.name.as_str();
     if bash_like && shell.windows {
         if shell.wsl {
@@ -55,7 +55,7 @@ pub(crate) fn shell_advice(shell: &ShellRequest) -> ShellAdvice {
         }
     } else if bash_like && (name == "bash" || name == "zsh") {
         ShellAdvice::sets("CLAUDE_CODE_SHELL", &shell.path)
-    } else if shell.family == "powershell" {
+    } else if shell.family == ShellFamily::Powershell {
         ShellAdvice::cannot(
             "Claude Code takes no path for PowerShell: its PowerShell tool runs the first pwsh on the PATH, which a copy the Store installs is on",
         )

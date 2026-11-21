@@ -264,6 +264,14 @@ fn a_proxy_stops_listening_while_another_holder_still_has_its_socket() {
 }
 
 fn effect(mode: &str) -> NetworkEffect {
+    let mode = match mode {
+        "system" => canoa::profile_item::NetworkMode::System,
+        "none" => canoa::profile_item::NetworkMode::None,
+        "proxy" => canoa::profile_item::NetworkMode::Proxy,
+        "pac" => canoa::profile_item::NetworkMode::Pac,
+        "command" => canoa::profile_item::NetworkMode::Command,
+        other => panic!("unexpected mode {other}"),
+    };
     NetworkEffect::new(mode)
 }
 

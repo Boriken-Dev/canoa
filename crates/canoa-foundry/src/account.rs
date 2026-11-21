@@ -6,6 +6,7 @@
 
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
+use core::fmt;
 
 use coqui_acp_api::{
     AccountKindInfo, AccountOffer, EndpointSlot, LoginMethodInfo, MODEL_API, standard,
@@ -44,39 +45,74 @@ pub enum EngineKind {
     Sdk,
 }
 
+/// Why Foundry Local account settings could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// A text setting was given a non-text or empty value.
+    NotText(String),
+    /// The settings map holds an unexpected key.
+    UnknownSetting(String),
+    /// `answer_seconds` is not a positive whole number.
+    InvalidAnswerSeconds,
+    /// The required `model` setting is missing.
+    MissingModel,
+    /// `engine` is neither `service` nor `sdk`.
+    InvalidEngine,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotText(key) => write!(f, "{key} is text"),
+            Self::UnknownSetting(extra) => write!(f, "{extra} is not a setting of this kind"),
+            Self::InvalidAnswerSeconds => {
+                f.write_str("answer_seconds is a whole number of seconds, at least 1")
+            }
+            Self::MissingModel => f.write_str("model names the model to serve"),
+            Self::InvalidEngine => f.write_str("engine is service or sdk"),
+        }
+    }
+}
+
+impl core::error::Error for Error {}
+
 impl Settings {
     /// Reads the settings of an account from its table.
     ///
     /// # Errors
     ///
     /// A missing model, or a value that is not text.
-    pub fn from_map(map: &Map<String, Value>) -> Result<Self, String> {
-        let text = |key: &str| -> Result<Option<String>, String> {
+    pub fn from_map(map: &Map<String, Value>) -> Result<Self, Error> {
+        let text = |key: &str| -> Result<Option<String>, Error> {
             match map.get(key) {
                 None | Some(Value::Null) => Ok(None),
                 Some(Value::String(text)) if !text.is_empty() => Ok(Some(text.clone())),
-                Some(_) => Err(alloc::format!("{key} is text")),
+                Some(_) => Err(Error::NotText(key.to_owned())),
             }
         };
         if let Some(extra) = map.keys().find(|key| {
             !["model", "endpoint", "library", "engine", "answer_seconds"].contains(&key.as_str())
         }) {
-            return Err(alloc::format!("{extra} is not a setting of this kind"));
+            return Err(Error::UnknownSetting(extra.clone()));
         }
         let answer_seconds = match map.get("answer_seconds") {
             None | Some(Value::Null) => None,
-            Some(value) => Some(value.as_u64().filter(|seconds| *seconds >= 1).ok_or_else(
-                || "answer_seconds is a whole number of seconds, at least 1".to_string(),
-            )?),
+            Some(value) => Some(
+                value
+                    .as_u64()
+                    .filter(|seconds| *seconds >= 1)
+                    .ok_or(Error::InvalidAnswerSeconds)?,
+            ),
         };
         Ok(Self {
-            model: text("model")?.ok_or_else(|| "model names the model to serve".to_string())?,
+            model: text("model")?.ok_or(Error::MissingModel)?,
             endpoint: text("endpoint")?,
             library: text("library")?,
             engine: match text("engine")?.as_deref() {
                 None | Some("service") => EngineKind::Service,
                 Some("sdk") => EngineKind::Sdk,
-                Some(_) => return Err("engine is service or sdk".to_string()),
+                Some(_) => return Err(Error::InvalidEngine),
             },
             window: None,
             answer_seconds,

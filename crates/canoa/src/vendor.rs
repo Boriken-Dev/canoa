@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue};
+use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue, Value};
 
 pub mod sessions;
 
@@ -211,6 +211,37 @@ impl LoginFile {
     }
 }
 
+/// Which command-line family a shell belongs to.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ShellFamily {
+    /// POSIX Bourne-Again shell (`bash`).
+    Bash,
+    /// Z shell (`zsh`).
+    Zsh,
+    /// PowerShell (`powershell` or `pwsh`).
+    Powershell,
+    /// Windows Command Prompt (`cmd`).
+    Cmd,
+    /// Any other shell.
+    Other,
+}
+
+impl ShellFamily {
+    /// The family's canonical lower-case name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Zsh => "zsh",
+            Self::Powershell => "powershell",
+            Self::Cmd => "cmd",
+            Self::Other => "other",
+        }
+    }
+}
+
 /// A shell a person chose, as an agent is asked to use it.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
@@ -220,8 +251,8 @@ pub struct ShellRequest {
     pub path: String,
     /// The program's file name without its extension, in lower case (`bash`, `pwsh`).
     pub name: String,
-    /// Its family: `bash`, `zsh`, `powershell`, `cmd`, or `other`.
-    pub family: String,
+    /// Its family.
+    pub family: ShellFamily,
     /// Whether it is the one the Windows Subsystem for Linux starts.
     pub wsl: bool,
     /// Whether the host runs on Windows.
@@ -231,15 +262,11 @@ pub struct ShellRequest {
 impl ShellRequest {
     /// A request for the shell at `path`, called `name`, of `family`, with neither the subsystem nor Windows.
     #[must_use]
-    pub fn new(
-        path: impl Into<String>,
-        name: impl Into<String>,
-        family: impl Into<String>,
-    ) -> Self {
+    pub fn new(path: impl Into<String>, name: impl Into<String>, family: ShellFamily) -> Self {
         Self {
             path: path.into(),
             name: name.into(),
-            family: family.into(),
+            family,
             wsl: false,
             windows: false,
         }
@@ -444,18 +471,18 @@ pub const PLUGIN_PATH: &str = "{path}";
 pub struct PluginDelivery {
     /// The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself.
     pub folder: String,
-    /// What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists
-    /// by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path.
-    pub meta: String,
+    /// What the session request's `_meta` gains, as an object: it is merged into the request's, objects key by key and lists by
+    /// appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path.
+    pub meta: Value,
 }
 
 impl PluginDelivery {
     /// The plugin in `folder`, loaded by a session whose `_meta` gains `meta`.
     #[must_use]
-    pub fn new(folder: impl Into<String>, meta: impl Into<String>) -> Self {
+    pub fn new(folder: impl Into<String>, meta: Value) -> Self {
         Self {
             folder: folder.into(),
-            meta: meta.into(),
+            meta,
         }
     }
 }
@@ -514,16 +541,29 @@ impl SkillsDelivery {
 }
 
 /// The moments of a session that only an agent's own hooks show the host.
-pub const HOOK_KINDS: [&str; 3] = ["start", "pre-compact", "batch"];
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub enum HookKind {
+    /// A session started again or was compacted into or cleared.
+    #[map(rename = "start")]
+    Start,
+    /// A compaction is about to run, which the command's failure stops.
+    #[map(rename = "pre-compact")]
+    PreCompact,
+    /// A batch of tool calls ended.
+    #[map(rename = "batch")]
+    Batch,
+}
 
 /// One command an agent's hook runs.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
 pub struct HookCommand {
-    /// What it reports: one of [`HOOK_KINDS`]. `start`: a session started again or was compacted into or cleared; `pre-compact`:
-    /// a compaction is about to run, which the command's failure stops; `batch`: a batch of tool calls ended.
-    pub kind: String,
+    /// What it reports: `start` (a session started again or was compacted into or cleared), `pre-compact` (a compaction is about
+    /// to run, which the command's failure stops), or `batch` (a batch of tool calls ended).
+    pub kind: HookKind,
     /// The command line, quoted for a POSIX shell, that reports it to the host.
     pub command: String,
 }
@@ -531,9 +571,9 @@ pub struct HookCommand {
 impl HookCommand {
     /// The command `command` for the moment `kind`.
     #[must_use]
-    pub fn new(kind: impl Into<String>, command: impl Into<String>) -> Self {
+    pub fn new(kind: HookKind, command: impl Into<String>) -> Self {
         Self {
-            kind: kind.into(),
+            kind,
             command: command.into(),
         }
     }
@@ -816,12 +856,12 @@ pub trait AgentVendor: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+    /// The settings of the agent's own harness provider that the host's source for it is started with, as an object (a managed
     /// copy's program, the person's protected places), or `None` when there are none to add. The default: none.
     fn entry_settings(
         &self,
         request: EntrySettingsRequest,
-    ) -> Result<Option<String>, ProviderError> {
+    ) -> Result<Option<Value>, ProviderError> {
         drop(request);
         Ok(None)
     }
@@ -908,7 +948,7 @@ mod tests {
                 .expect("answers"),
             None
         );
-        let shell = ShellRequest::new("/bin/bash", "bash", "bash");
+        let shell = ShellRequest::new("/bin/bash", "bash", ShellFamily::Bash);
         assert_eq!(
             plain.shell_advice(shell).expect("answers"),
             ShellAdvice::cannot(NO_SHELL_SETTING)

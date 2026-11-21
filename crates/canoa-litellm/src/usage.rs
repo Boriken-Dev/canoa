@@ -49,7 +49,7 @@ pub fn buckets_of(info: &Value, observed: i64) -> Vec<Bucket> {
 /// its own, is the answer "not offered", not an error.
 pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, ProviderError> {
     let reply = http::get_json(&format!("{base}/key/info"), Some(key))
-        .map_err(|why| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &why))?;
+        .map_err(|why| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &why.to_string()))?;
     let mut usage = match reply.status {
         200..=299 => {
             let info = reply
