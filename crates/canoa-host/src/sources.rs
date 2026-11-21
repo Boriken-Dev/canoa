@@ -349,7 +349,7 @@ fn expand(directory: &str) -> Option<String> {
 
 /// The file that runs `program`: on `PATH`, else in `search`. On Windows only a program the system starts counts, as `where`
 /// lists `npm` the shell script before `npm.cmd`.
-fn find(program: &str, search: &[&str]) -> Option<PathBuf> {
+pub(crate) fn find(program: &str, search: &[&str]) -> Option<PathBuf> {
     let direct = Path::new(program);
     if direct.is_absolute() && is_program(direct) {
         return Some(direct.to_path_buf());
@@ -433,13 +433,11 @@ mod tests {
             .iter()
             .find(|source| source.entry.name == "Grok")
             .expect("Grok");
-        match &grok.entry.kind {
-            crate::EntryKind::Agent { program, args, .. } => {
-                assert_eq!(program.to_string_lossy(), "/opt/bin/grok");
-                assert_eq!(args.len(), 2);
-            }
-            other => panic!("{other:?}"),
-        }
+        assert!(matches!(
+            &grok.entry.kind,
+            crate::EntryKind::Harness { harness, executable: Some(exe), .. }
+                if harness == "grok" && Path::new(exe).ends_with("opt/bin/grok")
+        ));
     }
 
     #[test]

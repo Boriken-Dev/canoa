@@ -287,12 +287,21 @@ fn the_bundled_agents_are_listed_with_what_each_says_of_itself() {
             .expect("logins")
             .is_empty()
     );
-    // A program with no harness provider of its own has no accounts and no harness, and is still an agent.
     let grok = row(&rows, "grok");
-    assert_eq!(grok["harness"], false);
-    assert!(grok["accounts"].is_null());
+    assert_eq!(grok["harness"], true);
+    assert_eq!(grok["accounts"]["provider"], "grok_accounts");
     assert_eq!(grok["source"], "Grok");
     assert_eq!(grok["vendor"], "xai");
+    let antigravity = row(&rows, "antigravity");
+    assert_eq!(antigravity["harness"], true);
+    assert_eq!(antigravity["accounts"]["provider"], "antigravity_accounts");
+    assert_eq!(antigravity["source"], "Antigravity");
+    assert_eq!(antigravity["vendor"], "google");
+    // A vendor with no harness provider of its own has no accounts and no harness, and is still listed as an agent.
+    let gemini = row(&rows, "gemini");
+    assert_eq!(gemini["harness"], false);
+    assert!(gemini["accounts"].is_null());
+    assert_eq!(gemini["vendor"], "google");
 }
 
 #[test]

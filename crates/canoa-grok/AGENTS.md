@@ -9,14 +9,14 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No C
 ```rust
 pub const PRESET: SourcePreset;
 pub const ACCESS: Target;   // coqui_acp_harness::Target
-// = SourcePreset::new("Grok", "grok").args(&["agent", "stdio"]).search(&["~/.grok/bin"])
+// = SourcePreset::new("Grok", "grok").agent("grok").harness("grok").args(&["agent", "stdio"]).search(&["~/.grok/bin"])
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GrokRecipe;
 impl canoa::store::recipe::Recipe for GrokRecipe { /* every required method */ }
 ```
 
-- `PRESET`: how the host starts Grok when `canoa.cfg` does not name it: runs `grok agent stdio`, searched for in `~/.grok/bin`.
+- `PRESET`: how the host runs Grok when `canoa.cfg` does not name it: through the `grok` harness provider (`grok agent stdio`), searched for in `~/.grok/bin`.
 - `ACCESS`: how an access setting (sandbox, network, approvals) is said in Grok's own words, under the AOS harness id `grok`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
 - `GrokRecipe`: Grok's Store recipe: one binary per platform from the publisher's storage; the publisher gives no checksum, so the plan says the download is not verified; channels `stable`, `alpha`, `enterprise`.
 
@@ -27,7 +27,7 @@ Each item is public at this one path. `GrokRecipe` is made a Store provider by `
 ```rust
 pub const MARK: &str;                 // the contents of mark.svg: the vendor's mark as SVG paths
 pub struct GrokVendor;                  // an `agent_vendor` provider (id `grok_vendor`): title, program, vendor, registry id, model variable, credential standards, reported names, modes, mark
-pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: the vendor description alone (Grok runs as a program, with no harness provider)
+pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: GrokProvider (`acp_harness`, id `grok`), GrokAccounts (`account_provider`, id `grok_accounts`), GrokVendor, and GrokStore
 ```
 
 The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("grok")`).

@@ -30,6 +30,7 @@ pub const ACCESS: Target = coqui_acp_harness::vendors::grok::TARGET;
 /// How the host starts Grok when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Grok", "grok")
     .agent("grok")
+    .harness("grok")
     .args(&["agent", "stdio"])
     .search(&["~/.grok/bin"]);
 
@@ -74,7 +75,12 @@ canoa::store_provider!(
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-grok",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [GrokVendor, GrokStore]
+    providers = [
+        coqui_acp_harness::vendors::grok::GrokProvider,
+        coqui_acp_harness::vendors::grok::GrokAccounts,
+        GrokVendor,
+        GrokStore
+    ]
 );
 
 /// Grok.

@@ -245,10 +245,18 @@
       ],
       "mark": "<svg viewBox=\"0 0 180 180\" xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#3186FF\" d=\"M144.248 149.062C151.748 154.688 162.998 150.938 152.685 140.625C121.748 110.625 128.31 28.125 89.8727 28.125C51.4352 28.125 57.9977 110.625 27.0602 140.625C15.8102 151.875 27.9977 154.688 35.4977 149.062C64.5602 129.375 62.6852 94.6875 89.8727 94.6875C117.06 94.6875 115.185 129.375 144.248 149.062Z\"/></svg>\n",
       "look": null,
-      "harness": false,
+      "harness": true,
       "imports": false,
       "markers": [],
-      "accounts": null,
+      "accounts": {
+        "provider": "antigravity_accounts",
+        "title": "Antigravity accounts",
+        "description": "Antigravity's sign-in is unmeasured, so it keeps no account yet.",
+        "kinds": [],
+        "logins": [],
+        "usage": [],
+        "local": true
+      },
       "source": "Antigravity",
       "launch": {
         "program": "agy",
@@ -280,12 +288,49 @@
       "modes": [],
       "mark": "<svg viewBox=\"0 0 512 512\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M210.484 312.759L343.465 210.383C349.984 205.364 359.302 207.322 362.408 215.117C378.758 256.231 371.454 305.64 338.925 339.563C306.397 373.487 261.137 380.927 219.768 363.983L174.577 385.803C239.394 432.008 318.104 420.581 367.289 369.251C406.303 328.564 418.386 273.104 407.088 223.091L407.19 223.198C390.807 149.726 411.218 120.359 453.03 60.3072C454.02 58.8833 455.01 57.4595 456 56L400.978 113.382V113.204L210.45 312.794\"/><path d=\"M183.042 337.641C136.519 291.294 144.54 219.567 184.236 178.203C213.59 147.59 261.683 135.096 303.666 153.464L348.755 131.75C340.632 125.627 330.221 119.042 318.275 114.414C264.277 91.2407 199.63 102.774 155.735 148.516C113.513 192.549 100.236 260.254 123.036 318.027C140.069 361.206 112.148 391.748 84.0229 422.575C74.0561 433.503 64.0553 444.431 56 456L183.007 337.677\"/></svg>\n",
       "look": null,
-      "harness": false,
+      "harness": true,
       "imports": false,
       "markers": [
         "grokShell"
       ],
-      "accounts": null,
+      "accounts": {
+        "provider": "grok_accounts",
+        "title": "Grok accounts",
+        "description": "Signs in to Grok, renews and watches its logins, and says its accounts report no plan usage.",
+        "kinds": [
+          {
+            "id": "grok-login",
+            "title": "Grok login"
+          },
+          {
+            "id": "xai-api-key",
+            "title": "xAI API key"
+          },
+          {
+            "id": "grok-oidc",
+            "title": "Grok through an identity provider"
+          }
+        ],
+        "logins": [
+          {
+            "id": "device",
+            "title": "Sign in with a code",
+            "produces": "grok-login"
+          },
+          {
+            "id": "browser",
+            "title": "Sign in with a browser",
+            "produces": "grok-login"
+          },
+          {
+            "id": "api-key",
+            "title": "xAI API key",
+            "produces": "xai-api-key"
+          }
+        ],
+        "usage": [],
+        "local": true
+      },
       "source": "Grok",
       "launch": null,
       "origin": "bundled"

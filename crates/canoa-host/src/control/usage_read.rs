@@ -65,9 +65,21 @@ pub(super) fn call(
     } else {
         let store = crate::accounts::Accounts::open(&config, accounts.home_dir())
             .map_err(|error| (REFUSED, error.to_string()))?;
-        let row =
-            crate::options::usage_for(&config, (name, &account), &store, &Endpoints::default())
-                .map_err(|why| (REFUSED, why))?;
+        let report = crate::options::usage_report_for(
+            &config,
+            (name, &account),
+            &store,
+            &Endpoints::default(),
+        )
+        .map_err(|why| (REFUSED, why))?;
+        if let Some(log) = log {
+            log.note_report(
+                &account.usage_id(),
+                &report,
+                crate::usage_splice::unix_now(),
+            );
+        }
+        let row = serde_json::to_value(report).map_err(|error| (REFUSED, error.to_string()))?;
         if let Ok(mut held) = cache.0.lock() {
             held.insert(key, (Instant::now(), row.clone()));
         }

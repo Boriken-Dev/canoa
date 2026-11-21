@@ -307,3 +307,69 @@ fn a_refused_login_is_renewed_from_the_directory_the_stored_copy_was_written_to(
     assert!(why.contains("could not be started"), "{why}");
     assert!(!why.contains("canary"), "{why}");
 }
+
+#[test]
+fn antigravity_usage_read_without_session_uses_agy_usage_reader_and_records_buckets() {
+    let dir = Dir::new();
+    let store = accounts(&dir);
+    let exe = std::env::current_exe().expect("test path");
+    let debug = exe.parent().expect("deps").parent().expect("debug");
+    let stdio_agent = debug
+        .join("examples")
+        .join(format!("stdio_agent{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        stdio_agent.is_file(),
+        "build the examples first: cargo build -p canoa-host --examples"
+    );
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("agy")
+        .join("getuserstatus.json");
+    let wrapper = if cfg!(windows) {
+        let path = dir.0.join("agy.cmd");
+        std::fs::write(
+            &path,
+            format!(
+                "@echo off\r\n\"{}\" --agy \"{}\"\r\n",
+                stdio_agent.display(),
+                fixture.display()
+            ),
+        )
+        .expect("wrapper written");
+        path
+    } else {
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = dir.0.join("agy");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nexec \"{}\" --agy \"{}\"\n",
+                stdio_agent.display(),
+                fixture.display()
+            ),
+        )
+        .expect("wrapper written");
+        #[cfg(unix)]
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("wrapper executable");
+        path
+    };
+    let quoted_exe = serde_json::to_string(&wrapper.to_string_lossy().into_owned()).expect("json");
+    let cfg = config(&format!(
+        "[host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {quoted_exe}\n",
+    ));
+    let account = crate::config::AccountConfig::local("antigravity");
+    let report =
+        crate::options::usage_report_for(&cfg, ("local", &account), &store, &Endpoints::default())
+            .expect("read");
+    assert!(report.supported, "{report:?}");
+    assert!(
+        report
+            .buckets
+            .iter()
+            .any(|bucket| bucket.id.starts_with("agy:")),
+        "expected agy:* quota buckets in {report:?}"
+    );
+}

@@ -708,6 +708,16 @@ pub(crate) fn usage_for(
     store: &Arc<crate::accounts::Accounts>,
     endpoints: &limits::Endpoints,
 ) -> Result<Value, String> {
+    let report = usage_report_for(config, (name, account), store, endpoints)?;
+    serde_json::to_value(report).map_err(|error| error.to_string())
+}
+
+pub(crate) fn usage_report_for(
+    config: &Config,
+    (name, account): (&str, &crate::config::AccountConfig),
+    store: &Arc<crate::accounts::Accounts>,
+    endpoints: &limits::Endpoints,
+) -> Result<coqui_acp_api::UsageReport, String> {
     let harness = account.harness.as_str();
     let runs = |entry: &&crate::config::Entry| matches!(&entry.kind, EntryKind::Harness { harness: each, .. } if each == harness);
     let entry = config
@@ -774,7 +784,60 @@ pub(crate) fn usage_for(
     .map_err(|error| error.to_string())?;
     let listed = crate::serve::offered_accounts(config, harness, &[name.to_owned()], &built)?;
     let built = built.offering(store, listed, Vec::new());
-    serde_json::to_value(limits::read(&built, name, account)?).map_err(|error| error.to_string())
+    let report = limits::read(&built, name, account)?;
+    if report.supported {
+        return Ok(report);
+    }
+    Ok(usage_via_reader(&registry, harness, &configured, account).unwrap_or(report))
+}
+
+fn usage_via_reader(
+    registry: &Arc<coqui_acp_api::guatiao::library::Registry>,
+    harness: &str,
+    configured: &Settings,
+    account: &crate::config::AccountConfig,
+) -> Option<coqui_acp_api::UsageReport> {
+    let preset = crate::bundled::ALL
+        .iter()
+        .find(|bundle| bundle.preset.harness == Some(harness))
+        .map(|bundle| &bundle.preset);
+    let reader_id = preset.and_then(|preset| preset.usage)?;
+    let reader = crate::usage_splice::Reader::offered_by(reader_id, &[Arc::clone(registry)])
+        .or_else(|| crate::usage_splice::Reader::named(reader_id))?;
+    let program = configured
+        .as_map()
+        .get("executable")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .map(OsString::from)
+        .or_else(|| {
+            std::env::var_os(crate::harness::executable_variable(harness))
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| {
+            preset.and_then(|preset| {
+                crate::bundled::runs_managed_by_own_name(preset.program)
+                    .then(|| crate::sources::managed_program(preset.program))
+                    .flatten()
+                    .map(|(path, _)| path.into_os_string())
+            })
+        })
+        .or_else(|| {
+            preset
+                .and_then(|preset| crate::sources::find(preset.program, preset.search))
+                .map(std::path::PathBuf::into_os_string)
+        })?;
+    let args: Vec<OsString> = preset
+        .map(|preset| preset.args.iter().map(OsString::from).collect())
+        .unwrap_or_default();
+    let buckets = probe::ask_usage(&reader, &program, &args, &[]).ok()?;
+    let mut report = coqui_acp_api::UsageReport::new();
+    report.supported = true;
+    report.sources = vec![coqui_acp_api::Source::Reported];
+    report.account = Some(account.usage_id());
+    report.observed_at = crate::usage_splice::unix_now();
+    report.buckets = buckets;
+    Some(report)
 }
 
 #[cfg(test)]

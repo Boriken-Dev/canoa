@@ -58,6 +58,81 @@ pub(crate) fn ask(
     environment: &[(OsString, OsString)],
     wait: Duration,
 ) -> Result<Probed, Failure> {
+    with_session(
+        program,
+        args,
+        environment,
+        wait,
+        |_pid, opened, _deadline| {
+            let models = models_of(opened);
+            let (modes, default_mode) = modes_of(opened);
+            Ok(Probed {
+                models,
+                modes,
+                default_mode,
+            })
+        },
+    )
+}
+
+/// Starts `program args` in a scratch session, reads quota through `reader`, and stops the process group.
+pub(crate) fn ask_usage(
+    reader: &crate::usage_splice::Reader,
+    program: &OsString,
+    args: &[OsString],
+    environment: &[(OsString, OsString)],
+) -> Result<Vec<coqui_acp_api::usage::Bucket>, Failure> {
+    let info = reader.info();
+    let wait = Duration::from_millis(info.private_limit_ms.max(1_000));
+    with_session(program, args, environment, wait, |pid, opened, deadline| {
+        let reading = reader.open()?;
+        if let Err(error) = reading.opened(&opened.to_string()) {
+            tracing::debug!("usage reader {}: {}", info.id, error.message());
+        }
+        let retries: &[u64] = if info.private_retries_ms.is_empty() {
+            &[0]
+        } else {
+            &info.private_retries_ms
+        };
+        let mut last = "the agent shows nothing to read".to_owned();
+        for &delay_ms in retries {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            if delay_ms > 0 {
+                std::thread::sleep(Duration::from_millis(delay_ms).min(remaining));
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            match reading.read(pid, true) {
+                Ok(out) => match out.failure {
+                    None => return Ok(out.buckets),
+                    Some(failure) => {
+                        last = failure.why;
+                        if failure.retry == canoa::usage_reader::Retry::Never {
+                            break;
+                        }
+                    }
+                },
+                Err(error) => {
+                    last = error.message().to_owned();
+                    break;
+                }
+            }
+        }
+        Err(last)
+    })
+}
+
+fn with_session<T>(
+    program: &OsString,
+    args: &[OsString],
+    environment: &[(OsString, OsString)],
+    wait: Duration,
+    inspect: impl FnOnce(u32, &Value, Instant) -> Result<T, String>,
+) -> Result<T, Failure> {
     let folder = Folder::make().map_err(|error| Failure::Failed(error.to_string()))?;
     let mut command = Command::new(program);
     command
@@ -81,14 +156,20 @@ pub(crate) fn ask(
             Failure::Failed(text)
         }
     })?;
-    let result = converse(&mut child, folder.path(), wait);
+    let result = converse(&mut child, folder.path(), wait, inspect);
     let _ = child.kill();
     child.end_group();
     let _ = child.wait();
     result.map_err(Failure::Failed)
 }
 
-fn converse(child: &mut Child, folder: &Path, wait: Duration) -> Result<Probed, String> {
+fn converse<T>(
+    child: &mut Child,
+    folder: &Path,
+    wait: Duration,
+    inspect: impl FnOnce(u32, &Value, Instant) -> Result<T, String>,
+) -> Result<T, String> {
+    let pid = child.id();
     let mut stdin = child.stdin.take().ok_or("no standard input")?;
     let stdout = child.stdout.take().ok_or("no standard output")?;
     let (lines, heard) = mpsc::channel::<String>();
@@ -150,8 +231,7 @@ fn converse(child: &mut Child, folder: &Path, wait: Duration) -> Result<Probed, 
         json!({"cwd": folder.to_string_lossy(), "mcpServers": []}),
         deadline,
     )?;
-    let models = models_of(&opened);
-    let (modes, default_mode) = modes_of(&opened);
+    let output = inspect(pid, &opened, deadline)?;
     let closes = initialized
         .pointer("/agentCapabilities/sessionCapabilities/close")
         .is_some_and(|close| !close.is_null());
@@ -162,11 +242,7 @@ fn converse(child: &mut Child, folder: &Path, wait: Duration) -> Result<Probed, 
             Instant::now() + CLOSE_WAIT,
         );
     }
-    Ok(Probed {
-        models,
-        modes,
-        default_mode,
-    })
+    Ok(output)
 }
 
 /// The models a `session/new` answer lists, each with the efforts the session lists beside them.

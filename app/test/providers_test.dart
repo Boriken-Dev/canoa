@@ -84,8 +84,12 @@ void main() {
     expect(claude.mark, isNotNull);
     expect(claude.harness, isTrue);
     expect(claude.accounts!.kinds.map((each) => each.$1), contains('claude-login'));
-    expect(providerCatalog.byId('grok')!.harness, isFalse);
-    expect(providerCatalog.byId('grok')!.accounts, isNull);
+    expect(providerCatalog.byId('grok')!.harness, isTrue);
+    expect(providerCatalog.byId('grok')!.accounts, isNotNull);
+    expect(providerCatalog.byId('antigravity')!.harness, isTrue);
+    expect(providerCatalog.byId('antigravity')!.accounts, isNotNull);
+    expect(providerCatalog.byId('gemini')!.harness, isFalse);
+    expect(providerCatalog.byId('gemini')!.accounts, isNull);
     expect(providerCatalog.byId('pi')!.accounts, isNotNull);
   });
 

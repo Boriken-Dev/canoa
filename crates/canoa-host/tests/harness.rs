@@ -1409,3 +1409,57 @@ fn an_entry_whose_own_shell_is_not_here_does_not_start_and_names_the_entry() {
         "{failure}"
     );
 }
+
+#[test]
+fn grok_and_antigravity_run_through_their_harness_providers_on_the_standin() {
+    let scratch = Scratch::new();
+    let agent = example("stdio_agent", false);
+    let grok = scratch
+        .0
+        .join(format!("grok{}", std::env::consts::EXE_SUFFIX));
+    let agy = scratch
+        .0
+        .join(format!("agy{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(&agent, &grok).expect("grok stand-in copied");
+    std::fs::copy(&agent, &agy).expect("agy stand-in copied");
+    let config = format!(
+        "[host.agents.Grok]\nharness = \"grok\"\nexecutable = {}\n\n\
+         [host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {}\n",
+        quoted(&grok.to_string_lossy()),
+        quoted(&agy.to_string_lossy()),
+    );
+    let host = Host::start_in(scratch, &config, 2, &[]);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    for (entry_name, prompt_text) in [("Grok", "hello grok"), ("Antigravity", "hello agy")] {
+        let (_initialized, answer, updates) =
+            with_link(host.url(entry_name), &client, host.peer, |rpc| {
+                let initialized = rpc.initialize().expect("initialize is answered");
+                let opened = rpc
+                    .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                    .expect("a session opens");
+                let session = opened["sessionId"].as_str().expect("an id").to_owned();
+                rpc.send(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 900,
+                    "method": "session/prompt",
+                    "params": {"sessionId": session, "prompt": [{"type": "text", "text": prompt_text}]}
+                }))
+                .expect("prompt sent");
+                let mut updates = Vec::new();
+                let answer = loop {
+                    let message = rpc.next_message(support::WAIT).expect("turn completes");
+                    if message.get("method").is_some() {
+                        updates.push(message);
+                    } else if message["id"] == 900 {
+                        break message;
+                    }
+                };
+                (initialized, answer, updates)
+            })
+            .expect("paired key is served");
+        assert_eq!(answer["result"]["stopReason"], "end_turn", "{answer}");
+        assert_eq!(said(&updates), format!("echo: {prompt_text}"));
+    }
+}

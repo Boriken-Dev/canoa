@@ -105,8 +105,13 @@ impl Reader {
             .collect()
     }
 
+    /// Description of how the reader polls and names its buckets.
+    pub(crate) fn info(&self) -> &ReaderInfo {
+        &self.info
+    }
+
     /// A reading of one agent's figures.
-    fn open(&self) -> Result<Object<dyn UsageReading>, String> {
+    pub(crate) fn open(&self) -> Result<Object<dyn UsageReading>, String> {
         let registry = match &self.registry {
             Some(registry) => registry.as_ref(),
             None => crate::vendors::bundled_providers().ok_or("no reader is loaded")?,

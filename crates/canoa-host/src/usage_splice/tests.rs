@@ -1511,4 +1511,73 @@ mod recording {
         assert_eq!(told[0]["method"], USAGE_NOTIFICATION);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn standard_acp_prompt_and_state_updates_record_tokens_spent_and_model() {
+        let dir = folder("acp_spend");
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let splice = recording(&log);
+        initialize(&splice, true, plain_answer());
+        assert!(
+            read_client(
+                &splice,
+                &json!({"id": 2, "method": "session/new", "params": {"cwd": "/w"}})
+            )
+            .is_none()
+        );
+        from_agent(
+            &splice,
+            &json!({"id": 2, "result": {"sessionId": "s1",
+                "configOptions": [{"id": "model", "currentValue": "gemini-4-argon-high"}]}}),
+        );
+        // Turn 1: standard ACP `PromptResponse.usage` + `usage_update` cost.
+        prompt(&splice, 3, "s1");
+        from_agent(
+            &splice,
+            &json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "s1",
+                "update": {"sessionUpdate": "usage_update", "used": 200, "size": 1000, "cost": {"amount": 0.0125, "currency": "USD"}}
+            }}),
+        );
+        from_agent(
+            &splice,
+            &json!({"id": 3, "result": {"stopReason": "end_turn", "usage": {
+                "inputTokens": 120,
+                "outputTokens": 45,
+                "cachedReadTokens": 30,
+                "cachedWriteTokens": 5
+            }}}),
+        );
+        // Turn 2: `state_update` usage (as ACP v2 agents send before returning the prompt result).
+        prompt(&splice, 4, "s1");
+        from_agent(
+            &splice,
+            &json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": "s1",
+                "update": {"sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn", "usage": {
+                    "inputTokens": 80,
+                    "outputTokens": 20,
+                    "cachedReadTokens": 10,
+                    "cachedWriteTokens": 0
+                }}
+            }}),
+        );
+        from_agent(
+            &splice,
+            &json!({"id": 4, "result": {"stopReason": "end_turn"}}),
+        );
+        let rows = rows(&dir);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0]["model"], "gemini-4-argon-high");
+        assert_eq!(rows[0]["input"], 120);
+        assert_eq!(rows[0]["output"], 45);
+        assert_eq!(rows[0]["cache_read"], 30);
+        assert_eq!(rows[0]["cache_write"], 5);
+        assert_eq!(rows[0]["cost_micro_usd"], 12_500);
+        assert_eq!(rows[1]["model"], "gemini-4-argon-high");
+        assert_eq!(rows[1]["input"], 80);
+        assert_eq!(rows[1]["output"], 20);
+        assert_eq!(rows[1]["cache_read"], 10);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -37,6 +37,7 @@ pub const ACCESS: Target = coqui_acp_harness::vendors::antigravity::TARGET;
 /// How the host starts Antigravity when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Antigravity", "agy")
     .agent("antigravity")
+    .harness("antigravity")
     .args(&["acp"])
     .search(&["%LOCALAPPDATA%/agy/bin"])
     .usage("antigravity");
@@ -137,7 +138,14 @@ canoa::store_provider!(
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-antigravity",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [AgyVendor, GeminiVendor, AgyStore, AgyUsage]
+    providers = [
+        coqui_acp_harness::vendors::antigravity::AntigravityProvider,
+        coqui_acp_harness::vendors::antigravity::AntigravityAccounts,
+        AgyVendor,
+        GeminiVendor,
+        AgyStore,
+        AgyUsage
+    ]
 );
 
 /// Antigravity.
