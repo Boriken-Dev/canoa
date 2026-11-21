@@ -1,0 +1,94 @@
+{
+  "kinds": [
+    {
+      "name": "environment",
+      "floor_hash": 95687090,
+      "object": false,
+      "doc": "A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).\n\nA provider that cannot do something answers `UNSUPPORTED` ([`unsupported`]) and does not declare its capability; the host asks\na method only of an environment that declares it. One that cannot be reached answers `GONE` ([`unavailable`]).\n\nEvery slot takes `&self`, so the host may call it from several threads at once.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What it is and what it offers now."
+        },
+        {
+          "name": "spawner",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "object",
+            "kind": "process_spawner"
+          },
+          "doc": "The spawner a harness, an agent or a shell is started through. Its programs run in this environment; the host destroys it\nwhen it has no more to start."
+        },
+        {
+          "name": "read_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "A file's bytes. Asked only when `fs.read` is declared."
+        },
+        {
+          "name": "write_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Writes a file, replacing one there and making the folders on the way. Asked only when `fs.write` is declared."
+        },
+        {
+          "name": "list_dir",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "A folder's entries. Asked only when `fs.list` is declared."
+        },
+        {
+          "name": "call",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "A capability the host maps to nothing, by its name. Asked only of a name the environment declared."
+        }
+      ]
+    }
+  ]
+}

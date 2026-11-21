@@ -606,6 +606,29 @@ export interface AccountSpeechRemote extends k.RemoteBase<typeof AccountSpeech> 
 export declare const AccountSpeech: k.DescribedKind<AccountSpeech, AccountSpeechRemote, false>;
 
 /**
+ * Describes the text-to-speech services the accounts of some kinds can call. The same answer on every call, with nothing run and
+ * no connection opened.
+ *
+ * The `account_speech_output` kind: what a provider of it implements.
+ */
+export interface AccountSpeechOutput {
+  /** The services. */
+  describe(): unknown;
+}
+
+/** A caller's handle on a `account_speech_output` table: a method per slot. */
+export interface AccountSpeechOutputRemote extends k.RemoteBase<typeof AccountSpeechOutput> {
+  /** The services. */
+  describe(): g.Value;
+}
+
+/**
+ * Describes the text-to-speech services the accounts of some kinds can call. The same answer on every call, with nothing run and
+ * no connection opened.
+ */
+export declare const AccountSpeechOutput: k.DescribedKind<AccountSpeechOutput, AccountSpeechOutputRemote, false>;
+
+/**
  * Where a catalog comes from.
  *
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
@@ -645,6 +668,63 @@ export interface CatalogSourceRemote extends k.RemoteBase<typeof CatalogSource> 
  * even when it refuses.
  */
 export declare const CatalogSource: k.DescribedKind<CatalogSource, CatalogSourceRemote, false>;
+
+/**
+ * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).
+ *
+ * A provider that cannot do something answers `UNSUPPORTED` ([`unsupported`]) and does not declare its capability; the host asks
+ * a method only of an environment that declares it. One that cannot be reached answers `GONE` ([`unavailable`]).
+ *
+ * Every slot takes `&self`, so the host may call it from several threads at once.
+ *
+ * The `environment` kind: what a provider of it implements.
+ */
+export interface Environment {
+  /** What it is and what it offers now. */
+  describe(): unknown;
+  /**
+   * The spawner a harness, an agent or a shell is started through. Its programs run in this environment; the host destroys it
+   * when it has no more to start.
+   */
+  spawner(): ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>;
+  /** A file's bytes. Asked only when `fs.read` is declared. */
+  readFile(request: g.Ref): unknown;
+  /** Writes a file, replacing one there and making the folders on the way. Asked only when `fs.write` is declared. */
+  writeFile(request: g.Ref): void;
+  /** A folder's entries. Asked only when `fs.list` is declared. */
+  listDir(request: g.Ref): unknown;
+  /** A capability the host maps to nothing, by its name. Asked only of a name the environment declared. */
+  call(request: g.Ref): unknown;
+}
+
+/** A caller's handle on a `environment` table: a method per slot. */
+export interface EnvironmentRemote extends k.RemoteBase<typeof Environment> {
+  /** What it is and what it offers now. */
+  describe(): g.Value;
+  /**
+   * The spawner a harness, an agent or a shell is started through. Its programs run in this environment; the host destroys it
+   * when it has no more to start.
+   */
+  spawner(): k.ObjectHandle<typeof ProcessSpawner>;
+  /** A file's bytes. Asked only when `fs.read` is declared. */
+  readFile(request: unknown): g.Value;
+  /** Writes a file, replacing one there and making the folders on the way. Asked only when `fs.write` is declared. */
+  writeFile(request: unknown): void;
+  /** A folder's entries. Asked only when `fs.list` is declared. */
+  listDir(request: unknown): g.Value;
+  /** A capability the host maps to nothing, by its name. Asked only of a name the environment declared. */
+  call(request: unknown): g.Value;
+}
+
+/**
+ * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).
+ *
+ * A provider that cannot do something answers `UNSUPPORTED` ([`unsupported`]) and does not declare its capability; the host asks
+ * a method only of an environment that declares it. One that cannot be reached answers `GONE` ([`unavailable`]).
+ *
+ * Every slot takes `&self`, so the host may call it from several threads at once.
+ */
+export declare const Environment: k.DescribedKind<Environment, EnvironmentRemote, false>;
 
 /**
  * Serves a model that runs on this computer to the sessions of accounts of one kind. A provider is the same on every call; what

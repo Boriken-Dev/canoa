@@ -389,6 +389,18 @@ class AccountSpeech(KindProtocol, Protocol, kind="account_speech", floor_hash=22
         ...
 
 
+class AccountSpeechOutput(KindProtocol, Protocol, kind="account_speech_output", floor_hash=173022290):
+    """Describes the text-to-speech services the accounts of some kinds can call. The same answer on every call, with nothing run and
+    no connection opened.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """The services."""
+        ...
+
+
 class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=2158006965):
     """Where a catalog comes from.
 
@@ -411,6 +423,54 @@ class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=21
     @fallible
     def read(self, request: Ref, spawner: Taken[ProcessSpawner]) -> str:
         """The catalog's text."""
+        ...
+
+
+class Environment(KindProtocol, Protocol, kind="environment", floor_hash=95687090):
+    """A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).
+
+    A provider that cannot do something answers `UNSUPPORTED` ([`unsupported`]) and does not declare its capability; the host asks
+    a method only of an environment that declares it. One that cannot be reached answers `GONE` ([`unavailable`]).
+
+    Every slot takes `&self`, so the host may call it from several threads at once.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What it is and what it offers now."""
+        ...
+
+    @required
+    @fallible
+    def spawner(self) -> ProcessSpawner:
+        """The spawner a harness, an agent or a shell is started through. Its programs run in this environment; the host destroys it
+        when it has no more to start.
+        """
+        ...
+
+    @required
+    @fallible
+    def read_file(self, request: Ref) -> ValueAnswer:
+        """A file's bytes. Asked only when `fs.read` is declared."""
+        ...
+
+    @required
+    @fallible
+    def write_file(self, request: Ref) -> None:
+        """Writes a file, replacing one there and making the folders on the way. Asked only when `fs.write` is declared."""
+        ...
+
+    @required
+    @fallible
+    def list_dir(self, request: Ref) -> ValueAnswer:
+        """A folder's entries. Asked only when `fs.list` is declared."""
+        ...
+
+    @required
+    @fallible
+    def call(self, request: Ref) -> ValueAnswer:
+        """A capability the host maps to nothing, by its name. Asked only of a name the environment declared."""
         ...
 
 
@@ -1034,4 +1094,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=378457
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "CatalogSource", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "CatalogSource", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

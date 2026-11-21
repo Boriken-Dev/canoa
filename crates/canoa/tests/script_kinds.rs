@@ -1,7 +1,7 @@
 //! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`, `model_store`,
 //! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab`, `usage_reader`, `model_gateway` and
 //! `account_provider`), and their models' schemas: what such a library is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage,gateway --test script_kinds`.
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage,gateway,environment --test script_kinds`.
 #![cfg(all(
     feature = "store",
     feature = "vendor",
@@ -10,7 +10,8 @@
     feature = "settings-section",
     feature = "panel-tab",
     feature = "usage",
-    feature = "gateway"
+    feature = "gateway",
+    feature = "environment"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -20,6 +21,10 @@
 
 use std::path::PathBuf;
 
+use canoa::environment::{
+    Call, CallAnswer, Capability, DirEntry, EnvironmentInfo, EnvironmentVtable, FileContent,
+    ListDir, Listing, ReadFile, State as EnvironmentState, WriteFile,
+};
 use canoa::gateway::{GatewayInfo, GatewayLeaseVtable, GatewayRequest, ModelGatewayVtable};
 use canoa::panel_tab::{PanelTabVtable, Shows, TabInfo, TailRequest};
 use canoa::profile_item::{
@@ -414,6 +419,34 @@ fn the_committed_account_provider_schemas_are_what_this_build_describes() {
             ("ModelListing", schema_of::<ModelListing>()),
             ("ModelInfo", schema_of::<ModelInfo>()),
             ("UnknownKind", schema_of::<UnknownKind>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_environment_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.environment.kinds.json",
+        &document(&EnvironmentVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_environment_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.environment.schemas.json",
+        &schemas(vec![
+            ("EnvironmentInfo", schema_of::<EnvironmentInfo>()),
+            ("Capability", schema_of::<Capability>()),
+            ("State", schema_of::<EnvironmentState>()),
+            ("ReadFile", schema_of::<ReadFile>()),
+            ("FileContent", schema_of::<FileContent>()),
+            ("WriteFile", schema_of::<WriteFile>()),
+            ("ListDir", schema_of::<ListDir>()),
+            ("Listing", schema_of::<Listing>()),
+            ("DirEntry", schema_of::<DirEntry>()),
+            ("Call", schema_of::<Call>()),
+            ("CallAnswer", schema_of::<CallAnswer>()),
         ]),
     );
 }

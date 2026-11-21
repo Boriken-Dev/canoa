@@ -40,6 +40,8 @@ speech = ["dep:guatiao", "dep:coqui-acp-api"]
 speech-builtin = ["speech", "network", "dep:guatiao-intake", "dep:serde_json"]
 # The loopback HTTP server a host gives an agent: tools, or a local model's API, to a program of this user holding a bearer.
 loopback = ["dep:httparse", "dep:serde_json", "dep:sha2", "dep:rustix"]
+# The `environment` kind: a place an agent works (a remote host, a machine over SSH, a container), which hands out the spawner programs start through and serves files.
+environment = ["dep:coqui-acp-api"]
 # The `model_gateway` kind: a local model served to an agent, over the OpenAI or Anthropic API, for the session of an account.
 gateway = ["dep:coqui-acp-api"]
 # The account kind of an address that speaks one or several credential standards (an API gateway or proxy: an address, a key and the
@@ -93,7 +95,7 @@ required-features = ["store"]
 
 [[test]]
 name = "script_kinds"
-required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway"]
+required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment"]
 
 [[test]]
 name = "speech_kinds"

@@ -1,0 +1,298 @@
+{
+  "EnvironmentInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "os": {
+        "type": "string",
+        "description": "The operating system its programs run on, spelled as Rust's `std::env::consts::OS` spells it (`windows`, `linux`, `macos`): which rules its paths follow."
+      },
+      "arch": {
+        "type": "string",
+        "description": "Its processor, spelled as `std::env::consts::ARCH` spells it."
+      },
+      "local": {
+        "type": "boolean",
+        "description": "Whether it shares the host's own files and paths, so that a folder the host names is the same folder there.",
+        "default": false
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "waiting",
+          "down"
+        ],
+        "x-enum-labels": {
+          "ready": "It answers and takes what it is asked.",
+          "waiting": "It answers, and waits for someone to approve this host there: [`EnvironmentInfo::detail`] says how.",
+          "down": "It cannot be reached: [`EnvironmentInfo::detail`] says why."
+        },
+        "description": "Whether it can be used now.",
+        "default": "ready"
+      },
+      "detail": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "For [`State::Waiting`] and [`State::Down`]: what to do or what failed, in words for the person."
+      },
+      "capabilities": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name: a word of lower-case letters, digits, `_` and `.`, 1 to 64. See [`capability`] for the ones the host maps."
+            },
+            "facts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "What the environment says of this capability (the shells it has, the folders its files are in, `read_only`), by name.",
+              "default": {}
+            },
+            "help": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "A line for people, and for the agent, on what the capability does here."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ]
+        },
+        "description": "What it offers now, each name once. A name missing here is not possible in this environment.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "os",
+      "arch"
+    ]
+  },
+  "Capability": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name: a word of lower-case letters, digits, `_` and `.`, 1 to 64. See [`capability`] for the ones the host maps."
+      },
+      "facts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "What the environment says of this capability (the shells it has, the folders its files are in, `read_only`), by name.",
+        "default": {}
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line for people, and for the agent, on what the capability does here."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name"
+    ]
+  },
+  "State": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "ready",
+      "waiting",
+      "down"
+    ],
+    "x-enum-labels": {
+      "ready": "It answers and takes what it is asked.",
+      "waiting": "It answers, and waits for someone to approve this host there: [`EnvironmentInfo::detail`] says how.",
+      "down": "It cannot be reached: [`EnvironmentInfo::detail`] says why."
+    },
+    "properties": {}
+  },
+  "ReadFile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The file's path."
+      },
+      "max_bytes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes to answer. A longer file is refused `BAD_VALUE`, never cut."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path",
+      "max_bytes"
+    ]
+  },
+  "FileContent": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "bytes": {
+        "type": "bytes",
+        "description": "Its bytes."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "bytes"
+    ]
+  },
+  "WriteFile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The file's path. Folders on the way are made."
+      },
+      "bytes": {
+        "type": "bytes",
+        "description": "What it will hold: a file there is replaced."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path",
+      "bytes"
+    ]
+  },
+  "ListDir": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The folder's path."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ]
+  },
+  "Listing": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "entries": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name, not a path."
+            },
+            "dir": {
+              "type": "boolean",
+              "description": "Whether it is a folder.",
+              "default": false
+            },
+            "len": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Its length in bytes, for a file."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ]
+        },
+        "description": "Its entries, in the order the environment gives them.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "DirEntry": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name, not a path."
+      },
+      "dir": {
+        "type": "boolean",
+        "description": "Whether it is a folder.",
+        "default": false
+      },
+      "len": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Its length in bytes, for a file."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name"
+    ]
+  },
+  "Call": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "capability": {
+        "type": "string",
+        "description": "The capability's name, one the environment declared."
+      },
+      "arguments": {
+        "type": "string",
+        "description": "The arguments, a JSON object as text; `{}` when the capability takes none."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "capability",
+      "arguments"
+    ]
+  },
+  "CallAnswer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The answer as text: what the agent reads, usually JSON."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ]
+  }
+}

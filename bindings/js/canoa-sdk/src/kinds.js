@@ -484,6 +484,22 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "account_speech_output",
+      "floor_hash": 173022290,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
       "name": "catalog_source",
       "floor_hash": 2158006965,
       "object": false,
@@ -516,6 +532,89 @@ const described = kindsOf({
           ],
           "answer": {
             "type": "text"
+          }
+        }
+      ]
+    },
+    {
+      "name": "environment",
+      "floor_hash": 95687090,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "spawner",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "object",
+            "kind": "process_spawner"
+          }
+        },
+        {
+          "name": "read_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "write_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        },
+        {
+          "name": "list_dir",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "call",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
           }
         }
       ]
@@ -1702,6 +1801,12 @@ export const SpawnedProcess = described["spawned_process"];
 export const AccountSpeech = described["account_speech"];
 
 /**
+ * Describes the text-to-speech services the accounts of some kinds can call. The same answer on every call, with nothing run and
+ * no connection opened.
+ */
+export const AccountSpeechOutput = described["account_speech_output"];
+
+/**
  * Where a catalog comes from.
  *
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
@@ -1713,6 +1818,16 @@ export const AccountSpeech = described["account_speech"];
  * even when it refuses.
  */
 export const CatalogSource = described["catalog_source"];
+
+/**
+ * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).
+ *
+ * A provider that cannot do something answers `UNSUPPORTED` ([`unsupported`]) and does not declare its capability; the host asks
+ * a method only of an environment that declares it. One that cannot be reached answers `GONE` ([`unavailable`]).
+ *
+ * Every slot takes `&self`, so the host may call it from several threads at once.
+ */
+export const Environment = described["environment"];
 
 /**
  * Serves a model that runs on this computer to the sessions of accounts of one kind. A provider is the same on every call; what
