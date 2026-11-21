@@ -554,8 +554,14 @@ impl Control {
         method: &str,
         params: &Value,
     ) -> Result<Value, (i32, String)> {
-        self.say
-            .call(caller, &self.files, self.stores().ok(), method, params)
+        self.say.call(
+            caller,
+            &self.files,
+            &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
+            self.stores().ok(),
+            method,
+            params,
+        )
     }
 
     pub(super) fn r_speech(

@@ -17,6 +17,8 @@ use guatiao::{FromValue, Schema, ToValue};
 
 use super::AudioFormat;
 
+pub mod account;
+
 pub use coqui_acp_api::READ_TIMED_OUT;
 
 /// One thing a person chooses between: a model or a style.

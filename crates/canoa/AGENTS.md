@@ -866,3 +866,17 @@ pub trait Mailbox: Send + Sync {
 ```
 
 - `BackendInfo` (`new(id, title)`, `.taking::<S: SettingsSchema>()`, `.problem()`, `description`, `no_secret_state`, `schema`, `form`), `ValidateRequest` (`new(settings, has_secret)`), `PreparedAccount` (`needs_secret`, `state`, `details`, `check_urls`, `no_secret_state`), `OpenMailbox` (`new(settings, timeout_secs)`, `secret`, `no_store`), `MailError` (`Bad`, `Auth`, `Unreachable`, `Backend`, converting to and from `ProviderError` without losing variant meaning), `Person`, `Summary`, `Attachment`, `Message`, `Folder`, `Query`, `Page`, `Draft` (`new_message`, `reply`, `kind()`), `Change` (`move_to`, `archive`, `read`, `flag`, `categories`, `kind()`), `FlagState`, `Related`, and shared helpers `WELL_KNOWN_FOLDERS`, `is_valid_id`, `well_known`, `find_folder`, `plain_subject`, `related`, `default_summaries`, `default_thread`.
+
+## `account_speech_output` (`canoa::speech::output::account`, feature `speech`)
+
+Mirroring `account_speech` for text-to-speech: describes the voice services accounts of some kinds can call (`provider`, `standard`, `address`, `url`, `credential`, and optional `models`, `voices`, `styles` for `speech_say_endpoint`). Checked by `tests/account_speech_output.rs` against `include/canoa.account_speech_output.{kinds,schemas}.json`.
+
+```rust
+#[guatiao::kind(name = "account_speech_output")]
+pub trait AccountSpeechOutput: Send + Sync {
+    fn describe(&self) -> Result<AccountSpeechOutputInfo, ProviderError>;
+}
+pub const KIND: &str = "account_speech_output";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+pub struct AccountSpeechOutputInfo { pub services: Vec<AccountSpeechOutputService> }
+pub struct AccountSpeechOutputService { pub id, pub title, pub summary, pub location, pub standard, pub address, pub url, pub credential, pub provider: String, pub models, pub voices, pub styles: Vec<String> }
+```

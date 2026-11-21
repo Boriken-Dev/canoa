@@ -10,15 +10,69 @@
 )]
 
 use core::borrow::Borrow;
+use std::path::Path;
 use std::sync::Arc;
 
 use canoa::speech::account::{AccountSpeech, AccountSpeechService};
+use canoa::speech::output::account::{AccountSpeechOutput, AccountSpeechOutputService};
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::{AccountKindInfo, EndpointSlot, MODEL_API};
 use serde_json::{Value, json};
 
 use crate::accounts::matching::Catalogs;
 use crate::config::{AccountConfig, Config};
+
+/// Collects described services from `registries` through `AccountSpeech` or `AccountSpeechOutput`.
+fn collect_services<K, T, F>(
+    registries: &[impl Borrow<Registry>],
+    mut extract: F,
+    id_of: fn(&T) -> &str,
+    label: &str,
+) -> Vec<T>
+where
+    K: ?Sized + coqui_acp_api::guatiao::library::Kind + 'static,
+    F: FnMut(&K) -> Option<(Vec<T>, Option<String>)>,
+{
+    let mut services: Vec<T> = Vec::new();
+    for registry in registries {
+        for offer in registry.borrow().offers::<K>() {
+            let id = offer.id().to_owned();
+            let Some(instance) = offer.default_instance() else {
+                tracing::warn!(
+                    provider = id.as_str(),
+                    "its speech {label} services cannot be built"
+                );
+                continue;
+            };
+            let Some((items, problem)) = extract(instance) else {
+                tracing::warn!(
+                    provider = id.as_str(),
+                    "its speech {label} services cannot be described"
+                );
+                continue;
+            };
+            if let Some(problem) = problem {
+                tracing::warn!(
+                    provider = id.as_str(),
+                    "its speech {label} services are not offered: {problem}"
+                );
+                continue;
+            }
+            for service in items {
+                let sid = id_of(&service).to_owned();
+                if services.iter().any(|each| id_of(each) == sid) {
+                    tracing::warn!(
+                        provider = id.as_str(),
+                        "the speech service {sid} is already offered"
+                    );
+                } else {
+                    services.push(service);
+                }
+            }
+        }
+    }
+    services
+}
 
 /// The services the libraries this host loads describe.
 #[derive(Debug, Default, Clone)]
@@ -36,41 +90,16 @@ impl Services {
     /// The services `registries` offer, in the order they are given. A service that cannot be offered, or whose id an earlier one took,
     /// is left out and logged.
     pub(crate) fn from_registries(registries: &[impl Borrow<Registry>]) -> Self {
-        let mut services: Vec<AccountSpeechService> = Vec::new();
-        for registry in registries {
-            let registry = registry.borrow();
-            for offer in registry.offers::<dyn AccountSpeech>() {
-                let id = offer.id().to_owned();
-                let Some(info) = offer
-                    .default_instance()
-                    .and_then(|provider| provider.describe().ok())
-                else {
-                    tracing::warn!(
-                        provider = id.as_str(),
-                        "its speech services cannot be described"
-                    );
-                    continue;
-                };
-                if let Some(problem) = info.problem() {
-                    tracing::warn!(
-                        provider = id.as_str(),
-                        "its speech services are not offered: {problem}"
-                    );
-                    continue;
-                }
-                for service in info.services {
-                    if services.iter().any(|each| each.id == service.id) {
-                        tracing::warn!(
-                            provider = id.as_str(),
-                            "the speech service {} is already offered",
-                            service.id
-                        );
-                    } else {
-                        services.push(service);
-                    }
-                }
-            }
-        }
+        let services = collect_services::<dyn AccountSpeech, _, _>(
+            registries,
+            |provider| {
+                let info = provider.describe().ok()?;
+                let problem = info.problem();
+                Some((info.services, problem))
+            },
+            |service| &service.id,
+            "recognition",
+        );
         Self { services }
     }
 
@@ -104,9 +133,114 @@ impl Services {
     ) -> Vec<(&AccountSpeechService, Result<(), String>)> {
         self.services
             .iter()
-            .filter_map(|service| Some((service, verdict(service, kinds, account)?)))
+            .filter_map(|service| {
+                Some((
+                    service,
+                    verdict_for(
+                        &service.standard,
+                        &service.address,
+                        &service.title,
+                        "speech-to-text",
+                        kinds,
+                        account,
+                    )?,
+                ))
+            })
             .collect()
     }
+}
+
+/// The text-to-speech services the libraries this host loads describe (`account_speech_output`).
+#[derive(Debug, Default, Clone)]
+pub(crate) struct OutputServices {
+    services: Vec<AccountSpeechOutputService>,
+}
+
+impl OutputServices {
+    /// The services of the libraries this build carries and, when canoa.cfg names extensions, of those too.
+    pub(crate) fn of(config: Option<&Config>) -> Self {
+        Self::from_registries(&registries(config))
+    }
+
+    /// The services `registries` offer, in the order they are given.
+    pub(crate) fn from_registries(registries: &[impl Borrow<Registry>]) -> Self {
+        let services = collect_services::<dyn AccountSpeechOutput, _, _>(
+            registries,
+            |provider| {
+                let info = provider.describe().ok()?;
+                let problem = info.problem();
+                Some((info.services, problem))
+            },
+            |service| &service.id,
+            "output",
+        );
+        Self { services }
+    }
+
+    /// Exactly these services, as a test stands in for the libraries.
+    #[cfg(test)]
+    pub(crate) fn from_services(services: Vec<AccountSpeechOutputService>) -> Self {
+        Self { services }
+    }
+
+    /// The service called `id`.
+    pub(crate) fn find(&self, id: &str) -> Option<&AccountSpeechOutputService> {
+        self.services.iter().find(|service| service.id == id)
+    }
+
+    /// Each service `account` can be offered for text-to-speech, using the same standard and address matching rule as dictation.
+    pub(crate) fn offered(
+        &self,
+        kinds: &Catalogs<'_>,
+        account: &AccountConfig,
+    ) -> Vec<(&AccountSpeechOutputService, Result<(), String>)> {
+        self.services
+            .iter()
+            .filter_map(|service| {
+                Some((
+                    service,
+                    verdict_for(
+                        &service.standard,
+                        &service.address,
+                        &service.title,
+                        "text-to-speech",
+                        kinds,
+                        account,
+                    )?,
+                ))
+            })
+            .collect()
+    }
+}
+
+/// Reads `credential` of `account_name` from `home`'s credential store without copying it anywhere else.
+pub(crate) fn read_credential(
+    config: &Config,
+    home: &Path,
+    account_name: &str,
+    credential: &str,
+) -> Result<String, String> {
+    let account = config
+        .accounts
+        .get(account_name)
+        .ok_or_else(|| format!("the account {account_name} is gone: add it again"))?;
+    let store = crate::accounts::Accounts::open(config, home).map_err(|error| {
+        tracing::warn!("the account store could not be opened for speech: {error}");
+        "the host's account store could not be used".to_owned()
+    })?;
+    let record = store
+        .load(&account.id)
+        .map_err(|error| {
+            tracing::warn!("an account could not be read for speech: {error}");
+            "the host's account store could not be used".to_owned()
+        })?
+        .ok_or_else(|| format!("the account {account_name} holds no key: sign in to it again"))?;
+    record
+        .credentials
+        .get(credential)
+        .filter(|key| !key.is_empty())
+        .cloned()
+        .ok_or_else(|| format!("the account {account_name} holds no key: sign in to it again"))
 }
 
 /// Whether two addresses are the same, whatever slash ends them.
@@ -119,31 +253,35 @@ fn model_api(kind: &AccountKindInfo) -> Option<&EndpointSlot> {
     kind.endpoints.iter().find(|slot| slot.purpose == MODEL_API)
 }
 
-/// Whether `kind` is a key for `service`: it provides the service's standard and its model API starts from the service's address.
-fn is_key_for(service: &AccountSpeechService, kind: &AccountKindInfo) -> bool {
-    kind.provides.contains(&service.standard)
+/// Whether `kind` is a key for `(standard, address)`.
+fn is_key_for(standard: &str, address: &str, kind: &AccountKindInfo) -> bool {
+    kind.provides.iter().any(|each| each == standard)
         && model_api(kind)
             .and_then(|slot| slot.default.as_deref())
-            .is_some_and(|address| same(address, &service.address))
+            .is_some_and(|default| same(default, address))
 }
 
-/// What an account's kind says of a service: `None` for an account of a provider none of whose kinds is a key for it, `Ok` for a key
-/// that may call it and the reason for an account that is not one.
-fn verdict(
-    service: &AccountSpeechService,
+/// What an account's kind says of a service described by `(standard, address, title)`.
+fn verdict_for(
+    standard: &str,
+    address: &str,
+    title: &str,
+    what: &str,
     kinds: &Catalogs<'_>,
     account: &AccountConfig,
 ) -> Option<Result<(), String>> {
     let beside = kinds.kinds_beside(&account.kind);
-    beside.iter().find(|kind| is_key_for(service, kind))?;
+    beside
+        .iter()
+        .find(|kind| is_key_for(standard, address, kind))?;
     let Some(kind) = beside
         .iter()
         .find(|kind| kind.id == account.kind)
-        .filter(|kind| is_key_for(service, kind))
+        .filter(|kind| is_key_for(standard, address, kind))
     else {
         return Some(Err(format!(
-            "an account of kind {} is not an API key for {}, and Canoa has no measured way to send audio to {} with it, so it is not offered: add an API key as an account to use {}'s speech-to-text",
-            account.kind, service.title, service.title, service.title
+            "an account of kind {} is not an API key for {title}, and Canoa has no measured way to send audio to {title} with it, so it is not offered: add an API key as an account to use {title}'s speech-to-text",
+            account.kind
         )));
     };
     let moved = model_api(kind)
@@ -151,12 +289,12 @@ fn verdict(
         .and_then(|key| account.settings.as_ref()?.as_map().get(key))
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|address| !address.is_empty() && !same(address, &service.address));
+        .filter(|value| !value.is_empty() && !same(value, address));
     Some(match moved {
-        Some(address) => Err(format!(
-            "its key is for {}, not for {}, and Canoa has not measured that address's speech-to-text, so it is not offered",
-            address.trim_end_matches('/'),
-            service.address.trim_end_matches('/')
+        Some(other) => Err(format!(
+            "its key is for {}, not for {}, and Canoa has not measured that address's {what}, so it is not offered",
+            other.trim_end_matches('/'),
+            address.trim_end_matches('/')
         )),
         None => Ok(()),
     })

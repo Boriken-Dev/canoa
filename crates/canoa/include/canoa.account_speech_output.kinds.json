@@ -1,0 +1,22 @@
+{
+  "kinds": [
+    {
+      "name": "account_speech_output",
+      "floor_hash": 173022290,
+      "object": false,
+      "doc": "Describes the text-to-speech services the accounts of some kinds can call. The same answer on every call, with nothing run and\nno connection opened.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The services."
+        }
+      ]
+    }
+  ]
+}

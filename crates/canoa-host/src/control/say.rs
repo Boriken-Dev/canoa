@@ -34,8 +34,12 @@ use serde_json::{Map, Value, json};
 
 use super::files::Files;
 use super::speech::{form_of, members_of, schema_of, secrets_of, text_list, valid_name};
+use super::speech_offers::Lend;
 use super::{Caller, Grant, NOT_FOUND, REFUSED, Stores, allow, bad, text_param};
 use crate::speech_scripts::{self, ORIGIN_KEYS};
+
+/// Host-managed keys on synthesized account voice entries that are stripped from provider settings.
+const ACCOUNT_KEYS: [&str; 4] = ["account", "offer", "credential", "title"];
 
 type Outcome = Result<Value, (i32, String)>;
 
@@ -310,6 +314,8 @@ pub(crate) struct Say {
     next: AtomicU64,
     kept: Mutex<BTreeMap<String, Kept>>,
     offered: Offered,
+    #[cfg(test)]
+    output_services: Mutex<Option<super::speech_accounts::OutputServices>>,
 }
 
 impl Default for Say {
@@ -319,6 +325,8 @@ impl Default for Say {
             next: AtomicU64::new(0),
             kept: Mutex::default(),
             offered: Box::new(from_stores),
+            #[cfg(test)]
+            output_services: Mutex::new(None),
         }
     }
 }
@@ -345,24 +353,42 @@ impl Say {
         self
     }
 
+    /// Replaces the account speech-output descriptions with `services` for tests.
+    #[cfg(test)]
+    pub(crate) fn with_output_services(&self, services: super::speech_accounts::OutputServices) {
+        *self
+            .output_services
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(services);
+    }
+
     pub(crate) fn call(
         &self,
         caller: &Caller,
         files: &Files,
+        lend: &Lend<'_>,
         stores: Option<&Stores>,
         method: &str,
         params: &Value,
     ) -> Outcome {
+        #[cfg(test)]
+        if let Some(services) = self
+            .output_services
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        {
+            lend.with_output_services(services);
+        }
         match method {
             "speech/voices" => {
-                allow(caller, Grant::Voice).and_then(|()| self.voices(files, stores, params))
+                allow(caller, Grant::Voice).and_then(|()| self.voices(files, lend, stores, params))
             }
             "speech/say_configure" => {
-                allow(caller, Grant::VoiceSetup).and_then(|()| self.configure(files, params))
+                allow(caller, Grant::VoiceSetup).and_then(|()| self.configure(files, lend, params))
             }
-            "speech/say" => {
-                allow(caller, Grant::Voice).and_then(|()| self.say(caller, files, stores, params))
-            }
+            "speech/say" => allow(caller, Grant::Voice)
+                .and_then(|()| self.say(caller, files, lend, stores, params)),
             "speech/audio" => allow(caller, Grant::Voice).and_then(|()| self.audio(caller, params)),
             "speech/stop" => allow(caller, Grant::Voice).and_then(|()| self.stop(caller, params)),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
@@ -385,6 +411,7 @@ impl Say {
     fn all_tables(
         &self,
         files: &Files,
+        lend: &Lend<'_>,
         stores: Option<&Stores>,
     ) -> Result<Map<String, Value>, (i32, String)> {
         let mut all = tables(files)?;
@@ -394,17 +421,45 @@ impl Say {
         for (name, table) in (self.offered)(stores) {
             all.entry(name).or_insert(table);
         }
+        for (name, table) in lend.account_output_tables() {
+            all.entry(name).or_insert(table);
+        }
         Ok(all)
     }
 
-    /// What one table says, built: its kind and the provider, or why it cannot be.
-    fn built(&self, files: &Files, table: &Value) -> Result<(Resolved, Built), String> {
+    /// What one table says, built: its kind and the provider, or why it cannot be. When `with_key` is set and the table names an
+    /// `account`, the credential is read from the account's store without writing it to `canoa.cfg`.
+    fn built(
+        &self,
+        files: &Files,
+        lend: &Lend<'_>,
+        table: &Value,
+        with_key: bool,
+    ) -> Result<(Resolved, Built), String> {
         let (resolved, origin) = resolve_table(files, table)?;
         let mut settings = table.clone();
         if let Some(map) = settings.as_object_mut() {
             map.remove("provider");
             for key in ORIGIN_KEYS {
                 map.remove(key);
+            }
+            for key in ACCOUNT_KEYS {
+                map.remove(key);
+            }
+            if with_key && let Some(account) = table.get("account").and_then(Value::as_str) {
+                let service = table
+                    .get("offer")
+                    .and_then(Value::as_str)
+                    .and_then(|offer| offer.split_once(':'))
+                    .map(|(service, _)| service);
+                let credential = table
+                    .get("credential")
+                    .and_then(Value::as_str)
+                    .unwrap_or("api_key");
+                map.insert(
+                    "api_key".to_owned(),
+                    Value::String(lend.output_key(account, service, credential)?),
+                );
             }
         }
         let (provider, code) = resolved.build(&settings)?;
@@ -423,10 +478,16 @@ impl Say {
     /// `speech/voices`: the kinds this host has, each with the schema and the form its settings are drawn with, and the providers it
     /// offers, each with what it says of itself, where the text goes and the voices it has. A setting that is a secret is never
     /// answered, only that it is set. `provider` asks for one provider, `language` for the voices that speak it.
-    fn voices(&self, files: &Files, stores: Option<&Stores>, params: &Value) -> Outcome {
+    fn voices(
+        &self,
+        files: &Files,
+        lend: &Lend<'_>,
+        stores: Option<&Stores>,
+        params: &Value,
+    ) -> Outcome {
         let only = text_param(params, "provider")?;
         let language = text_param(params, "language")?;
-        let all = self.all_tables(files, stores)?;
+        let all = self.all_tables(files, lend, stores)?;
         if let Some(only) = only
             && !all.contains_key(only)
         {
@@ -445,9 +506,8 @@ impl Say {
             }
             listed.push(self.entry(
                 files,
-                name,
-                table,
-                in_file.contains_key(name),
+                lend,
+                (name, table, in_file.contains_key(name)),
                 language,
                 &mut kinds,
             )?);
@@ -472,14 +532,16 @@ impl Say {
     fn entry(
         &self,
         files: &Files,
-        name: &str,
-        table: &Value,
-        written: bool,
+        lend: &Lend<'_>,
+        (name, table, written): (&str, &Value, bool),
         language: Option<&str>,
         kinds: &mut Vec<Resolved>,
     ) -> Outcome {
         let mut entry =
             json!({"name": name, "provider": table.get("provider"), "builtin": !written});
+        if let Some(account) = table.get("account").and_then(Value::as_str) {
+            entry["account"] = json!(account);
+        }
         let found = resolve_table(files, table);
         let secrets = match &found {
             Ok((resolved, _)) => secrets_of(&resolved.schema),
@@ -494,10 +556,11 @@ impl Say {
         let mut settings = Map::new();
         let mut set = Vec::new();
         if let Some(map) = table.as_object() {
-            for (key, value) in map
-                .iter()
-                .filter(|(key, _)| *key != "provider" && !ORIGIN_KEYS.contains(&key.as_str()))
-            {
+            for (key, value) in map.iter().filter(|(key, _)| {
+                *key != "provider"
+                    && !ORIGIN_KEYS.contains(&key.as_str())
+                    && !ACCOUNT_KEYS.contains(&key.as_str())
+            }) {
                 if secrets.contains(key) {
                     set.push(key.clone());
                 } else {
@@ -507,7 +570,7 @@ impl Say {
         }
         entry["settings"] = Value::Object(settings);
         entry["secrets_set"] = json!(set);
-        let made = match self.built(files, table) {
+        let made = match self.built(files, lend, table, false) {
             Ok((_, made)) => made,
             Err(why) => {
                 entry["problem"] = json!(why);
@@ -528,6 +591,9 @@ impl Say {
                 entry["problem"] = json!(error.to_string());
                 return Ok(entry);
             }
+        }
+        if let Some(title) = table.get("title").and_then(Value::as_str) {
+            entry["title"] = json!(title);
         }
         match self.voices_of(name, table, provider, language) {
             Ok(voices) => entry["voices"] = voices,
@@ -581,6 +647,7 @@ impl Say {
         &self,
         caller: &Caller,
         files: &Files,
+        lend: &Lend<'_>,
         stores: Option<&Stores>,
         params: &Value,
     ) -> Outcome {
@@ -592,12 +659,12 @@ impl Say {
                 format!("a text is at most {MAX_TEXT} bytes; send it in parts"),
             ));
         }
-        let all = self.all_tables(files, stores)?;
+        let all = self.all_tables(files, lend, stores)?;
         let table = all
             .get(name)
             .ok_or_else(|| (NOT_FOUND, format!("this host has no voice provider {name}")))?;
         let (_, made) = self
-            .built(files, table)
+            .built(files, lend, table, true)
             .map_err(|why| (REFUSED, format!("{name}: {why}")))?;
         let (provider, code) = (&made.provider, made.code.clone());
         let mut request = SayRequest::new(text);
@@ -737,7 +804,7 @@ impl Say {
 
     /// `speech/say_configure`: writes (or, with `remove`, takes out) the `[say.NAME]` table. Settings the kind's schema does not name
     /// are refused, and a secret the request leaves out or leaves empty keeps what the table had; `clear` names the ones to take out.
-    fn configure(&self, files: &Files, params: &Value) -> Outcome {
+    fn configure(&self, files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
         let name = text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?;
         if !valid_name(name) {
             return Err(bad(
@@ -809,7 +876,7 @@ impl Say {
                 }
             }
             let table = Value::Object(table);
-            self.built(files, &table)
+            self.built(files, lend, &table, false)
                 .map_err(|why| format!("those settings cannot be used: {why}"))?;
             map.insert(name.to_owned(), table);
             Ok(Value::Object(map))

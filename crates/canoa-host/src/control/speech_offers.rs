@@ -25,7 +25,7 @@ use serde_json::{Map, Value, json};
 
 use super::accounts::Accounts as HostAccounts;
 use super::files::Files;
-use super::speech_accounts::Services;
+use super::speech_accounts::{OutputServices, Services};
 use super::{Caller, Grant, NOT_FOUND, REFUSED, Stores, allow, bad, text_param};
 use crate::accounts::matching::Catalogs;
 use crate::config::{Config, Layers};
@@ -104,6 +104,8 @@ pub(super) struct Lend<'a> {
     stores: Option<&'a Stores>,
     /// The speech services the libraries describe for accounts, read when first needed.
     services: OnceLock<Services>,
+    /// The text-to-speech services the libraries describe for accounts, read when first needed.
+    output_services: OnceLock<OutputServices>,
 }
 
 impl<'a> Lend<'a> {
@@ -113,6 +115,7 @@ impl<'a> Lend<'a> {
             accounts: accounts.map(|each| (each.layers(), each.home_dir())),
             stores,
             services: OnceLock::new(),
+            output_services: OnceLock::new(),
         }
     }
 
@@ -123,6 +126,7 @@ impl<'a> Lend<'a> {
             accounts: Some((layers, home)),
             stores,
             services: OnceLock::new(),
+            output_services: OnceLock::new(),
         }
     }
 
@@ -131,6 +135,12 @@ impl<'a> Lend<'a> {
     pub(super) fn with_services(self, services: Services) -> Self {
         let _ = self.services.set(services);
         self
+    }
+
+    /// The same, with the speech-output services a test names in place of the libraries this build carries.
+    #[cfg(test)]
+    pub(super) fn with_output_services(&self, services: OutputServices) {
+        let _ = self.output_services.set(services);
     }
 
     /// The accounts canoa.cfg lists now.
@@ -144,6 +154,91 @@ impl<'a> Lend<'a> {
     fn services(&self) -> &Services {
         self.services
             .get_or_init(|| Services::of(self.config().ok().as_ref()))
+    }
+
+    /// The text-to-speech services the libraries describe: those this build carries and canoa.cfg's extensions.
+    fn output_services(&self) -> &OutputServices {
+        self.output_services
+            .get_or_init(|| OutputServices::of(self.config().ok().as_ref()))
+    }
+
+    /// The built-in `[say]` tables made of the person's matching accounts (`SERVICE:NAME`), holding no key.
+    pub(super) fn account_output_tables(&self) -> Vec<(String, Value)> {
+        let Ok(config) = self.config() else {
+            return Vec::new();
+        };
+        let kinds = Catalogs::new(&config);
+        let mut tables = Vec::new();
+        for (name, account) in &config.accounts {
+            for (service, verdict) in self.output_services().offered(&kinds, account) {
+                if verdict.is_err() {
+                    continue;
+                }
+                let offer = format!("{}:{name}", service.id);
+                let mut map = Map::new();
+                map.insert("provider".to_owned(), json!(service.provider));
+                map.insert("account".to_owned(), json!(name));
+                map.insert("offer".to_owned(), json!(offer));
+                map.insert("credential".to_owned(), json!(service.credential));
+                map.insert(
+                    "title".to_owned(),
+                    json!(format!("{}, account {name}", service.title)),
+                );
+                if service.provider == "speech_say_endpoint" {
+                    map.insert("url".to_owned(), json!(service.url));
+                    if !service.models.is_empty() {
+                        map.insert("models".to_owned(), json!(service.models));
+                    }
+                    if !service.voices.is_empty() {
+                        map.insert("voices".to_owned(), json!(service.voices));
+                    }
+                    if !service.styles.is_empty() {
+                        map.insert("styles".to_owned(), json!(service.styles));
+                    }
+                }
+                tables.push((offer, Value::Object(map)));
+            }
+        }
+        tables
+    }
+
+    /// Reads the key of `account` for speech output from the credential store, checking the account still matches when `service` is
+    /// named.
+    pub(super) fn output_key(
+        &self,
+        account_name: &str,
+        wanted_service: Option<&str>,
+        fallback_credential: &str,
+    ) -> Result<String, String> {
+        let config = self.config()?;
+        let account = config
+            .accounts
+            .get(account_name)
+            .ok_or_else(|| format!("the account {account_name} is gone: add it again"))?;
+        let credential = if let Some(id) = wanted_service
+            && let Some(service) = self.output_services().find(id)
+        {
+            let kinds = Catalogs::new(&config);
+            match self
+                .output_services()
+                .offered(&kinds, account)
+                .into_iter()
+                .find(|(each, _)| each.id == service.id)
+            {
+                Some((_, Ok(()))) => service.credential.clone(),
+                Some((_, Err(why))) => return Err(why),
+                None => {
+                    return Err(format!(
+                        "an account of kind {} does not offer {} for text-to-speech",
+                        account.kind, service.title
+                    ));
+                }
+            }
+        } else {
+            fallback_credential.to_owned()
+        };
+        let (_, home) = self.accounts.ok_or("this host keeps no accounts")?;
+        super::speech_accounts::read_credential(&config, home, account_name, &credential)
     }
 
     /// The models of the service a recording is posted to at the address in `settings`: none for an address no library describes.
@@ -206,24 +301,7 @@ impl<'a> Lend<'a> {
         let config = self.config()?;
         let service = self.service_for(&config, name, wanted)?;
         let (_, home) = self.accounts.ok_or("this host keeps no accounts")?;
-        let account = &config.accounts[name];
-        let store = crate::accounts::Accounts::open(&config, home).map_err(|error| {
-            tracing::warn!("the account store could not be opened for speech: {error}");
-            "the host's account store could not be used".to_owned()
-        })?;
-        let record = store
-            .load(&account.id)
-            .map_err(|error| {
-                tracing::warn!("an account could not be read for speech: {error}");
-                "the host's account store could not be used".to_owned()
-            })?
-            .ok_or_else(|| format!("the account {name} holds no key: sign in to it again"))?;
-        record
-            .credentials
-            .get(&service.credential)
-            .filter(|key| !key.is_empty())
-            .cloned()
-            .ok_or_else(|| format!("the account {name} holds no key: sign in to it again"))
+        super::speech_accounts::read_credential(&config, home, name, &service.credential)
     }
 
     /// Where the service of the Store type `service` is now, as its library says, with the models that can transcribe when asked

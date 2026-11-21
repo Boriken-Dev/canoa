@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use super::files::{Files, UploadLimits};
 use super::speech::Speech;
-use super::speech_accounts::Services;
+use super::speech_accounts::{OutputServices, Services};
 use super::speech_offers::{self, Lend};
 use super::{Caller, NOT_FOUND, REFUSED, Stores};
 use crate::config::Layers;
@@ -1136,6 +1136,153 @@ fn an_offer_no_description_names_is_not_found_and_an_account_of_another_kind_is_
             .expect("canoa.cfg")
             .contains("[speech."),
         "nothing was written"
+    );
+    let _ = fs::remove_dir_all(&home.root);
+}
+
+fn say_control(home: &Home) -> super::Control {
+    use coqui_link::auth::{Identity, Method};
+    use std::sync::Arc;
+
+    let store = Arc::new(super::TrustStore::open(&home.root).expect("a trust store"));
+    let host = Identity::generate(Method::WebCrypto).expect("a key");
+    let hub = crate::secrets::Hub::new(
+        &host,
+        &store,
+        crate::delegate::BridgeCommand::new(std::path::Path::new("canoa"), &[]),
+    );
+    super::Control::open(
+        None,
+        super::DEFAULT_MAX_RECORDS,
+        super::DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(files(home))
+    .with_accounts(super::accounts::Accounts::new(
+        home.layers.clone(),
+        home.root.clone(),
+        hub,
+        Duration::from_secs(20),
+        false,
+    ))
+    .with_offered_voices(Vec::new())
+}
+
+fn ask_control(control: &super::Control, method: &str, params: Value) -> Value {
+    let line =
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
+            .expect("encodes");
+    serde_json::from_slice(&control.handle(&Caller::Owner, &line).expect("answered")).expect("JSON")
+}
+
+#[test]
+fn openai_key_account_lists_openai_voices_while_moved_or_other_standard_offers_none() {
+    let home = home("say-openai", &ACCOUNTS, Some("sk-secret-key"), "");
+    let control = say_control(&home);
+    let listed = ask_control(&control, "speech/voices", json!({}));
+    let providers = listed["result"]["providers"].as_array().expect("providers");
+    let offered = providers
+        .iter()
+        .find(|each| each["name"] == "openai:work")
+        .unwrap_or_else(|| panic!("openai:work in {listed}"));
+    assert_eq!(offered["builtin"], true);
+    assert_eq!(offered["account"], "work");
+    assert_eq!(offered["title"], "OpenAI, account work");
+    assert_eq!(offered["provider"], "speech_say_openai");
+    assert_eq!(offered["secrets_set"], json!([]));
+    assert!(offered.get("problem").is_none(), "{offered}");
+    assert_eq!(offered["voices"].as_array().expect("voices").len(), 13);
+    for excluded in ["openai:proxied", "openai:login", "openai:claude"] {
+        assert!(
+            providers.iter().all(|each| each["name"] != excluded),
+            "{excluded} should not be offered: {listed}"
+        );
+    }
+    assert!(!listed.to_string().contains("sk-secret-key"), "{listed}");
+    let _ = fs::remove_dir_all(&home.root);
+}
+
+#[test]
+fn a_voice_offer_for_an_account_speaks_through_a_loopback_endpoint_with_its_stored_key() {
+    use canoa::speech::output::account::AccountSpeechOutputService;
+
+    let (base, received) = standin("200 OK", "pcm12345", |_| {});
+    let home = home("say-account-loopback", &STAND_IN_ACCOUNTS, None, "");
+    keep_credential(&home.root, "plain", "token", "tok-output-secret");
+    let mut service = AccountSpeechOutputService::new(
+        "standin",
+        "Stand-in",
+        coqui_acp_api::standard::ANTHROPIC_API,
+        "https://api.anthropic.com",
+        format!("{base}/v1/audio/speech"),
+        "token",
+        "speech_say_endpoint",
+    );
+    service.models = vec!["tts-standin".to_owned()];
+    service.voices = vec!["sol".to_owned()];
+    let control =
+        say_control(&home).with_account_voices(OutputServices::from_services(vec![service]));
+
+    let listed = ask_control(&control, "speech/voices", json!({}));
+    let providers = listed["result"]["providers"].as_array().expect("providers");
+    let offer = providers
+        .iter()
+        .find(|each| each["name"] == "standin:plain")
+        .unwrap_or_else(|| panic!("standin:plain in {listed}"));
+    assert_eq!(offer["builtin"], true);
+    assert_eq!(offer["account"], "plain");
+    assert_eq!(offer["voices"][0]["id"], "sol");
+    for excluded in ["standin:moved", "standin:login", "standin:other"] {
+        assert!(
+            providers.iter().all(|each| each["name"] != excluded),
+            "{excluded} should not be offered: {listed}"
+        );
+    }
+
+    let started = ask_control(
+        &control,
+        "speech/say",
+        json!({"provider": "standin:plain", "text": "Hola.", "voice": "sol", "model": "tts-standin"}),
+    );
+    let utterance = started["result"]["utterance"]
+        .as_str()
+        .unwrap_or_else(|| panic!("started: {started}"));
+    let mut audio = Vec::new();
+    for _ in 0..50 {
+        let piece = ask_control(
+            &control,
+            "speech/audio",
+            json!({"utterance": utterance, "wait_ms": 1000, "max_bytes": 64}),
+        );
+        let result = &piece["result"];
+        audio.extend(
+            data_encoding::BASE64
+                .decode(result["audio"].as_str().expect("audio").as_bytes())
+                .expect("base64"),
+        );
+        if result["done"] == true {
+            assert_eq!(result["error"], Value::Null, "{piece}");
+            break;
+        }
+    }
+    assert_eq!(audio, b"pcm12345");
+    let req = received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("a request");
+    assert!(
+        req.head.contains("Bearer tok-output-secret"),
+        "{}",
+        req.head
+    );
+    assert!(
+        String::from_utf8_lossy(&req.body).contains("Hola."),
+        "text was sent"
+    );
+    let cfg = fs::read_to_string(&home.cfg).expect("canoa.cfg");
+    assert!(
+        !cfg.contains("tok-output-secret") && !cfg.contains("[say."),
+        "{cfg}"
     );
     let _ = fs::remove_dir_all(&home.root);
 }

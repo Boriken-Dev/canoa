@@ -17,9 +17,11 @@ pub const CREDENTIAL: &str = "api_key";     // the credential that holds the key
 pub const MODELS: [(&str, &str); 4];        // id and label, the recommended first
 
 /// What a host links: handed to `Registry::register_local`.
-pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // OpenAiSpeech, OpenAiVoices
+pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // OpenAiSpeech, OpenAiVoices, OpenAiSpeechOutput
 
 pub struct OpenAiSpeech;   // an `account_speech`, id "openai_speech": one service, `openai`, for the standard `openai-api`
+pub struct OpenAiSpeechOutput;   // an `account_speech_output`, id "openai_speech_output": offers OpenAI's voices to `openai-api` accounts at OpenAI's own address
+```
 
 pub const SPEECH_PROVIDER: &str = "speech_say_openai";   // the voice provider's id, which a `[say.NAME]` table names
 pub const SPEECH: &str;                 // https://api.openai.com/v1/audio/speech: where the text is posted
@@ -37,7 +39,7 @@ pub struct OpenAiVoiceSettings { pub api_key: Option<Secret<String>>, pub model:
 
 ## The voices
 
-`OpenAiVoices` is `canoa`'s generic endpoint provider (`EndpointSay`) over OpenAI's address with OpenAI's lists: the three models, thirteen voices and four styles. A voice that only `gpt-4o-mini-tts` has is refused, naming that model, when a request asks for another one; nothing is sent. `leaves` is `yes`, and `words` names api.openai.com and the key. The key is the provider's own setting: lending an account's key to speech output, as `account_speech` does for dictation, is not done.
+`OpenAiVoices` is `canoa`'s generic endpoint provider (`EndpointSay`) over OpenAI's address with OpenAI's lists: the three models, thirteen voices and four styles. A voice that only `gpt-4o-mini-tts` has is refused, naming that model, when a request asks for another one; nothing is sent. `leaves` is `yes`, and `words` names api.openai.com and the key. `OpenAiSpeechOutput` describes the same service through `account_speech_output` so any matching `openai-api` key account at OpenAI's address offers OpenAI's voices (`openai:NAME`) with its key lent from the account store when speaking and never written to `[say]`.
 
 ## Gotchas
 

@@ -343,6 +343,13 @@ impl Control {
         self
     }
 
+    /// Replaces the `account_speech_output` services with `services`, as a test points a stand-in service at loopback.
+    #[cfg(test)]
+    pub(crate) fn with_account_voices(self, services: speech_accounts::OutputServices) -> Self {
+        self.say.with_output_services(services);
+        self
+    }
+
     /// The terminals this host runs.
     #[cfg(test)]
     pub(crate) fn terminals(&self) -> &Terminals {

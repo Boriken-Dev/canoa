@@ -16,6 +16,9 @@ pub use voices::{
 use canoa::speech::account::{
     AccountSpeech, AccountSpeechInfo, AccountSpeechModel, AccountSpeechService,
 };
+use canoa::speech::output::account::{
+    AccountSpeechOutput, AccountSpeechOutputInfo, AccountSpeechOutputService,
+};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::standard;
@@ -71,11 +74,33 @@ impl AccountSpeech for OpenAiSpeech {
     }
 }
 
+/// OpenAI's text-to-speech description, for the accounts that hold an API key.
+#[derive(Default, Debug, Clone, Copy, Provider)]
+#[provider(AccountSpeechOutput, id = "openai_speech_output", crate = ::coqui_acp_api::guatiao)]
+pub struct OpenAiSpeechOutput;
+
+impl AccountSpeechOutput for OpenAiSpeechOutput {
+    fn describe(&self) -> Result<AccountSpeechOutputInfo, ProviderError> {
+        let mut service = AccountSpeechOutputService::new(
+            SERVICE,
+            "OpenAI",
+            standard::OPENAI_API,
+            ADDRESS,
+            SPEECH,
+            CREDENTIAL,
+            SPEECH_PROVIDER,
+        );
+        service.summary = "Text to speech by OpenAI's voices.".to_owned();
+        service.location = "The text goes over the internet to api.openai.com with your key, and OpenAI's terms say what it does with it.".to_owned();
+        Ok(AccountSpeechOutputInfo::new(vec![service]))
+    }
+}
+
 // What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is read.
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-openai",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [OpenAiSpeech, OpenAiVoices]
+    providers = [OpenAiSpeech, OpenAiVoices, OpenAiSpeechOutput]
 );
 
 #[cfg(test)]
@@ -117,5 +142,14 @@ mod tests {
                 .offer::<dyn canoa::speech::output::SpeechOutput>(SPEECH_PROVIDER)
                 .is_some()
         );
+        assert!(
+            registry
+                .offer::<dyn AccountSpeechOutput>("openai_speech_output")
+                .is_some()
+        );
+        let output = OpenAiSpeechOutput.describe().expect("described");
+        assert_eq!(output.problem(), None);
+        assert_eq!(output.services[0].id, SERVICE);
+        assert_eq!(output.services[0].provider, SPEECH_PROVIDER);
     }
 }

@@ -19,6 +19,7 @@ use canoa::profile_item::ProfileItemVtable;
 use canoa::secret_provider::SecretProviderVtable;
 use canoa::settings_section::SettingsSectionVtable;
 use canoa::speech::account::AccountSpeechVtable;
+use canoa::speech::output::account::AccountSpeechOutputVtable;
 use canoa::speech::output::{SpeechOutputVtable, SpeechUtteranceVtable};
 use canoa::speech::{SpeechProviderVtable, SpeechSessionVtable};
 use canoa::store::extension::StoreExtensionVtable;
@@ -55,6 +56,7 @@ pub(crate) fn document() -> String {
         InstallPrompterVtable::description(),
         InstallToolsVtable::description(),
         AccountSpeechVtable::description(),
+        AccountSpeechOutputVtable::description(),
         SpeechProviderVtable::description(),
         SpeechSessionVtable::description(),
         SpeechOutputVtable::description(),
@@ -138,6 +140,7 @@ mod tests {
             "gateway_lease",
             "acp_harness",
             "transport",
+            "account_speech_output",
         ] {
             assert!(names.contains(&needed), "{needed} in {names:?}");
         }
