@@ -11,6 +11,7 @@ use std::path::{Component, Path, PathBuf};
 
 use canoa::network::{ClientCertificate, GitTls, NetworkSettings, ProxyChoice, Secret};
 use coqui_acp_api::CacheLifetime;
+use coqui_acp_api::guatiao::{FromValue as _, Value as GuatiaoValue};
 use coqui_peer_webcrypto::PeerId;
 use coqui_transport_pipe::PipeName;
 use indexmap::IndexMap;
@@ -107,6 +108,8 @@ pub struct Config {
     pub extensions: Vec<Extension>,
     /// The account makers the libraries this config names offer, found when first asked for.
     pub(crate) makers: crate::makers::Cell,
+    /// Opened provider registries for this config, cached on first read.
+    pub(crate) providers: crate::control::providers::Cell,
 }
 
 /// Serves nothing, with every setting at its default.
@@ -141,6 +144,7 @@ impl Default for Config {
             skill_pins: Default::default(),
             extensions: Default::default(),
             makers: Default::default(),
+            providers: Default::default(),
         }
     }
 }
@@ -1038,6 +1042,45 @@ pub struct PoolConfig {
     pub accounts: Vec<String>,
 }
 
+/// Validation failure for a pool definition under [`Config`].
+pub(crate) enum PoolIssue {
+    InvalidLabel(ConfigError),
+    AccountName(String),
+    AutomaticPool(String),
+    InvalidStandard,
+    UnknownMember(String),
+    DuplicateMember(String),
+}
+
+impl PoolConfig {
+    /// Checks pool name, standard id and member names against `accounts`.
+    pub(crate) fn validate(
+        &self,
+        name: &str,
+        accounts: &IndexMap<String, AccountConfig>,
+    ) -> Result<(), PoolIssue> {
+        check_label(name).map_err(PoolIssue::InvalidLabel)?;
+        if name == coqui_acp_api::LOCAL_ACCOUNT || accounts.contains_key(name) {
+            return Err(PoolIssue::AccountName(name.to_owned()));
+        }
+        if crate::pools::automatic_standard(name).is_some() {
+            return Err(PoolIssue::AutomaticPool(name.to_owned()));
+        }
+        if !coqui_acp_api::standard::is_standard(&self.standard) {
+            return Err(PoolIssue::InvalidStandard);
+        }
+        for (index, account) in self.accounts.iter().enumerate() {
+            if account != coqui_acp_api::LOCAL_ACCOUNT && !accounts.contains_key(account) {
+                return Err(PoolIssue::UnknownMember(account.clone()));
+            }
+            if self.accounts[..index].contains(account) {
+                return Err(PoolIssue::DuplicateMember(account.clone()));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// `[host.web]`: the web app on a listener of its own, beside the entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1416,24 +1459,17 @@ pub const CACHE_LIFETIMES: &[&str] = &["default", "off", "short", "long"];
 /// The lifetime `name` stands for, one of [`CACHE_LIFETIMES`].
 #[must_use]
 pub fn cache_lifetime_named(name: &str) -> Option<CacheLifetime> {
-    match name {
-        "default" => Some(CacheLifetime::Default),
-        "off" => Some(CacheLifetime::Off),
-        "short" => Some(CacheLifetime::Short),
-        "long" => Some(CacheLifetime::Long),
-        _ => None,
-    }
+    CacheLifetime::from_value(&GuatiaoValue::from(name)).ok()
 }
 
 /// The name of `lifetime` in [`CACHE_LIFETIMES`].
 #[must_use]
-pub const fn cache_lifetime_name(lifetime: CacheLifetime) -> &'static str {
-    match lifetime {
-        CacheLifetime::Off => "off",
-        CacheLifetime::Short => "short",
-        CacheLifetime::Long => "long",
-        _ => "default",
-    }
+pub fn cache_lifetime_name(lifetime: CacheLifetime) -> &'static str {
+    CACHE_LIFETIMES
+        .iter()
+        .copied()
+        .find(|name| cache_lifetime_named(name) == Some(lifetime))
+        .unwrap_or("default")
 }
 
 /// What a menu calls `lifetime`: the host's own words, the same whichever provider honours it.
@@ -2708,13 +2744,7 @@ impl Config {
                         .map(|table| settings_of(&name, table))
                         .transpose()?;
                     let settings = if built_in {
-                        built_in_settings(
-                            &name,
-                            &harness,
-                            settings,
-                            agent.executable.is_some(),
-                            &directory,
-                        )?
+                        built_in_settings(&name, settings, agent.executable.is_some(), &directory)?
                     } else {
                         settings
                     };
@@ -2972,6 +3002,7 @@ impl Config {
             skill_pins,
             extensions,
             makers: crate::makers::Cell::default(),
+            providers: crate::control::providers::Cell::default(),
         })
     }
 
@@ -3238,7 +3269,6 @@ fn origin_of(
 /// command line runs in a session's directory, which a client chooses.
 fn built_in_settings(
     name: &str,
-    harness: &str,
     settings: Option<Settings>,
     executable_key: bool,
     directory: &Path,
@@ -3246,7 +3276,6 @@ fn built_in_settings(
     let Some(settings) = settings else {
         return Ok(None);
     };
-    let _ = harness;
     let mut map = settings.as_map().clone();
     if executable_key && map.contains_key("executable") {
         return Err(invalid(
@@ -4091,44 +4120,38 @@ fn pool_of(
     raw: RawPool,
     accounts: &IndexMap<String, AccountConfig>,
 ) -> Result<PoolConfig, ConfigError> {
-    check_label(name)?;
     let refused = |what: String| ConfigError::Invalid {
         entry: None,
         what: format!("pool {name}: {what}"),
     };
-    if name == coqui_acp_api::LOCAL_ACCOUNT || accounts.contains_key(name) {
-        return Err(refused(
-            "that name is an account's, and a pool and an account do not share one".to_owned(),
-        ));
-    }
-    if crate::pools::automatic_standard(name).is_some() {
-        return Err(refused(
-            "that name is taken by the pool the host makes of every account that provides that standard".to_owned(),
-        ));
-    }
-    let standard = match raw.standard {
-        Some(standard) if coqui_acp_api::standard::is_standard(&standard) => standard,
-        Some(_) => {
-            return Err(refused(
-                "standard is a credential standard's id: lower-case letters, digits and single hyphens".to_owned(),
-            ));
-        }
-        None => return Err(refused("standard is missing".to_owned())),
-    };
-    for (index, account) in raw.accounts.iter().enumerate() {
-        if account != coqui_acp_api::LOCAL_ACCOUNT && !accounts.contains_key(account) {
-            return Err(refused(format!(
-                "accounts names {account}, which [host.accounts] does not hold"
-            )));
-        }
-        if raw.accounts[..index].contains(account) {
-            return Err(refused(format!("accounts names {account} twice")));
-        }
-    }
-    Ok(PoolConfig {
+    let standard = raw
+        .standard
+        .ok_or_else(|| refused("standard is missing".to_owned()))?;
+    let pool = PoolConfig {
         standard,
         accounts: raw.accounts,
-    })
+    };
+    if let Err(issue) = pool.validate(name, accounts) {
+        return Err(match issue {
+            PoolIssue::InvalidLabel(error) => error,
+            PoolIssue::AccountName(_) => refused(
+                "that name is an account's, and a pool and an account do not share one".to_owned(),
+            ),
+            PoolIssue::AutomaticPool(_) => refused(
+                "that name is taken by the pool the host makes of every account that provides that standard".to_owned(),
+            ),
+            PoolIssue::InvalidStandard => refused(
+                "standard is a credential standard's id: lower-case letters, digits and single hyphens".to_owned(),
+            ),
+            PoolIssue::UnknownMember(account) => refused(format!(
+                "accounts names {account}, which [host.accounts] does not hold"
+            )),
+            PoolIssue::DuplicateMember(account) => {
+                refused(format!("accounts names {account} twice"))
+            }
+        });
+    }
+    Ok(pool)
 }
 
 /// A name the person gives an account or a pool: any text they can read, 1 to [`MAX_NAME`] characters and no control character. It

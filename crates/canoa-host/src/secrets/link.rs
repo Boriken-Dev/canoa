@@ -20,6 +20,7 @@ use coqui_acp_secrets::{
     Action, Approval, Decision, Error, Event, Frontend, Mode, Secrets, SessionConfig,
 };
 use serde_json::{Value, json};
+#[cfg(test)]
 use sha2::{Digest as _, Sha256};
 
 use super::{Grant, Hub, lock};
@@ -359,12 +360,9 @@ impl Link {
         else {
             return false;
         };
-        let mut secret = [0_u8; 32];
-        if getrandom::fill(&mut secret).is_err() {
+        let Some((token, digest)) = crate::loopback::mint_bearer() else {
             return false;
-        }
-        let token: String = data_encoding::HEXLOWER.encode(&secret);
-        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+        };
         let Some(servers) = value
             .get_mut("params")
             .and_then(Value::as_object_mut)
@@ -375,31 +373,14 @@ impl Link {
         };
         servers.retain(|server| server.get("name").and_then(Value::as_str) != Some(SERVER_NAME));
         let version = self.stdio.load(Ordering::SeqCst);
-        servers.push(if self.http.load(Ordering::SeqCst) {
-            json!({
-                "type": "http",
-                "name": SERVER_NAME,
-                "url": url,
-                "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-            })
-        } else {
-            // The same stdio bridge the delegation tools use, with the address and bearer in its environment. Version 1 writes
-            // a stdio server with no `type`; version 2 names it.
-            let bridge = &self.hub.bridge;
-            let mut entry = json!({
-                "name": SERVER_NAME,
-                "command": bridge.program,
-                "args": bridge.args,
-                "env": [
-                    {"name": crate::delegate::bridge::URL_VAR, "value": url},
-                    {"name": crate::delegate::bridge::TOKEN_VAR, "value": token},
-                ],
-            });
-            if version >= 2 {
-                entry["type"] = json!("stdio");
-            }
-            entry
-        });
+        let bridge = (!self.http.load(Ordering::SeqCst)).then_some(&self.hub.bridge);
+        servers.push(crate::loopback::server_entry(
+            SERVER_NAME,
+            &url,
+            &token,
+            bridge,
+            version,
+        ));
         self.hub.tokens.add(digest);
         self.remember(
             id,

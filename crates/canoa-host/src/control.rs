@@ -59,7 +59,7 @@ const POLL: Duration = Duration::from_millis(50);
 
 const NOT_JSON: i32 = -32700;
 const NO_METHOD: i32 = -32601;
-const BAD_PARAMS: i32 = -32602;
+pub(crate) const BAD_PARAMS: i32 = -32602;
 const DENIED: i32 = -32001;
 const REFUSED: i32 = -32002;
 const NOT_FOUND: i32 = -32003;
@@ -1836,6 +1836,7 @@ pub(crate) mod mail_setup;
 #[cfg(test)]
 mod mail_setup_tests;
 pub(crate) mod panel_tabs;
+mod params;
 mod pools;
 pub(crate) mod profile_items;
 pub(crate) mod providers;

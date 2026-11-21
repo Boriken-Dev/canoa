@@ -117,16 +117,25 @@ fn built_in() -> Result<Registry, String> {
 impl TabCatalog {
     /// The built-in kinds, then those `registries` offer, each registry as its origin names it. A kind whose id an earlier one took,
     /// or that cannot be described, is left out and logged.
+    #[cfg(test)]
     pub(crate) fn from_registries(registries: Vec<(String, Registry)>) -> Self {
-        let mut found: Vec<(String, Registry)> = Vec::new();
+        let wrapped: Vec<(String, Arc<Registry>)> = registries
+            .into_iter()
+            .map(|(origin, registry)| (origin, Arc::new(registry)))
+            .collect();
+        Self::from_arcs(&wrapped)
+    }
+
+    /// As [`Self::from_registries`], sharing cached `Arc<Registry>` handles.
+    pub(crate) fn from_arcs(registries: &[(String, Arc<Registry>)]) -> Self {
+        let mut found: Vec<(String, Arc<Registry>)> = Vec::new();
         match built_in() {
-            Ok(registry) => found.push((BUILT_IN.to_owned(), registry)),
+            Ok(registry) => found.push((BUILT_IN.to_owned(), Arc::new(registry))),
             Err(why) => tracing::warn!("the built-in panel tabs are not offered: {why}"),
         }
-        found.extend(registries);
+        found.extend(registries.iter().cloned());
         let mut entries: Vec<Entry> = Vec::new();
         for (origin, registry) in found {
-            let registry = Arc::new(registry);
             let keys: Vec<String> = registry
                 .offers::<dyn PanelTab>()
                 .filter_map(|offer| offer.key().map(str::to_owned))
@@ -170,7 +179,7 @@ impl TabCatalog {
 
     /// The built-in kinds and those the libraries of `config`'s entries and extensions add.
     pub(crate) fn of(config: &Config) -> Self {
-        Self::from_registries(crate::control::providers::loaded(config))
+        Self::from_arcs(&crate::control::providers::loaded(config))
     }
 
     /// The kinds as `panel_tabs/list` answers: each with its `id`, `title`, `help`, `icon`, `shows` (`terminal`, `log` or `page`),

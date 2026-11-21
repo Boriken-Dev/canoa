@@ -140,10 +140,9 @@ impl BackendCatalog {
     }
 
     /// Collects valid, unique `mail_backend` offers from `registries` in order.
-    pub(crate) fn from_registries(registries: Vec<Registry>) -> Self {
+    pub(crate) fn from_registries(registries: Vec<Arc<Registry>>) -> Self {
         let mut entries: Vec<BackendEntry> = Vec::new();
         for registry in registries {
-            let registry = Arc::new(registry);
             let keys: Vec<String> = registry
                 .offers::<dyn MailBackend>()
                 .filter_map(|offer| offer.key().map(str::to_owned))

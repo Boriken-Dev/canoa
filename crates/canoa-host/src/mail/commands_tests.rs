@@ -425,7 +425,7 @@ fn non_microsoft_mail_backend_registers_and_opens_through_catalog() {
     registry
         .register_local("mock-imap", library)
         .expect("registers");
-    let catalog = BackendCatalog::from_registries(vec![registry]);
+    let catalog = BackendCatalog::from_registries(vec![Arc::new(registry)]);
     assert_eq!(
         catalog
             .list()

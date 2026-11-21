@@ -127,7 +127,7 @@ pub(crate) fn applied_as(
             .map(str::to_owned)
     };
     Applied {
-        address: named("base_url"),
+        address: named(crate::accounts::matching::BASE_URL),
         credential: named("credential"),
     }
 }
@@ -138,7 +138,7 @@ fn address_key(info: &AccountKindInfo) -> String {
         .iter()
         .find(|slot| slot.purpose == coqui_acp_api::MODEL_API)
         .and_then(|slot| slot.key.clone())
-        .unwrap_or_else(|| "base_url".to_owned())
+        .unwrap_or_else(|| crate::accounts::matching::BASE_URL.to_owned())
 }
 
 /// The standards the account with `settings` provides: those its property names when the kind has one and the account sets it, else

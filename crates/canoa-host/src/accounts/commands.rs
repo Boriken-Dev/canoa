@@ -277,11 +277,11 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
                 account_settings.clone().unwrap_or_default(),
             )
         }
-        _ if is_built_in_harness(harness) => (
-            kind::registry(None).map_err(Failed::run)?,
-            installed_program(harness),
-            Settings::default(),
-        ),
+        _ if is_built_in_harness(harness) => {
+            let registry = kind::registry(None).map_err(Failed::run)?;
+            let settings = serve::builtin_provider_settings(&registry, harness, None, None);
+            (registry, settings, Settings::default())
+        }
         _ => {
             return Err(Failed::usage(format!(
                 "no entry runs a provider called {harness}: add an agent entry with harness = \"{harness}\" and its library or source"
@@ -297,20 +297,6 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
         crate::makers::Makers::of(config),
     )
     .map_err(|error| Failed::run(format!("the {harness} provider is unusable: {error}")))
-}
-
-/// The settings of a built-in provider no entry configures: the program the Store installed, when it installed one.
-fn installed_program(harness: &str) -> Settings {
-    let managed = crate::bundled::runs_managed_by_own_name(harness)
-        .then(|| crate::sources::managed_program(harness))
-        .flatten();
-    match managed {
-        Some((path, _)) => Settings::new(serde_json::Map::from_iter([(
-            "executable".to_owned(),
-            serde_json::Value::String(path.to_string_lossy().into_owned()),
-        )])),
-        None => Settings::default(),
-    }
 }
 
 fn methods_of(provider: &kind::Harness) -> Result<Vec<LoginMethodInfo>, Failed> {
@@ -1190,15 +1176,9 @@ pub(crate) fn remove_table(
     write_cfg(path, &edited)
 }
 
-/// Whether the file at `path` has the agent entry `name`, in whatever format it is written.
-pub(crate) fn has_entry(path: &Path, name: &str) -> Result<bool, Failed> {
-    let _one = config_writes();
-    let text = read_cfg(path)?;
-    has_table(path, &text, &["host", "agents", name])
-}
-
 /// Takes the agent entry `name` out of the file at `path`, whole. Refused when the file spells it with tables of their own
 /// (`[host.agents.NAME.x]`), which a caller that only means to drop a plain entry never meant.
+#[cfg(test)]
 pub(crate) fn remove_entry(path: &Path, name: &str) -> Result<(), Failed> {
     let _one = config_writes();
     let text = read_cfg(path)?;

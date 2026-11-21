@@ -355,10 +355,9 @@ impl core::error::Error for ServeError {}
 /// The registries of the libraries and sources canoa.cfg's entries and extensions load, which offer the usage readers beside the
 /// bundled agents'.
 fn readers_of_libraries(config: &Config) -> Vec<Arc<GuatiaoRegistry>> {
-    crate::control::providers::loaded(config)
-        .into_iter()
-        .filter(|(origin, _)| origin != "bundled")
-        .map(|(_, registry)| Arc::new(registry))
+    crate::control::providers::libraries(config)
+        .iter()
+        .map(|(_, registry)| Arc::clone(registry))
         .collect()
 }
 
@@ -3428,6 +3427,49 @@ fn say_origin_of(name: &str, table: &str, prefix: &str, origin: &Origin) {
     }
 }
 
+/// Shared built-in provider settings: explicit or Store-installed `executable`, `allow_bypass`, and `modes`, each added where
+/// the provider's schema declares it and not already set in `own`.
+pub(crate) fn builtin_provider_settings(
+    registry: &coqui_acp_api::guatiao::library::Registry,
+    harness: &str,
+    executable: Option<&OsString>,
+    own: Option<&Settings>,
+) -> Settings {
+    let mut map = own.map(|own| own.as_map().clone()).unwrap_or_default();
+    if let Some(executable) = executable {
+        map.insert(
+            "executable".to_owned(),
+            serde_json::Value::String(executable.to_string_lossy().into_owned()),
+        );
+    } else if crate::bundled::runs_managed_by_own_name(harness)
+        && !map.contains_key("executable")
+        && let Some((path, _)) = sources::managed_program(harness)
+    {
+        // Nothing names the program: the one the Store installed runs, found as it is now.
+        map.insert(
+            "executable".to_owned(),
+            serde_json::Value::String(path.to_string_lossy().into_owned()),
+        );
+    }
+    let takes = |key: &str| crate::kind::declares_setting(registry, harness, key);
+    // Every mode the agent has is offered, Bypass included: the person's own account runs it, and a paired key is theirs.
+    if takes("allow_bypass") {
+        map.entry("allow_bypass".to_owned())
+            .or_insert(serde_json::Value::Bool(true));
+    }
+    if takes("modes") {
+        map.entry("modes".to_owned()).or_insert_with(|| {
+            serde_json::Value::from(
+                coqui_acp_harness::Mode::ALL
+                    .iter()
+                    .map(|mode| mode.id())
+                    .collect::<Vec<_>>(),
+            )
+        });
+    }
+    Settings::new(map)
+}
+
 /// The settings a harness entry's provider is configured with: the entry's `settings`, then the entry's own keys of the
 /// same names, and for the built-in `claude`, `codex` and `pi` what is the same for every agent: the standard access, which a
 /// session's profile replaces through the request's `_meta`, and every mode the agent has, Bypass included. A setting the
@@ -3440,25 +3482,12 @@ pub(crate) fn harness_settings(
     asks: &HarnessOptions,
     own: Option<&Settings>,
 ) -> Settings {
-    let mut map = own.map(|own| own.as_map().clone()).unwrap_or_default();
     // A provider that takes none of the access, mode or setting-source keys (one that runs a stdio agent as it is) is given only
     // the program and the limits of a connection: each key below goes in where the provider's schema declares it.
     let takes = |key: &str| crate::kind::declares_setting(registry, harness, key);
-    if let Some(executable) = executable {
-        map.insert(
-            "executable".to_owned(),
-            serde_json::Value::String(executable.to_string_lossy().into_owned()),
-        );
-    } else if crate::bundled::runs_managed_by_own_name(harness)
-        && !map.contains_key("executable")
-        && let Some((path, _)) = sources::managed_program(harness)
-    {
-        // Nothing names the program: the one the Store installed runs, as it is when the host starts.
-        map.insert(
-            "executable".to_owned(),
-            serde_json::Value::String(path.to_string_lossy().into_owned()),
-        );
-    }
+    let mut map = builtin_provider_settings(registry, harness, executable, own)
+        .as_map()
+        .clone();
     if let Some(sources) = &asks.setting_sources
         && takes("setting_sources")
     {
@@ -3485,21 +3514,6 @@ pub(crate) fn harness_settings(
             serde_json::Value::Bool(true),
         );
     }
-    // Every mode the agent has is offered, Bypass included: the person's own account runs it, and a paired key is theirs.
-    if takes("allow_bypass") {
-        map.entry("allow_bypass".to_owned())
-            .or_insert(serde_json::Value::Bool(true));
-    }
-    if takes("modes") {
-        map.entry("modes".to_owned()).or_insert_with(|| {
-            serde_json::Value::from(
-                coqui_acp_harness::Mode::ALL
-                    .iter()
-                    .map(|mode| mode.id())
-                    .collect::<Vec<_>>(),
-            )
-        });
-    }
     // Requests a connection works on at once: what the host always allowed, not the provider's smaller default.
     map.entry("max_requests".to_owned())
         .or_insert_with(|| serde_json::Value::from(HARNESS_MAX_REQUESTS));
@@ -3525,7 +3539,7 @@ pub(crate) fn keeps_key_in_environment(
                 && info
                     .endpoints
                     .iter()
-                    .any(|slot| slot.purpose == "model_api" && slot.key.is_some()))
+                    .any(|slot| slot.purpose == coqui_acp_api::MODEL_API && slot.key.is_some()))
     })
 }
 
@@ -3720,7 +3734,7 @@ fn turn_away<C: Channel>(channel: &C, first: &[u8], (entry, peer): (&str, &PeerI
         .and_then(|message| message.get("id").cloned());
     if let Some(id) = id {
         let answer = serde_json::json!({"jsonrpc": "2.0", "id": id,
-            "error": {"code": -32602, "message": why}});
+            "error": {"code": crate::control::BAD_PARAMS, "message": why}});
         let _ = channel.send(answer.to_string().as_bytes());
     }
     tracing::info!(entry, %peer, "turned away: {why}");
@@ -4194,7 +4208,8 @@ settings = { replay_max_bytes = 4096 }
         let mut info =
             coqui_acp_api::AccountKindInfo::new("k", "K").provides(provides.iter().copied());
         if endpoint {
-            info.endpoints = vec![coqui_acp_api::EndpointSlot::new("model_api").key("base_url")];
+            info.endpoints =
+                vec![coqui_acp_api::EndpointSlot::new(coqui_acp_api::MODEL_API).key("base_url")];
         }
         let account = crate::config::AccountConfig {
             harness: harness.to_owned(),

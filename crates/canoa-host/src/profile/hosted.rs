@@ -2111,11 +2111,13 @@ fn acp_server(server: &ReadyMcp, version: u64) -> Option<Value> {
         .map(|(name, value)| json!({"name": name, "value": value}))
         .collect();
     Some(if server.transport == "stdio" {
-        let mut out = json!({"name": server.name, "command": first, "args": args, "env": pairs});
-        if version == 2 {
-            out["type"] = json!("stdio");
-        }
-        out
+        crate::loopback::stdio_server_entry(
+            &server.name,
+            first,
+            args.clone(),
+            Value::Array(pairs),
+            version,
+        )
     } else {
         json!({"type": server.transport, "name": server.name, "url": first, "headers": pairs})
     })

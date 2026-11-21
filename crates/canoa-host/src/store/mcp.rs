@@ -31,7 +31,6 @@ use std::time::Instant;
 
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
 
 pub(crate) use self::approve::{Approval, Card};
 use self::approve::{Held, Questions};
@@ -178,27 +177,7 @@ impl Access {
 }
 
 /// The bearers in force, by the digest of the token: the token itself is never kept.
-#[derive(Default)]
-pub(crate) struct Tokens(Mutex<HashMap<[u8; 32], Arc<Access>>>);
-
-impl Tokens {
-    fn add(&self, digest: [u8; 32], access: Arc<Access>) {
-        lock(&self.0).insert(digest, access);
-    }
-
-    fn find(&self, digest: &[u8; 32]) -> Option<Arc<Access>> {
-        lock(&self.0).get(digest).cloned()
-    }
-
-    fn remove(&self, digest: &[u8; 32]) {
-        lock(&self.0).remove(digest);
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        lock(&self.0).len()
-    }
-}
+pub(crate) type Tokens = crate::loopback::Tokens<Access>;
 
 /// What the host holds for every connection: whether the tools are on, what answers them, and the server.
 pub(crate) struct Hub {
@@ -567,36 +546,11 @@ impl Link {
         };
         let mut made = Vec::new();
         for (server, extra) in wanted {
-            let mut secret = [0_u8; 32];
-            if getrandom::fill(&mut secret).is_err() {
+            let Some((token, digest)) = crate::loopback::mint_bearer() else {
                 return false;
-            }
-            let token: String = data_encoding::HEXLOWER.encode(&secret);
-            let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-            let entry = if http {
-                json!({
-                    "type": "http",
-                    "name": server,
-                    "url": url,
-                    "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-                })
-            } else {
-                // The same stdio bridge the delegation tools use, with the address and bearer in its environment. Version 1
-                // writes a stdio server with no `type`; version 2 names it.
-                let mut entry = json!({
-                    "name": server,
-                    "command": self.hub.bridge.program,
-                    "args": self.hub.bridge.args,
-                    "env": [
-                        {"name": crate::delegate::bridge::URL_VAR, "value": url},
-                        {"name": crate::delegate::bridge::TOKEN_VAR, "value": token},
-                    ],
-                });
-                if stdio >= 2 {
-                    entry["type"] = json!("stdio");
-                }
-                entry
             };
+            let bridge = (!http).then_some(&self.hub.bridge);
+            let entry = crate::loopback::server_entry(server, &url, &token, bridge, stdio);
             made.push((server, extra, digest, entry));
         }
         let Some(servers) = value

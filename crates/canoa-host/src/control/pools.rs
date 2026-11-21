@@ -7,16 +7,14 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use super::accounts::Accounts;
+use super::params::{Refusal, refusal, string_list, text};
 use super::{BAD_PARAMS, NOT_FOUND, REFUSED};
 use crate::accounts::commands;
 use crate::accounts::matching::Catalogs;
-use crate::cli::Failed;
-use crate::config::{Config, EntryKind, PoolConfig};
+use crate::config::{Config, EntryKind, PoolConfig, PoolIssue};
 use crate::options::limits::Endpoints;
 use crate::pools::turn::{self, Turn, Why};
 use crate::pools::{self, Pool, gather};
-
-type Refusal = (i32, String);
 
 /// A pool as the control channel says it.
 pub(super) fn pool_json(pool: &Pool) -> Value {
@@ -39,72 +37,41 @@ pub(super) fn list(config: &Config) -> Value {
     json!({"pools": rows})
 }
 
-fn text<'a>(params: &'a Value, key: &str) -> Result<&'a str, Refusal> {
-    params
-        .get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| (BAD_PARAMS, format!("{key} is missing or not text")))
-}
-
-fn refusal(failed: &Failed) -> Refusal {
-    (
-        if failed.status == 2 {
-            BAD_PARAMS
-        } else {
-            REFUSED
-        },
-        failed.why.clone(),
-    )
-}
-
 /// `pools/set` `{"name", "standard", "accounts"}`: makes the pool `name`, or changes it to hold exactly those accounts, in that
 /// order. Every account has to provide the standard; one that does not is refused, naming the account, its kind's standards and
 /// the pool's. The host reads its pools when it starts, so the answer says it has to start again.
 pub(super) fn set(own: &Path, config: &Config, params: &Value) -> Result<Value, Refusal> {
     let name = text(params, "name")?;
-    crate::config::check_label(name).map_err(|error| (BAD_PARAMS, error.to_string()))?;
     let standard = text(params, "standard")?;
-    if !coqui_acp_api::standard::is_standard(standard) {
-        return Err((
-            BAD_PARAMS,
-            "standard is a credential standard's id: lower-case letters, digits and single hyphens"
-                .to_owned(),
-        ));
-    }
-    let members: Vec<String> = match params.get("accounts") {
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|item| item.as_str().map(str::to_owned))
-            .collect::<Option<_>>()
-            .ok_or((BAD_PARAMS, "accounts is a list of names".to_owned()))?,
-        _ => return Err((BAD_PARAMS, "accounts is a list of names".to_owned())),
-    };
-    if name == coqui_acp_api::LOCAL_ACCOUNT || config.accounts.contains_key(name) {
-        return Err((
-            REFUSED,
-            format!("{name} is an account's name, and a pool and an account do not share one"),
-        ));
-    }
-    if pools::automatic_standard(name).is_some() {
-        return Err((
-            REFUSED,
-            format!(
-                "{name} is taken by the pool the host makes of every account that provides that standard"
-            ),
-        ));
-    }
-    for (index, member) in members.iter().enumerate() {
-        if member != coqui_acp_api::LOCAL_ACCOUNT && !config.accounts.contains_key(member) {
-            return Err((NOT_FOUND, format!("no account called {member}")));
-        }
-        if members[..index].contains(member) {
-            return Err((BAD_PARAMS, format!("{member} is listed twice")));
-        }
-    }
+    let members = string_list(params, "accounts")?;
     let pool = PoolConfig {
         standard: standard.to_owned(),
         accounts: members,
     };
+    if let Err(issue) = pool.validate(name, &config.accounts) {
+        return Err(match issue {
+            PoolIssue::InvalidLabel(error) => (BAD_PARAMS, error.to_string()),
+            PoolIssue::AccountName(name) => (
+                REFUSED,
+                format!("{name} is an account's name, and a pool and an account do not share one"),
+            ),
+            PoolIssue::AutomaticPool(name) => (
+                REFUSED,
+                format!(
+                    "{name} is taken by the pool the host makes of every account that provides that standard"
+                ),
+            ),
+            PoolIssue::InvalidStandard => (
+                BAD_PARAMS,
+                "standard is a credential standard's id: lower-case letters, digits and single hyphens"
+                    .to_owned(),
+            ),
+            PoolIssue::UnknownMember(member) => (NOT_FOUND, format!("no account called {member}")),
+            PoolIssue::DuplicateMember(member) => {
+                (BAD_PARAMS, format!("{member} is listed twice"))
+            }
+        });
+    }
     let catalogs = Catalogs::new(config);
     pools::check_one(config, &catalogs, name, &pool).map_err(|why| (REFUSED, why))?;
     commands::set_pool(own, name, &pool).map_err(|failed| refusal(&failed))?;

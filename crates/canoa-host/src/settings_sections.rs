@@ -121,15 +121,23 @@ impl SectionCatalog {
     /// The sections the application draws itself, then those `registries` offer, each registry as its origin names it. A section whose
     /// id an earlier one took, or that cannot be described, is left out and logged.
     pub(crate) fn from_registries(registries: Vec<(String, Registry)>) -> Self {
-        let mut found: Vec<(String, Registry)> = Vec::new();
+        let wrapped: Vec<(String, Arc<Registry>)> = registries
+            .into_iter()
+            .map(|(origin, registry)| (origin, Arc::new(registry)))
+            .collect();
+        Self::from_arcs(&wrapped)
+    }
+
+    /// As [`Self::from_registries`], sharing cached `Arc<Registry>` handles.
+    pub(crate) fn from_arcs(registries: &[(String, Arc<Registry>)]) -> Self {
+        let mut found: Vec<(String, Arc<Registry>)> = Vec::new();
         match built_in() {
-            Ok(registry) => found.push((BUILT_IN.to_owned(), registry)),
+            Ok(registry) => found.push((BUILT_IN.to_owned(), Arc::new(registry))),
             Err(why) => tracing::warn!("the built-in settings sections are not offered: {why}"),
         }
-        found.extend(registries);
+        found.extend(registries.iter().cloned());
         let mut entries: Vec<Entry> = Vec::new();
         for (origin, registry) in found {
-            let registry = Arc::new(registry);
             let keys: Vec<String> = registry
                 .offers::<dyn SettingsSection>()
                 .filter_map(|offer| offer.key().map(str::to_owned))
@@ -191,7 +199,7 @@ impl SectionCatalog {
     /// The sections the application draws itself, the bundled libraries' and those of `config`'s entries and extensions, each library
     /// opened as the host opens it for `providers/list`: an extension whose pin no longer matches is left out.
     pub(crate) fn of(config: &Config) -> Self {
-        Self::from_registries(crate::control::providers::loaded(config))
+        Self::from_arcs(&crate::control::providers::loaded(config))
     }
 
     /// The sections offered, in the order they were found.

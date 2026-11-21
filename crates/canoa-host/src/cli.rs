@@ -933,14 +933,6 @@ fn load_for_serving(
         }
         loaded => loaded.map_err(Failed::usage),
     }?;
-    // An entry an earlier version of the application made for a provider's accounts is folded into the agent's own before the host
-    // lists its agents, so the person never sees a second agent for one provider.
-    let portal = args.portal.is_some();
-    match crate::control::accounts::fold_made_entries(&layers.own, &config, portal) {
-        Ok(true) => return Ok((Config::load_layers(&layers).map_err(Failed::usage)?, layers)),
-        Ok(false) => {}
-        Err((_, why)) => tracing::warn!("canoa.cfg's accounts entry was left as it is: {why}"),
-    }
     Ok((config, layers))
 }
 

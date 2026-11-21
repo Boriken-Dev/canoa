@@ -11,7 +11,7 @@ pub(super) fn list(config: &Config) -> Value {
     let registries = super::providers::loaded(config);
     let loaded: Vec<(&str, &coqui_acp_api::guatiao::library::Registry)> = registries
         .iter()
-        .map(|(origin, registry)| (origin.as_str(), registry))
+        .map(|(origin, registry)| (origin.as_str(), registry.as_ref()))
         .collect();
     json!({ "looks": super::providers::looks_of(&loaded) })
 }

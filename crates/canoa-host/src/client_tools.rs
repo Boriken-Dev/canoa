@@ -32,7 +32,6 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
 
 use crate::control::Grant;
 use crate::delegate::BridgeCommand;
@@ -344,27 +343,7 @@ struct Providers {
 }
 
 /// The bearers in force, by the digest of the token: the token itself is never kept.
-#[derive(Default)]
-pub(crate) struct Tokens(Mutex<HashMap<[u8; 32], Arc<Access>>>);
-
-impl Tokens {
-    fn add(&self, access: &Arc<Access>) {
-        lock(&self.0).insert(access.digest, Arc::clone(access));
-    }
-
-    fn find(&self, digest: &[u8; 32]) -> Option<Arc<Access>> {
-        lock(&self.0).get(digest).cloned()
-    }
-
-    fn remove(&self, digest: &[u8; 32]) {
-        lock(&self.0).remove(digest);
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        lock(&self.0).len()
-    }
-}
+pub(crate) type Tokens = crate::loopback::Tokens<Access>;
 
 /// What the host holds for every connection: the providers, the bearers and the loopback server.
 pub(crate) struct Hub {
@@ -798,14 +777,16 @@ impl Link {
         let mut entries = Vec::new();
         let mut accesses = Vec::new();
         for provider in providers {
-            let (Some(token), Some(stream)) = (random_hex(32), random_hex(16)) else {
+            let (Some((token, digest)), Some(stream)) =
+                (crate::loopback::mint_bearer(), random_hex(16))
+            else {
                 continue;
             };
             let access = Arc::new(Access {
                 hub: Arc::downgrade(&self.hub),
                 provider: provider.clone(),
                 stream,
-                digest: Sha256::digest(token.as_bytes()).into(),
+                digest,
                 who: self.who.clone(),
                 calls: AtomicUsize::new(0),
                 attached: Mutex::new(None),
@@ -814,30 +795,8 @@ impl Link {
                 closed: AtomicBool::new(false),
             });
             let name = format!("{SERVER_PREFIX}{provider}");
-            let entry = if http {
-                json!({
-                    "type": "http",
-                    "name": name,
-                    "url": url,
-                    "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-                })
-            } else {
-                // The same stdio bridge the other host tools use. Version 1 writes a stdio server with no `type`; version 2
-                // names it.
-                let mut entry = json!({
-                    "name": name,
-                    "command": self.hub.bridge.program,
-                    "args": self.hub.bridge.args,
-                    "env": [
-                        {"name": crate::delegate::bridge::URL_VAR, "value": url},
-                        {"name": crate::delegate::bridge::TOKEN_VAR, "value": token},
-                    ],
-                });
-                if stdio >= 2 {
-                    entry["type"] = json!("stdio");
-                }
-                entry
-            };
+            let bridge = (!http).then_some(&self.hub.bridge);
+            let entry = crate::loopback::server_entry(&name, &url, &token, bridge, stdio);
             entries.push((name, entry));
             accesses.push(access);
         }
@@ -855,7 +814,7 @@ impl Link {
             servers.push(entry);
         }
         for access in &accesses {
-            self.hub.tokens.add(access);
+            self.hub.tokens.add(access.digest, Arc::clone(access));
             lock(&self.hub.watching).push(Arc::downgrade(access));
         }
         let known = (value.get("method") != Some(&json!("session/new")))

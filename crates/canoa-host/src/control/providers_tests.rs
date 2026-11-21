@@ -493,3 +493,17 @@ fn extension_harnesses_get_behavior_lookups_and_gateways() {
         "for_kind sees noted extension gateway"
     );
 }
+
+#[test]
+fn providers_loaded_and_listed_reuse_cached_registries_per_config() {
+    let config = crate::Config::default();
+    let first = super::providers::loaded(&config);
+    let second = super::providers::loaded(&config);
+    assert!(!first.is_empty());
+    assert_eq!(first.len(), second.len());
+    assert!(std::sync::Arc::ptr_eq(&first[0].1, &second[0].1));
+    assert_eq!(
+        super::providers::list(&config),
+        super::providers::list(&config)
+    );
+}

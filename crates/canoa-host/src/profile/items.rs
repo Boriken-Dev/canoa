@@ -321,19 +321,27 @@ impl ItemCatalog {
     /// The built-in and the bundled items, then those `registries` offer, each registry as its origin names it. An item whose id an
     /// earlier one took, or that cannot be described, is left out and logged.
     pub(crate) fn from_registries(registries: Vec<(String, Registry)>) -> Self {
-        let mut found: Vec<(String, Registry)> = Vec::new();
+        let wrapped: Vec<(String, Arc<Registry>)> = registries
+            .into_iter()
+            .map(|(origin, registry)| (origin, Arc::new(registry)))
+            .collect();
+        Self::from_arcs(&wrapped)
+    }
+
+    /// As [`Self::from_registries`], sharing cached `Arc<Registry>` handles.
+    pub(crate) fn from_arcs(registries: &[(String, Arc<Registry>)]) -> Self {
+        let mut found: Vec<(String, Arc<Registry>)> = Vec::new();
         match registry_of("canoa-profile-items", library as Library) {
-            Ok(registry) => found.push((BUILT_IN.to_owned(), registry)),
+            Ok(registry) => found.push((BUILT_IN.to_owned(), Arc::new(registry))),
             Err(why) => tracing::warn!("the built-in profile items are not offered: {why}"),
         }
         match super::bundled::registry() {
-            Ok(registry) => found.push((BUNDLED.to_owned(), registry)),
+            Ok(registry) => found.push((BUNDLED.to_owned(), Arc::new(registry))),
             Err(why) => tracing::warn!("the bundled profile items are not offered: {why}"),
         }
-        found.extend(registries);
+        found.extend(registries.iter().cloned());
         let mut entries: Vec<Entry> = Vec::new();
         for (origin, registry) in found {
-            let registry = Arc::new(registry);
             let keys: Vec<String> = registry
                 .offers::<dyn ProfileItem>()
                 .filter_map(|offer| offer.key().map(str::to_owned))
@@ -380,7 +388,7 @@ impl ItemCatalog {
     /// The built-in and bundled items, and those the libraries of `config`'s entries and extensions add. Each library is opened as the
     /// host opens it for `providers/list`: an extension whose pin no longer matches is left out.
     pub(crate) fn of(config: &Config) -> Self {
-        Self::from_registries(crate::control::providers::loaded(config))
+        Self::from_arcs(&crate::control::providers::loaded(config))
     }
 
     /// The items offered, in the order they were found.

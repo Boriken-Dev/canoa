@@ -56,6 +56,16 @@ pub(crate) const ALL: &[Bundle] = &[
     },
 ];
 
+fn register_one(registry: &mut Registry, name: &str, library: Library) -> Result<(), String> {
+    let loading = registry
+        .register_local(name, library)
+        .map_err(|error| format!("{name}: {error}"))?;
+    if loading.loaded().is_none() {
+        return Err(format!("{name} was not accepted"));
+    }
+    Ok(())
+}
+
 /// Registers each of `bundles` in `registry`.
 ///
 /// # Errors
@@ -63,12 +73,7 @@ pub(crate) const ALL: &[Bundle] = &[
 /// The name of the library the registry did not accept, and why.
 pub(crate) fn register(registry: &mut Registry, bundles: &[Bundle]) -> Result<(), String> {
     for bundle in bundles {
-        let loading = registry
-            .register_local(bundle.name, bundle.library)
-            .map_err(|error| format!("{}: {error}", bundle.name))?;
-        if loading.loaded().is_none() {
-            return Err(format!("{} was not accepted", bundle.name));
-        }
+        register_one(registry, bundle.name, bundle.library)?;
     }
     Ok(())
 }
@@ -182,12 +187,7 @@ pub(crate) const INCLUDED: &[Included] = &[
 /// The name of the library the registry did not accept, and why.
 pub(crate) fn register_included(registry: &mut Registry) -> Result<(), String> {
     for included in INCLUDED {
-        let loading = registry
-            .register_local(included.name, included.library)
-            .map_err(|error| format!("{}: {error}", included.name))?;
-        if loading.loaded().is_none() {
-            return Err(format!("{} was not accepted", included.name));
-        }
+        register_one(registry, included.name, included.library)?;
     }
     Ok(())
 }

@@ -1036,42 +1036,20 @@ impl Conn {
         let Some(url) = self.engine.url.get() else {
             return false;
         };
-        let mut secret = [0_u8; 32];
-        if getrandom::fill(&mut secret).is_err() {
+        let Some((token, digest)) = crate::loopback::mint_bearer() else {
             return false;
-        }
-        let token: String = data_encoding::HEXLOWER.encode(&secret);
-        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+        };
         let session = self.engine.new_session(self, cwd, digest);
         self.suggest(&session, state.reported.as_deref());
         tracing::debug!(
             entry = self.info.entry,
             "a session was given the delegation tools"
         );
-        let entry = match (way, self.engine.bridge.get()) {
-            (Way::Stdio, Some(bridge)) => {
-                // Version 1 writes a stdio server with no `type`; version 2 names it.
-                let mut entry = json!({
-                    "name": SERVER_NAME,
-                    "command": bridge.program,
-                    "args": bridge.args,
-                    "env": [
-                        {"name": bridge::URL_VAR, "value": url},
-                        {"name": bridge::TOKEN_VAR, "value": token},
-                    ],
-                });
-                if state.version >= 2 {
-                    entry["type"] = json!("stdio");
-                }
-                entry
-            }
-            _ => json!({
-                "type": "http",
-                "name": SERVER_NAME,
-                "url": url,
-                "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-            }),
+        let bridge = match way {
+            Way::Stdio => self.engine.bridge.get(),
+            Way::Http => None,
         };
+        let entry = crate::loopback::server_entry(SERVER_NAME, url, &token, bridge, state.version);
         let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) else {
             return false;
         };

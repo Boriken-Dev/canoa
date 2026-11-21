@@ -15,6 +15,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
+use super::params::{Refusal, non_empty_text as text, refusal};
 use super::{BAD_PARAMS, NOT_FOUND, REFUSED};
 use crate::accounts::Accounts;
 use crate::accounts::commands::Cfg;
@@ -26,8 +27,6 @@ use crate::mail::{
     commands::{self, NewAccount},
     open_account,
 };
-
-type Refusal = (i32, String);
 
 /// What `mail/*` reads and writes: `canoa.cfg`, the host's home, and the mailboxes the mail tools use.
 #[derive(Clone)]
@@ -41,25 +40,6 @@ impl core::fmt::Debug for MailSetup {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("MailSetup").finish_non_exhaustive()
     }
-}
-
-fn text<'a>(params: &'a Value, key: &str) -> Result<&'a str, Refusal> {
-    params
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| (BAD_PARAMS, format!("{key} is a string")))
-}
-
-fn refusal(failed: &Failed) -> Refusal {
-    (
-        if failed.status == 2 {
-            BAD_PARAMS
-        } else {
-            REFUSED
-        },
-        failed.why.clone(),
-    )
 }
 
 impl MailSetup {

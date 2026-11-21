@@ -194,6 +194,7 @@ pub(crate) fn remove_key(
 }
 
 /// Whether the table at `path` holds a table of its own (`[path.x]`).
+#[cfg(test)]
 pub(crate) fn has_subtable(document: &DocumentMut, path: &[&str]) -> bool {
     let mut at: &dyn TableLike = document.as_table();
     for key in path {

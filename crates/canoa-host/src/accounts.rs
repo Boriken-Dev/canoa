@@ -607,7 +607,7 @@ impl Accounts {
         let rotates = info.rotates;
         // Every connection on the account holds its lease: one that rotates alone, any other with the rest, so that a
         // command which signs in again or removes the account waits for them all.
-        let lock = self.lease(&id, holder, rotates)?;
+        let lock = self.lease(&id, rotates)?;
         let files = {
             let mut state = self.state();
             let hold = state.holds.entry(id.clone()).or_default();
@@ -660,7 +660,7 @@ impl Accounts {
 
     /// The lock on an account's lease file, `exclusive` or shared. A look that `held` is taking can hold it for an
     /// instant, so a refusal is only believed after a few tries.
-    fn lease(&self, id: &str, holder: &str, exclusive: bool) -> Result<fs::File, Refusal> {
+    fn lease(&self, id: &str, exclusive: bool) -> Result<fs::File, Refusal> {
         if exclusive
             && let Some(by) = self
                 .state()
@@ -687,7 +687,6 @@ impl Accounts {
                     std::thread::sleep(LEASE_WAIT);
                 }
                 Err(fs::TryLockError::WouldBlock) => {
-                    let _ = holder;
                     return Err(Refusal::InUse("another connection or command".to_owned()));
                 }
                 Err(fs::TryLockError::Error(error)) => {
@@ -700,7 +699,7 @@ impl Accounts {
 
     /// A lock on `id` for a command that signs in again or removes it, refused while any connection holds it.
     pub(crate) fn exclusive(&self, id: &str) -> Result<fs::File, Refusal> {
-        self.lease(id, "this command", true)
+        self.lease(id, true)
     }
 
     /// What a provider reported about the renewal of `id`: stored when it is the next of its chain or newer than the stored

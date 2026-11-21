@@ -212,11 +212,10 @@ impl Makers {
             taken.note(&maker.accounts);
         }
         let mut added: Vec<Maker> = Vec::new();
-        for (library, registry) in crate::control::providers::libraries(config) {
-            let registry = Arc::new(registry);
-            for maker in makers_in(&registry) {
-                if let Some(mut maker) = taken.claim(maker, &library) {
-                    maker.registry = Some(Arc::clone(&registry));
+        for (library, registry) in crate::control::providers::libraries(config).iter() {
+            for maker in makers_in(registry) {
+                if let Some(mut maker) = taken.claim(maker, library) {
+                    maker.registry = Some(Arc::clone(registry));
                     added.push(maker);
                 }
             }
@@ -226,46 +225,75 @@ impl Makers {
         }
     }
 
-    /// Every maker in force: in a test the stand-ins the test's thread named, the bundled ones, then those canoa.cfg's libraries add.
-    fn all(&self) -> Vec<Maker> {
+    fn visit(&self, mut visitor: impl FnMut(&Maker) -> bool) {
         #[cfg(test)]
-        let mut found = stand_ins::current();
-        #[cfg(not(test))]
-        let mut found = Vec::new();
-        found.extend(offered().iter().cloned());
-        found.extend(self.added.iter().cloned());
-        found
+        if stand_ins::visit(|maker| !visitor(maker)) {
+            return;
+        }
+        for maker in offered() {
+            if !visitor(maker) {
+                return;
+            }
+        }
+        for maker in self.added.iter() {
+            if !visitor(maker) {
+                return;
+            }
+        }
     }
 
     /// The maker that makes accounts of `kind`.
     pub(crate) fn for_kind(&self, kind: &str) -> Option<Maker> {
-        self.all()
-            .into_iter()
-            .find(|maker| maker.kind(kind).is_some())
+        let mut found = None;
+        self.visit(|maker| {
+            if maker.kind(kind).is_some() {
+                found = Some(maker.clone());
+                return false;
+            }
+            true
+        });
+        found
     }
 
     /// The id of each account provider that is a maker: no agent is theirs.
     pub(crate) fn ids(&self) -> Vec<String> {
-        self.all().into_iter().map(|maker| maker.provider).collect()
+        let mut ids = Vec::new();
+        self.visit(|maker| {
+            ids.push(maker.provider.clone());
+            true
+        });
+        ids
     }
 
     /// The maker whose sign-in method is `method`.
     pub(crate) fn login_provider(&self, method: &str) -> Option<Arc<dyn AccountProvider>> {
-        self.all()
-            .into_iter()
-            .find(|maker| {
-                maker
-                    .accounts
-                    .logins
-                    .iter()
-                    .any(|login| login.id == method && maker.kind(&login.produces).is_some())
-            })
-            .map(|maker| maker.provider())
+        let mut found = None;
+        self.visit(|maker| {
+            if maker
+                .accounts
+                .logins
+                .iter()
+                .any(|login| login.id == method && maker.kind(&login.produces).is_some())
+            {
+                found = Some(maker.provider());
+                return false;
+            }
+            true
+        });
+        found
     }
 
     /// Whether the kind `kind` is made by a maker, not by a harness's own account provider.
     pub(crate) fn makes(&self, kind: &str) -> bool {
-        self.for_kind(kind).is_some()
+        let mut found = false;
+        self.visit(|maker| {
+            if maker.kind(kind).is_some() {
+                found = true;
+                return false;
+            }
+            true
+        });
+        found
     }
 
     /// Adds the kinds and sign-in methods the makers offer to `listing`, the harness `harness`'s own: a kind a gateway serves joins when
@@ -277,7 +305,7 @@ impl Makers {
         harness: &str,
         catalog: Option<&AccountCatalog>,
     ) {
-        for maker in self.all() {
+        self.visit(|maker| {
             for kind in &maker.accounts.kinds {
                 if listing.kinds.iter().any(|each| each.id == kind.id) {
                     continue;
@@ -316,7 +344,8 @@ impl Makers {
                         .cloned(),
                 );
             }
-        }
+            true
+        });
     }
 }
 
@@ -336,9 +365,9 @@ pub(crate) mod stand_ins {
         static NAMED: RefCell<Vec<Maker>> = const { RefCell::new(Vec::new()) };
     }
 
-    /// The makers named for this thread.
-    pub(super) fn current() -> Vec<Maker> {
-        NAMED.with(|named| named.borrow().clone())
+    /// Visits the makers named for this thread until `stop` returns true.
+    pub(super) fn visit(mut stop: impl FnMut(&Maker) -> bool) -> bool {
+        NAMED.with(|named| named.borrow().iter().any(&mut stop))
     }
 
     /// Names `makers` for this thread until the guard drops.

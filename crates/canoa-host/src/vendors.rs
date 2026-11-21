@@ -153,17 +153,27 @@ pub(crate) fn behave_name<T>(name: &str, f: impl FnOnce(&dyn AgentVendor) -> T) 
     behave(known.agent, f)
 }
 
-static BUNDLED_PROVIDERS: OnceLock<Option<Registry>> = OnceLock::new();
+static BUNDLED_PROVIDERS: OnceLock<Option<Arc<Registry>>> = OnceLock::new();
 
 /// The registry of the bundled agents' providers, made once and kept for the life of the process.
 pub(crate) fn bundled_providers() -> Option<&'static Registry> {
     BUNDLED_PROVIDERS
         .get_or_init(|| {
             crate::control::providers::bundled_registry(crate::bundled::ALL)
+                .map(Arc::new)
                 .map_err(|why| tracing::warn!("the bundled agents' providers are not kept: {why}"))
                 .ok()
         })
-        .as_ref()
+        .as_deref()
+}
+
+/// Shared handle to the bundled agents' registry.
+pub(crate) fn bundled_providers_arc() -> Option<Arc<Registry>> {
+    let _ = bundled_providers();
+    BUNDLED_PROVIDERS
+        .get()
+        .and_then(|slot| slot.as_ref())
+        .map(Arc::clone)
 }
 
 /// Whether the harness provider `harness` in `origin` (`None` for the bundled providers) declares a setting called `key`

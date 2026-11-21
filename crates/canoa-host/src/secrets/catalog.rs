@@ -121,15 +121,23 @@ impl Catalog {
     /// The built-in providers, then those `registries` offer, each registry as its origin names it. A provider whose id an earlier
     /// one took, or that cannot be described, is left out and logged.
     pub(crate) fn from_registries(registries: Vec<(String, Registry)>) -> Self {
-        let mut found: Vec<(String, Registry)> = Vec::new();
+        let wrapped: Vec<(String, Arc<Registry>)> = registries
+            .into_iter()
+            .map(|(origin, registry)| (origin, Arc::new(registry)))
+            .collect();
+        Self::from_arcs(&wrapped)
+    }
+
+    /// As [`Self::from_registries`], sharing cached `Arc<Registry>` handles.
+    pub(crate) fn from_arcs(registries: &[(String, Arc<Registry>)]) -> Self {
+        let mut found: Vec<(String, Arc<Registry>)> = Vec::new();
         match registry_of("canoa-secret-providers", builtin::library as Library) {
-            Ok(registry) => found.push((BUILT_IN.to_owned(), registry)),
+            Ok(registry) => found.push((BUILT_IN.to_owned(), Arc::new(registry))),
             Err(why) => tracing::warn!("the built-in secret providers are not offered: {why}"),
         }
-        found.extend(registries);
+        found.extend(registries.iter().cloned());
         let mut offered: Vec<Offered> = Vec::new();
         for (origin, registry) in found {
-            let registry = Arc::new(registry);
             let keys: Vec<String> = registry
                 .offers::<dyn SecretProvider>()
                 .filter_map(|offer| offer.key().map(str::to_owned))
@@ -195,17 +203,17 @@ impl Catalog {
     /// libraries of `config`'s entries and extensions add.
     pub(crate) fn of(config: &Config, home: Option<&std::path::Path>) -> Self {
         let mut found = Self::bundled_scripts(home);
-        found.extend(crate::control::providers::loaded(config));
-        Self::from_registries(found)
+        found.extend(crate::control::providers::loaded(config).iter().cloned());
+        Self::from_arcs(&found)
     }
 
     /// The script providers that ship in the host, as built-in ones.
-    fn bundled_scripts(home: Option<&std::path::Path>) -> Vec<(String, Registry)> {
+    fn bundled_scripts(home: Option<&std::path::Path>) -> Vec<(String, Arc<Registry>)> {
         let Some(home) = home else {
             return Vec::new();
         };
         match super::bundled::registry(home) {
-            Ok(registry) => vec![(BUILT_IN.to_owned(), registry)],
+            Ok(registry) => vec![(BUILT_IN.to_owned(), Arc::new(registry))],
             Err(why) => {
                 tracing::warn!(
                     "the script secret providers that ship in the host are not offered: {why}"
@@ -218,7 +226,7 @@ impl Catalog {
     /// The built-in providers and the script providers that ship in the host, kept in `home`.
     #[cfg(test)]
     pub(crate) fn built_in_in(home: &std::path::Path) -> Self {
-        Self::from_registries(Self::bundled_scripts(Some(home)))
+        Self::from_arcs(&Self::bundled_scripts(Some(home)))
     }
 
     /// The providers offered, in the order they were found.

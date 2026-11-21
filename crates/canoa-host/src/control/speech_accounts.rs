@@ -9,6 +9,9 @@
     reason = "the registry is the host's"
 )]
 
+use core::borrow::Borrow;
+use std::sync::Arc;
+
 use canoa::speech::account::{AccountSpeech, AccountSpeechService};
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::{AccountKindInfo, EndpointSlot, MODEL_API};
@@ -32,9 +35,10 @@ impl Services {
 
     /// The services `registries` offer, in the order they are given. A service that cannot be offered, or whose id an earlier one took,
     /// is left out and logged.
-    pub(crate) fn from_registries(registries: &[Registry]) -> Self {
+    pub(crate) fn from_registries(registries: &[impl Borrow<Registry>]) -> Self {
         let mut services: Vec<AccountSpeechService> = Vec::new();
         for registry in registries {
+            let registry = registry.borrow();
             for offer in registry.offers::<dyn AccountSpeech>() {
                 let id = offer.id().to_owned();
                 let Some(info) = offer
@@ -162,18 +166,18 @@ fn verdict(
 
 /// The registries the services are read from, each library once: with a canoa.cfg, those `providers/list` opens (the carried
 /// libraries among them); without one, the carried libraries alone.
-fn registries(config: Option<&Config>) -> Vec<Registry> {
+fn registries(config: Option<&Config>) -> Vec<Arc<Registry>> {
     if let Some(config) = config {
         return super::providers::loaded(config)
-            .into_iter()
-            .map(|(_, registry)| registry)
+            .iter()
+            .map(|(_, registry)| Arc::clone(registry))
             .collect();
     }
     let mut carried = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
     if let Err(why) = crate::bundled::register_included(&mut carried) {
         tracing::warn!("the libraries this build carries are not read for speech: {why}");
     }
-    vec![carried]
+    vec![Arc::new(carried)]
 }
 
 #[cfg(test)]
@@ -181,10 +185,10 @@ mod tests {
     use super::*;
 
     /// How many speech providers `registries` offer, counting a library each time it appears.
-    fn offered(registries: &[Registry]) -> usize {
+    fn offered(registries: &[impl Borrow<Registry>]) -> usize {
         registries
             .iter()
-            .map(|registry| registry.offers::<dyn AccountSpeech>().count())
+            .map(|registry| registry.borrow().offers::<dyn AccountSpeech>().count())
             .sum()
     }
 

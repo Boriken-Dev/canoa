@@ -4,6 +4,7 @@
 //! listed the same way as one Canoa carries.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, OnceLock};
 
 use canoa::usage_reader::UsageReader;
 use canoa::vendor::{AgentVendor, VendorInfo};
@@ -15,6 +16,35 @@ use crate::bundled::{self, Bundle};
 use crate::config::{Config, EntryKind, Origin, Settings};
 use crate::kind::{account_instance, account_provider, instance};
 use crate::makers::{ACCOUNTS_SUFFIX, Makers, makers_in};
+
+pub(crate) type LoadedRegistries = Arc<[(String, Arc<Registry>)]>;
+
+/// Cached opened provider registries per [`Config`]; cloned configs start empty so modified entries/extensions reload cleanly.
+#[derive(Default)]
+pub(crate) struct Cell {
+    libraries: OnceLock<LoadedRegistries>,
+    loaded: OnceLock<LoadedRegistries>,
+}
+
+impl Clone for Cell {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl core::fmt::Debug for Cell {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Cell").finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for Cell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Cell {}
 
 /// What the loaded providers say of one agent, from every registry that offers a part of it.
 #[derive(Default)]
@@ -34,7 +64,7 @@ pub(crate) fn list(config: &Config) -> Value {
     let registries = loaded(config);
     let loaded: Vec<(&str, &Registry)> = registries
         .iter()
-        .map(|(origin, registry)| (origin.as_str(), registry))
+        .map(|(origin, registry)| (origin.as_str(), registry.as_ref()))
         .collect();
     json!({
         "providers": rows_of(&loaded, bundled::ALL, &Makers::of(config)),
@@ -84,75 +114,78 @@ pub(crate) fn usage_readers_of(registries: &[(&str, &Registry)]) -> Vec<Value> {
     readers
 }
 
-/// The loaded registries of `config`: the bundled agents' and each entry's and extension's own.
-pub(crate) fn loaded(config: &Config) -> Vec<(String, Registry)> {
-    let mut registries: Vec<(String, Registry)> = Vec::new();
-    match bundled_registry(bundled::ALL) {
-        Ok(registry) => registries.push(("bundled".to_owned(), registry)),
-        Err(why) => tracing::warn!("the bundled agents are not listed: {why}"),
-    }
-    registries.extend(libraries(config));
-    registries
+/// The loaded registries of `config`: the bundled agents' and each entry's and extension's own, cached per config.
+pub(crate) fn loaded(config: &Config) -> LoadedRegistries {
+    Arc::clone(config.providers.loaded.get_or_init(|| {
+        let mut registries: Vec<(String, Arc<Registry>)> = Vec::new();
+        if let Some(registry) = crate::vendors::bundled_providers_arc() {
+            registries.push(("bundled".to_owned(), registry));
+        }
+        registries.extend(libraries(config).iter().cloned());
+        registries.into()
+    }))
 }
 
 /// The registries available for mail and speech providers: `loaded(config)` when `Some`, else the carried libraries alone.
-pub(crate) fn registries_of(config: Option<&Config>) -> Vec<Registry> {
+pub(crate) fn registries_of(config: Option<&Config>) -> Vec<Arc<Registry>> {
     if let Some(config) = config {
         return loaded(config)
-            .into_iter()
-            .map(|(_, registry)| registry)
+            .iter()
+            .map(|(_, registry)| Arc::clone(registry))
             .collect();
     }
     let mut carried = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
     if let Err(why) = crate::bundled::register_included(&mut carried) {
         tracing::warn!("the carried libraries could not be loaded: {why}");
     }
-    vec![carried]
+    vec![Arc::new(carried)]
 }
 
 /// The registries of the libraries and sources `config` names, each with the name of the entry or extension that loads it: the
-/// agent entries' and the extensions' (an extension verified as the Store verifies it), each origin once.
-pub(crate) fn libraries(config: &Config) -> Vec<(String, Registry)> {
-    let mut registries: Vec<(String, Registry)> = Vec::new();
-    let mut seen: Vec<Origin> = Vec::new();
-    let origins = config
-        .entries
-        .iter()
-        .filter_map(|entry| match &entry.kind {
-            EntryKind::Harness {
-                origin: Some(origin),
-                ..
-            } => Some((entry.name.as_str(), origin, true)),
-            _ => None,
-        })
-        .chain(
-            config
-                .extensions
-                .iter()
-                .map(|extension| (extension.name.as_str(), &extension.origin, false)),
-        );
-    for (name, origin, entry) in origins {
-        if seen.contains(origin) {
-            continue;
-        }
-        if !entry
-            && let Some(extension) = config.extensions.iter().find(|each| each.name == name)
-            && let Err(why) = super::stores::verify_extension(extension)
-        {
-            tracing::warn!(extension = name, "not listed: {why}");
-            continue;
-        }
-        seen.push(origin.clone());
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
-        match crate::provider::open(&mut registry, origin) {
-            Ok(()) => {
-                crate::vendors::note(&registry);
-                registries.push((name.to_owned(), registry));
+/// agent entries' and the extensions' (an extension verified as the Store verifies it), each origin once, cached per config.
+pub(crate) fn libraries(config: &Config) -> LoadedRegistries {
+    Arc::clone(config.providers.libraries.get_or_init(|| {
+        let mut registries: Vec<(String, Arc<Registry>)> = Vec::new();
+        let mut seen: Vec<Origin> = Vec::new();
+        let origins = config
+            .entries
+            .iter()
+            .filter_map(|entry| match &entry.kind {
+                EntryKind::Harness {
+                    origin: Some(origin),
+                    ..
+                } => Some((entry.name.as_str(), origin, true)),
+                _ => None,
+            })
+            .chain(
+                config
+                    .extensions
+                    .iter()
+                    .map(|extension| (extension.name.as_str(), &extension.origin, false)),
+            );
+        for (name, origin, entry) in origins {
+            if seen.contains(origin) {
+                continue;
             }
-            Err(why) => tracing::warn!(entry = name, "its providers are not listed: {why}"),
+            if !entry
+                && let Some(extension) = config.extensions.iter().find(|each| each.name == name)
+                && let Err(why) = super::stores::verify_extension(extension)
+            {
+                tracing::warn!(extension = name, "not listed: {why}");
+                continue;
+            }
+            seen.push(origin.clone());
+            let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+            match crate::provider::open(&mut registry, origin) {
+                Ok(()) => {
+                    crate::vendors::note(&registry);
+                    registries.push((name.to_owned(), Arc::new(registry)));
+                }
+                Err(why) => tracing::warn!(entry = name, "its providers are not listed: {why}"),
+            }
         }
-    }
-    registries
+        registries.into()
+    }))
 }
 
 /// The look documents the loaded agents carry, each a JSON object with an `id`, in the order the agents were found.

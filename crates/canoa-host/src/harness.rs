@@ -77,21 +77,6 @@ impl AgentRun {
             .executable
             .clone()
             .or_else(|| std::env::var_os(executable_variable(&self.id)).filter(|v| !v.is_empty()));
-        if let Some(executable) = executable {
-            map.insert(
-                "executable".to_owned(),
-                Value::String(executable.to_string_lossy().into_owned()),
-            );
-        } else if crate::bundled::runs_managed_by_own_name(&self.id)
-            && !map.contains_key("executable")
-            && let Some((path, _)) = crate::sources::managed_program(&self.id)
-        {
-            // Nothing names the program: the one the Store installed runs, found each time a session starts.
-            map.insert(
-                "executable".to_owned(),
-                Value::String(path.to_string_lossy().into_owned()),
-            );
-        }
         if let Some(access) = &self.access {
             if takes("access") {
                 map.entry("access".to_owned()).or_insert(access.clone());
@@ -99,22 +84,13 @@ impl AgentRun {
                 return Err(format!("{} takes no access setting", self.id));
             }
         }
-        // Every mode the agent has is offered, Bypass included: the person's own account runs it.
-        if takes("allow_bypass") {
-            map.entry("allow_bypass".to_owned())
-                .or_insert(Value::Bool(true));
-        }
-        if takes("modes") {
-            map.entry("modes".to_owned()).or_insert_with(|| {
-                Value::from(
-                    coqui_acp_harness::Mode::ALL
-                        .iter()
-                        .map(|mode| mode.id())
-                        .collect::<Vec<_>>(),
-                )
-            });
-        }
-        Ok(Settings::new(map))
+        let own = Settings::new(map);
+        Ok(crate::serve::builtin_provider_settings(
+            registry,
+            &self.id,
+            executable.as_ref(),
+            Some(&own),
+        ))
     }
 }
 

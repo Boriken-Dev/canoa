@@ -31,7 +31,6 @@ use coqui_aos::index::Settings;
 use coqui_aos::{CallerFacts, KnowledgeOverlay, KnowledgeSettings};
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
 
 pub(crate) use self::library::Source;
 use self::library::{Builder, Library, Slot};
@@ -150,27 +149,7 @@ impl Access {
 }
 
 /// The bearers in force, by the digest of the token: the token itself is never kept.
-#[derive(Default)]
-pub(crate) struct Tokens(Mutex<HashMap<[u8; 32], Arc<Access>>>);
-
-impl Tokens {
-    fn add(&self, digest: [u8; 32], access: Arc<Access>) {
-        lock(&self.0).insert(digest, access);
-    }
-
-    fn find(&self, digest: &[u8; 32]) -> Option<Arc<Access>> {
-        lock(&self.0).get(digest).cloned()
-    }
-
-    fn remove(&self, digest: &[u8; 32]) {
-        lock(&self.0).remove(digest);
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        lock(&self.0).len()
-    }
-}
+pub(crate) type Tokens = crate::loopback::Tokens<Access>;
 
 /// What the host holds for every connection: whether the tools are on, how indexes are made, and the server.
 pub(crate) struct Hub {
@@ -387,36 +366,11 @@ impl Link {
         let Some(url) = self.hub.url() else {
             return false;
         };
-        let mut secret = [0_u8; 32];
-        if getrandom::fill(&mut secret).is_err() {
+        let Some((token, digest)) = crate::loopback::mint_bearer() else {
             return false;
-        }
-        let token: String = data_encoding::HEXLOWER.encode(&secret);
-        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        let entry = if http {
-            json!({
-                "type": "http",
-                "name": SERVER_NAME,
-                "url": url,
-                "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-            })
-        } else {
-            // The same stdio bridge the other host tools use, with the address and bearer in its environment. Version 1
-            // writes a stdio server with no `type`; version 2 names it.
-            let mut entry = json!({
-                "name": SERVER_NAME,
-                "command": self.hub.bridge.program,
-                "args": self.hub.bridge.args,
-                "env": [
-                    {"name": crate::delegate::bridge::URL_VAR, "value": url},
-                    {"name": crate::delegate::bridge::TOKEN_VAR, "value": token},
-                ],
-            });
-            if stdio >= 2 {
-                entry["type"] = json!("stdio");
-            }
-            entry
         };
+        let bridge = (!http).then_some(&self.hub.bridge);
+        let entry = crate::loopback::server_entry(SERVER_NAME, &url, &token, bridge, stdio);
         let Some(servers) = value
             .get_mut("params")
             .and_then(Value::as_object_mut)
