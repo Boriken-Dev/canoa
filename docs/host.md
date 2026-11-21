@@ -503,6 +503,9 @@ An environment is where an agent works, which need not be the computer the host 
 [host.environments.build-box]          # made by the provider `kind` names; the other keys are its settings
 kind = "some_environment"             # an id a library offers
 exec_seconds = 3600                   # how long the exec tool waits for a program (0: for ever)
+output_bytes = 1048576                # output an agent's terminal/create keeps unless it names a limit (0: all)
+scrollback_bytes = 4194304            # output the tools keep of an interactive terminal (0: all)
+max_tool_sessions = 256               # sessions of a connection given its tool server (0: any)
 library = "/path/to/library.so"       # or `source`, as a harness entry names its provider; none for a bundled one
 
 [host.agents.worker]

@@ -685,6 +685,15 @@ impl Default for UsageConfig {
 /// How long the `exec` tool of an environment waits for a program when `exec_seconds` is not set: an hour.
 pub const DEFAULT_EXEC_SECONDS: u64 = 3600;
 
+/// What an agent's `terminal/create` keeps of a program's output when it names no limit: 1 MiB.
+pub const DEFAULT_OUTPUT_BYTES: u64 = 1024 * 1024;
+
+/// What the tools keep of an interactive terminal's output for the agent to read: 4 MiB.
+pub const DEFAULT_SCROLLBACK_BYTES: u64 = 4 * 1024 * 1024;
+
+/// How many sessions of one connection are given an environment's tool server: 256.
+pub const DEFAULT_MAX_TOOL_SESSIONS: u64 = 256;
+
 /// One `[host.environments.NAME]`: a place an agent works, made by an `environment` provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -699,6 +708,15 @@ pub struct EnvironmentConfig {
     /// How long a program the `exec` tool runs here may take before it is ended (`exec_seconds`), `0` for no limit; `None` is
     /// [`DEFAULT_EXEC_SECONDS`]. The call has to return, so a program that never ends is ended at this and the tool says so.
     pub exec_seconds: Option<u64>,
+    /// How much of a program's output the host keeps for an agent's `terminal/output` when the agent names no limit of its own
+    /// (`output_bytes`), `0` for all of it; `None` is [`DEFAULT_OUTPUT_BYTES`].
+    pub output_bytes: Option<u64>,
+    /// How much of an interactive terminal's output the tools keep for the agent to read (`scrollback_bytes`), `0` for all of it;
+    /// `None` is [`DEFAULT_SCROLLBACK_BYTES`].
+    pub scrollback_bytes: Option<u64>,
+    /// How many sessions of one connection may be given this environment's tool server (`max_tool_sessions`), `0` for any number;
+    /// `None` is [`DEFAULT_MAX_TOOL_SESSIONS`].
+    pub max_tool_sessions: Option<u64>,
 }
 
 /// `[host.mcp_list]`: what listing the tools and resources of a session's MCP servers (`_canoa/mcp/list`) is held to. Each is at

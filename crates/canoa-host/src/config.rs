@@ -60,7 +60,10 @@ pub use types::{
     NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, StoreConfig,
     UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
-pub use types::{DEFAULT_EXEC_SECONDS, EnvironmentConfig};
+pub use types::{
+    DEFAULT_EXEC_SECONDS, DEFAULT_MAX_TOOL_SESSIONS, DEFAULT_OUTPUT_BYTES,
+    DEFAULT_SCROLLBACK_BYTES, EnvironmentConfig,
+};
 
 struct TopLevel {
     secrets: Option<serde_json::Value>,
@@ -478,6 +481,9 @@ fn environment_of(
         origin,
         settings,
         exec_seconds: raw.exec_seconds,
+        output_bytes: raw.output_bytes,
+        scrollback_bytes: raw.scrollback_bytes,
+        max_tool_sessions: raw.max_tool_sessions,
     })
 }
 

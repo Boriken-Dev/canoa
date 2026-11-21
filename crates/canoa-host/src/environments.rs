@@ -44,9 +44,6 @@ pub(crate) const HERE: &str = "here";
 /// `{"run": NAME, "serve": NAME, "tools": [NAME, ...]}`, each part optional.
 pub(crate) const META: &str = "dev.boriken.canoa/environments";
 
-/// The largest file the host reads through an environment at once, for the tools and the served `fs/read_text_file`.
-pub(crate) const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
-
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -166,6 +163,8 @@ pub(crate) struct Environments {
     pending: Mutex<Option<Pending>>,
     offered: Mutex<Vec<Offered>>,
     live: Mutex<BTreeMap<String, Arc<Env>>>,
+    /// `[host] max_message_bytes`: a file read is answered in one message, so it is the longest file the host reads.
+    message_bytes: usize,
 }
 
 /// Where the providers are found.
@@ -191,6 +190,7 @@ impl Environments {
             pending: Mutex::new(Some(Pending::Config(Box::new(config.clone())))),
             offered: Mutex::new(Vec::new()),
             live: Mutex::new(BTreeMap::new()),
+            message_bytes: config.max_message_bytes,
         })
     }
 
@@ -200,12 +200,14 @@ impl Environments {
     pub(crate) fn from_registries(
         configured: IndexMap<String, EnvironmentConfig>,
         registries: Vec<(String, Registry)>,
+        message_bytes: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
             configured,
             pending: Mutex::new(Some(Pending::Registries(registries))),
             offered: Mutex::new(Vec::new()),
             live: Mutex::new(BTreeMap::new()),
+            message_bytes,
         })
     }
 
@@ -275,6 +277,11 @@ impl Environments {
         *lock(&self.offered) = offered;
     }
 
+    /// The longest message, `[host] max_message_bytes`.
+    pub(crate) fn message_bytes(&self) -> usize {
+        self.message_bytes
+    }
+
     /// `here` and then the names canoa.cfg gives, in its order.
     pub(crate) fn names(&self) -> Vec<String> {
         core::iter::once(HERE.to_owned())
@@ -307,10 +314,24 @@ impl Environments {
             .get(name)
             .and_then(|config| config.exec_seconds)
             .unwrap_or(crate::config::DEFAULT_EXEC_SECONDS);
+        let table = self.configured.get(name);
         let env = Arc::new(Env {
             name: name.to_owned(),
             provider,
             exec_seconds,
+            message_bytes: self.message_bytes,
+            output_bytes: limit_of(
+                table.and_then(|config| config.output_bytes),
+                crate::config::DEFAULT_OUTPUT_BYTES,
+            ),
+            scrollback_bytes: limit_of(
+                table.and_then(|config| config.scrollback_bytes),
+                crate::config::DEFAULT_SCROLLBACK_BYTES,
+            ),
+            max_tool_sessions: limit_of(
+                table.and_then(|config| config.max_tool_sessions),
+                crate::config::DEFAULT_MAX_TOOL_SESSIONS,
+            ),
         });
         live.insert(name.to_owned(), Arc::clone(&env));
         Ok(env)
@@ -354,6 +375,20 @@ pub(crate) struct Env {
     provider: Arc<dyn Environment>,
     /// `exec_seconds` of its table; `0` is no limit.
     exec_seconds: u64,
+    /// `[host] max_message_bytes`.
+    message_bytes: usize,
+    /// `output_bytes`, `scrollback_bytes` and `max_tool_sessions` of its table; `usize::MAX` is no limit.
+    output_bytes: usize,
+    scrollback_bytes: usize,
+    max_tool_sessions: usize,
+}
+
+/// A limit as a table sets it: `0` is none.
+fn limit_of(set: Option<u64>, default: u64) -> usize {
+    match set.unwrap_or(default) {
+        0 => usize::MAX,
+        n => usize::try_from(n).unwrap_or(usize::MAX),
+    }
 }
 
 impl core::fmt::Debug for Env {
@@ -366,6 +401,21 @@ impl Env {
     /// How long the `exec` tool waits for a program, in seconds; `0` waits for ever.
     pub(crate) fn exec_seconds(&self) -> u64 {
         self.exec_seconds
+    }
+
+    /// How much output an agent's terminal keeps when it names no limit.
+    pub(crate) fn output_bytes(&self) -> usize {
+        self.output_bytes
+    }
+
+    /// How much an interactive terminal's output the tools keep.
+    pub(crate) fn scrollback_bytes(&self) -> usize {
+        self.scrollback_bytes
+    }
+
+    /// How many sessions of a connection may be given this environment's tools.
+    pub(crate) fn max_tool_sessions(&self) -> usize {
+        self.max_tool_sessions
     }
 
     /// Its name in canoa.cfg, or `here`.
@@ -464,9 +514,14 @@ impl Env {
     pub(crate) fn read(&self, path: &str) -> Result<Vec<u8>, String> {
         self.needs(capability::FS_READ)?;
         self.provider
-            .read_file(ReadFile::new(path, MAX_FILE_BYTES))
+            .read_file(ReadFile::new(path, self.message_bytes as u64))
             .map(|content| content.bytes.0)
-            .map_err(|error| format!("environment {}: {error}", self.name))
+            .map_err(|error| {
+                format!(
+                    "environment {}: {error} (a file is read into one message, at most [host] max_message_bytes = {})",
+                    self.name, self.message_bytes
+                )
+            })
     }
 
     /// Writes a file there.

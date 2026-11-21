@@ -26,12 +26,8 @@ use crate::loopback::{self, Answer, Caller, Listener, Service};
 
 /// The prefix of an environment's MCP server's name.
 pub(crate) const SERVER_PREFIX: &str = "env_";
-/// Sessions of one connection that hold a bearer.
-const MAX_SESSIONS: usize = 256;
 /// Requests of the client the host remembers an answer for.
 const MAX_PENDING: usize = 64;
-/// How much of an interactive terminal's output is kept for the agent to read.
-const TERMINAL_KEEP_BYTES: usize = 4 * 1024 * 1024;
 
 /// The name of the MCP server for the environment `name`: MCP names are words, so anything else becomes `_`.
 pub(crate) fn server_name(name: &str) -> String {
@@ -352,11 +348,12 @@ impl Access {
             )
         };
         let output = Arc::new(Mutex::new(super::served::Output::default()));
+        let keep = self.env.scrollback_bytes();
         let (reader, kept) = (process.output(), Arc::clone(&output));
         let done = Arc::new(AtomicBool::new(false));
         std::thread::Builder::new()
             .name("canoa-environment-shell".to_owned())
-            .spawn(move || collect(reader, &kept, TERMINAL_KEEP_BYTES, &done))
+            .spawn(move || collect(reader, &kept, keep, &done))
             .map_err(|error| error.to_string())?;
         let id = format!("shell-{}", self.next.fetch_add(1, Ordering::SeqCst));
         lock(&self.shells).insert(id.clone(), Shell { process, output });
@@ -431,6 +428,8 @@ pub(crate) struct Hub {
 
 struct ToolServer {
     hub: Weak<Hub>,
+    /// `[host] max_message_bytes`: a call's arguments, a file's text among them, ride in one message.
+    max_body: usize,
     tokens: Arc<Tokens>,
 }
 
@@ -444,7 +443,7 @@ impl Service for ToolServer {
     }
 
     fn body_limit(&self) -> usize {
-        MAX_BODY
+        self.max_body
     }
 
     fn answer(self: &Arc<Self>, access: &Arc<Access>, message: &Value) -> Answer {
@@ -460,9 +459,6 @@ impl Service for ToolServer {
         .map_or(Answer::Accepted, Answer::Json)
     }
 }
-
-/// A call's arguments: a file's text rides in one.
-const MAX_BODY: usize = 16 * 1024 * 1024;
 
 impl Hub {
     /// The hub for `environments`; `bridge` runs the stdio bridge for an agent that takes no HTTP MCP server.
@@ -485,6 +481,7 @@ impl Hub {
         if server.is_none() {
             *server = Listener::start(&Arc::new(ToolServer {
                 hub: Arc::downgrade(self),
+                max_body: self.environments.message_bytes(),
                 tokens: Arc::clone(&self.tokens),
             }))
             .ok();
@@ -551,6 +548,8 @@ struct LinkState {
     stdio: u64,
     pending: HashMap<String, Pending>,
     digests: Vec<[u8; 32]>,
+    /// How many session requests of this connection were given the tool servers.
+    opened: usize,
     /// The sessions the agent has been told about its environments.
     briefed: BTreeSet<String>,
 }
@@ -713,13 +712,27 @@ impl Link {
         if self.tools.is_empty() || self.is_closed() {
             return false;
         }
-        let (http, stdio, count) = {
+        let (http, stdio) = {
             let state = lock(&self.state);
-            (state.http, state.stdio, state.digests.len())
+            (state.http, state.stdio)
         };
-        if count + self.tools.len() > MAX_SESSIONS || !(http || stdio > 0) {
+        if !(http || stdio > 0) {
             return false;
         }
+        let opened = lock(&self.state).opened;
+        if let Some(env) = self
+            .tools
+            .iter()
+            .find(|env| opened >= env.max_tool_sessions())
+        {
+            tracing::warn!(
+                "environment {} is not given to another session of this connection: max_tool_sessions is {}",
+                env.name(),
+                env.max_tool_sessions()
+            );
+            return false;
+        }
+        lock(&self.state).opened += 1;
         let Some(url) = self.hub.url() else {
             return false;
         };

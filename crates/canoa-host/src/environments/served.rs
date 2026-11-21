@@ -24,8 +24,6 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 /// The code of a call the environment refused or could not do.
 const FAILED: i64 = -32000;
-/// How much of a terminal's output is kept when the agent names no limit of its own.
-const DEFAULT_OUTPUT_BYTES: usize = 1024 * 1024;
 
 /// An error answer: its JSON-RPC code and its message.
 pub(crate) type Refusal = (i64, String);
@@ -205,7 +203,7 @@ impl Served {
         let limit = params
             .get("outputByteLimit")
             .and_then(Value::as_u64)
-            .map_or(DEFAULT_OUTPUT_BYTES, |limit| {
+            .map_or(self.env.output_bytes(), |limit| {
                 usize::try_from(limit).unwrap_or(usize::MAX)
             });
         spec = spec.error_output(ErrorOutput::Merged);

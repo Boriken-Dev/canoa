@@ -69,6 +69,7 @@ fn environments(table: &str) -> Arc<Environments> {
     Environments::from_registries(
         config.environments,
         vec![("runs-only".to_owned(), registry)],
+        crate::config::DEFAULT_MAX_MESSAGE_BYTES,
     )
 }
 
@@ -380,4 +381,149 @@ fn a_program_that_outlasts_exec_seconds_is_ended_and_the_refusal_names_the_setti
     let text = result["content"][0]["text"].as_str().expect("text");
     assert!(text.contains("exec_seconds"), "{text}");
     assert!(text.contains("longer than 1 seconds"), "{text}");
+}
+
+fn here_with(extra: &str, message_bytes: usize) -> Arc<Env> {
+    let config = Config::from_str_in(
+        &format!("[host.environments.x]\nkind = \"here\"\n{extra}"),
+        std::path::Path::new(""),
+    )
+    .expect("parses");
+    Environments::from_registries(config.environments, Vec::new(), message_bytes)
+        .get("x")
+        .expect("made")
+}
+
+#[test]
+fn the_output_scrollback_and_session_limits_are_settings_with_today_values_and_zero_for_none() {
+    let defaults = here_with("", 1000);
+    assert_eq!(
+        (
+            defaults.output_bytes(),
+            defaults.scrollback_bytes(),
+            defaults.max_tool_sessions()
+        ),
+        (1024 * 1024, 4 * 1024 * 1024, 256)
+    );
+    let raised = here_with(
+        "output_bytes = 5000000\nscrollback_bytes = 9000000\nmax_tool_sessions = 1000\n",
+        1000,
+    );
+    assert_eq!(
+        (
+            raised.output_bytes(),
+            raised.scrollback_bytes(),
+            raised.max_tool_sessions()
+        ),
+        (5_000_000, 9_000_000, 1000)
+    );
+    let none = here_with(
+        "output_bytes = 0\nscrollback_bytes = 0\nmax_tool_sessions = 0\n",
+        1000,
+    );
+    assert_eq!(
+        (
+            none.output_bytes(),
+            none.scrollback_bytes(),
+            none.max_tool_sessions()
+        ),
+        (usize::MAX, usize::MAX, usize::MAX)
+    );
+}
+
+#[test]
+fn a_file_is_read_up_to_the_hosts_message_size_and_the_refusal_names_that_setting() {
+    let dir = std::env::temp_dir().join(format!("canoa-env-cap-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a folder");
+    let file = dir.join("big.txt").to_string_lossy().into_owned();
+    std::fs::write(&file, vec![b'a'; 100]).expect("written");
+    let refused = here_with("", 50)
+        .read(&file)
+        .expect_err("too long for the message");
+    assert!(refused.contains("max_message_bytes = 50"), "{refused}");
+    assert_eq!(here_with("", 100).read(&file).expect("raised").len(), 100);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_served_terminal_keeps_the_environments_output_limit_unless_the_agent_names_its_own() {
+    let (program, args) = if cfg!(windows) {
+        ("cmd.exe", json!(["/c", "echo 0123456789"]))
+    } else {
+        ("/bin/sh", json!(["-c", "echo 0123456789"]))
+    };
+    let run = |extra: &str, params: Value| {
+        let served = Served::new(here_with(extra, 1000));
+        let mut request = json!({"command": program, "args": args});
+        request
+            .as_object_mut()
+            .expect("object")
+            .extend(params.as_object().expect("object").clone());
+        let created = served.answer("terminal/create", &request).expect("started");
+        let by = json!({"terminalId": created["terminalId"]});
+        served.answer("terminal/wait_for_exit", &by).expect("ended");
+        served.answer("terminal/output", &by).expect("output")
+    };
+    let default = run("", json!({}));
+    assert_eq!(default["truncated"], false, "{default}");
+    let small = run("output_bytes = 4\n", json!({}));
+    assert_eq!(small["truncated"], true, "{small}");
+    assert!(
+        small["output"].as_str().expect("text").len() <= 4,
+        "{small}"
+    );
+    let own = run("output_bytes = 4\n", json!({"outputByteLimit": 100000}));
+    assert_eq!(own["truncated"], false, "the agent's own limit wins: {own}");
+}
+
+#[test]
+fn a_connection_is_given_an_environments_tools_for_that_many_sessions() {
+    let sessions = |limit: &str| {
+        let hub = super::mcp::Hub::new(
+            environments(&format!(
+                "[host.environments.small]\nkind = \"runs_only\"\n{limit}"
+            )),
+            crate::delegate::BridgeCommand::new(std::path::Path::new("canoa"), &[]),
+        );
+        let placement = Placement {
+            tools: vec!["small".to_owned()],
+            ..Placement::default()
+        };
+        let link = hub
+            .for_connection(None, &placement, false)
+            .expect("exists")
+            .expect("a link");
+        link.client_said(
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+                .to_string()
+                .into_bytes(),
+        );
+        link.agent_said(
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1,
+                "agentCapabilities": {"mcpCapabilities": {"http": true}}}})
+            .to_string()
+            .as_bytes(),
+        );
+        (1..=3)
+            .filter(|id| {
+                let sent = link.client_said(
+                    json!({"jsonrpc": "2.0", "id": id + 1, "method": "session/new",
+                        "params": {"cwd": "/", "mcpServers": []}})
+                    .to_string()
+                    .into_bytes(),
+                );
+                let sent: Value = serde_json::from_slice(&sent).expect("JSON");
+                sent["params"]["mcpServers"]
+                    .as_array()
+                    .is_some_and(|servers| !servers.is_empty())
+            })
+            .count()
+    };
+    assert_eq!(
+        sessions("max_tool_sessions = 2\n"),
+        2,
+        "a raised or lowered value is the limit"
+    );
+    assert_eq!(sessions("max_tool_sessions = 0\n"), 3, "0 is no limit");
+    assert_eq!(sessions(""), 3, "the default is 256");
 }
