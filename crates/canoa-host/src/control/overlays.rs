@@ -532,6 +532,13 @@ impl Overlays {
         if let Some(label) = &label {
             record["catalog"] = Value::String(label.clone());
         }
+        let run_prepare = params
+            .get("prepare")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if run_prepare {
+            super::allow(caller, super::Grant::StorePrograms)?;
+        }
         let bytes =
             serde_json::to_vec_pretty(&record).map_err(|error| refused(error.to_string()))?;
         crate::replace::write_file(&root.join(format!("{name}.json")), &bytes, 0o600).map_err(
@@ -541,6 +548,29 @@ impl Overlays {
                 ))
             },
         )?;
+        if run_prepare {
+            let prep_plan = prepare::Plan::of(
+                name,
+                &root.join(name),
+                coqui_aos::current_os(),
+                &plan.digest,
+            )
+            .map_err(|why| refused(format!("{name}: {why}")))?;
+            let home = prepare::Home::new(root);
+            let finder = crate::profile::Finder::new(
+                &|variable| std::env::var(variable).ok(),
+                &crate::sources::runtime_dirs(),
+            );
+            let change = if home.record(name).is_some() {
+                coqui_aos::Change::Sync
+            } else {
+                coqui_aos::Change::Add
+            };
+            let done = prepare::run(&prep_plan, change, &home, &finder, &[])
+                .map_err(|failure| refused(format!("{name}: {failure}")))?;
+            record["prepared"] =
+                json!({"phase": done.phase.map(coqui_aos::Phase::name), "steps": done.steps});
+        }
         Ok(record)
     }
 

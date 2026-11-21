@@ -471,7 +471,7 @@ pub(super) fn layers_of(
                 if let Some(aos) = layer.aos.as_mut() {
                     aos.allowed = host.allow_hooks.get(&overlay.identity).cloned();
                     let home = prepare::Home::new(host.directory.join("overlays"));
-                    // What preparing made counts only for the version it was made for.
+                    // What preparing made counts for the version it was made for, or for runtime dependencies whose manifest digest is unchanged.
                     if home
                         .record(&overlay.identity)
                         .is_some_and(|record| record.digest.eq_ignore_ascii_case(&aos.digest))
@@ -479,6 +479,23 @@ pub(super) fn layers_of(
                         aos.packages = home.packages(&overlay.identity);
                         let state = home.state(&overlay.identity);
                         aos.state = state.is_dir().then(|| state.to_string_lossy().into_owned());
+                    } else if let Some(inspected) = overlay::inspect(aos) {
+                        let all_pkgs = home.packages(&overlay.identity);
+                        let mut active_pkgs = BTreeMap::new();
+                        for dep in &inspected.dependencies {
+                            let rt = dep.runtime.as_str();
+                            if home.runtime_ready(&overlay.identity, &aos.digest, dep)
+                                && let Some(dir) = all_pkgs.get(rt)
+                            {
+                                active_pkgs.insert(rt.to_owned(), dir.clone());
+                            }
+                        }
+                        if !active_pkgs.is_empty() {
+                            aos.packages = active_pkgs;
+                            let state = home.state(&overlay.identity);
+                            aos.state =
+                                state.is_dir().then(|| state.to_string_lossy().into_owned());
+                        }
                     }
                 }
                 if let Some(aos) = &layer.aos {

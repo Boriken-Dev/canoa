@@ -2414,12 +2414,41 @@ fn what_preparing_made_reaches_the_session_only_for_the_version_it_was_made_for(
         "the state directory is `NAME_OVERLAY_STATE`"
     );
 
-    // A preparation of another version counts for nothing.
+    // A preparation of another version counts for nothing when dependency digests also differ.
     prepared_by_hand(&temp, "needy", &format!("sha256:{}", "0".repeat(64)));
     let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
     let stale = report(&connection);
     assert_eq!(item(&stale, "setup: setup.py")["state"], "off", "{stale}");
     assert_eq!(env_value(&connection, "PYTHONPATH"), Some(own.as_str()));
+
+    // When dependency manifest digest is recorded and unchanged across a non-dependency edit, dependencies stay applied.
+    let dep_digest = prepare::dependency_digest_files(
+        &temp.0.join("overlays/needy"),
+        "lib/python/requirements.txt",
+        None,
+    )
+    .expect("dep digest");
+    let mut deps = BTreeMap::new();
+    deps.insert("python".to_owned(), dep_digest);
+    prepare::Home::new(temp.0.join("overlays"))
+        .write_record_with_deps(
+            "needy",
+            &aos::SetupRecord::new(format!("sha256:{}", "1".repeat(64)), aos::Phase::Install),
+            &deps,
+        )
+        .expect("recorded with deps");
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let dep_kept = report(&connection);
+    assert_eq!(
+        item(&dep_kept, "dependencies: lib/python/requirements.txt")["state"],
+        "applied",
+        "{dep_kept}"
+    );
+    assert!(
+        env_value(&connection, "PYTHONPATH")
+            .expect("PYTHONPATH")
+            .contains("site-packages")
+    );
 }
 
 #[test]
@@ -3653,7 +3682,7 @@ fn antigravity_overlay_context_applies_across_system_prompt_instruction_file_and
     );
     assert_eq!(item(&agy_parts.report, "context")["state"], "applied");
 
-    // 2. Without systemPrompt, with additionalDirectories: written as `.agents/AGENTS.md`.
+    // 2. Without systemPrompt, with additionalDirectories: written as `AGENTS.md`.
     let dir_takes = Takes {
         version: 1,
         capabilities: json!({"sessionCapabilities": {"additionalDirectories": {}}}),
@@ -3662,7 +3691,7 @@ fn antigravity_overlay_context_applies_across_system_prompt_instruction_file_and
     assert!(dir_parts.system_prompt.is_none());
     assert_eq!(item(&dir_parts.report, "context")["state"], "applied");
     let dir = PathBuf::from(&dir_parts.directories[0]);
-    let agents_md = std::fs::read_to_string(dir.join(".agents/AGENTS.md")).expect("written");
+    let agents_md = std::fs::read_to_string(dir.join("AGENTS.md")).expect("written");
     assert!(agents_md.contains("Use overlay rule alpha."));
 
     // 3. Without systemPrompt or additionalDirectories: prepended to first session/prompt turn once.

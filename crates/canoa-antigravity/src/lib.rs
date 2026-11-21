@@ -43,7 +43,7 @@ pub const PRESET: SourcePreset = SourcePreset::new("Antigravity", "agy")
     .usage("antigravity")
     .context(
         ContextDelivery::STANDARD
-            .with_instruction_file(".agents/AGENTS.md")
+            .with_instruction_file("AGENTS.md")
             .with_prompt_briefing(),
     );
 

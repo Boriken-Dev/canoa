@@ -77,11 +77,59 @@ impl Home {
         ))
     }
 
+    /// Recorded per-runtime dependency manifest digests (`"python" -> "sha256:..."`, `"node" -> "sha256:..."`).
+    pub(crate) fn dep_digests(&self, identity: &str) -> BTreeMap<String, String> {
+        let Ok(bytes) = std::fs::read(self.record_file(identity)) else {
+            return BTreeMap::new();
+        };
+        let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+            return BTreeMap::new();
+        };
+        value
+            .get("deps")
+            .and_then(Value::as_object)
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether `dep`'s prepared runtime environment is current: either the whole overlay digest matches, or the
+    /// dependency file's (and lockfile's) digest matches the one recorded when the runtime environment was built.
+    pub(crate) fn runtime_ready(&self, identity: &str, digest: &str, dep: &Dependency) -> bool {
+        if self
+            .record(identity)
+            .is_some_and(|record| record.digest.eq_ignore_ascii_case(digest))
+        {
+            return true;
+        }
+        let Some(recorded) = self.dep_digests(identity).remove(dep.runtime.as_str()) else {
+            return false;
+        };
+        let root = self.overlays.join(identity);
+        dependency_digest(&root, dep).is_some_and(|current| current.eq_ignore_ascii_case(&recorded))
+    }
+
+    #[cfg(test)]
     pub(crate) fn write_record(&self, identity: &str, record: &SetupRecord) -> std::io::Result<()> {
-        let text = json!({"digest": record.digest, "phase": record.phase.name()}).to_string();
+        self.write_record_with_deps(identity, record, &BTreeMap::new())
+    }
+
+    pub(crate) fn write_record_with_deps(
+        &self,
+        identity: &str,
+        record: &SetupRecord,
+        deps: &BTreeMap<String, String>,
+    ) -> std::io::Result<()> {
+        let mut obj = json!({"digest": record.digest, "phase": record.phase.name()});
+        if !deps.is_empty() {
+            obj["deps"] = json!(deps);
+        }
         crate::replace::write_file(
             &self.record_file(identity),
-            text.as_bytes(),
+            obj.to_string().as_bytes(),
             crate::replace::SHARED,
         )
     }
@@ -250,6 +298,41 @@ fn setup_line(setup: &SetupRun) -> String {
     )
 }
 
+/// Computes the tree digest of a dependency manifest file (and optional lockfile) under `root`.
+pub(crate) fn dependency_digest(root: &Path, dep: &Dependency) -> Option<String> {
+    dependency_digest_files(root, &dep.file, dep.lock.as_deref())
+}
+
+pub(crate) fn dependency_digest_files(
+    root: &Path,
+    file: &str,
+    lock: Option<&str>,
+) -> Option<String> {
+    let file_bytes = std::fs::read(root.join(file)).ok()?;
+    let lock_bytes = if let Some(lock) = lock {
+        Some((lock, std::fs::read(root.join(lock)).ok()?))
+    } else {
+        None
+    };
+    let mut entries: Vec<(Vec<&[u8]>, aos::TreeEntry)> = vec![(
+        file.as_bytes().split(|b| *b == b'/').collect(),
+        aos::TreeEntry::File(file_bytes),
+    )];
+    if let Some((lock, bytes)) = lock_bytes {
+        entries.push((
+            lock.as_bytes().split(|b| *b == b'/').collect(),
+            aos::TreeEntry::File(bytes),
+        ));
+    }
+    aos::digest_entries(
+        entries
+            .iter()
+            .map(|(components, entry)| (components.clone(), entry)),
+    )
+    .ok()
+    .map(|d| d.digest.to_string())
+}
+
 /// What preparing made of an overlay at `digest`, as report lines: each dependency file installed and the setup run, or not yet.
 pub(crate) fn lines_for(
     home: &Home,
@@ -266,7 +349,8 @@ pub(crate) fn lines_for(
     let mut lines = Vec::new();
     for dependency in dependencies {
         let runtime = dependency.runtime.as_str();
-        let held = record.as_ref().and(packages.get(runtime));
+        let ready = home.runtime_ready(identity, digest, dependency);
+        let held = ready.then(|| packages.get(runtime)).flatten();
         lines.push(Line {
             key: format!("dependencies: {}", dependency.file),
             met: held.is_some(),
@@ -385,7 +469,13 @@ pub(crate) fn run(
             }
             Step::Record => {
                 if let Some(record) = &steps.record {
-                    home.write_record(identity, record)
+                    let mut deps = BTreeMap::new();
+                    for dep in &plan.effective.dependencies {
+                        if let Some(d) = dependency_digest(&plan.root, dep) {
+                            deps.insert(dep.runtime.as_str().to_owned(), d);
+                        }
+                    }
+                    home.write_record_with_deps(identity, record, &deps)
                         .map_err(|error| failed("record", error.to_string()))?;
                 }
             }

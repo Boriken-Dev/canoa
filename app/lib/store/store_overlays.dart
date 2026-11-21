@@ -6,6 +6,7 @@ import '../config/canoa_config.dart';
 import '../loadout/loadout_controller.dart';
 import '../loadout/overlay_knowledge.dart';
 import '../loadout/overlay_options.dart';
+import '../profile/overlays.dart' show OverlayException;
 import '../profile/profile.dart';
 import '../profile/profiles_panel.dart' show OverlayIcon, OverlayUpdateDialog, visible;
 import '../selectable.dart';
@@ -422,6 +423,13 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
           return;
         }
         await c.apply(await installPreview(home.overlays, c.config, preview, catalog: listed.label));
+        if (preview.prepares.isNotEmpty) {
+          try {
+            await home.overlays.prepare(preview.name);
+          } on OverlayException {
+            // The overlay stays installed when preparing fails; its report says what was not done.
+          }
+        }
       });
     } finally {
       if (mounted) setState(() => _installing.remove(key));
