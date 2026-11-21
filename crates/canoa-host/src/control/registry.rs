@@ -191,7 +191,7 @@ impl Registry {
                 format!("the cache holds {MAX_DOCUMENTS} documents already"),
             ));
         }
-        crate::replace::write_file(&file, document.as_bytes(), crate::replace::SHARED)
+        crate::replace::write_file_in_folder(&file, document.as_bytes(), crate::replace::SHARED)
             .map_err(|error| (REFUSED, format!("the cache cannot be written: {error}")))?;
         Ok(json!({}))
     }

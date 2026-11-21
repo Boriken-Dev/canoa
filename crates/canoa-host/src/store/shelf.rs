@@ -570,7 +570,8 @@ impl Locked<'_> {
 
     fn write(&self, current: &Current) -> Result<(), ShelfError> {
         let bytes = serde_json::to_vec_pretty(current).map_err(io::Error::other)?;
-        crate::replace::write_file(
+        // Launches read it while a switch replaces it, so it is swapped in by one rename, never absent between two files.
+        crate::replace::write_file_in_folder(
             &self.program.dir.join("current.json"),
             &bytes,
             crate::replace::SHARED,

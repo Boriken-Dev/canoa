@@ -577,8 +577,11 @@ impl StoreIndex {
         let Ok(bytes) = serde_json::to_vec(&text) else {
             return;
         };
-        let _ =
-            crate::replace::write_file(&folder.join("index.json"), &bytes, crate::replace::SHARED);
+        let _ = crate::replace::write_file_in_folder(
+            &folder.join("index.json"),
+            &bytes,
+            crate::replace::SHARED,
+        );
     }
 
     /// The newest index on disk for the source, if one reads.

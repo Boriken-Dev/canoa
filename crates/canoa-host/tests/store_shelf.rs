@@ -176,14 +176,14 @@ fn current_json_is_always_whole_for_a_reader_while_versions_switch() {
         })
     };
     // The switches start once the reader is reading, and the reader goes on until it has read after the last one.
-    while reads.load(Ordering::SeqCst) == 0 {
+    while reads.load(Ordering::SeqCst) == 0 && !reader.is_finished() {
         thread::yield_now();
     }
     for n in 2..8 {
         install(&shelf, &format!("{n}.0.0"));
     }
     let seen = reads.load(Ordering::SeqCst);
-    while reads.load(Ordering::SeqCst) < seen + 2 {
+    while reads.load(Ordering::SeqCst) < seen + 2 && !reader.is_finished() {
         thread::yield_now();
     }
     stop.store(true, Ordering::SeqCst);
