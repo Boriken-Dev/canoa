@@ -5,8 +5,8 @@ library;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
+import '../shell/index_pane.dart';
 import '../shell/layout_state.dart';
-import '../theme/look.dart';
 import 'loadout_editor.dart' show LoadoutDraft;
 
 /// The loadout chosen in the index and the draft being edited, which the index and the main view share.
@@ -88,18 +88,15 @@ class _LoadoutsIndexState extends State<LoadoutsIndex> {
     builder: (context, _) {
       final config = widget.config;
       final chosen = widget.selection.selectedIn(config);
+      final scheme = Theme.of(context).colorScheme;
       final shown = [
         for (final MapEntry(:key, :value) in config.loadouts.entries)
           if (_query.isEmpty || key.toLowerCase().contains(_query.toLowerCase()) || value.description.toLowerCase().contains(_query.toLowerCase()))
             (key, value),
       ];
-      return Material(
-        color: context.look.rail,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 8, 6),
-            child: Text('Loadouts', style: Theme.of(context).textTheme.titleLarge),
-          ),
+      return IndexPane(
+        title: 'Loadouts',
+        aboveDivider: [
           InkWell(
             key: const Key('loadout-new'),
             onTap: () {
@@ -109,7 +106,7 @@ class _LoadoutsIndexState extends State<LoadoutsIndex> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
               child: Row(children: [
-                Icon(Icons.add, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                Icon(Icons.add, size: 20, color: scheme.onSurfaceVariant),
                 const SizedBox(width: 12),
                 const Text('New loadout'),
               ]),
@@ -124,28 +121,33 @@ class _LoadoutsIndexState extends State<LoadoutsIndex> {
                 onChanged: (value) => setState(() => _query = value.trim()),
               ),
             ),
-          const Divider(height: 1),
-          Expanded(
-            child: config.loadouts.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(18),
-                    child: Text('No loadouts yet. New sessions start with every overlay and every server.', key: Key('loadouts-empty')),
-                  )
-                : ListView(children: [
-                    for (final (name, loadout) in shown)
-                      _Row(
-                        name: name,
-                        detail: loadoutCounts(loadout),
-                        isDefault: name == config.defaultLoadout,
-                        selected: name == chosen,
-                        onTap: () {
-                          widget.selection.select(name);
-                          _closeDrawer();
-                        },
-                      ),
-                  ]),
-          ),
-        ]),
+        ],
+        body: config.loadouts.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.all(18),
+                child: Text('No loadouts yet. New sessions start with every overlay and every server.', key: Key('loadouts-empty')),
+              )
+            : ListView(children: [
+                for (final (name, loadout) in shown)
+                  IndexRow(
+                    rowKey: Key('loadouts-index-$name'),
+                    leading: Icon(Icons.inventory_2_outlined, size: 20, color: scheme.onSurfaceVariant),
+                    titleWidget: Row(children: [
+                      Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      if (name == config.defaultLoadout)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Text('Default', key: Key('loadouts-index-default-$name'), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.primary)),
+                        ),
+                    ]),
+                    subtitle: loadoutCounts(loadout),
+                    selected: name == chosen,
+                    onTap: () {
+                      widget.selection.select(name);
+                      _closeDrawer();
+                    },
+                  ),
+              ]),
       );
     },
   );
@@ -156,47 +158,4 @@ String loadoutCounts(Loadout loadout) {
   String count(int n, String one, String many) => '$n ${n == 1 ? one : many}';
   return '${count(loadout.overlays.length, 'overlay', 'overlays')} · ${count(loadout.skills.length, 'skill', 'skills')} · '
       '${count(loadout.mcp.length, 'MCP server', 'MCP servers')}';
-}
-
-class _Row extends StatelessWidget {
-  const _Row({required this.name, required this.detail, required this.isDefault, required this.selected, required this.onTap});
-
-  final String name, detail;
-  final bool isDefault, selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Semantics(
-      selected: selected,
-      child: Material(
-        color: selected ? context.look.selected : Colors.transparent,
-        child: InkWell(
-          key: Key('loadouts-index-$name'),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            child: Row(children: [
-              Icon(Icons.inventory_2_outlined, size: 20, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    if (isDefault)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Text('Default', key: Key('loadouts-index-default-$name'), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.primary)),
-                      ),
-                  ]),
-                  Text(detail, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
-                ]),
-              ),
-            ]),
-          ),
-        ),
-      ),
-    );
-  }
 }

@@ -2,13 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../desktop/control_client.dart' show ControlFailed;
+import '../desktop/control_client.dart' show hostWords;
 import '../settings/settings_row.dart';
+import '../shell/confirm_remove.dart';
 import 'account_models.dart';
 import 'accounts_controller.dart';
-
-/// The host's words for why a request failed: the refusal as the host wrote it, with nothing the app adds.
-String hostWords(Object error) => error is ControlFailed ? error.message : '$error'.replaceFirst(RegExp(r'^(Bad state|Exception): '), '');
 
 /// Settings › Accounts › Pools: sets of accounts that provide one credential standard, which a session may run on instead of one
 /// account, on whichever has usage left. The person makes, edits and removes their own; the host makes one for every standard
@@ -30,19 +28,16 @@ class _PoolsGroupState extends State<PoolsGroup> {
   }
 
   Future<void> _remove(PoolInfo pool) async {
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('remove-pool'),
-        title: Text('Remove ${pool.name}?'),
-        content: const Text('The accounts in it stay as they are; only the set goes, and the sources that offered it stop offering it.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
-          FilledButton(key: const Key('remove-pool-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
-        ],
-      ),
-    );
-    if (sure != true) return;
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove ${pool.name}?',
+      body: 'The accounts in it stay as they are; only the set goes, and the sources that offered it stop offering it.',
+      dialogKey: const Key('remove-pool'),
+      cancelKey: null,
+      confirmKey: const Key('remove-pool-confirm'),
+    )) {
+      return;
+    }
     try {
       await _accounts.removePool(pool.name);
     } on Object catch (error) {

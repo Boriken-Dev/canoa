@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../shell/index_pane.dart';
 import '../theme/look.dart';
 import '../settings/shell_settings.dart' show HostShell;
 import 'terminal_controller.dart';
@@ -293,47 +294,25 @@ class _TerminalIndexState extends State<TerminalIndex> {
 
   Widget _list(BuildContext context, Widget? _) {
     final targets = controller.targets();
-    return Material(
-      color: context.look.rail,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 8, 6),
-            child: Row(
+    return IndexPane(
+      title: 'Terminal',
+      trailing: IconButton(
+        key: const ValueKey('terminal-section new'),
+        tooltip: 'New shell',
+        icon: const Icon(Icons.add),
+        onPressed: targets.isEmpty ? null : () => unawaited(_new(context)),
+      ),
+      body: targets.isEmpty
+          ? const Padding(
+              padding: EdgeInsets.all(18),
+              child: Text('No host to open a shell on.'),
+            )
+          : ListView(
               children: [
-                Expanded(
-                  child: Text(
-                    'Terminal',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                IconButton(
-                  key: const ValueKey('terminal-section new'),
-                  tooltip: 'New shell',
-                  icon: const Icon(Icons.add),
-                  onPressed: targets.isEmpty
-                      ? null
-                      : () => unawaited(_new(context)),
-                ),
+                for (final target in targets)
+                  _HostBlock(controller: controller, target: target),
               ],
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: targets.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(18),
-                    child: Text('No host to open a shell on.'),
-                  )
-                : ListView(
-                    children: [
-                      for (final target in targets)
-                        _HostBlock(controller: controller, target: target),
-                    ],
-                  ),
-          ),
-        ],
-      ),
     );
   }
 }

@@ -17,6 +17,7 @@ import 'skills.dart';
 import 'store.dart';
 import 'store_icon.dart';
 import '../selectable.dart';
+import '../shell/confirm_remove.dart';
 
 /// Saves a changed canoa.cfg and gives the configuration saved, or null when it was not.
 typedef SaveConfig = Future<CanoaConfig?> Function(CanoaConfig changed);
@@ -162,20 +163,18 @@ class OverlayPageState extends State<OverlayPage> {
 
   Future<void> _remove() async {
     final (name, source) = _target!;
-    final yes = await showSelectableDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Remove ${namedAs(config, name) ?? name}?'),
-        content: const Text('Its files, its fetched history and its entry in canoa.cfg go; agents started after this '
-            'start without it.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(key: const Key('store-remove-confirm'), onPressed: () => Navigator.pop(context, true),
-              child: const Text('Remove')),
-        ],
-      ),
-    );
-    if (yes != true) return;
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove ${namedAs(config, name) ?? name}?',
+      body: 'Its files, its fetched history and its entry in canoa.cfg go; agents started after this start without it.',
+      cancelLabel: 'Cancel',
+      dialogKey: null,
+      cancelKey: null,
+      confirmKey: const Key('store-remove-confirm'),
+      selectable: true,
+    )) {
+      return;
+    }
     await _run('Removing', () async {
       final changed = await removeInstalled(widget.home!.overlays, config, name, source, offer: _offerOrphans);
       final saved = await widget.onSave(changed);
@@ -189,24 +188,19 @@ class OverlayPageState extends State<OverlayPage> {
   }
 
   /// Offers to remove the skills that only this overlay named and that nothing names now.
-  Future<bool> _offerOrphans(List<SkillCopy> orphans) async {
-    final yes = await showSelectableDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove its skills too?'),
-        content: Text('${orphans.map((copy) => oneLine(copy.name)).join(', ')} '
-            '${orphans.length == 1 ? 'was' : 'were'} fetched for this overlay, and no other overlay names '
-            '${orphans.length == 1 ? 'it' : 'them'}. Skills you chose yourself are never offered.'),
-        actions: [
-          TextButton(key: const Key('store-orphans-keep'), onPressed: () => Navigator.pop(context, false),
-              child: const Text('Keep them')),
-          FilledButton(key: const Key('store-orphans-remove'), onPressed: () => Navigator.pop(context, true),
-              child: const Text('Remove them')),
-        ],
-      ),
-    );
-    return yes == true;
-  }
+  Future<bool> _offerOrphans(List<SkillCopy> orphans) => confirmRemoval(
+    context,
+    title: 'Remove its skills too?',
+    body: '${orphans.map((copy) => oneLine(copy.name)).join(', ')} '
+        '${orphans.length == 1 ? 'was' : 'were'} fetched for this overlay, and no other overlay names '
+        '${orphans.length == 1 ? 'it' : 'them'}. Skills you chose yourself are never offered.',
+    cancelLabel: 'Keep them',
+    confirmLabel: 'Remove them',
+    dialogKey: null,
+    cancelKey: const Key('store-orphans-keep'),
+    confirmKey: const Key('store-orphans-remove'),
+    selectable: true,
+  );
 
   @override
   Widget build(BuildContext context) {

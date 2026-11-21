@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
+import '../desktop/control_client.dart' show hostWords;
 import 'entry_details.dart';
 import 'overlay_page.dart' show oneLine;
 import 'programs.dart';

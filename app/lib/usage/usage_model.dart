@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
 import '../chat/session_picker.dart' show machineLoginLabel;
-import '../desktop/control_client.dart' show ControlFailed;
+import '../desktop/control_client.dart' show hostWords;
 import '../desktop/host_control.dart';
 import 'spend_model.dart';
 
@@ -233,13 +233,11 @@ class UsageController extends ChangeNotifier {
                 note == null ? notes.remove(account.id) : notes[account.id] = note;
               } on Object catch (error) {
                 // The question failed: said in words, and what the sessions reported stands.
-                (_notes[source.name] ??= {})[account.id] = ReadNote(ReadNoteKind.failed, _why(error));
+                (_notes[source.name] ??= {})[account.id] = ReadNote(ReadNoteKind.failed, hostWords(error));
               }
             }(),
     ]);
   }
-
-  static String _why(Object error) => error is ControlFailed ? error.message : '$error'.replaceFirst(RegExp(r'^(Exception|StateError): '), '');
 
   /// Every account any host reported, and every account this computer lists that none did, one for each identity, the newest
   /// reading winning, in a stable order: provider, then name.

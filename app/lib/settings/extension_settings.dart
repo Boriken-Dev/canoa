@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart' show ControlFailed;
 import '../served/host_files.dart';
+import '../shell/confirm_remove.dart';
 import 'settings_row.dart';
 
 /// One `[host.extensions.NAME]` of the host's canoa.cfg: a store extension the host loads, which adds types to the Store.
@@ -322,22 +323,18 @@ class _ExtensionsSectionState extends State<ExtensionsSection> {
   }
 
   Future<void> _remove(BuildContext context, ExtensionEntry entry) async {
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        key: const Key('extension-remove-dialog'),
-        title: Text('Remove ${entry.name}'),
-        content: const Text(
-          'The extension goes out of the host\'s canoa.cfg, and its types leave the Store when the host restarts. Programs it installed '
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove ${entry.name}',
+      body: 'The extension goes out of the host\'s canoa.cfg, and its types leave the Store when the host restarts. Programs it installed '
           'stay where they are.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
-          FilledButton(key: const Key('extension-remove-confirm'), onPressed: () => Navigator.pop(dialog, true), child: const Text('Remove')),
-        ],
-      ),
-    );
-    if (sure != true || !context.mounted) return;
+      cancelLabel: 'Cancel',
+      dialogKey: const Key('extension-remove-dialog'),
+      cancelKey: null,
+      confirmKey: const Key('extension-remove-confirm'),
+    ) || !context.mounted) {
+      return;
+    }
     final problem = await settings.remove(entry.name);
     if (problem != null && context.mounted) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(problem)));

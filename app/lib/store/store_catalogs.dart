@@ -9,28 +9,14 @@ import '../forms/schema_fields.dart';
 import '../loadout/loadout_controller.dart';
 import '../settings/setting_layers.dart' show SettingNote;
 import '../settings/settings_row.dart';
+import '../shell/confirm_remove.dart';
 import '../theme/look.dart';
 import 'catalog_types.dart';
 import 'overlay_page.dart' show oneLine;
 import 'store.dart';
 import 'store_settings.dart';
 
-/// Asks before something the person set up is taken away: `title` says what, `body` what is taken out and what stays as it is.
-/// True when the person says remove, false on Keep it or on dismissing the dialog.
-Future<bool> confirmRemoval(BuildContext context, {required String title, required String body}) async =>
-    await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('confirm-remove'),
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(key: const Key('confirm-remove-no'), onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
-          FilledButton(key: const Key('confirm-remove-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
-        ],
-      ),
-    ) ??
-    false;
+export '../shell/confirm_remove.dart' show confirmRemoval;
 
 /// Asks before a catalog is taken out of canoa.cfg.
 Future<bool> confirmCatalogRemoval(BuildContext context, String label) => confirmRemoval(

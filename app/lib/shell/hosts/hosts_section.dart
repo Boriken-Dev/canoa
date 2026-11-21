@@ -7,6 +7,8 @@ import '../../config/connection.dart';
 import '../../connect_dialog.dart' show showAddConnectionDialog;
 import '../../selectable.dart';
 import '../../theme/look.dart';
+import '../confirm_remove.dart';
+import '../index_pane.dart';
 import 'host_status.dart';
 import 'hosts_controller.dart';
 import 'start_session_dialog.dart';
@@ -54,82 +56,50 @@ class _HostsIndexState extends State<HostsIndex> {
     builder: (context, _) {
       final items = controller.items;
       final selected = controller.selected;
-      return Material(
-        color: context.look.rail,
-        child: Column(children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 8, 6),
-            child: Row(children: [
-              Expanded(child: Text('Hosts', style: Theme.of(context).textTheme.titleLarge)),
-              IconButton(
-                key: const ValueKey('hosts-add'),
-                tooltip: 'Add connection',
-                icon: const Icon(Icons.add),
-                onPressed: controller.canSave ? () => unawaited(_openAdd(context, controller)) : null,
-              ),
-            ]),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: items.isEmpty
-                ? const Padding(padding: EdgeInsets.all(18), child: Text('No host yet. Add a connection to a Canoa host or an agent elsewhere.'))
-                : ListView(children: [
-                    for (final item in items) _Row(controller: controller, item: item, selected: item.id == selected?.id),
-                  ]),
-          ),
-          if (controller.browserProvider != null && controller.useBrowserAgents != null) _BrowserAgents(controller: controller),
-        ]),
+      final scheme = Theme.of(context).colorScheme;
+      return IndexPane(
+        title: 'Hosts',
+        trailing: IconButton(
+          key: const ValueKey('hosts-add'),
+          tooltip: 'Add connection',
+          icon: const Icon(Icons.add),
+          onPressed: controller.canSave ? () => unawaited(_openAdd(context, controller)) : null,
+        ),
+        body: items.isEmpty
+            ? const Padding(padding: EdgeInsets.all(18), child: Text('No host yet. Add a connection to a Canoa host or an agent elsewhere.'))
+            : ListView(children: [
+                for (final item in items) _hostRow(context, scheme, item, item.id == selected?.id),
+              ]),
+        footer: controller.browserProvider != null && controller.useBrowserAgents != null ? _BrowserAgents(controller: controller) : null,
       );
     },
   );
-}
 
-class _Row extends StatelessWidget {
-  const _Row({required this.controller, required this.item, required this.selected});
-
-  final HostsController controller;
-  final HostItem item;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _hostRow(BuildContext context, ColorScheme scheme, HostItem item, bool selected) {
     final status = item.kind == HostItemKind.saved ? controller.statusOf(item) : null;
-    final scheme = Theme.of(context).colorScheme;
-    return Semantics(
+    return IndexRow(
+      rowKey: ValueKey('host-row ${item.id}'),
+      leading: Icon(_iconOf(item), size: 20, color: scheme.onSurfaceVariant),
+      title: item.name,
+      subtitle: item.kindLabel,
       selected: selected,
-      child: Material(
-        color: selected ? context.look.selected : Colors.transparent,
-        child: InkWell(
-          key: ValueKey('host-row ${item.id}'),
-          onTap: () => controller.select(item.id),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            child: Row(children: [
-              Icon(_iconOf(item), size: 20, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  Text(item.kindLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
-                ]),
-              ),
-              if (controller.openShell != null && (controller.hasShell?.call(item) ?? false))
-                IconButton(
-                  key: ValueKey('host-shell ${item.id}'),
-                  tooltip: 'Open a shell on ${item.name}',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 18,
-                  icon: const Icon(Icons.terminal),
-                  onPressed: () => controller.openShell!(item),
-                ),
-              if (status != null) Tooltip(
-                message: status.state.label,
-                child: Icon(Icons.circle, size: 10, color: _stateColor(context, status.state)),
-              ),
-            ]),
+      onTap: () => controller.select(item.id),
+      trailing: [
+        if (controller.openShell != null && (controller.hasShell?.call(item) ?? false))
+          IconButton(
+            key: ValueKey('host-shell ${item.id}'),
+            tooltip: 'Open a shell on ${item.name}',
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            icon: const Icon(Icons.terminal),
+            onPressed: () => controller.openShell!(item),
           ),
-        ),
-      ),
+        if (status != null)
+          Tooltip(
+            message: status.state.label,
+            child: Icon(Icons.circle, size: 10, color: _stateColor(context, status.state)),
+          ),
+      ],
     );
   }
 }
@@ -364,28 +334,28 @@ class HostsOverview extends StatelessWidget {
 
   Future<void> _remove(BuildContext context, Connection connection) async {
     final affected = controller.sessionsOn(connection);
-    final sure = await showSelectableDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text('Remove ${connection.name}?'),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Only this app\'s record of it goes. Nothing is stopped on the other end, and its key stays paired there.'),
-          const SizedBox(height: 12),
-          if (affected.isEmpty)
-            const Text('No session of yours is on it.', key: ValueKey('remove-sessions'))
-          else
-            Column(key: const ValueKey('remove-sessions'), crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${affected.length == 1 ? 'This session is' : 'These ${affected.length} sessions are'} on it and cannot continue once it is gone:'),
-              for (final session in affected) Padding(padding: const EdgeInsets.only(top: 4), child: Text(session.title)),
-            ]),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: const Text('Cancel')),
-          FilledButton(key: const ValueKey('remove-confirm'), onPressed: () => Navigator.of(dialog).pop(true), child: const Text('Remove')),
-        ],
-      ),
-    );
-    if (sure == true) await controller.remove(connection);
+    if (await confirmRemoval(
+      context,
+      title: 'Remove ${connection.name}?',
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Only this app\'s record of it goes. Nothing is stopped on the other end, and its key stays paired there.'),
+        const SizedBox(height: 12),
+        if (affected.isEmpty)
+          const Text('No session of yours is on it.', key: ValueKey('remove-sessions'))
+        else
+          Column(key: const ValueKey('remove-sessions'), crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${affected.length == 1 ? 'This session is' : 'These ${affected.length} sessions are'} on it and cannot continue once it is gone:'),
+            for (final session in affected) Padding(padding: const EdgeInsets.only(top: 4), child: Text(session.title)),
+          ]),
+      ]),
+      cancelLabel: 'Cancel',
+      dialogKey: null,
+      cancelKey: null,
+      confirmKey: const ValueKey('remove-confirm'),
+      selectable: true,
+    )) {
+      await controller.remove(connection);
+    }
   }
 }
 

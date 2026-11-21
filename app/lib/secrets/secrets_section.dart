@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard;
 import 'package:flutter/material.dart';
 
+import '../shell/confirm_remove.dart';
 import 'provider_setup.dart';
 import 'secrets_controller.dart';
 import 'secrets_host.dart';
@@ -64,25 +65,21 @@ class _SecretsPageState extends State<SecretsPage> {
   }
 
   Future<void> _forget(SecretRow row) async {
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('secret-forget-confirm'),
-        title: Text('Forget ${row.name}?'),
-        content: Text(
-          row.foreign
-              ? '${row.name} is a credential another program keeps in the ${row.provider} vault. Forgetting it deletes it there, and that program will ask for it again. Canoa cannot bring it back.'
-              : row.kept == 'stored'
-              ? '${row.name} is taken out of the ${row.provider} vault. An agent that asks for it again will ask you.'
-              : 'Canoa stops holding ${row.name}. An agent that asks for it again will ask you.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
-          FilledButton(key: const Key('secret-forget-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Forget it')),
-        ],
-      ),
-    );
-    if (sure ?? false) await _secrets.forget(row);
+    if (await confirmRemoval(
+      context,
+      title: 'Forget ${row.name}?',
+      body: row.foreign
+          ? '${row.name} is a credential another program keeps in the ${row.provider} vault. Forgetting it deletes it there, and that program will ask for it again. Canoa cannot bring it back.'
+          : row.kept == 'stored'
+          ? '${row.name} is taken out of the ${row.provider} vault. An agent that asks for it again will ask you.'
+          : 'Canoa stops holding ${row.name}. An agent that asks for it again will ask you.',
+      confirmLabel: 'Forget it',
+      dialogKey: const Key('secret-forget-confirm'),
+      cancelKey: null,
+      confirmKey: const Key('secret-forget-yes'),
+    )) {
+      await _secrets.forget(row);
+    }
   }
 
   Future<void> _editProvider(SecretEntry entry) async {
@@ -91,19 +88,17 @@ class _SecretsPageState extends State<SecretsPage> {
   }
 
   Future<void> _removeProvider(SecretEntry entry) async {
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('secret-provider-remove-confirm'),
-        title: Text('Remove ${entry.name}?'),
-        content: const Text('Canoa stops using this setup. What it kept for you in its own store stays there.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
-          FilledButton(key: const Key('secret-provider-remove-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove it')),
-        ],
-      ),
-    );
-    if (sure ?? false) await _secrets.removeEntry(entry.name);
+    if (await confirmRemoval(
+      context,
+      title: 'Remove ${entry.name}?',
+      body: 'Canoa stops using this setup. What it kept for you in its own store stays there.',
+      confirmLabel: 'Remove it',
+      dialogKey: const Key('secret-provider-remove-confirm'),
+      cancelKey: null,
+      confirmKey: const Key('secret-provider-remove-yes'),
+    )) {
+      await _secrets.removeEntry(entry.name);
+    }
   }
 
   /// What the chosen vault is: what it can do, its settings and, for one the person set up, a way to change or take it away.

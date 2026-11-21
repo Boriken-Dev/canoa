@@ -272,18 +272,18 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
   }
 
   Future<void> _remove(String name, GitOverlay source) async {
-    final yes = await showSelectableDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Remove $name?'),
-        content: const Text('Its files, its fetched history and its entry in canoa.cfg go; agents started after this start without it.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(key: const Key('overlay-remove-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
-        ],
-      ),
-    );
-    if (yes != true) return;
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove $name?',
+      body: 'Its files, its fetched history and its entry in canoa.cfg go; agents started after this start without it.',
+      cancelLabel: 'Cancel',
+      dialogKey: null,
+      cancelKey: null,
+      confirmKey: const Key('overlay-remove-confirm'),
+      selectable: true,
+    )) {
+      return;
+    }
     await c.run('Removing $name', () async {
       final changed = await removeInstalled(c.home!.overlays, c.config, name, source);
       await c.apply(changed);

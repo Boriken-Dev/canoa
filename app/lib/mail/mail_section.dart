@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../desktop/control_client.dart' show ControlFailed;
 import '../forms/schema_fields.dart';
 import '../settings/settings_row.dart';
+import '../shell/confirm_remove.dart';
 import 'mail_accounts.dart';
 
 /// Settings › Mail: the mailboxes an agent can use as a source. Each row says where the mailbox is and whether its credential is
@@ -38,25 +39,16 @@ class _MailSectionState extends State<MailSection> {
   }
 
   Future<void> _remove(MailAccountInfo account) async {
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('remove-mail-account'),
-        title: Text('Remove "${account.name}"?'),
-        content: const Text(
-          'Takes the mailbox out of canoa.cfg and forgets any saved password. Nothing in the mailbox itself changes.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep it')),
-          FilledButton(
-            key: const Key('remove-mail-account-confirm'),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (sure != true) return;
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove "${account.name}"?',
+      body: 'Takes the mailbox out of canoa.cfg and forgets any saved password. Nothing in the mailbox itself changes.',
+      dialogKey: const Key('remove-mail-account'),
+      cancelKey: null,
+      confirmKey: const Key('remove-mail-account-confirm'),
+    )) {
+      return;
+    }
     try {
       await _mail.remove(account.name);
     } on Object catch (error) {

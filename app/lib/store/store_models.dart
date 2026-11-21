@@ -6,7 +6,6 @@ import '../desktop/control_client.dart';
 import '../forms/schema_fields.dart';
 import '../selectable.dart';
 import 'entry_details.dart';
-import 'programs_view.dart' show hostWords;
 import 'store_extension.dart';
 import 'store_selection.dart' show StoreMarkImage;
 

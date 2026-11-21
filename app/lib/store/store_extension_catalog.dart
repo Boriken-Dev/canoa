@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart';
 import '../selectable.dart';
+import '../shell/confirm_remove.dart';
 import 'programs.dart';
-import 'programs_view.dart';
+import 'programs_view.dart' show PlanDialog;
 import 'store_extension.dart';
 
 /// One extension an extensions catalog lists, as the host's `extension/catalogs` gives it: the catalog's claim, shown before
@@ -307,29 +308,19 @@ class ExtensionCatalogs extends ChangeNotifier {
   }
 
   Future<void> _remove(BuildContext context, String name) async {
-    final sure = await showSelectableDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        key: const Key('extension-store-remove-dialog'),
-        title: Text('Remove $name'),
-        content: const Text(
-          'The extension goes out of the host\'s canoa.cfg, and its files out of the folder the host kept them in. Its types leave the '
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove $name',
+      body: 'The extension goes out of the host\'s canoa.cfg, and its files out of the folder the host kept them in. Its types leave the '
           'Store when the host restarts.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialog, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const Key('extension-store-remove-confirm'),
-            onPressed: () => Navigator.pop(dialog, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (sure != true || !context.mounted) return;
+      cancelLabel: 'Cancel',
+      dialogKey: const Key('extension-store-remove-dialog'),
+      cancelKey: null,
+      confirmKey: const Key('extension-store-remove-confirm'),
+      selectable: true,
+    ) || !context.mounted) {
+      return;
+    }
     try {
       await (await _control()).call('extension/remove', {'name': name});
     } on Object catch (error) {

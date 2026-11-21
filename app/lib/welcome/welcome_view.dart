@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'package:flutter/material.dart';
 
-import '../desktop/control_client.dart';
+import '../desktop/control_client.dart' show hostWords;
 import '../history/session_import.dart';
 import '../sources/source_icons.dart';
 import '../sources/sources.dart';
@@ -87,7 +87,7 @@ class _WelcomeViewState extends State<WelcomeView> {
           ..addAll(found.where((each) => !each.imported));
       });
     } on Object catch (error) {
-      if (mounted) setState(() => _importFailed = 'Could not look: ${_why(error)}');
+      if (mounted) setState(() => _importFailed = 'Could not look: ${hostWords(error)}');
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -107,13 +107,11 @@ class _WelcomeViewState extends State<WelcomeView> {
         _imported = done.imported == 1 ? 'Imported 1 session.' : 'Imported ${done.imported} sessions.';
       });
     } on Object catch (error) {
-      if (mounted) setState(() => _importFailed = 'Could not import: ${_why(error)}');
+      if (mounted) setState(() => _importFailed = 'Could not import: ${hostWords(error)}');
     } finally {
       if (mounted) setState(() => _importing = false);
     }
   }
-
-  static String _why(Object error) => error is ControlFailed ? error.message : '$error';
 
   /// The sessions the host found, by source, each with a box: what Import would bring in is what is ticked.
   Widget _choices(BuildContext context, HistoryImport offer, List<ImportChoice> found) {

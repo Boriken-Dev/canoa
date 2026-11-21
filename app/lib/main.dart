@@ -1,11 +1,11 @@
 import 'attention/notifier.dart';
 import 'dart:async';
-import 'dart:convert' show utf8;
 import 'served/folder_dialog.dart';
 import 'served/served_control.dart' show servedControl;
 import 'workspace/remote_host.dart';
 import 'served/served_app.dart';
 import 'desktop/control_client.dart' show ControlFailed;
+import 'desktop/host_services.dart';
 import 'config/canoa_config.dart';
 import 'config/connection.dart' show Connection, ConnectionKind, ConnectionTransport;
 import 'config/canoa_config_file.dart';
@@ -22,13 +22,11 @@ import 'profile/profile_items.dart';
 import 'sources/source_icons.dart' show sourceProvider;
 import 'extension/composer_extension.dart';
 import 'extension/local_host.dart';
-import 'extension/local_host_banner.dart';
 import 'extension/local_host_control.dart';
 import 'client/client_mode.dart';
 import 'client/full_app.dart' as full_app;
 import 'client/pane_link.dart';
 import 'client/pane_pairing.dart';
-import 'client/related_rail.dart';
 import 'client/related_sessions.dart';
 import 'client/relation.dart';
 import 'client/relation_source.dart';
@@ -45,7 +43,6 @@ import 'acp/local_agent.dart';
 import 'acp/secret_identity.dart';
 import 'desktop/child_flag.dart';
 import 'package:coqui_acp/page.dart';
-import 'package:desktop_drop/desktop_drop.dart';
 import 'connect_dialog.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -62,12 +59,9 @@ import 'chat/mentions.dart' show FolderServices;
 import 'chat/modes.dart' show modeEntries, modeOptionIn;
 import 'chat/session_options.dart' show OptionRole, optionIn;
 import 'chat/delegate_dialog.dart';
-import 'chat/delegation_setup_dialog.dart';
 import 'chat/git_changes.dart' show GitReader;
-import 'chat/inspector.dart';
 import 'chat/timing_log.dart';
 import 'chat/inspector_surfaces.dart';
-import 'chat/run_in_terminal.dart';
 import 'surfaces/files_surface.dart';
 import 'surfaces/terminal_controller.dart' show ControlTerminals;
 import 'surfaces/terminal_remote.dart';
@@ -76,21 +70,11 @@ import 'surfaces/terminal_surface.dart';
 import 'served/host_files.dart' show HostFiles, WorkspaceFiles;
 import 'served/host_config.dart' show HostConfigChanged, HostConfigStore;
 import 'served/host_state.dart';
-import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
-import 'chat/child_thread.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat show ChatRenderers, ClipboardReader;
 import 'chat/clipboard.dart';
 import 'chat/composer.dart';
 import 'chat/dictation.dart';
-import 'chat/reply_voice.dart';
-import 'chat/delegation_row.dart';
-import 'chat/delegation_view.dart';
-import 'chat/new_session_view.dart';
-import 'chat/palette.dart';
 import 'chat/source_trouble.dart';
-import 'chat/agent_events.dart' show AgentCommandInfo;
-import 'chat/session_views.dart';
-import 'package:flutter/services.dart' show KeyUpEvent, LogicalKeyboardKey;
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
 import 'history/agent_switch.dart';
@@ -100,7 +84,6 @@ import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
 import 'ledger/running_sessions.dart';
 import 'ledger/session_ledger.dart';
-import 'chat/presence.dart';
 import 'permissions/host_paths.dart';
 import 'permissions/permission_rules.dart';
 import 'popout/platform.dart' as popout_platform;
@@ -123,7 +106,6 @@ import 'profile/approval_dialog.dart';
 import 'profile/effective_setup.dart';
 import 'profile/report.dart';
 import 'secrets/secrets_controller.dart';
-import 'secrets/secrets_host.dart';
 import 'secrets/provider_setup.dart';
 import 'secrets/secrets_section.dart';
 import 'secrets/secrets_index.dart';
@@ -135,20 +117,16 @@ import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
 import 'desktop/hosting_panel.dart' show HostingPanel;
 import 'desktop/knowledge_panel.dart' show KnowledgeSearchPanel;
+import 'shell/app_palette.dart' show ConversationHandle;
+import 'shell/canoa_home.dart';
 import 'shell/hosts/host_status.dart' show ConnectionProbe, probeConnection;
 import 'shell/hosts/hosts_controller.dart';
 import 'shell/hosts/hosts_section.dart';
 import 'shell/layout_backend.dart';
-import 'shell/layout_controls.dart';
 import 'shell/layout_state.dart';
 import 'shell/surface.dart';
-import 'shell/work_panel.dart';
-import 'shell/sections.dart';
-import 'usage/spend_model.dart' show SpendRow;
 import 'usage/usage_model.dart';
 import 'usage/usage_section.dart';
-import 'shell/shell.dart';
-import 'rail/session_rail.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/source_checks.dart';
@@ -175,7 +153,6 @@ import 'workspace/host_folders.dart';
 import 'workspace/open_in.dart';
 import 'workspace/open_in_host.dart' show HostedOpening;
 import 'served/web_mode.dart' show WebMode;
-import 'workspace/open_in_ui.dart';
 import 'workspace/scratch.dart';
 import 'workspace/site.dart' show siteFqdn;
 import 'workspace/site_meta.dart';
@@ -188,7 +165,6 @@ import 'voice/host_speech.dart';
 import 'voice/host_speech_output.dart';
 import 'voice/outputs.dart';
 import 'voice/pcm_player.dart';
-import 'voice/record_capture.dart';
 import 'voice/reply_reader.dart';
 import 'voice/system_speech.dart';
 
@@ -589,29 +565,11 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   /// The store extensions of the host's canoa.cfg, edited in Settings where this key may change the host's own settings.
-  late final ExtensionSettings? _extensionSettingsHeld = _hostFiles == null
-      ? null
-      : ExtensionSettings(
-          files: _hostFiles,
-          types: () async {
-            final held = _extensionsHeld;
-            if (held == null) return const {};
-            await held.refresh();
-            return held.addedBy;
-          },
-          restart: _restartForExtensions,
-          saved: _extensionsSaved,
-        );
-
-  ExtensionSettings? get _extensionSettings => _grants?.may(HostGrants.hosting) ?? false ? _extensionSettingsHeld : null;
+  ExtensionSettings? get _extensionSettings => _grants?.may(HostGrants.hosting) ?? false ? _services.extensionSettingsHeld : null;
 
   /// The shells the host found and which of them its terminals and agents use, chosen in Settings where this key may change the
   /// host's own settings.
-  late final ShellSettings? _shellSettingsHeld = _hostFiles == null
-      ? null
-      : ShellSettings(files: _hostFiles, restart: _restartForExtensions, saved: _extensionsSaved);
-
-  ShellSettings? get _shellSettings => _grants?.may(HostGrants.hosting) ?? false ? _shellSettingsHeld : null;
+  ShellSettings? get _shellSettings => _grants?.may(HostGrants.hosting) ?? false ? _services.shellSettingsHeld : null;
 
   /// Has the host start again so that it loads the extensions canoa.cfg now names; true when it did.
   Future<bool> _restartForExtensions() async {
@@ -666,7 +624,7 @@ class _CanoaAppState extends State<CanoaApp> {
       : WorkSurfaces(widget.surfaces!);
 
   /// The kinds of tab the host's providers offer the panel: a shell, a log, and what an extension adds.
-  late final PanelTabKinds? _panelTabs = _control == null ? null : PanelTabKinds((method, params) async => (await _control.ready(wait: false)).call(method, params));
+  PanelTabKinds? get _panelTabs => _services.panelTabs;
 
   /// Hosting is part of Local's overview, in the Hosts section.
   Future<void> _showHosting() async {
@@ -758,7 +716,7 @@ class _CanoaAppState extends State<CanoaApp> {
       _settingsKey.currentState?.controller.adopt(changed);
     },
     sessions: () => store.sessions,
-    nearby: _control == null ? null : () async => nearbyOf(await _control.ready(wait: false)),
+    nearby: _control == null ? null : () async => nearbyOf(await _control!.ready(wait: false)),
     local: widget.host == null || widget.served != null
         ? null
         : () => HostSummary.ofSupervisor(widget.host!, grants: _grants?.held),
@@ -1027,8 +985,8 @@ class _CanoaAppState extends State<CanoaApp> {
     key: _loadoutKey,
     embedded: true,
     selection: _storeSelection,
-    contentsStorage: _control == null ? null : ControlContentsStorage(_control),
-    contentsReader: _control == null ? null : ControlContentsReader(_control, os: _home?.os ?? 'linux'),
+    contentsStorage: _control == null ? null : ControlContentsStorage(_control!),
+    contentsReader: _control == null ? null : ControlContentsReader(_control!, os: _home?.os ?? 'linux'),
     config: config,
     home: _home,
     onSave: _saveLoadout,
@@ -1037,8 +995,8 @@ class _CanoaAppState extends State<CanoaApp> {
     extensionTypes: _storeTypes(),
     runtimes: _programs == null ? null : _extensionsHeld?.runtimes,
     // The host reads catalogs and looks programs up, for a page and the desktop alike.
-    findProgram: _control == null ? null : controlFindProgram(_control),
-    overlayNeeds: _control == null ? null : controlOverlayNeeds(_control),
+    findProgram: _control == null ? null : controlFindProgram(_control!),
+    overlayNeeds: _control == null ? null : controlOverlayNeeds(_control!),
     index: ControlStoreIndex.over(_control)?.catalogs,
     catalogTypes: ControlCatalogTypes.over(_control)?.read,
     readCatalog: controlCatalogRead(_control),
@@ -1061,7 +1019,7 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   /// What the conversation shown offers the keyboard and the palette.
-  final _conversation = _ConversationHandle();
+  final _conversation = ConversationHandle();
 
   /// How the rail groups the sessions, which the keyboard's order follows.
   final ValueNotifier<SessionGrouping> _grouping = ValueNotifier(SessionGrouping.status);
@@ -1257,27 +1215,40 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Whether canoa.cfg sets any profile, so an agent given none of it says so.
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
-  late final HostControl? _control = widget.served?.control ?? (widget.host == null ? null : HostControl(widget.host!));
+  late final HostServices _services = HostServices(
+    control: widget.served?.control ?? (widget.host == null ? null : HostControl(widget.host!)),
+    hostFilesOverride: widget.served?.files,
+    hostFoldersOverride: widget.hostFolders,
+    speechCapture: widget.speechCapture,
+    mailHostOverride: widget.mailHost,
+    agentMovesOverride: widget.agentMoves,
+    accountsController: () => _accountsHeld,
+    onGrantsChanged: _grantsChanged,
+    onFoldersChanged: _foldersChanged,
+    onProgramsChanged: _programsChanged,
+    onExtensionsChanged: _extensionsChanged,
+    afterProgramChange: _hostReadsPrograms,
+    onRestartForExtensions: _restartForExtensions,
+    onExtensionsSaved: _extensionsSaved,
+    onAfterExtensionInstall: _secretProviderInstalled,
+  );
 
-  /// The sessions the host keeps running for several clients, which Earlier conversations lists to join.
-  late final RunningSessions? _running = _control == null
-      ? null
-      : RunningSessions(() async {
-          final control = _control;
-          final answer = await (await control.ready(wait: false)).call('sessions/running');
-          if (answer is! Map || answer['sessions'] is! List) return const [];
-          return [for (final each in answer['sessions'] as List) ?RunningSession.parse(each)];
-        });
-
-  /// The speech providers of the host this app reaches, which run what a page or a platform without a speech service of its own records.
-  late final HostSpeechCatalog? _hostSpeech = _control == null
-      ? null
-      : HostSpeechCatalog(
-          _control,
-          capture: widget.speechCapture ?? const RecordCapture(),
-          grants: _grants,
-          programs: ProgramStores(control: () => _control.ready(wait: false), open: _control.open, kind: 'runtimes'),
-        );
+  HostControl? get _control => _services.control;
+  RunningSessions? get _running => _services.running;
+  HostSpeechCatalog? get _hostSpeech => _services.hostSpeech;
+  HostVoiceCatalog? get _hostVoices => _services.hostVoices;
+  HostGrants? get _grants => _services.grants;
+  HostFiles? get _hostFiles => _services.hostFiles;
+  HostFolders? get _hostFolders => _services.hostFolders;
+  ControlTerminals? get _terminals => _services.terminals;
+  UsageController? get _usageHeld => _services.usageHeld;
+  SecretsController? get _secretsHeld => _services.secretsHeld;
+  MailAccountsController? get _mailHeld => _services.mailHeld;
+  AgentMoves? get _moves => _services.moves;
+  PortableAgents? get _portable => _services.portable;
+  ProgramStores? get _programsHeld => _services.programsHeld;
+  StoreExtensions? get _extensionsHeld => _services.extensionsHeld;
+  HostSections get _hostSections => _services.hostSections;
 
   /// Reads what the host's speech providers are, once, before a dictation looks for its service: a page that has just opened has
   /// not asked, and a host that was down is asked again.
@@ -1303,11 +1274,6 @@ class _CanoaAppState extends State<CanoaApp> {
     return null;
   }
 
-  /// The voice providers of the host this app reaches, which read replies aloud for a page and for a platform with no voices of its
-  /// own. They run over the same control channel as the speech-to-text ones.
-  late final HostVoiceCatalog? _hostVoices = _hostSpeech == null ? null : HostVoiceCatalog(_hostSpeech.call);
-
-  /// Every voice this app or page can read aloud with.
   late final VoiceOutputs _voiceOutputs = widget.voiceOutputs ?? VoiceOutputs(host: _hostVoices, browser: browserSpeechOutputs(), load: _voicesReady);
 
   /// Reads the host's voice providers once, before the first reply is read: a page that has just opened has not asked, and a host
@@ -1376,11 +1342,6 @@ class _CanoaAppState extends State<CanoaApp> {
     },
   );
 
-  late final HostFiles? _hostFiles = widget.served?.files ?? (_control == null ? null : HostFiles(_control));
-
-  /// The host's answers about folders: whether one is there and in a repository, an `@`'s names, a chat's scratch folder.
-  late final HostFolders? _hostFolders = (widget.hostFolders ?? (_control == null ? null : HostFolders(_control)))?..addListener(_foldersChanged);
-
   void _foldersChanged() {
     if (mounted) setState(() {});
   }
@@ -1398,8 +1359,6 @@ class _CanoaAppState extends State<CanoaApp> {
         ? session.place == SessionPlace.local || session.place == SessionPlace.host
         : session.peerId == null || session.peerId == served.host.peer;
   }
-
-  late final ControlTerminals? _terminals = _control == null ? null : ControlTerminals(_control);
 
   /// What this app's own host offers of a shell: the Terminal section's Local row (a page's own host on a served page).
   Future<TerminalAccess> _localTerminal() async {
@@ -1473,12 +1432,12 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Whether [session]'s folder is on a computer this app can ask about links and repositories: the host it is a client of.
   bool _pathsOnHost(ChatSession session) => _viaHost && _filesOf(session) != null;
 
-  Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
+  Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control!);
 
   /// Reads the repository in [session]'s folder through the host its agent runs on; null where none can.
   GitReader? _gitReaderFor(ChatSession session) {
     if (widget.gitReader != null) return widget.gitReader!(session);
-    if (session.place == SessionPlace.local) return _control == null ? null : HostGit(controlWorktreeCall(_control));
+    if (session.place == SessionPlace.local) return _control == null ? null : HostGit(controlWorktreeCall(_control!));
     final worktrees = _worktrees(session.place, endpoint: session.endpoint?.toString(), fallback: session.websocketFallback?.toString(),
         peerId: session.peerId, method: session.method);
     return worktrees is HostWorktrees ? HostGit(worktrees.call) : null;
@@ -1670,10 +1629,6 @@ class _CanoaAppState extends State<CanoaApp> {
     return SourceCheck(missing: listening.missing);
   }
 
-  /// What the host this app reaches gives its key. The app shows the program Store and the accounts when it says so, and the
-  /// host's own link holds every grant: the host is the one place that decides.
-  late final HostGrants? _grants = _control == null ? null : (HostGrants(() => _control.ready(wait: false))..addListener(_grantsChanged));
-
   StreamSubscription<void>? _reconnects;
 
   /// The link to the host was made again after it ended (the host restarted, or the connection came back): what the page read of
@@ -1705,14 +1660,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (_programs != null && _checked) unawaited(_checkSources());
   }
 
-  /// The Usage section: the limits of the host this app reaches, which the section shows when the host grants `usage`.
-  late final UsageController? _usageHeld = _control == null
-      ? null
-      : UsageController(sources: [ControlUsageSource('This host', _control)], accounts: _accountsHeld);
-
   UsageController? get _usage => _grants?.may(HostGrants.usage) ?? false ? _usageHeld : null;
-
-  late final SecretsController? _secretsHeld = _control == null ? null : SecretsController(host: ControlSecretsHost(_control));
 
   SecretsController? get _secrets => _grants?.may(HostGrants.secrets) ?? false ? _secretsHeld : null;
 
@@ -1725,22 +1673,6 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The mail accounts of the host this app reaches, for Settings; none where the app reaches no host or the host does not grant
   /// setting them up.
   MailAccountsController? get _mail => widget.mailHost != null || (_grants?.may(HostGrants.mailSetup) ?? false) ? _mailHeld : null;
-
-  late final MailAccountsController? _mailHeld = _buildMail();
-
-  MailAccountsController? _buildMail() {
-    final control = _control;
-    final host = widget.mailHost ?? (control == null ? null : ControlMailHost(control));
-    return host == null ? null : MailAccountsController(host: host);
-  }
-
-  /// How a running conversation changes agent: the host's own export and import, over its control channel.
-  late final AgentMoves? _moves = widget.agentMoves ?? _controlMoves();
-  AgentMoves? _controlMoves() {
-    final control = _control;
-    return control == null ? null : ControlAgentMoves(() => control.ready());
-  }
-  late final PortableAgents? _portable = _moves == null ? null : PortableAgents(_moves);
 
   AccountsController? _buildAccounts() {
     final control = _control;
@@ -1790,7 +1722,7 @@ class _CanoaAppState extends State<CanoaApp> {
       for (final entry in edited.hostEntries)
         if (!_sameList(edited.hostAccountsOf(entry.name), view.hostAccountsOf(entry.name))) entry.name: edited.hostAccountsOf(entry.name),
     };
-    final accountsHost = widget.accountsHost ?? (_control == null ? null : ControlAccountsHost(_control));
+    final accountsHost = widget.accountsHost ?? (_control == null ? null : ControlAccountsHost(_control!));
     for (final MapEntry(:key, :value) in offers.entries) {
       await accountsHost?.offer(key, value, harness: edited.hostHarnessOf(key));
     }
@@ -1893,25 +1825,6 @@ class _CanoaAppState extends State<CanoaApp> {
     );
     return ok ?? false;
   }
-
-  /// The programs the host's Store keeps. Nothing is asked of the host until a page that shows them, or a source's readiness,
-  /// needs it; an install runs only when the person confirms its plan.
-  late final ProgramStores? _programsHeld = _control == null
-      ? null
-      : (ProgramStores(control: () => _control.ready(wait: false), open: _control.open, afterChange: _hostReadsPrograms)
-          ..addListener(_programsChanged));
-
-  /// Runtimes and the types extensions add, which the host lists and installs from; asked only once the Store is shown.
-  late final StoreExtensions? _extensionsHeld = _control == null
-      ? null
-      : (StoreExtensions(
-          control: () => _control.ready(wait: false),
-          open: _control.open,
-          mayInstall: () => _grants?.may(HostGrants.hosting) ?? false,
-          restart: _restartForExtensions,
-          saved: _extensionsSaved,
-          afterInstall: _secretProviderInstalled,
-        )..addListener(_extensionsChanged));
 
   /// A program of the Secret providers type was installed: its provider is set up next, in the form the host describes.
   Future<void> _secretProviderInstalled(BuildContext context, String type) async {
@@ -2565,7 +2478,7 @@ class _CanoaAppState extends State<CanoaApp> {
             'mode': [for (final entry in modeEntries(modeOptionIn(options))) entry.value],
           },
           unsupported: session.presetUnsupported,
-          overlayNeeds: _control == null ? null : controlOverlayNeeds(_control),
+          overlayNeeds: _control == null ? null : controlOverlayNeeds(_control!),
           onInstallRuntime: _programs == null
               ? null
               : (providers) async {
@@ -3183,7 +3096,6 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   void dispose() {
-    _running?.dispose();
     store.removeListener(_keepSelection);
     if (widget.layout == null) _layout.dispose();
     _surfaces.dispose();
@@ -3210,7 +3122,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.pathsOnHost, _pathsOnHost)) store.pathsOnHost = null;
     widget.host?.removeListener(_hostChanged);
     unawaited(_reconnects?.cancel());
-    _hostFolders?.dispose();
+    _services.dispose();
     _dictation.dispose();
     _reader.stop();
     _reader.dispose();
@@ -3223,7 +3135,6 @@ class _CanoaAppState extends State<CanoaApp> {
       accounts.dispose();
     }
     _remoteAccounts.clear();
-    unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
     widget.shell?.beforeQuit = null;
@@ -3365,7 +3276,7 @@ class _CanoaAppState extends State<CanoaApp> {
         : (session, target) => store.switchAgent(
             session,
             target,
-            move: (moving, to) => _moves.move(entry: moving.agent, session: moving.remoteSessionId!, to: to, cwd: moving.cwd),
+            move: (moving, to) => _moves!.move(entry: moving.agent, session: moving.remoteSessionId!, to: to, cwd: moving.cwd),
             start: (moving, source) async {
               final client = await _agentFor(
                 place: SessionPlace.local,
@@ -3448,55 +3359,11 @@ class _CanoaAppState extends State<CanoaApp> {
     () => themeFor(family, brightness, density: config.density),
   );
 
-  /// Asks the host for the families it lists, which the Claude and ChatGPT looks draw from; until it answers they draw as Canoa's.
-  Future<void> _loadLooks() async {
-    final control = _control;
-    if (control == null) return;
-    try {
-      final client = await control.ready(wait: false);
-      vendorLooks.adopt(await client.call('looks/list', const {}));
-    } on Object catch (error) {
-      vendorLooks.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
-    }
-  }
+  Future<void> _loadLooks() => _services.loadLooks();
 
-  /// Asks the host which agents it has loaded: the only place the app learns which agents there are, what each is called, and what its
-  /// mark looks like. Until it answers, none is known.
-  Future<void> _loadProviders() async {
-    final control = _control;
-    if (control == null) return;
-    try {
-      final client = await control.ready(wait: false);
-      providerCatalog.adopt(await client.call('providers/list', const {}));
-    } on Object catch (error) {
-      providerCatalog.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
-    }
-  }
+  Future<void> _loadProviders() => _services.loadProviders();
 
-  /// The sections of Settings the host's providers offer, drawn from what each says of itself.
-  late final HostSections _hostSections = _control == null ? HostSections.withoutHost() : HostSections((method, params) async => (await _control.ready(wait: false)).call(method, params));
-
-  /// Asks the host which items a profile may set: the editor draws a form for each from what its provider says of it.
-  Future<void> _loadProfileItems({bool wait = false}) async {
-    final control = _control;
-    if (control == null) return;
-    try {
-      final client = await control.ready(wait: wait);
-      unawaited(_hostSections.load());
-      unawaited(_panelTabs?.load());
-      profileItems.adopt(await client.call('profile_items/list', const {}));
-      if (profileItems.asksForClientCertificate) {
-        // The pick is only for the owner or a key that edits profiles: a refusal leaves the keystores' own choice alone.
-        try {
-          profileCertificates.adopt(await client.call('network/client_certificates', const {}));
-        } on Object {
-          profileCertificates.failed();
-        }
-      }
-    } on Object catch (error) {
-      profileItems.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
-    }
-  }
+  Future<void> _loadProfileItems({bool wait = false}) => _services.loadProfileItems(wait: wait);
 
   @override
   Widget build(BuildContext context) {
@@ -3522,7 +3389,7 @@ class _CanoaAppState extends State<CanoaApp> {
       themeMode: config.themeMode,
       home: AnimatedBuilder(
         animation: Listenable.merge([store, _popout]),
-        builder: (context, _) => _CanoaHome(
+        builder: (context, _) => CanoaHome(
           store: store, onNewSession: _newSession, onSettings: _showSettings,
           onHosts: () => _showSection(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen, running: _running, onAttach: _attachRunning,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
@@ -3554,863 +3421,9 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 }
 
-class _CanoaHome extends StatelessWidget {
-  const _CanoaHome({
-    required this.store, required this.onNewSession, required this.onSettings,
-    this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, this.running, this.onAttach, required this.conversation, this.kit = const ComposerKit(),
-    this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.localHost, required this.grouping,
-    required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
-    required this.hostsIndex, required this.hostsPage, required this.storeIndex, required this.loadoutsIndex, this.usageIndex, this.usagePage, this.secretsIndex, this.secretsPage, this.sessionSpend,
-    required this.terminalIndex, required this.terminalMain,
-    this.chatOnly = false, this.relations, required this.onNewRelated, required this.onResumeRelated, this.onOpenFullApp, this.startOptions,
-  });
-
-  /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
-  final LocalHostBridge? localHost;
-
-  final ValueNotifier<SessionGrouping> grouping;
-  final ShellLayout layout;
-  final WorkSurfaces surfaces;
-
-  /// The main views of the Settings, Store and Loadouts sections.
-  final Widget settings, loadout, loadouts;
-
-  /// The Hosts section's index and main view.
-  final Widget hostsIndex, hostsPage, storeIndex, loadoutsIndex;
-
-  /// The Usage section's index and main view; none where the host does not grant usage.
-  final Widget? usageIndex, usagePage;
-
-  /// The Secrets section's main view; none where the host does not grant secrets.
-  final Widget? secretsIndex, secretsPage;
-
-  /// The Terminal section's index and main view.
-  final Widget terminalIndex, terminalMain;
-
-  /// Whether this is the chat-only app: the conversation and the sessions related to what is in front of the client, with none of
-  /// the sections, panels or surfaces of the whole app, and a way to open that.
-  final bool chatOnly;
-
-  /// What is in front of the client, and what the chat-only index does with it.
-  final RelationSource? relations;
-  final Future<void> Function(Relation relation) onNewRelated;
-  final Future<void> Function(LedgerEntry entry) onResumeRelated;
-  final VoidCallback? onOpenFullApp;
-
-  /// The loadout and profile the next session started for what is in front starts with, chosen beside its button.
-  final Widget? startOptions;
-  final Future<SpendRow?> Function(String sessionId)? sessionSpend;
-
-  final SessionStore store;
-  final Widget welcome;
-
-  /// Whether no agent can start here, which the page of choices for a new session gives way to the welcome page for.
-  final bool noAgent;
-
-  /// Opens a new session's empty view.
-  final VoidCallback onNewSession;
-  final ComposerKit kit;
-  final chat.ChatRenderers renderers;
-  final VoidCallback onSettings;
-  final VoidCallback? onHosts;
-  final VoidCallback? onLoadout, onLoadouts;
-  final String? account;
-  final Future<void> Function()? onSignOut;
-  final Future<void> Function(LedgerEntry)? onReopen;
-
-  /// The sessions the host keeps running, and what joins one.
-  final RunningSessions? running;
-  final Future<void> Function(RunningSession)? onAttach;
-  final _ConversationHandle conversation;
-
-  /// The session [step] places from the one chosen, going round the list.
-  void _step(int step) {
-    final sessions = listOrder(store.listed, grouping.value);
-    if (sessions.isEmpty) return;
-    final at = sessions.indexWhere((session) => session.id == store.selectedId);
-    store.select(sessions[(at + step) % sessions.length].id);
-  }
-
-  /// The agent's first option of [kind] for the question shown, if any.
-  void _answer(String kind) {
-    final session = store.selected;
-    if (session == null || session.pendingPermissions.isEmpty) return;
-    final options = session.pendingPermissions.first.options;
-    final chosen = options.where((option) => option.kind == kind).firstOrNull ??
-        (kind == 'reject_once' ? options.where((option) => option.rejects).firstOrNull : null);
-    if (chosen != null) store.choosePermission(session, chosen);
-  }
-
-  void _stop() {
-    if (store.selected?.status == SessionStatus.working) unawaited(store.cancelActiveSession().catchError((Object _) {}));
-  }
-
-  /// The rail as the window shows it: beside the conversation, or in the drawer.
-  Widget _rail(BuildContext context) => SessionRail(
-    store: store, onNewSession: onNewSession,
-    onReopen: onReopen, running: running, onAttach: onAttach, grouping: grouping,
-    initialScroll: layout.of(ShellLayout.conversations).scroll,
-    onScroll: (offset, {required end}) {
-      layout.setScroll(ShellLayout.conversations, offset);
-      if (end) unawaited(layout.flush());
-    },
-    onSearch: () => unawaited(_palette(context, sessionsOnly: true)),
-    onClose: conversation.close ?? store.close,
-  );
-
-  Future<void> _palette(BuildContext context, {bool sessionsOnly = false}) {
-    final session = store.selected;
-    return showSelectableDialog<void>(
-      context: context,
-      builder: (_) => CommandPalette(items: sessionsOnly ? [
-        for (final other in listOrder(store.listed, grouping.value))
-          PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
-      ] : [
-        PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
-        if (!chatOnly && session != null && conversation.showChanges != null && (changeTotals(session) != null))
-          PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
-        if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
-        if (session != null && store.canDelegate(session))
-          PaletteItem('Delegate task', () => unawaited(showDelegateDialog(context, store, session)),
-              detail: 'Hand a task to another agent, model or host', icon: Icons.account_tree_outlined),
-        if (session != null && store.canDelegate(session))
-          PaletteItem('Delegation setup', () => unawaited(openDelegationSetup(context, store, session)),
-              detail: 'Which agents this conversation may delegate to, and what it may attach', icon: Icons.tune),
-        if (!chatOnly && session != null)
-          if (workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target case final target?)
-            for (final action in workspaceOpener.actionsFor(WorkspaceContext.palette, target))
-              PaletteItem(action.label, () => unawaited(runWorkspaceAction(context, action, target)),
-                  detail: target.path, icon: action.icon),
-        if (chatOnly)
-          PaletteItem('Open the full app', onSettings, detail: 'Workspaces, terminal, Store and Settings', icon: Icons.open_in_new)
-        else ...[
-          PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
-          if (onLoadouts != null) PaletteItem('Loadouts', onLoadouts!, icon: Icons.inventory_2_outlined),
-          if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
-          if (onHosts != null) PaletteItem('Hosts', onHosts!, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
-        ],
-        PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
-        for (final other in store.listed)
-          if (other.id != store.selectedId)
-            PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
-        for (final command in session?.commands ?? const <AgentCommandInfo>[])
-          PaletteItem('/${command.name}', () => conversation.insert?.call('/${command.name} '),
-              detail: command.description.isEmpty ? 'A command of the agent\'s' : command.description, icon: Icons.terminal),
-        PaletteItem('Open in browser', () => unawaited(askToOpenInBrowser(context, workspaceOpener)),
-            detail: 'A web address, in the system browser', icon: Icons.open_in_browser),
-      ]),
-    );
-  }
-
-  /// The keyboard's shortcuts, wherever focus is in the window.
-  Map<ShortcutActivator, VoidCallback> _shortcuts(BuildContext context) => {
-    chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
-    chord(LogicalKeyboardKey.keyN): onNewSession,
-    // The chat-only app has no panels.
-    if (!chatOnly) ...{
-      chord(LogicalKeyboardKey.backquote): () {
-        if (store.selected case final session?) toggleBottomPanel(surfaces: surfaces, layout: layout, session: session);
-      },
-      chord(LogicalKeyboardKey.keyB, alt: true): () {
-        if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.right)) layout.toggleRight();
-      },
-    },
-    // The shell hears it too when focus is inside it; this is for focus above, where nothing in the shell is.
-    chord(LogicalKeyboardKey.keyB): () {
-      if (layout.section == ShellLayout.conversations) layout.toggleIndex(layout.section);
-    },
-    chord(LogicalKeyboardKey.comma): onSettings,
-    for (final (index, key) in const [
-      LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3,
-      LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5, LogicalKeyboardKey.digit6,
-      LogicalKeyboardKey.digit7, LogicalKeyboardKey.digit8, LogicalKeyboardKey.digit9,
-    ].indexed)
-      chord(key): () {
-        final ordered = listOrder(store.listed, grouping.value);
-        if (index < ordered.length) store.select(ordered[index].id);
-      },
-    chord(LogicalKeyboardKey.tab): () => _step(1),
-    chord(LogicalKeyboardKey.tab, shift: true): () => _step(-1),
-    chord(LogicalKeyboardKey.keyL): () => conversation.focusComposer?.call(),
-    chord(LogicalKeyboardKey.space, shift: true): () => unawaited(kit.dictation?.press() ?? Future.value()),
-    chord(LogicalKeyboardKey.period): _stop,
-    chord(LogicalKeyboardKey.keyA, shift: true): () => _answer('allow_once'),
-    chord(LogicalKeyboardKey.keyR, shift: true): () => _answer('reject_once'),
-    chord(LogicalKeyboardKey.keyD, shift: true): () => conversation.showChanges?.call(),
-    chord(LogicalKeyboardKey.slash): () => unawaited(showShortcutHelp(context)),
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: _shortcuts(context),
-      child: Focus(
-        autofocus: true,
-        // Push to talk ends when any key of the shortcut comes up.
-        onKeyEvent: (_, event) {
-          if (event is KeyUpEvent && kit.dictation?.holding == true) unawaited(kit.dictation!.release());
-          return KeyEventResult.ignored;
-        },
-        child: _layout(context),
-      ),
-    );
-  }
-
-  Widget _layout(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final narrow = AppShell.isNarrow(constraints.maxWidth) ||
-          Uri.base.queryParameters['view'] == 'panel';
-      return Selectable(child: AppShell(
-        layout: layout,
-        narrow: narrow,
-        account: account,
-        onSignOut: onSignOut,
-        indexWidth: context.look.railWidth,
-        banner: localHost == null ? null : LocalHostBanner(bridge: localHost!),
-        selector: !chatOnly,
-        sections: [
-          AppSection(
-            id: ShellLayout.conversations,
-            ownsLayoutControls: true,
-            label: 'Conversations',
-            icon: Icons.chat_bubble_outline,
-            index: chatOnly ? _relatedRail() : _rail(context),
-            main: _Conversation(
-              key: ValueKey(store.selectedId ?? 'empty'),
-              store: store,
-              narrow: narrow,
-              handle: conversation,
-              layout: layout,
-              surfaces: surfaces,
-              kit: kit,
-              renderers: renderers,
-              welcome: welcome,
-              noAgent: noAgent,
-              sessionSpend: sessionSpend,
-              chatOnly: chatOnly,
-              onOpenFullApp: onOpenFullApp,
-            ),
-          ),
-          if (!chatOnly) ...[
-          AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
-          AppSection(id: 'terminal', label: 'Terminal', icon: Icons.terminal, index: terminalIndex, main: terminalMain),
-          if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
-          if (secretsPage != null) AppSection(id: 'secrets', label: 'Secrets', icon: Icons.key_outlined, index: secretsIndex, main: secretsPage!),
-          AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, index: loadoutsIndex, main: loadouts),
-          AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, index: storeIndex, main: loadout, ownsLayoutControls: true),
-          AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
-          ],
-        ],
-      ));
-    });
-  }
-
-  /// The chat-only app's index: the sessions of what is in front first.
-  Widget _relatedRail() => RelatedRail(
-    source: relations!,
-    store: store,
-    ledger: store.ledger,
-    onNew: onNewRelated,
-    onNewSession: onNewSession,
-    onResume: onResumeRelated,
-    onOpenFullApp: onOpenFullApp,
-    running: running,
-    onAttach: onAttach,
-    startOptions: startOptions,
-  );
-}
-
 /// What a start under way has made so far, for quitting to take back.
 final class _Starting {
   Worktrees? worktrees;
   SessionWorktree? made;
   VerifiedAgent? client;
-}
-
-/// What the conversation shown offers the keyboard and the palette, set by it while it is shown.
-final class _ConversationHandle {
-  Object? owner;
-  VoidCallback? focusComposer, showChanges;
-  ValueChanged<String>? insert;
-
-  /// Ends a conversation as the app does, asking after its worktree; set by the app.
-  Future<void> Function(ChatSession)? close;
-
-  /// The sources a session can move to, by name and as shown, and the move itself; set by the app.
-  Map<String, String> Function(ChatSession)? moveTargets;
-  Future<void> Function(BuildContext, ChatSession)? move;
-
-  /// The sessions the host brought in for a session's source, for Earlier conversations, whether it has any to list, and the
-  /// showing of one; set by the app.
-  bool Function(ChatSession)? canListImported;
-  Future<List<AcpSessionInfo>> Function(ChatSession)? imported;
-  Future<void> Function(ChatSession, AcpSessionInfo)? showImported;
-  /// The conversations shown in a window of their own; set by the app.
-  PopoutHub? popout;
-}
-
-class _Conversation extends StatefulWidget {
-  const _Conversation({
-    super.key, required this.store, required this.narrow, required this.handle, required this.layout, required this.surfaces,
-    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.sessionSpend,
-    this.chatOnly = false, this.onOpenFullApp,
-  });
-
-  /// Whether this is the chat-only app, whose conversation has no work panels, inspector, terminal or workspace to open.
-  final bool chatOnly;
-
-  /// Opens the whole app, which the chat-only header offers.
-  final VoidCallback? onOpenFullApp;
-
-  final Widget welcome;
-  final bool noAgent;
-
-  /// What the host recorded a session spending, for the inspector; null where the host does not grant usage.
-  final Future<SpendRow?> Function(String sessionId)? sessionSpend;
-  final _ConversationHandle handle;
-  final ComposerKit kit;
-  final chat.ChatRenderers renderers;
-
-  final SessionStore store;
-  final bool narrow;
-  final ShellLayout layout;
-  final WorkSurfaces surfaces;
-
-  @override
-  State<_Conversation> createState() => _ConversationState();
-}
-
-class _ConversationState extends State<_Conversation> {
-  final TextEditingController _input = TextEditingController();
-
-  /// The composer's focus.
-  final FocusNode _composerFocus = FocusNode();
-
-  /// The conversation, which keeps its end in view while the person has not scrolled away.
-  final _transcript = GlobalKey<chat.ChatTranscriptState>();
-
-  /// A draft's composer text goes with it, across sessions shown and runs of the app.
-  void _keepText() {
-    final session = widget.store.selected;
-    if (session != null && session.isDraft) widget.store.keepDraftText(session, _input.text);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    final session = widget.store.selected;
-    // A draft's text, or a first message not yet taken by its agent.
-    if (session != null && (session.isDraft || session.draftText.isNotEmpty)) _input.text = session.draftText;
-    _input.addListener(_keepText);
-    widget.store.addListener(_followReplies);
-    widget.handle
-      ..owner = this
-      ..focusComposer = _composerFocus.requestFocus
-      ..showChanges = widget.chatOnly ? null : () {
-        final session = widget.store.selected;
-        if (session != null && !session.isDraft) _showInspector(session);
-      }
-      ..insert = (text) {
-        _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
-        _composerFocus.requestFocus();
-      };
-  }
-
-  /// Voice mode hears the conversation shown as it grows, and reads what is new.
-  void _followReplies() {
-    final reader = widget.kit.reader, session = widget.store.selected;
-    // A child's conversation shown in its place follows itself (child_thread.dart), and the parent's is not read meanwhile.
-    if (reader == null || !reader.voiceMode || session == null || session.isDraft || session.openChild != null) return;
-    followReplies(reader, session.id, session.messages, working: session.status == SessionStatus.working);
-  }
-
-  /// This conversation's renderers: the delegation rows, the terminal's, replies with Play beside Copy, and the app's own.
-  chat.ChatRenderers _renderersFor(ChatSession session) {
-    final reader = widget.kit.reader;
-    var renderers = delegationRenderers.merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command)));
-    if (reader != null) renderers = renderers.merge(replyRenderers(reader));
-    return renderers.merge(widget.renderers);
-  }
-
-  /// Adds [text] to the message being written, on a line of its own.
-  void _addToComposer(String text) {
-    final had = _input.text;
-    final joined = had.isEmpty || had.endsWith('\n') ? '$had$text' : '$had\n$text';
-    _input.value = TextEditingValue(text: joined, selection: TextSelection.collapsed(offset: joined.length));
-  }
-
-  /// Shows the surface [id] in its panel, or hides the panel when that surface is the one it shows. On a narrow window the panel
-  /// takes the whole window, with a way back.
-  void _toggleSurface(ChatSession session, String id) {
-    final surface = widget.surfaces.registry.where((each) => each.id == id).firstOrNull;
-    if (surface == null) return;
-    final mine = widget.surfaces.of(session.id);
-    final open = mine.find(id);
-    final layout = widget.layout;
-    final slot = open?.slot ?? surface.placements.first;
-    final panelOpen = slot == SurfaceSlot.right ? layout.rightOpen : layout.bottomOpen;
-    if (open != null && panelOpen && layout.focus != PanelFocus.main && identical(mine.activeIn(slot), open)) {
-      slot == SurfaceSlot.right ? layout.setRightOpen(false) : layout.setBottomOpen(false);
-      return;
-    }
-    // What the disk holds is read when a surface is shown, so it is not older than the person's last look.
-    widget.store.refreshGit(session);
-    mine.openSurface(surface);
-    slot == SurfaceSlot.right ? layout.showRight() : layout.showBottom();
-  }
-
-  /// The Terminal surface when the host [session] runs on gives a shell to open.
-  TerminalSurface? _terminalSurface(ChatSession session) {
-    if (widget.chatOnly) return null;
-    final surface = widget.surfaces.registry.whereType<TerminalSurface>().firstOrNull;
-    return surface != null && surface.accessFor(session) is TerminalOnHost ? surface : null;
-  }
-
-  /// Types [command] into the session's terminal, shown, without pressing Enter.
-  void _runInTerminal(ChatSession session, String command) {
-    final surface = _terminalSurface(session);
-    if (surface == null) return;
-    final opened = widget.surfaces.of(session.id).openSurface(surface);
-    opened.slot == SurfaceSlot.bottom ? widget.layout.showBottom() : widget.layout.showRight();
-    surface.workspaceFor(opened.controller, session)?.focused?.type(command);
-  }
-
-  /// The Files surface when the host [session] runs on gives its files to browse.
-  FilesSurface? _filesSurface(ChatSession session) {
-    if (widget.chatOnly) return null;
-    final surface = widget.surfaces.registry.whereType<FilesSurface>().firstOrNull;
-    return surface != null && surface.available(session) ? surface : null;
-  }
-
-  /// Shows [path], a file of the session's host, in the Files surface.
-  void _openInFiles(ChatSession session, String path) {
-    final surface = _filesSurface(session);
-    if (surface == null) return;
-    final opened = widget.surfaces.of(session.id).openSurface(surface, null, (controller) => controller.data[FilesSurface.revealKey] = FileReveal(path));
-    opened.slot == SurfaceSlot.bottom ? widget.layout.showBottom() : widget.layout.showRight();
-  }
-
-  /// Takes [text] as a text file on the message being written, or says why it cannot.
-  void _attachText(ChatSession session, String name, String text) {
-    final messenger = ScaffoldMessenger.of(context);
-    final problem = widget.store.addAttachment(session, name, utf8.encode(text), mimeType: 'text/plain');
-    if (problem != null) messenger.showSnackBar(SnackBar(content: Text(problem)));
-  }
-
-  void _showInspector(ChatSession session) => _toggleSurface(session, DetailsSurface.surfaceId);
-
-  @override
-  void dispose() {
-    // A conversation chosen next may have taken the handle already.
-    if (identical(widget.handle.owner, this)) {
-      widget.handle
-        ..owner = null
-        ..focusComposer = null
-        ..showChanges = null
-        ..insert = null;
-    }
-    _input.removeListener(_keepText);
-    widget.store.removeListener(_followReplies);
-    _composerFocus.dispose();
-    _input.dispose();
-    super.dispose();
-  }
-
-  Future<void> _showEarlier(ChatSession session) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final handle = widget.handle;
-    final brought = <String>{};
-    final picked = await showSelectableDialog<AcpSessionInfo>(
-      context: context,
-      builder: (context) => EarlierConversations(
-        list: (cursor) => earlierPage(
-          cursor,
-          imported: (handle.canListImported?.call(session) ?? false) ? () => handle.imported!(session) : null,
-          agent: widget.store.canListEarlier(session) ? (next) => widget.store.earlierSessions(session, cursor: next) : null,
-          onImported: brought.addAll,
-        ),
-      ),
-    );
-    if (picked == null) return;
-    try {
-      if (brought.contains(picked.id)) {
-        await handle.showImported!(session, picked);
-      } else {
-        await widget.store.openEarlier(session, picked);
-      }
-    } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text('That conversation could not be opened: $error')));
-    }
-  }
-
-  /// Puts what was queued back in the composer, after what is written there.
-  void _queuedToComposer(String text) {
-    final current = _input.text;
-    final joined = current.trim().isEmpty ? text : '$current\n\n$text';
-    _input.value = TextEditingValue(text: joined, selection: TextSelection.collapsed(offset: joined.length));
-    _composerFocus.requestFocus();
-  }
-
-  /// Sends the composer's message. While a turn runs it queues, or with [steer] stops the turn and goes first.
-  void _send({bool steer = false}) {
-    final text = _input.text;
-    final session = widget.store.selected;
-    final attached = session?.attachments.isNotEmpty ?? false;
-    if (text.trim().isEmpty && !attached) return;
-    // A draft's first message shows in the conversation while its agent starts; a start that fails puts it back here.
-    final starting = session != null && session.isDraft;
-    try {
-      _input.clear();
-      unawaited(widget.store.sendText(text, steer: steer).catchError((Object error) {
-        if (!mounted) return;
-        // Not sent, so it is there to change and send again.
-        if (session != null && !identical(widget.store.selected, session)) {
-          widget.store.keepDraftText(session, text);
-        } else if (_input.text.isEmpty) {
-          _input.text = text;
-        }
-        final started = session?.remoteSessionId != null;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${steer ? 'Not steered' : starting && !started ? 'Not started' : 'Message not accepted'}: ${reasonOf(error)}')),
-        );
-      }));
-    } on StateError {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Connect and verify an ACP peer before sending.'),
-      ));
-    }
-    _transcript.currentState?.jumpToLatest();
-  }
-
-  /// Under the title: the agent. Its folder, branch and worktree are in the inspector.
-  static String _subtitle(ChatSession? session) => session == null ? 'Multi-session agent chat' : session.agent;
-
-  /// The state a session's header names.
-  static String _state(ChatSession? session) => switch (session?.status) {
-    null => 'Offline',
-    SessionStatus.preview => 'Preview',
-    SessionStatus.draft => 'New',
-    SessionStatus.connecting when session!.isDraft => 'Starting',
-    final status => status.name,
-  };
-
-  Future<void> _popOut(ChatSession session) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await widget.handle.popout!.popOut(session);
-    } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text('Could not open a window: ${error is StateError ? error.message : error}')));
-    }
-  }
-
-  /// The header's entry for opening [session]'s folder on this computer, or null where nothing can be started.
-  (String, IconData, VoidCallback)? _workspaceEntry(ChatSession? session) {
-    if (session == null) return null;
-    final workspace = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId);
-    if (workspace.target == null && workspace.reason == null) return null;
-    return ('Open the workspace', Icons.folder_open, () => unawaited(showWorkspaceActions(
-      context, opener: workspaceOpener, target: workspace.target, reason: workspace.reason,
-    )));
-  }
-
-  /// What the header offers for [session], beside closing it: as buttons, or under one menu where two or more would crowd a phone.
-  List<Widget> _headerActions(ChatSession? session, {bool tight = false}) {
-    final actions = <(String, IconData, VoidCallback)>[
-      if (session != null && (widget.store.canListEarlier(session) || (widget.handle.canListImported?.call(session) ?? false)))
-        ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
-      if (session != null && !session.isDraft && !widget.chatOnly) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
-      if (session != null && !widget.chatOnly && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
-        ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
-      if (session != null && (!widget.narrow || Uri.base.queryParameters['view'] == 'panel') && !session.isDraft && (widget.handle.popout?.available ?? false))
-        if (widget.handle.popout!.isPoppedOut(session))
-          ('Bring back from its own window', Icons.close_fullscreen, () => unawaited(widget.handle.popout!.dockBack(session)))
-        else
-          ('Open in its own window', Icons.open_in_new, () => unawaited(_popOut(session))),
-      if (!widget.chatOnly) ?_workspaceEntry(session),
-      if (widget.chatOnly && widget.onOpenFullApp != null) ('Open the full app', Icons.open_in_new, widget.onOpenFullApp!),
-      if (session?.profile case final report?)
-        ('Profile', Icons.tune, () => unawaited(showSelectableDialog<void>(
-          context: context,
-          builder: (_) => ProfileReportDialog(report: report),
-        ))),
-    ];
-    if (!(widget.narrow || tight) || actions.length < 2) {
-      return [
-        for (final (tooltip, icon, onPressed) in actions) IconButton(tooltip: tooltip, icon: Icon(icon), onPressed: onPressed),
-      ];
-    }
-    return [
-      PopupMenuButton<VoidCallback>(
-        tooltip: 'More',
-        onSelected: (chosen) => chosen(),
-        itemBuilder: (context) => [
-          for (final (label, icon, onPressed) in actions)
-            PopupMenuItem(value: onPressed, child: ListTile(leading: Icon(icon), title: Text(label))),
-        ],
-      ),
-    ];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final chosen = widget.store.selected;
-    // With no agent to start one, a new session's page of choices gives way to the welcome page, which is no session's.
-    final session = chosen != null && widget.noAgent && chosen.isDraft && !widget.store.isStarting(chosen) ? null : chosen;
-    // A first message shown here once its agent has taken it, sent from another view of this session, goes.
-    if (session?.firstSent case final sent? when _input.text == sent && !widget.store.isStarting(session!)) {
-      session.firstSent = null;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _input.text == sent) _input.clear();
-      });
-    }
-
-    final conversation = Column(children: [
-      Material(
-        color: context.look.bar,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          // A header with panels open beside it is narrow though the window is not: its actions go under one menu, as on a phone.
-          child: LayoutBuilder(builder: (context, headerBox) => Row(children: [
-            if (widget.narrow)
-              Builder(builder: (inner) => IconButton(
-                tooltip: 'Sessions',
-                icon: const Icon(Icons.menu),
-                onPressed: () => Scaffold.of(inner).openDrawer(),
-              )),
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(session?.title ?? 'Canoa', style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w600,
-                ), maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(_subtitle(session),
-                  style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
-              ],
-            )),
-            if (session != null && !session.isDraft && !widget.chatOnly)
-              if (changeTotals(session) case (final added, final removed)) _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
-            if (session != null && session.others.isNotEmpty) PresenceMark(others: session.others, narrow: widget.narrow),
-            if (session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
-            ..._headerActions(session, tight: headerBox.maxWidth < 680),
-            if (session != null)
-              IconButton(
-                tooltip: 'Close conversation',
-                icon: const Icon(Icons.close),
-                onPressed: () => unawaited((widget.handle.close ?? widget.store.close)(session)),
-              ),
-            // On a phone the state is an icon whose tooltip names it, which leaves the conversation's name room to be read.
-            // The welcome page, with no session or no agent to start one, has no state to name.
-            if (session == null)
-              const SizedBox.shrink()
-            else if (widget.narrow || headerBox.maxWidth < 680)
-              Tooltip(
-                message: _state(session),
-                child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)),
-              )
-            else
-              Chip(
-                avatar: const Icon(Icons.hub_outlined, size: 16),
-                label: Text(_state(session)),
-                visualDensity: VisualDensity.compact,
-              ),
-            if (!widget.narrow && !widget.chatOnly)
-              LayoutControls(
-                layout: widget.layout,
-                section: ShellLayout.conversations,
-                hasIndex: true,
-                hasRight: session != null && widget.surfaces.offers(session, SurfaceSlot.right),
-                hasBottom: session != null && widget.surfaces.offers(session, SurfaceSlot.bottom),
-              ),
-          ])),
-        ),
-      ),
-      if (session == null)
-        Expanded(child: widget.welcome)
-      else if (session.isDraft && !widget.store.isStarting(session))
-        Expanded(
-          child: _dropping(session, NewSessionView(
-            store: widget.store,
-            session: session,
-            kit: widget.kit,
-            composer: _composerFor(session, centred: true),
-          )),
-        )
-      else if (session.openChild != null && session.tasks[session.openChild!] != null)
-        Expanded(
-          child: ChildThreadView(
-            store: widget.store, session: session, task: session.tasks[session.openChild!]!,
-            renderers: widget.kit.reader == null
-                ? delegationRenderers.merge(widget.renderers)
-                : delegationRenderers.merge(replyRenderers(widget.kit.reader!)).merge(widget.renderers),
-            reader: widget.kit.reader,
-            narrow: widget.narrow,
-          ),
-        )
-      else ...[
-        Expanded(
-          child: _dropping(session, chat.ChatTranscript(
-            key: _transcript,
-            entries: delegationEntries(session, onOpen: (id) => widget.store.openChild(session, id), now: widget.store.clock),
-            terminals: session.terminals,
-            plan: session.plan,
-            working: session.status == SessionStatus.working || widget.store.isStarting(session),
-            agentName: session.agent,
-            turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
-            renderers: _renderersFor(session),
-            narrow: widget.narrow,
-          )),
-        ),
-        if (session.status == SessionStatus.working && session.tasks.live.isNotEmpty)
-          DelegationWaiting(
-            children: [for (final task in session.tasks.live) ChildView.of(task)],
-            onStop: () => unawaited(widget.store.stopTasks(session)),
-          ),
-        if (session.accountOffer != null) SessionAccountOffer(store: widget.store, session: session),
-        if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session, toComposer: _queuedToComposer),
-        if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
-        if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),
-        if (session.pendingSecrets.isNotEmpty) SessionSecretCard(store: widget.store, session: session),
-        // The context's fraction is in the inspector.
-        chat.UsageFooter(text: chat.describeUsage(SessionUsage(cost: session.usage.cost, currency: session.usage.currency), spend: session.spend)),
-        Container(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
-          child: Center(
-            heightFactor: 1,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: context.chatLook.messageWidth + 100),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                _composerFor(session),
-                if (!canRunLocalAgents || session.place != SessionPlace.local) ...[
-                  const SizedBox(height: 8),
-                  Text('Remote sessions require verified peer authentication',
-                    style: TextStyle(fontSize: 11, color: context.chatLook.muted)),
-                ],
-              ]),
-            ),
-          ),
-        ),
-      ],
-    ]);
-    if (session == null || widget.chatOnly) return conversation;
-    return PanelFrame(
-      layout: widget.layout,
-      session: session,
-      surfaces: widget.surfaces.of(session.id),
-      registry: widget.surfaces,
-      narrow: widget.narrow,
-      child: conversation,
-      wrap: (panels) => SurfaceEnvironment(
-        store: widget.store,
-        sessionSpend: widget.sessionSpend,
-        onComment: _addToComposer,
-        onAttachText: widget.store.canAttach(session) ? (name, text) => _attachText(session, name, text) : null,
-        onOpenInFiles: _filesSurface(session) == null ? null : (path) => _openInFiles(session, path),
-        onOpenChild: () {
-          if (widget.narrow) widget.layout.setRightOpen(false);
-        },
-        child: panels,
-      ),
-    );
-  }
-
-  /// The composer of [session]: in the middle of a new session's view when [centred], else docked under the conversation.
-  Widget _composerFor(ChatSession session, {bool centred = false}) => SessionComposer(
-    store: widget.store,
-    session: session,
-    controller: _input,
-    focusNode: _composerFocus,
-    kit: widget.kit,
-    centred: centred,
-    enabled: !widget.store.isStarting(session) && (session.status == SessionStatus.preview ||
-        session.status == SessionStatus.draft ||
-        session.status == SessionStatus.connected ||
-        session.status == SessionStatus.working),
-    onSend: _send,
-    onSteer: () => _send(steer: true),
-    working: session.status == SessionStatus.working,
-    onStop: () {
-      final messenger = ScaffoldMessenger.of(context);
-      unawaited(widget.store.cancelActiveSession().catchError((Object error) {
-        messenger.showSnackBar(SnackBar(content: Text('Could not stop: $error')));
-      }));
-    },
-    commands: session.commands,
-  );
-
-  /// [child], taking files dropped on it as attachments where this app can read them.
-  Widget _dropping(ChatSession session, Widget child) {
-    if (widget.kit.statFile == null || !widget.store.canAttach(session)) return child;
-    return DropTarget(
-      onDragDone: (details) async {
-        final messenger = ScaffoldMessenger.of(context);
-        final problems = await addPaths(widget.store, session, [
-          for (final file in details.files)
-            if (file.path.isNotEmpty) file.path,
-        ], widget.kit);
-        if (problems.isNotEmpty) messenger.showSnackBar(SnackBar(content: Text(problems.join('\n'))));
-      },
-      child: child,
-    );
-  }
-}
-
-/// The lines a session's changes add and remove, in the header: it opens the inspector at the changes.
-class _ChangesChip extends StatelessWidget {
-  const _ChangesChip({required this.added, required this.removed, required this.onPressed});
-
-  final int added, removed;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final look = context.chatLook;
-    final mono = TextStyle(fontFamily: look.codeFont, fontSize: 12, fontWeight: FontWeight.w600);
-    return Tooltip(
-      message: 'Changes',
-      child: InkWell(
-        key: const ValueKey('changes chip'),
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('+$added', style: mono.copyWith(color: look.success)),
-            const SizedBox(width: 4),
-            Text('−$removed', style: mono.copyWith(color: look.danger)),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-/// Says in the header that the session is in Bypass, which the mode control in the composer also shows. Leaving it is a choice of
-/// another mode there.
-class _BypassMark extends StatelessWidget {
-  const _BypassMark({required this.narrow});
-
-  final bool narrow;
-
-  static const message = 'Bypass: each request that offers to allow is allowed without asking you.';
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: message,
-      child: Padding(
-        key: const Key('bypass-mark'),
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: narrow
-            ? Icon(Icons.fast_forward_outlined, size: 18, color: scheme.tertiary)
-            : Chip(
-                avatar: Icon(Icons.fast_forward_outlined, size: 16, color: scheme.onTertiaryContainer),
-                label: Text('Bypass', style: TextStyle(color: scheme.onTertiaryContainer)),
-                backgroundColor: scheme.tertiaryContainer,
-                side: BorderSide.none,
-                visualDensity: VisualDensity.compact,
-              ),
-      ),
-    );
-  }
 }

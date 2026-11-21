@@ -28,9 +28,6 @@ String sizeText(int bytes) {
   return '${value.toStringAsFixed(value < 10 ? 1 : 0)} ${units[unit]}';
 }
 
-/// What the host said when it refused, or what went wrong reaching it.
-String hostWords(Object error) => error is ControlFailed ? error.message : error is StateError ? error.message : '$error';
-
 /// A line saying where a status stands: the version, whether the copy is Canoa's, and what the publisher says is newest.
 List<String> statusLines(ProgramStatus status) {
   final copy = status.copy;

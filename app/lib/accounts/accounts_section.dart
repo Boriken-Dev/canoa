@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../settings/settings_row.dart';
+import '../shell/confirm_remove.dart';
 import '../sources/source_icons.dart';
 import 'account_models.dart';
 import 'accounts_controller.dart';
@@ -86,23 +87,18 @@ class _AccountsSectionState extends State<AccountsSection> {
 
   Future<void> _remove(AccountInfo account) async {
     final offered = _accounts.offering(account.name);
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('remove-account'),
-        title: Text('Remove ${account.name}?'),
-        content: Text(
-          'Canoa forgets the login it stored for ${account.name} on this computer'
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove ${account.name}?',
+      body: 'Canoa forgets the login it stored for ${account.name} on this computer'
           '${offered.isEmpty ? '' : ' and stops offering it in ${offered.join(', ')}'}. '
           'It does not sign out at ${harnessTitle(account.harness)}: a login there stays until you end it.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
-          FilledButton(key: const Key('remove-account-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
-        ],
-      ),
-    );
-    if (sure != true) return;
+      dialogKey: const Key('remove-account'),
+      cancelKey: null,
+      confirmKey: const Key('remove-account-confirm'),
+    )) {
+      return;
+    }
     try {
       await _accounts.remove(account);
     } on Object catch (error) {

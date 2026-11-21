@@ -17,6 +17,13 @@ final class ControlFailed implements Exception {
   String toString() => 'the host refused: $message ($code)';
 }
 
+/// The host's words for why a request failed: the refusal as the host wrote it, or [error] without its Dart wrapper prefix.
+String hostWords(Object error) => switch (error) {
+  ControlFailed(:final message) => message,
+  StateError(:final message) => message,
+  _ => '$error'.replaceFirst(RegExp(r'^(Bad state|Exception): '), ''),
+};
+
 /// What a long request hears while it runs: the host's notifications naming it, and the questions the host puts to the caller.
 final class ControlListener {
   const ControlListener({this.onNotification, this.onRequest});

@@ -4,9 +4,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
+import '../shell/confirm_remove.dart';
 import 'running_sessions.dart';
 import 'session_ledger.dart';
-import '../selectable.dart';
 
 /// The ledger's sessions that are not open now, listed under Earlier conversations, with a filter by agent. Each opens again where its agent
 /// offers that, says why where it does not, and can be removed from the list, which never deletes the agent's own session.
@@ -88,21 +88,19 @@ class _LedgerListState extends State<LedgerList> {
 
   Future<void> _remove(LedgerEntry entry) async {
     final title = entry.title ?? 'This session';
-    final confirmed = await showSelectableDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove from Canoa\'s list?'),
-        content: Text(
-          '"$title" leaves this list only. This does not delete the session itself: ${entry.harness} still has it.'
+    if (await confirmRemoval(
+      context,
+      title: 'Remove from Canoa\'s list?',
+      body: '"$title" leaves this list only. This does not delete the session itself: ${entry.harness} still has it.'
           '${entry.messages.isEmpty ? '' : ' What Canoa kept of what was said goes with it.'}',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
-        ],
-      ),
-    );
-    if (confirmed ?? false) widget.ledger.remove(entry);
+      cancelLabel: 'Cancel',
+      dialogKey: null,
+      cancelKey: null,
+      confirmKey: null,
+      selectable: true,
+    )) {
+      widget.ledger.remove(entry);
+    }
   }
 
   @override
