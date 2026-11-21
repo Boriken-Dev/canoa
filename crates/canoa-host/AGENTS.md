@@ -24,7 +24,7 @@ The root re-exports `SITE_META`, `ACCOUNT_META`, `MAX_MESSAGE_META`, `MODEL_META
 | Header | Covers |
 | --- | --- |
 | [`src/config/AGENTS.md`](src/config/AGENTS.md) | `canoa.cfg` (`canoa_host::config`) and shells (`canoa_host::shells`) |
-| [`src/serve/AGENTS.md`](src/serve/AGENTS.md) | Serving (`canoa_host::serve`), shared sessions, transports, pipes, native host, web app, stdio providers, and CLI tools |
+| [`src/serve/AGENTS.md`](src/serve/AGENTS.md) | Serving (`canoa_host::serve`), shared sessions, transports, pipes, native host, web app, stdio providers, CLI tools, and environments (`[host.environments]`) |
 | [`src/profile/AGENTS.md`](src/profile/AGENTS.md) | Layered profiles (`canoa_host::profile`), overlay hooks, and AOS overlays |
 | [`src/control/AGENTS.md`](src/control/AGENTS.md) | Control channel (`canoa_host::control`), worktrees, and pairing (`canoa_host::peers`) |
 | [`src/portal/AGENTS.md`](src/portal/AGENTS.md) | Multi-user portal (`canoa_host::portal`) and host lock (`canoa_host::home`) |

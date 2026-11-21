@@ -41,7 +41,7 @@ A higher layer is merged over the lower ones, key by key:
 
 - A key in a higher layer replaces the same key below it, and tables merge by key.
 - Arrays replace whole, never element by element.
-- Named entries replace whole, by name, never key by key: `[host.agents.NAME]`, `[host.providers.NAME]`, `[host.tools.NAME]`, `[host.profiles.NAME]`, `[host.accounts.NAME]`, `[host.pools.NAME]`, `[agents.NAME]`, `[profile.mcp.NAME]`, `[profile.skills.NAME]`, `[profile.env.NAME]`, `[overlays]` entries and each Store type's `[store.TYPE.catalogs.LABEL]`. A higher `[agents.Claude]` therefore drops a lower one's `[agents.Claude.profile]`.
+- Named entries replace whole, by name, never key by key: `[host.agents.NAME]`, `[host.providers.NAME]`, `[host.tools.NAME]`, `[host.profiles.NAME]`, `[host.accounts.NAME]`, `[host.pools.NAME]`, `[host.environments.NAME]`, `[agents.NAME]`, `[profile.mcp.NAME]`, `[profile.skills.NAME]`, `[profile.env.NAME]`, `[overlays]` entries and each Store type's `[store.TYPE.catalogs.LABEL]`. A higher `[agents.Claude]` therefore drops a lower one's `[agents.Claude.profile]`.
 - A layer cannot remove a key a lower one sets: a null in YAML or JSON is the same as leaving the key out.
 - Relative `library` and `source` paths, and the `overlays/` folder, are taken from the directory of your own file.
 

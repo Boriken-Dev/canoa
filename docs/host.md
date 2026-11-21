@@ -495,6 +495,39 @@ canoa accounts add local --provider foundry_accounts --method foundry-local --in
   load another folder (its routes as measured on 0.14.0 include `/catalogs/local/v1/`, which listed no model, and none that registers one), so
   the host logs that the window was not used. The NPU builds are compiled for 4096 tokens and cannot be raised.
 
+## Environments
+
+An environment is where an agent works, which need not be the computer the host runs on: a machine reached over a link, a container, a virtual machine. Each kind of environment is a provider of the `environment` kind that a library adds, so the host names none; the host's own computer is the environment `here`, which every host has and which needs no entry. An environment says what it is and what it can do as a list of capability names (`exec`, `terminal`, `fs.read`, `fs.write`, `fs.list`, and any name of its own, such as `snapshot` or `ui`), each with its facts; the host does nothing the environment does not offer, and a refusal names the capability. What an agent may do in an environment is what the environment grants, and the session's permission mode asks about the rest as it does anywhere.
+
+```toml
+[host.environments.build-box]          # made by the provider `kind` names; the other keys are its settings
+kind = "some_environment"             # an id a library offers
+library = "/path/to/library.so"       # or `source`, as a harness entry names its provider; none for a bundled one
+
+[host.agents.worker]
+program = "worker-agent"
+environment = "build-box"             # this entry's agent runs there; `here` (the default) runs it on this computer
+```
+
+A session uses an environment three ways, which can be combined, and a client asks for them in `initialize`'s `_meta["dev.boriken.canoa/environments"]`: `{"run": NAME, "serve": NAME, "tools": [NAME, ...]}`, each part optional. A name this host does not have turns the connection away.
+
+- **The agent runs in it** (`run`, or the entry's `environment`). The agent's program is started through the environment's spawner, so its own tools, files and shell are the environment's: where the agent thinks it is. A program entry's session identity reaches it in its environment; an entry with a profile cannot run elsewhere, since a profile writes its skills and settings on this computer, and the host says so.
+- **Its standard tools are served from it** (`serve`). The agent runs where it does and the host, as the ACP client, answers its `fs/read_text_file`, `fs/write_text_file` and `terminal/*` calls from the environment, advertising in `clientCapabilities` only what the environment offers. A call for a capability it lacks is refused with the capability's name.
+- **It is offered as tools** (`tools`). Each environment is one MCP server, `env_<name>`, with a tool for each capability it offers (`exec`, `terminal_open`, `terminal_send`, `terminal_read`, `terminal_close`, `fs_read`, `fs_write`, `fs_list`, and `call_<name>` for a capability of its own), so one agent reaches several environments at once.
+
+The first prompt of each session also tells the agent which environments it has, how each is attached, what each offers and what it lacks ("no interactive shell here", "read-only files here"), so it does not try what is not possible. A terminal in the app's panel opens in an environment with `terminal/open`'s `environment`.
+
+Which agents ask their client for files and commands, so that serving them changes anything, was read from each translator's source and its recorded sessions:
+
+| Agent | Its file and shell tools | Through the client's `fs/*` and `terminal/*` | Use |
+| --- | --- | --- | --- |
+| Claude Code | run inside the program (recorded sessions: `Read`, `Edit`, `Write`, `Bash`, `Grep`, `Task*`); the host answers only its permission questions | no | run it in the environment, or offer the environment as tools |
+| Codex | run inside the program (its `commandExecution` and file-change items) | no | the same |
+| Pi | run inside the program (`edit`, `write`, `bash` tool executions) | no | the same |
+| OpenCode, Grok, Antigravity | their own ACP agents; whether they ask the client when it offers `fs` and `terminal` was not measured, since that needs the real program and a login | not measured | run in the environment, or offer it as tools |
+
+When a client asks for the tools of Claude Code, Codex or Pi to be served, the host tells the agent that doing so changes nothing it does.
+
 ## Granting a key the Store and accounts
 
 `[host.control] grants` names, per key, what that key may do. Two of the grants run programs as the user: **`store.programs` lets

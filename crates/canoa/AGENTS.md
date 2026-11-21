@@ -217,6 +217,40 @@ pub fn loopback_problem(url: &str) -> Option<&'static str>;   // None for http/h
 - `id` is a word of lower-case letters, digits and `_` (1 to 32). `Shows::Terminal` opens a shell on the host: `shell` is the id of one the host lists (`shell/list`), none for the host's own choice. `Shows::Log` is a text the provider keeps: the application asks for the latest lines every couple of seconds while the tab is open. `Shows::Page` is a page the extension's own server answers on this computer's loopback, at `url`: the application has no web view of its own, so the tab names the page and a button opens it in the person's browser (the same decision as the Browser surface: nothing is embedded, and the extension's own permissions stay in the browser).
 - `TabInfo::problem` says why a description cannot be used (a bad id, no title, a shell named by a kind that shows no terminal, an address on a kind that shows no page, a page with none or one that is not `http`/`https` on the loopback: a tab names a server on this computer, not another site).
 
+## `canoa::environment` (feature `environment`)
+
+The `environment` kind: a place an agent works, which is not necessarily the computer the host runs on (a machine over a link, a container, a virtual machine). Canoa names no kind of environment: each is a provider, the host's own computer (`here`) included.
+
+```rust
+pub const KIND: &str = "environment";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+pub mod capability { pub const EXEC: &str = "exec"; TERMINAL = "terminal"; FS_READ = "fs.read"; FS_WRITE = "fs.write"; FS_LIST = "fs.list"; }
+#[non_exhaustive] pub struct Capability { pub name: String, pub facts: BTreeMap<String, String>, pub help: Option<String> }
+pub enum State { Ready, Waiting, Down }
+#[non_exhaustive] pub struct EnvironmentInfo { pub title: String, pub os: String, pub arch: String, pub local: bool, pub state: State,
+    pub detail: Option<String>, pub capabilities: Vec<Capability> }
+#[non_exhaustive] pub struct ReadFile { pub path: String, pub max_bytes: u64 }   pub struct FileContent { pub bytes: Bytes }
+#[non_exhaustive] pub struct WriteFile { pub path: String, pub bytes: Bytes }
+#[non_exhaustive] pub struct ListDir { pub path: String }   pub struct Listing { pub entries: Vec<DirEntry> }   pub struct DirEntry { pub name: String, pub dir: bool, pub len: Option<u64> }
+#[non_exhaustive] pub struct Call { pub capability: String, pub arguments: String }   pub struct CallAnswer { pub text: String }
+#[guatiao::kind(name = "environment")] pub trait Environment: Send + Sync {
+    fn describe(&self) -> Result<EnvironmentInfo, ProviderError>;                   // may change as its link does
+    fn spawner(&self) -> Result<Object<dyn ProcessSpawner>, ProviderError>;        // where a harness, an agent or a shell is started
+    fn read_file(&self, request: ReadFile) -> Result<FileContent, ProviderError>;   // asked only when `fs.read` is declared
+    fn write_file(&self, request: WriteFile) -> Result<(), ProviderError>;          // `fs.write`
+    fn list_dir(&self, request: ListDir) -> Result<Listing, ProviderError>;         // `fs.list`
+    fn call(&self, request: Call) -> Result<CallAnswer, ProviderError>;             // a capability of the environment's own, by its declared name
+}
+pub fn unsupported(why) / unavailable(why) / not_found(why) / bad_value(why) / internal(why) -> ProviderError;
+impl EnvironmentInfo { pub fn new(title, os, arch) -> Self; pub fn offering(self, Capability) -> Self; pub fn offers(&self, name) -> bool; pub fn problem(&self) -> Option<String> }
+```
+
+- **The capability list is open.** A name is 1 to 64 lower-case letters, digits, `_` and `.`; the `capability` names are the ones the host maps to ACP's file and terminal methods and to its tools, and any other is the environment's own (`ui`, `kb`, `snapshot`), reached through `call`. A name the environment does not declare is not possible there: the host refuses it, naming the capability, and never asks the provider.
+- **Every method is required**; a provider with no files answers `UNSUPPORTED` and does not declare `fs.*`. `describe` is asked often and may say `Down` or `Waiting` (with `detail`) while the link is.
+- `spawner` hands out the `ProcessSpawner` (coqui-acp-api) a harness, an agent program or a shell is started through; the program runs where the environment is, and `SpawnerInfo` says `local: false`.
+- The kind's description and schemas are `include/canoa.environment.kinds.json` and `.schemas.json`, checked by `tests/script_kinds.rs` (`CANOA_WRITE_KINDS=1` regenerates them); the SDKs' kinds are regenerated with `tools/write_kinds.{py,mjs}`.
+
+`SourcePreset::own_tools` says an agent does its own file and shell work and never asks its client for either (Claude Code, Codex and Pi, from their recorded sessions): the host tells such an agent that serving its tools from an environment changes nothing it does.
+
 ## `canoa::address` (feature `network`)
 
 The http and https addresses a person types. Any is accepted; plain `http` beyond this computer is told of and never refused (a library does not decide what the person's own network may carry).
