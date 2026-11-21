@@ -112,6 +112,13 @@ pub(crate) fn harnesses() -> impl Iterator<Item = &'static str> {
     ALL.iter().filter_map(|bundle| bundle.preset.harness)
 }
 
+/// Whether the bundled harness `id` does its own file and shell work, so that serving its client's `fs/*` and `terminal/*` from an
+/// environment changes nothing it does.
+pub(crate) fn does_own_tool_work(id: &str) -> bool {
+    ALL.iter()
+        .any(|bundle| bundle.preset.harness == Some(id) && bundle.preset.own_tools)
+}
+
 /// Whether the host itself carries a harness provider called `id`.
 pub(crate) fn is_harness(id: &str) -> bool {
     harnesses().any(|each| each == id)

@@ -27,6 +27,13 @@
 //! whether it ended. `--marker=PATH` appends the process id
 //! to PATH each time the agent starts, so a test can tell whether one did.
 //!
+//! `ClientCaps` says the file and terminal capabilities its client advertised, `ClientRead PATH` reads a file through the client's
+//! `fs/read_text_file`, `ClientWrite PATH TEXT` writes one through `fs/write_text_file`, and `ClientRun PROGRAM ARGS...` runs a program through
+//! `terminal/create` and says its exit code and output; each says the client's refusal in its words when there is one.
+//!
+//! A text block that starts `Environments available in this session` is what the host tells an agent of its environments: it is
+//! left out of the prompt's text, and `Briefing` says the latest one the session was given.
+//!
 //! `InstructionsOn SERVER` says the instructions the named server gave when asked to initialize, empty for none.
 //! `Dirs` says the `additionalDirectories` its session was opened with.
 //! `Meta` says the `_meta` its session request and that prompt carried, as it received them.
@@ -79,6 +86,10 @@ struct Shared {
     /// What each session has chosen: option id to value.
     chosen: Mutex<HashMap<String, Map<String, Value>>>,
     forms: Mutex<bool>,
+    /// The file and terminal capabilities the client advertised in `initialize`.
+    client_files: Mutex<Value>,
+    /// The latest briefing each session was given of its environments.
+    briefings: Mutex<HashMap<String, String>>,
     /// The id of the prompt being answered.
     turn: Mutex<Option<Value>>,
     /// The usage extension, when this agent speaks it.
@@ -250,7 +261,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The text blocks of a prompt, joined.
+/// What the host tells an agent of its environments starts with this.
+const BRIEFING: &str = "Environments available in this session";
+
+/// The text blocks of a prompt, joined, but for the host's briefing.
 fn prompt_text(blocks: &Value) -> String {
     blocks
         .as_array()
@@ -258,8 +272,20 @@ fn prompt_text(blocks: &Value) -> String {
         .flatten()
         .filter(|block| block["type"] == "text")
         .filter_map(|block| block["text"].as_str())
+        .filter(|text| !text.starts_with(BRIEFING))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The host's briefing in a prompt, when it has one.
+fn briefing_in(blocks: &Value) -> Option<String> {
+    blocks
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|block| block["text"].as_str())
+        .find(|text| text.starts_with(BRIEFING))
+        .map(str::to_owned)
 }
 
 fn option_of(args: &[String], name: &str) -> Option<String> {
@@ -388,6 +414,46 @@ impl Shared {
         lock(&self.waiting).insert(id, sender);
         self.send(json!({"id": id, "method": method, "params": params}));
         receiver.recv().ok()
+    }
+
+    /// One call to the client, and what it answered: `done` says its result, or the client's refusal in its words.
+    fn client_call(
+        &self,
+        method: &str,
+        params: Value,
+        done: impl FnOnce(&Value) -> String,
+    ) -> String {
+        match self.request(method, params) {
+            None => "the client went away".to_owned(),
+            Some(answer) => match answer.get("error") {
+                Some(error) => format!("refused: {}", error["message"].as_str().unwrap_or("")),
+                None => done(&answer["result"]),
+            },
+        }
+    }
+
+    /// A program run through the client's terminal methods: its exit code and output.
+    fn client_run(&self, session: &str, line: &str) -> String {
+        let mut words = line.split_whitespace();
+        let command = words.next().unwrap_or("");
+        let args: Vec<&str> = words.collect();
+        let created = self.client_call(
+            "terminal/create",
+            json!({"sessionId": session, "command": command, "args": args}),
+            |result| result["terminalId"].as_str().unwrap_or("").to_owned(),
+        );
+        if created.starts_with("refused:") || created.starts_with("the client") {
+            return created;
+        }
+        let by = json!({"sessionId": session, "terminalId": created});
+        let code = self.client_call("terminal/wait_for_exit", by.clone(), |result| {
+            result["exitCode"].to_string()
+        });
+        let output = self.client_call("terminal/output", by.clone(), |result| {
+            result["output"].as_str().unwrap_or("").to_owned()
+        });
+        let _ = self.request("terminal/release", by);
+        format!("exit={code} output={}", output.trim())
     }
 
     /// A question as Claude's adapter shapes its AskUserQuestion tool: one choice with a header, and a free-text "Other".
@@ -792,6 +858,25 @@ impl Shared {
                 format!("blocks={count} text={text}")
             }
             "Pid" => format!("pid: {}", std::process::id()),
+            "Briefing" => lock(&self.briefings)
+                .get(session)
+                .cloned()
+                .unwrap_or_default(),
+            "ClientCaps" => format!("client: {}", lock(&self.client_files)),
+            "ClientRead" => self.client_call(
+                "fs/read_text_file",
+                json!({"sessionId": session, "path": rest.trim()}),
+                |result| result["content"].as_str().unwrap_or("").to_owned(),
+            ),
+            "ClientWrite" => {
+                let (path, content) = rest.split_once(' ').unwrap_or((rest, ""));
+                self.client_call(
+                    "fs/write_text_file",
+                    json!({"sessionId": session, "path": path, "content": content}),
+                    |_| "written".to_owned(),
+                )
+            }
+            "ClientRun" => self.client_run(session, rest),
             "Dirs" => format!(
                 "dirs: {}",
                 lock(&self.directories)
@@ -885,6 +970,9 @@ impl Shared {
     }
 
     fn prompt(&self, session: &str, blocks: &Value) -> &'static str {
+        if let Some(briefing) = briefing_in(blocks) {
+            lock(&self.briefings).insert(session.to_owned(), briefing);
+        }
         let text = prompt_text(blocks);
         let blocks = blocks.as_array().cloned().unwrap_or_default();
         let attached: Vec<String> = blocks
@@ -1155,6 +1243,8 @@ impl Shared {
                     .cloned()
                     .unwrap_or(Value::Null);
                 *lock(&self.forms) = !capabilities["elicitation"]["form"].is_null();
+                *lock(&self.client_files) =
+                    json!({"fs": capabilities["fs"], "terminal": capabilities["terminal"]});
                 if let Some(usage) = &self.usage {
                     let asked = &capabilities["_meta"][USAGE_CAPABILITY];
                     let mut state = lock(&usage.state);
@@ -1387,6 +1477,8 @@ pub fn run(args: &[String]) {
         remembered: Mutex::new(HashMap::new()),
         chosen: Mutex::new(HashMap::new()),
         forms: Mutex::new(false),
+        client_files: Mutex::new(Value::Null),
+        briefings: Mutex::new(HashMap::new()),
         turn: Mutex::new(None),
         usage: args.iter().any(|arg| arg == "--usage").then(|| Usage {
             claims: option_of(args, "usage-claims"),

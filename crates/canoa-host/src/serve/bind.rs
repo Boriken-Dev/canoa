@@ -738,6 +738,7 @@ fn bind_entry(state: &mut BindState<'_>, entry: &Entry) -> Result<(), ServeError
             log_entries: entry.shared_log_entries,
             log_bytes: entry.shared_log_bytes,
         }),
+        environment: entry.environment.clone(),
     });
     match listener {
         Some(listener) => state.listeners.push((served, listener)),
@@ -797,6 +798,7 @@ fn bind_control_entry(state: &mut BindState<'_>) -> Result<(), ServeError> {
             },
             running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
             keep: None,
+            environment: None,
         }),
         bound,
     ));
@@ -816,6 +818,7 @@ fn build_control_hub(
     recorded: Arc<history::Store>,
     movers: BTreeMap<String, Arc<kind::Harness>>,
     mail_boxes: Arc<crate::mail::Mailboxes>,
+    environments: &Arc<crate::environments::Environments>,
 ) -> Result<control::Control, ServeError> {
     let kept = control::Control::open(
         options
@@ -885,10 +888,13 @@ fn build_control_hub(
         .with_extensions(control::ExtensionInstall::new(
             options.state_dir.as_ref().map(|dir| dir.join("extensions")),
         ))
-        .with_terminals(crate::terminal::Terminals::new(
-            config.shell.clone(),
-            options.home_dir.clone().or_else(home_from_environment),
-        ))
+        .with_terminals(
+            crate::terminal::Terminals::new(
+                config.shell.clone(),
+                options.home_dir.clone().or_else(home_from_environment),
+            )
+            .in_environments(Arc::clone(environments)),
+        )
         .with_shells(crate::shells::Plan::new(
             config.shell.clone(),
             config
@@ -1142,6 +1148,7 @@ impl Serving {
         }
         let hosted = Arc::new(super::sessions::Hosted::new(method.peer_id(), kept));
         let office_dir = options.state_dir.as_ref().map(|dir| dir.join("office"));
+        let environments = crate::environments::Environments::of(config);
         let control = build_control_hub(
             config,
             options,
@@ -1154,6 +1161,7 @@ impl Serving {
             recorded.clone(),
             state.movers,
             Arc::clone(&mail_boxes),
+            &environments,
         )?;
         let mut serving = Self {
             shared: Arc::new(Shared {
@@ -1166,6 +1174,10 @@ impl Serving {
                 kb_tools: kb_mcp::Hub::new(
                     &config.kb,
                     options.state_dir.clone(),
+                    delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
+                ),
+                env_tools: crate::environments::mcp::Hub::new(
+                    Arc::clone(&environments),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
                 ),
                 client_tools: client_tools::Hub::new(delegate::BridgeCommand::new(
@@ -1332,6 +1344,7 @@ impl Serving {
             },
             running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
             keep: None,
+            environment: None,
         });
         let tools = Arc::new(Served {
             name: client_tools::NAME.to_owned(),
@@ -1342,6 +1355,7 @@ impl Serving {
             },
             running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
             keep: None,
+            environment: None,
         });
         Some(Door::new(
             listener,

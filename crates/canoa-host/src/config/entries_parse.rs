@@ -639,6 +639,7 @@ pub(super) fn entry(
         title: None,
         local: false,
         shared: false,
+        environment: None,
         shared_idle: None,
         shared_permission_window: None,
         shared_keep_log: true,

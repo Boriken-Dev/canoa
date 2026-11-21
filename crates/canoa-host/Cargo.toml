@@ -48,7 +48,7 @@ qrcode = { workspace = true, optional = true }
 # The WebSocket handshake of the portal's relay, which checks the session before it upgrades; already in the graph through
 # coqui-transport-web.
 tungstenite = { workspace = true, optional = true, features = ["handshake"] }
-canoa = { workspace = true, features = ["store", "speech-builtin", "network", "profile-item", "secret", "settings-section", "panel-tab", "usage", "gateway", "loopback", "api-gateway", "mail-backend"] }
+canoa = { workspace = true, features = ["store", "speech-builtin", "network", "profile-item", "secret", "settings-section", "panel-tab", "usage", "gateway", "loopback", "api-gateway", "mail-backend", "environment"] }
 canoa-antigravity.workspace = true
 canoa-bitwarden.workspace = true
 canoa-claude.workspace = true
@@ -181,6 +181,10 @@ crate-type = ["cdylib"]
 
 [[example]]
 name = "echo_source"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "environment_standin"
 crate-type = ["cdylib"]
 
 [[example]]

@@ -66,6 +66,9 @@ pub struct Config {
     /// `[settings.power] keep_awake`: whether the host keeps this computer from idle-sleeping while an agent turn runs; `false`
     /// unless set. The Power group of Settings writes it.
     pub keep_awake: bool,
+    /// `[host.environments]`, by name, in the file's order: the places an agent may work besides this computer (`here`, which needs no
+    /// entry). Each is made by the environment provider its `kind` names.
+    pub environments: IndexMap<String, EnvironmentConfig>,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
     /// `[host.network]`: how the host reaches the network; the system's proxy, login, certificate verifier and client
@@ -125,6 +128,7 @@ impl Default for Config {
             openers: Default::default(),
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             keep_awake: false,
+            environments: Default::default(),
             store: Default::default(),
             network: Default::default(),
             kb: Default::default(),
@@ -676,6 +680,19 @@ impl Default for UsageConfig {
             keep_days: crate::usage_log::DEFAULT_KEEP_DAYS,
         }
     }
+}
+
+/// One `[host.environments.NAME]`: a place an agent works, made by an `environment` provider.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EnvironmentConfig {
+    /// The id of the provider that makes it, which the host lists as an environment kind.
+    pub kind: String,
+    /// Where the provider's code comes from when it is no bundled one (`library` or `source`, as a harness entry names them).
+    pub origin: Option<Origin>,
+    /// The provider's settings: every key of the table but `kind` and the ones that name its code, checked against the schema the
+    /// provider declares when the environment is first used.
+    pub settings: Settings,
 }
 
 /// `[host.mcp_list]`: what listing the tools and resources of a session's MCP servers (`_canoa/mcp/list`) is held to. Each is at

@@ -27,6 +27,7 @@ use crate::client_tools;
 use crate::config::{Config, Entry, EntryKind, HostProfile, Layers};
 use crate::control;
 use crate::delegate::Delegation;
+use crate::environments;
 use crate::history;
 use crate::inproc::InProcess;
 use crate::kb_mcp;
@@ -181,6 +182,8 @@ struct Served {
     running: Gate,
     /// Set for an entry whose sessions outlive their connections.
     keep: Option<sessions::Keep>,
+    /// The environment the entry's agent runs in, when it names one: a client may ask for another.
+    environment: Option<String>,
 }
 
 /// What every connection shares.
@@ -210,6 +213,8 @@ struct Shared {
     /// What gives a connection's sessions the store tools (search and inspect).
     store_tools: Arc<store_mcp::Hub>,
     kb_tools: Arc<kb_mcp::Hub>,
+    /// What gives a connection's sessions the environments they use as tools, and the environments themselves.
+    env_tools: Arc<environments::mcp::Hub>,
     /// What gives a connection's sessions the tools programs offer (a browser extension's), and takes their offers.
     client_tools: Arc<client_tools::Hub>,
     /// What `[host.control]` grants each key, and what every key holds beside it.
@@ -268,6 +273,27 @@ impl Shared {
         self.record(|| {
             let agent = Arc::new(BridgeAgent::spawn_with(
                 &crate::spawn::Agents,
+                program,
+                args,
+                self.max_line,
+            )?);
+            Ok((Process::Agent(Arc::clone(&agent)), agent))
+        })
+    }
+
+    /// Starts an agent in the environment `env`, with `identity` in its environment, and records it as [`Shared::start`] does.
+    fn start_in(
+        &self,
+        env: &Arc<environments::Env>,
+        program: &OsString,
+        args: &[OsString],
+        identity: &[(String, String)],
+    ) -> std::io::Result<Option<(u64, Arc<BridgeAgent>)>> {
+        self.record(|| {
+            let spawner = environments::agent::InEnvironment::new(Arc::clone(env))
+                .with_variables(identity.to_vec());
+            let agent = Arc::new(BridgeAgent::spawn_with(
+                &spawner,
                 program,
                 args,
                 self.max_line,

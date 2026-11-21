@@ -15,6 +15,7 @@ pub mod config;
 pub mod control;
 mod delegate;
 mod descriptions;
+mod environments;
 mod format;
 mod forms;
 mod gateways;

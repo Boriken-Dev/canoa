@@ -450,6 +450,9 @@ pub struct Entry {
     /// admits may attach to it by `session/load` or `session/resume` and take part (`shared = true`). Off, each connection
     /// has an agent of its own that ends with it. Only an agent or harness entry may set it.
     pub shared: bool,
+    /// The environment an agent or harness entry's program runs in (`environment = "build-box"`), one `[host.environments]` names
+    /// or `here`; `None` runs it on this computer. A client may ask for another when it connects.
+    pub environment: Option<String>,
     /// How long a shared session that no client is attached to is kept, after which the host ends it
     /// (`shared_idle_seconds`, a day by default); `None` keeps it until a client ends it or the host stops (`0`).
     pub shared_idle: Option<core::time::Duration>,

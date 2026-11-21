@@ -27,6 +27,7 @@ use crate::child;
 use crate::client_tools::{self, ToolsLayer, ToolsPeek};
 use crate::control;
 use crate::delegate::{self, Delegating, Peek, Principal};
+use crate::environments::{self, layer::EnvLayer};
 use crate::history::Recording;
 use crate::inproc::{self, InProcess};
 use crate::kb_mcp::{self, KbLayer};
@@ -458,6 +459,7 @@ struct ConnectionLinks<'a> {
     store: Option<&'a Arc<store_mcp::Link>>,
     kb: Option<&'a Arc<kb_mcp::Link>>,
     tools: Option<&'a Arc<client_tools::Link>>,
+    envs: Option<&'a Arc<environments::mcp::Link>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -465,13 +467,13 @@ fn launch_agent_program<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,
-    peer: &PeerId,
+    (peer, first): (&PeerId, &[u8]),
     (program, args): (&OsString, &[OsString]),
     scope: &Scope,
     offer: Option<&Offer>,
     connection: Option<&Connection>,
     identity: &[(String, String)],
-    links: ConnectionLinks<'_>,
+    (run_env, links): (Option<&Arc<environments::Env>>, ConnectionLinks<'_>),
 ) {
     let ConnectionLinks {
         conn,
@@ -479,7 +481,19 @@ fn launch_agent_program<C: Channel>(
         store,
         kb,
         tools,
+        envs,
     } = links;
+    if let (Some(env), Some(_)) = (run_env, connection) {
+        return turn_away(
+            channel,
+            first,
+            (&served.name, peer),
+            format!(
+                "a profile writes skills and settings on this computer, which the environment {} does not see: run this agent here, or without a profile",
+                env.name()
+            ),
+        );
+    }
     let launcher = offer.map_or(&shared.launcher, |offer| &offer.launcher);
     let mut launched = shared.program_args.clone();
     launched.extend([
@@ -488,7 +502,13 @@ fn launch_agent_program<C: Channel>(
         program.clone(),
     ]);
     launched.extend(args.iter().cloned());
-    let (key, agent) = match shared.start(launcher, &launched) {
+    // In an environment the program is started there, with the session's identity in its environment: the `canoa launch` that
+    // would give it on a first line of input is a program of this computer.
+    let started = match run_env {
+        Some(env) => shared.start_in(env, program, args, identity),
+        None => shared.start(launcher, &launched),
+    };
+    let (key, agent) = match started {
         Ok(Some(started)) => started,
         Ok(None) => return,
         Err(error) => {
@@ -502,30 +522,34 @@ fn launch_agent_program<C: Channel>(
                 .agent(agent.pid())
                 .given(given.clone());
             let end = coqui_acp_bridge::relay::relay(
-                &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
+                &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
                     &KbLayer::new(
                         &StoreLayer::new(&Layer::new(&Delegating::new(&hosted, conn), link), store),
                         kb,
                     ),
                     tools,
-                ), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
+                ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
                 &agent,
             );
             drop(hosted);
             end
         }
         None => {
-            let scoped = Scoped::new(channel, scope)
-                .agent(agent.pid())
-                .launching(plain_launch_line(identity));
+            let scoped = if run_env.is_some() {
+                Scoped::new(channel, scope)
+            } else {
+                Scoped::new(channel, scope)
+                    .agent(agent.pid())
+                    .launching(plain_launch_line(identity))
+            };
             coqui_acp_bridge::relay::relay(
-                &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
+                &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
                     &KbLayer::new(
                         &StoreLayer::new(&Layer::new(&Delegating::new(&scoped, conn), link), store),
                         kb,
                     ),
                     tools,
-                ), Arc::clone(&shared.keep_awake)), shared.mcp_list, Given::for_connection(None)),
+                ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, Given::for_connection(None)),
                 &agent,
             )
         }
@@ -559,6 +583,20 @@ pub(super) fn give_agent_flow<C: Channel>(
     let any_account = shared
         .store_grants(peer, context.is_some())
         .is_some_and(|grants| grants.contains(&control::Grant::Accounts));
+    // Where the agent runs, and what else its sessions use: the entry's environment, or the one the client names.
+    let attached = match environments::attach(
+        &shared.env_tools,
+        served.environment.as_deref(),
+        match agent {
+            Agent::Harness(harness) => Some(harness.id()),
+            Agent::Program { .. } => None,
+        },
+        first,
+    ) {
+        Ok(attached) => attached,
+        Err(why) => return turn_away(channel, first, (&served.name, peer), why),
+    };
+    let (run_env, envs) = (attached.run, attached.link);
     let settled;
     let (first, pool) = match agent {
         Agent::Harness(harness) => match harness.settle(first, any_account) {
@@ -695,19 +733,23 @@ pub(super) fn give_agent_flow<C: Channel>(
             shared,
             served,
             channel,
-            peer,
+            (peer, first),
             (program, args),
             scope,
             offer.map(Arc::as_ref),
             connection.as_ref(),
             &identity,
-            ConnectionLinks {
-                conn: conn.as_ref(),
-                link: link.as_ref(),
-                store: store.as_ref(),
-                kb: kb.as_ref(),
-                tools: tools.as_ref(),
-            },
+            (
+                run_env.as_ref(),
+                ConnectionLinks {
+                    conn: conn.as_ref(),
+                    link: link.as_ref(),
+                    store: store.as_ref(),
+                    kb: kb.as_ref(),
+                    tools: tools.as_ref(),
+                    envs: envs.as_ref(),
+                },
+            ),
         ),
         Agent::Harness(options) => give_harness(
             shared,
@@ -724,6 +766,7 @@ pub(super) fn give_agent_flow<C: Channel>(
                 kb.as_ref(),
                 tools.as_ref(),
                 &identity,
+                (run_env.as_ref(), envs.as_ref()),
             ),
         ),
     }
@@ -823,6 +866,10 @@ type Joined<'a> = (
     Option<&'a Arc<kb_mcp::Link>>,
     Option<&'a Arc<client_tools::Link>>,
     &'a [(String, String)],
+    (
+        Option<&'a Arc<environments::Env>>,
+        Option<&'a Arc<environments::mcp::Link>>,
+    ),
 );
 
 /// Answers the `initialize` in `first` with `-32602` and `why`, and says in the log that the connection was turned away.
@@ -846,7 +893,7 @@ fn give_harness<C: Channel>(
     (peer, first, any_account, pool): (&PeerId, &[u8], bool, Option<&str>),
     harness: &kind::Harness,
     scope: &Scope,
-    (connection, conn, link, store, kb, tools, identity): Joined<'_>,
+    (connection, conn, link, store, kb, tools, identity, (run, envs)): Joined<'_>,
 ) {
     let turn_away = |why: String| turn_away(channel, first, (&served.name, peer), why);
     let lifetime = match harness.lifetime_of(first) {
@@ -861,12 +908,17 @@ fn give_harness<C: Channel>(
         Ok(account) => account,
         Err(why) => return turn_away(why),
     };
+    // The harness's programs start where the environment says; its refusal turns the connection away before anything starts.
+    let env_spawner = match run.map(|env| env.spawner()).transpose() {
+        Ok(spawner) => spawner,
+        Err(why) => return turn_away(why),
+    };
     let control = InProcess::new();
     let key = match shared.record(|| Ok((Process::Translator(Arc::clone(&control)), ()))) {
         Ok(Some((key, ()))) => key,
         Ok(None) | Err(_) => return,
     };
-    let started = harness.connection_as(
+    let mut started = harness.connection_as(
         connection.map(|connection| {
             let environment = connection
                 .env()
@@ -879,6 +931,9 @@ fn give_harness<C: Channel>(
         account.as_ref(),
         lifetime,
     );
+    if let Some(spawner) = env_spawner {
+        started.spawner = spawner;
+    }
     let gated = Gated::new(
         channel,
         account.as_ref().map(|held| {
@@ -905,7 +960,7 @@ fn give_harness<C: Channel>(
     let given = Given::for_connection(connection);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
+            &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
                 &KbLayer::new(
                     &StoreLayer::new(
                         &Layer::new(
@@ -925,7 +980,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            ), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
+            ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
             &*started.harness,
             to_provider,
             started.watch,
@@ -933,7 +988,7 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
+            &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
                 &KbLayer::new(
                     &StoreLayer::new(
                         &Layer::new(
@@ -953,7 +1008,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            ), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
+            ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
             &*started.harness,
             to_provider,
             started.watch,

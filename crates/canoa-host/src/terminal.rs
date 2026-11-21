@@ -48,6 +48,69 @@ const MAX_CELLS: u16 = 1000;
 /// How long a finished terminal's reader waits for the shell's exit code.
 const EXIT_WAIT: Duration = Duration::from_secs(10);
 
+/// What ends, waits on and resizes a shell, on this computer or in an environment.
+enum Shell {
+    Local(pty::Process),
+    Remote(crate::environments::remote::Remote),
+}
+
+impl Shell {
+    fn wait(&self) -> i32 {
+        match self {
+            Self::Local(process) => process.wait(),
+            Self::Remote(process) => process.wait_code(),
+        }
+    }
+
+    fn end(&self) {
+        match self {
+            Self::Local(process) => process.end(),
+            Self::Remote(process) => {
+                let _ = process.kill();
+            }
+        }
+    }
+
+    fn resize(&self, size: Size) -> std::io::Result<()> {
+        match self {
+            Self::Local(process) => process.resize(size),
+            Self::Remote(process) => process.resize(size.rows, size.cols),
+        }
+    }
+}
+
+/// What the shell reads.
+enum Feed {
+    Local(pty::Input),
+    Remote(crate::environments::remote::Input),
+}
+
+impl Feed {
+    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Write as _;
+        match self {
+            Self::Local(input) => input.write_all(bytes),
+            Self::Remote(input) => input.write_all(bytes),
+        }
+    }
+}
+
+/// What the shell wrote.
+enum Drain {
+    Local(pty::Output),
+    Remote(crate::environments::remote::Output),
+}
+
+impl Drain {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::io::Read as _;
+        match self {
+            Self::Local(output) => output.read(buf),
+            Self::Remote(output) => output.read(buf),
+        }
+    }
+}
+
 /// A terminal's size in character cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Size {
@@ -82,6 +145,8 @@ pub(crate) struct Terminals {
     live: Arc<AtomicUsize>,
     /// Where shells are looked for; this computer when `None`.
     lookup: Option<crate::shells::Lookup>,
+    /// The environments a request may open a shell in.
+    environments: Option<Arc<crate::environments::Environments>>,
 }
 
 impl Terminals {
@@ -92,7 +157,17 @@ impl Terminals {
             home,
             live: Arc::new(AtomicUsize::new(0)),
             lookup: None,
+            environments: None,
         }
+    }
+
+    /// These terminals able to open a shell in an environment of `environments`, which a request names with `environment`.
+    pub(crate) fn in_environments(
+        mut self,
+        environments: Arc<crate::environments::Environments>,
+    ) -> Self {
+        self.environments = Some(environments);
+        self
     }
 
     /// These terminals looking for the shells an id names in `lookup`, in place of this computer.
@@ -233,7 +308,7 @@ impl Scroll {
 
 /// What a terminal's threads and its link share.
 struct Terminal {
-    process: Arc<pty::Process>,
+    process: Arc<Shell>,
     scroll: Mutex<Scroll>,
     /// The person closed it, so its end is not announced.
     quiet: AtomicBool,
@@ -314,6 +389,11 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
 
     fn open(&self, params: &Value) -> Result<Value, Fail> {
         let size = size_of(params)?;
+        if let Some(name) = text(params, "environment")?
+            && name != crate::environments::HERE
+        {
+            return self.open_in(name, params, size);
+        }
         let cwd = match text(params, "cwd")? {
             Some(path) => {
                 // A share is an ordinary folder, written plain; a device namespace is no folder.
@@ -368,8 +448,9 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
             output,
             process,
         } = started;
+        let (input, output) = (Feed::Local(input), Drain::Local(output));
         let terminal = Arc::new(Terminal {
-            process: Arc::new(process),
+            process: Arc::new(Shell::Local(process)),
             scroll: Mutex::new(Scroll::default()),
             quiet: AtomicBool::new(false),
             ended: AtomicBool::new(false),
@@ -414,16 +495,98 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
         Ok(opened)
     }
 
+    /// Opens a shell in the environment `name`, through its spawner: its programs, its folders and its shells, as the environment
+    /// says them. The host checks none of them against this computer's.
+    fn open_in(&self, name: &str, params: &Value, size: Size) -> Result<Value, Fail> {
+        let environments = self
+            .host
+            .environments
+            .as_ref()
+            .ok_or_else(|| Fail::Refused("this host has no environments".to_owned()))?;
+        let env = environments.get(name).map_err(Fail::Refused)?;
+        let info = env
+            .needs(canoa::environment::capability::TERMINAL)
+            .map_err(Fail::Refused)?;
+        let spawner = env.terminal_spawner().map_err(Fail::Refused)?;
+        let program = match text(params, "shell")? {
+            Some(shell) => shell.to_owned(),
+            None => info
+                .capability(canoa::environment::capability::TERMINAL)
+                .and_then(|each| each.facts.get("shell").cloned())
+                .unwrap_or_else(|| {
+                    if info.os == "windows" {
+                        "cmd.exe"
+                    } else {
+                        "/bin/sh"
+                    }
+                    .to_owned()
+                }),
+        };
+        let mut spec = coqui_acp_api::SpawnSpec::new(program.clone())
+            .terminal(coqui_acp_api::TerminalSize::new(size.rows, size.cols));
+        if let Some(cwd) = text(params, "cwd")? {
+            spec = spec.cwd(cwd);
+        }
+        let mut open = lock(&self.open);
+        if open
+            .iter()
+            .filter(|(_, e)| !e.terminal.ended.load(Ordering::SeqCst))
+            .count()
+            >= MAX_PER_LINK
+        {
+            return Err(Fail::Refused(format!(
+                "a link may have at most {MAX_PER_LINK} terminals open: close one"
+            )));
+        }
+        let slot = Slot::take(&self.host.live).ok_or_else(|| {
+            Fail::Refused(format!(
+                "this host runs at most {MAX_PER_HOST} terminals at once"
+            ))
+        })?;
+        let started = spawner.spawn(spec).map_err(|error| {
+            Fail::Refused(format!(
+                "the shell {program} could not be started in {name}: {error}"
+            ))
+        })?;
+        let process = crate::environments::remote::Remote::new(started);
+        let terminal = Arc::new(Terminal {
+            process: Arc::new(Shell::Remote(process.clone())),
+            scroll: Mutex::new(Scroll::default()),
+            quiet: AtomicBool::new(false),
+            ended: AtomicBool::new(false),
+        });
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        let (typed, to_shell) = sync_channel::<Vec<u8>>(QUEUED_WRITES);
+        let (exit_code, exit_code_rx) = channel::<i32>();
+        let spawned = self.spawn_threads(
+            id,
+            &terminal,
+            (Feed::Remote(process.input()), to_shell),
+            (Drain::Remote(process.output()), exit_code, exit_code_rx),
+            slot,
+        );
+        if let Err(error) = spawned {
+            terminal.process.end();
+            return Err(Fail::Refused(format!(
+                "the terminal's threads could not start: {error}"
+            )));
+        }
+        open.insert(
+            id,
+            Entry {
+                terminal,
+                input: typed,
+            },
+        );
+        Ok(json!({"id": id, "shell": program, "environment": name, "cwd": text(params, "cwd")?}))
+    }
+
     fn spawn_threads(
         &self,
         id: u32,
         terminal: &Arc<Terminal>,
-        (mut input, to_shell): (pty::Input, Receiver<Vec<u8>>),
-        (mut output, exit_code, exit_code_rx): (
-            pty::Output,
-            std::sync::mpsc::Sender<i32>,
-            Receiver<i32>,
-        ),
+        (mut input, to_shell): (Feed, Receiver<Vec<u8>>),
+        (mut output, exit_code, exit_code_rx): (Drain, std::sync::mpsc::Sender<i32>, Receiver<i32>),
         slot: Slot,
     ) -> std::io::Result<()> {
         // The shell's input: one thread, so that a shell that does not read holds up only its own terminal.

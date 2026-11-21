@@ -45,7 +45,7 @@ use profiles::{
 };
 use raw::{
     RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawExtension, RawFile, RawHost, RawKb,
-    RawLines, RawMail, RawPool, RawProvider, network_of,
+    RawEnvironment, RawLines, RawMail, RawPool, RawProvider, network_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
@@ -60,6 +60,7 @@ pub use types::{
     NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, StoreConfig,
     UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
+pub use types::EnvironmentConfig;
 
 struct TopLevel {
     secrets: Option<serde_json::Value>,
@@ -185,6 +186,28 @@ impl Config {
             &pools,
             &top.remote_agents,
         )?;
+        let mut environments = IndexMap::new();
+        for (name, raw) in core::mem::take(&mut host.environments) {
+            let environment = environment_of(&name, raw, base, &directory)?;
+            environments.insert(name, environment);
+        }
+        for served in &entries {
+            let Some(environment) = &served.environment else {
+                continue;
+            };
+            if environment != crate::environments::HERE && !environments.contains_key(environment) {
+                return Err(invalid(
+                    &served.name,
+                    "environment names an environment [host.environments] does not hold, and is not here",
+                ));
+            }
+            if served.shared {
+                return Err(invalid(
+                    &served.name,
+                    "environment goes with shared = false: a shared session's agent runs on this computer",
+                ));
+            }
+        }
         let openers = raw::openers_of(host.openers.take())?;
         let max_message_bytes = host.max_message_bytes.unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
         if max_message_bytes == 0 {
@@ -207,6 +230,7 @@ impl Config {
             shell: host.shell,
             openers,
             max_message_bytes,
+            environments,
             keep_awake: top.keep_awake,
             local_agents: top.local_agents,
             remote_agents: top.remote_agents,
@@ -417,6 +441,45 @@ fn build_entries_and_extensions(
     Ok((entries, extensions))
 }
 
+/// One `[host.environments.NAME]`. Errors name a key, never a value: a setting may be a credential.
+fn environment_of(
+    name: &str,
+    raw: RawEnvironment,
+    base: &Path,
+    directory: &Path,
+) -> Result<EnvironmentConfig, ConfigError> {
+    check_label(name)?;
+    let refused = |what: String| ConfigError::Invalid {
+        entry: None,
+        what: format!("environment {name}: {what}"),
+    };
+    if name == crate::environments::HERE {
+        return Err(refused(
+            "that name is taken by this computer, which every host has".to_owned(),
+        ));
+    }
+    let Some(kind) = raw.kind.filter(|kind| !kind.is_empty()) else {
+        return Err(refused("kind is missing or empty".to_owned()));
+    };
+    let origin = origin_of(
+        name,
+        base,
+        directory,
+        OriginKeys {
+            library: raw.library.as_deref(),
+            source: raw.source.as_deref(),
+            source_settings: raw.source_settings,
+            import_search: raw.import_search.as_deref(),
+        },
+    )?;
+    let settings = settings_of(name, raw.settings)?;
+    Ok(EnvironmentConfig {
+        kind,
+        origin,
+        settings,
+    })
+}
+
 fn build_agent_entry(
     name: String,
     agent: RawAgent,
@@ -591,6 +654,7 @@ fn build_agent_entry(
     let mut served = entry(name, kind, common)?;
     served.title = title;
     served.shared = shared;
+    served.environment = agent.environment;
     served.shared_idle = shared_idle;
     served.shared_permission_window = shared_permission_window;
     served.shared_keep_log = shared_keep_log;

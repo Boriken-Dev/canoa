@@ -196,6 +196,20 @@ pub(super) struct RawHost {
     pub(super) kb: Option<RawKb>,
     pub(super) mail: Option<RawMail>,
     pub(super) mcp_list: Option<RawMcpList>,
+    #[serde(default)]
+    pub(super) environments: IndexMap<String, RawEnvironment>,
+}
+
+/// `[host.environments.NAME]`: `kind`, and every other key is the provider's own setting.
+#[derive(Deserialize)]
+pub(super) struct RawEnvironment {
+    pub(super) kind: Option<String>,
+    pub(super) library: Option<String>,
+    pub(super) source: Option<String>,
+    pub(super) source_settings: Option<toml::Table>,
+    pub(super) import_search: Option<String>,
+    #[serde(flatten)]
+    pub(super) settings: toml::Table,
 }
 
 /// `[host.mcp_list]`.
@@ -591,6 +605,7 @@ pub(super) struct RawAgent {
     pub(super) usage: Option<String>,
     pub(super) title: Option<String>,
     pub(super) shared: Option<bool>,
+    pub(super) environment: Option<String>,
     pub(super) shared_idle_seconds: Option<u64>,
     pub(super) shared_permission_window_seconds: Option<u64>,
     pub(super) shared_keep_log: Option<bool>,
