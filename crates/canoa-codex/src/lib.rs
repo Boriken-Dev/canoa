@@ -46,7 +46,8 @@ pub const ACCESS: Target = acp::access::TARGET;
 /// How the host starts Codex when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Codex", "codex")
     .agent("codex")
-    .harness("codex");
+    .harness("codex")
+    .own_tools();
 
 /// Codex's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
 pub const MARK: &str = include_str!("../mark.svg");

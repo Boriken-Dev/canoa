@@ -71,6 +71,9 @@ pub struct SourcePreset {
     pub managed: Option<&'static str>,
     /// How this preset receives composed overlay context.
     pub context: ContextDelivery,
+    /// Whether the agent does its own file and shell work: its tools never ask its client's `fs/*` and `terminal/*` methods, so a
+    /// client that serves those changes nothing it does. False for an agent that was not measured.
+    pub own_tools: bool,
 }
 
 impl SourcePreset {
@@ -98,6 +101,7 @@ impl SourcePreset {
             usage: None,
             managed: None,
             context: ContextDelivery::STANDARD,
+            own_tools: false,
         }
     }
 
@@ -154,6 +158,13 @@ impl SourcePreset {
     #[must_use]
     pub const fn context(mut self, context: ContextDelivery) -> Self {
         self.context = context;
+        self
+    }
+
+    /// The agent does its own file and shell work, and never asks its client for either.
+    #[must_use]
+    pub const fn own_tools(mut self) -> Self {
+        self.own_tools = true;
         self
     }
 }

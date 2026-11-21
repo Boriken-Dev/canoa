@@ -44,7 +44,8 @@ pub const PRESET: SourcePreset = SourcePreset::new("Pi", "pi")
     .agent("pi")
     .harness("pi")
     .search(DIRS)
-    .managed("pi");
+    .managed("pi")
+    .own_tools();
 
 /// Pi's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
 pub const MARK: &str = include_str!("../mark.svg");

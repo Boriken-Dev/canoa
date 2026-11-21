@@ -45,7 +45,8 @@ pub const ACCESS: Target = acp::access::TARGET;
 /// How the host starts Claude Code when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Claude", "claude")
     .agent("claude")
-    .harness("claude");
+    .harness("claude")
+    .own_tools();
 
 /// Claude Code's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
 pub const MARK: &str = include_str!("../mark.svg");
