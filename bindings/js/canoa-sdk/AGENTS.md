@@ -60,6 +60,13 @@ class PanelTab extends Provider {             // panel.js: static tab, title, he
 }
 class TerminalPanelTab extends PanelTab; class PagePanelTab extends PanelTab   // a page at `url`, on this computer's loopback
 class LogPanelTab extends PanelTab   // lines() -> the log's lines, oldest first
+class AccountProvider extends Provider {      // account.js: static title, description, offeredKinds, logins, usageKinds, local; offer(), login/renew/watch throw Unsupported, usage/models answer unsupported/unknown (and release handles)
+}
+class AccountWatch   // account.js: stop()
+credentialSchema(title?, description?); accountKind(fields); loginMethod(fields); endpointSlot(fields); loginOutcome(fields); modelsListed(models); modelsUnknown(reason, unknownKind?); usageUnsupported(reason, account?); renewed(credentials, expiresAt?); renewUnchanged(reason); release(...handles)
+class ModelGateway extends Provider {         // gateway.js: static kind, vendor, table?; open(request, spawner) -> GatewayLease
+}
+class GatewayLease   // gateway.js: address(), bearer(), models() (defaults to modelsUnknown)
 ```
 
 A catalog source's `read` is handed the host's `spawner`: `spawner.spawn(spec)` starts a program as the person, `spawner.readFile(path, max)`

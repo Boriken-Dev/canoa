@@ -101,18 +101,33 @@ fn failed(error: &ureq::Error) -> Error {
     Error::RequestFailed(error.to_string())
 }
 
+/// `GET url` with `headers` (after `Accept: application/json`).
+///
+/// # Errors
+///
+/// The address did not answer in time, refused the connection, or sent an answer that was cut off. A status is not an error.
+pub fn get_json_with(url: &str, headers: &[(&str, &str)]) -> Result<Reply, Error> {
+    let agent = agent()?;
+    let mut request = agent.get(url).header("Accept", "application/json");
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    read(request.call().map_err(|error| failed(&error))?)
+}
+
 /// `GET url`, with `Authorization: Bearer KEY` when a key is given.
 ///
 /// # Errors
 ///
 /// The address did not answer in time, refused the connection, or sent an answer that was cut off. A status is not an error.
 pub fn get_json(url: &str, bearer: Option<&str>) -> Result<Reply, Error> {
-    let agent = agent()?;
-    let mut request = agent.get(url).header("Accept", "application/json");
-    if let Some(key) = bearer {
-        request = request.header("Authorization", format!("Bearer {key}"));
+    match bearer {
+        Some(key) => {
+            let authorization = format!("Bearer {key}");
+            get_json_with(url, &[("Authorization", &authorization)])
+        }
+        None => get_json_with(url, &[]),
     }
-    read(request.call().map_err(|error| failed(&error))?)
 }
 
 /// `POST url` with `fields` as a form (`application/x-www-form-urlencoded`).

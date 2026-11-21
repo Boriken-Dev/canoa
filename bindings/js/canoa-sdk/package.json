@@ -18,6 +18,14 @@
       "types": "./types/index.d.ts",
       "import": "./src/index.js"
     },
+    "./account": {
+      "types": "./types/account.d.ts",
+      "import": "./src/account.js"
+    },
+    "./gateway": {
+      "types": "./types/gateway.d.ts",
+      "import": "./src/gateway.js"
+    },
     "./vendor": {
       "types": "./types/vendor.d.ts",
       "import": "./src/vendor.js"

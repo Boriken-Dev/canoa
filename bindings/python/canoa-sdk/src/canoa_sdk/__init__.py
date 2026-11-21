@@ -1,14 +1,35 @@
 """Write a Canoa provider in Python: subclass a kind's base class, set a few attributes or override a few methods, and list the class
 in the module's `__all__`; a guatiao source loads the module like any other, and the host offers the provider.
 
-Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.settings`, `.panel`, `.usage`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
+Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.settings`, `.panel`, `.usage`, `.account`, `.gateway`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
 is written on a dataclass with `canoa_sdk.forms`. `canoa_sdk.kinds` holds the typed `Protocol` classes written from the kinds'
 descriptions, which the base classes sit on.
 """
 
 from __future__ import annotations
 
+from .account import (
+    AccountKindInfo,
+    AccountOffer,
+    AccountProvider,
+    AccountProviderInfo,
+    AccountWatch,
+    EndpointSlot,
+    LoginForm,
+    LoginMethodInfo,
+    LoginOutcome,
+    ModelInfo,
+    OpenUrl,
+    credential_schema,
+    models_listed,
+    models_unknown,
+    release,
+    renew_unchanged,
+    renewed,
+    usage_unsupported,
+)
 from .forms import Section, form_meta, form_of, section, ui
+from .gateway import GatewayInfo, GatewayLease, ModelGateway, request_of
 from .panel import LogPanelTab, PagePanelTab, PanelTab, TerminalPanelTab
 from .profile import (
     EnvProfileItem,
@@ -48,19 +69,33 @@ from .usage import ReaderInfo, Retry, UsageReader, UsageReading, bucket, failed,
 from .vendor import AgentVendor, ModeTitle, StandardTitle, VendorInfo
 
 __all__ = [
+    "AccountKindInfo",
+    "AccountOffer",
+    "AccountProvider",
+    "AccountProviderInfo",
+    "AccountWatch",
     "AgentVendor",
     "CatalogSource",
     "CommandCatalogSource",
+    "EndpointSlot",
     "EnvProfileItem",
     "ExtensionInfo",
     "ExtensionType",
     "FormSecretProvider",
+    "GatewayInfo",
+    "GatewayLease",
     "Held",
     "ItemEffect",
     "LogPanelTab",
+    "LoginForm",
+    "LoginMethodInfo",
+    "LoginOutcome",
     "ModeTitle",
+    "ModelGateway",
+    "ModelInfo",
     "NetworkEffect",
     "NetworkProfileItem",
+    "OpenUrl",
     "PagePanelTab",
     "PanelTab",
     "ProfileItem",
@@ -86,17 +121,25 @@ __all__ = [
     "UsageReading",
     "VendorInfo",
     "bucket",
+    "credential_schema",
     "effect",
     "failed",
     "fields_of",
     "form_meta",
     "form_of",
     "keeping_of",
+    "models_listed",
+    "models_unknown",
     "name_of",
     "reading",
+    "release",
+    "renew_unchanged",
+    "renewed",
+    "request_of",
     "section",
     "text_of",
     "ui",
+    "usage_unsupported",
     "values_of",
     "words_of",
 ]

@@ -56,6 +56,12 @@ class SettingsSection:    # canoa_sdk.settings: section, title, help, icon, grou
 class PanelTab:           # canoa_sdk.panel: tab, title, help, icon, shows = "log" | "terminal" | "page", shell, url; tail(request)
 class TerminalPanelTab(PanelTab); class PagePanelTab(PanelTab)   # a page at `url`, on this computer's loopback
 class LogPanelTab(PanelTab)   # lines() -> the log's lines, oldest first
+class AccountProvider:    # canoa_sdk.account: title, description, kinds_offered ([AccountKindInfo]), logins ([LoginMethodInfo]), usage_kinds, local; offer(), login/renew/watch refuse UNSUPPORTED, usage/models answer unsupported/unknown (and release handles)
+class AccountWatch        # canoa_sdk.account: stop()
+credential_schema(title?, description?); models_listed(models); models_unknown(reason, unknown_kind?); usage_unsupported(reason, account?); renewed(credentials, expires_at?); renew_unchanged(reason); release(*handles)
+class ModelGateway:       # canoa_sdk.gateway: kind, vendor, table?; abstract slot open(request, spawner) -> GatewayLease
+class GatewayLease        # canoa_sdk.gateway: address() -> str, bearer() -> str, models() -> ModelListing (defaults to unknown)
+request_of(request) -> dict
 ```
 
 A catalog source's `read` is handed the host's `spawner`: `spawner.spawn(spec)` starts a program as the person, `spawner.read_file(path, max)`

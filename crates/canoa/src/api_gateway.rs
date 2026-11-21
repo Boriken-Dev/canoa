@@ -23,7 +23,7 @@ use core::fmt;
 
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::standard::{OPENAI_API, is_standard, well_known};
+use coqui_acp_api::standard::{ANTHROPIC_API, OPENAI_API, is_standard, well_known};
 use coqui_acp_api::{
     AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer, AccountProvider,
     AccountProviderInfo, AccountUsage, AccountUsageQuery, AccountWatch, Credentials, EndpointSlot,
@@ -347,16 +347,14 @@ pub fn models_url(base: &str) -> String {
     }
 }
 
-/// The models an OpenAI-API address serves, as its `GET /v1/models` lists them with `key`.
-///
-/// Anything it cannot say is an unknown with the reason (the address does not answer, refuses the key, answers what is not a list),
-/// never a guess.
-#[must_use]
-pub fn openai_models(base: &str, key: &str) -> ModelListing {
+const ANTHROPIC_VERSION: &str = "2023-06-01";
+const AUTH_TOKEN_CREDENTIAL: &str = "auth_token";
+
+fn list_models(base: &str, headers: &[(&str, &str)], format_name: &str) -> ModelListing {
     if let Err(why) = check_address(base) {
         return ModelListing::unavailable(UnknownKind::Failed, why.to_string());
     }
-    let reply = match http::get_json(&models_url(base), Some(key)) {
+    let reply = match http::get_json_with(&models_url(base), headers) {
         Ok(reply) => reply,
         Err(why) => return ModelListing::unavailable(UnknownKind::Failed, why.to_string()),
     };
@@ -369,15 +367,53 @@ pub fn openai_models(base: &str, key: &str) -> ModelListing {
     let Some(list) = reply.body.get("data").and_then(Value::as_array) else {
         return ModelListing::unavailable(
             UnknownKind::Failed,
-            "the address's model list is not an OpenAI one (no `data`)",
+            format!("the address's model list is not an {format_name} one (no `data`)"),
         );
     };
     ModelListing::of(
         list.iter()
-            .filter_map(|each| each.get("id").and_then(Value::as_str))
-            .map(ModelInfo::new)
+            .filter_map(|each| {
+                let id = each.get("id").and_then(Value::as_str)?;
+                let mut model = ModelInfo::new(id);
+                if let Some(name) = each.get("display_name").and_then(Value::as_str)
+                    && !name.is_empty()
+                {
+                    model.name = Some(name.to_owned());
+                }
+                Some(model)
+            })
             .collect(),
     )
+}
+
+/// The models an OpenAI-API address serves, as its `GET /v1/models` lists them with `key`.
+///
+/// Anything it cannot say is an unknown with the reason (the address does not answer, refuses the key, answers what is not a list),
+/// never a guess.
+#[must_use]
+pub fn openai_models(base: &str, key: &str) -> ModelListing {
+    let authorization = format!("Bearer {key}");
+    list_models(base, &[("Authorization", &authorization)], "OpenAI")
+}
+
+/// The models an Anthropic-API address serves, as its `GET /v1/models` lists them with `key` (sent as `Authorization: Bearer`
+/// when `bearer` is set, else `x-api-key`) and `anthropic-version: 2023-06-01`.
+///
+/// Anything it cannot say is an unknown with the reason (the address does not answer, refuses the key, answers what is not a list),
+/// never a guess.
+#[must_use]
+pub fn anthropic_models(base: &str, key: &str, bearer: bool) -> ModelListing {
+    let authorization;
+    let headers = if bearer {
+        authorization = format!("Bearer {key}");
+        [
+            ("Authorization", authorization.as_str()),
+            ("anthropic-version", ANTHROPIC_VERSION),
+        ]
+    } else {
+        [("x-api-key", key), ("anthropic-version", ANTHROPIC_VERSION)]
+    };
+    list_models(base, &headers, "Anthropic")
 }
 
 /// The settings of an account of this kind, as its table holds them.
@@ -751,16 +787,20 @@ impl AccountProvider for ApiGatewayAccounts {
                 "this provider keeps no account of that kind",
             ));
         }
-        if !grant.provides.iter().any(|standard| standard == OPENAI_API) {
+        let standard = if grant.provides.iter().any(|each| each == OPENAI_API) {
+            OPENAI_API
+        } else if grant.provides.iter().any(|each| each == ANTHROPIC_API) {
+            ANTHROPIC_API
+        } else {
             return Ok(ModelListing::unknown(format!(
-                "the address's models are listed through the OpenAI API, and this account is used as {}",
+                "the address's models are listed through the OpenAI or Anthropic API, and this account is used as {}",
                 if grant.provides.is_empty() {
                     "no standard".to_owned()
                 } else {
                     grant.provides.join(", ")
                 }
             )));
-        }
+        };
         let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&grant.settings)
             .map_err(|_| crate::status::bad_value("the account's settings are not a table"))?;
         let Some(base) = settings.get(BASE_URL).and_then(Value::as_str) else {
@@ -772,13 +812,22 @@ impl AccountProvider for ApiGatewayAccounts {
             .get(CREDENTIAL)
             .ok_or_else(|| crate::status::bad_value("the account holds no key"))?
             .to_string();
-        let address = settings
+        let override_entry = settings
             .get(BY_STANDARD)
-            .and_then(|table| table.get(OPENAI_API))
+            .and_then(|table| table.get(standard));
+        let address = override_entry
             .and_then(|entry| entry.get(BASE_URL))
             .and_then(Value::as_str)
             .unwrap_or(base);
-        Ok(openai_models(address, &key))
+        if standard == ANTHROPIC_API {
+            let bearer = override_entry
+                .and_then(|entry| entry.get("credential"))
+                .and_then(Value::as_str)
+                == Some(AUTH_TOKEN_CREDENTIAL);
+            Ok(anthropic_models(address, &key, bearer))
+        } else {
+            Ok(openai_models(address, &key))
+        }
     }
 }
 

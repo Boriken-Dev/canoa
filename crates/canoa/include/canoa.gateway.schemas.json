@@ -1,0 +1,65 @@
+{
+  "GatewayInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "The account kind whose sessions it serves. An `account_provider` of the same library offers the kind, so a person can make an account of it."
+      },
+      "vendor": {
+        "type": "string",
+        "description": "The vendor of what runs the model, in the words a session's identity variables use for an account's provider (`AGENTS_ACCOUNT_PROVIDER`)."
+      },
+      "table": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The name of the table of canoa.cfg that holds settings of the gateway's own, when it has any: the host reads it each time it opens a gateway and hands it over as [`GatewayRequest::table`]."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "vendor"
+    ]
+  },
+  "GatewayRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "account": {
+        "type": "string",
+        "description": "The account's id. A gateway shares one server among the sessions that hold the same account."
+      },
+      "settings": {
+        "description": "The account's settings, as an object; the account kind's schema says what it holds."
+      },
+      "table": {
+        "description": "The gateway's own table of canoa.cfg ([`GatewayInfo::table`]), as an object as the file has it now: `{}` when the gateway names no table or the file has none."
+      },
+      "home": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The host's home folder, where a gateway may keep its logs and the files it makes."
+      },
+      "helper": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The command line that starts one of the host's own helper commands: the program, then its arguments. A gateway that runs part of itself in a process of its own appends the name of its library and the arguments that library's helper reads, and starts the result through its spawner. Empty when this host has no such command.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "account",
+      "settings",
+      "table"
+    ]
+  }
+}

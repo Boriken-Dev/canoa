@@ -4,7 +4,22 @@
 // The modules import each other by relative path only, since the source that runs them (QuickJS) resolves nothing else beside
 // `guatiao`, `guatiao/kinds` and `guatiao/provide`: a library imports this file or one of its siblings by a relative path to where
 // the SDK is under the library's `paths`.
+export {
+  AccountProvider,
+  AccountWatch,
+  accountKind,
+  credentialSchema,
+  endpointSlot,
+  loginMethod,
+  loginOutcome,
+  modelsListed,
+  modelsUnknown,
+  renewUnchanged,
+  renewed,
+  usageUnsupported,
+} from './account.js';
 export { FORM_KEY, formMeta, section, ui, when } from './forms.js';
+export { GatewayLease, ModelGateway } from './gateway.js';
 export * as kinds from './kinds.js';
 export {
   FormSecretProvider,

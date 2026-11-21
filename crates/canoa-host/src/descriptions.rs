@@ -13,6 +13,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use canoa::gateway::{GatewayLeaseVtable, ModelGatewayVtable};
 use canoa::panel_tab::PanelTabVtable;
 use canoa::profile_item::ProfileItemVtable;
 use canoa::secret_provider::SecretProviderVtable;
@@ -48,6 +49,8 @@ pub(crate) fn document() -> String {
         ProcessMembersVtable::description(),
         SettingsSectionVtable::description(),
         PanelTabVtable::description(),
+        ModelGatewayVtable::description(),
+        GatewayLeaseVtable::description(),
         ProgramStoreVtable::description(),
         InstallPrompterVtable::description(),
         InstallToolsVtable::description(),
@@ -131,6 +134,8 @@ mod tests {
             "usage_reader",
             "settings_section",
             "panel_tab",
+            "model_gateway",
+            "gateway_lease",
             "acp_harness",
             "transport",
         ] {

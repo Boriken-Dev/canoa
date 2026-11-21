@@ -73,21 +73,31 @@ fn spawner() -> Object<dyn ProcessSpawner> {
     LocalSpawner::new().into_object()
 }
 
-/// The request line and `Authorization` header of each request a stand-in gateway was sent.
-type Requests = Arc<Mutex<Vec<(String, String)>>>;
+/// One request captured by a stand-in gateway: request line plus the auth and Anthropic version headers.
+type Requests = Arc<Mutex<Vec<(String, String, String, String)>>>;
 
-/// A gateway on loopback: it answers `/v1/models` with the models it was given when the request carries `Bearer CANARY`, 401 when
-/// it does not, and records each request line and its `Authorization` header.
-fn stand_in(models: &[&str]) -> (String, Requests) {
+fn header_value(head: &str, name: &str) -> String {
+    head.lines()
+        .find_map(|each| {
+            let (header, value) = each.split_once(':')?;
+            header
+                .eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_owned())
+        })
+        .unwrap_or_default()
+}
+
+/// A gateway on loopback: answers `/v1/models` with `payload` when `check` accepts the request headers, 401 when it does not, and
+/// records each request line and its `Authorization`, `x-api-key` and `anthropic-version` headers.
+fn stand_in_with(payload: Vec<Value>, check: fn(&str, &str, &str) -> bool) -> (String, Requests) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("binds");
     let address = format!("http://{}", listener.local_addr().expect("an address"));
     let seen: Requests = Arc::default();
     let record = Arc::clone(&seen);
-    let models: Vec<String> = models.iter().map(|m| (*m).to_owned()).collect();
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
-            let (record, models) = (Arc::clone(&record), models.clone());
+            let (record, payload) = (Arc::clone(&record), payload.clone());
             std::thread::spawn(move || {
                 let mut head = Vec::new();
                 let mut byte = [0_u8; 1];
@@ -99,28 +109,21 @@ fn stand_in(models: &[&str]) -> (String, Requests) {
                 }
                 let head = String::from_utf8_lossy(&head).into_owned();
                 let line = head.lines().next().unwrap_or("").to_owned();
-                // The header's name is the client's to spell.
-                let auth = head
-                    .lines()
-                    .find_map(|each| {
-                        let (name, value) = each.split_once(':')?;
-                        name.eq_ignore_ascii_case("authorization")
-                            .then(|| value.trim().to_owned())
-                    })
-                    .unwrap_or_default();
-                record
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .push((line.clone(), auth.clone()));
+                let auth = header_value(&head, "authorization");
+                let api_key = header_value(&head, "x-api-key");
+                let version = header_value(&head, "anthropic-version");
+                record.lock().unwrap_or_else(PoisonError::into_inner).push((
+                    line.clone(),
+                    auth.clone(),
+                    api_key.clone(),
+                    version.clone(),
+                ));
                 let (status, body) = if !line.starts_with("GET /v1/models ") {
                     ("404 Not Found", json!({"error": "no such path"}))
-                } else if auth != format!("Bearer {CANARY}") {
+                } else if !check(&auth, &api_key, &version) {
                     ("401 Unauthorized", json!({"error": "bad key"}))
                 } else {
-                    (
-                        "200 OK",
-                        json!({"object": "list", "data": models.iter().map(|id| json!({"id": id, "object": "model"})).collect::<Vec<_>>()}),
-                    )
+                    ("200 OK", json!({"object": "list", "data": payload}))
                 };
                 let body = body.to_string();
                 let _ = write!(
@@ -132,6 +135,17 @@ fn stand_in(models: &[&str]) -> (String, Requests) {
         }
     });
     (address, seen)
+}
+
+/// An OpenAI gateway on loopback answering `GET /v1/models` when sent `Authorization: Bearer CANARY`.
+fn stand_in(models: &[&str]) -> (String, Requests) {
+    stand_in_with(
+        models
+            .iter()
+            .map(|id| json!({"id": id, "object": "model"}))
+            .collect(),
+        |auth, _, _| auth == format!("Bearer {CANARY}"),
+    )
 }
 
 fn sign_in(inputs: &Value, key: &str) -> Result<coqui_acp_api::LoginOutcome, ProviderError> {
@@ -293,7 +307,7 @@ fn the_models_are_the_openai_list_of_the_address_read_with_the_key() {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .iter()
-        .map(|(line, _)| line.clone())
+        .map(|(line, _, _, _)| line.clone())
         .collect();
     assert_eq!(
         lines,
@@ -302,18 +316,72 @@ fn the_models_are_the_openai_list_of_the_address_read_with_the_key() {
 }
 
 #[test]
-fn an_account_used_as_another_standard_gives_the_reason_and_a_refused_key_is_a_failure_that_says_so()
- {
+fn an_anthropic_only_gateway_lists_its_models_with_key_or_bearer_and_unknown_standard_says_so() {
+    let (api_key_address, seen_key) = stand_in_with(
+        vec![json!({"id": "claude-sonnet-4-5", "display_name": "Claude Sonnet 4.5"})],
+        |auth, api_key, version| auth.is_empty() && api_key == CANARY && version == "2023-06-01",
+    );
+    let listed = models(grant(&api_key_address, &[ANTHROPIC_API]));
+    assert!(listed.known, "{:?}", listed.unknown_because);
+    assert_eq!(listed.models.len(), 1);
+    assert_eq!(listed.models[0].id, "claude-sonnet-4-5");
+    assert_eq!(listed.models[0].name.as_deref(), Some("Claude Sonnet 4.5"));
+    assert_eq!(
+        seen_key.lock().unwrap_or_else(PoisonError::into_inner)[0],
+        (
+            "GET /v1/models HTTP/1.1".to_owned(),
+            String::new(),
+            CANARY.to_owned(),
+            "2023-06-01".to_owned(),
+        )
+    );
+
+    let (bearer_address, seen_bearer) = stand_in_with(
+        vec![json!({"id": "claude-opus-4-5"})],
+        |auth, api_key, version| {
+            auth == format!("Bearer {CANARY}") && api_key.is_empty() && version == "2023-06-01"
+        },
+    );
+    let mut by = Map::new();
+    by.insert(
+        ANTHROPIC_API.to_owned(),
+        json!({"base_url": format!("{bearer_address}/v1"), "credential": "auth_token"}),
+    );
+    let mut credentials = Credentials::new();
+    credentials.insert(CREDENTIAL, CANARY);
+    let bearer_account = AccountGrant::new("id-two", ACCOUNT_KIND)
+        .settings(api_gateway::value(
+            &json!({"base_url": "https://never.example.com", "by_standard": by}),
+        ))
+        .credentials(credentials)
+        .provides([ANTHROPIC_API]);
+    let bearer_listed = models(bearer_account);
+    assert!(bearer_listed.known, "{:?}", bearer_listed.unknown_because);
+    assert_eq!(bearer_listed.models.len(), 1);
+    assert_eq!(bearer_listed.models[0].id, "claude-opus-4-5");
+    assert_eq!(bearer_listed.models[0].name, None);
+    assert_eq!(
+        seen_bearer.lock().unwrap_or_else(PoisonError::into_inner)[0],
+        (
+            "GET /v1/models HTTP/1.1".to_owned(),
+            format!("Bearer {CANARY}"),
+            String::new(),
+            "2023-06-01".to_owned(),
+        )
+    );
+
     let (address, _) = stand_in(&["m"]);
-    let anthropic = models(grant(&address, &[ANTHROPIC_API]));
-    assert!(!anthropic.known);
+    let other = models(grant(&address, &["other-api"]));
+    assert!(!other.known);
     assert!(
-        anthropic
+        other
             .unknown_because
             .as_deref()
-            .is_some_and(|why| why.contains("OpenAI") && why.contains("anthropic-api")),
+            .is_some_and(|why| why.contains("OpenAI")
+                && why.contains("Anthropic")
+                && why.contains("other-api")),
         "{:?}",
-        anthropic.unknown_because
+        other.unknown_because
     );
     let mut wrong = grant(&address, &[OPENAI_API]);
     let mut credentials = Credentials::new();

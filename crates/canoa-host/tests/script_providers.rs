@@ -554,13 +554,12 @@ mod python {
             &[("PYO3_PYTHON", executable)],
         );
         let examples = repository().join("examples/providers/python");
-        // The account provider's kind is coqui-acp's, which its own Python folder carries.
         let settings = format!(
             "dirs = {}\npaths = {}\nimport_dirs = {}\n",
             list(&[examples.join("gateway")]),
             list(&[
                 checkout("guatiao").join("bindings/python/guatiao/src"),
-                checkout("coqui-acp-api").join("crates/coqui-acp-api/python"),
+                repository().join("bindings/python/canoa-sdk/src"),
             ]),
             list(&[prefix]),
         );

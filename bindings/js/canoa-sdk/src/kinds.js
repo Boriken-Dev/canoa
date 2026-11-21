@@ -7,24 +7,8 @@ const described = kindsOf({
   "format": 1,
   "kinds": [
     {
-      "name": "account_speech",
-      "floor_hash": 2239884849,
-      "object": false,
-      "slots": [
-        {
-          "name": "describe",
-          "required": true,
-          "fallible": true,
-          "args": [],
-          "answer": {
-            "type": "value"
-          }
-        }
-      ]
-    },
-    {
-      "name": "catalog_source",
-      "floor_hash": 2158006965,
+      "name": "account_provider",
+      "floor_hash": 4172086390,
       "object": false,
       "slots": [
         {
@@ -37,7 +21,43 @@ const described = kindsOf({
           }
         },
         {
-          "name": "read",
+          "name": "offers",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "login",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "prompter",
+              "type": "object",
+              "kind": "login_prompter",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "renew",
           "required": true,
           "fallible": true,
           "args": [
@@ -54,7 +74,187 @@ const described = kindsOf({
             }
           ],
           "answer": {
-            "type": "text"
+            "type": "value"
+          }
+        },
+        {
+          "name": "watch",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "keeper",
+              "type": "object",
+              "kind": "account_keeper",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "account_watch"
+          }
+        },
+        {
+          "name": "usage",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "query",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "keeper",
+              "type": "object",
+              "kind": "account_keeper",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "models",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "query",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "keeper",
+              "type": "object",
+              "kind": "account_keeper",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
+      "name": "account_watch",
+      "floor_hash": 589148782,
+      "object": true,
+      "slots": [
+        {
+          "name": "stop",
+          "required": true,
+          "fallible": true,
+          "args": []
+        }
+      ]
+    },
+    {
+      "name": "account_keeper",
+      "floor_hash": 708146915,
+      "object": true,
+      "slots": [
+        {
+          "name": "renewed",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "renewal",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        },
+        {
+          "name": "lost",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "loss",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "login_prompter",
+      "floor_hash": 2606822037,
+      "object": true,
+      "slots": [
+        {
+          "name": "say",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "text",
+              "type": "str"
+            }
+          ]
+        },
+        {
+          "name": "open_url",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "open",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        },
+        {
+          "name": "ask",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "form",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "cancelled",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "bool"
           }
         }
       ]
@@ -264,6 +464,131 @@ const described = kindsOf({
           "fallible": true,
           "name": "link",
           "required": true
+        }
+      ]
+    },
+    {
+      "name": "account_speech",
+      "floor_hash": 2239884849,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
+      "name": "catalog_source",
+      "floor_hash": 2158006965,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "read",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ]
+    },
+    {
+      "name": "model_gateway",
+      "floor_hash": 1955023755,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "gateway_lease"
+          }
+        }
+      ]
+    },
+    {
+      "name": "gateway_lease",
+      "floor_hash": 904744137,
+      "object": true,
+      "slots": [
+        {
+          "name": "address",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "bearer",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "models",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
         }
       ]
     },
@@ -1300,23 +1625,56 @@ const described = kindsOf({
 });
 
 /**
- * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
- * connection opened.
+ * Owns accounts: the kinds it makes, the sign-in that makes one, the renewal and watching of its
+ * credentials, the usage of its plan and the models it may use.
+ *
+ * An account provider does not run an agent. A harness (`acp_harness`) applies an account the
+ * host hands it when the account's `provides` meets what the harness accepts, and never asks how
+ * the account was made. The host owns which accounts exist, their secrets at rest and who holds
+ * one; the provider owns every fact about how its kinds sign in, renew, rotate and report.
+ *
+ * Every method answers for the provider as configured: a host builds an instance from the
+ * provider's settings and asks it. Every method is synchronous; a host calls them from a thread
+ * of its own. Every object a method is handed (`spawner`, `prompter`, `keeper`) is the provider's
+ * from then on, and it destroys each, even when it refuses.
+ *
+ * A credential crosses only as a secret, and nothing a provider answers carries one: not an
+ * answer, a refusal, an error, a log line or an argument vector.
  */
-export const AccountSpeech = described["account_speech"];
+export const AccountProvider = described["account_provider"];
 
 /**
- * Where a catalog comes from.
- *
- * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
- * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
- *
- * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
- * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
- * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
- * even when it refuses.
+ * A watch of one account, from [`AccountProvider::watch`]. Destroying it stops it, as
+ * [`stop`](Self::stop) does.
  */
-export const CatalogSource = described["catalog_source"];
+export const AccountWatch = described["account_watch"];
+
+/**
+ * Where an account provider reports what happens to an account's credentials behind the host's
+ * back. The host implements it and hands one to [`watch`](crate::AccountProvider::watch) and to
+ * [`usage`](crate::AccountProvider::usage); the provider owns it from then on, and destroys it when
+ * the watch stops or the call returns.
+ *
+ * **Every live keeper of the account hears each event**, not the first to ask. An event carries a
+ * sequence the provider counts per account; **the host deduplicates by (account, sequence)** and
+ * orders chained rotations by it, so a keeper that hears an event twice, or two keepers of one
+ * host that hear it once each, store it once.
+ *
+ * A watch looks at an account's files through the spawner (every `renew_poll_ms`, 30000 by
+ * default) and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost),
+ * never [`renewed`](Self::renewed).
+ */
+export const AccountKeeper = described["account_keeper"];
+
+/**
+ * How a login relays its steps to the person. The host implements it, hands one to
+ * [`login`](crate::AccountProvider::login) and renders each call; the provider owns it from then on and
+ * destroys it when the login ends. `ask` goes sealed from the person's frontend to where the
+ * provider runs, never through a model, a channel the agent reads or a log.
+ *
+ * When the person cancels, every call answers `GUATIAO_ERR_GONE` and `cancelled` is true.
+ */
+export const LoginPrompter = described["login_prompter"];
 
 /**
  * Starts programs where the host chooses: on this machine, on another over SSH, in a container or
@@ -1336,6 +1694,37 @@ export const ProcessSpawner = described["process_spawner"];
  * Destroying it kills the whole tree, as [`kill`](Self::kill) does.
  */
 export const SpawnedProcess = described["spawned_process"];
+
+/**
+ * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
+ * connection opened.
+ */
+export const AccountSpeech = described["account_speech"];
+
+/**
+ * Where a catalog comes from.
+ *
+ * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
+ * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
+ *
+ * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
+ * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
+ * even when it refuses.
+ */
+export const CatalogSource = described["catalog_source"];
+
+/**
+ * Serves a model that runs on this computer to the sessions of accounts of one kind. A provider is the same on every call; what
+ * it keeps for one account is in the lease it opens.
+ */
+export const ModelGateway = described["model_gateway"];
+
+/**
+ * One session's access to a gateway. Destroying it ends the session's access, and the last one for an account ends that
+ * account's gateway.
+ */
+export const GatewayLease = described["gateway_lease"];
 
 /**
  * The models of a Store type, and what the person does with each.

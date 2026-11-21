@@ -5,68 +5,374 @@ import type * as g from 'guatiao';
 import type * as k from 'guatiao/kinds';
 
 /**
- * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
- * connection opened.
+ * Owns accounts: the kinds it makes, the sign-in that makes one, the renewal and watching of its
+ * credentials, the usage of its plan and the models it may use.
  *
- * The `account_speech` kind: what a provider of it implements.
+ * An account provider does not run an agent. A harness (`acp_harness`) applies an account the
+ * host hands it when the account's `provides` meets what the harness accepts, and never asks how
+ * the account was made. The host owns which accounts exist, their secrets at rest and who holds
+ * one; the provider owns every fact about how its kinds sign in, renew, rotate and report.
+ *
+ * Every method answers for the provider as configured: a host builds an instance from the
+ * provider's settings and asks it. Every method is synchronous; a host calls them from a thread
+ * of its own. Every object a method is handed (`spawner`, `prompter`, `keeper`) is the provider's
+ * from then on, and it destroys each, even when it refuses.
+ *
+ * A credential crosses only as a secret, and nothing a provider answers carries one: not an
+ * answer, a refusal, an error, a log line or an argument vector.
+ *
+ * The `account_provider` kind: what a provider of it implements.
  */
-export interface AccountSpeech {
-  /** The services. */
+export interface AccountProvider {
+  /** Who the provider is, for a host listing its providers. Cheap, and the same on every call. */
   describe(): unknown;
+  /**
+   * The kinds of account it makes, the ways to sign in, and which kinds report usage. Cheap,
+   * the same on every call, and answered as configured.
+   */
+  offers(): unknown;
+  /**
+   * Signs in to make an account of the kind the method `request.method` produces. The provider
+   * runs the sign-in in `request.state_dir` (a program on a terminal where it needs one)
+   * through `spawner`, reads what it prints and relays each step through `prompter`, and at the
+   * end reads the files it wrote into the outcome's credentials. `spawner` and `prompter` are
+   * handed over: the provider destroys both before it answers, a timeout excepted (see below).
+   *
+   * The sign-in is one call that ends in the outcome, a refusal or a cancel. Its steps reach the
+   * person through `prompter`: `say` and `open_url` show them what the sign-in prints, `ask`
+   * takes back what they type or paste, and `cancelled` is how the person ends it.
+   *
+   * When the person cancels (`prompter.cancelled()` true, or a prompter call answering
+   * `GUATIAO_ERR_GONE`), or `request.timeout_ms` passes, the provider kills the program's whole
+   * tree and answers `GUATIAO_ERR_GONE` with `login cancelled` or `login timed out` within two
+   * seconds. It runs a watchdog of its own: at the deadline it kills the tree and answers even
+   * if a prompter call has not returned (the call is then left to end by itself, and the
+   * prompter destroyed when it does), so a host's `ask` should return by `timeout_ms`. It also
+   * checks the deadline after every prompter call and before it answers an outcome. A key the
+   * program refused is `GUATIAO_ERR_BAD_VALUE` with `login refused: ` and its reason; any other
+   * failure `GUATIAO_ERR_INTERNAL` with a reason that holds no input value and no URL query. A
+   * method the provider does not list is `GUATIAO_ERR_BAD_VALUE`; a provider with no login
+   * method answers `GUATIAO_ERR_UNSUPPORTED` with the reason.
+   */
+  login(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>, prompter: k.ObjectHandle<typeof LoginPrompter>): unknown;
+  /**
+   * Renews the credentials of `request.account` with no model turn. Answers the new
+   * credentials, or why nothing changed. `GUATIAO_ERR_UNSUPPORTED`, with the reason, for a
+   * kind whose entry says `renews` false; `GUATIAO_ERR_BAD_VALUE` for a kind it does not list,
+   * an id that is not 1 to 128 bytes without a control character, or a credential that is
+   * missing. `spawner` is handed over as `login`'s is. A refused renewal that lost the login is
+   * `GUATIAO_ERR_GONE` with the reason, and the blank copy is never answered.
+   */
+  renew(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /**
+   * Starts watching the account `request.account` names for a credential its program renewed or
+   * lost behind the host's back: the files in its `state_dir`, read through `spawner`. The
+   * watch tells `keeper` of each change, from threads of its own, and ends when the returned
+   * object is stopped or destroyed.
+   *
+   * A changed credential is `renewed` with the new credentials and the `revision` of the
+   * grant it replaces; a blank or deleted one is `lost`, with a reason that holds no
+   * credential. Each change is told once, with a `sequence` that grows with every event of the
+   * account (renewals and losses together) and that every live watch of the same account in the
+   * same provider instance hears, so a host deduplicates by (account, sequence) and may hand a
+   * keeper that keeps nothing. A watch reports what it finds when it begins, so a login that is
+   * already gone is told at once.
+   *
+   * Refuses `GUATIAO_ERR_UNSUPPORTED`, with the reason, a kind whose entry does not say both
+   * `rotates` and `state_dir`, or a spawner without files; `GUATIAO_ERR_BAD_VALUE` for a kind
+   * it does not list, an id that is not 1 to 128 bytes without a control character, or a
+   * credential that is missing. `spawner` and `keeper` are handed over to the watch: it
+   * destroys both when it is stopped, and at once when it refuses.
+   */
+  watch(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>, keeper: k.ObjectHandle<typeof AccountKeeper>): AccountWatch | k.ObjectHandle<typeof AccountWatch>;
+  /**
+   * What the plan behind `query.account` has used and has left, with no session and no model
+   * turn: the account's windows, how much of each is used, when each resets and which models it
+   * covers. Cheap, so a host may poll it as often as it likes. A kind the provider lists in
+   * `offers().usage` answers `supported`; any other kind it lists answers "not offered",
+   * [`AccountUsage::unsupported`], which is a true answer. The automatic `local` account (kind
+   * [`HARNESS_LOGIN`](crate::HARNESS_LOGIN), when `offers().local`) is asked of the program on
+   * the configuration as it stands. A kind it neither lists nor offers as `local` is
+   * `GUATIAO_ERR_BAD_VALUE`, as is an id that is not 1 to 128 bytes without a control
+   * character.
+   *
+   * **Plan usage only.** The tokens a session or a run spent are not an account's: ACP reports
+   * them with the session, and no field of the answer holds one. Never carries a value of the
+   * environment or the credentials. A provider that runs a program to ask runs it through
+   * `spawner`, on the account's directory, and destroys it; `keeper` is handed over as
+   * `watch`'s is, for a login the call sees renewed or lost, and is destroyed before the call
+   * answers.
+   */
+  usage(query: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>, keeper: k.ObjectHandle<typeof AccountKeeper>): unknown;
+  /**
+   * The models the account behind `query.account` may use, with no model turn and no session:
+   * what a host shows a person choosing one before a session starts. The listing is the
+   * account's, so an account of another kind (another login, another key) may list others. A
+   * provider that cannot list for a kind (the program lists its models only in a session, or
+   * has no way to) answers [`ModelListing::unknown`] with the reason, which is a true answer,
+   * and one that tried and could not answers [`ModelListing::unavailable`]; it never guesses.
+   *
+   * Takes every kind the provider lists in `offers().kinds`, and [`HARNESS_LOGIN`](crate::HARNESS_LOGIN)
+   * (the automatic `local` account) when `offers().local`: the program asked as its
+   * configuration stands, with nothing applied. Any other kind is `GUATIAO_ERR_BAD_VALUE`, as
+   * is an id that is not 1 to 128 bytes without a control character. Never carries a value of
+   * the environment or the credentials.
+   *
+   * A provider that runs a program to ask runs it through `spawner`, on the account's directory,
+   * and destroys it; `keeper` is handed over as `watch`'s is, for a login the call sees renewed
+   * or lost, and is destroyed before the call answers.
+   */
+  models(query: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>, keeper: k.ObjectHandle<typeof AccountKeeper>): unknown;
 }
 
-/** A caller's handle on a `account_speech` table: a method per slot. */
-export interface AccountSpeechRemote extends k.RemoteBase<typeof AccountSpeech> {
-  /** The services. */
+/** A caller's handle on a `account_provider` table: a method per slot. */
+export interface AccountProviderRemote extends k.RemoteBase<typeof AccountProvider> {
+  /** Who the provider is, for a host listing its providers. Cheap, and the same on every call. */
   describe(): g.Value;
+  /**
+   * The kinds of account it makes, the ways to sign in, and which kinds report usage. Cheap,
+   * the same on every call, and answered as configured.
+   */
+  offers(): g.Value;
+  /**
+   * Signs in to make an account of the kind the method `request.method` produces. The provider
+   * runs the sign-in in `request.state_dir` (a program on a terminal where it needs one)
+   * through `spawner`, reads what it prints and relays each step through `prompter`, and at the
+   * end reads the files it wrote into the outcome's credentials. `spawner` and `prompter` are
+   * handed over: the provider destroys both before it answers, a timeout excepted (see below).
+   *
+   * The sign-in is one call that ends in the outcome, a refusal or a cancel. Its steps reach the
+   * person through `prompter`: `say` and `open_url` show them what the sign-in prints, `ask`
+   * takes back what they type or paste, and `cancelled` is how the person ends it.
+   *
+   * When the person cancels (`prompter.cancelled()` true, or a prompter call answering
+   * `GUATIAO_ERR_GONE`), or `request.timeout_ms` passes, the provider kills the program's whole
+   * tree and answers `GUATIAO_ERR_GONE` with `login cancelled` or `login timed out` within two
+   * seconds. It runs a watchdog of its own: at the deadline it kills the tree and answers even
+   * if a prompter call has not returned (the call is then left to end by itself, and the
+   * prompter destroyed when it does), so a host's `ask` should return by `timeout_ms`. It also
+   * checks the deadline after every prompter call and before it answers an outcome. A key the
+   * program refused is `GUATIAO_ERR_BAD_VALUE` with `login refused: ` and its reason; any other
+   * failure `GUATIAO_ERR_INTERNAL` with a reason that holds no input value and no URL query. A
+   * method the provider does not list is `GUATIAO_ERR_BAD_VALUE`; a provider with no login
+   * method answers `GUATIAO_ERR_UNSUPPORTED` with the reason.
+   */
+  login(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>, prompter: LoginPrompter | k.ObjectHandle<typeof LoginPrompter>): g.Value;
+  /**
+   * Renews the credentials of `request.account` with no model turn. Answers the new
+   * credentials, or why nothing changed. `GUATIAO_ERR_UNSUPPORTED`, with the reason, for a
+   * kind whose entry says `renews` false; `GUATIAO_ERR_BAD_VALUE` for a kind it does not list,
+   * an id that is not 1 to 128 bytes without a control character, or a credential that is
+   * missing. `spawner` is handed over as `login`'s is. A refused renewal that lost the login is
+   * `GUATIAO_ERR_GONE` with the reason, and the blank copy is never answered.
+   */
+  renew(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /**
+   * Starts watching the account `request.account` names for a credential its program renewed or
+   * lost behind the host's back: the files in its `state_dir`, read through `spawner`. The
+   * watch tells `keeper` of each change, from threads of its own, and ends when the returned
+   * object is stopped or destroyed.
+   *
+   * A changed credential is `renewed` with the new credentials and the `revision` of the
+   * grant it replaces; a blank or deleted one is `lost`, with a reason that holds no
+   * credential. Each change is told once, with a `sequence` that grows with every event of the
+   * account (renewals and losses together) and that every live watch of the same account in the
+   * same provider instance hears, so a host deduplicates by (account, sequence) and may hand a
+   * keeper that keeps nothing. A watch reports what it finds when it begins, so a login that is
+   * already gone is told at once.
+   *
+   * Refuses `GUATIAO_ERR_UNSUPPORTED`, with the reason, a kind whose entry does not say both
+   * `rotates` and `state_dir`, or a spawner without files; `GUATIAO_ERR_BAD_VALUE` for a kind
+   * it does not list, an id that is not 1 to 128 bytes without a control character, or a
+   * credential that is missing. `spawner` and `keeper` are handed over to the watch: it
+   * destroys both when it is stopped, and at once when it refuses.
+   */
+  watch(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>, keeper: AccountKeeper | k.ObjectHandle<typeof AccountKeeper>): k.ObjectHandle<typeof AccountWatch>;
+  /**
+   * What the plan behind `query.account` has used and has left, with no session and no model
+   * turn: the account's windows, how much of each is used, when each resets and which models it
+   * covers. Cheap, so a host may poll it as often as it likes. A kind the provider lists in
+   * `offers().usage` answers `supported`; any other kind it lists answers "not offered",
+   * [`AccountUsage::unsupported`], which is a true answer. The automatic `local` account (kind
+   * [`HARNESS_LOGIN`](crate::HARNESS_LOGIN), when `offers().local`) is asked of the program on
+   * the configuration as it stands. A kind it neither lists nor offers as `local` is
+   * `GUATIAO_ERR_BAD_VALUE`, as is an id that is not 1 to 128 bytes without a control
+   * character.
+   *
+   * **Plan usage only.** The tokens a session or a run spent are not an account's: ACP reports
+   * them with the session, and no field of the answer holds one. Never carries a value of the
+   * environment or the credentials. A provider that runs a program to ask runs it through
+   * `spawner`, on the account's directory, and destroys it; `keeper` is handed over as
+   * `watch`'s is, for a login the call sees renewed or lost, and is destroyed before the call
+   * answers.
+   */
+  usage(query: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>, keeper: AccountKeeper | k.ObjectHandle<typeof AccountKeeper>): g.Value;
+  /**
+   * The models the account behind `query.account` may use, with no model turn and no session:
+   * what a host shows a person choosing one before a session starts. The listing is the
+   * account's, so an account of another kind (another login, another key) may list others. A
+   * provider that cannot list for a kind (the program lists its models only in a session, or
+   * has no way to) answers [`ModelListing::unknown`] with the reason, which is a true answer,
+   * and one that tried and could not answers [`ModelListing::unavailable`]; it never guesses.
+   *
+   * Takes every kind the provider lists in `offers().kinds`, and [`HARNESS_LOGIN`](crate::HARNESS_LOGIN)
+   * (the automatic `local` account) when `offers().local`: the program asked as its
+   * configuration stands, with nothing applied. Any other kind is `GUATIAO_ERR_BAD_VALUE`, as
+   * is an id that is not 1 to 128 bytes without a control character. Never carries a value of
+   * the environment or the credentials.
+   *
+   * A provider that runs a program to ask runs it through `spawner`, on the account's directory,
+   * and destroys it; `keeper` is handed over as `watch`'s is, for a login the call sees renewed
+   * or lost, and is destroyed before the call answers.
+   */
+  models(query: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>, keeper: AccountKeeper | k.ObjectHandle<typeof AccountKeeper>): g.Value;
 }
 
 /**
- * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
- * connection opened.
+ * Owns accounts: the kinds it makes, the sign-in that makes one, the renewal and watching of its
+ * credentials, the usage of its plan and the models it may use.
+ *
+ * An account provider does not run an agent. A harness (`acp_harness`) applies an account the
+ * host hands it when the account's `provides` meets what the harness accepts, and never asks how
+ * the account was made. The host owns which accounts exist, their secrets at rest and who holds
+ * one; the provider owns every fact about how its kinds sign in, renew, rotate and report.
+ *
+ * Every method answers for the provider as configured: a host builds an instance from the
+ * provider's settings and asks it. Every method is synchronous; a host calls them from a thread
+ * of its own. Every object a method is handed (`spawner`, `prompter`, `keeper`) is the provider's
+ * from then on, and it destroys each, even when it refuses.
+ *
+ * A credential crosses only as a secret, and nothing a provider answers carries one: not an
+ * answer, a refusal, an error, a log line or an argument vector.
  */
-export declare const AccountSpeech: k.DescribedKind<AccountSpeech, AccountSpeechRemote, false>;
+export declare const AccountProvider: k.DescribedKind<AccountProvider, AccountProviderRemote, false>;
 
 /**
- * Where a catalog comes from.
+ * A watch of one account, from [`AccountProvider::watch`]. Destroying it stops it, as
+ * [`stop`](Self::stop) does.
  *
- * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
- * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
- *
- * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
- * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
- * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
- * even when it refuses.
- *
- * The `catalog_source` kind: what a provider of it implements.
+ * The `account_watch` kind: what an object of it implements.
  */
-export interface CatalogSource {
-  /** What this provider is. The same answer on every call, with nothing run. */
-  describe(): unknown;
-  /** The catalog's text. */
-  read(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): string;
+export interface AccountWatch {
+  /**
+   * Ends the watch: no keeper call starts after it answers, one under way has finished, and the
+   * spawner and the keeper it was handed are destroyed. Stopping it twice is no error.
+   */
+  stop(): void;
 }
 
-/** A caller's handle on a `catalog_source` table: a method per slot. */
-export interface CatalogSourceRemote extends k.RemoteBase<typeof CatalogSource> {
-  /** What this provider is. The same answer on every call, with nothing run. */
-  describe(): g.Value;
-  /** The catalog's text. */
-  read(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): string;
+/** A caller's handle on a `account_watch` table or object: a method per slot. */
+export interface AccountWatchRemote extends k.RemoteBase<typeof AccountWatch> {
+  /**
+   * Ends the watch: no keeper call starts after it answers, one under way has finished, and the
+   * spawner and the keeper it was handed are destroyed. Stopping it twice is no error.
+   */
+  stop(): void;
 }
 
 /**
- * Where a catalog comes from.
- *
- * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
- * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
- *
- * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
- * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
- * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
- * even when it refuses.
+ * A watch of one account, from [`AccountProvider::watch`]. Destroying it stops it, as
+ * [`stop`](Self::stop) does.
  */
-export declare const CatalogSource: k.DescribedKind<CatalogSource, CatalogSourceRemote, false>;
+export declare const AccountWatch: k.DescribedKind<AccountWatch, AccountWatchRemote, true>;
+
+/**
+ * Where an account provider reports what happens to an account's credentials behind the host's
+ * back. The host implements it and hands one to [`watch`](crate::AccountProvider::watch) and to
+ * [`usage`](crate::AccountProvider::usage); the provider owns it from then on, and destroys it when
+ * the watch stops or the call returns.
+ *
+ * **Every live keeper of the account hears each event**, not the first to ask. An event carries a
+ * sequence the provider counts per account; **the host deduplicates by (account, sequence)** and
+ * orders chained rotations by it, so a keeper that hears an event twice, or two keepers of one
+ * host that hear it once each, store it once.
+ *
+ * A watch looks at an account's files through the spawner (every `renew_poll_ms`, 30000 by
+ * default) and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost),
+ * never [`renewed`](Self::renewed).
+ *
+ * The `account_keeper` kind: what an object of it implements.
+ */
+export interface AccountKeeper {
+  /** The harness renewed the credentials. The host stores them only when they are newer. */
+  renewed(renewal: g.Ref): void;
+  /**
+   * The harness lost the login (a refused refresh blanked or deleted its file). The blank copy
+   * is never reported as a renewal.
+   */
+  lost(loss: g.Ref): void;
+}
+
+/** A caller's handle on a `account_keeper` table or object: a method per slot. */
+export interface AccountKeeperRemote extends k.RemoteBase<typeof AccountKeeper> {
+  /** The harness renewed the credentials. The host stores them only when they are newer. */
+  renewed(renewal: unknown): void;
+  /**
+   * The harness lost the login (a refused refresh blanked or deleted its file). The blank copy
+   * is never reported as a renewal.
+   */
+  lost(loss: unknown): void;
+}
+
+/**
+ * Where an account provider reports what happens to an account's credentials behind the host's
+ * back. The host implements it and hands one to [`watch`](crate::AccountProvider::watch) and to
+ * [`usage`](crate::AccountProvider::usage); the provider owns it from then on, and destroys it when
+ * the watch stops or the call returns.
+ *
+ * **Every live keeper of the account hears each event**, not the first to ask. An event carries a
+ * sequence the provider counts per account; **the host deduplicates by (account, sequence)** and
+ * orders chained rotations by it, so a keeper that hears an event twice, or two keepers of one
+ * host that hear it once each, store it once.
+ *
+ * A watch looks at an account's files through the spawner (every `renew_poll_ms`, 30000 by
+ * default) and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost),
+ * never [`renewed`](Self::renewed).
+ */
+export declare const AccountKeeper: k.DescribedKind<AccountKeeper, AccountKeeperRemote, true>;
+
+/**
+ * How a login relays its steps to the person. The host implements it, hands one to
+ * [`login`](crate::AccountProvider::login) and renders each call; the provider owns it from then on and
+ * destroys it when the login ends. `ask` goes sealed from the person's frontend to where the
+ * provider runs, never through a model, a channel the agent reads or a log.
+ *
+ * When the person cancels, every call answers `GUATIAO_ERR_GONE` and `cancelled` is true.
+ *
+ * The `login_prompter` kind: what an object of it implements.
+ */
+export interface LoginPrompter {
+  /** Shows `text`, a line the CLI printed that the person should read. */
+  say(text: string): void;
+  /** Asks the person to open a page, and to confirm a code there. */
+  openUrl(open: g.Ref): void;
+  /** Asks the person to fill `form` and waits for the answer. */
+  ask(form: g.Ref): unknown;
+  /** Whether the person cancelled the login. */
+  cancelled(): boolean;
+}
+
+/** A caller's handle on a `login_prompter` table or object: a method per slot. */
+export interface LoginPrompterRemote extends k.RemoteBase<typeof LoginPrompter> {
+  /** Shows `text`, a line the CLI printed that the person should read. */
+  say(text: string): void;
+  /** Asks the person to open a page, and to confirm a code there. */
+  openUrl(open: unknown): void;
+  /** Asks the person to fill `form` and waits for the answer. */
+  ask(form: unknown): g.Value;
+  /** Whether the person cancelled the login. */
+  cancelled(): boolean;
+}
+
+/**
+ * How a login relays its steps to the person. The host implements it, hands one to
+ * [`login`](crate::AccountProvider::login) and renders each call; the provider owns it from then on and
+ * destroys it when the login ends. `ask` goes sealed from the person's frontend to where the
+ * provider runs, never through a model, a channel the agent reads or a log.
+ *
+ * When the person cancels, every call answers `GUATIAO_ERR_GONE` and `cancelled` is true.
+ */
+export declare const LoginPrompter: k.DescribedKind<LoginPrompter, LoginPrompterRemote, true>;
 
 /**
  * Starts programs where the host chooses: on this machine, on another over SSH, in a container or
@@ -275,6 +581,144 @@ export interface SpawnedProcessRemote extends k.RemoteBase<typeof SpawnedProcess
  * Destroying it kills the whole tree, as [`kill`](Self::kill) does.
  */
 export declare const SpawnedProcess: k.DescribedKind<SpawnedProcess, SpawnedProcessRemote, true>;
+
+/**
+ * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
+ * connection opened.
+ *
+ * The `account_speech` kind: what a provider of it implements.
+ */
+export interface AccountSpeech {
+  /** The services. */
+  describe(): unknown;
+}
+
+/** A caller's handle on a `account_speech` table: a method per slot. */
+export interface AccountSpeechRemote extends k.RemoteBase<typeof AccountSpeech> {
+  /** The services. */
+  describe(): g.Value;
+}
+
+/**
+ * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
+ * connection opened.
+ */
+export declare const AccountSpeech: k.DescribedKind<AccountSpeech, AccountSpeechRemote, false>;
+
+/**
+ * Where a catalog comes from.
+ *
+ * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
+ * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
+ *
+ * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
+ * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
+ * even when it refuses.
+ *
+ * The `catalog_source` kind: what a provider of it implements.
+ */
+export interface CatalogSource {
+  /** What this provider is. The same answer on every call, with nothing run. */
+  describe(): unknown;
+  /** The catalog's text. */
+  read(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): string;
+}
+
+/** A caller's handle on a `catalog_source` table: a method per slot. */
+export interface CatalogSourceRemote extends k.RemoteBase<typeof CatalogSource> {
+  /** What this provider is. The same answer on every call, with nothing run. */
+  describe(): g.Value;
+  /** The catalog's text. */
+  read(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): string;
+}
+
+/**
+ * Where a catalog comes from.
+ *
+ * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
+ * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
+ *
+ * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
+ * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
+ * even when it refuses.
+ */
+export declare const CatalogSource: k.DescribedKind<CatalogSource, CatalogSourceRemote, false>;
+
+/**
+ * Serves a model that runs on this computer to the sessions of accounts of one kind. A provider is the same on every call; what
+ * it keeps for one account is in the lease it opens.
+ *
+ * The `model_gateway` kind: what a provider of it implements.
+ */
+export interface ModelGateway {
+  /** Who it serves. The same answer on every call, with nothing run. */
+  describe(): unknown;
+  /**
+   * A bearer on the gateway of `request.account`, started when no session holds one: the server, and what runs the model.
+   * `spawner` is the host's, for any process the gateway starts. A refusal says what the person can act on (the model is not
+   * loaded, the service is not running), in words that name no value of the account.
+   */
+  open(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): GatewayLease | k.ObjectHandle<typeof GatewayLease>;
+}
+
+/** A caller's handle on a `model_gateway` table: a method per slot. */
+export interface ModelGatewayRemote extends k.RemoteBase<typeof ModelGateway> {
+  /** Who it serves. The same answer on every call, with nothing run. */
+  describe(): g.Value;
+  /**
+   * A bearer on the gateway of `request.account`, started when no session holds one: the server, and what runs the model.
+   * `spawner` is the host's, for any process the gateway starts. A refusal says what the person can act on (the model is not
+   * loaded, the service is not running), in words that name no value of the account.
+   */
+  open(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): k.ObjectHandle<typeof GatewayLease>;
+}
+
+/**
+ * Serves a model that runs on this computer to the sessions of accounts of one kind. A provider is the same on every call; what
+ * it keeps for one account is in the lease it opens.
+ */
+export declare const ModelGateway: k.DescribedKind<ModelGateway, ModelGatewayRemote, false>;
+
+/**
+ * One session's access to a gateway. Destroying it ends the session's access, and the last one for an account ends that
+ * account's gateway.
+ *
+ * The `gateway_lease` kind: what an object of it implements.
+ */
+export interface GatewayLease {
+  /** Where the model's API is: `http://127.0.0.1:PORT`, with no path. An agent adds the path of the API it speaks. */
+  address(): string;
+  /** The bearer the agent shows. It is good for this session alone, and for no one but a program of this user. */
+  bearer(): string;
+  /**
+   * The models this gateway could serve, as an account provider lists the models of an account of an ordinary kind, with the
+   * one the account serves marked as the default. A gateway that cannot list them answers [`ModelListing::unknown`] with its
+   * reason.
+   */
+  models(): unknown;
+}
+
+/** A caller's handle on a `gateway_lease` table or object: a method per slot. */
+export interface GatewayLeaseRemote extends k.RemoteBase<typeof GatewayLease> {
+  /** Where the model's API is: `http://127.0.0.1:PORT`, with no path. An agent adds the path of the API it speaks. */
+  address(): string;
+  /** The bearer the agent shows. It is good for this session alone, and for no one but a program of this user. */
+  bearer(): string;
+  /**
+   * The models this gateway could serve, as an account provider lists the models of an account of an ordinary kind, with the
+   * one the account serves marked as the default. A gateway that cannot list them answers [`ModelListing::unknown`] with its
+   * reason.
+   */
+  models(): g.Value;
+}
+
+/**
+ * One session's access to a gateway. Destroying it ends the session's access, and the last one for an account ends that
+ * account's gateway.
+ */
+export declare const GatewayLease: k.DescribedKind<GatewayLease, GatewayLeaseRemote, true>;
 
 /**
  * The models of a Store type, and what the person does with each.

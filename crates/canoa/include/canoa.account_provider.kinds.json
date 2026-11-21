@@ -1,0 +1,500 @@
+{
+  "kinds": [
+    {
+      "name": "account_provider",
+      "floor_hash": 4172086390,
+      "object": false,
+      "doc": "Owns accounts: the kinds it makes, the sign-in that makes one, the renewal and watching of its\ncredentials, the usage of its plan and the models it may use.\n\nAn account provider does not run an agent. A harness (`acp_harness`) applies an account the\nhost hands it when the account's `provides` meets what the harness accepts, and never asks how\nthe account was made. The host owns which accounts exist, their secrets at rest and who holds\none; the provider owns every fact about how its kinds sign in, renew, rotate and report.\n\nEvery method answers for the provider as configured: a host builds an instance from the\nprovider's settings and asks it. Every method is synchronous; a host calls them from a thread\nof its own. Every object a method is handed (`spawner`, `prompter`, `keeper`) is the provider's\nfrom then on, and it destroys each, even when it refuses.\n\nA credential crosses only as a secret, and nothing a provider answers carries one: not an\nanswer, a refusal, an error, a log line or an argument vector.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Who the provider is, for a host listing its providers. Cheap, and the same on every call."
+        },
+        {
+          "name": "offers",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The kinds of account it makes, the ways to sign in, and which kinds report usage. Cheap,\nthe same on every call, and answered as configured."
+        },
+        {
+          "name": "login",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "prompter",
+              "type": "object",
+              "kind": "login_prompter",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Signs in to make an account of the kind the method `request.method` produces. The provider\nruns the sign-in in `request.state_dir` (a program on a terminal where it needs one)\nthrough `spawner`, reads what it prints and relays each step through `prompter`, and at the\nend reads the files it wrote into the outcome's credentials. `spawner` and `prompter` are\nhanded over: the provider destroys both before it answers, a timeout excepted (see below).\n\nThe sign-in is one call that ends in the outcome, a refusal or a cancel. Its steps reach the\nperson through `prompter`: `say` and `open_url` show them what the sign-in prints, `ask`\ntakes back what they type or paste, and `cancelled` is how the person ends it.\n\nWhen the person cancels (`prompter.cancelled()` true, or a prompter call answering\n`GUATIAO_ERR_GONE`), or `request.timeout_ms` passes, the provider kills the program's whole\ntree and answers `GUATIAO_ERR_GONE` with `login cancelled` or `login timed out` within two\nseconds. It runs a watchdog of its own: at the deadline it kills the tree and answers even\nif a prompter call has not returned (the call is then left to end by itself, and the\nprompter destroyed when it does), so a host's `ask` should return by `timeout_ms`. It also\nchecks the deadline after every prompter call and before it answers an outcome. A key the\nprogram refused is `GUATIAO_ERR_BAD_VALUE` with `login refused: ` and its reason; any other\nfailure `GUATIAO_ERR_INTERNAL` with a reason that holds no input value and no URL query. A\nmethod the provider does not list is `GUATIAO_ERR_BAD_VALUE`; a provider with no login\nmethod answers `GUATIAO_ERR_UNSUPPORTED` with the reason."
+        },
+        {
+          "name": "renew",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Renews the credentials of `request.account` with no model turn. Answers the new\ncredentials, or why nothing changed. `GUATIAO_ERR_UNSUPPORTED`, with the reason, for a\nkind whose entry says `renews` false; `GUATIAO_ERR_BAD_VALUE` for a kind it does not list,\nan id that is not 1 to 128 bytes without a control character, or a credential that is\nmissing. `spawner` is handed over as `login`'s is. A refused renewal that lost the login is\n`GUATIAO_ERR_GONE` with the reason, and the blank copy is never answered."
+        },
+        {
+          "name": "watch",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "keeper",
+              "type": "object",
+              "kind": "account_keeper",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "account_watch"
+          },
+          "doc": "Starts watching the account `request.account` names for a credential its program renewed or\nlost behind the host's back: the files in its `state_dir`, read through `spawner`. The\nwatch tells `keeper` of each change, from threads of its own, and ends when the returned\nobject is stopped or destroyed.\n\nA changed credential is `renewed` with the new credentials and the `revision` of the\ngrant it replaces; a blank or deleted one is `lost`, with a reason that holds no\ncredential. Each change is told once, with a `sequence` that grows with every event of the\naccount (renewals and losses together) and that every live watch of the same account in the\nsame provider instance hears, so a host deduplicates by (account, sequence) and may hand a\nkeeper that keeps nothing. A watch reports what it finds when it begins, so a login that is\nalready gone is told at once.\n\nRefuses `GUATIAO_ERR_UNSUPPORTED`, with the reason, a kind whose entry does not say both\n`rotates` and `state_dir`, or a spawner without files; `GUATIAO_ERR_BAD_VALUE` for a kind\nit does not list, an id that is not 1 to 128 bytes without a control character, or a\ncredential that is missing. `spawner` and `keeper` are handed over to the watch: it\ndestroys both when it is stopped, and at once when it refuses."
+        },
+        {
+          "name": "usage",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "query",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "keeper",
+              "type": "object",
+              "kind": "account_keeper",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What the plan behind `query.account` has used and has left, with no session and no model\nturn: the account's windows, how much of each is used, when each resets and which models it\ncovers. Cheap, so a host may poll it as often as it likes. A kind the provider lists in\n`offers().usage` answers `supported`; any other kind it lists answers \"not offered\",\n[`AccountUsage::unsupported`], which is a true answer. The automatic `local` account (kind\n[`HARNESS_LOGIN`](crate::HARNESS_LOGIN), when `offers().local`) is asked of the program on\nthe configuration as it stands. A kind it neither lists nor offers as `local` is\n`GUATIAO_ERR_BAD_VALUE`, as is an id that is not 1 to 128 bytes without a control\ncharacter.\n\n**Plan usage only.** The tokens a session or a run spent are not an account's: ACP reports\nthem with the session, and no field of the answer holds one. Never carries a value of the\nenvironment or the credentials. A provider that runs a program to ask runs it through\n`spawner`, on the account's directory, and destroys it; `keeper` is handed over as\n`watch`'s is, for a login the call sees renewed or lost, and is destroyed before the call\nanswers."
+        },
+        {
+          "name": "models",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "query",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "keeper",
+              "type": "object",
+              "kind": "account_keeper",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The models the account behind `query.account` may use, with no model turn and no session:\nwhat a host shows a person choosing one before a session starts. The listing is the\naccount's, so an account of another kind (another login, another key) may list others. A\nprovider that cannot list for a kind (the program lists its models only in a session, or\nhas no way to) answers [`ModelListing::unknown`] with the reason, which is a true answer,\nand one that tried and could not answers [`ModelListing::unavailable`]; it never guesses.\n\nTakes every kind the provider lists in `offers().kinds`, and [`HARNESS_LOGIN`](crate::HARNESS_LOGIN)\n(the automatic `local` account) when `offers().local`: the program asked as its\nconfiguration stands, with nothing applied. Any other kind is `GUATIAO_ERR_BAD_VALUE`, as\nis an id that is not 1 to 128 bytes without a control character. Never carries a value of\nthe environment or the credentials.\n\nA provider that runs a program to ask runs it through `spawner`, on the account's directory,\nand destroys it; `keeper` is handed over as `watch`'s is, for a login the call sees renewed\nor lost, and is destroyed before the call answers."
+        }
+      ]
+    },
+    {
+      "name": "account_watch",
+      "floor_hash": 589148782,
+      "object": true,
+      "doc": "A watch of one account, from [`AccountProvider::watch`]. Destroying it stops it, as\n[`stop`](Self::stop) does.",
+      "slots": [
+        {
+          "name": "stop",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "doc": "Ends the watch: no keeper call starts after it answers, one under way has finished, and the\nspawner and the keeper it was handed are destroyed. Stopping it twice is no error."
+        }
+      ]
+    },
+    {
+      "name": "account_keeper",
+      "floor_hash": 708146915,
+      "object": true,
+      "doc": "Where an account provider reports what happens to an account's credentials behind the host's\nback. The host implements it and hands one to [`watch`](crate::AccountProvider::watch) and to\n[`usage`](crate::AccountProvider::usage); the provider owns it from then on, and destroys it when\nthe watch stops or the call returns.\n\n**Every live keeper of the account hears each event**, not the first to ask. An event carries a\nsequence the provider counts per account; **the host deduplicates by (account, sequence)** and\norders chained rotations by it, so a keeper that hears an event twice, or two keepers of one\nhost that hear it once each, store it once.\n\nA watch looks at an account's files through the spawner (every `renew_poll_ms`, 30000 by\ndefault) and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost),\nnever [`renewed`](Self::renewed).",
+      "slots": [
+        {
+          "name": "renewed",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "renewal",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "The harness renewed the credentials. The host stores them only when they are newer."
+        },
+        {
+          "name": "lost",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "loss",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "The harness lost the login (a refused refresh blanked or deleted its file). The blank copy\nis never reported as a renewal."
+        }
+      ]
+    },
+    {
+      "name": "login_prompter",
+      "floor_hash": 2606822037,
+      "object": true,
+      "doc": "How a login relays its steps to the person. The host implements it, hands one to\n[`login`](crate::AccountProvider::login) and renders each call; the provider owns it from then on and\ndestroys it when the login ends. `ask` goes sealed from the person's frontend to where the\nprovider runs, never through a model, a channel the agent reads or a log.\n\nWhen the person cancels, every call answers `GUATIAO_ERR_GONE` and `cancelled` is true.",
+      "slots": [
+        {
+          "name": "say",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "text",
+              "type": "str"
+            }
+          ],
+          "doc": "Shows `text`, a line the CLI printed that the person should read."
+        },
+        {
+          "name": "open_url",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "open",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Asks the person to open a page, and to confirm a code there."
+        },
+        {
+          "name": "ask",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "form",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Asks the person to fill `form` and waits for the answer."
+        },
+        {
+          "name": "cancelled",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "bool"
+          },
+          "doc": "Whether the person cancelled the login."
+        }
+      ]
+    },
+    {
+      "name": "process_spawner",
+      "floor_hash": 4038904472,
+      "object": true,
+      "doc": "Starts programs where the host chooses: on this machine, on another over SSH, in a container or\na virtual machine. The host implements it and hands one to every\n[`AcpHarness::start`](crate::AcpHarness::start); the provider owns it from then on, starts its\nprograms through it, or never calls it, and destroys it by the time it calls the sink's\n`closed`.\n\nEvery slot takes `&self`, so a provider may call it from several threads at once.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Where its programs run and what it can give them; the same on every call."
+        },
+        {
+          "name": "spawn",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "spec",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "spawned_process"
+          },
+          "doc": "Starts `spec` and hands over the process. Refuses `GUATIAO_ERR_UNSUPPORTED` a spec asking\nwhat [`describe`](Self::describe) says it cannot give, `GUATIAO_ERR_NOT_FOUND` a program\nthat is not there, `GUATIAO_ERR_BAD_VALUE` a spec it cannot read."
+        },
+        {
+          "name": "write_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            },
+            {
+              "name": "bytes",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "private",
+              "type": "bool"
+            }
+          ],
+          "doc": "Writes `bytes` to the file `path` in the private directory the host granted this spawner (an\naccount's `state_dir`, or a login's), making directories on the way and replacing a file\nthere; `private` makes it readable by its owner alone where the system has such a notion.\n\n**The host resolves every path** against that directory and never trusts the provider's:\n`path` is relative, and an absolute path, a `..` part, or a link leading out of the directory\nis `GUATIAO_ERR_NOT_FOUND`, as is any call on a spawner with no such directory. A file\nwith another name for the same data (a hard link) is `GUATIAO_ERR_NOT_FOUND` too, where the\nsystem lets the host see it. `private` is honoured where the file is made: on Unix the file\nis created owner-only (mode 0600) before it holds a byte; on Windows the granted\ndirectory's ACL is the guard. A spawner that cannot give files says `files` false in [`describe`](Self::describe) and refuses all four\nfile methods `GUATIAO_ERR_UNSUPPORTED`."
+        },
+        {
+          "name": "read_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The content of the file `path`, whole. `GUATIAO_ERR_NOT_FOUND` for a file that is not there\nor a path [`write_file`](Self::write_file) refuses; `GUATIAO_ERR_BAD_VALUE` for one longer\nthan `max_bytes`, or a file that is not a regular file `GUATIAO_ERR_NOT_FOUND`."
+        },
+        {
+          "name": "file_info",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "How long the file `path` is and when it last changed; `None` when it is not there.\n`GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses."
+        },
+        {
+          "name": "remove_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "doc": "Removes the file `path`; removing a file that is not there is no error.\n`GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses."
+        },
+        {
+          "name": "notice",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "notice",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Tells the host something about the connection this spawner serves that is no message of the\nclient's: the harness exited, gave a notice (a version it was not tested with), or a part of\nthe provider's own plumbing failed. The host logs it. Called from a thread of the provider's,\nat any time while the connection runs, and never with client text or a value of the\nenvironment or the credentials; a spawner that has no use for it returns `Ok`, and the\nprovider ignores a failure."
+        }
+      ]
+    },
+    {
+      "name": "spawned_process",
+      "floor_hash": 3306532587,
+      "object": true,
+      "doc": "One program a spawner started, and everything it starts in turn.\n\nEvery slot takes `&self`, so one thread may write or kill while another waits in `read`.\nDestroying it kills the whole tree, as [`kill`](Self::kill) does.",
+      "slots": [
+        {
+          "name": "write",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "bytes",
+              "type": "bytes"
+            }
+          ],
+          "doc": "Writes all of `bytes` to its standard input (its terminal's, with a terminal).\n`GUATIAO_ERR_GONE` once the input is closed or the process has ended."
+        },
+        {
+          "name": "close_input",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "doc": "Closes its standard input: the program reads the end. Closing it twice is no error."
+        },
+        {
+          "name": "read",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            },
+            {
+              "name": "timeout_ms",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "i64"
+          },
+          "doc": "Copies standard output (a terminal's whole output, with one) into `dst`: the byte count;\n`0` once no more can ever come; [`READ_TIMED_OUT`] after `timeout_ms` with nothing (`0`\npolls); [`READ_LINK_DOWN`] while the link is down. Never skips or repeats a byte, a link\nthat dropped and came back included."
+        },
+        {
+          "name": "read_error",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            },
+            {
+              "name": "timeout_ms",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "i64"
+          },
+          "doc": "The same for standard error, when the spec kept it [`ErrorOutput::Separate`]; `0` at once\notherwise."
+        },
+        {
+          "name": "resize",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "size",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Resizes its terminal. `GUATIAO_ERR_UNSUPPORTED` for a process started without one."
+        },
+        {
+          "name": "wait",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "timeout_ms",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Waits up to `timeout_ms` (`0` polls) for it to end, and answers how it stands."
+        },
+        {
+          "name": "kill",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "doc": "Ends it and every process it started: its process group or job, and those that left it\nwhen [`SpawnerInfo::kills_escaped`] says so. Killing an ended process is no error."
+        },
+        {
+          "name": "link",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Whether the link to where it runs is up, and how often it has dropped."
+        }
+      ]
+    }
+  ]
+}

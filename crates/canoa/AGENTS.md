@@ -388,9 +388,10 @@ pub fn check_credential(standard: &str, key: &str) -> Result<(), Error>;  // a k
 pub fn check_address(url: &str) -> Result<(), Error>;               // `address::parse` without the `Url`: any `http` or `https` address, no login in it, no space
 pub fn models_url(base: &str) -> String;                              // `/v1/models`, or `/models` when `base` already ends in `/v1`
 pub fn openai_models(base: &str, key: &str) -> ModelListing;         // GET it with `Authorization: Bearer KEY`; anything it cannot say is an unknown with the reason (the address does not answer, answers its status, or a list with no `data`)
+pub fn anthropic_models(base: &str, key: &str, bearer: bool) -> ModelListing;   // GET it with `x-api-key: KEY` (or `Authorization: Bearer KEY` when `bearer` is set) and `anthropic-version: 2023-06-01`, reading optional `display_name`
 pub fn key_form(title: &str, what: &str) -> LoginForm;  pub fn key_of(&LoginAnswer) -> Result<String, ProviderError>;   // the sealed form that asks for a key, and the trimmed key it answers (BAD_VALUE when nothing was typed)
 pub fn credential_schema(title: &str, description: &str) -> Value;  pub fn value(&Value) -> guatiao::Value;
-#[derive(Default, Debug, Clone, Copy, Provider)] pub struct ApiGatewayAccounts;   // `account_provider` `api_gateway_accounts`: login (address and standards as inputs, the key in the sealed form), usage (not offered: a gateway of unknown make has no plan limits), models (the OpenAI list, read at the address the account names for `openai-api` or else its own, when the account provides `openai-api`, else unknown saying so), renew and watch (not offered)
+#[derive(Default, Debug, Clone, Copy, Provider)] pub struct ApiGatewayAccounts;   // `account_provider` `api_gateway_accounts`: login (address and standards as inputs, the key in the sealed form), usage (not offered: a gateway of unknown make has no plan limits), models (the OpenAI list when `openai-api`, else the Anthropic list with `x-api-key` or `auth_token` Bearer when `anthropic-api`, read at the address for that standard or its own, else unknown saying so), renew and watch (not offered)
 pub fn library(host: Host) -> Option<LibraryParts>;                  // what `Registry::register_local` takes
 pub mod http {
     pub const WAIT: Duration;                   // 30 s a request
@@ -398,6 +399,7 @@ pub mod http {
     #[non_exhaustive] pub enum Error { NetworkSetup(String), RequestFailed(String), ResponseCutOff(String) }
     pub fn agent() -> Result<ureq::Agent, Error>;                          // through `network::Network::current()`, no redirect, no error for a status
     pub fn get_json(url: &str, bearer: Option<&str>) -> Result<Reply, Error>;
+    pub fn get_json_with(url: &str, headers: &[(&str, &str)]) -> Result<Reply, Error>;
     pub fn post_form(url: &str, fields: &[(&str, &str)]) -> Result<Reply, Error>;
     pub fn post_json(url: &str, body: &Value) -> Result<Reply, Error>;
 }

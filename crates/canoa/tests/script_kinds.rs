@@ -1,7 +1,7 @@
 //! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`, `model_store`,
-//! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab` and `usage_reader`), and their models' schemas: what such a
-//! library is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage --test script_kinds`.
+//! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab`, `usage_reader`, `model_gateway` and
+//! `account_provider`), and their models' schemas: what such a library is built against. Regenerate the files with
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage,gateway --test script_kinds`.
 #![cfg(all(
     feature = "store",
     feature = "vendor",
@@ -9,7 +9,8 @@
     feature = "profile-item",
     feature = "settings-section",
     feature = "panel-tab",
-    feature = "usage"
+    feature = "usage",
+    feature = "gateway"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -19,6 +20,7 @@
 
 use std::path::PathBuf;
 
+use canoa::gateway::{GatewayInfo, GatewayLeaseVtable, GatewayRequest, ModelGatewayVtable};
 use canoa::panel_tab::{PanelTabVtable, Shows, TabInfo, TailRequest};
 use canoa::profile_item::{
     ApplyRequest, ClientCertificateHost, ItemEffect, ItemInfo, NetworkEffect, ProfileItemVtable,
@@ -45,7 +47,14 @@ use canoa::vendor::{
     Variable as VendorVariable, VendorInfo,
 };
 use coqui_acp_api::guatiao::Schema;
-use coqui_acp_api::{ProcessSpawnerVtable, SpawnedProcessVtable};
+use coqui_acp_api::{
+    AccountKeeperVtable, AccountKindInfo, AccountLoss, AccountModelsQuery, AccountOffer,
+    AccountProviderInfo, AccountProviderVtable, AccountRenewal, AccountUsage, AccountUsageQuery,
+    AccountWatchVtable, Bucket, EndpointSlot, LoginAnswer, LoginForm, LoginMethodInfo,
+    LoginOutcome, LoginPrompterVtable, LoginRequest, ModelInfo, ModelListing, OpenUrl,
+    ProcessSpawnerVtable, RenewReport, RenewRequest, SpawnedProcessVtable, UnknownKind,
+    WatchRequest,
+};
 use guatiao_serde::Serializable;
 use serde_json::Value as Json;
 
@@ -333,6 +342,78 @@ fn the_committed_usage_schemas_are_what_this_build_describes() {
             ("Reading", schema_of::<Reading>()),
             ("Failure", schema_of::<Failure>()),
             ("Retry", schema_of::<Retry>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_gateway_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.gateway.kinds.json",
+        &document(&format!(
+            "{},{},{},{}",
+            ModelGatewayVtable::description(),
+            GatewayLeaseVtable::description(),
+            ProcessSpawnerVtable::description(),
+            SpawnedProcessVtable::description()
+        )),
+    );
+}
+
+#[test]
+fn the_committed_gateway_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.gateway.schemas.json",
+        &schemas(vec![
+            ("GatewayInfo", schema_of::<GatewayInfo>()),
+            ("GatewayRequest", schema_of::<GatewayRequest>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_account_provider_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.account_provider.kinds.json",
+        &document(&format!(
+            "{},{},{},{},{},{}",
+            AccountProviderVtable::description(),
+            AccountWatchVtable::description(),
+            AccountKeeperVtable::description(),
+            LoginPrompterVtable::description(),
+            ProcessSpawnerVtable::description(),
+            SpawnedProcessVtable::description()
+        )),
+    );
+}
+
+#[test]
+fn the_committed_account_provider_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.account_provider.schemas.json",
+        &schemas(vec![
+            ("AccountProviderInfo", schema_of::<AccountProviderInfo>()),
+            ("AccountOffer", schema_of::<AccountOffer>()),
+            ("AccountKindInfo", schema_of::<AccountKindInfo>()),
+            ("EndpointSlot", schema_of::<EndpointSlot>()),
+            ("LoginMethodInfo", schema_of::<LoginMethodInfo>()),
+            ("LoginRequest", schema_of::<LoginRequest>()),
+            ("LoginOutcome", schema_of::<LoginOutcome>()),
+            ("LoginForm", schema_of::<LoginForm>()),
+            ("LoginAnswer", schema_of::<LoginAnswer>()),
+            ("OpenUrl", schema_of::<OpenUrl>()),
+            ("RenewRequest", schema_of::<RenewRequest>()),
+            ("RenewReport", schema_of::<RenewReport>()),
+            ("WatchRequest", schema_of::<WatchRequest>()),
+            ("AccountRenewal", schema_of::<AccountRenewal>()),
+            ("AccountLoss", schema_of::<AccountLoss>()),
+            ("AccountUsageQuery", schema_of::<AccountUsageQuery>()),
+            ("AccountUsage", schema_of::<AccountUsage>()),
+            ("Bucket", schema_of::<Bucket>()),
+            ("AccountModelsQuery", schema_of::<AccountModelsQuery>()),
+            ("ModelListing", schema_of::<ModelListing>()),
+            ("ModelInfo", schema_of::<ModelInfo>()),
+            ("UnknownKind", schema_of::<UnknownKind>()),
         ]),
     );
 }

@@ -18,7 +18,7 @@ import pytest
 import canoa_sdk as sdk
 from canoa_sdk import forms
 from guatiao import provide
-from guatiao.errors import BadValue, Internal, NotFound
+from guatiao.errors import BadValue, Internal, NotFound, Unsupported
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -603,3 +603,88 @@ def test_a_usage_reader_that_leaves_open_in_place_is_refused_at_creation() -> No
         class Mute(sdk.UsageReader):
             reader = "mute"
             bucket_prefix = "m:"
+
+
+def test_account_provider_and_model_gateway_describe_and_answer_defaults() -> None:
+    class DemoAccounts(sdk.AccountProvider):
+        title = "Demo accounts"
+        description = "An account kind."
+        kinds_offered = [
+            sdk.AccountKindInfo(
+                id="demo-key",
+                title="Demo key",
+                settings={
+                    "type": "object",
+                    "properties": {"api_key": sdk.credential_schema("Key")},
+                    "required": ["api_key"],
+                },
+                endpoints=[sdk.EndpointSlot(purpose="model_api", key="base_url")],
+                provides=["openai-api"],
+            )
+        ]
+        logins = [sdk.LoginMethodInfo(id="demo-login", title="Key", produces="demo-key", steps=["ask"])]
+
+    destroyed: List[str] = []
+
+    class DummyHandle:
+        def __init__(self, tag: str) -> None:
+            self.tag = tag
+
+        def destroy(self) -> None:
+            destroyed.append(self.tag)
+
+    provider = DemoAccounts()
+    assert provider.describe() == {"title": "Demo accounts", "description": "An account kind."}
+    offered = provider.offers()
+    assert offered["kinds"][0]["id"] == "demo-key"
+    assert offered["logins"][0]["produces"] == "demo-key"
+    assert provider.usage({"account": {"id": "acc-1"}}, DummyHandle("s"), DummyHandle("k")) == {
+        "supported": False,
+        "unsupported_because": "this account provider reports no plan limits",
+        "sources": [],
+        "account": "acc-1",
+        "revision": 0,
+        "observed_at": 0,
+        "buckets": [],
+    }
+    assert provider.models({}, DummyHandle("s2"), DummyHandle("k2")) == {
+        "known": False,
+        "unknown_because": "this account provider does not list models",
+        "models": [],
+    }
+    with pytest.raises(Unsupported):
+        provider.renew({}, DummyHandle("s3"))
+    assert destroyed == ["s", "k", "s2", "k2", "s3"]
+    assert provide.library("demo_accounts", "1", providers=[DemoAccounts]).kinds == ("account_provider",)
+
+    class LocalLease(sdk.GatewayLease):
+        def address(self) -> str:
+            return "http://127.0.0.1:4100"
+
+        def bearer(self) -> str:
+            return "session-bearer"
+
+    class LocalGateway(sdk.ModelGateway):
+        kind = "demo-key"
+        vendor = "demo"
+        table = "demo"
+
+        def open(self, request: Any, spawner: Any) -> sdk.GatewayLease:
+            sdk.release(spawner)
+            assert sdk.request_of(request)["account"] == "acc-1"
+            return LocalLease()
+
+    with pytest.raises(TypeError, match="IncompleteGateway does not implement open"):
+
+        class IncompleteGateway(sdk.ModelGateway):
+            kind = "demo-key"
+            vendor = "demo"
+
+    gateway = LocalGateway()
+    assert gateway.describe() == {"kind": "demo-key", "vendor": "demo", "table": "demo"}
+    lease = gateway.open({"account": "acc-1"}, DummyHandle("gw-s"))
+    assert lease.address() == "http://127.0.0.1:4100"
+    assert lease.bearer() == "session-bearer"
+    assert lease.models()["known"] is False
+    assert destroyed[-1] == "gw-s"
+    assert provide.library("local_gw", "1", providers=[LocalGateway]).kinds == ("model_gateway",)
