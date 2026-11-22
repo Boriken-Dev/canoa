@@ -32,6 +32,23 @@ export interface AccountProvider {
    */
   offers(): unknown;
   /**
+   * The standards the account `account` provides: every one it can be used as, the ids a harness
+   * matches against what it accepts. An account names only its kind and settings; this is where
+   * they are read. A kind that lists `provides` answers that list, and a kind whose settings pick
+   * the standards ([`PROVIDES_BY_VALUE`](crate::PROVIDES_BY_VALUE) is the usual way)
+   * answers what the account's settings pick. The answer is the account's, not the credentials':
+   * it reads `account.settings` and no secret, and `account.provides` is no input. Each id is a
+   * [`standard`](crate::standard) id, none twice. May be empty for an account that cannot be
+   * used yet.
+   *
+   * Takes every kind the provider lists in `offers().kinds`, and, when `offers().local`, the
+   * automatic `local` account ([`HARNESS_LOGIN`](crate::HARNESS_LOGIN)), which provides the
+   * standard of the program itself. Any other kind is `GUATIAO_ERR_BAD_VALUE`, as is an id that
+   * is not 1 to 128 bytes without a control character. Cheap, the same on every call for the
+   * same account, and it starts nothing.
+   */
+  provides(account: g.Ref): unknown;
+  /**
    * Signs in to make an account of the kind the method `request.method` produces. The provider
    * runs the sign-in in `request.state_dir` (a program on a terminal where it needs one)
    * through `spawner`, reads what it prints and relays each step through `prompter`, and at the
@@ -134,6 +151,23 @@ export interface AccountProviderRemote extends k.RemoteBase<typeof AccountProvid
    * the same on every call, and answered as configured.
    */
   offers(): g.Value;
+  /**
+   * The standards the account `account` provides: every one it can be used as, the ids a harness
+   * matches against what it accepts. An account names only its kind and settings; this is where
+   * they are read. A kind that lists `provides` answers that list, and a kind whose settings pick
+   * the standards ([`PROVIDES_BY_VALUE`](crate::PROVIDES_BY_VALUE) is the usual way)
+   * answers what the account's settings pick. The answer is the account's, not the credentials':
+   * it reads `account.settings` and no secret, and `account.provides` is no input. Each id is a
+   * [`standard`](crate::standard) id, none twice. May be empty for an account that cannot be
+   * used yet.
+   *
+   * Takes every kind the provider lists in `offers().kinds`, and, when `offers().local`, the
+   * automatic `local` account ([`HARNESS_LOGIN`](crate::HARNESS_LOGIN)), which provides the
+   * standard of the program itself. Any other kind is `GUATIAO_ERR_BAD_VALUE`, as is an id that
+   * is not 1 to 128 bytes without a control character. Cheap, the same on every call for the
+   * same account, and it starts nothing.
+   */
+  provides(account: unknown): g.Value;
   /**
    * Signs in to make an account of the kind the method `request.method` produces. The provider
    * runs the sign-in in `request.state_dir` (a program on a terminal where it needs one)

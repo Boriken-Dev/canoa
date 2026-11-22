@@ -8,7 +8,7 @@ const described = kindsOf({
   "kinds": [
     {
       "name": "account_provider",
-      "floor_hash": 4172086390,
+      "floor_hash": 1682791892,
       "object": false,
       "slots": [
         {
@@ -25,6 +25,21 @@ const described = kindsOf({
           "required": true,
           "fallible": true,
           "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "provides",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "account",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
           "answer": {
             "type": "value"
           }

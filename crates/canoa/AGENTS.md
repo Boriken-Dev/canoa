@@ -17,6 +17,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
 | `speech-builtin` | `canoa::speech::builtin` | built-in speech-to-text and speech-output providers (implies `speech`, `network`, `guatiao-intake`, `serde_json`) |
 | `loopback` | `canoa::loopback` | loopback HTTP server for host tools and local model gateways (`httparse`, `serde_json`, `sha2`, `rustix`) |
+| `environment` | `canoa::environment` | the `environment` kind: a place an agent works, which hands out the spawner programs start through and serves files (`coqui-acp-api`) |
 | `gateway` | `canoa::gateway` | the `model_gateway` kind for local model APIs (`coqui-acp-api`) |
 | `api-gateway` | `canoa::api_gateway` | generic multi-standard API gateway accounts and helpers (implies `network`, `coqui-acp-api`, `guatiao`, `guatiao-serde`, `serde_json`, `percent-encoding`) |
 | `network` | `canoa::network`, `canoa::address` | system proxy, proxy auth, certificates, and URL/address checks (`coqui-syshttp`, `ureq`, `rustls`, `tracing`, `url`) |

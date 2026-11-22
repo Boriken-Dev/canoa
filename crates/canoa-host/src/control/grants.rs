@@ -230,7 +230,7 @@ pub(super) const GRANT_SPECS: [GrantSpec; 29] = [
     GrantSpec {
         grant: Grant::FilesWriteHost,
         name: "files.write.host",
-        control: true,
+        control: false,
     },
     GrantSpec {
         grant: Grant::Terminal,
