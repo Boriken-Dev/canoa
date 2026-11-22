@@ -111,8 +111,11 @@ pub(super) struct Hold {
     pub(super) parts: Option<Parts>,
     /// Sessions that have already received the fallback initial prompt briefing.
     briefed: BTreeSet<String>,
-    /// Working directory (`cwd`) remembered per pending/open session request for prompt briefing templates.
+    /// The working directory of each session the agent has answered a `session/new` or `session/load` for, for the briefing's
+    /// templates; dropped when the session closes.
     pub(super) session_cwds: BTreeMap<String, Option<String>>,
+    /// The session id (a `session/load` names it) and working directory of each session request the agent has not answered.
+    session_asks: BTreeMap<String, (Option<String>, Option<String>)>,
     /// Messages the client sent while the host waited for an approval, in order, to be read before any other.
     queued: alloc::collections::VecDeque<Vec<u8>>,
     asked: u64,
@@ -169,6 +172,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 parts: None,
                 briefed: BTreeSet::new(),
                 session_cwds: BTreeMap::new(),
+                session_asks: BTreeMap::new(),
                 queued: alloc::collections::VecDeque::new(),
                 asked: 0,
                 approves: false,
@@ -333,6 +337,12 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
             return Ok(bytes);
         }
         if !tracked {
+            if method == "session/close"
+                && let Some(session_id) = value.pointer("/params/sessionId").and_then(Value::as_str)
+            {
+                hold.session_cwds.remove(session_id);
+                hold.briefed.remove(session_id);
+            }
             if method == "session/prompt"
                 && let Some(session_id) = value
                     .pointer("/params/sessionId")
@@ -387,11 +397,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                     .map(|each| each.server.clone()),
             );
         }
-        if let Some(session_id) = session_id {
-            hold.session_cwds.insert(session_id, cwd);
-        } else if let Some(cwd) = cwd {
-            hold.session_cwds.insert(id.to_string(), Some(cwd));
-        }
+        hold.session_asks.insert(id.to_string(), (session_id, cwd));
         hold.pending
             .insert(id.to_string(), Pending::Session(allowed));
         serde_json::to_vec(&value)
@@ -456,10 +462,15 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             }
             Some(Pending::Session(allowed)) => {
                 let key = value.get("id").map(ToString::to_string).unwrap_or_default();
-                if let Some(session_id) = value.pointer("/result/sessionId").and_then(Value::as_str)
-                    && let Some(cwd) = hold.session_cwds.remove(&key)
+                if let Some((asked, cwd)) = hold.session_asks.remove(&key)
+                    && value.get("error").is_none()
+                    && let Some(session_id) = value
+                        .pointer("/result/sessionId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or(asked)
                 {
-                    hold.session_cwds.insert(session_id.to_owned(), cwd);
+                    hold.session_cwds.insert(session_id, cwd);
                 }
                 let notes = hold.book.notes_for(&key);
                 if let (Some(result), Some(parts)) = (value.get_mut("result"), &hold.parts) {

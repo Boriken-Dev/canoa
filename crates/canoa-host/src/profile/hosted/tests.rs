@@ -389,7 +389,7 @@ fn an_initialize_answer_is_read_where_its_version_puts_what_it_says() {
     });
     let (takes, name) = described(&v2);
     assert_eq!(name, Some("coqui-acp-codex"));
-    assert!(takes.additional_directories() && takes.system_prompt() && takes.mcp("stdio"));
+    assert!(takes.additional_directories() && takes.system_prompt(None) && takes.mcp("stdio"));
     let v1 = json!({
         "protocolVersion": 1,
         "agentInfo": {"name": "coqui-acp-claude", "version": "0"},
@@ -397,7 +397,7 @@ fn an_initialize_answer_is_read_where_its_version_puts_what_it_says() {
     });
     let (takes, name) = described(&v1);
     assert_eq!(name, Some("coqui-acp-claude"));
-    assert!(takes.system_prompt() && !takes.additional_directories());
+    assert!(takes.system_prompt(None) && !takes.additional_directories());
 }
 
 #[test]

@@ -628,7 +628,7 @@ A recipe fetches only through the `InstallTools` it is handed and starts no proc
 ```rust
 pub struct SourcePreset { pub name: &'static str, pub agent: &'static str, pub harness: Option<&'static str>, pub program: &'static str,
     pub args: &'static [&'static str], pub requires: &'static [&'static str], pub search: &'static [&'static str],
-    pub usage: Option<&'static str>, pub managed: Option<&'static str> }
+    pub usage: Option<&'static str>, pub managed: Option<&'static str>, pub context: ContextDelivery }
 impl SourcePreset {
     pub const fn new(name: &'static str, program: &'static str) -> Self;   // no harness, no arguments, nothing else
     pub const fn harness(self, harness: &'static str) -> Self;             // the id of an `acp_harness` provider the host runs in process
@@ -639,8 +639,20 @@ impl SourcePreset {
     pub const fn search(self, search: &'static [&'static str]) -> Self;     // `~` is the home directory, `%NAME%` an environment variable
     pub const fn usage(self, usage: &'static str) -> Self;
     pub const fn managed(self, store: &'static str) -> Self;               // the program store whose managed copy runs in place of one found
+    pub const fn context(self, context: ContextDelivery) -> Self;          // how the agent receives composed overlay context
+}
+
+#[non_exhaustive] pub struct ContextDelivery { pub system_prompt: bool, pub instruction_file: Option<&'static str>, pub prompt_briefing: bool,
+    pub system_prompt_capability: Option<&'static [&'static str]> }   // Debug, Clone, Copy, PartialEq, Eq
+impl ContextDelivery {
+    pub const STANDARD: Self;                                                             // ACP's `systemPrompt` only
+    pub const fn with_instruction_file(self, path: &'static str) -> Self;                 // else a file at this path under a directory the session is given (`additionalDirectories`)
+    pub const fn with_prompt_briefing(self) -> Self;                                      // else the context prepended to the session's first prompt
+    pub const fn with_system_prompt_capability(self, path: &'static [&'static str]) -> Self;   // where its `initialize` capabilities say it takes a system prompt, when not the standard's place
 }
 ```
+
+The host tries the ways in that order and reports what became of the context: applied by the way used, refused when the instruction file cannot be written, not supported when none applies. The default is `ContextDelivery::STANDARD`.
 
 ## `speech_provider` (`canoa::speech`, feature `speech`)
 

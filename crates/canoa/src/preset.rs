@@ -10,6 +10,9 @@ pub struct ContextDelivery {
     pub instruction_file: Option<&'static str>,
     /// Prepend composed overlay context to the first `session/prompt` when neither `systemPrompt` nor an instruction file applies.
     pub prompt_briefing: bool,
+    /// Where in the agent's `initialize` capabilities it says it takes a system prompt, when it says so somewhere other than
+    /// the standard's place.
+    pub system_prompt_capability: Option<&'static [&'static str]>,
 }
 
 impl ContextDelivery {
@@ -18,12 +21,20 @@ impl ContextDelivery {
         system_prompt: true,
         instruction_file: None,
         prompt_briefing: false,
+        system_prompt_capability: None,
     };
 
     /// Fallback relative instruction file written inside `additionalDirectories`.
     #[must_use]
     pub const fn with_instruction_file(mut self, path: &'static str) -> Self {
         self.instruction_file = Some(path);
+        self
+    }
+
+    /// Names the place in the agent's capabilities where it says it takes a system prompt.
+    #[must_use]
+    pub const fn with_system_prompt_capability(mut self, path: &'static [&'static str]) -> Self {
+        self.system_prompt_capability = Some(path);
         self
     }
 

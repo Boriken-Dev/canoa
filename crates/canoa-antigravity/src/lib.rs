@@ -43,6 +43,7 @@ pub const PRESET: SourcePreset = SourcePreset::new("Antigravity", "agy")
     .usage("antigravity")
     .context(
         ContextDelivery::STANDARD
+            .with_system_prompt_capability(&["_meta", "antigravity", "systemPrompt"])
             .with_instruction_file("AGENTS.md")
             .with_prompt_briefing(),
     );

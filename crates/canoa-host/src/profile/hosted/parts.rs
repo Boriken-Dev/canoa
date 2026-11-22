@@ -56,14 +56,15 @@ impl Takes {
         }
     }
 
-    pub(super) fn system_prompt(&self) -> bool {
-        if self.version == 2 {
+    /// Whether the agent takes a system prompt with a new session: by the standard's capability, or by `own`, the path its
+    /// vendor's preset names for an agent that says it elsewhere in its capabilities.
+    pub(super) fn system_prompt(&self, own: Option<&[&str]>) -> bool {
+        let standard = if self.version == 2 {
             self.says(&["session", "systemPrompt"])
-                || self.says(&["_meta", "antigravity", "systemPrompt"])
         } else {
             self.says(&["sessionCapabilities", "systemPrompt"])
-                || self.says(&["_meta", "antigravity", "systemPrompt"])
-        }
+        };
+        standard || own.is_some_and(|path| self.says(path))
     }
 
     pub(super) fn additional_directories(&self) -> bool {
@@ -733,6 +734,8 @@ pub(super) fn parts_with(
     let mut pieces = Vec::new();
     let mut briefing_pieces = Vec::new();
     let mut instruction_file_out: Option<(String, Vec<u8>)> = None;
+    // The layers and sources of the context an instruction file carries, reported once its write is known.
+    let mut instruction_from = Vec::new();
     let preset_context = harness
         .and_then(|aos| {
             crate::vendors::by_aos(aos).map(|v| crate::bundled::context_delivery(v.agent))
@@ -740,7 +743,7 @@ pub(super) fn parts_with(
         .or_else(|| harness.map(crate::bundled::context_delivery))
         .unwrap_or(canoa::preset::ContextDelivery::STANDARD);
     if !texts.is_empty() {
-        let taken = takes.system_prompt();
+        let taken = takes.system_prompt(preset_context.system_prompt_capability);
         let has_context_blocker = not_taken(harness, |vendor| vendor.context_not_taken()).is_some();
         if taken {
             system_prompt = Some(
@@ -772,14 +775,10 @@ pub(super) fn parts_with(
                 .collect::<Vec<_>>()
                 .join("\n\n");
             instruction_file_out = Some((rel_path.to_owned(), joined.into_bytes()));
-            for (_, layer, source, _) in &texts {
-                items.push(Item::new(
-                    "context",
-                    layer,
-                    State::Applied,
-                    format!("instruction file ({rel_path}) via additionalDirectories ({source})"),
-                ));
-            }
+            instruction_from = texts
+                .iter()
+                .map(|(_, layer, source, _)| (layer.clone(), source.clone()))
+                .collect();
         } else if !has_context_blocker && preset_context.prompt_briefing {
             briefing_pieces = texts
                 .iter()
@@ -872,8 +871,8 @@ pub(super) fn parts_with(
             Item::new(
                 key,
                 &ready.layer,
-                State::Applied,
-                "deduplicated: exposed through [scripts] and SKILL.md",
+                State::Off,
+                "not started: the same tools are exposed through [scripts] and SKILL.md",
             )
         } else if let Some(why) = &ready.refused {
             Item::new(key, &ready.layer, State::Refused, why.clone())
@@ -943,8 +942,8 @@ pub(super) fn parts_with(
             items.push(Item::new(
                 format!("skills.{name}"),
                 &skill.layer,
-                State::Applied,
-                format!("deduplicated: exposed through mcp.{server_name}"),
+                State::Off,
+                format!("not delivered: the same tools are exposed through mcp.{server_name}"),
             ));
             continue;
         }
@@ -961,6 +960,8 @@ pub(super) fn parts_with(
     let mut written = None;
     let mut meta = None;
     let mut directories = Vec::new();
+    // What became of the instruction file: its path once it is in a directory the agent is given, else why not.
+    let mut instruction_result: Option<Result<String, String>> = None;
     if !usable.is_empty() {
         match &skills_delivery {
             None => {
@@ -983,9 +984,10 @@ pub(super) fn parts_with(
                 for file in &delivery.files {
                     written_files.insert(file.path.clone(), file.text.clone().into_bytes());
                 }
-                if let Some((rel_path, bytes)) = instruction_file_out.take() {
-                    written_files.insert(rel_path, bytes);
-                }
+                let instruction_path = instruction_file_out.take().map(|(rel_path, bytes)| {
+                    written_files.insert(rel_path.clone(), bytes);
+                    rel_path
+                });
                 match connection
                     .private()
                     .and_then(|under| Written::create(under, &written_files))
@@ -1007,15 +1009,18 @@ pub(super) fn parts_with(
                                     ));
                                 }
                                 meta = given;
-                                if delivery.directory
-                                    || instruction_file_out.is_none()
-                                        && preset_context.instruction_file.is_some()
-                                {
+                                if delivery.directory || instruction_path.is_some() {
                                     directories.push(done.0.to_string_lossy().into_owned());
                                 }
+                                instruction_result = instruction_path.map(Ok);
                                 written = Some(done);
                             }
                             Err(why) => {
+                                instruction_result = instruction_path.map(|_| {
+                                    Err(format!(
+                                        "the agent's delivery of the files is not usable ({why})"
+                                    ))
+                                });
                                 for (name, layer, _) in &usable {
                                     items.push(Item::new(
                                         format!("skills.{name}"),
@@ -1030,6 +1035,11 @@ pub(super) fn parts_with(
                         }
                     }
                     Err(error) => {
+                        instruction_result = instruction_path.map(|_| {
+                            Err(format!(
+                                "its file could not be written for the agent ({error})"
+                            ))
+                        });
                         for (name, layer, _) in &usable {
                             items.push(Item::new(
                                 format!("skills.{name}"),
@@ -1044,14 +1054,39 @@ pub(super) fn parts_with(
         }
     }
     if let Some((rel_path, bytes)) = instruction_file_out {
-        written_files.insert(rel_path, bytes);
-        if let Ok(done) = connection
-            .private()
-            .and_then(|under| Written::create(under, &written_files))
-        {
-            directories.push(done.0.to_string_lossy().into_owned());
-            written = Some(done);
-        }
+        written_files.insert(rel_path.clone(), bytes);
+        instruction_result = Some(
+            match connection
+                .private()
+                .and_then(|under| Written::create(under, &written_files))
+            {
+                Ok(done) => {
+                    directories.push(done.0.to_string_lossy().into_owned());
+                    written = Some(done);
+                    Ok(rel_path)
+                }
+                Err(error) => Err(format!(
+                    "its file could not be written for the agent ({error})"
+                )),
+            },
+        );
+    }
+    for (layer, source) in &instruction_from {
+        items.push(match &instruction_result {
+            Some(Ok(rel_path)) => Item::new(
+                "context",
+                layer,
+                State::Applied,
+                format!("instruction file ({rel_path}) via additionalDirectories ({source})"),
+            ),
+            Some(Err(why)) => Item::new("context", layer, State::Refused, why.clone()),
+            None => Item::new(
+                "context",
+                layer,
+                State::Refused,
+                "its file was not written for the agent",
+            ),
+        });
     }
 
     for (key, value) in [
@@ -1119,7 +1154,7 @@ pub(super) fn parts_with(
         system_prompt,
         pieces,
         briefing_pieces,
-        system_prompt_taken: takes.system_prompt(),
+        system_prompt_taken: takes.system_prompt(preset_context.system_prompt_capability),
         servers,
         names,
         directories,
