@@ -1,3 +1,6 @@
+import 'desktop/tray_follower.dart';
+import 'brand.dart';
+import 'l10n/app_text.dart';
 import 'attention/notifier.dart';
 import 'dart:async';
 import 'served/folder_dialog.dart';
@@ -822,7 +825,7 @@ class _CanoaAppState extends State<CanoaApp> {
       hostSpeech: _hostSpeech,
       voiceOutputs: _voiceOutputs,
       reader: _reader,
-      version: const String.fromEnvironment('CANOA_VERSION'),
+      version: const String.fromEnvironment('APP_VERSION'),
     );
 
   /// The first run turns starting at sign-in on and writes that down; once canoa.cfg holds an answer, on or off, it is the person's
@@ -3406,8 +3409,12 @@ class _CanoaAppState extends State<CanoaApp> {
     return MaterialApp(
       navigatorKey: _navigator,
       scaffoldMessengerKey: _messenger,
-      title: 'Canoa',
+      title: Brand.name,
       debugShowCheckedModeBanner: false,
+      builder: (context, child) => AppTextHost(
+        language: config.language.isEmpty ? null : config.language,
+        child: TrayFollower(shell: widget.shell, child: child ?? const SizedBox.shrink()),
+      ),
       theme: _theme(family, Brightness.light),
       darkTheme: _theme(family, Brightness.dark),
       themeMode: config.themeMode,

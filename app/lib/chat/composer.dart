@@ -5,6 +5,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../accounts/account_chooser.dart';
 import '../accounts/accounts_controller.dart';
 import '../acp/local_agent.dart' show InsideFile;
@@ -490,7 +491,7 @@ class SessionComposer extends StatelessWidget {
               controller.value = TextEditingValue(text: '$text$at', selection: TextSelection.collapsed(offset: text.length + at.length));
               focusNode?.requestFocus();
             },
-            child: Text(inFolder != null ? 'Mention a file' : 'Mention a conversation'),
+            child: Text(inFolder != null ? context.t('composer.mention_file') : 'Mention a conversation'),
           ),
         MenuItemButton(
           key: const Key('plus-slash'),
@@ -502,7 +503,7 @@ class SessionComposer extends StatelessWidget {
                   focusNode?.requestFocus();
                 }
               : null,
-          child: const Text('Slash commands'),
+          child: Text(context.t('composer.slash_commands')),
         ),
         // The microphone gives way to Send once something is typed, so dictating into a message goes on from here (or the shortcut).
         if (dictation != null)
@@ -510,7 +511,7 @@ class SessionComposer extends StatelessWidget {
             key: const Key('plus-dictate'),
             leadingIcon: const Icon(Icons.mic_none, size: 18),
             onPressed: dictation.cancellable ? null : () => unawaited(dictation.start()),
-            child: Text('Dictate ($dictationKeys)'),
+            child: Text(context.t('composer.dictate', {'keys': dictationKeys})),
           ),
         if (kit.reader case final reader? when reader.available) VoiceModeMenuItem(reader: reader, onChanged: kit.onVoiceMode ?? (_) {}),
       ],

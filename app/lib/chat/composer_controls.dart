@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../config/canoa_config.dart' show Preset, isPresetName, presetDefault, presetNameRule;
 import '../session_store.dart';
 import '../sources/source_icons.dart';
@@ -30,9 +31,9 @@ class SourceChooser extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       onTap: () => unawaited(showSessionPicker(context, store: store, session: session, kit: kit)),
       child: Tooltip(
-        message: problem ?? 'Where its agent comes from',
+        message: problem ?? context.t('composer.source_tooltip'),
         child: ComposerPill(
-          label: source?.displayName ?? 'Choose a source',
+          label: source?.displayName ?? context.t('composer.choose_source'),
           leading: SourceMark.of(source),
           danger: problem != null || source == null,
         ),
@@ -69,10 +70,10 @@ class PlaceToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final changed = kit.foldersChanged;
-    return changed == null ? _toggle() : ListenableBuilder(listenable: changed, builder: (context, _) => _toggle());
+    return changed == null ? _toggle(context) : ListenableBuilder(listenable: changed, builder: (context, _) => _toggle(context));
   }
 
-  Widget _toggle() {
+  Widget _toggle(BuildContext context) {
     final cwd = session.cwd;
     final inRepository = cwd != null && (kit.repositoryOf?.call(session) ?? kit.inGitRepository?.call(cwd) ?? false);
     return Padding(
@@ -82,12 +83,12 @@ class PlaceToggle extends StatelessWidget {
         style: const ButtonStyle(visualDensity: VisualDensity(horizontal: -4, vertical: -4), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
         showSelectedIcon: false,
         segments: [
-          const ButtonSegment(value: false, label: Text('Local', style: TextStyle(fontSize: 12.5))),
+          ButtonSegment(value: false, label: Text(context.t('composer.local'), style: const TextStyle(fontSize: 12.5))),
           ButtonSegment(
             value: true,
             enabled: inRepository,
-            tooltip: inRepository ? 'A new git worktree of this workspace, on a branch of its own' : 'The workspace is not in a git repository',
-            label: const Text('Worktree', style: TextStyle(fontSize: 12.5)),
+            tooltip: context.t(inRepository ? 'composer.worktree_tooltip' : 'composer.worktree_none'),
+            label: Text(context.t('composer.worktree'), style: const TextStyle(fontSize: 12.5)),
           ),
         ],
         selected: {session.wantsWorktree && inRepository},
@@ -149,10 +150,10 @@ class ModelEffortChooser extends StatelessWidget {
     if (!known && draft && asked != null && (asked.unknownKind != null || asked.signedOut)) return const SizedBox.shrink();
     // The host is asking the agent for its list now.
     if (!known && draft && source != null && store.isAskingChoices(source)) {
-      return const Tooltip(
-        key: Key('option-model'),
-        message: 'Asking the agent for its models and efforts',
-        child: ComposerPill(label: 'Listing models…', icon: Icons.memory, enabled: false),
+      return Tooltip(
+        key: const Key('option-model'),
+        message: context.t('composer.models_asking'),
+        child: ComposerPill(label: context.t('composer.models_listing'), icon: Icons.memory, enabled: false),
       );
     }
     // Nothing is known of this agent's list until it runs: say so, with the agent's reason when it gave one.
@@ -162,8 +163,8 @@ class ModelEffortChooser extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         onTap: source == null ? null : () => unawaited(store.askChoicesAgain(source)),
         child: Tooltip(
-          message: '${asked?.unknownBecause ?? 'Its model and effort choices are listed once the agent has started'}. Tap to ask again.',
-          child: const ComposerPill(label: 'Model: after start', icon: Icons.memory),
+          message: context.t('composer.models_unknown', {'because': asked?.unknownBecause ?? context.t('composer.models_unknown_default')}),
+          child: ComposerPill(label: context.t('composer.models_after_start'), icon: Icons.memory),
         ),
       );
     }
@@ -172,14 +173,15 @@ class ModelEffortChooser extends StatelessWidget {
       _part(effort, OptionRole.effort, always: false),
     ].whereType<String>().toList();
     final waiting = (pendingModel != null || pendingEffort != null) && session.status == SessionStatus.working;
-    final label = '${parts.isEmpty ? (draft ? 'Default' : 'Model') : parts.join(' · ')}${waiting ? ' (next turn)' : ''}';
+    final named = parts.isEmpty ? context.t(draft ? 'composer.default' : 'composer.model') : parts.join(' · ');
+    final label = waiting ? context.t('composer.next_turn', {'label': named}) : named;
     final connecting = session.status == SessionStatus.connecting;
     return InkWell(
       key: const Key('option-model'),
       borderRadius: BorderRadius.circular(8),
       onTap: connecting ? null : () => _open(context),
       child: Tooltip(
-        message: _seenLabel(draft ? seen : null, 'Model and effort'),
+        message: _seenLabel(draft ? seen : null, context.t('composer.model_effort')),
         child: ComposerPill(label: label, icon: Icons.memory),
       ),
     );
@@ -208,10 +210,10 @@ class ModeChooser extends StatelessWidget {
     final shown = entries.where((entry) => entry.value == current).firstOrNull;
     // Canoa's own Bypass sits on the agent's mode, which is said beside it.
     final under = session.bypass ? entries.where((entry) => entry.value == store.underlyingMode(session)).firstOrNull : null;
-    final label = under == null ? (shown?.label ?? (current == null ? null : choiceLabel(OptionRole.mode, Choice(current, current))) ?? (session.isDraft ? 'Default' : 'Mode')) : 'Bypass over ${under.label}';
+    final label = under == null ? (shown?.label ?? (current == null ? null : choiceLabel(OptionRole.mode, Choice(current, current))) ?? context.t(session.isDraft ? 'composer.default' : 'composer.mode')) : context.t('composer.bypass_over', {'mode': under.label});
     return PopupMenuButton<Object?>(
       key: const Key('option-mode'),
-      tooltip: _seenLabel(session.isDraft ? seen : null, 'Mode (Shift+Tab changes it)'),
+      tooltip: _seenLabel(session.isDraft ? seen : null, context.t('composer.mode_tooltip')),
       enabled: store.canChangeMode(session) || session.isDraft,
       onSelected: (value) {
         if (value is ModeEntry) {
@@ -226,12 +228,12 @@ class ModeChooser extends StatelessWidget {
           key: const Key('mode-header'),
           enabled: false,
           height: 28,
-          child: Text('Permissions \u00b7 this session', style: Theme.of(context).textTheme.labelMedium),
+          child: Text(context.t('composer.permissions_session'), style: Theme.of(context).textTheme.labelMedium),
         ),
-        if (session.isDraft) const PopupMenuItem<Object?>(value: null, child: Text('Default')),
+        if (session.isDraft) PopupMenuItem<Object?>(value: null, child: Text(context.t('composer.default'))),
         // An agent the app knows nothing of lists its modes once it runs; Canoa's own Bypass works with any.
         if (session.isDraft && option == null)
-          const PopupMenuItem<Object?>(enabled: false, child: Text('Its other modes: after it has started')),
+          PopupMenuItem<Object?>(enabled: false, child: Text(context.t('composer.modes_after_start'))),
         for (final entry in entries)
           CheckedPopupMenuItem<Object?>(
             value: entry,
@@ -250,7 +252,7 @@ class ModeChooser extends StatelessWidget {
           ),
       ],
       child: ComposerPill(
-        label: pending && session.status == SessionStatus.working ? '$label (next turn)' : label,
+        label: pending && session.status == SessionStatus.working ? context.t('composer.next_turn', {'label': label}) : label,
         icon: bypass ? Icons.fast_forward_outlined : Icons.tune,
         status: bypass,
       ),
@@ -271,7 +273,7 @@ class MoreChooser extends StatelessWidget {
     final others = options.where((option) => roleOf(option) == OptionRole.other).toList();
     return PopupMenuButton<(ConfigOption, String)>(
       key: const Key('option-more'),
-      tooltip: 'More of the agent\'s choices',
+      tooltip: context.t('composer.more_tooltip'),
       onSelected: (chosen) => unawaited(store.choose(session, chosen.$1, chosen.$2)),
       itemBuilder: (context) => [
         for (final option in others) ...[
@@ -284,7 +286,7 @@ class MoreChooser extends StatelessWidget {
             ),
         ],
       ],
-      child: const ComposerPill(label: 'More', icon: Icons.more_horiz),
+      child: ComposerPill(label: context.t('composer.more'), icon: Icons.more_horiz),
     );
   }
 }
@@ -307,14 +309,14 @@ class CacheChooser extends StatelessWidget {
     final unavailable = store.cacheUnavailable(session);
     return PopupMenuButton<CacheLifetime?>(
       key: const Key('option-cache'),
-      tooltip: 'How long the prompt cache lives',
+      tooltip: context.t('composer.cache_tooltip'),
       enabled: session.status == SessionStatus.draft,
       onSelected: (value) => store.setCacheLifetime(session, value),
       itemBuilder: (context) => [
         PopupMenuItem<CacheLifetime?>(
           key: const Key('cache-unchosen'),
           value: null,
-          child: Text(asked.chosen ? 'Not chosen' : 'Not chosen (${choices.cacheLabel(asked.lifetime)})'),
+          child: Text(asked.chosen ? context.t('composer.cache_unchosen') : context.t('composer.cache_unchosen_with', {'label': choices.cacheLabel(asked.lifetime)})),
         ),
         CheckedPopupMenuItem<CacheLifetime?>(
           key: Key('cache-${CacheLifetime.harness.id}'),
@@ -334,10 +336,10 @@ class CacheChooser extends StatelessWidget {
             key: Key('cache-unavailable-${unavailable.id}'),
             enabled: false,
             value: unavailable,
-            child: Text('${unavailable.label}: not offered by this agent, so ${CacheLifetime.harness.label.toLowerCase()} is used'),
+            child: Text(context.t('composer.cache_unavailable', {'label': unavailable.label, 'used': CacheLifetime.harness.label.toLowerCase()})),
           ),
       ],
-      child: ComposerPill(label: 'Cache: ${choices.cacheLabel(asked.lifetime)}', icon: Icons.timer_outlined),
+      child: ComposerPill(label: context.t('composer.cache', {'label': choices.cacheLabel(asked.lifetime)}), icon: Icons.timer_outlined),
     );
   }
 }
@@ -403,15 +405,15 @@ class OverlaysChooser extends StatelessWidget {
     final on = session.overlays ?? base.toSet();
     final count = kit.overlays.where(on.contains).length;
     final missing = loadout?.missingOverlays ?? const <String>[];
-    final label = '${loadout == null ? 'Overlays' : named!} ($count)${missing.isEmpty ? '' : ', ${missing.length} missing'}';
+    final label = '${loadout == null ? context.t('composer.overlays') : named!} ($count)${missing.isEmpty ? '' : ', ${context.t('composer.overlays_missing', {'count': missing.length})}'}';
     if (!session.isDraft) {
       return InkWell(
         key: const Key('overlays'),
         borderRadius: BorderRadius.circular(8),
         onTap: kit.onProfile == null ? null : () => kit.onProfile!(session),
         child: Tooltip(
-          message: 'What its profile gave it, set when it started',
-          child: ComposerPill(label: 'Overlays${session.overlays == null ? '' : ' ($count)'}', icon: Icons.layers_outlined, enabled: false),
+          message: context.t('composer.overlays_given'),
+          child: ComposerPill(label: '${context.t('composer.overlays')}${session.overlays == null ? '' : ' ($count)'}', icon: Icons.layers_outlined, enabled: false),
         ),
       );
     }
@@ -444,7 +446,7 @@ class OverlaysChooser extends StatelessWidget {
           MenuItemButton(
             key: Key('overlay-missing $name'),
             leadingIcon: Icon(Icons.warning_amber_outlined, size: 18, color: Theme.of(context).colorScheme.error),
-            child: Text('$name is not installed'),
+            child: Text(context.t('composer.overlay_missing', {'name': name})),
           ),
         if (kit.onLoadout != null) ...[
           const Divider(height: 1),
@@ -452,7 +454,7 @@ class OverlaysChooser extends StatelessWidget {
             key: const Key('overlays-loadout'),
             leadingIcon: const Icon(Icons.tune, size: 18),
             onPressed: kit.onLoadout,
-            child: const Text('Manage loadouts'),
+            child: Text(context.t('composer.manage_loadouts')),
           ),
         ],
       ],
@@ -462,8 +464,8 @@ class OverlaysChooser extends StatelessWidget {
         onTap: () => controller.isOpen ? controller.close() : controller.open(),
         child: Tooltip(
           message: missing.isEmpty
-              ? 'The loadout it starts with, and which of its overlays are on'
-              : 'The loadout names ${missing.join(', ')}, which ${missing.length == 1 ? 'is' : 'are'} not installed',
+              ? context.t('composer.loadout_tooltip')
+              : context.t(missing.length == 1 ? 'composer.loadout_missing_one' : 'composer.loadout_missing_many', {'names': missing.join(', ')}),
           child: ComposerPill(label: label, icon: missing.isEmpty ? Icons.layers_outlined : Icons.warning_amber_outlined),
         ),
       ),
@@ -505,7 +507,7 @@ class PresetChooser extends StatelessWidget {
   Future<void> _saveChanges(BuildContext context, String name) async {
     final saved = await kit.savePreset!(name, _current(_held));
     if (!context.mounted || saved) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('canoa.cfg could not be written')));
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(context.t('composer.config_unwritten'))));
   }
 
   Future<void> _saveAsNew(BuildContext context) async {
@@ -518,7 +520,7 @@ class PresetChooser extends StatelessWidget {
     final saved = await kit.savePreset!(name, made);
     if (!context.mounted) return;
     if (!saved) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('canoa.cfg could not be written')));
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(context.t('composer.config_unwritten'))));
       return;
     }
     store.usePreset(session, name, made, source: session.source);
@@ -550,35 +552,35 @@ class PresetChooser extends StatelessWidget {
             key: const Key('profile-save-changes'),
             leadingIcon: const Icon(Icons.save_outlined, size: 18),
             onPressed: () => unawaited(_saveChanges(context, name)),
-            child: const Text('Save changes'),
+            child: Text(context.t('composer.profile_save_changes')),
           ),
         if (kit.savePreset != null)
           MenuItemButton(
             key: const Key('profile-save-new'),
             leadingIcon: const Icon(Icons.library_add_outlined, size: 18),
             onPressed: () => unawaited(_saveAsNew(context)),
-            child: const Text('Save as new profile'),
+            child: Text(context.t('composer.profile_save_new')),
           ),
         if (held != null && modified)
           MenuItemButton(
             key: const Key('profile-reset'),
             leadingIcon: const Icon(Icons.restart_alt, size: 18),
             onPressed: () => _use(name),
-            child: const Text('Back to the profile'),
+            child: Text(context.t('composer.profile_back')),
           ),
         if (kit.onSetup != null)
           MenuItemButton(
             key: const Key('profile-effective'),
             leadingIcon: const Icon(Icons.fact_check_outlined, size: 18),
             onPressed: () => kit.onSetup!(session),
-            child: const Text('Effective setup'),
+            child: Text(context.t('composer.profile_effective')),
           ),
         if (kit.onProfiles != null)
           MenuItemButton(
             key: const Key('profile-manage'),
             leadingIcon: const Icon(Icons.tune, size: 18),
             onPressed: kit.onProfiles,
-            child: const Text('Manage profiles'),
+            child: Text(context.t('composer.profile_manage')),
           ),
       ],
       builder: (context, controller, _) => InkWell(
@@ -586,7 +588,7 @@ class PresetChooser extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         onTap: () => controller.isOpen ? controller.close() : controller.open(),
         child: Tooltip(
-          message: why.isEmpty ? 'The profile it starts with: its source, model, effort, mode and starting instructions' : why.join('\n'),
+          message: why.isEmpty ? context.t('composer.profile_tooltip') : why.join('\n'),
           child: ComposerPill(label: label, icon: modified || missing ? Icons.warning_amber_outlined : Icons.account_tree_outlined),
         ),
       ),
@@ -623,21 +625,21 @@ class _ProfileNameDialogState extends State<_ProfileNameDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Save as new profile'),
+    title: Text(context.t('composer.profile_save_new')),
     content: TextField(
       key: const Key('profile-name'),
       controller: _name,
       autofocus: true,
-      decoration: InputDecoration(labelText: 'Name', errorText: _problem),
+      decoration: InputDecoration(labelText: context.t('composer.profile_name'), errorText: _problem),
       onChanged: (_) => setState(() {}),
       onSubmitted: (_) => _name.text.isNotEmpty && _problem == null ? Navigator.pop(context, _name.text) : null,
     ),
     actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      TextButton(onPressed: () => Navigator.pop(context), child: Text(context.t('common.cancel'))),
       FilledButton(
         key: const Key('profile-name-save'),
         onPressed: _name.text.isEmpty || _problem != null ? null : () => Navigator.pop(context, _name.text),
-        child: const Text('Save'),
+        child: Text(context.t('common.save')),
       ),
     ],
   );

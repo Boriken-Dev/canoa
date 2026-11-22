@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../theme/look.dart';
 import 'sections.dart';
 
@@ -47,7 +48,9 @@ class SectionRail extends StatelessWidget {
               onTap: () => onSelect(section.id),
               child: SizedBox(
                 height: 44,
-                child: Icon(section.icon, size: 22, color: on ? scheme.primary : scheme.onSurfaceVariant),
+                child: section.symbol == null
+                    ? Icon(section.icon, size: 22, color: on ? scheme.primary : scheme.onSurfaceVariant)
+                    : SymbolIcon(section.symbol!, size: 22, color: on ? scheme.primary : scheme.onSurfaceVariant),
               ),
             ),
           ),
@@ -71,12 +74,12 @@ class SectionRail extends StatelessWidget {
           for (final section in foot) _item(context, section),
           if (onSignOut != null)
             Tooltip(
-              message: account == null ? 'Sign out' : 'Signed in as $account. Sign out',
+              message: account == null ? context.t('shell.sign_out') : context.t('shell.signed_in_as', {'account': account}),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 child: IconButton(
                   key: const ValueKey('sign-out'),
-                  icon: const Icon(Icons.logout_rounded, size: 22),
+                  icon: const SymbolIcon('sign_out', size: 22),
                   onPressed: onSignOut,
                 ),
               ),

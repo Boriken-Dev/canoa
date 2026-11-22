@@ -7,7 +7,8 @@ class AppSection {
   const AppSection({
     required this.id,
     required this.label,
-    required this.icon,
+    this.icon,
+    this.symbol,
     required this.main,
     this.index,
     this.tooltip,
@@ -19,7 +20,11 @@ class AppSection {
 
   /// The name the selector's tooltip and screen reader say.
   final String label;
-  final IconData icon;
+  /// The icon to draw, for a section that is not drawn from a named symbol.
+  final IconData? icon;
+
+  /// The name of the symbol the selector draws for it, which the look can replace; [icon] is drawn when it is null.
+  final String? symbol;
 
   /// A longer tooltip, when the label alone does not say enough.
   final String? tooltip;

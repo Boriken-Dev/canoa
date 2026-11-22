@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Color;
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
+import '../brand.dart';
 import '../config/canoa_config.dart';
+import '../l10n/app_text.dart';
 import 'desktop_shell.dart';
 import 'login_start.dart';
+import 'tray_icon.dart';
 
 DesktopShell createDesktopShell() => TrayShell();
 
@@ -25,13 +29,15 @@ Future<bool> linuxShowsTrayIcons() async {
 
 /// The window and its tray icon. On Windows a double click on the icon opens the chat; on Linux, whose StatusNotifier
 /// icons pass no clicks on, the menu's Open does.
-class TrayShell with WindowListener, TrayListener implements DesktopShell {
+class TrayShell with WindowListener, TrayListener implements DesktopShell, TrayAppearance {
   TrayShell({
     @visibleForTesting Future<bool> Function()? trayAvailable,
     @visibleForTesting bool? desktop,
     @visibleForTesting DateTime Function()? clock,
     @visibleForTesting LoginStart? loginStart,
-  }) : _trayAvailable = trayAvailable ?? (() async => !Platform.isLinux || await linuxShowsTrayIcons()),
+    @visibleForTesting Future<String> Function(Color accent)? iconFile,
+  }) : _iconFile = iconFile ?? ((accent) => writeTrayIcon(accent, ico: Platform.isWindows)),
+       _trayAvailable = trayAvailable ?? (() async => !Platform.isLinux || await linuxShowsTrayIcons()),
        _desktop = desktop ?? (Platform.isWindows || Platform.isMacOS || Platform.isLinux),
        _clock = clock ?? DateTime.now,
        _loginStart = loginStart;
@@ -43,6 +49,9 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
   final bool _desktop;
   final DateTime Function() _clock;
   final LoginStart? _loginStart;
+  final Future<String> Function(Color accent) _iconFile;
+  AppText _text = AppText.base;
+  Color _accent = Brand.accent;
   CanoaConfig config = const CanoaConfig();
   void Function()? onSettings, onHosting;
   bool ready = false, quitting = false;
@@ -69,17 +78,17 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
     if (!_desktop) return;
     await windowManager.ensureInitialized();
     // The generated runner titles the window with the project's name, `canoa`.
-    await windowManager.setTitle('Canoa');
+    await windowManager.setTitle(Brand.name);
     await windowManager.setPreventClose(true);
     windowManager.addListener(this);
     _hasTray = await _trayAvailable();
     if (_hasTray) {
       trayManager.addListener(this);
-      // Windows loads the tray icon with LoadImage(IMAGE_ICON), which takes no PNG, and picks the .ico's entry for the
-      // display's small-icon size; Linux and macOS take the one PNG.
-      await trayManager.setIcon(Platform.isWindows ? 'assets/icons/canoa.ico' : 'assets/icons/canoa_tray.png');
+      // The mark in the look's accent, drawn when asked: Windows loads the tray icon with LoadImage(IMAGE_ICON), which takes no
+      // PNG, and picks the .ico's entry for the display's small-icon size; Linux and macOS take the one PNG.
+      await trayManager.setIcon(await _iconFile(_accent));
       // A StatusNotifier icon on Linux has no tooltip, and tray_manager has no such call there.
-      if (!Platform.isLinux) await trayManager.setToolTip('Canoa');
+      if (!Platform.isLinux) await trayManager.setToolTip(_tooltip(0));
       await trayManager.setContextMenu(menu = _menu(0));
     }
     ready = true;
@@ -89,14 +98,28 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
   }
 
   /// The tray's menu, whose first item says how many sessions wait for the person.
-  static Menu _menu(int waiting) => Menu(items: [
-    MenuItem(key: 'open', label: waiting == 0 ? 'Open Canoa' : 'Open Canoa ($waiting waiting for you)'),
-    MenuItem(key: 'hosting', label: 'Hosting…'),
-    MenuItem(key: 'settings', label: 'Settings…'),
-    MenuItem(key: 'hide', label: 'Hide to tray'),
+  Menu _menu(int waiting) => Menu(items: [
+    MenuItem(key: 'open', label: waiting == 0 ? _text('tray.open') : _text('tray.open_waiting', {'count': waiting})),
+    MenuItem(key: 'hosting', label: _text('tray.hosting')),
+    MenuItem(key: 'settings', label: _text('tray.settings')),
+    MenuItem(key: 'hide', label: _text('tray.hide')),
     MenuItem.separator(),
-    MenuItem(key: 'quit', label: 'Exit Canoa'),
+    MenuItem(key: 'quit', label: _text('tray.quit')),
   ]);
+
+  String _tooltip(int waiting) => waiting == 0 ? _text('tray.tooltip') : _text('tray.tooltip_waiting', {'count': waiting});
+
+  @override
+  Future<void> applyAppearance({required AppText text, required Color accent}) async {
+    final recolour = accent != _accent;
+    if (text == _text && !recolour) return;
+    _text = text;
+    _accent = accent;
+    if (!ready || !_hasTray) return;
+    if (recolour) await trayManager.setIcon(await _iconFile(accent));
+    if (!Platform.isLinux) await trayManager.setToolTip(_tooltip(waiting));
+    await trayManager.setContextMenu(menu = _menu(waiting));
+  }
 
   /// How many sessions the tray last said wait for the person.
   @visibleForTesting
@@ -108,7 +131,7 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
     waiting = count;
     if (!ready || !_hasTray) return;
     // A StatusNotifier icon on Linux has no tooltip, so there the menu says it.
-    if (!Platform.isLinux) await trayManager.setToolTip(count == 0 ? 'Canoa' : 'Canoa: $count waiting for you');
+    if (!Platform.isLinux) await trayManager.setToolTip(_tooltip(count));
     await trayManager.setContextMenu(menu = _menu(count));
   }
 

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../chat/palette.dart' show chord;
 
+import '../l10n/app_text.dart';
 import '../theme/look.dart';
 import 'layout_controls.dart';
 import 'layout_state.dart';
@@ -32,7 +33,7 @@ class ShellScope extends InheritedWidget {
   static Widget? menuButton(BuildContext context) {
     final scope = maybeOf(context);
     if (scope == null || !scope.narrow) return null;
-    return IconButton(key: const ValueKey('open-navigation'), tooltip: 'Sections', icon: const Icon(Icons.menu), onPressed: scope.openNavigation);
+    return IconButton(key: const ValueKey('open-navigation'), tooltip: context.t('shell.sections'), icon: const Icon(Icons.menu), onPressed: scope.openNavigation);
   }
 
   @override

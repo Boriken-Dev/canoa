@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/text_pack.dart';
 import 'look.dart';
 
 /// The conversation tokens a look sets apart from the shell's.
@@ -120,6 +121,7 @@ final class VendorLooks extends ChangeNotifier {
       radius: tokens.number('radius') ?? fallback.radius,
       controlRadius: tokens.number('controlRadius') ?? fallback.controlRadius,
       railWidth: tokens.number('railWidth') ?? fallback.railWidth,
+      words: _documents[id]?.text,
     );
   }
 
@@ -142,10 +144,13 @@ final class VendorLooks extends ChangeNotifier {
 final VendorLooks vendorLooks = VendorLooks();
 
 final class _Document {
-  _Document(this.id, this.vendor, this._light, this._dark);
+  _Document(this.id, this.vendor, this._light, this._dark, this.text);
 
   final LookId id;
   final String vendor;
+
+  /// What the document sets of the words and symbols, from its `text` table.
+  final TextPack? text;
   final _Tokens? _light, _dark;
 
   _Tokens? of(Brightness brightness) => brightness == Brightness.dark ? _dark : _light;
@@ -158,7 +163,7 @@ final class _Document {
     final look = id is String ? LookId.named(id, label: label is String ? label : null) : null;
     // Canoa's and the terminal's looks are built in: a host does not replace them.
     if (look == null || look.isBuiltIn || vendor is! String) return null;
-    return _Document(look, vendor, _Tokens.parse(item['light']), _Tokens.parse(item['dark']));
+    return _Document(look, vendor, _Tokens.parse(item['light']), _Tokens.parse(item['dark']), TextPack.parse(item['text']));
   }
 }
 

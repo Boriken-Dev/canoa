@@ -42,6 +42,7 @@ final class CanoaConfig {
     this.followProvider = false,
     this.brightness = 'dark',
     this.density = ChatDensity.normal,
+    this.language = '',
     this.agents = const [],
     this.host,
     this.sessions = const LedgerSettings(),
@@ -155,6 +156,9 @@ final class CanoaConfig {
   /// `[appearance] density`: how much of an agent's work a conversation shows, `normal`, `thinking` or `verbose`.
   final ChatDensity density;
 
+  /// `[appearance] language`: the language the app's own words are in, as its code (`en`, `es`); empty follows the system's.
+  final String language;
+
   ThemeMode get themeMode => switch (brightness) {
     'light' => ThemeMode.light,
     'system' => ThemeMode.system,
@@ -163,7 +167,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? startAtLogin, bool? preferWebTransport, num? connectTimeout,
-      LookId? look, bool? followProvider, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
+      LookId? look, bool? followProvider, String? brightness, ChatDensity? density, String? language, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
       NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
       CanoaConfig(
@@ -178,6 +182,7 @@ final class CanoaConfig {
         followProvider: followProvider ?? this.followProvider,
         brightness: brightness ?? this.brightness,
         density: density ?? this.density,
+        language: language ?? this.language,
         agents: agents ?? this.agents,
         host: host,
         sessions: sessions ?? this.sessions,
@@ -212,6 +217,7 @@ final class CanoaConfig {
     followProvider: followProvider,
     brightness: brightness,
     density: density,
+    language: language,
     agents: agents,
     host: host,
     sessions: sessions,
@@ -1230,6 +1236,7 @@ final class CanoaConfig {
     followProvider: followProvider,
     brightness: brightness,
     density: density,
+    language: language,
     agents: agents,
     host: host,
     sessions: sessions,
@@ -1270,7 +1277,7 @@ final class CanoaConfig {
   static const _editedKeys = <String, Set<String>>{
     'desktop': {'start_hidden', 'close_to_tray', 'minimize_to_tray', 'local_host', 'start_at_login'},
     'network': {'prefer_webtransport', 'connect_timeout'},
-    'appearance': {'look', 'follow_provider', 'brightness', 'density'},
+    'appearance': {'look', 'follow_provider', 'brightness', 'density', 'language'},
     'sessions': {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'},
     'permissions': {'default_mode', 'full_access', 'allow_once_only', 'protected'},
     'notifications': {'permission', 'question', 'finished'},
@@ -1417,6 +1424,8 @@ final class CanoaConfig {
     if (density == null) {
       throw FormatException('canoa.cfg: appearance.density must be one of ${ChatDensity.values.map((each) => each.name).join(', ')}');
     }
+    final languageName = appearance['language'] ?? '';
+    if (languageName is! String) throw const FormatException('canoa.cfg: appearance.language must be text');
     final agents = <AgentCommand>[];
     final agentProfiles = <String, Profile>{};
     final agentTables = <String, Object?>{};
@@ -1565,7 +1574,7 @@ final class CanoaConfig {
       },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
-      look: look, followProvider: flag(appearance, 'follow_provider', false), brightness: brightness, density: density,
+      look: look, followProvider: flag(appearance, 'follow_provider', false), brightness: brightness, density: density, language: languageName,
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
@@ -1660,7 +1669,7 @@ look = "${look.name}"
 follow_provider = $followProvider
 brightness = "$brightness"
 density = "${density.name}"
-
+${language.isEmpty ? '' : 'language = ${jsonEncode(language)}\n'}
 [sessions]
 keep = ${sessions.keep}
 keep_text = ${sessions.keepText}

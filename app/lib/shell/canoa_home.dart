@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show KeyUpEvent;
 
 import '../chat/composer.dart' show ComposerKit;
+import '../l10n/app_text.dart';
 import '../chat/conversation_view.dart';
 import '../client/related_rail.dart';
 import '../client/relation.dart';
@@ -185,8 +186,8 @@ class CanoaHome extends StatelessWidget {
               AppSection(
                 id: ShellLayout.conversations,
                 ownsLayoutControls: true,
-                label: 'Conversations',
-                icon: Icons.chat_bubble_outline,
+                label: context.t('nav.conversations'),
+                symbol: 'conversations',
                 index: chatOnly ? _relatedRail() : _rail(context),
                 main: ConversationView(
                   key: ValueKey(store.selectedId ?? 'empty'),
@@ -205,13 +206,13 @@ class CanoaHome extends StatelessWidget {
                 ),
               ),
               if (!chatOnly) ...[
-                AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
-                AppSection(id: 'terminal', label: 'Terminal', icon: Icons.terminal, index: terminalIndex, main: terminalMain),
-                if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
-                if (secretsPage != null) AppSection(id: 'secrets', label: 'Secrets', icon: Icons.key_outlined, index: secretsIndex, main: secretsPage!),
-                AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, index: loadoutsIndex, main: loadouts),
-                AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, index: storeIndex, main: loadout, ownsLayoutControls: true),
-                AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
+                AppSection(id: HostsController.section, label: context.t('nav.hosts'), symbol: 'hosts', index: hostsIndex, main: hostsPage),
+                AppSection(id: 'terminal', label: context.t('nav.terminal'), symbol: 'terminal', index: terminalIndex, main: terminalMain),
+                if (usagePage != null) AppSection(id: 'usage', label: context.t('nav.usage'), symbol: 'usage', index: usageIndex, main: usagePage!),
+                if (secretsPage != null) AppSection(id: 'secrets', label: context.t('nav.secrets'), symbol: 'secrets', index: secretsIndex, main: secretsPage!),
+                AppSection(id: 'loadouts', label: context.t('nav.loadouts'), symbol: 'loadouts', index: loadoutsIndex, main: loadouts),
+                AppSection(id: 'store', label: context.t('nav.store'), symbol: 'store', index: storeIndex, main: loadout, ownsLayoutControls: true),
+                AppSection(id: 'settings', label: context.t('nav.settings'), tooltip: context.t('nav.settings_tooltip'), symbol: 'settings', main: settings, atFoot: true),
               ],
             ],
           ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
+
 import 'layout_state.dart';
 import 'outline_icon.dart';
 import 'shell.dart' show shortcutLabel;
@@ -63,14 +65,14 @@ class LayoutControls extends StatelessWidget {
       final bottomShown = layout.bottomOpen && !focused;
       return Row(mainAxisSize: MainAxisSize.min, children: [
         if (focused)
-          TextButton(key: const ValueKey('layout-restore'), onPressed: layout.restore, child: const Text('Restore layout')),
+          TextButton(key: const ValueKey('layout-restore'), onPressed: layout.restore, child: Text(context.t('layout.restore'))),
         if (hasIndex)
           _toggle(
             context,
             key: const ValueKey('layout-left'),
             region: WindowRegion.left,
             shown: indexShown,
-            tooltip: 'Toggle section index (${shortcutLabel('B')})',
+            tooltip: context.t('layout.toggle_index', {'keys': shortcutLabel('B')}),
             onPressed: () => layout.toggleIndex(section),
           ),
         if (hasBottom)
@@ -79,7 +81,7 @@ class LayoutControls extends StatelessWidget {
             key: const ValueKey('layout-bottom'),
             region: WindowRegion.bottom,
             shown: bottomShown,
-            tooltip: 'Toggle bottom panel (${shortcutLabel('`')})',
+            tooltip: context.t('layout.toggle_bottom', {'keys': shortcutLabel('`')}),
             onPressed: layout.toggleBottom,
           ),
         if (hasRight)
@@ -88,14 +90,14 @@ class LayoutControls extends StatelessWidget {
             key: const ValueKey('layout-right'),
             region: WindowRegion.right,
             shown: rightShown,
-            tooltip: 'Toggle right panel (${shortcutLabel('Alt+B')})',
+            tooltip: context.t('layout.toggle_right', {'keys': shortcutLabel('Alt+B')}),
             onPressed: layout.toggleRight,
           ),
         if (menu)
         PopupMenuButton<String>(
           key: const ValueKey('layout-menu'),
-          tooltip: 'Layout',
-          icon: const Icon(Icons.view_quilt_outlined, size: 20),
+          tooltip: context.t('layout.menu'),
+          icon: const SymbolIcon('layout', size: 20),
           padding: const EdgeInsets.all(6),
           onSelected: (value) {
             switch (value) {
@@ -107,12 +109,12 @@ class LayoutControls extends StatelessWidget {
                 layout.reset();
             }
           },
-          itemBuilder: (_) => [
+          itemBuilder: (menu) => [
             if (focused)
-              const PopupMenuItem(value: 'restore', child: Text('Restore layout'))
+              PopupMenuItem(value: 'restore', child: Text(menu.t('layout.restore')))
             else
-              const PopupMenuItem(value: 'focus', child: Text('Focus main view')),
-            const PopupMenuItem(value: 'reset', child: Text('Reset layout')),
+              PopupMenuItem(value: 'focus', child: Text(menu.t('layout.focus'))),
+            PopupMenuItem(value: 'reset', child: Text(menu.t('layout.reset'))),
           ],
         ),
       ]);

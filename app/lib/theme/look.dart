@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/text_pack.dart';
 import 'vendor_looks.dart';
 
 /// The id of a look family. Canoa's own look and the terminal's are built in; every other is a family the host lists (`looks/list`,
@@ -74,6 +75,7 @@ final class CanoaLook extends ThemeExtension<CanoaLook> {
     required this.radius,
     required this.controlRadius,
     required this.railWidth,
+    this.words,
   });
 
   final LookId id;
@@ -96,6 +98,9 @@ final class CanoaLook extends ThemeExtension<CanoaLook> {
   /// The corner of a card or dialog, and of a field or button.
   final double radius, controlRadius;
   final double railWidth;
+
+  /// The words and symbols this look sets in place of the base ones; null when it draws the base.
+  final TextPack? words;
 
   /// The outline that shows keyboard focus.
   Color get focus => accent;
@@ -129,6 +134,7 @@ final class CanoaLook extends ThemeExtension<CanoaLook> {
       radius: number(radius, other.radius),
       controlRadius: number(controlRadius, other.controlRadius),
       railWidth: number(railWidth, other.railWidth),
+      words: (t < 0.5 ? this : other).words,
     );
   }
 }

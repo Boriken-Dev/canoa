@@ -1,4 +1,7 @@
+import 'package:flutter/painting.dart' show Color;
+
 import '../config/canoa_config.dart';
+import '../l10n/app_text.dart';
 import 'desktop_shell_stub.dart'
     if (dart.library.io) 'desktop_shell_io.dart' as platform;
 
@@ -34,4 +37,10 @@ abstract interface class DesktopShell {
   /// Says on the tray how many sessions wait for the person's answer.
   Future<void> showWaiting(int count);
 }
+/// A shell whose tray follows the look: its words and the colour of its icon.
+abstract interface class TrayAppearance {
+  /// Labels the tray's menu and tooltip with [text] and draws its icon in [accent]; the same call again changes nothing.
+  Future<void> applyAppearance({required AppText text, required Color accent});
+}
+
 DesktopShell createDesktopShell() => platform.createDesktopShell();

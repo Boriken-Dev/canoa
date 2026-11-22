@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, Chat
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../chat/palette.dart' show ShortcutSpec, appShortcutTable, parseShortcutActivator;
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
@@ -285,6 +286,18 @@ class AppearanceSection extends StatelessWidget {
             value: config.brightness,
             choices: const [('dark', 'Dark'), ('light', 'Light'), ('system', 'Follow the system')],
             onChanged: (v) => controller.change((c) => c.copyWith(brightness: v)),
+          ),
+          ChoiceRow<String>(
+            title: context.t('settings.language'),
+            configKey: const ['appearance', 'language'],
+            description: context.t('settings.language_description'),
+            fieldKey: const Key('settings-language'),
+            value: AppText.of(context).languages.contains(config.language) ? config.language : '',
+            choices: [
+              ('', context.t('settings.language_system')),
+              for (final code in AppText.of(context).languages) (code, AppText.of(context).languageName(code)),
+            ],
+            onChanged: (v) => controller.change((c) => c.copyWith(language: v)),
           ),
           ChoiceRow<ChatDensity>(
             title: 'Detail of the agent\'s work',

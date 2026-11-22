@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../accounts/accounts_controller.dart';
 import '../accounts/accounts_section.dart';
 import '../config/canoa_config.dart';
@@ -300,24 +301,24 @@ class SettingsPageState extends State<SettingsPage> {
         child: TextField(
           key: const Key('settings-search'),
           controller: _search,
-          decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search settings', isDense: true, border: OutlineInputBorder()),
+          decoration: InputDecoration(prefixIcon: const Icon(Icons.search), hintText: context.t('settings.search'), isDense: true, border: const OutlineInputBorder()),
           onChanged: (_) => setState(() {}),
         ),
       ),
       Expanded(
         child: ListView(padding: const EdgeInsets.only(bottom: 16), children: [
-          if (matching.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No setting matches.', key: Key('settings-no-match'))),
+          if (matching.isEmpty) Padding(padding: const EdgeInsets.all(16), child: Text(context.t('settings.no_match'), key: const Key('settings-no-match'))),
           for (final group in groups) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(group, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
+              child: Text(AppText.of(context).maybe('settings.group.${group.toLowerCase()}') ?? group, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
             ),
             for (final section in matching.where((section) => section.group == group))
               ListTile(
                 key: Key('settings-nav-${section.id}'),
                 dense: true,
                 leading: Icon(section.icon, size: 20),
-                title: Text(section.title),
+                title: Text(_titleOf(context, section)),
                 selected: wide && _current(matching)?.id == section.id,
                 selectedTileColor: scheme.surfaceContainerHighest,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -329,6 +330,9 @@ class SettingsPageState extends State<SettingsPage> {
       ),
     ]);
   }
+
+  /// What a section is called: the app's own word for it where there is one, else what its provider says.
+  String _titleOf(BuildContext context, SettingsSection section) => AppText.of(context).maybe('settings.section.${section.id}') ?? section.title;
 
   /// The section shown: the one picked if the search still lists it, else the first listed.
   SettingsSection? _current(List<SettingsSection> matching) =>
@@ -347,7 +351,7 @@ class SettingsPageState extends State<SettingsPage> {
           children: [
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
-              child: Text(section.title, style: Theme.of(context).textTheme.headlineSmall),
+              child: Text(_titleOf(context, section), style: Theme.of(context).textTheme.headlineSmall),
             ),
             if (controller.problem case final problem?)
               Padding(
@@ -377,7 +381,7 @@ class SettingsPageState extends State<SettingsPage> {
       child: Selectable(
         child: Scaffold(
           appBar: AppBar(
-            title: Text(inSection ? current.title : 'Settings'),
+            title: Text(inSection ? _titleOf(context, current) : context.t('nav.settings')),
             automaticallyImplyLeading: false,
             leading: inSection
                 ? IconButton(
