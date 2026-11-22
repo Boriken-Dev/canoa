@@ -200,10 +200,11 @@ mod tests {
     use crate::config::{WebConfig, WebTls};
 
     fn web(listen: &str, tls: bool) -> WebConfig {
-        let mut web = WebConfig::default();
-        web.listen = listen.parse().unwrap();
-        web.tls = tls.then(|| WebTls::new("web.crt", "web.key"));
-        web
+        WebConfig {
+            listen: listen.parse().unwrap(),
+            tls: tls.then(|| WebTls::new("web.crt", "web.key")),
+            ..WebConfig::default()
+        }
     }
 
     #[test]
