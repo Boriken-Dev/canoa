@@ -35,6 +35,7 @@ nav:
   - Interoperability: interop.md
   - Transport selection: transport.md
   - Desktop and configuration: configuration.md
+  - Words, symbols and brands: themes_and_brands.md
   - Providers written as scripts: script_providers.md
   - The host: host.md
   - The portal: portal.md
