@@ -327,3 +327,43 @@ fn a_canoa_cfg_from_two_layers_dispatches_cleanly() {
     Config::load(&dir.join("Canoa.cfg")).expect("loads");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn agent_takes_the_access_every_agent_takes_the_same_way_and_any_id() {
+    use coqui_acp_harness::{Access, Approvals, Sandbox};
+    let run = agent_run(&[
+        "codex",
+        "--approvals",
+        "edits",
+        "--sandbox",
+        "workspace",
+        "--no-network",
+    ]);
+    let mut expected = Access::STANDARD;
+    expected.approvals = Approvals::Edits;
+    expected.sandbox = Sandbox::Workspace;
+    expected.network = false;
+    assert_eq!(run.access, Some(expected.to_json()));
+    assert!(run.access_asked);
+    assert_eq!(
+        agent_run(&["claude"]).access,
+        Some(Access::STANDARD.to_json()),
+        "no flag asks for the standard access, the same for every agent"
+    );
+    // The id is whatever the host carries: the command line does not know which.
+    assert_eq!(agent_run(&["gemini"]).id, "gemini");
+    for wrong in [
+        &["codex", "--permission-mode", "plan"][..],
+        &["codex", "--approval-policy", "never"],
+        &["claude", "--sandbox", "workspace-write"],
+        &["claude", "--max-acp-version", "3"],
+        &["claude", "--setting", "no-equals-sign"],
+        &["claude", "--setting", "=empty"],
+        &[],
+    ] {
+        assert!(
+            Cli::try_parse_from(["canoa", "agent"].iter().chain(wrong)).is_err(),
+            "{wrong:?}"
+        );
+    }
+}
