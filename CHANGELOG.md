@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **The Files surface shows each file with a viewer chosen by its type.** A registry picks the viewer from the file's MIME type, its extension or its first bytes: Markdown sections, an image, a JSON, YAML or TOML tree, a diff for `.diff` and `.patch` files, and plain text for the rest; a file nothing can draw says so. Where a file has more than one viewer a switch under the header changes it, and the choice is kept per type in `viewers.json` beside canoa.cfg. Viewers are registered objects, so another party's viewer joins the same list.
 - **A file path in the chat opens in Files.** A Markdown link, a path in inline code, a tool call's file and a diff's header open the file in the Files surface of the session's folder (`path:line` and `#L10` endings are read), and a link to the web is copied rather than followed.
 - **The composer shows how full the context is, and offers the agent's own compact command.** A pill beside the composer says the percentage used, opens the context breakdown in Details and, where the agent lists a `compact` command among its commands, runs it as the agent names it; an agent that lists none is offered no Compact. Details has the same button.
 - **A conversation copies as Markdown or saves as a `.md` file,** from the header and the command palette.
