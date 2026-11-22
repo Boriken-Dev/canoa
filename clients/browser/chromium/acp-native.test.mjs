@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { NATIVE_PIECE, createDeframer, dialAgent, frame, pairWithPin } from "./acp-dial.js";
+import { MAX_MESSAGE_META, NATIVE_PIECE, createDeframer, dialAgent, frame, pairWithPin } from "./acp-dial.js";
 import * as noise from "./vendor/coqui-peer-noise.mjs";
 import { createResponder, generateIdentity } from "./vendor/coqui-peer-webcrypto.mjs";
 
@@ -156,4 +156,40 @@ test("pairing by PIN can run over the native port, to the host's pairing door", 
     /closed during the proof/,
   );
   assert.deepEqual(seen.opened, ["@pair"]);
+});
+
+const MIB = 1024 * 1024;
+const initialized = (limit) => JSON.stringify({
+  jsonrpc: "2.0",
+  id: 1,
+  result: { protocolVersion: 1, ...(limit === undefined ? {} : { _meta: { [MAX_MESSAGE_META]: limit } }) },
+});
+
+test("a message past the default limit ends the link, as no host takes one", async () => {
+  const identity = await generateIdentity();
+  const client = await generateIdentity();
+  const { connectNative, seen } = relayTo({ identity });
+  const link = await dialAgent({ native: { entry: "agent" }, peer: identity.peerId, method: "webcrypto" }, { identity: client, connectNative });
+  const closed = new Promise((resolve) => link.onClose(resolve));
+  link.onMessage(() => assert.fail("a message over the limit was delivered"));
+  await seen.seal("x".repeat(20 * MIB));
+  await closed;
+});
+
+test("the limit the host names in its answer to initialize opens the link to longer messages, and a longer one is refused before it is sealed", async () => {
+  const identity = await generateIdentity();
+  const client = await generateIdentity();
+  const { connectNative, seen } = relayTo({ identity });
+  const link = await dialAgent({ native: { entry: "agent" }, peer: identity.peerId, method: "webcrypto" }, { identity: client, connectNative });
+  const heard = [];
+  link.onMessage((message) => heard.push(message.length));
+  await seen.seal(initialized(32 * MIB));
+  await seen.seal("y".repeat(20 * MIB));
+  for (let wait = 0; wait < 100 && heard.length < 2; wait += 1) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(heard[1], 20 * MIB);
+  assert.equal(link.ending, undefined, "the link is still open");
+  await assert.rejects(link.send("z".repeat(33 * MIB)), /max_message_bytes/);
+  await link.send("ok");
+  for (let wait = 0; wait < 50 && seen.records.length === 0; wait += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(seen.records, ["ok"]);
 });

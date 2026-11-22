@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createDeframer, dialAgent, frame } from "./acp-dial.js";
+import { MAX_MESSAGE_META, createDeframer, dialAgent, frame, hostLimit, maxRecord } from "./acp-dial.js";
 import { createMux } from "./vendor/coqui-link/mux.mjs";
 import { createResponder, generateIdentity } from "./vendor/coqui-peer-webcrypto.mjs";
 
@@ -124,4 +124,17 @@ test("a heartbeat, when asked for, goes out as the mux's own ping", async () => 
   // The ping crosses the real proof's async sealing, so how long it takes depends on load: wait for it.
   for (let turn = 0; turn < 400 && !heard.frames.includes(4); turn += 1) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.ok(heard.frames.includes(4), JSON.stringify(heard.frames));
+});
+
+test("the host's limit is read from its answer to initialize, and from nothing else", () => {
+  const answer = (extra) => JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 1, ...extra } });
+  assert.equal(hostLimit(answer({ _meta: { [MAX_MESSAGE_META]: 33554432 } })), 33554432);
+  assert.equal(hostLimit(answer({})), null);
+  assert.equal(hostLimit(answer({ _meta: { [MAX_MESSAGE_META]: 0 } })), null);
+  assert.equal(hostLimit(answer({ _meta: { [MAX_MESSAGE_META]: "9" } })), null);
+  // A request that carries the key is a peer talking, not the host answering.
+  const request = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1, _meta: { [MAX_MESSAGE_META]: 5 } } };
+  assert.equal(hostLimit(JSON.stringify(request)), null);
+  assert.equal(hostLimit("not json protocolVersion " + MAX_MESSAGE_META), null);
+  assert.ok(maxRecord(1024) > 1024);
 });

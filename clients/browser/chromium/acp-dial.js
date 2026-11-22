@@ -24,7 +24,29 @@ export const PAIR_MS = 120_000;
 const WEBTRANSPORT_OPEN_MS = 5_000;
 // What the bridge library takes: a 16 MiB line, as a record of each method.
 const MAX_LINE = 16 * 1024 * 1024;
-const MAX_MESSAGE = Math.max(MAX_LINE + 64, recordLimit("noise", MAX_LINE));
+const MAX_MESSAGE = maxRecord(MAX_LINE);
+/** The `_meta` key of the host's answer to `initialize` that holds `[host] max_message_bytes`. */
+export const MAX_MESSAGE_META = "dev.boriken.canoa/maxMessageBytes";
+
+/** The longest record, under either method, that a line of `bytes` can become. */
+export function maxRecord(bytes) {
+  return Math.max(bytes + 64, recordLimit("noise", bytes));
+}
+
+/**
+ * The longest message the host takes, `[host] max_message_bytes`, when `text` is its answer to `initialize` and names it; else null.
+ * The answer is a response, so a message a peer wrote as a request that carries the key is not believed.
+ */
+export function hostLimit(text) {
+  if (typeof text !== "string" || !text.includes(MAX_MESSAGE_META) || !text.includes("protocolVersion")) return null;
+  try {
+    const message = JSON.parse(text);
+    const bytes = message.method === undefined ? message.result?._meta?.[MAX_MESSAGE_META] : undefined;
+    return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The longest record a message of `n` bytes can become under `method`, whatever key limit its sender runs: a Noise sender may
@@ -136,6 +158,7 @@ function webTransportLink({ url, hash }, WebTransportClass) {
       send: (body) => writer.write(frame(body)),
       close: end,
       proven: () => deframe.raiseLimit(MAX_MESSAGE),
+      limit: (bytes) => deframe.raiseLimit(bytes),
       addEventListener: (type, listen) => listeners[type]?.push(listen),
     },
   };
@@ -218,6 +241,7 @@ function nativeLink({ entry, host = NATIVE_HOST }, connectNative) {
       },
       close: () => end(),
       proven: () => deframe.raiseLimit(MAX_MESSAGE),
+      limit: (bytes) => deframe.raiseLimit(bytes),
       addEventListener: (type, listen) => listeners[type]?.push(listen),
     },
   };
@@ -347,14 +371,22 @@ async function acpOverLink(proven) {
     get ending() {
       return proven.ending;
     },
-    send: (message) => stream.send(message),
+    send: (message) => proven.refusal(message) ?? stream.send(message),
     // Not read until there is someone to give it to.
     onMessage(handler) {
+      let followed = false;
       (async () => {
         for (;;) {
           const message = await stream.receive();
           if (message === null) break;
-          handler(new TextDecoder().decode(message));
+          const text = new TextDecoder().decode(message);
+          const bytes = followed ? null : hostLimit(text);
+          if (bytes !== null) {
+            followed = true;
+            proven.follow(bytes);
+            mux.limits.maxMessage = bytes;
+          }
+          handler(text);
         }
       })().catch(() => {}).finally(() => proven.close());
     },
@@ -567,6 +599,20 @@ export async function dialAgent(agent, {
     throw error;
   }
   let sending = Promise.resolve();
+  // The host's own limit, once its answer to `initialize` has said it: a longer message is refused here, before it is sealed, so the
+  // link and the session stay usable.
+  let hostBytes = null;
+  const follow = (bytes) => {
+    hostBytes = bytes;
+    socket.limit?.(maxRecord(bytes));
+  };
+  const refusal = (message) => {
+    if (hostBytes === null || (typeof message === "string" ? message.length * 3 : message.length) <= hostBytes) return null;
+    const size = typeof message === "string" ? new TextEncoder().encode(message).length : message.length;
+    return size <= hostBytes
+      ? null
+      : Promise.reject(new Error(`a message of ${size} bytes is over the limit the host takes, ${hostBytes}: [host] max_message_bytes in its configuration`));
+  };
   const enqueue = (sealed) => {
     sending = sending.then(async () => socket.send(await sealed)).catch(() => socket.close());
     return sending;
@@ -577,13 +623,23 @@ export async function dialAgent(agent, {
     get ending() {
       return ending;
     },
-    send: (message) => enqueue(session.seal(message)),
+    send: (message) => refusal(message) ?? enqueue(session.seal(message)),
     sendBytes: (bytes) => enqueue(session.seal(bytes)),
+    follow,
+    refusal,
     onBytes(handler) {
       onBytes = handler;
     },
     onMessage(handler) {
-      onMessage = handler;
+      let followed = false;
+      onMessage = (text) => {
+        const bytes = followed ? null : hostLimit(text);
+        if (bytes !== null) {
+          followed = true;
+          follow(bytes);
+        }
+        handler(text);
+      };
     },
     onClose(handler) {
       onClose = handler;
