@@ -902,3 +902,29 @@ fn a_harness_is_given_the_address_and_the_key_form_the_account_names_for_the_sta
     assert_eq!(settings, json!({"base_url": "https://gw.example"}));
     assert_eq!(keys, ["auth_token"], "the key as a bearer token");
 }
+
+/// A name that is absent while a file made beside it is still there is a write in progress, not a missing account.
+#[test]
+fn a_file_account_absent_while_its_replacement_is_being_put_in_place_is_waited_for() {
+    let dir = Dir::new();
+    let store = FileStore::new(&dir.0);
+    store.put("one", b"first").expect("written");
+    let path = store.path_of("one");
+    let beside = dir.0.join(format!(
+        "{}.tmp.1",
+        path.file_stem().expect("a stem").to_string_lossy()
+    ));
+    let sealed = fs::read(&path).expect("read");
+    fs::write(&beside, &sealed).expect("beside");
+    fs::remove_file(&path).expect("absent");
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(core::time::Duration::from_millis(150));
+            fs::rename(&beside, &path).expect("put in place");
+        });
+        assert_eq!(store.get("one").expect("read"), Some(b"first".to_vec()));
+    });
+    // With nothing beside it, an absent file is an account that is not there.
+    fs::remove_file(&path).expect("removed");
+    assert_eq!(store.get("one").expect("read"), None);
+}

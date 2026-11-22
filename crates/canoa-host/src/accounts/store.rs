@@ -622,20 +622,52 @@ fn sync_dir(dir: &Path) {
     let _ = dir;
 }
 
-/// Reads a file that `put` may be renaming over. Windows refuses a read of a name at the moment another rename takes it
-/// ("access denied"), and the file is whole a moment later, so that one kind is read again a few times; a file that is
-/// really unreadable still says so.
+/// How long a read waits for a file a write is putting in its place.
+const REWRITE_WAIT: core::time::Duration = core::time::Duration::from_secs(5);
+
+/// Reads a file that `put` may be renaming over. On Windows a read of the name at the moment of the rename is refused ("access
+/// denied") or finds the name absent, and the file is whole a moment later: both are read again while a file made beside it is
+/// still there (the write has not finished), up to [`REWRITE_WAIT`]. A file that is really unreadable or gone, with no write in
+/// progress, still says so.
 fn read_over_a_rewrite(path: &Path) -> io::Result<Vec<u8>> {
-    let mut tries = 0;
+    let started = std::time::Instant::now();
     loop {
         match fs::read(path) {
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied && tries < 20 => {
-                tries += 1;
-                std::thread::sleep(core::time::Duration::from_millis(5));
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound
+                ) && started.elapsed() < REWRITE_WAIT =>
+            {
+                if error.kind() == io::ErrorKind::NotFound && !has_file_beside(path) {
+                    // No write in progress; one last read, since the write may have finished between the two looks.
+                    return fs::read(path);
+                }
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    && started.elapsed() > REWRITE_WAIT / 5
+                {
+                    return Err(error);
+                }
+                std::thread::sleep(core::time::Duration::from_millis(1));
             }
             other => return other,
         }
     }
+}
+
+/// Whether a write of `path` is in progress: a file whose name starts with the file's own, apart from the file.
+fn has_file_beside(path: &Path) -> bool {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return false;
+    };
+    let name = name.to_string_lossy();
+    let stem = format!("{}.", name.split('.').next().unwrap_or(&name));
+    fs::read_dir(dir).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let found = entry.file_name().to_string_lossy().into_owned();
+            found != name && found.starts_with(&stem)
+        })
+    })
 }
 
 impl FileStore {
