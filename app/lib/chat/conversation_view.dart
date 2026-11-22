@@ -30,6 +30,7 @@ import 'child_thread.dart';
 import 'activity_strip.dart';
 import 'composer.dart';
 import 'delegation_row.dart';
+import 'conversation_tools.dart';
 import 'delegation_view.dart';
 import 'file_links.dart';
 import 'inspector.dart' show changeTotals;
@@ -101,6 +102,10 @@ class _ConversationViewState extends State<ConversationView> {
               final session = widget.store.selected;
               if (session != null && !session.isDraft) _showInspector(session);
             }
+      ..tools = () {
+        final session = widget.store.selected;
+        return session == null || session.isDraft ? const [] : conversationTools(context, session);
+      }
       ..insert = (text) {
         _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
         _composerFocus.requestFocus();
@@ -204,6 +209,7 @@ class _ConversationViewState extends State<ConversationView> {
         ..owner = null
         ..focusComposer = null
         ..showChanges = null
+        ..tools = null
         ..insert = null;
     }
     _input.removeListener(_keepText);
@@ -301,6 +307,7 @@ class _ConversationViewState extends State<ConversationView> {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && (widget.store.canListEarlier(session) || (widget.handle.canListImported?.call(session) ?? false)))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
+      if (session != null && !session.isDraft) ...conversationTools(context, session),
       if (session != null && !session.isDraft && !widget.chatOnly) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
       if (session != null && !widget.chatOnly && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),

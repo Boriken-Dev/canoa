@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../acp/client.dart' show AcpSessionInfo;
 import '../chat/agent_events.dart' show AgentCommandInfo;
 import '../chat/context_pill.dart' show compactPrompt;
+import '../chat/conversation_tools.dart';
 import '../chat/delegate_dialog.dart';
 import '../chat/delegation_setup_dialog.dart';
 import '../chat/inspector.dart' show changeTotals;
@@ -21,6 +22,9 @@ import '../workspace/open_in_ui.dart';
 final class ConversationHandle {
   Object? owner;
   VoidCallback? focusComposer, showChanges;
+
+  /// Copy and export the conversation shown; set by it.
+  List<ConversationTool> Function()? tools;
   ValueChanged<String>? insert;
 
   /// Ends a conversation as the app does, asking after its worktree; set by the app.
@@ -92,6 +96,7 @@ Future<void> showAppPalette(
             ]
           : [
               PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
+              for (final (label, icon, run) in conversation.tools?.call() ?? const <ConversationTool>[]) PaletteItem(label, run, icon: icon),
               if (session != null && !session.isDraft && compactPrompt(session) != null)
                 PaletteItem('Compact context', () => unawaited(store.sendText(compactPrompt(session)!)), icon: Icons.compress),
               if (!chatOnly && session != null && conversation.showChanges != null && (changeTotals(session) != null))
