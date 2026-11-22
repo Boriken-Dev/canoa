@@ -505,6 +505,13 @@ is refused. Skills are written into a new directory under the system's temporary
 the agent ends. The initial context, every layer's together, is at most 1 MiB; a skill directory at most 1024 files and
 16 MiB.
 
+A project's own agent context is handed to an agent that does not read it itself: `AGENTS.md` and `AGENTS.*.md` in the folder
+the session opens in and in its `.agents` folder, `AGENTS.local.md` last, each with its path, in the system prompt where the
+agent takes one and with the first prompt where it does not. A file the agent loads itself (Codex reads `AGENTS.md`) is left
+out, and the report lists each file. `AGENTS_DIR` (default `.agents`) and `AGENTS_CONTEXT` (default `AGENTS.md` and
+`AGENTS.*.md`) in the session's environment, each a list in the platform's path-list separator, change the folder and the
+file names. With Claude Code, a directory the session enters brings its own files with the next prompt, once.
+
 An MCP server's environment is resolved as the profile's is: an overlay's text is substituted against that overlay's own
 environment, with `AOS_OVERLAY_ROOT` and `AOS_OVERLAY_NAME`; its `env_passthrough` and `headers_env` give a variable only
 when one of your layers shares it, and otherwise leave it out and say so. A command with no directory is looked up on
