@@ -100,6 +100,17 @@ void _rows(_Host host) {
 }
 
 void main() {
+  testWidgets('an account whose provider says who it is shows the email and the plan under its name, with or without figures', (tester) async {
+    await _open(tester, (host) {
+      _rows(host);
+      host.rows['work'] = {...(host.rows['work']! as Map<String, Object?>), 'details': {'label': 'me@example.com', 'plan': 'Google AI Pro'}};
+      host.rows['fresh'] = {'supported': true, 'buckets': <Object?>[], 'details': {'plan': 'Pro'}};
+    });
+    expect(tester.widget<Text>(find.byKey(const Key('usage-who id-work'))).data, 'me@example.com · Google AI Pro');
+    expect(find.descendant(of: find.byKey(const Key('usage-account id-fresh')), matching: find.text('Pro')), findsOneWidget);
+    expect(find.byKey(const Key('usage-who id-key')), findsNothing, reason: 'a provider that says nothing of who it is adds no line');
+  });
+
   testWidgets('opening Usage reads every account with no session and says what each came to', (tester) async {
     final (_, host) = await _open(tester, _rows);
     expect(host.reads.toSet(), {'work', 'key', 'fresh', 'down'});

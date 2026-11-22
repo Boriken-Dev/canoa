@@ -80,6 +80,24 @@ final class ReadNote {
   final String text;
 }
 
+/// Who an account is, as its agent says when its provider is asked with no session: an email address or a name, and the plan.
+final class AccountWho {
+  const AccountWho({this.label, this.plan});
+
+  /// The details of a row's `details` object, or null when it holds neither.
+  static AccountWho? parse(Object? json) {
+    if (json is! Map) return null;
+    final label = json['label'], plan = json['plan'];
+    final who = AccountWho(label: label is String && label.isNotEmpty ? label : null, plan: plan is String && plan.isNotEmpty ? plan : null);
+    return who.label == null && who.plan == null ? null : who;
+  }
+
+  final String? label, plan;
+
+  /// The words shown under the account's name: the label and the plan, as far as they are known.
+  String get text => [?label, ?plan].join(' · ');
+}
+
 /// What is known of one account's allowances: the newest reading among the hosts that reported its identity.
 final class AccountLimits {
   const AccountLimits({
@@ -90,8 +108,12 @@ final class AccountLimits {
     required this.report,
     required this.readAt,
     this.note,
+    this.who,
     this.automatic = false,
   });
+
+  /// Who the account is, when its agent said.
+  final AccountWho? who;
 
   /// Whether it is the login a harness has where it runs, which the host makes itself.
   final bool automatic;
@@ -209,6 +231,17 @@ class UsageController extends ChangeNotifier {
   /// Why a host's provider gave no figures for an account, by the host's name and the account's identity.
   final _notes = <String, Map<String, ReadNote>>{};
 
+  /// Who a host's provider said an account is, by the host's name and the account's identity.
+  final _who = <String, Map<String, AccountWho>>{};
+
+  AccountWho? _whoOf(String id) {
+    for (final source in sources) {
+      final who = _who[source.name]?[id];
+      if (who != null) return who;
+    }
+    return null;
+  }
+
   /// Asks each host that can for every account this computer lists, so an account no session has run on still says what its
   /// provider can report. A provider that reports only during a turn answers nothing, and an answer that fails leaves the account
   /// as it was.
@@ -224,6 +257,9 @@ class UsageController extends ChangeNotifier {
                 final heard = _Heard.parse(row is Map ? {'account': account.id, ...row.cast<String, Object?>()} : null);
                 if (heard == null) return;
                 (_read[source.name] ??= {})[account.id] = heard;
+                final who = heard.who;
+                final whos = _who[source.name] ??= {};
+                who == null ? whos.remove(account.id) : whos[account.id] = who;
                 final note = heard.report.buckets.isNotEmpty
                     ? null
                     : heard.report.supported
@@ -259,7 +295,7 @@ class UsageController extends ChangeNotifier {
       for (final source in sources) {
         note ??= _notes[source.name]?[each.id];
       }
-      merged.add(AccountLimits(id: each.id, name: _label(each), provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note, automatic: each.automatic));
+      merged.add(AccountLimits(id: each.id, name: _label(each), provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note, who: _whoOf(each.id), automatic: each.automatic));
     }
     for (final MapEntry(:key, :value) in byId.entries) {
       var newest = value.first.$2;
@@ -277,6 +313,7 @@ class UsageController extends ChangeNotifier {
           hosts: {for (final (host, _) in value) host}.toList(),
           report: newest.report,
           readAt: newest.readAt,
+          who: _whoOf(key),
           automatic: info?.automatic ?? false,
         ),
       );
@@ -495,7 +532,7 @@ class UsageController extends ChangeNotifier {
 }
 
 final class _Heard {
-  const _Heard(this.id, this.report, this.readAt);
+  const _Heard(this.id, this.report, this.readAt, [this.who]);
 
   static _Heard? parse(Object? json) {
     if (json is! Map || json['account'] is! String) return null;
@@ -509,9 +546,10 @@ final class _Heard {
     final at = observed is int && observed > 0
         ? observed
         : (updated is int ? updated : 0);
-    return _Heard(id, report, at);
+    return _Heard(id, report, at, AccountWho.parse(json['details']));
   }
 
+  final AccountWho? who;
   final String id;
   final UsageReport report;
   final int readAt;

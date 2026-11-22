@@ -72,6 +72,11 @@ class LimitsView extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(child: Text(each.name, style: text.titleMedium)),
                     ]),
+                    if (each.who case final who?)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(who.text, key: Key('usage-who ${each.id}'), style: small),
+                      ),
                     Padding(
                       padding: const EdgeInsets.only(top: 2, bottom: 12),
                       child: Text(
