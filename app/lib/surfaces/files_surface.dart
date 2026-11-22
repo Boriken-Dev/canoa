@@ -12,6 +12,7 @@ import '../shell/surface.dart';
 import '../theme/look.dart';
 import '../workspace/open_in.dart';
 import '../workspace/open_in_ui.dart';
+import 'markdown_section_viewer.dart';
 
 /// The files of the session's workspace, on the host the session runs on, to browse and preview. Read-only: nothing here writes, and
 /// the host decides what it shows (its own roots, its protected paths). It opens before any agent has started.
@@ -155,10 +156,13 @@ String sizeText(int bytes) {
 
 /// A request to show one file: each request is its own object, so asking for the same path again shows it again.
 final class FileReveal {
-  const FileReveal(this.path);
+  const FileReveal(this.path, {this.section});
 
-  /// The file's path on the host, absolute.
+  /// The file's path on the host, absolute, exactly as the host names it: a `#` in it is part of the name.
   final String path;
+
+  /// The heading of a Markdown file to focus, by its anchor or its title; null to open the file as it is.
+  final String? section;
 }
 
 /// The panel's body: a listing of the workspace, a folder at a time, and a file's preview in its place.
@@ -192,6 +196,11 @@ class _FilesPanelState extends State<FilesPanel> {
   String? _fileProblem;
   String? _opening;
 
+  /// The Markdown section to focus in the open file, and whether the person chose the sectioned view (true) or the plain one (false);
+  /// null leaves the choice to the file.
+  String? _focusSection;
+  bool? _sectioned;
+
   @override
   void initState() {
     super.initState();
@@ -217,7 +226,7 @@ class _FilesPanelState extends State<FilesPanel> {
       setState(() => _problem = 'It is not there any more: ${visibleText(path)}');
       return;
     }
-    await _open(entry);
+    await _open(entry, section: reveal.section);
   }
 
   @override
@@ -257,7 +266,7 @@ class _FilesPanelState extends State<FilesPanel> {
     }
   }
 
-  Future<void> _open(HostFolderEntry entry) async {
+  Future<void> _open(HostFolderEntry entry, {String? section}) async {
     if (entry.isFolder) {
       setState(() => _file = null);
       return _list(entry.path);
@@ -265,6 +274,8 @@ class _FilesPanelState extends State<FilesPanel> {
     setState(() {
       _opening = entry.path;
       _fileProblem = null;
+      _focusSection = section;
+      _sectioned = null;
     });
     try {
       final read = await widget.files.readFile(entry.path, maxBytes: FilesPanel.previewBytes);
@@ -387,10 +398,23 @@ class _FilesPanelState extends State<FilesPanel> {
     final bytes = file.bytes;
     Widget body;
     List<String>? lines;
+    Widget? markdown;
+    var markdownFile = false;
+    var sectioned = false;
     if (_fileProblem != null) {
       body = Text(_fileProblem!, key: const ValueKey('files problem'));
     } else if (file.kind == 'text' && bytes != null) {
-      lines = previewLines(_decode(bytes));
+      final text = _decode(bytes);
+      final name = file.name.toLowerCase();
+      markdownFile = name.endsWith('.md') || name.endsWith('.markdown');
+      // A file with frontmatter or three headings, or one opened at a section, shows as sections; any other keeps the plain view
+      // until the person chooses the sections.
+      sectioned = markdownFile && (_sectioned ?? (_focusSection != null || parseMarkdownSections(text).isStructured));
+      if (sectioned) {
+        markdown = MarkdownSectionViewer(key: ValueKey('markdown ${file.path}'), text: text, initialSection: _focusSection);
+      } else {
+        lines = previewLines(text);
+      }
       body = const SizedBox.shrink();
     } else if (file.kind == 'image' && bytes != null) {
       body = ImagePreview(key: ValueKey('image ${file.path}'), bytes: bytes);
@@ -424,6 +448,23 @@ class _FilesPanelState extends State<FilesPanel> {
           ),
         ),
         const Divider(height: 1),
+        if (markdownFile)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: SegmentedButton<bool>(
+                key: const ValueKey('markdown view'),
+                segments: const [
+                  ButtonSegment<bool>(value: false, label: Text('Plain', key: ValueKey('markdown view plain'), style: TextStyle(fontSize: 11))),
+                  ButtonSegment<bool>(value: true, label: Text('Sections', key: ValueKey('markdown view sections'), style: TextStyle(fontSize: 11))),
+                ],
+                selected: {sectioned},
+                showSelectedIcon: false,
+                onSelectionChanged: (choice) => setState(() => _sectioned = choice.first),
+              ),
+            ),
+          ),
         if (file.truncated && bytes != null && file.kind == 'text')
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -434,18 +475,19 @@ class _FilesPanelState extends State<FilesPanel> {
             ),
           ),
         Expanded(
-          child: lines == null
-              ? SingleChildScrollView(padding: const EdgeInsets.all(16), child: body)
-              : ListView.builder(
-                  key: const ValueKey('files text'),
-                  padding: const EdgeInsets.all(16),
-                  itemCount: lines.length,
-                  itemBuilder: (context, at) => SelectableText(
-                    visibleText(lines![at]),
-                    key: ValueKey('files line $at'),
-                    style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
-                  ),
-                ),
+          child: markdown ??
+              (lines == null
+                  ? SingleChildScrollView(padding: const EdgeInsets.all(16), child: body)
+                  : ListView.builder(
+                      key: const ValueKey('files text'),
+                      padding: const EdgeInsets.all(16),
+                      itemCount: lines.length,
+                      itemBuilder: (context, at) => SelectableText(
+                        visibleText(lines![at]),
+                        key: ValueKey('files line $at'),
+                        style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
+                      ),
+                    )),
         ),
       ],
     );
