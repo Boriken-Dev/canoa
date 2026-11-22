@@ -2692,3 +2692,25 @@ fn a_config_with_the_claude_and_codex_harness_entries_reads_as_it_did() {
     assert_eq!(harness_of("Codex"), "codex");
     assert_eq!(config.entries.len(), 2);
 }
+
+#[test]
+fn listing_mcp_servers_is_held_to_settings_with_no_ceiling_of_their_own() {
+    let program = "[host.agents.a]\nprogram = \"x\"\n";
+    let defaults = parse(program).expect("parses").mcp_list;
+    assert_eq!(defaults, McpListConfig::default());
+    assert_eq!(defaults.query_seconds, 5);
+    assert_eq!(defaults.max_items_per_server, 1000);
+    assert_eq!(defaults.max_reply_bytes, 4 * 1024 * 1024);
+    let raised = parse(&format!(
+        "[host.mcp_list]\nquery_seconds = 600\nmax_items_per_server = 1000000\nmax_reply_bytes = 68719476736\n{program}"
+    ))
+    .expect("parses")
+    .mcp_list;
+    assert_eq!(raised.query_seconds, 600);
+    assert_eq!(raised.max_items_per_server, 1_000_000);
+    assert_eq!(raised.max_reply_bytes, 68_719_476_736);
+    for key in ["query_seconds", "max_items_per_server", "max_reply_bytes"] {
+        assert!(parse(&format!("[host.mcp_list]\n{key} = 0\n{program}")).is_err());
+    }
+    assert!(parse(&format!("[host.mcp_list]\nmax_pending = 1\n{program}")).is_err());
+}

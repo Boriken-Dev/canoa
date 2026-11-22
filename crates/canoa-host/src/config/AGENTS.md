@@ -116,6 +116,11 @@ max_peers = 4                         # connections at once
 [host]
 max_message_bytes = 16777216          # the longest ACP message, one line, either way on a connection (a prompt with an attachment is one); no ceiling here, 0 is refused; `Config::max_message_bytes`, default `DEFAULT_MAX_MESSAGE_BYTES`. A message over it is refused naming the setting (`LinkError::TooLong` says it; a network client sees its connection end and the host's log says it). The host's link to another machine's agent uses it too; `canoa agent` takes `--max-message-bytes`, and `canoa launch`, `mcp-bridge` and a tool's own lines keep the default
 
+[host.mcp_list]                     # optional: what listing a session's MCP servers (`_canoa/mcp/list`) is held to; each at least 1, no ceiling here
+query_seconds = 5                     # how long one server may take to answer all its lists
+max_items_per_server = 1000           # the tools, and the resources, read from one server
+max_reply_bytes = 4194304             # the longest answer read from one server: an HTTP body or a line of its output
+
 [host.web]                            # optional: the web app on a listener of its own; see "The web app" below
 dir = "site"                          # the site, relative to the file's directory; without it the site built in (feature web)
 listen = "127.0.0.1:7800"             # the default; beyond loopback only with cert and key

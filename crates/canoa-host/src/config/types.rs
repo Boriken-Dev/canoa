@@ -70,6 +70,8 @@ pub struct Config {
     pub network: NetworkConfig,
     /// `[host.kb]`: the knowledge index tools and where their embeddings come from.
     pub kb: KbConfig,
+    /// `[host.mcp_list]`: how long and how much listing a session's MCP servers takes.
+    pub mcp_list: McpListConfig,
     /// `[host.mail]`: the mailboxes the `canoa-mail` tools reach.
     pub mail: MailConfig,
     /// `[host.delegate]`: what an agent may hand to another one.
@@ -122,6 +124,7 @@ impl Default for Config {
             store: Default::default(),
             network: Default::default(),
             kb: Default::default(),
+            mcp_list: Default::default(),
             mail: Default::default(),
             delegate: Default::default(),
             control: Default::default(),
@@ -667,6 +670,29 @@ impl Default for UsageConfig {
     fn default() -> Self {
         Self {
             keep_days: crate::usage_log::DEFAULT_KEEP_DAYS,
+        }
+    }
+}
+
+/// `[host.mcp_list]`: what listing the tools and resources of a session's MCP servers (`_canoa/mcp/list`) is held to. Each is at
+/// least 1 and has no ceiling of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct McpListConfig {
+    /// `query_seconds`: how long one server may take to answer all of its lists (default 5).
+    pub query_seconds: u64,
+    /// `max_items_per_server`: the tools, and the resources, read from one server (default 1000).
+    pub max_items_per_server: usize,
+    /// `max_reply_bytes`: the longest answer read from one server, an HTTP body or a line of its output (default 4 MiB).
+    pub max_reply_bytes: usize,
+}
+
+impl Default for McpListConfig {
+    fn default() -> Self {
+        Self {
+            query_seconds: 5,
+            max_items_per_server: 1000,
+            max_reply_bytes: 4 * 1024 * 1024,
         }
     }
 }

@@ -53,6 +53,7 @@ pub use types::{
     AgentProfile, Config, ControlConfig, DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS,
     DEFAULT_MAX_SESSIONS, DEFAULT_PRESET, DelegateConfig, Extension, ExtensionCheck, HistoryConfig,
     KbConfig, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, MailAccount, MailConfig, McpChoice,
+    McpListConfig,
     NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, StoreConfig,
     UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
@@ -73,6 +74,7 @@ struct Subsystems {
     store: StoreConfig,
     network: NetworkConfig,
     kb: KbConfig,
+    mcp_list: McpListConfig,
     mail: MailConfig,
     delegate: DelegateConfig,
     control: Option<ControlConfig>,
@@ -211,6 +213,7 @@ impl Config {
             store: sub.store,
             network: sub.network,
             kb: sub.kb,
+            mcp_list: sub.mcp_list,
             mail: sub.mail,
             delegate: sub.delegate,
             skill_pins: top.skill_pins,
@@ -913,6 +916,39 @@ fn build_subsystems(
         .map(RawKb::into_config)
         .transpose()?
         .unwrap_or_default();
+    let mcp_list = {
+        let raw = host.mcp_list.take();
+        let defaults = McpListConfig::default();
+        let query_seconds = raw
+            .as_ref()
+            .and_then(|raw| raw.query_seconds)
+            .unwrap_or(defaults.query_seconds);
+        let max_items_per_server = raw
+            .as_ref()
+            .and_then(|raw| raw.max_items_per_server)
+            .unwrap_or(defaults.max_items_per_server);
+        let max_reply_bytes = raw
+            .as_ref()
+            .and_then(|raw| raw.max_reply_bytes)
+            .unwrap_or(defaults.max_reply_bytes);
+        for (key, zero) in [
+            ("query_seconds", query_seconds == 0),
+            ("max_items_per_server", max_items_per_server == 0),
+            ("max_reply_bytes", max_reply_bytes == 0),
+        ] {
+            if zero {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: format!("host.mcp_list: {key} must be at least 1"),
+                });
+            }
+        }
+        McpListConfig {
+            query_seconds,
+            max_items_per_server,
+            max_reply_bytes,
+        }
+    };
     let mail = host
         .mail
         .take()
@@ -992,6 +1028,7 @@ fn build_subsystems(
         store,
         network,
         kb,
+        mcp_list,
         mail,
         delegate,
         control,

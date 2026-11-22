@@ -20,6 +20,14 @@ fn main() {
         std::process::exit(1);
     }
     let many = args.iter().any(|arg| arg == "--many");
+    // `--slow` answers `initialize` only after the given number of milliseconds, `--cwd` puts the folder it runs in in the
+    // description of its resource.
+    let slow = args
+        .iter()
+        .position(|arg| arg == "--slow")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|millis| millis.parse::<u64>().ok());
+    let in_folder = args.iter().any(|arg| arg == "--cwd");
     let mut stdout = std::io::stdout().lock();
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { return };
@@ -30,11 +38,16 @@ fn main() {
             continue;
         };
         let result = match message.get("method").and_then(Value::as_str) {
-            Some("initialize") => json!({
+            Some("initialize") => {
+                if let Some(millis) = slow {
+                    std::thread::sleep(std::time::Duration::from_millis(millis));
+                }
+                json!({
                 "protocolVersion": "2025-06-18",
                 "capabilities": {"tools": {}, "resources": {}},
                 "serverInfo": {"name": "probe", "version": "0"},
-            }),
+                })
+            }
             Some("tools/list") if many => {
                 let cursor = message.pointer("/params/cursor").and_then(Value::as_str);
                 match cursor {
@@ -85,7 +98,11 @@ fn main() {
                     {
                         "uri": "canoa://probe/readme",
                         "name": "readme",
-                        "description": "Probe server readme.",
+                        "description": if in_folder {
+                            std::env::current_dir().map_or_else(|_| String::new(), |dir| dir.to_string_lossy().into_owned())
+                        } else {
+                            "Probe server readme.".to_owned()
+                        },
                         "mimeType": "text/plain",
                     }
                 ]})

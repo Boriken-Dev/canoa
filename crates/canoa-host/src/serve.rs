@@ -224,6 +224,8 @@ struct Shared {
     hosted: Arc<sessions::Hosted>,
     /// The longest ACP message, as one line, either way (`[host] max_message_bytes`).
     max_line: usize,
+    /// What listing a session's MCP servers is held to (`[host.mcp_list]`).
+    mcp_list: crate::config::McpListConfig,
 }
 
 impl Shared {

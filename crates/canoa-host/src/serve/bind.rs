@@ -1170,6 +1170,7 @@ impl Serving {
                 )),
                 hosted,
                 max_line: config.max_message_bytes,
+                mcp_list: config.mcp_list,
                 control_grants: config
                     .control
                     .as_ref()

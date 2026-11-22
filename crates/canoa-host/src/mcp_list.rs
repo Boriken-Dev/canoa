@@ -1,10 +1,9 @@
-//! Lists the tools and resources of each MCP server attached to a session (`_canoa/mcp/list`).
+//! Lists the tools and resources of the MCP servers a session was given (`_canoa/mcp/list`).
 //!
-//! Sitting outermost around [`crate::client_tools::ToolsLayer`], this layer sees the final `mcpServers` list built for each
-//! `session/new`, `session/load`, `session/resume`, and `session/fork` after scope checks, profile/overlay `allow_mcp` and
-//! person approvals, and host-injected servers (`canoa-store`, `canoa-mail`, `canoa-kb`, `canoa-delegate`, `canoa-<provider>`).
-//! It starts no unattached server: when the client asks `_canoa/mcp/list`, only the servers attached to that session are
-//! queried, reporting any failure alongside the servers that answered and paging large responses cleanly.
+//! The `mcpServers` of each session request are read as they leave for the agent. An HTTP server, which the host's own servers
+//! are as well, is asked directly. A stdio server the agent starts for itself is not started a second time: it is reported as
+//! pending, since only the agent has it. A stdio server the host's profile gave the session is started once more, in the
+//! session's folder and environment, to be asked and ended.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -12,7 +11,7 @@
 )]
 
 use core::time::Duration;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
@@ -23,22 +22,15 @@ use canoa::network::Network;
 use coqui_transport::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
+use crate::config::McpListConfig;
 use crate::spawn::{Command, Stdio};
 
 /// The session-channel RPC method that lists attached MCP servers' tools and resources.
 pub(crate) const METHOD: &str = "_canoa/mcp/list";
 
 const POLL: Duration = Duration::from_millis(50);
-const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+/// The items in a page of the host's answer when the request names no `limit`.
 const DEFAULT_LIMIT: usize = 100;
-const MAX_LIMIT: usize = 200;
-const MAX_PENDING: usize = 64;
-const MAX_SESSIONS: usize = 256;
-const MAX_SERVERS: usize = 64;
-const MAX_SERVER_PAGES: usize = 32;
-const MAX_ITEMS_PER_SERVER: usize = 1000;
-const MAX_HTTP_BYTES: u64 = 4 * 1024 * 1024;
-const MAX_STDIO_LINE: usize = 4 * 1024 * 1024;
 const INVALID_PARAMS: i64 = -32602;
 const MCP_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -50,6 +42,49 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
+}
+
+/// What the host's profile gave the sessions of a connection: the names of its servers, and the environment the agent runs in.
+#[derive(Clone)]
+pub(crate) struct Given(Arc<GivenState>);
+
+struct GivenState {
+    names: Mutex<BTreeSet<String>>,
+    environment: Vec<(String, String)>,
+}
+
+impl Given {
+    /// The names of nothing yet, and the environment `connection` starts its agent with.
+    pub(crate) fn for_connection(connection: Option<&crate::profile::hosted::Connection>) -> Self {
+        Self::new(connection.map_or_else(Vec::new, |connection| {
+            connection
+                .env()
+                .iter()
+                .map(|(name, value)| (name.clone(), value.expose().to_owned()))
+                .collect()
+        }))
+    }
+
+    fn new(environment: Vec<(String, String)>) -> Self {
+        Self(Arc::new(GivenState {
+            names: Mutex::new(BTreeSet::new()),
+            environment,
+        }))
+    }
+
+    /// Records the names of `servers`, the entries the profile added to a session request.
+    pub(crate) fn add<'s>(&self, servers: impl IntoIterator<Item = &'s Value>) {
+        lock(&self.0.names).extend(
+            servers
+                .into_iter()
+                .filter_map(|server| server.get("name").and_then(Value::as_str))
+                .map(str::to_owned),
+        );
+    }
+
+    fn holds(&self, name: &str) -> bool {
+        lock(&self.0.names).contains(name)
+    }
 }
 
 /// One attached MCP server parsed from a session request's `mcpServers`.
@@ -65,6 +100,10 @@ enum ServerSpec {
         command: String,
         args: Vec<String>,
         env: Vec<(String, String)>,
+        /// The session's folder, where the agent starts it.
+        cwd: Option<String>,
+        /// The host's profile gave it, so the host may start it; otherwise the agent starts it and only the agent has it.
+        given: bool,
     },
     Unsupported {
         name: String,
@@ -107,14 +146,18 @@ struct InventoryState {
 
 /// Tracks attached MCP servers per session on one client connection and answers [`METHOD`] requests.
 struct Inventory {
+    settings: McpListConfig,
+    given: Given,
     state: Mutex<InventoryState>,
     outbox: Mutex<VecDeque<Vec<u8>>>,
     closed: AtomicBool,
 }
 
 impl Inventory {
-    fn new() -> Arc<Self> {
+    fn new(settings: McpListConfig, given: Given) -> Arc<Self> {
         Arc::new(Self {
+            settings,
+            given,
             state: Mutex::new(InventoryState::default()),
             outbox: Mutex::new(VecDeque::new()),
             closed: AtomicBool::new(false),
@@ -138,13 +181,7 @@ impl Inventory {
     }
 
     fn remember(&self, id: String, known_session: Option<String>, servers: Vec<ServerSpec>) {
-        let mut state = lock(&self.state);
-        if state.pending.len() >= MAX_PENDING
-            && let Some(first) = state.pending.keys().next().cloned()
-        {
-            state.pending.remove(&first);
-        }
-        state.pending.insert(
+        lock(&self.state).pending.insert(
             id,
             Pending {
                 known_session,
@@ -161,9 +198,6 @@ impl Inventory {
         let Some(session_id) = resolved_session.or(pending.known_session) else {
             return;
         };
-        if state.sessions.len() >= MAX_SESSIONS && !state.sessions.contains_key(&session_id) {
-            return;
-        }
         state.sessions.insert(session_id.clone(), pending.servers);
         state.snapshots.remove(&session_id);
     }
@@ -229,7 +263,7 @@ impl Inventory {
                                 .map(str::to_owned)
                         })
                         .flatten();
-                    let servers = extract_servers(&value);
+                    let servers = extract_servers(&value, &self.given);
                     self.remember(id, known, servers);
                 }
                 Some(message)
@@ -319,12 +353,15 @@ impl Inventory {
             .collect();
 
         let queried: Vec<ServerResult> = if selected.len() <= 1 {
-            selected.iter().map(query_server).collect()
+            selected
+                .iter()
+                .map(|spec| query_server(spec, &self.settings, &self.given))
+                .collect()
         } else {
             thread::scope(|scope| {
                 let handles: Vec<_> = selected
                     .iter()
-                    .map(|spec| scope.spawn(|| query_server(spec)))
+                    .map(|spec| scope.spawn(|| query_server(spec, &self.settings, &self.given)))
                     .collect();
                 handles
                     .into_iter()
@@ -377,9 +414,7 @@ fn parse_limit(value: Option<&Value>) -> Result<usize, String> {
             if raw == 0 {
                 return Err("limit must be at least 1".to_owned());
             }
-            Ok(usize::try_from(raw)
-                .unwrap_or(MAX_LIMIT)
-                .clamp(1, MAX_LIMIT))
+            Ok(usize::try_from(raw).unwrap_or(usize::MAX))
         }
         Some(_) => Err("limit must be a positive integer".to_owned()),
     }
@@ -436,20 +471,23 @@ fn slice_snapshot(snapshot: &Snapshot, offset: usize, limit: usize) -> Value {
 }
 
 /// Parses `params.mcpServers` into connection specs. Never fails the session request; unrecognised servers become `Unsupported`.
-fn extract_servers(request: &Value) -> Vec<ServerSpec> {
+fn extract_servers(request: &Value, given: &Given) -> Vec<ServerSpec> {
     let Some(list) = request
         .pointer("/params/mcpServers")
         .and_then(Value::as_array)
     else {
         return Vec::new();
     };
+    let cwd = request
+        .pointer("/params/cwd")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     list.iter()
-        .take(MAX_SERVERS)
-        .filter_map(parse_server_entry)
+        .filter_map(|entry| parse_server_entry(entry, cwd.as_deref(), given))
         .collect()
 }
 
-fn parse_server_entry(entry: &Value) -> Option<ServerSpec> {
+fn parse_server_entry(entry: &Value, cwd: Option<&str>, given: &Given) -> Option<ServerSpec> {
     let obj = entry.as_object()?;
     let name = obj
         .get("name")
@@ -492,10 +530,12 @@ fn parse_server_entry(entry: &Value) -> Option<ServerSpec> {
                 .map(str::to_owned)
                 .collect();
             Some(ServerSpec::Stdio {
+                given: given.holds(&name),
                 name,
                 command,
                 args,
                 env,
+                cwd: cwd.map(str::to_owned),
             })
         }
         Some(other) => Some(ServerSpec::Unsupported {
@@ -566,6 +606,20 @@ impl ServerResult {
         }
     }
 
+    fn pending(name: &str) -> Self {
+        Self {
+            summary: json!({
+                "name": name,
+                "status": "pending",
+                "note": "the agent starts this server: its tools are listed when the agent reports them",
+                "tools": 0,
+                "resources": 0,
+            }),
+            tools: Vec::new(),
+            resources: Vec::new(),
+        }
+    }
+
     fn error(name: &str, reason: String) -> Self {
         Self {
             summary: json!({
@@ -596,34 +650,46 @@ struct RpcError {
     message: String,
 }
 
-fn query_server(spec: &ServerSpec) -> ServerResult {
+fn query_server(spec: &ServerSpec, settings: &McpListConfig, given: &Given) -> ServerResult {
     match spec {
         ServerSpec::Unsupported { name, reason } => ServerResult::error(name, reason.clone()),
         ServerSpec::Http { name, url, headers } => {
-            let mut transport = match HttpMcp::new(url, headers) {
+            let mut transport = match HttpMcp::new(url, headers, settings) {
                 Ok(transport) => transport,
                 Err(why) => return ServerResult::error(name, why),
             };
-            collect_mcp(name, &mut transport)
+            collect_mcp(name, &mut transport, settings)
         }
+        ServerSpec::Stdio {
+            name, given: false, ..
+        } => ServerResult::pending(name),
         ServerSpec::Stdio {
             name,
             command,
             args,
             env,
+            cwd,
+            given: true,
         } => {
-            let mut transport = match StdioMcp::start(command, args, env) {
-                Ok(transport) => transport,
-                Err(why) => return ServerResult::error(name, why),
-            };
-            let result = collect_mcp(name, &mut transport);
+            let mut environment = given.0.environment.clone();
+            environment.extend(env.iter().cloned());
+            let mut transport =
+                match StdioMcp::start(command, args, &environment, cwd.as_deref(), settings) {
+                    Ok(transport) => transport,
+                    Err(why) => return ServerResult::error(name, why),
+                };
+            let result = collect_mcp(name, &mut transport, settings);
             transport.stop();
             result
         }
     }
 }
 
-fn collect_mcp<T: McpRpc>(server_name: &str, rpc: &mut T) -> ServerResult {
+fn collect_mcp<T: McpRpc>(
+    server_name: &str,
+    rpc: &mut T,
+    settings: &McpListConfig,
+) -> ServerResult {
     let init_params = json!({
         "protocolVersion": MCP_VERSIONS[0],
         "capabilities": {},
@@ -652,7 +718,7 @@ fn collect_mcp<T: McpRpc>(server_name: &str, rpc: &mut T) -> ServerResult {
             &mut next_id,
             "tools/list",
             "tools",
-            server_name,
+            (server_name, settings.max_items_per_server),
             format_tool,
         ) {
             Ok(list) => list,
@@ -668,7 +734,7 @@ fn collect_mcp<T: McpRpc>(server_name: &str, rpc: &mut T) -> ServerResult {
             &mut next_id,
             "resources/list",
             "resources",
-            server_name,
+            (server_name, settings.max_items_per_server),
             format_resource,
         ) {
             Ok(list) => list,
@@ -686,12 +752,12 @@ fn page_list<T: McpRpc>(
     next_id: &mut u64,
     method: &str,
     field: &str,
-    server_name: &str,
+    (server_name, max_items): (&str, usize),
     normalize: impl Fn(&str, &Value) -> Option<Value>,
 ) -> Result<Vec<Value>, String> {
     let mut items = Vec::new();
     let mut cursor: Option<String> = None;
-    for _ in 0..MAX_SERVER_PAGES {
+    loop {
         let id = *next_id;
         *next_id = next_id.saturating_add(1);
         let params = match &cursor {
@@ -708,7 +774,7 @@ fn page_list<T: McpRpc>(
             .and_then(Value::as_array)
             .ok_or_else(|| format!("{method} answer lacked {field} list"))?;
         for raw in page {
-            if items.len() >= MAX_ITEMS_PER_SERVER {
+            if items.len() >= max_items {
                 return Ok(items);
             }
             if let Some(entry) = normalize(server_name, raw) {
@@ -768,26 +834,35 @@ fn format_resource(server: &str, raw: &Value) -> Option<Value> {
 
 struct HttpMcp {
     agent: ureq::Agent,
+    deadline: Instant,
+    max_reply: u64,
     url: String,
     headers: Vec<(String, String)>,
     session_header: Option<String>,
 }
 
 impl HttpMcp {
-    fn new(url: &str, headers: &[(String, String)]) -> Result<Self, String> {
+    fn new(
+        url: &str,
+        headers: &[(String, String)],
+        settings: &McpListConfig,
+    ) -> Result<Self, String> {
+        let query = Duration::from_secs(settings.query_seconds);
         let parsed = url::Url::parse(url)
             .ok()
             .filter(|u| matches!(u.scheme(), "http" | "https") && u.host().is_some())
             .ok_or_else(|| "MCP URL is not an http or https address".to_owned())?;
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
-            .timeout_global(Some(QUERY_TIMEOUT))
+            .timeout_global(Some(query))
             .build();
         let agent = Network::current()
             .agent(config)
             .map_err(|error| format!("network unavailable: {error}"))?;
         Ok(Self {
             agent,
+            deadline: Instant::now() + query,
+            max_reply: u64::try_from(settings.max_reply_bytes).unwrap_or(u64::MAX),
             url: parsed.to_string(),
             headers: headers.to_vec(),
             session_header: None,
@@ -795,6 +870,9 @@ impl HttpMcp {
     }
 
     fn send_json(&mut self, body: &Value) -> Result<(u16, String, Vec<u8>), String> {
+        if self.deadline <= Instant::now() {
+            return Err("server did not answer in time".to_owned());
+        }
         let bytes = serde_json::to_vec(body).map_err(|e| e.to_string())?;
         let mut req = self
             .agent
@@ -836,11 +914,11 @@ impl HttpMcp {
         response
             .body_mut()
             .as_reader()
-            .take(MAX_HTTP_BYTES.saturating_add(1))
+            .take(self.max_reply.saturating_add(1))
             .read_to_end(&mut out)
             .map_err(|error| format!("HTTP MCP response did not finish arriving: {error}"))?;
-        if out.len() as u64 > MAX_HTTP_BYTES {
-            return Err("HTTP MCP response exceeded size limit".to_owned());
+        if out.len() as u64 > self.max_reply {
+            return Err("HTTP MCP response is over [host.mcp_list] max_reply_bytes".to_owned());
         }
         Ok((status, ctype, out))
     }
@@ -920,8 +998,18 @@ struct StdioMcp {
 }
 
 impl StdioMcp {
-    fn start(command: &str, args: &[String], env: &[(String, String)]) -> Result<Self, String> {
+    fn start(
+        command: &str,
+        args: &[String],
+        env: &[(String, String)],
+        cwd: Option<&str>,
+        settings: &McpListConfig,
+    ) -> Result<Self, String> {
+        let max_line = settings.max_reply_bytes;
         let mut cmd = Command::new(command);
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
         cmd.args(args)
             .stdin(Stdio::Piped)
             .stdout(Stdio::Piped)
@@ -949,14 +1037,16 @@ impl StdioMcp {
                 let mut reader = BufReader::new(stdout);
                 loop {
                     let mut buf = Vec::new();
-                    let limit = u64::try_from(MAX_STDIO_LINE)
+                    let limit = u64::try_from(max_line)
                         .unwrap_or(u64::MAX)
                         .saturating_add(1);
                     match (&mut reader).take(limit).read_until(b'\n', &mut buf) {
                         Ok(0) => break,
-                        Ok(_) if buf.len() > MAX_STDIO_LINE => {
-                            let _ =
-                                line_tx.send(Err("server output line exceeded limit".to_owned()));
+                        Ok(_) if buf.len() > max_line => {
+                            let _ = line_tx.send(Err(
+                                "server output line is over [host.mcp_list] max_reply_bytes"
+                                    .to_owned(),
+                            ));
                             break;
                         }
                         Ok(_) => {
@@ -992,7 +1082,7 @@ impl StdioMcp {
             stdin: Some(stdin),
             lines,
             stderr_rx,
-            deadline: Instant::now() + QUERY_TIMEOUT,
+            deadline: Instant::now() + Duration::from_secs(settings.query_seconds),
         })
     }
 
@@ -1085,10 +1175,10 @@ pub(crate) struct Layer<'a, C: Channel + ?Sized> {
 }
 
 impl<'a, C: Channel + ?Sized> Layer<'a, C> {
-    pub(crate) fn new(inner: &'a C) -> Self {
+    pub(crate) fn new(inner: &'a C, settings: McpListConfig, given: Given) -> Self {
         Self {
             inner,
-            inventory: Inventory::new(),
+            inventory: Inventory::new(settings, given),
         }
     }
 
@@ -1177,7 +1267,9 @@ mod tests {
                 ]
             }
         });
-        let parsed = extract_servers(&req);
+        let given = Given::new(Vec::new());
+        given.add(&[json!({"name": "probe"})]);
+        let parsed = extract_servers(&req, &given);
         assert_eq!(parsed.len(), 3);
         assert!(matches!(
             &parsed[0],
@@ -1185,12 +1277,34 @@ mod tests {
         ));
         assert!(matches!(
             &parsed[1],
-            ServerSpec::Stdio { name, command, .. } if name == "probe" && command == "/bin/probe"
+            ServerSpec::Stdio { name, command, given: true, .. } if name == "probe" && command == "/bin/probe"
         ));
         assert!(matches!(
             &parsed[2],
             ServerSpec::Unsupported { name, .. } if name == "events"
         ));
+    }
+
+    #[test]
+    fn a_stdio_server_the_agent_starts_is_pending_and_not_started() {
+        let spec = ServerSpec::Stdio {
+            name: "theirs".to_owned(),
+            command: "/no/such/program".to_owned(),
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+            given: false,
+        };
+        let outcome = query_server(&spec, &McpListConfig::default(), &Given::new(Vec::new()));
+        assert_eq!(outcome.summary["status"], "pending");
+        assert!(outcome.summary.get("error").is_none());
+    }
+
+    #[test]
+    fn a_page_is_the_limit_asked_for_with_no_ceiling() {
+        assert_eq!(parse_limit(None), Ok(DEFAULT_LIMIT));
+        assert_eq!(parse_limit(Some(&json!(100_000))), Ok(100_000));
+        assert!(parse_limit(Some(&json!(0))).is_err());
     }
 
     #[test]

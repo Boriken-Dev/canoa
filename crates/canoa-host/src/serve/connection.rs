@@ -31,7 +31,7 @@ use crate::history::Recording;
 use crate::inproc::{self, InProcess};
 use crate::kb_mcp::{self, KbLayer};
 use crate::kind;
-use crate::mcp_list::Layer as McpListLayer;
+use crate::mcp_list::{Given, Layer as McpListLayer};
 use crate::pipe;
 use crate::profile::hosted::{self, Connection, Hosted, Offer, Starting};
 use crate::profile::{Session, Who, account_words, plain_launch_line};
@@ -497,7 +497,10 @@ fn launch_agent_program<C: Channel>(
     };
     let end = match connection {
         Some(connection) => {
-            let hosted = Hosted::new(channel, scope, connection).agent(agent.pid());
+            let given = Given::for_connection(Some(connection));
+            let hosted = Hosted::new(channel, scope, connection)
+                .agent(agent.pid())
+                .given(given.clone());
             let end = coqui_acp_bridge::relay::relay(
                 &McpListLayer::new(&ToolsLayer::new(
                     &KbLayer::new(
@@ -505,7 +508,7 @@ fn launch_agent_program<C: Channel>(
                         kb,
                     ),
                     tools,
-                )),
+                ), shared.mcp_list, given),
                 &agent,
             );
             drop(hosted);
@@ -522,7 +525,7 @@ fn launch_agent_program<C: Channel>(
                         kb,
                     ),
                     tools,
-                )),
+                ), shared.mcp_list, Given::for_connection(None)),
                 &agent,
             )
         }
@@ -899,6 +902,7 @@ fn give_harness<C: Channel>(
     // and entry means a client connected again, never that a prompt restarted the program.
     tracing::info!(entry = %served.name, harness = harness.id(), %peer, "starting the harness program: a client connected");
     let to_provider = (started.request, started.spawner);
+    let given = Given::for_connection(connection);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
             &McpListLayer::new(&ToolsLayer::new(
@@ -907,7 +911,7 @@ fn give_harness<C: Channel>(
                         &Layer::new(
                             &Delegating::new(
                                 &Recording::new(
-                                    &Hosted::in_process(&gated, scope, connection),
+                                    &Hosted::in_process(&gated, scope, connection).given(given.clone()),
                                     &shared.history,
                                     &served.name,
                                     harness.id(),
@@ -921,7 +925,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            )),
+            ), shared.mcp_list, given),
             &*started.harness,
             to_provider,
             started.watch,
@@ -949,7 +953,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            )),
+            ), shared.mcp_list, given),
             &*started.harness,
             to_provider,
             started.watch,

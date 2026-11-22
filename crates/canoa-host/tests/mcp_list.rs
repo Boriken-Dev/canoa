@@ -254,3 +254,104 @@ fn pages_server_and_host_lists_and_rejects_bad_cursor_or_session() {
     assert_eq!(bad_session["code"], -32602);
     assert_eq!(bad_cursor["code"], -32602);
 }
+
+/// Opens a session on the `profiled` entry with `client_servers` given by the client, and lists what it answers.
+fn list_session(host: &Host, client_servers: Value) -> Value {
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("profiled"), &client, host.peer, |rpc| {
+        let _ = rpc.initialize().expect("initialize");
+        let opened = rpc
+            .request(
+                "session/new",
+                json!({"cwd": dir, "mcpServers": client_servers}),
+            )
+            .expect("session opens");
+        let session_id = opened["sessionId"].as_str().expect("sessionId").to_owned();
+        rpc.request(METHOD, json!({"sessionId": session_id}))
+            .expect("mcp/list answered")
+    })
+    .expect("paired link")
+}
+
+fn status<'a>(listed: &'a Value, name: &str) -> &'a Value {
+    listed["servers"]
+        .as_array()
+        .and_then(|servers| servers.iter().find(|server| server["name"] == name))
+        .unwrap_or_else(|| panic!("missing server {name} in {listed}"))
+}
+
+#[test]
+fn a_server_of_the_profile_is_started_in_the_sessions_folder() {
+    let server = quoted(&example("mcp_server", false).to_string_lossy());
+    let cfg = profile_config(
+        &format!(
+            "[host.profiles.main.mcp.probe]\ntype = \"stdio\"\ncommand = {server}\nargs = [\"--cwd\"]\n"
+        ),
+        "",
+    );
+    let host = Host::start_in(Scratch::new(), &cfg, 1, &[]);
+    let listed = list_session(&host, json!([]));
+    let described = listed["resources"][0]["description"]
+        .as_str()
+        .unwrap_or_default()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    assert!(
+        described.ends_with("/work"),
+        "the server runs in the session's folder: {listed}"
+    );
+}
+
+#[test]
+fn a_server_slower_than_the_setting_is_reported_and_the_default_waits_for_it() {
+    let server = quoted(&example("mcp_server", false).to_string_lossy());
+    let probe = format!(
+        "[host.profiles.main.mcp.probe]\ntype = \"stdio\"\ncommand = {server}\nargs = [\"--slow\", \"2500\"]\n"
+    );
+    let short = Host::start_in(
+        Scratch::new(),
+        &profile_config(&format!("{probe}[host.mcp_list]\nquery_seconds = 1\n"), ""),
+        1,
+        &[],
+    );
+    let listed = list_session(&short, json!([]));
+    assert_eq!(status(&listed, "probe")["status"], "error", "{listed}");
+    assert!(
+        status(&listed, "probe")["error"]
+            .as_str()
+            .is_some_and(|why| why.contains("in time")),
+        "{listed}"
+    );
+    let default = Host::start_in(Scratch::new(), &profile_config(&probe, ""), 1, &[]);
+    let listed = list_session(&default, json!([]));
+    assert_eq!(status(&listed, "probe")["status"], "ok", "{listed}");
+}
+
+#[test]
+fn the_most_items_read_from_a_server_is_a_setting() {
+    let server = quoted(&example("mcp_server", false).to_string_lossy());
+    let probe = format!(
+        "[host.profiles.main.mcp.probe]\ntype = \"stdio\"\ncommand = {server}\nargs = [\"--many\"]\n"
+    );
+    let host = Host::start_in(
+        Scratch::new(),
+        &profile_config(
+            &format!("{probe}[host.mcp_list]\nmax_items_per_server = 1\n"),
+            "",
+        ),
+        1,
+        &[],
+    );
+    let listed = list_session(&host, json!([]));
+    assert_eq!(
+        listed["tools"].as_array().map(Vec::len),
+        Some(1),
+        "{listed}"
+    );
+    assert_eq!(
+        listed["resources"].as_array().map(Vec::len),
+        Some(1),
+        "{listed}"
+    );
+}

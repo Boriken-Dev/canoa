@@ -179,6 +179,16 @@ pub(super) struct RawHost {
     pub(super) delegate: Option<RawDelegate>,
     pub(super) kb: Option<RawKb>,
     pub(super) mail: Option<RawMail>,
+    pub(super) mcp_list: Option<RawMcpList>,
+}
+
+/// `[host.mcp_list]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawMcpList {
+    pub(super) query_seconds: Option<u64>,
+    pub(super) max_items_per_server: Option<usize>,
+    pub(super) max_reply_bytes: Option<usize>,
 }
 
 /// `[host.network]`.

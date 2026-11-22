@@ -142,6 +142,8 @@ pub(crate) struct Hosted<'a, C: Channel + ?Sized> {
     pub(super) hold: Mutex<Hold>,
     splice: Splice,
     sites: crate::site::Sites,
+    /// Where the names of the MCP servers this adds to a session are kept, for the listing of a session's servers.
+    given: Option<crate::mcp_list::Given>,
     /// An unreadable line has been logged.
     noted: core::sync::atomic::AtomicBool,
 }
@@ -157,6 +159,13 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
     #[must_use]
     pub(crate) fn agent(mut self, pid: u32) -> Self {
         self.splice.set_agent(pid);
+        self
+    }
+
+    /// The MCP servers it adds to sessions are recorded in `given`.
+    #[must_use]
+    pub(crate) fn given(mut self, given: crate::mcp_list::Given) -> Self {
+        self.given = Some(given);
         self
     }
 
@@ -180,6 +189,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
             }),
             splice: scope.splice(),
             sites: scope.sites(),
+            given: None,
             noted: core::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -388,14 +398,17 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
             .get("sessionId")
             .and_then(Value::as_str)
             .map(str::to_owned);
+        let approved: Vec<&Value> = parts
+            .approvable
+            .iter()
+            .filter(|each| allowed.contains(&each.name))
+            .map(|each| &each.server)
+            .collect();
         if let Some(servers) = params.get_mut("mcpServers").and_then(Value::as_array_mut) {
-            servers.extend(
-                parts
-                    .approvable
-                    .iter()
-                    .filter(|each| allowed.contains(&each.name))
-                    .map(|each| each.server.clone()),
-            );
+            servers.extend(approved.iter().map(|server| (*server).clone()));
+        }
+        if let Some(given) = &self.given {
+            given.add(parts.servers.iter().chain(approved));
         }
         hold.session_asks.insert(id.to_string(), (session_id, cwd));
         hold.pending

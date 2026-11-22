@@ -1215,6 +1215,9 @@ something is told instead of refused, it is in the log as `non-default:`, in `ca
   carrying an attachment is one message, and base64 makes a file a third larger. There is no ceiling of Canoa's own, so raise it to
   send a larger file. A message over it is refused with the setting named (the link's error, the host's log), and the connection
   carries on.
+- **Listing MCP servers.** `[host.mcp_list]` `query_seconds` (5, all of one server's lists), `max_items_per_server` (1000) and
+  `max_reply_bytes` (4 MiB, an HTTP body or a line of output) are what listing a session's tools and resources is held to; each is at
+  least 1 and has no ceiling of Canoa's own.
 - **Worktrees.** `[host.worktrees]` `max_per_repository` (32) and `git_seconds` (120).
 - **Delegation.** `[host.delegate]` `wait_seconds` (300, the longest one `task_status` waits) and `dial_seconds` (20, reaching an agent
   on another machine).
