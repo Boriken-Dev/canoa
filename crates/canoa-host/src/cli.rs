@@ -2416,8 +2416,8 @@ mod tests {
 
     /// Whether the provider of `run` takes the settings `canoa agent` would give it.
     fn provider_takes(run: &crate::harness::AgentRun) -> Result<(), String> {
-        let settings = run.provider_settings()?;
         let registry = std::sync::Arc::new(crate::kind::registry(None).map_err(|e| e.to_string())?);
+        let settings = run.provider_settings(&registry)?;
         crate::kind::Harness::new(
             &registry,
             &run.id,

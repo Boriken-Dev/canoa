@@ -1,6 +1,9 @@
+use canoa::gateway::{GatewayInfo, GatewayLease, GatewayRequest, ModelGateway};
 use canoa::preset::SourcePreset;
 use canoa::usage_reader::{ProcessMembers, ReaderInfo, UsageReader, UsageReading};
-use canoa::vendor::{AgentVendor, StandardTitle, VendorInfo};
+use canoa::vendor::{
+    AgentVendor, GatewayRoute, ShellAdvice, ShellRequest, StandardTitle, VendorInfo,
+};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{
@@ -31,6 +34,32 @@ mod standin {
             info.mark =
                 Some("<svg viewBox=\"0 0 10 10\"><path d=\"M0 0H10V10Z\"/></svg>".to_owned());
             Ok(info)
+        }
+
+        fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError> {
+            Ok(Some(GatewayRoute::new("zed-key", "api_key")))
+        }
+
+        fn shell_advice(&self, _shell: ShellRequest) -> Result<ShellAdvice, ProviderError> {
+            Ok(ShellAdvice::cannot("zed extension shell"))
+        }
+    }
+
+    #[derive(Default, Debug, Provider)]
+    #[provider(ModelGateway, id = "zed_gateway", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct ZedGateway;
+
+    impl ModelGateway for ZedGateway {
+        fn describe(&self) -> Result<GatewayInfo, ProviderError> {
+            Ok(GatewayInfo::new("gate-key", "zedco"))
+        }
+
+        fn open(
+            &self,
+            _: GatewayRequest,
+            _: Object<dyn ProcessSpawner>,
+        ) -> Result<Object<dyn GatewayLease>, ProviderError> {
+            Err(unsupported())
         }
     }
 
@@ -187,7 +216,7 @@ mod standin {
     coqui_acp_api::guatiao::local_providers!(
         id = "zed",
         version = "0.0.0",
-        providers = [ZedVendor, ZedAccounts, GateAccounts, ZedUsage]
+        providers = [ZedVendor, ZedAccounts, GateAccounts, ZedUsage, ZedGateway]
     );
 }
 
@@ -305,14 +334,14 @@ fn an_agent_a_library_adds_is_listed_with_its_kinds_like_a_bundled_one() {
 
 #[test]
 fn a_gateway_a_library_carries_is_listed_with_its_kind_and_vendor_and_its_accounts_are_no_agents() {
-    let listed = gateways_of();
+    let registry = bundled_registry(bundled::ALL).expect("the libraries are accepted");
+    let listed = gateways_of(&[("bundled", &registry)]);
     assert_eq!(listed.len(), 1, "{listed:?}");
     assert_eq!(listed[0]["kind"], "foundry-local");
     assert_eq!(listed[0]["vendor"], "microsoft-foundry");
     assert_eq!(listed[0]["provider"], "foundry_accounts");
     assert_eq!(listed[0]["title"], "Foundry Local");
     // The kind joins the catalogs of the harnesses that can be given a gateway: no agent of its own is listed for it.
-    let registry = bundled_registry(bundled::ALL).expect("the libraries are accepted");
     let rows = rows_of(&[("bundled", &registry)], bundled::ALL, &Makers::default());
     assert!(
         rows.iter().all(|row| row["id"] != "foundry"),
@@ -396,7 +425,7 @@ fn the_apps_fixture_is_what_this_build_lists() {
     let listed = serde_json::json!({
         "providers": rows(bundled::ALL),
         "usage_readers": usage_readers_of(&[("bundled", &registry)]),
-        "gateways": gateways_of(),
+        "gateways": gateways_of(&[("bundled", &registry)]),
         "agent_entry": super::agent_entries::agent_entry(),
         "local_agent": super::agent_entries::local_agent(),
     });
@@ -434,4 +463,33 @@ fn an_account_provider_no_agent_owns_is_a_maker_in_any_library_and_is_listed_as_
         "a maker's provider is no agent row: {rows:?}"
     );
     assert_eq!(row(&rows, "zed")["accounts"]["provider"], "zed_accounts");
+}
+
+#[test]
+fn extension_harnesses_get_behavior_lookups_and_gateways() {
+    let bundled = bundled_registry(bundled::ALL).expect("bundled");
+    let library = bundled_registry(&[zed()]).expect("zed library");
+    crate::vendors::note(&library);
+
+    let advice = crate::vendors::behave("zed", |vendor| {
+        vendor.shell_advice(ShellRequest::new("sh", "sh", "bash"))
+    })
+    .expect("noted extension agent answers behave")
+    .expect("shell_advice");
+    assert_eq!(advice.notice.as_deref(), Some("zed extension shell"));
+
+    let route = crate::vendors::gateway_route("zed").expect("extension gateway_route");
+    assert_eq!(route.kind, "zed-key");
+
+    let listed = gateways_of(&[("bundled", &bundled), ("zed_ext", &library)]);
+    assert!(
+        listed
+            .iter()
+            .any(|each| each["kind"] == "gate-key" && each["vendor"] == "zedco"),
+        "extension gateway listed: {listed:?}"
+    );
+    assert!(
+        crate::gateways::for_kind("gate-key").is_some(),
+        "for_kind sees noted extension gateway"
+    );
 }

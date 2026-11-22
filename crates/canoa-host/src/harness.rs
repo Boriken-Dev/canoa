@@ -67,9 +67,12 @@ impl AgentRun {
     /// # Errors
     ///
     /// A command line that asks for the access of a provider that takes none.
-    pub(crate) fn provider_settings(&self) -> Result<Settings, String> {
+    pub(crate) fn provider_settings(
+        &self,
+        registry: &coqui_acp_api::guatiao::library::Registry,
+    ) -> Result<Settings, String> {
         let mut map = self.settings.clone();
-        let takes = |key: &str| crate::vendors::bundled_declares(&self.id, key);
+        let takes = |key: &str| crate::kind::declares_setting(registry, &self.id, key);
         let executable = self
             .executable
             .clone()
@@ -184,11 +187,11 @@ pub(crate) struct Refused {
 /// A command line the provider does not take (an id nothing offers, a setting it does not declare), or the connection failing.
 pub(crate) fn serve_stdio(run: &AgentRun) -> Result<(), Refused> {
     let usage = |why: String| Refused { why, usage: true };
-    let settings = run.provider_settings().map_err(usage)?;
     let registry = std::sync::Arc::new(kind::registry(None).map_err(|error| Refused {
         why: error.to_string(),
         usage: false,
     })?);
+    let settings = run.provider_settings(&registry).map_err(usage)?;
     let roots = run
         .roots
         .iter()

@@ -39,24 +39,25 @@ pub(crate) fn list(config: &Config) -> Value {
     json!({
         "providers": rows_of(&loaded, bundled::ALL, &Makers::of(config)),
         "usage_readers": usage_readers_of(&loaded),
-        "gateways": gateways_of(),
+        "gateways": gateways_of(&loaded),
         "agent_entry": super::agent_entries::agent_entry(),
         "local_agent": super::agent_entries::local_agent(),
     })
 }
 
-/// The gateways the bundled libraries offer for the sessions of accounts that run a model on this computer: each `{kind, vendor,
+/// The gateways `registries` offer for the sessions of accounts that run a model on this computer: each `{kind, vendor,
 /// provider, title}`, the account kind it serves, the vendor of what runs the model, the account provider that makes the kind and
 /// the kind's name.
-pub(crate) fn gateways_of() -> Vec<Value> {
-    crate::gateways::offered()
-        .iter()
+pub(crate) fn gateways_of(registries: &[(&str, &Registry)]) -> Vec<Value> {
+    crate::gateways::offered_in(registries)
+        .into_iter()
         .map(|offer| {
+            let title = offer.kind().map(|kind| kind.title.clone());
             json!({
                 "kind": offer.info.kind,
                 "vendor": offer.info.vendor,
                 "provider": offer.provider,
-                "title": offer.kind().map(|kind| kind.title.clone()),
+                "title": title,
             })
         })
         .collect()
@@ -129,7 +130,10 @@ pub(crate) fn libraries(config: &Config) -> Vec<(String, Registry)> {
         seen.push(origin.clone());
         let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
         match crate::provider::open(&mut registry, origin) {
-            Ok(()) => registries.push((name.to_owned(), registry)),
+            Ok(()) => {
+                crate::vendors::note(&registry);
+                registries.push((name.to_owned(), registry));
+            }
             Err(why) => tracing::warn!(entry = name, "its providers are not listed: {why}"),
         }
     }

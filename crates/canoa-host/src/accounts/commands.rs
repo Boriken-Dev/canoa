@@ -250,7 +250,7 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
     let entry = config.entries.iter().find(
         |entry| matches!(&entry.kind, EntryKind::Harness { harness: id, .. } if id == harness),
     );
-    let (origin, settings, account_settings) = match entry.map(|entry| (entry, &entry.kind)) {
+    let (registry, settings, account_settings) = match entry.map(|entry| (entry, &entry.kind)) {
         Some((
             entry,
             EntryKind::Harness {
@@ -261,27 +261,33 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
                 account_settings,
                 ..
             },
-        )) => (
-            origin.clone(),
-            serve::harness_settings(
+        )) => {
+            let registry = kind::registry(origin.as_ref()).map_err(Failed::run)?;
+            let settings = serve::harness_settings(
+                &registry,
                 entry,
                 harness,
                 executable.as_ref(),
                 options,
                 settings.as_ref(),
-            ),
-            account_settings.clone().unwrap_or_default(),
-        ),
-        _ if is_built_in_harness(harness) => {
-            (None, installed_program(harness), Settings::default())
+            );
+            (
+                registry,
+                settings,
+                account_settings.clone().unwrap_or_default(),
+            )
         }
+        _ if is_built_in_harness(harness) => (
+            kind::registry(None).map_err(Failed::run)?,
+            installed_program(harness),
+            Settings::default(),
+        ),
         _ => {
             return Err(Failed::usage(format!(
                 "no entry runs a provider called {harness}: add an agent entry with harness = \"{harness}\" and its library or source"
             )));
         }
     };
-    let registry = kind::registry(origin.as_ref()).map_err(Failed::run)?;
     kind::Harness::new(
         &Arc::new(registry),
         harness,

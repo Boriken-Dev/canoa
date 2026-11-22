@@ -5,6 +5,7 @@
 //! A description is kept for the life of the process: the strings are leaked once, so a lookup answers `&'static str`. The set is
 //! the few agents a host loads, and a description already kept is not kept again.
 
+use alloc::sync::Arc;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use canoa::vendor::{AgentVendor, VendorInfo};
@@ -54,22 +55,32 @@ impl Vendor {
 }
 
 static KEPT: Mutex<Vec<Vendor>> = Mutex::new(Vec::new());
+static KEPT_PROVIDERS: Mutex<Vec<(&'static str, Arc<dyn AgentVendor>)>> = Mutex::new(Vec::new());
 static BUNDLED: OnceLock<()> = OnceLock::new();
 
 fn keep_all(registry: &Registry) {
     let mut kept = KEPT.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut providers = KEPT_PROVIDERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     for offer in registry.offers::<dyn AgentVendor>() {
-        let Some(info) = offer
-            .default_instance()
-            .and_then(|vendor| vendor.describe().ok())
+        let Some(vendor) = offer.shared() else {
+            continue;
+        };
+        let Some(info) = vendor
+            .describe()
+            .ok()
             .filter(|info| info.problem().is_none())
         else {
             continue;
         };
         if kept.iter().all(|each| each.agent != info.agent) {
-            kept.push(Vendor::of(&info));
+            let record = Vendor::of(&info);
+            providers.push((record.agent, Arc::clone(&vendor)));
+            kept.push(record);
         }
     }
+    crate::gateways::note(registry);
 }
 
 /// The bundled agents' descriptions are kept first, whatever is noted.
@@ -155,25 +166,32 @@ pub(crate) fn bundled_providers() -> Option<&'static Registry> {
         .as_ref()
 }
 
-/// Whether the bundled harness provider `harness` declares a setting called `key` in its settings schema. False for a harness
-/// that is not bundled; true for one that publishes no schema, whose keys are not known.
-pub(crate) fn bundled_declares(harness: &str, key: &str) -> bool {
-    bundled_providers()
-        .is_some_and(|registry| crate::kind::declares_setting(registry, harness, key))
+/// Whether the harness provider `harness` in `origin` (`None` for the bundled providers) declares a setting called `key`
+/// in its settings schema. False when the registry cannot be opened or has no such provider; true when the provider publishes
+/// no schema, whose keys are not known.
+pub(crate) fn declares(origin: Option<&crate::config::Origin>, harness: &str, key: &str) -> bool {
+    match origin {
+        None => bundled_providers()
+            .is_some_and(|registry| crate::kind::declares_setting(registry, harness, key)),
+        Some(_) => crate::kind::registry(origin)
+            .ok()
+            .is_some_and(|registry| crate::kind::declares_setting(&registry, harness, key)),
+    }
 }
 
-/// Runs `f` on the `agent_vendor` provider of the bundled agent `agent`, which is what Canoa asks of an agent beyond its description
-/// (the variables an account sets, how a shell is chosen, where its sessions are kept); `None` when no bundled agent goes by that
-/// id. An agent a library from canoa.cfg adds answers through its description only.
+/// Runs `f` on the `agent_vendor` provider of `agent` (bundled or noted from a loaded library or extension), which is what
+/// Canoa asks of an agent beyond its description (the variables an account sets, how a shell is chosen, where its sessions are
+/// kept); `None` when no loaded agent goes by that id.
 pub(crate) fn behave<T>(agent: &str, f: impl FnOnce(&dyn AgentVendor) -> T) -> Option<T> {
-    let registry = bundled_providers()?;
-    for offer in registry.offers::<dyn AgentVendor>() {
-        let Some(vendor) = offer.default_instance() else {
-            continue;
-        };
-        if vendor.describe().is_ok_and(|info| info.agent == agent) {
-            return Some(f(vendor));
-        }
-    }
-    None
+    bundled();
+    let vendor = {
+        let providers = KEPT_PROVIDERS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        providers
+            .iter()
+            .find(|(id, _)| *id == agent)
+            .map(|(_, vendor)| Arc::clone(vendor))
+    }?;
+    Some(f(&*vendor))
 }

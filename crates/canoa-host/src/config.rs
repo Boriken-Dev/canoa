@@ -2870,10 +2870,9 @@ impl Config {
                         settings
                     };
                     let options = if built_in {
-                        harness_options(&name, &harness, &asks, settings.as_ref())?
+                        harness_options(&name, &harness, None, &asks, settings.as_ref())?
                     } else {
                         for (set, key) in [
-                            (asks.setting_sources.is_some(), "setting_sources"),
                             (agent.executable.is_some(), "executable"),
                             (agent.shell.is_some(), "shell"),
                         ] {
@@ -2886,7 +2885,7 @@ impl Config {
                                 ));
                             }
                         }
-                        HarnessOptions::default()
+                        harness_options(&name, &harness, origin.as_ref(), &asks, settings.as_ref())?
                     };
                     let options = HarnessOptions {
                         cache_lifetime,
@@ -3438,16 +3437,17 @@ fn built_in_settings(
     Ok(Some(Settings::new(map)))
 }
 
-/// A built-in entry's own keys, each checked against what the provider takes, and refused for the others.
+/// An entry's own keys, checked against what the provider of `origin` (`None` for bundled) takes, and refused for the others.
 /// A key that `settings` also holds is refused: the entry would say it twice.
 fn harness_options(
     name: &str,
     harness: &str,
+    origin: Option<&Origin>,
     agent: &RawAsks,
     settings: Option<&Settings>,
 ) -> Result<HarnessOptions, ConfigError> {
     if agent.setting_sources.is_some()
-        && !crate::vendors::bundled_declares(harness, "setting_sources")
+        && !crate::vendors::declares(origin, harness, "setting_sources")
     {
         return Err(invalid(
             name,

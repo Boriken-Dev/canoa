@@ -352,14 +352,15 @@ pub(crate) fn harness_of(
     else {
         return Err(format!("{} runs no harness", entry.name));
     };
+    let registry = Arc::new(kind::registry(origin.as_ref()).map_err(|error| error.to_string())?);
     let configured = crate::serve::harness_settings(
+        &registry,
         entry,
         harness,
         executable.as_ref(),
         options,
         settings.as_ref(),
     );
-    let registry = Arc::new(kind::registry(origin.as_ref()).map_err(|error| error.to_string())?);
     kind::Harness::new(
         &registry,
         harness,
@@ -717,7 +718,8 @@ pub(crate) fn usage_for(
             matches!(&entry.kind, EntryKind::Harness { accounts, .. } if accounts.iter().any(|each| each == name))
         })
         .or_else(|| config.entries.iter().find(runs));
-    let (origin, configured, mut account_settings) = match entry.map(|entry| (entry, &entry.kind)) {
+    let (registry, configured, mut account_settings) = match entry.map(|entry| (entry, &entry.kind))
+    {
         Some((
             entry,
             EntryKind::Harness {
@@ -728,22 +730,32 @@ pub(crate) fn usage_for(
                 account_settings,
                 ..
             },
-        )) => (
-            origin.as_ref(),
-            crate::serve::harness_settings(
+        )) => {
+            let registry =
+                Arc::new(kind::registry(origin.as_ref()).map_err(|error| error.to_string())?);
+            let configured = crate::serve::harness_settings(
+                &registry,
                 entry,
                 harness,
                 executable.as_ref(),
                 options,
                 settings.as_ref(),
-            ),
-            account_settings
-                .clone()
-                .unwrap_or_default()
-                .as_map()
-                .clone(),
+            );
+            (
+                registry,
+                configured,
+                account_settings
+                    .clone()
+                    .unwrap_or_default()
+                    .as_map()
+                    .clone(),
+            )
+        }
+        _ => (
+            Arc::new(kind::registry(None).map_err(|error| error.to_string())?),
+            Settings::new(Map::new()),
+            Map::new(),
         ),
-        _ => (None, Settings::new(Map::new()), Map::new()),
     };
     // A stand-in for the provider's usage endpoint is the account provider's own setting.
     if let Some(endpoint) = endpoints.of(harness) {
@@ -751,7 +763,6 @@ pub(crate) fn usage_for(
             .entry("usage_endpoint")
             .or_insert_with(|| Value::String(endpoint.to_owned()));
     }
-    let registry = Arc::new(kind::registry(origin).map_err(|error| error.to_string())?);
     let built = kind::Harness::new(
         &registry,
         harness,

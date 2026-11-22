@@ -83,24 +83,91 @@ fn offers_in(registry: &Registry) -> Vec<Offer> {
 }
 
 /// The gateways the bundled libraries offer, found once.
-pub(crate) fn offered() -> &'static [Offer] {
-    static OFFERED: OnceLock<Vec<Offer>> = OnceLock::new();
+fn bundled_offered() -> &'static [(Offer, &'static str)] {
+    static OFFERED: OnceLock<Vec<(Offer, &'static str)>> = OnceLock::new();
     OFFERED.get_or_init(|| {
         crate::vendors::bundled_providers()
             .map(offers_in)
             .unwrap_or_default()
+            .into_iter()
+            .map(|offer| {
+                let vendor: &'static str = Box::leak(offer.info.vendor.clone().into_boxed_str());
+                (offer, vendor)
+            })
+            .collect()
     })
 }
 
-/// The gateway that serves sessions of accounts of `kind`, when a library offers one.
-pub(crate) fn for_kind(kind: &str) -> Option<&'static Offer> {
-    offered().iter().find(|offer| offer.info.kind == kind)
+static EXTRA_OFFERS: std::sync::Mutex<Vec<(Offer, &'static str)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Keeps any gateways `registry` offers that are not already kept.
+pub(crate) fn note(registry: &Registry) {
+    let bundled = bundled_offered();
+    let mut extra = EXTRA_OFFERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for offer in offers_in(registry) {
+        if bundled
+            .iter()
+            .chain(extra.iter())
+            .all(|(existing, _)| existing.info.kind != offer.info.kind)
+        {
+            let vendor: &'static str = Box::leak(offer.info.vendor.clone().into_boxed_str());
+            extra.push((offer, vendor));
+        }
+    }
+}
+
+/// The gateways offered across `registries`, each kind once (first registry wins).
+pub(crate) fn offered_in(registries: &[(&str, &Registry)]) -> Vec<Offer> {
+    let mut offers = Vec::new();
+    for (_, registry) in registries {
+        for offer in offers_in(registry) {
+            if offers
+                .iter()
+                .all(|existing: &Offer| existing.info.kind != offer.info.kind)
+            {
+                offers.push(offer);
+            }
+        }
+    }
+    offers
+}
+
+/// The gateways the bundled libraries and any noted extension libraries offer.
+pub(crate) fn offered() -> Vec<Offer> {
+    let bundled = bundled_offered();
+    let extra = EXTRA_OFFERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    bundled
+        .iter()
+        .chain(extra.iter())
+        .map(|(offer, _)| offer.clone())
+        .collect()
+}
+
+/// The gateway that serves sessions of accounts of `kind`, when a bundled or noted library offers one.
+pub(crate) fn for_kind(kind: &str) -> Option<Offer> {
+    offered().into_iter().find(|offer| offer.info.kind == kind)
 }
 
 /// The vendor of what runs the model of accounts of `kind`, in the words a session's identity variables use, when a gateway
 /// serves the kind.
 pub(crate) fn vendor_of(kind: &str) -> Option<&'static str> {
-    for_kind(kind).map(|offer| offer.info.vendor.as_str())
+    bundled_offered()
+        .iter()
+        .find(|(offer, _)| offer.info.kind == kind)
+        .map(|(_, vendor)| *vendor)
+        .or_else(|| {
+            EXTRA_OFFERS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .find(|(offer, _)| offer.info.kind == kind)
+                .map(|(_, vendor)| *vendor)
+        })
 }
 
 /// What the gateways need of the host: where its home is, which canoa.cfg to read each gateway's table from, and how to start the
@@ -161,7 +228,7 @@ impl Gateways {
         {
             return Some(found.clone());
         }
-        for_kind(kind).cloned()
+        for_kind(kind)
     }
 
     /// Whether a gateway serves accounts of `kind`.

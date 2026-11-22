@@ -1697,13 +1697,6 @@ impl Serving {
                     if let Some(origin) = origin {
                         say_origin(entry, origin);
                     }
-                    let configured = harness_settings(
-                        entry,
-                        harness,
-                        executable.as_ref(),
-                        asks,
-                        settings.as_ref(),
-                    );
                     let refused = |what: String| ServeError::Harness {
                         entry: entry.name.clone(),
                         what,
@@ -1712,6 +1705,14 @@ impl Serving {
                     let registry = Arc::new(
                         kind::registry(origin.as_ref())
                             .map_err(|error| refused(error.to_string()))?,
+                    );
+                    let configured = harness_settings(
+                        &registry,
+                        entry,
+                        harness,
+                        executable.as_ref(),
+                        asks,
+                        settings.as_ref(),
                     );
                     let roots: Vec<String> = entry
                         .working_roots
@@ -3432,6 +3433,7 @@ fn say_origin_of(name: &str, table: &str, prefix: &str, origin: &Origin) {
 /// session's profile replaces through the request's `_meta`, and every mode the agent has, Bypass included. A setting the
 /// entry's `settings` names is the person's own and stays.
 pub(crate) fn harness_settings(
+    registry: &coqui_acp_api::guatiao::library::Registry,
     entry: &Entry,
     harness: &str,
     executable: Option<&OsString>,
@@ -3439,12 +3441,9 @@ pub(crate) fn harness_settings(
     own: Option<&Settings>,
 ) -> Settings {
     let mut map = own.map(|own| own.as_map().clone()).unwrap_or_default();
-    if !crate::config::is_built_in_harness(harness) {
-        return Settings::new(map);
-    }
     // A provider that takes none of the access, mode or setting-source keys (one that runs a stdio agent as it is) is given only
     // the program and the limits of a connection: each key below goes in where the provider's schema declares it.
-    let takes = |key: &str| crate::vendors::bundled_declares(harness, key);
+    let takes = |key: &str| crate::kind::declares_setting(registry, harness, key);
     if let Some(executable) = executable {
         map.insert(
             "executable".to_owned(),
@@ -4028,7 +4027,9 @@ mod tests {
             else {
                 panic!("a harness");
             };
+            let registry = crate::kind::registry(None).expect("bundled");
             harness_settings(
+                &registry,
                 entry,
                 harness,
                 executable.as_ref(),
@@ -4064,7 +4065,9 @@ settings = { replay_max_bytes = 4096 }
         else {
             panic!("a harness");
         };
+        let registry = crate::kind::registry(None).expect("bundled");
         let map = harness_settings(
+            &registry,
             entry,
             harness,
             executable.as_ref(),
@@ -4098,7 +4101,9 @@ settings = { replay_max_bytes = 4096 }
         else {
             panic!("a harness");
         };
+        let registry = crate::kind::registry(None).expect("bundled");
         let map = harness_settings(
+            &registry,
             entry,
             harness,
             executable.as_ref(),
@@ -4113,16 +4118,10 @@ settings = { replay_max_bytes = 4096 }
 
     #[test]
     fn a_setting_is_declared_by_the_provider_that_takes_it_and_by_no_other() {
-        assert!(crate::vendors::bundled_declares(
-            "claude",
-            "setting_sources"
-        ));
-        assert!(!crate::vendors::bundled_declares(
-            "codex",
-            "setting_sources"
-        ));
-        assert!(!crate::vendors::bundled_declares("opencode", "modes"));
-        assert!(!crate::vendors::bundled_declares("nobody", "modes"));
+        assert!(crate::vendors::declares(None, "claude", "setting_sources"));
+        assert!(!crate::vendors::declares(None, "codex", "setting_sources"));
+        assert!(!crate::vendors::declares(None, "opencode", "modes"));
+        assert!(!crate::vendors::declares(None, "nobody", "modes"));
     }
 
     #[test]
