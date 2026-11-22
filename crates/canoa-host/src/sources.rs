@@ -137,7 +137,7 @@ fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
 /// The folders of the runtimes the Store installed on `shelf` (Node, Python): where each one's launch file is, for a copy that
 /// is as it was installed. A copy that changed since adds nothing, so nothing unchecked reaches a search path.
 pub(crate) fn runtime_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
-    crate::store::runtimes::RUNTIME_PROGRAMS
+    crate::store::runtimes::runtime_programs()
         .iter()
         .filter_map(|program| managed_program_in(shelf, program))
         .filter_map(|(path, _)| path.parent().map(Path::to_path_buf))

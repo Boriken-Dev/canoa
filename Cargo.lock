@@ -780,6 +780,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-bitwarden"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "serde_json",
+]
+
+[[package]]
 name = "canoa-claude"
 version = "0.0.0-alpha.0"
 dependencies = [
@@ -841,6 +850,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-git-bash"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "serde_json",
+]
+
+[[package]]
 name = "canoa-grok"
 version = "0.0.0-alpha.0"
 dependencies = [
@@ -857,14 +875,19 @@ dependencies = [
  "apple-native-keyring-store",
  "canoa",
  "canoa-antigravity",
+ "canoa-bitwarden",
  "canoa-claude",
  "canoa-codex",
  "canoa-foundry",
+ "canoa-git-bash",
  "canoa-grok",
  "canoa-litellm",
+ "canoa-node",
  "canoa-openai",
  "canoa-opencode",
  "canoa-pi",
+ "canoa-powershell",
+ "canoa-python",
  "canoa-whisper",
  "clap",
  "coqui-a2a",
@@ -969,6 +992,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-node"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+]
+
+[[package]]
 name = "canoa-openai"
 version = "0.0.0-alpha.0"
 dependencies = [
@@ -994,6 +1025,23 @@ dependencies = [
  "coqui-acp-api",
  "coqui-acp-pi",
  "serde_json",
+]
+
+[[package]]
+name = "canoa-powershell"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "serde_json",
+]
+
+[[package]]
+name = "canoa-python"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
 ]
 
 [[package]]

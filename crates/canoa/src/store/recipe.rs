@@ -397,3 +397,87 @@ pub const fn exe_suffix(os: &str) -> &'static str {
         _ => "",
     }
 }
+
+/// The hosts GitHub sends release asset downloads on to.
+pub const GITHUB_ASSET_HOSTS: [&str; 2] = [
+    "https://release-assets.githubusercontent.com",
+    "https://objects.githubusercontent.com",
+];
+
+/// The `https` endpoints of a store served from GitHub releases (`api`, `downloads`, and GitHub's asset hosts).
+#[must_use]
+pub fn github_endpoints(api: &str, downloads: &str) -> Vec<String> {
+    [api, downloads]
+        .into_iter()
+        .chain(GITHUB_ASSET_HOSTS)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The SHA-256 hex digest listed for `file` in a `SHASUMS256.txt` or `SHA256SUMS` document.
+#[must_use]
+pub fn sha256_sum_of(sums: &str, file: &str) -> Option<String> {
+    sums.lines()
+        .filter_map(|line| line.split_once(char::is_whitespace))
+        .find(|(_, name)| name.trim().trim_start_matches('*') == file)
+        .map(|(hex, _)| hex.trim().to_ascii_lowercase())
+        .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Parses `N` dot-separated unsigned integers from `text`.
+#[must_use]
+pub fn dotted_numbers<const N: usize>(text: &str) -> Option<[u64; N]> {
+    let mut parts = text.split('.').map(|part| part.parse::<u64>().ok());
+    let mut found = [0; N];
+    for slot in &mut found {
+        *slot = parts.next()??;
+    }
+    parts.next().is_none().then_some(found)
+}
+
+/// One published release from a GitHub releases listing: its version, numeric sort key, tag and digested assets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Published<const N: usize> {
+    /// The release's version as the files name it.
+    pub version: String,
+    /// Numeric version components for ordering releases.
+    pub order: [u64; N],
+    /// The git tag on GitHub.
+    pub tag: String,
+    /// Each `(asset_name, sha256_hex)` listed on the release.
+    pub assets: Vec<(String, String)>,
+}
+
+impl<const N: usize> Published<N> {
+    /// The SHA-256 hex digest listed for `name`, when the release carries one.
+    #[must_use]
+    pub fn digest_of(&self, name: &str) -> Option<&str> {
+        self.assets
+            .iter()
+            .find(|(asset, _)| asset == name)
+            .map(|(_, digest)| digest.as_str())
+    }
+}
+
+fn asset_digest(asset: &serde_json::Value) -> Option<String> {
+    let digest = asset["digest"].as_str()?.strip_prefix("sha256:")?;
+    (digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| digest.to_ascii_lowercase())
+}
+
+/// Each asset of a GitHub release object that lists a `sha256:` digest: its file name and lower-case hex digest.
+#[must_use]
+pub fn github_assets(release: &serde_json::Value) -> Vec<(String, String)> {
+    release["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|asset| Some((asset["name"].as_str()?.to_owned(), asset_digest(asset)?)))
+        .collect()
+}
+
+/// The newest release in `all` by its numeric `order`.
+#[must_use]
+pub fn newest_published<const N: usize>(all: Vec<Published<N>>) -> Option<Published<N>> {
+    all.into_iter().max_by_key(|release| release.order)
+}

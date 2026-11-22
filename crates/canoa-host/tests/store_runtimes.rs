@@ -18,19 +18,19 @@ use canoa::store::{
     LatestQuery, LatestReport, PlanRequest, Platform, ProgramQuery, ProgramReport, ProgramStore,
     STORE_GLYPHS, StoreInfo, StoreSettings,
 };
-use canoa_foundry::store::{DOWNLOADS, FoundryRecipe, RELEASES_API};
-use canoa_host::store::bitwarden::{
+use canoa_bitwarden::{
     BitwardenRecipe, DOWNLOADS as BITWARDEN_DOWNLOADS, RELEASES_API as BITWARDEN_RELEASES_API,
 };
+use canoa_foundry::store::{DOWNLOADS, FoundryRecipe, RELEASES_API};
+use canoa_git_bash::{DOWNLOADS as GIT_DOWNLOADS, GitBashRecipe, RELEASES_API as GIT_RELEASES_API};
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
-use canoa_host::store::runtimes::{
-    NODE_ORIGIN, NodeRecipe, PYTHON_RELEASES, PythonRecipe, RUNTIME_PROGRAMS,
-};
-use canoa_host::store::shell_stores::{
-    GIT_DOWNLOADS, GIT_RELEASES_API, GitBashRecipe, POWERSHELL_DOWNLOADS, POWERSHELL_RELEASES_API,
-    PowerShellRecipe,
-};
+use canoa_host::store::runtimes::runtime_programs;
 use canoa_host::store::tools::LocalTools;
+use canoa_node::{NODE_ORIGIN, NodeRecipe};
+use canoa_powershell::{
+    DOWNLOADS as POWERSHELL_DOWNLOADS, PowerShellRecipe, RELEASES_API as POWERSHELL_RELEASES_API,
+};
+use canoa_python::{PYTHON_RELEASES, PythonRecipe};
 use canoa_whisper::store::{
     DOWNLOADS as WHISPER_DOWNLOADS, MODELS, MODELS_ORIGIN, Model, RELEASES_API as WHISPER_RELEASES,
     WhisperRecipe,
@@ -1161,9 +1161,10 @@ fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path
             "{program} has no summary"
         );
         // Foundry Local's folder holds libraries a program should not find, so it is on no `PATH`: it provides no command.
+        let exposed = runtime_programs();
         assert_eq!(
             !info.commands.is_empty(),
-            RUNTIME_PROGRAMS.contains(&program.as_str()),
+            exposed.iter().any(|each| each == program),
             "{program} provides {:?}",
             info.commands
         );

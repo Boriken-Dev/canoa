@@ -1,43 +1,48 @@
-//! Bitwarden's command line, `bw`: the Secret providers type's store. The publisher lists a release's files with the SHA-256 of each on
-//! GitHub, a zip holding the one program, and the download is checked against that digest. A publisher's signature is not checked,
-//! and the plan says so.
+//! Bitwarden's command line (`bw`) for Canoa: the Secret providers type's store. The publisher lists a release's files with
+//! the SHA-256 of each on GitHub, a zip holding the one program, and the download is checked against that digest. A publisher's
+//! signature is not checked, and the plan says so.
 //!
-//! Nothing here reads a vault: the store puts a program on the computer, and the Bitwarden provider (a script that ships in the
-//! host) runs it when the person has set it up. The program is on no search path of what the host starts: only the spawner a secret
-//! provider is handed finds it, by its name.
+//! Nothing here reads a vault: the store puts the program on the computer, and the Bitwarden secret provider runs it when the
+//! person has set it up. The program is on no search path of what the host starts: only the spawner a secret provider is handed
+//! finds it, by its name.
+#![forbid(unsafe_code)]
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "files and paths are std's"
 )]
 
+extern crate alloc;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
+use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
 use canoa::store::recipe::{
-    Finish, Part, Recipe, Release, UnpackStep, bad_value_error, dotted, get_json, internal_error,
-    path_has, pinned, unsupported_error,
+    Finish, Part, Published, Recipe, Release, UnpackStep, bad_value_error, dotted, dotted_numbers,
+    get_json, github_assets, github_endpoints, internal_error, newest_published, path_has, pinned,
+    unsupported_error,
 };
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
 };
+use canoa::store_provider;
+use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::shell_stores::{Published, assets_of, newest, numbers};
-use canoa::store_provider;
+/// The name this crate's library is registered under.
+pub const LIBRARY: &str = "canoa-bitwarden";
+
+/// The id of the Store type that lists secret providers' programs.
+pub const STORE_TYPE: &str = "secrets";
 
 /// The release listing of the repository that publishes the command line among the other Bitwarden clients.
 pub const RELEASES_API: &str = "https://api.github.com/repos/bitwarden/clients/releases";
+
 /// Where its release files are served from.
 pub const DOWNLOADS: &str = "https://github.com/bitwarden/clients/releases/download/";
-
-/// The hosts GitHub sends a release download on to.
-const ASSET_HOSTS: [&str; 2] = [
-    "https://release-assets.githubusercontent.com",
-    "https://objects.githubusercontent.com",
-];
 
 /// How many releases of the listing are read: the repository publishes the web, browser and desktop clients too, and the command
 /// line's newest is among the latest hundred.
@@ -46,6 +51,26 @@ const LISTED: u32 = 100;
 store_provider!(
     /// The Bitwarden command line's store.
     BitwardenStore, BitwardenRecipe, "bitwarden_store"
+);
+
+/// Adds the Secret providers type to the Store: the command line a secret provider needs on the computer.
+#[derive(Default, Debug, Clone, Copy, Provider)]
+#[provider(StoreExtension, id = "bitwarden_extension", crate = ::coqui_acp_api::guatiao)]
+pub struct BitwardenExtension;
+
+impl StoreExtension for BitwardenExtension {
+    fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
+        let mut secrets = ExtensionType::new(STORE_TYPE, "Secret providers", ["bitwarden_store"]);
+        secrets.icon = Some("lock".to_owned());
+        Ok(ExtensionInfo::new("Canoa", "Boriken Dev", vec![secrets]))
+    }
+}
+
+// What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is read.
+coqui_acp_api::guatiao::local_providers!(
+    id = "canoa-bitwarden",
+    version = env!("CARGO_PKG_VERSION"),
+    providers = [BitwardenStore, BitwardenExtension]
 );
 
 /// The command line's releases in a listing: tag `cli-v2026.10.1` is `2026.10.1`. A draft, a prerelease and any other client's tag
@@ -61,9 +86,9 @@ fn cli_releases(listing: &serde_json::Value) -> Vec<Published<3>> {
             let version = tag.strip_prefix("cli-v")?;
             Some(Published {
                 version: version.to_owned(),
-                order: numbers::<3>(version)?,
+                order: dotted_numbers::<3>(version)?,
                 tag: tag.to_owned(),
-                assets: assets_of(release),
+                assets: github_assets(release),
             })
         })
         .collect()
@@ -104,11 +129,7 @@ impl Recipe for BitwardenRecipe {
             .into_iter()
             .flat_map(|os| ["x86_64", "aarch64"].map(|arch| Platform::new(os, arch)))
             .collect();
-        info.endpoints = [RELEASES_API, DOWNLOADS]
-            .into_iter()
-            .chain(ASSET_HOSTS)
-            .map(str::to_owned)
-            .collect();
+        info.endpoints = github_endpoints(RELEASES_API, DOWNLOADS);
         info
     }
 
@@ -161,7 +182,7 @@ impl Recipe for BitwardenRecipe {
 
     fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
         match listing(tools)
-            .map(|doc| newest(cli_releases(&doc)))
+            .map(|doc| newest_published(cli_releases(&doc)))
             .and_then(|found| {
                 found.ok_or_else(|| {
                     internal_error("the repository lists no release of the command line")
@@ -186,7 +207,7 @@ impl Recipe for BitwardenRecipe {
                 let wanted = pinned(wanted)?;
                 all.into_iter().find(|release| release.version == wanted)
             }
-            None => newest(all),
+            None => newest_published(all),
         }
         .ok_or_else(|| unsupported_error("the repository lists no such release"))?;
         let name = format!("bw-{spelled}-{}.zip", release.version);
@@ -237,9 +258,12 @@ impl Recipe for BitwardenRecipe {
 
 #[cfg(test)]
 mod tests {
+    use canoa::store::ProgramStore;
+    use coqui_acp_api::guatiao::library::Registry;
+
     use super::*;
 
-    fn listing() -> serde_json::Value {
+    fn test_listing() -> serde_json::Value {
         let digest = |seed: &str| format!("sha256:{}", seed.repeat(64)[..64].to_owned());
         serde_json::json!([
             {"tag_name": "web-v2026.11.0", "draft": false, "prerelease": false, "assets": []},
@@ -252,12 +276,36 @@ mod tests {
     }
 
     #[test]
+    fn the_library_offers_the_program_and_the_secrets_extension_type() {
+        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let loading = registry
+            .register_local(LIBRARY, library)
+            .expect("registers");
+        assert!(loading.loaded().is_some(), "accepted");
+        assert!(
+            registry
+                .offer::<dyn ProgramStore>("bitwarden_store")
+                .is_some()
+        );
+        let info = BitwardenExtension.describe().expect("described");
+        let [kind] = info.types.as_slice() else {
+            panic!("one type: {:?}", info.types);
+        };
+        assert_eq!(kind.id, STORE_TYPE);
+        assert_eq!(kind.problem(), None);
+        assert_eq!(kind.stores, ["bitwarden_store"]);
+        assert_eq!(kind.icon.as_deref(), Some("lock"));
+    }
+
+    #[test]
     fn the_command_lines_releases_are_the_cli_tags_that_are_not_drafts_or_prereleases() {
-        let found = cli_releases(&listing());
+        let found = cli_releases(&test_listing());
         let versions: Vec<&str> = found.iter().map(|each| each.version.as_str()).collect();
         assert_eq!(versions, ["2026.10.1", "2026.9.0"]);
         assert_eq!(
-            newest(found).map(|release| release.version).as_deref(),
+            newest_published(found)
+                .map(|release| release.version)
+                .as_deref(),
             Some("2026.10.1")
         );
     }

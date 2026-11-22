@@ -1,5 +1,5 @@
-//! The registry of the stores built into this binary: the host's own (the runtimes, the speech and secret programs, the shells)
-//! and the ones each bundled agent's library offers, registered the way a library the person names is.
+//! The registry of the stores built into this binary: each bundled library (the agents, runtimes, extensions and gateways)
+//! registered the way a library the person names is.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -13,40 +13,30 @@ use alloc::vec::Vec;
 use canoa::store::ProgramStore;
 use coqui_acp_api::guatiao::library::Registry;
 
-use super::bitwarden::BitwardenStore;
 use super::piper::PiperStore;
-use super::runtimes::{NodeStore, PythonStore};
-use super::shell_stores::{GitBashStore, PowerShellStore};
 use crate::bundled::{self, Bundle};
 
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in-stores",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [
-        NodeStore,
-        PythonStore,
-        PiperStore,
-        BitwardenStore,
-        GitBashStore,
-        PowerShellStore
-    ]
+    providers = [PiperStore]
 );
 
-/// A registry holding the built-in stores and those of the bundled agents.
+/// A registry holding the built-in stores and those of the bundled libraries.
 ///
 /// # Errors
 ///
 /// The reason the registry did not accept them.
 pub fn built_in() -> Result<Arc<Registry>, String> {
     let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    bundled::register(&mut registry, bundled::ALL)?;
+    bundled::register_included(&mut registry)?;
     let loading = registry
         .register_local("canoa-stores", library)
         .map_err(|error| error.to_string())?;
     if loading.loaded().is_none() {
         return Err("the built-in stores were not accepted".to_owned());
     }
-    bundled::register(&mut registry, bundled::ALL)?;
-    bundled::register_included(&mut registry)?;
     Ok(Arc::new(registry))
 }
 

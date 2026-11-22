@@ -1210,7 +1210,7 @@ fn overlay_items(
         for line in lines {
             let state = if line.met { State::Applied } else { State::Off };
             let mut item = Item::new(line.key, &layer, state, line.how);
-            item.offer = line.offer.map(str::to_owned);
+            item.offer = line.offer;
             notes.push(item);
         }
         inspected.push((aos, each.commands));
@@ -1250,7 +1250,7 @@ fn overlay_items(
             let line = commands::line(&command, result.map(|_| ()));
             let state = if line.met { State::Applied } else { State::Off };
             let mut item = Item::new(line.key, &layer, state, line.how);
-            item.offer = line.offer.map(str::to_owned);
+            item.offer = line.offer;
             notes.push(item);
         }
         if any {

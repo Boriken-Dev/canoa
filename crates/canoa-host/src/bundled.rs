@@ -119,6 +119,31 @@ pub(crate) struct Included {
 /// Every library this build carries that is no agent.
 pub(crate) const INCLUDED: &[Included] = &[
     Included {
+        name: canoa_node::LIBRARY,
+        library: canoa_node::library,
+        helper: None,
+    },
+    Included {
+        name: canoa_python::LIBRARY,
+        library: canoa_python::library,
+        helper: None,
+    },
+    Included {
+        name: canoa_git_bash::LIBRARY,
+        library: canoa_git_bash::library,
+        helper: None,
+    },
+    Included {
+        name: canoa_powershell::LIBRARY,
+        library: canoa_powershell::library,
+        helper: None,
+    },
+    Included {
+        name: canoa_bitwarden::LIBRARY,
+        library: canoa_bitwarden::library,
+        helper: None,
+    },
+    Included {
         name: canoa_foundry::LIBRARY,
         library: canoa_foundry::library,
         helper: Some(canoa_foundry::run_helper),

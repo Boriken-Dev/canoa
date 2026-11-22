@@ -13,15 +13,19 @@ use coqui_acp_api::{
 };
 use coqui_acp_harness::LocalSpawner;
 
-use crate::store::runtimes::SECRET_PROGRAMS;
+use crate::store::runtimes::secret_programs;
 
 /// The program a bare `program` stands for: the copy the Store installed when it names one, else as it was written. A name with a
 /// folder in it is the person's or the provider's choice and is never replaced.
 fn resolved(program: &str) -> String {
+    resolved_in(program, &secret_programs())
+}
+
+fn resolved_in(program: &str, allowed: &[String]) -> String {
     let bare = !program.contains(['/', '\\']);
     let stem = program.strip_suffix(".exe").unwrap_or(program);
     if bare
-        && SECRET_PROGRAMS.contains(&stem)
+        && allowed.iter().any(|name| name == stem)
         && let Some((path, _)) = crate::sources::managed_program(stem)
     {
         return path.to_string_lossy().into_owned();
@@ -82,5 +86,10 @@ mod tests {
             // No copy is installed in a test's shelf for any of these, and a path is never replaced.
             assert_eq!(resolved(program), program, "{program}");
         }
+    }
+
+    #[test]
+    fn secret_programs_come_from_the_built_in_extension_stores() {
+        assert!(secret_programs().iter().any(|program| program == "bw"));
     }
 }

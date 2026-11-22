@@ -82,7 +82,7 @@ fn a_program_that_is_new_enough_is_met_and_one_that_is_not_is_offered_from_the_s
 
     let older = check(&python("3.11"), &finder(&[&old]), "linux");
     assert!(!older[0].met);
-    assert_eq!(older[0].offer, Some("python_store"));
+    assert_eq!(older[0].offer.as_deref(), Some("python_store"));
     assert!(older[0].how.contains("3.8.1"), "{}", older[0].how);
     assert!(older[0].how.contains("3.11 or later"), "{}", older[0].how);
     assert!(older[0].how.contains("Store"), "{}", older[0].how);
@@ -102,7 +102,7 @@ fn a_program_that_is_new_enough_is_met_and_one_that_is_not_is_offered_from_the_s
         "{}",
         absent[0].how
     );
-    assert_eq!(absent[0].offer, Some("python_store"));
+    assert_eq!(absent[0].offer.as_deref(), Some("python_store"));
 
     // With no version asked for, nothing is run: the program is only found.
     let any = Required {
@@ -150,9 +150,9 @@ fn commands_and_interpreters_are_found_on_the_path_and_the_stores_runtimes_come_
     let met: Vec<bool> = lines.iter().map(|line| line.met).collect();
     // The runtime's Node is found after the person's own folder; the test's path holds no shell and no npm.
     assert_eq!(met, [true, false, true, false, false]);
-    assert_eq!(lines[1].offer, runtime_for("sh"));
+    assert_eq!(lines[1].offer, runtime_for("linux", "sh").map(|(id, _)| id));
     assert_eq!(lines[3].offer, None, "{}", lines[3].how);
-    assert_eq!(lines[4].offer, Some("node_store"));
+    assert_eq!(lines[4].offer.as_deref(), Some("node_store"));
     assert!(lines[4].how.contains("Node.js"), "{}", lines[4].how);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -186,14 +186,21 @@ fn a_real_program_is_asked_its_version_and_a_missing_one_has_none() {
 
 #[test]
 fn the_stores_commands_are_the_ones_its_recipes_list() {
-    use crate::store::runtimes::{NodeRecipe, PythonRecipe};
     use canoa::store::recipe::Recipe as _;
+    use canoa_node::NodeRecipe;
+    use canoa_python::PythonRecipe;
     for (commands, id) in [
         (NodeRecipe.info().commands, "node_store"),
         (PythonRecipe.info().commands, "python_store"),
     ] {
         for command in commands {
-            assert_eq!(runtime_for(&command), Some(id), "{command}");
+            assert_eq!(
+                runtime_for("linux", &command)
+                    .map(|(found, _)| found)
+                    .as_deref(),
+                Some(id),
+                "{command}"
+            );
         }
     }
 }

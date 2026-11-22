@@ -52,7 +52,7 @@ pub(crate) struct Line {
     /// Where it was found, or what is missing.
     pub(crate) how: String,
     /// The Store runtime (a provider id) that installs it, when it is missing and one provides it.
-    pub(crate) offer: Option<&'static str>,
+    pub(crate) offer: Option<String>,
     /// What preparing the overlay would run for it, for a line that preparing makes true.
     pub(crate) runs: Option<String>,
 }
@@ -65,7 +65,7 @@ impl Line {
             "state": if self.met { "applied" } else { "off" },
             "how": self.how,
         });
-        if let Some(offer) = self.offer {
+        if let Some(offer) = &self.offer {
             out["offer"] = serde_json::json!(offer);
         }
         if let Some(runs) = &self.runs {
@@ -307,27 +307,16 @@ enum Located {
     Absent,
 }
 
-/// The Store runtime that provides `program`, and its name.
-fn offer_for(interpreter: &str) -> Option<(&'static str, &'static str)> {
+/// The Store runtime that provides `program` on `os`, and its display title.
+fn offer_for(interpreter: &str, os: &str) -> Option<(String, String)> {
     names_of(interpreter)
         .into_iter()
-        .find_map(runtime_for)
-        .map(|id| (id, store_title(id)))
+        .find_map(|name| runtime_for(os, name))
 }
 
 /// The Store runtime (a provider id) that provides `interpreter`, when one does.
-pub(crate) fn offer_id(interpreter: &str) -> Option<&'static str> {
-    offer_for(interpreter).map(|(id, _)| id)
-}
-
-fn store_title(id: &str) -> &'static str {
-    match id {
-        "node_store" => "Node.js",
-        "python_store" => "Python",
-        "git_bash_store" => "Git Bash",
-        "powershell_store" => "PowerShell",
-        _ => "a runtime",
-    }
+pub(crate) fn offer_id(interpreter: &str) -> Option<String> {
+    offer_for(interpreter, std::env::consts::OS).map(|(id, _)| id)
 }
 
 fn label(interpreter: &str) -> &str {
@@ -342,12 +331,13 @@ fn label(interpreter: &str) -> &str {
 fn line_for(
     key: String,
     finder: &Finder,
+    os: &str,
     interpreter: &str,
     minimum: Option<&str>,
     shown: &str,
 ) -> Line {
-    let offer = offer_for(interpreter);
-    let installs = |offer: Option<(&'static str, &'static str)>| {
+    let offer = offer_for(interpreter, os);
+    let installs = |offer: Option<&(String, String)>| {
         offer.map_or_else(String::new, |(_, title)| {
             format!("; the Store's {title} installs it")
         })
@@ -367,7 +357,7 @@ fn line_for(
             format!(
                 "{shown}{wanted} is needed and {} is {version}{}",
                 program.display(),
-                installs(offer)
+                installs(offer.as_ref())
             ),
         ),
         Located::Unknown(program) => (
@@ -375,14 +365,14 @@ fn line_for(
             format!(
                 "{shown}{wanted} is needed and {} did not say its version{}",
                 program.display(),
-                installs(offer)
+                installs(offer.as_ref())
             ),
         ),
         Located::Absent => (
             false,
             format!(
                 "{shown}{wanted} is needed and is not on the PATH{}",
-                installs(offer)
+                installs(offer.as_ref())
             ),
         ),
     };
@@ -468,6 +458,7 @@ pub(crate) fn check(required: &Required, finder: &Finder, os: &str) -> Vec<Line>
             lines.push(line_for(
                 key.to_owned(),
                 finder,
+                os,
                 interpreter,
                 minimum.as_deref(),
                 label(interpreter),
@@ -478,6 +469,7 @@ pub(crate) fn check(required: &Required, finder: &Finder, os: &str) -> Vec<Line>
         lines.push(line_for(
             format!("runtime.interpreter: {interpreter}"),
             finder,
+            os,
             interpreter,
             None,
             label(interpreter),
@@ -487,6 +479,7 @@ pub(crate) fn check(required: &Required, finder: &Finder, os: &str) -> Vec<Line>
         lines.push(line_for(
             format!("runtime.commands: {command}"),
             finder,
+            os,
             command,
             None,
             command,

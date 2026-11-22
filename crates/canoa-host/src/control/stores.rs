@@ -24,7 +24,7 @@ use super::{BAD_PARAMS, NO_METHOD, POLL, REFUSED, error_line};
 use crate::secrets::ask::{Asked, Asker};
 use crate::store::programs::{Event, Programs, Sink, StoreError};
 use crate::store::registry::agent_stores;
-use crate::store::runtimes::runtimes_here;
+use crate::store::runtimes::runtimes_in;
 use crate::store::shelf::Shelf;
 
 /// Nothing was found under that name.
@@ -92,12 +92,6 @@ pub(crate) fn verify_extension(extension: &crate::config::Extension) -> Result<(
         _ => Err("a SHA-256 check goes with a library file".to_owned()),
     }
 }
-
-/// The id of the Store type that lists what the secret providers need on the computer.
-pub(crate) const SECRETS_TYPE: &str = "secrets";
-
-/// The store that installs Bitwarden's command line.
-const BITWARDEN_STORE: &str = "bitwarden_store";
 
 /// A store type an extension adds, with the extension it comes from.
 #[derive(Clone, Debug)]
@@ -265,20 +259,18 @@ impl Stores {
         self
     }
 
-    /// The same, also listing the Secret providers type: what a secret provider needs on the computer (Bitwarden's `bw`), installed
-    /// by the Store like any program. The providers themselves ship in the host.
-    pub(crate) fn with_secret_providers(mut self) -> Self {
-        let mut info = ExtensionType::new(SECRETS_TYPE, "Secret providers", [BITWARDEN_STORE]);
-        info.icon = Some("lock".to_owned());
-        if !self.types.iter().any(|each| each.info.id == SECRETS_TYPE) {
-            self.types.push(AddedType {
-                info,
-                extension: "built-in".to_owned(),
-                extension_title: "Canoa".to_owned(),
-                publisher: "Boriken Dev".to_owned(),
-            });
-        }
-        self
+    /// The same, deriving the runtime stores from `registry` (every non-agent, non-extension `program_store` that supports this OS).
+    pub(crate) fn with_included_runtimes(
+        self,
+        registry: &Arc<coqui_acp_api::guatiao::library::Registry>,
+    ) -> Self {
+        let claimed: Vec<String> = self
+            .types
+            .iter()
+            .flat_map(|added| added.info.stores.iter().cloned())
+            .collect();
+        let runtimes = runtimes_in(registry, &self.providers, &claimed, std::env::consts::OS);
+        self.with_runtimes(runtimes)
     }
 
     /// The same, also listing the store types the libraries this build carries add (the `store_extension` providers of `registry`),
@@ -347,9 +339,8 @@ impl Stores {
             Arc::new(Programs::new(shelf, Arc::clone(&registry))),
             agent_stores(crate::bundled::ALL),
         )
-        .with_runtimes(runtimes_here())
-        .with_secret_providers()
-        .with_included_extensions(&registry))
+        .with_included_extensions(&registry)
+        .with_included_runtimes(&registry))
     }
 }
 
@@ -864,20 +855,14 @@ impl Stores {
 #[cfg(test)]
 mod runtimes_tests {
     use super::*;
-    use crate::store::runtimes::RUNTIMES;
 
     fn stores() -> (Stores, std::path::PathBuf) {
         let root = std::env::temp_dir().join(format!("canoa-runtime-list-{}", std::process::id()));
-        let programs = Programs::new(
-            Shelf::unchecked(&root),
-            crate::store::registry::built_in().expect("the built-in stores"),
-        );
+        let registry = crate::store::registry::built_in().expect("the built-in stores");
+        let programs = Programs::new(Shelf::unchecked(&root), Arc::clone(&registry));
         let stores = Stores::new(Arc::new(programs), agent_stores(crate::bundled::ALL))
-            .with_runtimes(runtimes_here())
-            .with_secret_providers()
-            .with_included_extensions(
-                &crate::store::registry::built_in().expect("the built-in stores"),
-            );
+            .with_included_extensions(&registry)
+            .with_included_runtimes(&registry);
         (stores, root)
     }
 
@@ -912,50 +897,38 @@ mod runtimes_tests {
         let runtimes = stores
             .read("store/list", &json!({"kind": "runtimes"}), None)
             .expect("the runtimes");
-        let every = [
-            ("node_store", "node", "nodes"),
-            ("python_store", "python", "indent"),
-            ("piper_store", "piper", "speaker"),
-            ("git_bash_store", "git-bash", "branch"),
-            ("powershell_store", "powershell", "prompt"),
-        ];
-        let here = runtimes_here();
-        let wanted: Vec<_> = every
-            .iter()
-            .filter(|(id, ..)| here.iter().any(|h| h == id))
-            .collect();
+        let found = programs_of(&runtimes);
+        for program in ["node", "python", "piper"] {
+            assert!(
+                found.iter().any(|(_, each)| each == program),
+                "expected {program} in {found:?}"
+            );
+        }
         assert_eq!(
-            programs_of(&runtimes),
-            wanted
-                .iter()
-                .map(|(id, program, _)| ((*id).to_owned(), (*program).to_owned()))
-                .collect::<Vec<_>>()
+            found.iter().any(|(_, each)| each == "git-bash"),
+            cfg!(windows)
         );
-        assert!(
-            RUNTIMES
-                .iter()
-                .all(|id| every.iter().any(|(each, ..)| each == id)),
-            "this test names every runtime"
+        assert_eq!(
+            found.iter().any(|(_, each)| each == "powershell"),
+            cfg!(any(windows, target_os = "linux"))
         );
         let listed = runtimes["stores"].as_array().expect("a list");
-        let icons: Vec<&str> = listed
-            .iter()
-            .map(|store| store["icon"].as_str().expect("an icon"))
-            .collect();
-        assert_eq!(
-            icons,
-            wanted.iter().map(|(_, _, icon)| *icon).collect::<Vec<_>>()
-        );
         assert!(
-            listed
-                .iter()
-                .all(|store| store["summary"].is_string() && store["commands"].is_array()),
-            "each runtime says what it is and which commands it provides: {listed:?}"
+            listed.iter().all(|store| {
+                store["icon"].is_string()
+                    && store["summary"].is_string()
+                    && store["commands"].is_array()
+            }),
+            "each runtime says what it is, its icon and which commands it provides: {listed:?}"
         );
         let bad = stores.read("store/list", &json!({"kind": "toys"}), None);
         assert_eq!(bad.expect_err("refused").0, BAD_PARAMS);
         // Nothing is installed: a report asks the shelf and the search path, and a runtime's store answers it.
-        let report = stores.read("store/report", &json!({"provider": "node_store"}), None);
+        let (node_provider, _) = found
+            .iter()
+            .find(|(_, program)| program == "node")
+            .expect("node store");
+        let report = stores.read("store/report", &json!({"provider": node_provider}), None);
         assert!(report.is_ok(), "{report:?}");
         let unknown = stores.read("store/report", &json!({"provider": "bun_store"}), None);
         assert_eq!(unknown.expect_err("unknown").0, NOT_FOUND);

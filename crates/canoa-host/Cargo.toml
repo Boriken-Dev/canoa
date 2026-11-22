@@ -50,14 +50,19 @@ qrcode = { workspace = true, optional = true }
 tungstenite = { workspace = true, optional = true, features = ["handshake"] }
 canoa = { workspace = true, features = ["store", "speech-builtin", "network", "profile-item", "secret", "settings-section", "panel-tab", "usage", "gateway", "loopback", "api-gateway"] }
 canoa-antigravity.workspace = true
+canoa-bitwarden.workspace = true
 canoa-claude.workspace = true
 canoa-codex.workspace = true
 canoa-foundry.workspace = true
+canoa-git-bash.workspace = true
 canoa-litellm.workspace = true
 canoa-grok.workspace = true
+canoa-node.workspace = true
 canoa-openai.workspace = true
 canoa-opencode.workspace = true
 canoa-pi.workspace = true
+canoa-powershell.workspace = true
+canoa-python.workspace = true
 canoa-whisper.workspace = true
 clap.workspace = true
 coqui-acp = { workspace = true, features = ["secret"] }
