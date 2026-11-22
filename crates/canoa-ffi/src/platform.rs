@@ -136,13 +136,33 @@ pub(crate) fn hide_console_for_children() -> std::io::Result<()> {
     attached
 }
 
-/// Joins the console of the host that started this process, so that what this starts shares it too. A process with no such
-/// console goes on without one.
+/// Joins the console of the host that started this process, so that what this starts shares it too, while keeping any
+/// already-open standard streams (such as redirected pipes). A process with no such console goes on without one.
 #[cfg(windows)]
 pub(crate) fn share_parents_console() {
-    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+        STD_OUTPUT_HANDLE, SetStdHandle,
+    };
+    let kept = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE].map(|kind| {
+        // SAFETY: constant standard-handle kind; returns null or INVALID_HANDLE_VALUE when none is set.
+        let handle = unsafe { GetStdHandle(kind) };
+        let valid = !handle.is_null() && handle != INVALID_HANDLE_VALUE;
+        (kind, valid.then_some(handle))
+    });
     // SAFETY: takes a constant by value; failing changes nothing.
-    let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
+        return;
+    }
+    for (kind, handle) in kept {
+        if let Some(handle) = handle {
+            // `AttachConsole` replaces every standard handle with the parent console's, which would take redirected pipes
+            // away from a child started with them.
+            // SAFETY: `handle` is this process's own standard handle captured just before `AttachConsole`.
+            let _ = unsafe { SetStdHandle(kind, handle) };
+        }
+    }
 }
 
 /// Dart's native API, as the virtual machine hands it over: a table of named functions, of which only the one that posts an

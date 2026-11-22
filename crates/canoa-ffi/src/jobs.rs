@@ -426,14 +426,20 @@ impl Front for ChildFront {
 /// See [`crate::exports::canoa_ffi_child_main`].
 pub(crate) fn child_main() -> i32 {
     platform::default_child_signal();
-    platform::share_parents_console();
-    log::install_for_child();
-    let mut arguments = std::env::args_os().skip(1);
+    let mut arguments = std::env::args_os().skip(1).peekable();
     let first = arguments.next();
     // A browser passes the origin and no command: it is the relay.
     let browser = first
         .as_ref()
         .is_some_and(|first| first.to_string_lossy().starts_with(BROWSER_ORIGIN_PREFIX));
+    let subcommand_is_native =
+        !browser && arguments.peek().is_some_and(|arg| *arg == "native-host");
+    // A browser's native host relays JSON frames over its parent pipes and starts detached hosts; attaching to a
+    // transient cmd.exe console adds nothing and must not tie the relay to the console.
+    if !browser && !subcommand_is_native {
+        platform::share_parents_console();
+    }
+    log::install_for_child();
     let command = browser
         .then(|| OsString::from("native-host"))
         .into_iter()
