@@ -709,6 +709,9 @@ pub(crate) struct UsageRead {
     pub(crate) report: coqui_acp_api::UsageReport,
     /// The account's email or name and its plan, from the agent's own reader.
     pub(crate) account: Option<canoa::usage_reader::AccountDetails>,
+    /// Whether the row may answer again for a while. A failed reading of what the agent stores is not kept: asking again costs
+    /// nothing, and a sign-in meanwhile changes the answer.
+    pub(crate) keep: bool,
 }
 
 impl UsageRead {
@@ -798,6 +801,7 @@ pub(crate) fn usage_report_for(
             Map::new(),
         ),
     };
+    let own = account_settings.clone();
     // A stand-in for the provider's usage endpoint is the account provider's own setting.
     if let Some(endpoint) = endpoints.of(harness) {
         account_settings
@@ -820,20 +824,24 @@ pub(crate) fn usage_report_for(
         return Ok(UsageRead {
             report,
             account: None,
+            keep: true,
         });
     }
     Ok(
-        usage_via_reader(&registry, harness, &configured, account).unwrap_or(UsageRead {
+        usage_via_reader(&registry, harness, (&configured, &own), account).unwrap_or(UsageRead {
             report,
             account: None,
+            keep: true,
         }),
     )
 }
 
+/// The account's figures from the harness's usage reader, with no session open: read from what the agent stores when the reader
+/// can, else read from the program started for the moment.
 fn usage_via_reader(
     registry: &Arc<coqui_acp_api::guatiao::library::Registry>,
     harness: &str,
-    configured: &Settings,
+    (configured, own): (&Settings, &Map<String, Value>),
     account: &crate::config::AccountConfig,
 ) -> Option<UsageRead> {
     let preset = crate::bundled::ALL
@@ -843,6 +851,9 @@ fn usage_via_reader(
     let reader_id = preset.and_then(|preset| preset.usage)?;
     let reader = crate::usage_splice::Reader::offered_by(reader_id, &[Arc::clone(registry)])
         .or_else(|| crate::usage_splice::Reader::named(reader_id))?;
+    if reader.info().stored {
+        return Some(usage_stored(&reader, configured, own, account));
+    }
     let program = configured
         .as_map()
         .get("executable")
@@ -879,6 +890,7 @@ fn usage_via_reader(
                     why.text()
                 )),
                 account: None,
+                keep: true,
             });
         }
     };
@@ -891,7 +903,56 @@ fn usage_via_reader(
     Some(UsageRead {
         report,
         account: asked.account,
+        keep: true,
     })
+}
+
+/// What a reader that reads the agent's stored login says with no process (`root` 0), configured with the entry's account
+/// settings and the harness's `executable` when they name none. Nothing is started: a failure is the answer, with who the
+/// account is when the reader could still say.
+fn usage_stored(
+    reader: &crate::usage_splice::Reader,
+    configured: &Settings,
+    own: &Map<String, Value>,
+    account: &crate::config::AccountConfig,
+) -> UsageRead {
+    let mut config = own.clone();
+    if let Some(executable) = configured.as_map().get("executable")
+        && !config.contains_key("executable")
+    {
+        config.insert("executable".to_owned(), executable.clone());
+    }
+    let read = reader
+        .open_configured(&Value::Object(config))
+        .and_then(|opened| {
+            opened
+                .reading
+                .read(0, false)
+                .map_err(|error| error.message().to_owned())
+        });
+    let (mut report, details) = match read {
+        Ok(reading) => match reading.failure {
+            None => {
+                let mut report = coqui_acp_api::UsageReport::new();
+                report.supported = true;
+                report.sources = vec![coqui_acp_api::Source::Reported];
+                report.buckets = reading.buckets;
+                (report, reading.account)
+            }
+            Some(failure) => (
+                coqui_acp_api::UsageReport::unsupported(failure.why),
+                reading.account,
+            ),
+        },
+        Err(why) => (coqui_acp_api::UsageReport::unsupported(why), None),
+    };
+    report.account = Some(account.usage_id());
+    report.observed_at = crate::usage_splice::unix_now();
+    UsageRead {
+        keep: report.supported,
+        report,
+        account: details,
+    }
 }
 
 #[cfg(test)]

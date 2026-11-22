@@ -308,34 +308,20 @@ fn a_refused_login_is_renewed_from_the_directory_the_stored_copy_was_written_to(
 }
 
 #[test]
-fn antigravity_usage_read_without_session_uses_agy_usage_reader_and_records_buckets() {
+fn antigravity_usage_read_without_session_starts_nothing_and_says_when_no_one_is_signed_in() {
     let dir = Dir::new();
     let store = accounts(&dir);
-    let exe = std::env::current_exe().expect("test path");
-    let debug = exe.parent().expect("deps").parent().expect("debug");
-    let stdio_agent = debug
-        .join("examples")
-        .join(format!("stdio_agent{}", std::env::consts::EXE_SUFFIX));
-    assert!(
-        stdio_agent.is_file(),
-        "build the examples first: cargo build -p canoa-host --examples"
-    );
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("agy")
-        .join("getuserstatus.json");
-    let wrapper = if cfg!(windows) {
+    let home = dir.0.join("agy-home");
+    std::fs::create_dir_all(home.join(".gemini")).expect("a home");
+    // A program that leaves a mark if it is ever started: reading the account must not start it.
+    let marker = dir.0.join("agy-ran");
+    let program = if cfg!(windows) {
         let path = dir.0.join("agy.cmd");
         std::fs::write(
             &path,
-            format!(
-                "@echo off\r\n\"{}\" --agy \"{}\"\r\n",
-                stdio_agent.display(),
-                fixture.display()
-            ),
+            format!("@echo off\r\necho ran> \"{}\"\r\n", marker.display()),
         )
-        .expect("wrapper written");
+        .expect("program written");
         path
     } else {
         #[cfg(unix)]
@@ -343,36 +329,38 @@ fn antigravity_usage_read_without_session_uses_agy_usage_reader_and_records_buck
         let path = dir.0.join("agy");
         std::fs::write(
             &path,
-            format!(
-                "#!/bin/sh\nexec \"{}\" --agy \"{}\"\n",
-                stdio_agent.display(),
-                fixture.display()
-            ),
+            format!("#!/bin/sh\necho ran > \"{}\"\n", marker.display()),
         )
-        .expect("wrapper written");
+        .expect("program written");
         #[cfg(unix)]
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-            .expect("wrapper executable");
+            .expect("program executable");
         path
     };
-    let quoted_exe = serde_json::to_string(&wrapper.to_string_lossy().into_owned()).expect("json");
+    let quoted = |text: &str| serde_json::to_string(text).expect("json");
+    let program = quoted(&program.to_string_lossy());
+    // The login is looked for only in the test's home: never the keyring, never the person's home.
     let cfg = config(&format!(
-        "[host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {quoted_exe}\n",
+        "[host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {program}\n\
+         account_settings = {{ home = {}, keyring = false, token_url = \"http://127.0.0.1:9/token\", \
+         userinfo_url = \"http://127.0.0.1:9/userinfo\", service = \"http://127.0.0.1:9\" }}\n",
+        quoted(&home.to_string_lossy()),
     ));
     let account = crate::config::AccountConfig::local("antigravity");
     let read =
         crate::options::usage_report_for(&cfg, ("local", &account), &store, &Endpoints::default())
             .expect("read");
-    let who = read.account.expect("the agent says who is signed in");
-    assert!(who.label.is_some_and(|label| !label.is_empty()));
-    assert_eq!(who.plan.as_deref(), Some("Google AI Pro"));
-    let report = read.report;
-    assert!(report.supported, "{report:?}");
+    assert!(!read.report.supported, "{:?}", read.report);
+    assert_eq!(
+        read.report.unsupported_because.as_deref(),
+        Some(canoa_antigravity::NOT_SIGNED_IN),
+        "{:?}",
+        read.report
+    );
+    assert!(read.account.is_none());
+    assert!(read.report.buckets.is_empty());
     assert!(
-        report
-            .buckets
-            .iter()
-            .any(|bucket| bucket.id.starts_with("agy:")),
-        "expected agy:* quota buckets in {report:?}"
+        !marker.exists(),
+        "the program was started to read the account"
     );
 }

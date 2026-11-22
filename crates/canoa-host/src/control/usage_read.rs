@@ -84,8 +84,9 @@ pub(super) fn call(
                 crate::usage_splice::unix_now(),
             );
         }
+        let keep = read.keep;
         let row = read.row().map_err(|why| (REFUSED, why))?;
-        if let Ok(mut held) = cache.0.lock() {
+        if keep && let Ok(mut held) = cache.0.lock() {
             held.insert(key, (Instant::now(), row.clone()));
         }
         row

@@ -450,8 +450,8 @@ pub(crate) fn add_with(
     check_inputs(method, inputs)?;
     let accounts = accounts_of(cfg)?;
     let outcome = signer(&accounts, &Signing::from(&listed), &method.id)?;
-    // A sign-in that made the agent's own login (Antigravity's `start`, which only proves the program starts and is signed in)
-    // adds nothing to canoa.cfg: that login is the automatic `local` account its harness already has.
+    // A sign-in that made the agent's own login (Antigravity's, which the program stores for itself) adds nothing to canoa.cfg:
+    // that login is the automatic `local` account its harness already has.
     if outcome.kind == coqui_acp_api::HARNESS_LOGIN
         && let Some(harness) = &listed.harness
     {

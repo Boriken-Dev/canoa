@@ -251,12 +251,12 @@
       "accounts": {
         "provider": "antigravity_accounts",
         "title": "Antigravity accounts",
-        "description": "Antigravity keeps its own login; this provider starts it to see who is signed in.",
+        "description": "Antigravity keeps its own login; this provider reads who is signed in from it, and runs Antigravity's sign-in when no one is.",
         "kinds": [],
         "logins": [
           {
-            "id": "start",
-            "title": "Start Antigravity to sign in",
+            "id": "sign_in",
+            "title": "Sign in to Antigravity",
             "produces": "harness-login"
           }
         ],

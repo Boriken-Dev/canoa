@@ -1,7 +1,8 @@
 //! Antigravity's and Grok's accounts over the control channel, as the desktop app uses them: the account providers and the sources
-//! they make listed, an Antigravity account added by starting the program, and what its row says of who is signed in and of its
-//! usage. The program is a stand-in everywhere; every folder an agent keeps its login in is this test's own, so no test reads the
-//! person's.
+//! they make listed, and Antigravity's automatic `local` account read from the login Antigravity stores, with no process
+//! started: who is signed in, the plan and the quota when a login is stored, "not signed in" and its own sign-in when none is.
+//! Every login is a fixture in a home of the test's own, the keyring is never read, and Google's service is a loopback
+//! stand-in; every folder another agent keeps its login in is the test's own too, so no test reads the person's.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -12,14 +13,23 @@ mod linked;
 mod sealed;
 mod support;
 
+use std::io::{Read as _, Write as _};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Once};
+use std::thread::JoinHandle;
 
 use canoa_host::Link;
 use linked::{Hosted, next, send};
 use sealed::{App, Typed};
 use serde_json::{Value, json};
 use support::{example, quoted};
+
+const EMAIL: &str = "person@example.test";
+const ACCESS: &str = "fixture-access-token";
+/// The page the stand-in sign-in prints, on the host Antigravity's own sign-in uses.
+const SIGN_IN_PAGE: &str = "https://accounts.google.com/o/oauth2/auth?client_id=fixture";
 
 /// Points every variable an agent's login folder is found by at a folder of this test's, before any host starts.
 fn isolate() {
@@ -103,24 +113,86 @@ fn program(dir: &Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
-/// The stand-in agent playing Antigravity's status surface from the recorded answer.
-fn agy_standin(dir: &Path) -> PathBuf {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("agy")
-        .join("getuserstatus.json");
-    let agent = example("stdio_agent", false);
+/// A stand-in for `agy` that only leaves a mark: reading the account must never start it.
+fn marking(dir: &Path) -> PathBuf {
+    let mark = dir.join("agy-ran");
     let body = if cfg!(windows) {
-        format!("\"{}\" --agy \"{}\"", agent.display(), fixture.display())
+        format!("echo ran> \"{}\"\r\nexit /b 1", mark.display())
+    } else {
+        format!("echo ran > \"{}\"\nexit 1", mark.display())
+    };
+    program(dir, "agy", &body)
+}
+
+/// A stand-in for `agy acp --login`: it prints the page to open, stores the fixture login a moment later, and stays running.
+fn signing_in(dir: &Path) -> PathBuf {
+    let fixture = dir.join("stored-login.json");
+    std::fs::write(&fixture, login_json().to_string()).expect("the login to store");
+    let stored = gemini(dir).join("jetski-standalone-oauth-token");
+    let body = if cfg!(windows) {
+        format!(
+            "echo Open the URL below in your browser:\r\necho {SIGN_IN_PAGE}\r\n\
+             ping -n 2 127.0.0.1 >nul\r\ncopy /y \"{}\" \"{}\" >nul\r\nping -n 60 127.0.0.1 >nul",
+            fixture.display(),
+            stored.display()
+        )
     } else {
         format!(
-            "exec \"{}\" --agy \"{}\"",
-            agent.display(),
-            fixture.display()
+            "echo 'Open the URL below in your browser:'\necho '{SIGN_IN_PAGE}'\nsleep 1\ncp \"{}\" \"{}\"\nsleep 60",
+            fixture.display(),
+            stored.display()
         )
     };
     program(dir, "agy", &body)
+}
+
+/// The test's own Antigravity home.
+fn home(dir: &Path) -> PathBuf {
+    dir.join("agy-home")
+}
+
+fn gemini(dir: &Path) -> PathBuf {
+    home(dir).join(".gemini")
+}
+
+/// agy's stored login, as it keeps it: a token that never expires (Go's zero time), the email and the plan it signed in to.
+fn login_json() -> Value {
+    json!({
+        "token": {"access_token": ACCESS, "token_type": "Bearer", "refresh_token": "fixture-refresh-token",
+                  "expiry": "0001-01-01T00:00:00Z"},
+        "auth_method": "consumer",
+        "id_token_email": EMAIL,
+        "project_id": "fixture-project",
+        "user_tier": "g1-pro-tier",
+        "tier_display_name": "Stored Plan"
+    })
+}
+
+/// A host with an Antigravity entry that runs `build`'s program and reads its login from the test's home, from Google's stand-in
+/// at `google`, never from the keyring.
+fn host_running(google: &Google, login: bool, build: impl FnOnce(&Path) -> PathBuf) -> Hosted {
+    isolate();
+    let base = google.base();
+    Hosted::start_with_setup(
+        |dir| {
+            std::fs::create_dir_all(gemini(dir)).expect("a home");
+            if login {
+                std::fs::write(
+                    gemini(dir).join("jetski-standalone-oauth-token"),
+                    login_json().to_string(),
+                )
+                .expect("the stored login");
+            }
+            let program = quoted(&build(dir).to_string_lossy());
+            let home = quoted(&home(dir).to_string_lossy());
+            format!(
+                "[secrets]\naccounts = \"file\"\n\n[host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {program}\n\
+                 account_settings = {{ executable = {program}, home = {home}, keyring = false, login_poll_ms = 100, \
+                 token_url = \"{base}/token\", userinfo_url = \"{base}/userinfo\", service = \"{base}\" }}\n"
+            )
+        },
+        &[],
+    )
 }
 
 fn app_of(host: &Hosted) -> App {
@@ -128,20 +200,126 @@ fn app_of(host: &Hosted) -> App {
     App::new(&secret[..])
 }
 
-/// A host with an Antigravity entry that runs `program` and signs in and out through it.
-fn host_running(build: impl FnOnce(&Path) -> PathBuf) -> Hosted {
-    isolate();
-    Hosted::start_with_setup(
-        |dir| {
-            let program = build(dir);
-            let program = quoted(&program.to_string_lossy());
-            format!(
-                "[secrets]\naccounts = \"file\"\n\n[host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {program}\naccount_settings = {{ executable = {program} }}\n"
-            )
-        },
-        &[],
-    )
+// ---------------------------------------------------------------------------------------------
+// The stand-in for Google's userinfo and Cloud Code service.
+
+struct Google {
+    address: SocketAddr,
+    paths: Arc<Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
 }
+
+impl Google {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a port");
+        let address = listener.local_addr().expect("its address");
+        let stop = Arc::new(AtomicBool::new(false));
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let (stopping, seen) = (Arc::clone(&stop), Arc::clone(&paths));
+        let thread = std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if stopping.load(Ordering::SeqCst) {
+                    return;
+                }
+                let Ok(mut stream) = stream else { continue };
+                let Some((method, path, authorization)) = request(&mut stream) else {
+                    continue;
+                };
+                seen.lock().expect("not poisoned").push(path.clone());
+                let (status, body) = answer(&method, &path, authorization.as_deref());
+                let body = body.to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.flush();
+            }
+        });
+        Self {
+            address,
+            paths,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn base(&self) -> String {
+        format!("http://{}", self.address)
+    }
+
+    fn paths(&self) -> Vec<String> {
+        self.paths.lock().expect("not poisoned").clone()
+    }
+}
+
+impl Drop for Google {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.address);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The request's method, path and `Authorization`, its body read and dropped.
+fn request(stream: &mut TcpStream) -> Option<(String, String, Option<String>)> {
+    let mut head = Vec::new();
+    let mut byte = [0_u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        if stream.read(&mut byte).ok()? == 0 {
+            return None;
+        }
+        head.push(byte[0]);
+    }
+    let head = String::from_utf8_lossy(&head).into_owned();
+    let mut lines = head.lines();
+    let mut first = lines.next()?.split(' ');
+    let (method, path) = (first.next()?.to_owned(), first.next()?.to_owned());
+    let (mut length, mut authorization) = (0, None);
+    for line in lines {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("content-length") {
+            length = value.trim().parse().ok()?;
+        } else if name.eq_ignore_ascii_case("authorization") {
+            authorization = Some(value.trim().to_owned());
+        }
+    }
+    let mut body = vec![0_u8; length];
+    stream.read_exact(&mut body).ok()?;
+    Some((method, path, authorization))
+}
+
+fn answer(method: &str, path: &str, authorization: Option<&str>) -> (u16, Value) {
+    if authorization != Some(&format!("Bearer {ACCESS}")) {
+        return (401, json!({"error": {"code": 401}}));
+    }
+    match (method, path) {
+        ("GET", "/userinfo") => (200, json!({"id": "1", "email": EMAIL, "name": "A Person"})),
+        ("POST", "/v1internal:loadCodeAssist") => (
+            200,
+            json!({
+                "currentTier": {"id": "free-tier", "name": "Free"},
+                "paidTier": {"id": "g1-pro-tier", "name": "Google AI Pro"},
+                "cloudaicompanionProject": "fixture-project"
+            }),
+        ),
+        ("POST", "/v1internal:fetchAvailableModels") => (
+            200,
+            json!({"models": {
+                "gemini-fixture-high": {"displayName": "Gemini Fixture", "quotaInfo": {"remainingFraction": 0.5, "resetTime": "2099-01-01T00:00:00Z"}},
+                "gemini-fixture-low": {"displayName": "Gemini Fixture Low", "quotaInfo": {"remainingFraction": 1, "resetTime": "2099-01-08T00:00:00Z"}}
+            }}),
+        ),
+        _ => (404, json!({})),
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn grok_and_antigravity_account_providers_and_sources_are_listed() {
@@ -207,38 +385,125 @@ fn grok_and_antigravity_account_providers_and_sources_are_listed() {
 }
 
 #[test]
-fn antigravity_is_added_by_starting_it_and_its_row_says_who_is_signed_in_and_what_is_left() {
-    let host = host_running(agy_standin);
+fn a_stored_antigravity_login_is_the_local_account_with_its_email_plan_and_quota_and_nothing_is_started()
+ {
+    let google = Google::start();
+    let host = host_running(&google, true, marking);
+    let ran = host.scratch.0.join("agy-ran");
     let link = host.local.open("@control").expect("a link");
+
+    let accounts = plain_call(&link, 1, "accounts/list", json!({})).expect("accounts");
+    assert!(
+        accounts["accounts"]
+            .as_array()
+            .expect("accounts array")
+            .iter()
+            .any(|row| row["agent"] == "antigravity" && row["name"] == "local"),
+        "{accounts}"
+    );
+
+    let read = plain_call(
+        &link,
+        2,
+        "usage/read",
+        json!({"account": "local", "harness": "antigravity"}),
+    )
+    .expect("usage/read");
+    let row = &read["account"];
+    assert_eq!(row["supported"], true, "{read}");
+    assert_eq!(row["details"]["label"], EMAIL, "{read}");
+    assert_eq!(row["details"]["plan"], "Google AI Pro", "{read}");
+    let buckets = row["buckets"].as_array().expect("buckets");
+    assert!(
+        buckets.iter().any(|bucket| bucket["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("agy:"))),
+        "the row has the quota: {read}"
+    );
+    assert!(
+        google
+            .paths()
+            .iter()
+            .any(|path| path == "/v1internal:fetchAvailableModels"),
+        "{:?}",
+        google.paths()
+    );
+
+    // Signing in with a login already stored runs nothing: the login is the account.
     let catalog = plain_call(
         &link,
-        1,
+        3,
         "accounts/catalog",
         json!({"provider": "antigravity_accounts"}),
     )
     .expect("catalog");
     let logins = catalog["logins"].as_array().expect("logins");
     assert_eq!(logins.len(), 1, "{catalog}");
-    assert_eq!(logins[0]["id"], "start", "{catalog}");
-    assert_eq!(
-        logins[0]["title"], "Start Antigravity to sign in",
-        "{catalog}"
-    );
-
+    assert_eq!(logins[0]["id"], "sign_in", "{catalog}");
+    assert_eq!(logins[0]["title"], "Sign in to Antigravity", "{catalog}");
     let mut app = app_of(&host);
     let (_, added) = app.drive(
         &link,
-        2,
+        4,
         "accounts/add",
-        &json!({"name": "agy", "provider": "antigravity_accounts", "method": "start"}),
+        &json!({"name": "agy", "provider": "antigravity_accounts", "method": "sign_in"}),
         &Typed::Leaves,
     );
-    let added = added.expect("the stand-in opens a session, so the sign-in succeeds");
-    // Its own login is the automatic `local` account of Antigravity: nothing is added to canoa.cfg.
+    let added = added.expect("a stored login signs in at once");
     assert_eq!(added["account"]["name"], "local", "{added}");
     assert_eq!(added["account"]["kind"], "harness-login", "{added}");
+    assert_eq!(added["account"]["label"], EMAIL, "{added}");
     assert_eq!(added["account"]["checked"], true, "{added}");
 
+    assert!(!ran.exists(), "agy was started to read or sign in");
+    host.stop();
+}
+
+#[test]
+fn with_no_antigravity_login_the_account_says_so_and_its_own_sign_in_stores_one() {
+    let google = Google::start();
+    let host = host_running(&google, false, signing_in);
+    let link = host.local.open("@control").expect("a link");
+
+    let read = plain_call(
+        &link,
+        1,
+        "usage/read",
+        json!({"account": "local", "harness": "antigravity"}),
+    )
+    .expect("usage/read");
+    let row = &read["account"];
+    assert_eq!(row["supported"], false, "{read}");
+    assert_eq!(
+        row["unsupported_because"],
+        canoa_antigravity::NOT_SIGNED_IN,
+        "{read}"
+    );
+    assert!(row.get("details").is_none(), "{read}");
+    assert!(google.paths().is_empty(), "{:?}", google.paths());
+    let stored = gemini(&host.scratch.0).join("jetski-standalone-oauth-token");
+    assert!(!stored.exists(), "agy was started to read the account");
+
+    let mut app = app_of(&host);
+    let (progress, added) = app.drive(
+        &link,
+        2,
+        "accounts/add",
+        &json!({"name": "agy", "provider": "antigravity_accounts", "method": "sign_in"}),
+        &Typed::Leaves,
+    );
+    let added = added.expect("the stand-in stores a login, so the sign-in succeeds");
+    assert_eq!(added["account"]["name"], "local", "{added}");
+    assert_eq!(added["account"]["label"], EMAIL, "{added}");
+    assert!(
+        progress
+            .iter()
+            .any(|each| each["open_url"]["url"] == SIGN_IN_PAGE),
+        "the person is offered the sign-in's page: {progress:?}"
+    );
+    assert!(stored.exists(), "the sign-in ran the program");
+
+    // The failed reading was not kept: the account is read again, now signed in.
     let read = plain_call(
         &link,
         3,
@@ -246,30 +511,15 @@ fn antigravity_is_added_by_starting_it_and_its_row_says_who_is_signed_in_and_wha
         json!({"account": "local", "harness": "antigravity"}),
     )
     .expect("usage/read");
-    let row = &read["account"];
-    assert_eq!(row["supported"], true, "{read}");
-    assert!(
-        row["details"]["label"]
-            .as_str()
-            .is_some_and(|label| !label.is_empty()),
-        "the row says who is signed in: {read}"
-    );
-    assert_eq!(row["details"]["plan"], "Google AI Pro", "{read}");
-    assert!(
-        row["buckets"]
-            .as_array()
-            .is_some_and(|buckets| buckets.iter().any(|bucket| bucket["id"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("agy:")))),
-        "the row has the quota: {read}"
-    );
+    assert_eq!(read["account"]["supported"], true, "{read}");
+    assert_eq!(read["account"]["details"]["label"], EMAIL, "{read}");
     host.stop();
 }
 
 #[test]
-fn antigravity_that_opens_no_session_asks_the_person_to_start_it_and_adds_nothing_when_they_leave()
-{
-    let host = host_running(|dir| {
+fn an_antigravity_sign_in_that_ends_with_no_login_stored_adds_nothing() {
+    let google = Google::start();
+    let host = host_running(&google, false, |dir| {
         program(
             dir,
             "agy",
@@ -282,18 +532,11 @@ fn antigravity_that_opens_no_session_asks_the_person_to_start_it_and_adds_nothin
         &link,
         1,
         "accounts/add",
-        &json!({"name": "agy", "provider": "antigravity_accounts", "method": "start"}),
+        &json!({"name": "agy", "provider": "antigravity_accounts", "method": "sign_in"}),
         &Typed::Leaves,
     );
-    assert!(outcome.is_err(), "{outcome:?}");
-    assert!(
-        app.traffic
-            .iter()
-            .any(|line| line.contains("Start Antigravity to sign in")
-                && line.contains("Start Antigravity, sign in there, then continue")),
-        "the person is asked to start it: {:?}",
-        app.traffic
-    );
+    let error = outcome.expect_err("no login was stored");
+    assert!(error.to_string().contains("no login is stored"), "{error}");
     let accounts = plain_call(&link, 2, "accounts/list", json!({})).expect("accounts");
     assert!(
         !accounts["accounts"]

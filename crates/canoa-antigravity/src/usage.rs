@@ -1,6 +1,8 @@
-//! Antigravity's quota. `agy acp` serves its own language server on loopback once a session is open, and
-//! `coqui_acp_harness::antigravity` reads the account's remaining fraction and reset time for each model from it. The host decides
-//! when to read; this is what a reading is: which processes to look at, which port answered last, which models the agent listed.
+//! Antigravity's quota, read two ways by `coqui_acp_harness::antigravity`. With no process (`root` 0): from the login
+//! Antigravity stores and Google's service, through the one reader this process keeps for the entry's settings, which says who
+//! is signed in, the plan and each model's remaining fraction and reset time, with nothing started. In a session: from the
+//! language server `agy acp` serves on loopback. The host decides when to read; this is what a reading is: which processes to
+//! look at, which port answered last, which models the agent listed.
 
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -12,19 +14,41 @@ use canoa::usage_reader::{
 };
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_harness::antigravity::{AcpModel, AgyQuota, BUCKET_PREFIX, ReadError, ReadLimits};
+use coqui_acp_harness::antigravity::{
+    AcpModel, AgyAccount, AgyQuota, BUCKET_PREFIX, LoginReading, ReadError, ReadLimits,
+};
 use serde_json::Value;
+
+use crate::login::{AgySettings, reader};
+
+/// Why a reading of the stored login gave nothing: there is none.
+pub const NOT_SIGNED_IN: &str = "Antigravity is not signed in: add its account to sign in";
 
 /// How long after a session opens each further try waits, while the agent has no port yet.
 const RETRIES_MS: [u64; 4] = [2_000, 4_000, 8_000, 16_000];
 /// How long a private agent waits between tries for its port.
 const PRIVATE_RETRIES_MS: [u64; 5] = [500, 1_000, 2_000, 4_000, 8_000];
 
-/// How Antigravity's quota is asked for: once a session has been open for a while with no turn running, or when its first turn
-/// ends, since the language server comes up a moment after the session does.
-#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
-#[provider(UsageReader, id = "antigravity_usage", crate = ::coqui_acp_api::guatiao)]
-pub struct AgyUsage;
+/// How Antigravity's quota is asked for: from its stored login whenever no session is open, and in a session once it has been
+/// open for a while with no turn running, or when its first turn ends, since the language server comes up a moment after the
+/// session does. It is configured as the account provider is, from the entry's `account_settings`.
+#[derive(Default, Debug, Clone, coqui_acp_api::guatiao::Provider)]
+#[provider(
+    UsageReader,
+    id = "antigravity_usage",
+    config = AgySettings,
+    new = AgyUsage::default,
+    crate = ::coqui_acp_api::guatiao
+)]
+pub struct AgyUsage {
+    settings: AgySettings,
+}
+
+impl From<AgySettings> for AgyUsage {
+    fn from(settings: AgySettings) -> Self {
+        Self { settings }
+    }
+}
 
 impl UsageReader for AgyUsage {
     fn describe(&self) -> Result<ReaderInfo, ProviderError> {
@@ -34,6 +58,7 @@ impl UsageReader for AgyUsage {
         info.cache_ms = 15_000;
         info.private_limit_ms = 40_000;
         info.private_retries_ms = PRIVATE_RETRIES_MS.to_vec();
+        info.stored = true;
         Ok(info)
     }
 
@@ -41,13 +66,15 @@ impl UsageReader for AgyUsage {
         &self,
         members: Object<dyn ProcessMembers>,
     ) -> Result<Object<dyn UsageReading>, ProviderError> {
-        Ok(Quota::new(members).into_object())
+        Ok(Quota::new(members, self.settings.clone()).into_object())
     }
 }
 
 /// One agent's quota: the reader remembers the port that answered and the host asks again without listing any ports.
 struct Quota {
     members: Object<dyn ProcessMembers>,
+    /// How the stored login is read.
+    settings: AgySettings,
     reader: Mutex<AgyQuota>,
     models: Mutex<Vec<AcpModel>>,
     /// Whether the agent's port was not its own process's, so the whole tree is looked through.
@@ -55,9 +82,10 @@ struct Quota {
 }
 
 impl Quota {
-    fn new(members: Object<dyn ProcessMembers>) -> Self {
+    fn new(members: Object<dyn ProcessMembers>, settings: AgySettings) -> Self {
         Self {
             members,
+            settings,
             reader: Mutex::new(AgyQuota::new(ReadLimits::default())),
             models: Mutex::new(Vec::new()),
             wide: AtomicBool::new(false),
@@ -71,6 +99,31 @@ impl Quota {
             .ok()
             .filter(|found| found.contains(&root))
             .unwrap_or_else(|| alloc::vec![root])
+    }
+
+    /// The account and quota from the stored login, with no process. No login, or one that cannot be read, is final; a
+    /// service that did not answer is worth asking again, and the account is said all the same.
+    fn stored(&self, models: &[AcpModel]) -> Reading {
+        let shared = reader(&self.settings);
+        let read = crate::login::lock(&shared).read(models);
+        match read {
+            Ok(LoginReading::SignedIn(signed)) => {
+                let account = account_details(&signed.account);
+                match signed.usage {
+                    Ok(buckets) => Reading::read(buckets).with_account(account),
+                    Err(error) => Reading::failed(Failure::new(
+                        alloc::format!("Antigravity's quota was not read: {error}"),
+                        Retry::NoAnswer,
+                    ))
+                    .with_account(account),
+                }
+            }
+            Ok(_) => Reading::failed(Failure::new(NOT_SIGNED_IN, Retry::Never)),
+            Err(error) => Reading::failed(Failure::new(
+                alloc::format!("Antigravity's login was not read: {error}"),
+                Retry::Never,
+            )),
+        }
     }
 }
 
@@ -92,6 +145,9 @@ impl UsageReading for Quota {
 
     fn read(&self, root: u32, tree: bool) -> Result<Reading, ProviderError> {
         let models = lock(&self.models).clone();
+        if root == 0 {
+            return Ok(self.stored(&models));
+        }
         let mut reader = lock(&self.reader);
         // The agent keeps its port for its life: ports are listed for the first reading and after a failure.
         if let Some(buckets) = reader.read_remembered(&models) {
@@ -122,9 +178,10 @@ impl UsageReading for Quota {
 
 /// Who the reader's last answer said is signed in: the email, else the name, and the plan.
 fn details(reader: &AgyQuota) -> AccountDetails {
-    let Some(account) = reader.account() else {
-        return AccountDetails::default();
-    };
+    reader.account().map(account_details).unwrap_or_default()
+}
+
+fn account_details(account: &AgyAccount) -> AccountDetails {
     AccountDetails::new(
         account.email.clone().or_else(|| account.name.clone()),
         account.plan.clone(),
@@ -168,13 +225,23 @@ mod tests {
         }
     }
 
+    /// A reader whose stored login is looked for only in `home`, never in the keyring.
+    fn isolated(home: &std::path::Path) -> AgyUsage {
+        AgyUsage::from(AgySettings {
+            home: Some(home.display().to_string()),
+            keyring: false,
+            ..AgySettings::default()
+        })
+    }
+
     #[test]
     fn the_description_is_one_the_host_accepts() {
-        let info = AgyUsage.describe().expect("described");
+        let info = AgyUsage::default().describe().expect("described");
         assert_eq!(info.problem(), None);
         assert_eq!(info.id, "antigravity");
         assert_eq!(info.bucket_prefix, BUCKET_PREFIX);
         assert_eq!(info.retries_ms, RETRIES_MS);
+        assert!(info.stored);
     }
 
     #[test]
@@ -194,18 +261,39 @@ mod tests {
 
     #[test]
     fn a_result_that_is_not_json_is_refused() {
-        let reading = AgyUsage.open(Alone.into_object()).expect("a reading opens");
+        let home = std::env::temp_dir().join(format!("canoa-agy-json-{}", std::process::id()));
+        let reading = isolated(&home)
+            .open(Alone.into_object())
+            .expect("a reading opens");
         assert!(reading.opened("not json").is_err());
         assert!(reading.opened("{}").is_ok());
     }
 
     #[test]
     fn a_process_with_no_port_is_read_again_later() {
-        let reading = AgyUsage.open(Alone.into_object()).expect("a reading opens");
+        let home = std::env::temp_dir().join(format!("canoa-agy-port-{}", std::process::id()));
+        let reading = isolated(&home)
+            .open(Alone.into_object())
+            .expect("a reading opens");
         // No process has this id, so nothing of it listens.
         let read = reading.read(u32::MAX - 1, false).expect("answered");
         let failure = read.failure.expect("nothing to read");
         assert_eq!(failure.retry, Retry::NotYet, "{}", failure.why);
         assert!(read.buckets.is_empty());
+    }
+
+    #[test]
+    fn with_no_process_and_no_login_stored_it_says_so_for_good() {
+        let home = std::env::temp_dir().join(format!("canoa-agy-none-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".gemini")).expect("a home");
+        let reading = isolated(&home)
+            .open(Alone.into_object())
+            .expect("a reading opens");
+        let read = reading.read(0, false).expect("answered");
+        let failure = read.failure.expect("no login");
+        assert_eq!(failure.why, NOT_SIGNED_IN);
+        assert_eq!(failure.retry, Retry::Never);
+        assert!(read.account.is_none());
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

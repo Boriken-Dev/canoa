@@ -24,6 +24,8 @@ use std::time::Instant;
 use canoa::usage_reader::{
     Failure as ReadFailure, ProcessMembers, ReaderInfo, Retry, UsageReader, UsageReading,
 };
+use coqui_acp_api::guatiao::Value as GuatiaoValue;
+use coqui_acp_api::guatiao::library::kind::Instance;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::{Source, UsageReport, UsageSupport};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
@@ -129,6 +131,50 @@ impl Reader {
         Err("the reader is no longer offered".to_owned())
     }
 
+    /// A reading of what the agent stores, from the reader configured with `config` (the entry's account settings); a reader
+    /// that takes no configuration is opened as it is.
+    pub(crate) fn open_configured(&self, config: &Value) -> Result<Configured, String> {
+        let registry = match &self.registry {
+            Some(registry) => registry.as_ref(),
+            None => crate::vendors::bundled_providers().ok_or("no reader is loaded")?,
+        };
+        for offer in registry.offers::<dyn UsageReader>() {
+            let Some(reader) = offer.default_instance() else {
+                continue;
+            };
+            if !reader.describe().is_ok_and(|info| info.id == self.info.id) {
+                continue;
+            }
+            if !offer.builds_instances() {
+                return reader
+                    .open(Table.into_object())
+                    .map(|reading| Configured {
+                        reading,
+                        _instance: None,
+                        _library: self.registry.clone(),
+                    })
+                    .map_err(|error| error.message().to_owned());
+            }
+            let instance = offer
+                .instantiate(&GuatiaoValue::from(
+                    crate::provider::map_of(&crate::config::Settings::new(
+                        config.as_object().cloned().unwrap_or_default(),
+                    ))
+                    .map_err(|why| format!("the reader's settings: {why}"))?,
+                ))
+                .map_err(|error| format!("the reader's settings: {error}"))?;
+            let reading = instance
+                .open(Table.into_object())
+                .map_err(|error| error.message().to_owned())?;
+            return Ok(Configured {
+                reading,
+                _instance: Some(instance),
+                _library: self.registry.clone(),
+            });
+        }
+        Err("the reader is no longer offered".to_owned())
+    }
+
     /// How long a reading counts as current: a request younger than this is answered from it, and no private agent is started
     /// more often.
     fn cache(&self) -> Duration {
@@ -143,6 +189,13 @@ impl Reader {
     fn id(&self) -> &str {
         &self.info.id
     }
+}
+
+/// A reading opened from a configured reader: the reading is let go first, then the instance it came from, then the library.
+pub(crate) struct Configured {
+    pub(crate) reading: Object<dyn UsageReading>,
+    _instance: Option<Instance<dyn UsageReader>>,
+    _library: Option<Arc<Registry>>,
 }
 
 /// One agent's reading, opened from its reader and asked one thread at a time. A library's reading is let go before the library.

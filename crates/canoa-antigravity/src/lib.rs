@@ -5,9 +5,13 @@
 
 extern crate alloc;
 
+mod accounts;
+mod login;
 mod usage;
 
-pub use usage::AgyUsage;
+pub use accounts::{AgyAccounts, SIGN_IN};
+pub use login::AgySettings;
+pub use usage::{AgyUsage, NOT_SIGNED_IN};
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -148,7 +152,7 @@ coqui_acp_api::guatiao::local_providers!(
     version = env!("CARGO_PKG_VERSION"),
     providers = [
         coqui_acp_harness::vendors::antigravity::AntigravityProvider,
-        coqui_acp_harness::vendors::antigravity::AntigravityAccounts,
+        AgyAccounts,
         AgyVendor,
         GeminiVendor,
         AgyStore,
