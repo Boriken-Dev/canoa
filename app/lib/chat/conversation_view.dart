@@ -31,6 +31,7 @@ import 'activity_strip.dart';
 import 'composer.dart';
 import 'delegation_row.dart';
 import 'delegation_view.dart';
+import 'file_links.dart';
 import 'inspector.dart' show changeTotals;
 import 'inspector_surfaces.dart' show DetailsSurface;
 import 'new_session_view.dart';
@@ -114,9 +115,10 @@ class _ConversationViewState extends State<ConversationView> {
 
   chat.ChatRenderers _renderersFor(ChatSession session) {
     final reader = widget.kit.reader;
-    var renderers = delegationRenderers.merge(
-      terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command)),
-    );
+    final openFile = _filesSurface(session) == null ? null : (String path) => _openInFiles(session, path);
+    var renderers = filePathRenderers(root: FilesSurface.workspaceOf(session), onOpenFile: openFile, reader: reader)
+        .merge(delegationRenderers)
+        .merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command)));
     if (reader != null) renderers = renderers.merge(replyRenderers(reader));
     return renderers.merge(widget.renderers);
   }
