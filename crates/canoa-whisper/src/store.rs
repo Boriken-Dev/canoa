@@ -306,7 +306,7 @@ impl WhisperRecipe {
 
 impl Recipe for WhisperRecipe {
     fn info(&self) -> StoreInfo {
-        let mut info = StoreInfo::new("whisper", "whisper.cpp", "ggml-org");
+        let mut info = StoreInfo::new("whisper", crate::NAME, "ggml-org");
         info.homepage = Some("https://github.com/ggml-org/whisper.cpp".to_owned());
         info.summary = Some(
             "Turns speech into text on this computer, for dictation: the audio never leaves the host. The channel is the model.".to_owned(),

@@ -19,6 +19,7 @@ use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status};
 
+use crate::NAME;
 use crate::store::{MODELS, Model, held_model, model_path};
 
 /// What the speech offer says when the program is not installed.
@@ -90,6 +91,7 @@ fn row_of(model: &Model, held: Option<&Model>) -> ModelRow {
     row.on = on;
     row.state = on.then(|| "installed".to_owned());
     row.tags = vec![
+        "speech-to-text".to_owned(),
         if model.id.ends_with(".en") {
             "English only"
         } else {
@@ -98,6 +100,7 @@ fn row_of(model: &Model, held: Option<&Model>) -> ModelRow {
         .to_owned(),
     ];
     row.facts = vec![
+        Fact::new("Runtime", NAME),
         Fact::new("Size", megabytes(model.bytes)),
         Fact::new("File", model.file),
         Fact::new("SHA-256", model.sha256),
@@ -123,7 +126,7 @@ impl ModelStore for WhisperModels {
             "Install whisper.cpp from the Store to run a model.",
         );
         let mut speech = SpeechService::program(
-            "whisper.cpp",
+            NAME,
             "Speech to text on this host's own processor, in every language the model knows. The program and the model are downloaded once, checked against their publishers' checksums.",
             "The audio goes to your host and is turned into text there by a program Canoa installed: nothing is sent to another service.",
         );
@@ -286,6 +289,15 @@ mod tests {
             .collect();
         assert_eq!(on, ["base.en"]);
         assert!(rows.iter().all(|row| row.actions.is_empty()));
+        assert!(
+            rows.iter()
+                .all(|row| row.tags.iter().any(|tag| tag == "speech-to-text"))
+        );
+        assert!(rows.iter().all(|row| {
+            row.facts
+                .iter()
+                .any(|fact| fact.label == "Runtime" && fact.value == crate::NAME)
+        }));
         let _ = std::fs::remove_dir_all(&root);
     }
 

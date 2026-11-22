@@ -10,6 +10,7 @@ What a host loads is `library` (below). The host names none of it: it carries th
 
 ```rust
 pub const LIBRARY: &str = "canoa-whisper";    // the name `library` is registered under
+pub const NAME: &str = "whisper.cpp";    // what the program is called to the person: its rows, facts and speech offer
 pub const STORE_TYPE: &str = "whisper";       // the id of the Store type, and of its speech offer
 
 /// What a host links: handed to `Registry::register_local`.
@@ -43,7 +44,7 @@ pub mod store {
 
 ## The models page and the speech offer
 
-`WhisperModels` is the `model_store` of the type `whisper`. `list` answers the eight models as rows (size, file and digest as facts, `English only` or `Every language` as the tag) and marks the one the host's copy holds (`on`, state `installed`); a row has no action, since the Store installs the program and a model together (`act` and `keep` refuse `UNSUPPORTED`). Its `describe` says the speech service is a program (`SpeechService::program`, licence MIT). `service` is that offer: with `query.models` it lists every model (the install's choices, the default first), and with `query.program` (the launch path of the host's managed copy) it answers `command`, `speech_command`'s `program`, `arguments(model)`, `input` `wav` and the held model, or `unavailable` in its own words (`whisper.cpp is not installed: install it in the Store first`, `the installed copy holds no model: install whisper.cpp again`, an unexpected layout). `-of` only makes the program print to its standard output, which it does not for a stream otherwise; nothing is written to a file.
+`WhisperModels` is the `model_store` of the type `whisper`. `list` answers the eight models as rows (runtime, size, file and digest as facts; `speech-to-text` and `English only` or `Every language` as the tags) and marks the one the host's copy holds (`on`, state `installed`); a row has no action, since the Store installs the program and a model together (`act` and `keep` refuse `UNSUPPORTED`). Its `describe` says the speech service is a program (`SpeechService::program`, licence MIT). `service` is that offer: with `query.models` it lists every model (the install's choices, the default first), and with `query.program` (the launch path of the host's managed copy) it answers `command`, `speech_command`'s `program`, `arguments(model)`, `input` `wav` and the held model, or `unavailable` in its own words (`whisper.cpp is not installed: install it in the Store first`, `the installed copy holds no model: install whisper.cpp again`, an unexpected layout). `-of` only makes the program print to its standard output, which it does not for a stream otherwise; nothing is written to a file.
 
 ## Gotchas
 
