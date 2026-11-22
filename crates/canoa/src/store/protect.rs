@@ -202,6 +202,25 @@ impl Protected {
         self.protects_names(&names_of(path), home.as_deref())
     }
 
+    /// [`Self::protects`] for a path of another system, given as its names (drive first for a Windows path, a share's server and
+    /// share as two names), already worked out; `home` is the names of the directory `~/` means there, when it is known.
+    #[must_use]
+    pub fn protects_parts<S: AsRef<str>>(&self, names: &[S], home: Option<&[S]>) -> bool {
+        let names: Vec<String> = names.iter().map(|name| fold(name.as_ref())).collect();
+        let home: Option<Vec<String>> =
+            home.map(|home| home.iter().map(|name| fold(name.as_ref())).collect());
+        self.protects_names(&names, home.as_deref())
+    }
+
+    /// Whether a line is anchored at the home directory or a file system's root: a relative path, whose folder is not known,
+    /// cannot be judged by such a line.
+    #[must_use]
+    pub fn anchored(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|rule| !matches!(rule.anchor, Anchor::Anywhere))
+    }
+
     /// Whether `path` is a proper ancestor of a place the list names outright (no wildcard, relative to the home directory or the
     /// file system): claiming it would claim that place too.
     #[must_use]

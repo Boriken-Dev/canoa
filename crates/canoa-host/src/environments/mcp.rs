@@ -10,7 +10,6 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -22,6 +21,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 use super::intercept::{Interception, Mode, Modes};
+use super::places::Rules;
 use super::remote::Remote;
 use super::served::{Served, collect};
 use super::{Env, Environments, HERE, Placement, briefing, lock};
@@ -48,21 +48,30 @@ pub(crate) fn server_name(name: &str) -> String {
     format!("{SERVER_PREFIX}{word}")
 }
 
-/// The person's protected places as the tools of an environment hold them, and the modes of the connection's sessions.
+/// The person's protected places as the tools of an environment hold them, by the environment's path rules, and the modes of the
+/// connection's sessions.
 pub(crate) struct Guard {
     list: Arc<Protected>,
-    /// The home directory `~/` names: this computer's for `here`, none elsewhere, whose home the host does not know.
-    home: Option<PathBuf>,
+    rules: Rules,
     modes: Arc<Modes>,
 }
 
 impl Guard {
-    /// The places `lines` protect, for sessions whose modes are `modes`.
+    /// The places `lines` protect in an environment whose paths are this computer's, for sessions whose modes are `modes`.
     #[cfg(test)]
     pub(super) fn listing(lines: &[&str], modes: Arc<Modes>) -> Self {
+        Self::listing_in(lines, modes, cfg!(windows))
+    }
+
+    /// The same, in an environment whose paths are Windows paths when `windows`.
+    #[cfg(test)]
+    pub(super) fn listing_in(lines: &[&str], modes: Arc<Modes>, windows: bool) -> Self {
         Self {
             list: Arc::new(Protected::new(lines.iter().copied())),
-            home: None,
+            rules: Rules {
+                windows,
+                ..Rules::default()
+            },
             modes,
         }
     }
@@ -70,11 +79,7 @@ impl Guard {
     /// No place protected, and every session asking.
     #[cfg(test)]
     fn open() -> Self {
-        Self {
-            list: Arc::new(Protected::new(core::iter::empty::<&str>())),
-            home: None,
-            modes: Arc::new(Modes::default()),
-        }
+        Self::listing(&[], Arc::new(Modes::default()))
     }
 }
 
@@ -142,35 +147,15 @@ impl Access {
         }
     }
 
-    /// Whether a file tool may act on `path`: not when the person's list protects it, or it cannot be placed, unless the session
-    /// is in Bypass. A path is judged as written: the environment's links are its own and are not followed from here.
+    /// Whether a tool may act on `path` (a file, a folder, a program's working folder): not when the person's list protects it,
+    /// or it cannot be judged by the environment's path rules, unless the session is in Bypass (`places::judge`). A program's own
+    /// name and arguments, and a shell's text, are not read for paths.
     fn may_touch(&self, path: &str) -> Result<(), String> {
         let session = lock(&self.session).clone();
         if session.is_some_and(|session| self.guard.modes.of(&session) == Mode::Bypass) {
             return Ok(());
         }
-        if path.is_empty()
-            || path.contains('\0')
-            || path.starts_with('~')
-            || Path::new(path)
-                .components()
-                .any(|part| part == Component::ParentDir)
-            || path.split(['/', '\\']).any(|part| part == "..")
-        {
-            return Err(format!(
-                "{path:?} cannot be placed (empty, starting with ~ or holding a .. part), so it is kept as a protected place is: give the path plainly"
-            ));
-        }
-        if self
-            .guard
-            .list
-            .protects(Path::new(path), self.guard.home.as_deref())
-        {
-            return Err(format!(
-                "{path} is on the person's list of protected places ([permissions] protected), which this session's tools read or change only in the Bypass mode"
-            ));
-        }
-        Ok(())
+        super::places::judge(&self.guard.list, &self.guard.rules, path)
     }
 
     /// Binds the bearer to the session it was given to.
@@ -445,6 +430,9 @@ impl Access {
             .and_then(Value::as_str)
             .ok_or("program is text")?
             .to_owned();
+        if let Some(cwd) = arguments.get("cwd").and_then(Value::as_str) {
+            self.may_touch(cwd)?;
+        }
         request["command"] = json!(program);
         let created = self
             .exec
@@ -503,6 +491,9 @@ impl Access {
     }
 
     fn open(&self, arguments: &Value) -> Result<String, String> {
+        if let Some(cwd) = arguments.get("cwd").and_then(Value::as_str) {
+            self.may_touch(cwd)?;
+        }
         let info = self.env.needs(capability::TERMINAL)?;
         let shell = arguments
             .get("shell")
@@ -679,11 +670,33 @@ impl Hub {
         (&self.bridge.program, before)
     }
 
-    /// What the tools of `env` hold to for a connection whose sessions' modes are `modes`.
+    /// What the tools of `env` hold to for a connection whose sessions' modes are `modes`: the person's list, by the path rules of
+    /// the environment as it describes itself. `~/` is this computer's home where the environment shares its files, and the
+    /// `home` its `fs.read` capability names elsewhere; with neither, a `~/` line protects nothing there.
     fn guard(&self, env: &Env, modes: &Arc<Modes>) -> Guard {
+        let info = env.info();
+        let local = info.local || env.name() == HERE;
+        let windows = if local {
+            cfg!(windows)
+        } else {
+            info.os == "windows"
+        };
+        let home = if local {
+            std::env::home_dir()
+                .and_then(|home| super::places::names(&home.to_string_lossy(), windows).ok())
+        } else {
+            info.capability(capability::FS_READ)
+                .and_then(|read| read.facts.get("home"))
+                .and_then(|home| super::places::names(home, windows).ok())
+        }
+        .map(|(names, _)| names);
         Guard {
             list: Arc::clone(&self.protected),
-            home: (env.name() == HERE).then(std::env::home_dir).flatten(),
+            rules: Rules {
+                windows,
+                local,
+                home,
+            },
             modes: Arc::clone(modes),
         }
     }

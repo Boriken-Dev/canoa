@@ -422,6 +422,34 @@ fn a_file_is_edited_as_bytes_and_patched_in_the_environment_and_a_protected_plac
         let refused = access.call("fs_read", &json!({"path": climbing}));
         assert!(text(&refused).contains("cannot be placed"), "{refused}");
     }
+    // A program's working folder is a place too, judged the same way.
+    let (program, args) = if cfg!(windows) {
+        ("cmd.exe", json!(["/c", "echo x"]))
+    } else {
+        ("/bin/sh", json!(["-c", "echo x"]))
+    };
+    let ran = access.call(
+        "exec",
+        &json!({"program": program, "args": args, "cwd": dir.join("secret.txt").to_string_lossy()}),
+    );
+    assert!(text(&ran).contains("protected"), "{ran}");
+    // An environment whose paths are Windows paths is judged by them, wherever the host runs.
+    let windows = super::mcp::Access::guarded(
+        here_with("", 1 << 20),
+        super::mcp::Guard::listing_in(&["package.json"], Arc::clone(&modes), true),
+    );
+    for path in [
+        r"C:\w\package.json.",
+        r"C:\w\package.json::$DATA",
+        r"C:\w\PACKAG~1.JSO",
+    ] {
+        let refused = windows.call("fs_read", &json!({"path": path}));
+        assert_eq!(refused["isError"], true, "{path}: {refused}");
+        assert!(
+            text(&refused).contains("protected") || text(&refused).contains("cannot be placed"),
+            "{path}: {refused}"
+        );
+    }
     modes.chosen("s", super::intercept::Mode::Bypass);
     let allowed = access.call("fs_write", &json!({"path": secret, "content": "x"}));
     assert_eq!(allowed["isError"], false, "{allowed}");
