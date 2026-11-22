@@ -22,10 +22,7 @@ use std::path::{Path, PathBuf};
 
 use coqui_access::guatiao::library::{ImportSearch, Registry};
 use coqui_access::guatiao::{Alloc, Map, Value};
-use coqui_access::{
-    Accounts as AccountKind, Attempt as Credential, Authenticator, Directory, Lookup, Verdict,
-    takes,
-};
+use coqui_access::{Attempt as Credential, Authenticator, Directory, Lookup, Verdict, takes};
 use coqui_access_kit::matcher::{Match, Matcher};
 use coqui_access_signin::SignInRules;
 use coqui_access_system::SystemAccounts;
@@ -41,11 +38,6 @@ use super::signin::{
     Accounts, CertificateStatus, CodeCheck, Enrolment, FactorError, FactorStanding, MAX_PASSWORD,
     Method, PinError, SignIn, Standing, valid_user,
 };
-
-#[cfg(test)]
-use certs::{MAX_CHAIN, MAX_HEADER, marker_fits};
-#[cfg(test)]
-use codes::{MAX_CODE, code_key, keeps_codes, split_key};
 
 /// The provider id of the operating system's accounts.
 pub const SYSTEM: &str = "coqui_access_system";

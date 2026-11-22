@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use coqui_access::{AccountPut, Accounts as AccountKind};
 use sha2::{Digest as _, Sha256};
 
+use super::super::signin::PinState;
 use super::*;
 
 fn exe_dir() -> PathBuf {
