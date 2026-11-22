@@ -383,7 +383,10 @@ try {
       await tab.call('Input.dispatchMouseEvent', { type, x: composer.x, y: composer.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
     }
     const promptText = 'CallOn canoa-word word_insert_text {"text":"HelloFromWord","location":"document_end"}';
+    // Flutter's text field takes the click's focus a moment later: typing at once can be lost.
+    await sleep(700);
     await tab.call('Input.insertText', { text: promptText });
+    await sleep(500);
     await tab.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await tab.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
 
@@ -393,8 +396,7 @@ try {
       return hidden ? null : paneSession.run('document.getElementById("ask-text").textContent');
     }, 30_000).catch(async (error) => {
       const shown = await labels();
-      const status = await paneSession.run('document.getElementById("status").textContent').catch(() => '');
-      throw new Error(`${error.message}; pane status: ${status}; the app shows: ${shown.slice(-900)}`);
+      throw new Error(`${error.message}; the transcript ends: ${shown.slice(-450).split('\n').join(' ')}`);
     });
     assert.match(askText, /word_insert_text/);
     assert.match(askText, /Plan\.docx/);

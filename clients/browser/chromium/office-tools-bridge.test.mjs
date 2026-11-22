@@ -74,8 +74,8 @@ test("createOfficeToolsBridge registers an Office provider on @tools, forwards M
   const pageTools = [];
   const gateway = {
     attached: [],
-    setPageTools(origin, tabId, apps) {
-      pageTools.push({ origin, tabId, apps: [...apps] });
+    setPageTools(origin, tabId, apps, pane) {
+      pageTools.push({ origin, tabId, apps: [...apps], pane });
     },
     attach(port, meta) {
       gateway.attached.push({ port, meta });
@@ -93,9 +93,11 @@ test("createOfficeToolsBridge registers an Office provider on @tools, forwards M
   for (let i = 0; i < 30 && !panePort.sent.some((m) => m.id === 2); i += 1) await settle();
   assert.deepEqual(panePort.sent.find((m) => m.id === 2).result, { ok: true });
   assert.deepEqual(link.sent[0], { type: "register", provider: "word" });
-  assert.deepEqual(pageTools.at(-1), { origin: "https://pane.example", tabId: 9, apps: ["word"] });
+  assert.deepEqual({ ...pageTools.at(-1), pane: undefined }, { origin: "https://pane.example", tabId: 9, apps: ["word"], pane: undefined });
+  const pane = pageTools.at(-1).pane;
+  assert.match(pane, /^[0-9a-f]{32}$/);
 
-  link.hear({ type: "open", stream: STREAM, session: { agent: "Claude", via: "app" } });
+  link.hear({ type: "open", stream: STREAM, session: { agent: "Claude", via: "app", pane } });
   link.hear({ type: "mcp", stream: STREAM, message: { jsonrpc: "2.0", id: 11, method: "tools/list", params: {} } });
   for (let i = 0; i < 30 && !panePort.sent.some((m) => m.toolsCall !== undefined); i += 1) await settle();
   const openEv = panePort.sent.find((m) => m.toolsEvent?.event?.type === "open");
@@ -109,7 +111,7 @@ test("createOfficeToolsBridge registers an Office provider on @tools, forwards M
 
   panePort.drop();
   assert.equal(link.closed, true);
-  assert.deepEqual(pageTools.at(-1), { origin: "https://pane.example", tabId: 9, apps: [] });
+  assert.deepEqual(pageTools.at(-1), { origin: "https://pane.example", tabId: 9, apps: [], pane: undefined });
 });
 
 test("a pane asks for the host's web origin and gets what the native host claimed, or null", async () => {
@@ -125,4 +127,44 @@ test("a pane asks for the host's web origin and gets what the native host claime
   none.emit({ id: 2, op: "host.web", args: {} });
   await settle();
   assert.deepEqual(none.sent.find((m) => m.id === 2).result, { web: null });
+});
+
+test("a session is served by the pane of the tab that opened it and never by another tab's pane or by none", async () => {
+  const link = fakeLocalLink();
+  const panes = new Map();
+  const gateway = {
+    setPageTools(origin, tabId, apps, pane) {
+      panes.set(tabId, apps.size > 0 ? pane : undefined);
+    },
+    attach() {},
+  };
+  const bridge = createOfficeToolsBridge({ dialLocal: async () => link, gateway, callTimeoutMs: 50 });
+  const tabA = fakePort();
+  const tabB = fakePort();
+  bridge.attach(tabA, { origin: "https://pane.example", tabId: 1 });
+  bridge.attach(tabB, { origin: "https://pane.example", tabId: 2 });
+  for (const [id, port] of [[1, tabA], [2, tabB]]) {
+    port.emit({ id, op: "tools.register", args: { app: "word" } });
+    for (let i = 0; i < 30 && !port.sent.some((m) => m.id === id); i += 1) await settle();
+  }
+  assert.notEqual(panes.get(1), panes.get(2));
+  const toolsCalls = (port) => port.sent.filter((m) => m.toolsCall !== undefined);
+  const ask = async (stream, pane, id) => {
+    link.hear({ type: "open", stream, session: { agent: "Claude", via: "app", ...(pane === undefined ? {} : { pane }) } });
+    link.hear({ type: "mcp", stream, message: { jsonrpc: "2.0", id, method: "tools/list", params: {} } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  };
+  const streamA = "a".repeat(32);
+  const streamB = "b".repeat(32);
+  const streamNone = "c".repeat(32);
+  const streamUnknown = "d".repeat(32);
+  await ask(streamA, panes.get(1), 11);
+  assert.equal(toolsCalls(tabA).length, 1, "tab A's session reaches tab A's pane");
+  assert.equal(toolsCalls(tabB).length, 0, "and never tab B's");
+  await ask(streamB, panes.get(2), 12);
+  assert.equal(toolsCalls(tabB).length, 1);
+  assert.equal(toolsCalls(tabA).length, 1);
+  await ask(streamNone, undefined, 13);
+  await ask(streamUnknown, "f".repeat(32), 14);
+  assert.equal(toolsCalls(tabA).length + toolsCalls(tabB).length, 2, "a session naming no pane, or one that is not there, reaches none");
 });

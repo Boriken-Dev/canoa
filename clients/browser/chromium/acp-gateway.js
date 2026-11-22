@@ -172,7 +172,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
   const dialing = new Map();
   // Origins with a window open about a mode: one at a time, as for a request, so a page cannot raise window after window.
   const modeAsking = new Set();
-  // Active Office pane tool names per (origin, tabId), set only by the extension worker from verified senders.
+  // Active Office pane tool names and the pane's token per (origin, tabId), set only by the extension worker from verified senders.
   const pageTools = new Map();
   const OFFICE_TOOLS = new Set(["outlook", "word", "excel"]);
   const pageToolsKey = (origin, tabId) => `${origin}\0${tabId}`;
@@ -455,7 +455,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
     // Canoa's own pages say so, which no page can: its sessions are the person's own, not a site's.
     const own = link.entry.origin === ownOrigin;
     const tools = own || link.entry.tabId === undefined ? undefined : pageTools.get(pageToolsKey(link.entry.origin, link.entry.tabId));
-    const siteMeta = own ? { site: link.site, own: true } : tools?.length ? { site: link.site, tools } : { site: link.site };
+    const siteMeta = own ? { site: link.site, own: true } : tools ? { site: link.site, tools: tools.apps, pane: tools.pane } : { site: link.site };
     const params = { ...message.params, _meta: { [SITE_META]: siteMeta } };
     if (link.placedByHost && message.method !== "session/new") {
       const folder = link.folders.get(params.sessionId);
@@ -673,13 +673,16 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       for (const origin of origins) announce(origin);
     },
 
-    /** Sets the Office providers allowed for sessions opened by a verified `(origin, tabId)` pane tab. */
-    setPageTools(origin, tabId, apps) {
+    /**
+     * Sets the Office providers allowed for sessions opened by a verified `(origin, tabId)` pane tab, and `pane`, the token the
+     * host repeats to the provider so that a session is served by the pane of that tab alone.
+     */
+    setPageTools(origin, tabId, apps, pane) {
       if (origin === ownOrigin || typeof origin !== "string" || tabId === undefined) return;
       const allowed = [...new Set([...(apps ?? [])].filter((name) => OFFICE_TOOLS.has(name)))].sort();
       const key = pageToolsKey(origin, tabId);
-      if (allowed.length === 0) pageTools.delete(key);
-      else pageTools.set(key, allowed);
+      if (allowed.length === 0 || typeof pane !== "string") pageTools.delete(key);
+      else pageTools.set(key, { apps: allowed, pane });
     },
 
     /** One document's port. `origin` and `tabId` are what the browser reported about its sender. */

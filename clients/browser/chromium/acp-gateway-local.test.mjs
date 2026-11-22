@@ -155,7 +155,7 @@ test("an Office pane tab carries its allowed Office tools in site meta without o
     onMessage: { addListener: (listen) => listeners.push(listen) },
     onDisconnect: { addListener: () => {} },
   }, { origin: PAGE, tabId: 42 });
-  gateway.setPageTools(PAGE, 42, ["word", "browser", "evil"]);
+  gateway.setPageTools(PAGE, 42, ["word", "browser", "evil"], "0123456789abcdef");
   const ask = async (id, op, args) => {
     listeners.forEach((listen) => listen({ id, op, args }));
     for (let tries = 0; tries < 40 && !received.some((message) => message.id === id); tries += 1) await settle();
@@ -166,7 +166,7 @@ test("an Office pane tab carries its allowed Office tools in site meta without o
   listeners.forEach((listen) => listen({ conn, msg: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "session/new", params: { cwd: "/", mcpServers: [] } }) }));
   for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
   const marked = sent.find((message) => message.method === "session/new");
-  assert.deepEqual(marked.params._meta, { "dev.boriken.canoa/site": { site: "site.example", tools: ["word"] } });
+  assert.deepEqual(marked.params._meta, { "dev.boriken.canoa/site": { site: "site.example", tools: ["word"], pane: "0123456789abcdef" } });
   assert.equal(marked.params._meta["dev.boriken.canoa/site"].own, undefined);
   gateway.setPageTools(PAGE, 42, []);
   listeners.forEach((listen) => listen({ conn, msg: JSON.stringify({ jsonrpc: "2.0", id: 6, method: "session/new", params: { cwd: "/", mcpServers: [] } }) }));

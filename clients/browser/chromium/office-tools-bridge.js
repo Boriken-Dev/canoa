@@ -44,6 +44,17 @@ export function createOfficeToolsBridge({ dialLocal, gateway, localWeb = async (
   /** @type {Set<object>} */
   const ports = new Set();
   let nextCall = 1;
+  /** The token of each `(origin, tabId)` pane tab, shared by its frames and gone with its last one. */
+  const tokens = new Map();
+  const tabKey = (origin, tabId) => `${origin}\0${tabId}`;
+  const tokenFor = (origin, tabId) => {
+    const key = tabKey(origin, tabId);
+    if (!tokens.has(key)) {
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      tokens.set(key, [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join(""));
+    }
+    return tokens.get(key);
+  };
 
   function activeAppsFor(origin, tabId) {
     const apps = new Set();
@@ -56,16 +67,19 @@ export function createOfficeToolsBridge({ dialLocal, gateway, localWeb = async (
   }
 
   function syncTab(origin, tabId) {
-    gateway.setPageTools(origin, tabId, activeAppsFor(origin, tabId));
+    const apps = activeAppsFor(origin, tabId);
+    gateway.setPageTools(origin, tabId, apps, apps.size > 0 ? tokenFor(origin, tabId) : undefined);
+    if (apps.size === 0 && ![...ports].some((entry) => entry.origin === origin && entry.tabId === tabId)) tokens.delete(tabKey(origin, tabId));
   }
 
-  function pickRegistration(app) {
+  /** The pane of the tab that opened the session, which the host names by its token; no pane of that tab holding `app`, none. */
+  function pickRegistration(app, pane) {
     const bucket = byApp.get(app);
-    if (!bucket || bucket.regs.size === 0) return null;
-    // Pick the most recently registered connected pane for this Office app.
-    let chosen = null;
-    for (const reg of bucket.regs) chosen = reg;
-    return chosen;
+    if (!bucket || typeof pane !== "string") return null;
+    for (const reg of bucket.regs) {
+      if (!reg.closed && tokens.get(tabKey(reg.origin, reg.tabId)) === pane) return reg;
+    }
+    return null;
   }
 
   function getOrCreateApp(app) {
@@ -80,8 +94,8 @@ export function createOfficeToolsBridge({ dialLocal, gateway, localWeb = async (
           resolve(null);
           return;
         }
-        const reg = pickRegistration(app);
-        if (reg === null || reg.closed) {
+        const reg = pickRegistration(app, session?.pane);
+        if (reg === null) {
           resolve(null);
           return;
         }
