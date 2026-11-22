@@ -336,6 +336,12 @@ impl Environments {
             hook_seconds: table
                 .and_then(|config| config.hook_seconds)
                 .unwrap_or(crate::config::DEFAULT_HOOK_SECONDS),
+            hook_handlers: table
+                .and_then(|config| config.hook_handlers)
+                .unwrap_or(crate::config::DEFAULT_HOOK_HANDLERS),
+            hook_read_ms: table
+                .and_then(|config| config.hook_read_ms)
+                .unwrap_or(crate::config::DEFAULT_HOOK_READ_MS),
             max_tool_sessions: limit_of(
                 table.and_then(|config| config.max_tool_sessions),
                 crate::config::DEFAULT_MAX_TOOL_SESSIONS,
@@ -389,6 +395,10 @@ pub(crate) struct Env {
     output_bytes: usize,
     scrollback_bytes: usize,
     max_tool_sessions: usize,
+    /// `hook_read_ms` of its table; `0` for as long as it takes.
+    hook_read_ms: u64,
+    /// `hook_handlers` of its table; `0` for any number.
+    hook_handlers: u64,
     /// `hook_seconds` of its table; `0` for as long as the agent's hook can wait.
     hook_seconds: u64,
 }
@@ -436,6 +446,16 @@ impl Env {
     /// How long the hook that takes an agent's own tools over may take to have the host's answer, in all, and a prompt waits for the hook to report that it is in force; `0` for as long as the agent's hook can wait.
     pub(crate) fn hook_seconds(&self) -> u64 {
         self.hook_seconds
+    }
+
+    /// How many requests of the hook's channel are handled at once; one past it is dropped, which refuses that call; `0` for any number.
+    pub(crate) fn hook_handlers(&self) -> u64 {
+        self.hook_handlers
+    }
+
+    /// How long a connection to the hook's channel has to send its request, in milliseconds, before its secret is checked; `0` for as long as it takes.
+    pub(crate) fn hook_read_ms(&self) -> u64 {
+        self.hook_read_ms
     }
 
     /// Its name in canoa.cfg, or `here`.

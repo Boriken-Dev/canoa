@@ -565,7 +565,17 @@ fn a_stand_in_harness_still_refuses_what_the_persons_rules_and_dont_ask_refuse_o
 
 /// An interception of Claude Code's tools on `name`, with a plugin written for the request `1`, and its channel file.
 fn opened(name: &str, max_bytes: usize, modes: &Arc<Modes>) -> (Interception, PathBuf) {
-    let env = environments(max_bytes).get(name).expect("made");
+    opened_with(name, max_bytes, modes, "")
+}
+
+/// The same, with the settings `extra` adds to the table of `box`.
+fn opened_with(
+    name: &str,
+    max_bytes: usize,
+    modes: &Arc<Modes>,
+    extra: &str,
+) -> (Interception, PathBuf) {
+    let env = environments_with(max_bytes, extra).get(name).expect("made");
     let interception = Interception::open(
         env,
         ("claude", claude()),
@@ -1003,4 +1013,36 @@ fn a_prompt_waits_for_the_hook_to_report_it_is_in_force_and_is_refused_when_it_d
             .contains("did not report"),
         "{answer}"
     );
+}
+
+#[test]
+fn the_channel_handles_a_bounded_number_of_requests_and_drops_an_idle_connection_before_its_secret_is_checked()
+ {
+    let modes = Arc::new(Modes::default());
+    let (interception, channel) = opened_with(
+        "box",
+        1 << 20,
+        &modes,
+        "hook_handlers = 2\nhook_read_ms = 300\n",
+    );
+    let held: Value =
+        serde_json::from_slice(&std::fs::read(&channel).expect("read")).expect("JSON");
+    let addr: std::net::SocketAddr = held["addr"]
+        .as_str()
+        .expect("an address")
+        .parse()
+        .expect("parses");
+    // Two connections that send nothing take every handler.
+    let idle: Vec<std::net::TcpStream> = (0..2)
+        .map(|_| std::net::TcpStream::connect(addr).expect("connects"))
+        .collect();
+    std::thread::sleep(Duration::from_millis(100));
+    let (status, _, _) = forwarded(KIND_TOOL, &channel, None, bash("ls").to_string().as_bytes());
+    assert_eq!(status, 2, "past the bound a call is refused, never run");
+    // They are dropped once hook_read_ms passes, and a call is heard again.
+    std::thread::sleep(Duration::from_millis(500));
+    let (status, _, err) = forwarded(KIND_TOOL, &channel, None, bash("ls").to_string().as_bytes());
+    assert_eq!(status, 0, "{err}");
+    drop(idle);
+    drop(interception);
 }

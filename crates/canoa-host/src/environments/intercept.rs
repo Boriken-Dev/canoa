@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -374,8 +374,13 @@ struct Shared {
     latest: Mutex<BTreeMap<String, String>>,
     ops: Mutex<BTreeMap<String, Op>>,
     max_bytes: usize,
-    /// How long a forwarder may take for its answer, in all, and the host for a request: the environment's `hook_seconds`.
+    /// How long a forwarder may take for its answer, in all: the environment's `hook_seconds`.
     seconds: u64,
+    /// Requests handled now, and how many may be (`hook_handlers`, 0 for any number).
+    handlers: AtomicUsize,
+    max_handlers: usize,
+    /// How long a connection has to send its request before its secret is checked (`hook_read_ms`, 0 for as long as it takes).
+    read_ms: u64,
 }
 
 /// One connection's take-over of its agent's own tools: a loopback channel, and the plugin of each session request.
@@ -428,7 +433,15 @@ impl Interception {
         let seconds = answer_seconds(&env);
         // A tool call is judged by this, so an environment that is slow to say what it is never decides how long the hook takes.
         let info = env.info();
+        let max_handlers = match env.hook_handlers() {
+            0 => usize::MAX,
+            set => usize::try_from(set).unwrap_or(usize::MAX),
+        };
+        let read_ms = env.hook_read_ms();
         let shared = Arc::new(Shared {
+            handlers: AtomicUsize::new(0),
+            max_handlers,
+            read_ms,
             env,
             info,
             hook,
@@ -618,10 +631,22 @@ fn accept(listener: &TcpListener, shared: &Arc<Shared>, stop: &AtomicBool) {
                 {
                     continue;
                 }
+                // Past the bound a connection is dropped unread, which refuses that call: idle connections of another user
+                // cannot take the host's threads.
+                if shared.handlers.fetch_add(1, Ordering::SeqCst) >= shared.max_handlers {
+                    shared.handlers.fetch_sub(1, Ordering::SeqCst);
+                    continue;
+                }
                 let own = Arc::clone(shared);
-                let _ = std::thread::Builder::new()
+                let spawned = std::thread::Builder::new()
                     .name("canoa-env-tool-call".to_owned())
-                    .spawn(move || handle(&stream, &own));
+                    .spawn(move || {
+                        handle(&stream, &own);
+                        own.handlers.fetch_sub(1, Ordering::SeqCst);
+                    });
+                if spawned.is_err() {
+                    shared.handlers.fetch_sub(1, Ordering::SeqCst);
+                }
             }
             Err(_) => std::thread::sleep(POLL),
         }
@@ -637,8 +662,16 @@ fn write_line(mut stream: &TcpStream, value: &Value) {
 /// One request. Anything that is not one well-formed request with a secret the host holds is dropped unanswered, which the
 /// forwarder takes for a refusal.
 fn handle(stream: &TcpStream, shared: &Shared) {
-    let deadline = Instant::now() + Duration::from_secs(shared.seconds);
-    let Some(line) = read_line(stream, deadline, shared.max_bytes.saturating_add(ENVELOPE)) else {
+    // The forwarder writes its request as soon as it connects; only a connection whose secret holds gets longer.
+    let wait = match shared.read_ms {
+        0 => Duration::from_secs(LONGEST_HOOK_SECONDS),
+        set => Duration::from_millis(set),
+    };
+    let Some(line) = read_line(
+        stream,
+        Instant::now() + wait,
+        shared.max_bytes.saturating_add(ENVELOPE),
+    ) else {
         return;
     };
     let Ok(request) = serde_json::from_slice::<Value>(&line) else {

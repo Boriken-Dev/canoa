@@ -697,6 +697,12 @@ pub const DEFAULT_MAX_TOOL_SESSIONS: u64 = 256;
 /// How long the hook that takes an agent's own tools over may take for its answer when `hook_seconds` is not set: 30 seconds.
 pub const DEFAULT_HOOK_SECONDS: u64 = 30;
 
+/// How many requests of the take-over's channel are handled at once when `hook_handlers` is not set: 16.
+pub const DEFAULT_HOOK_HANDLERS: u64 = 16;
+
+/// How long a connection to the take-over's channel has to send its request when `hook_read_ms` is not set: one second.
+pub const DEFAULT_HOOK_READ_MS: u64 = 1000;
+
 /// One `[host.environments.NAME]`: a place an agent works, made by an `environment` provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -720,6 +726,10 @@ pub struct EnvironmentConfig {
     /// How many sessions of one connection may be given this environment's tool server (`max_tool_sessions`), `0` for any number;
     /// `None` is [`DEFAULT_MAX_TOOL_SESSIONS`].
     pub max_tool_sessions: Option<u64>,
+    /// How long a connection to the hook's channel has to send its request, in milliseconds, before its secret is checked (`hook_read_ms`), `0` for as long as it takes; `None` is [`DEFAULT_HOOK_READ_MS`].
+    pub hook_read_ms: Option<u64>,
+    /// How many requests of the hook's channel are handled at once; one past it is dropped, which refuses that call (`hook_handlers`), `0` for any number; `None` is [`DEFAULT_HOOK_HANDLERS`].
+    pub hook_handlers: Option<u64>,
     /// How long the hook that takes an agent's own tools over may take to have the host's answer, in all, and a prompt waits for the hook to report that it is in force (`hook_seconds`), `0` for as long as the agent's hook can wait; `None` is [`DEFAULT_HOOK_SECONDS`].
     pub hook_seconds: Option<u64>,
 }

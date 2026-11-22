@@ -60,8 +60,8 @@ pub use types::{
     StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
-    DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_SECONDS, DEFAULT_MAX_TOOL_SESSIONS, DEFAULT_OUTPUT_BYTES,
-    DEFAULT_SCROLLBACK_BYTES, EnvironmentConfig,
+    DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
+    DEFAULT_MAX_TOOL_SESSIONS, DEFAULT_OUTPUT_BYTES, DEFAULT_SCROLLBACK_BYTES, EnvironmentConfig,
 };
 
 struct TopLevel {
@@ -483,6 +483,8 @@ fn environment_of(
         output_bytes: raw.output_bytes,
         scrollback_bytes: raw.scrollback_bytes,
         max_tool_sessions: raw.max_tool_sessions,
+        hook_read_ms: raw.hook_read_ms,
+        hook_handlers: raw.hook_handlers,
         hook_seconds: raw.hook_seconds,
     })
 }
