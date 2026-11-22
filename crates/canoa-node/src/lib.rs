@@ -1,5 +1,5 @@
 //! Node.js for Canoa: `node_store`, nodejs.org's own builds checked against `SHASUMS256.txt` and unpacked into the Store's
-//! folder. Neither signature is checked: the plan says so.
+//! folder. Nothing checks a publisher's signature.
 #![forbid(unsafe_code)]
 #![allow(
     clippy::std_instead_of_core,

@@ -1,5 +1,5 @@
 //! PowerShell 7 for Canoa: `powershell_store`, the zip (Windows) or `tar.gz` (Linux) of Microsoft's PowerShell 7 releases,
-//! checked against the SHA-256 GitHub lists. A publisher's signature is not checked, and the plan says so.
+//! checked against the SHA-256 GitHub lists. A publisher's signature is not checked.
 #![forbid(unsafe_code)]
 #![allow(
     clippy::std_instead_of_core,

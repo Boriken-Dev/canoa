@@ -1,6 +1,6 @@
 //! Bitwarden's command line (`bw`) for Canoa: the Secret providers type's store. The publisher lists a release's files with
 //! the SHA-256 of each on GitHub, a zip holding the one program, and the download is checked against that digest. A publisher's
-//! signature is not checked, and the plan says so.
+//! signature is not checked.
 //!
 //! Nothing here reads a vault: the store puts the program on the computer, and the Bitwarden secret provider runs it when the
 //! person has set it up. The program is on no search path of what the host starts: only the spawner a secret provider is handed

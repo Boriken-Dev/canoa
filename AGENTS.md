@@ -16,6 +16,11 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | [`crates/canoa-claude/AGENTS.md`](crates/canoa-claude/AGENTS.md) | `canoa-claude`: Claude Code's provider re-export, source preset and Store recipe |
 | [`crates/canoa-codex/AGENTS.md`](crates/canoa-codex/AGENTS.md) | `canoa-codex`: the same for Codex |
 | [`crates/canoa-grok/AGENTS.md`](crates/canoa-grok/AGENTS.md) | `canoa-grok`: Grok's source preset and Store recipe |
+| [`crates/canoa-node/AGENTS.md`](crates/canoa-node/AGENTS.md) | `canoa-node`: Node.js as a Store program |
+| [`crates/canoa-python/AGENTS.md`](crates/canoa-python/AGENTS.md) | `canoa-python`: CPython as a Store program |
+| [`crates/canoa-git-bash/AGENTS.md`](crates/canoa-git-bash/AGENTS.md) | `canoa-git-bash`: Git for Windows' portable Bash as a Store program |
+| [`crates/canoa-powershell/AGENTS.md`](crates/canoa-powershell/AGENTS.md) | `canoa-powershell`: PowerShell 7 as a Store program |
+| [`crates/canoa-bitwarden/AGENTS.md`](crates/canoa-bitwarden/AGENTS.md) | `canoa-bitwarden`: Bitwarden's command line as a Store program and the `secrets` Store type |
 | [`crates/canoa-pi/AGENTS.md`](crates/canoa-pi/AGENTS.md) | `canoa-pi`: Pi's provider re-export, source preset and Store recipe |
 | [`crates/canoa-antigravity/AGENTS.md`](crates/canoa-antigravity/AGENTS.md) | `canoa-antigravity`: Antigravity's source preset and Store recipe |
 | [`crates/canoa-opencode/AGENTS.md`](crates/canoa-opencode/AGENTS.md) | `canoa-opencode`: OpenCode's source preset and Store recipe |

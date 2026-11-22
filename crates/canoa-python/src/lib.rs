@@ -1,5 +1,5 @@
 //! Python for Canoa: `python_store`, the standalone CPython build the Astral project publishes, checked against `SHA256SUMS`
-//! and unpacked into the Store's folder. Neither signature is checked: the plan says so.
+//! and unpacked into the Store's folder. Nothing checks a publisher's signature.
 #![forbid(unsafe_code)]
 #![allow(
     clippy::std_instead_of_core,

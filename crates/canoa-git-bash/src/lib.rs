@@ -1,5 +1,5 @@
 //! Git Bash for Canoa: `git_bash_store`, Git for Windows' portable release holding `bin/bash.exe` with the tools that go
-//! with it and `git`, checked against the SHA-256 GitHub lists. A publisher's signature is not checked, and the plan says so.
+//! with it and `git`, checked against the SHA-256 GitHub lists. A publisher's signature is not checked.
 #![forbid(unsafe_code)]
 #![allow(
     clippy::std_instead_of_core,
