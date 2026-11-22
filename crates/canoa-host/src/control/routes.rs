@@ -81,6 +81,15 @@ impl Control {
         Ok(caller.grants_json())
     }
 
+    pub(super) fn r_fs_write(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.files.write(caller, params)
+    }
+
     pub(super) fn r_fs_read(
         &self,
         _: &Caller,

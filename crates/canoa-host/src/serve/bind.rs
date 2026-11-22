@@ -941,7 +941,8 @@ fn build_control_hub(
                         .map_or(control::DEFAULT_MAX_UPLOADS, |c| c.max_uploads),
                 },
             )
-            .with_openers(config.openers.clone()),
+            .with_openers(config.openers.clone())
+            .with_protected(config.protected_paths.clone()),
         );
     let kept = kept
         .with_worktree_limits(config.worktrees)

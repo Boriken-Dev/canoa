@@ -62,13 +62,15 @@ pub(super) fn native_of(raw: RawNative) -> Result<NativeConfig, ConfigError> {
                         | crate::control::Grant::OverlayWrite
                         | crate::control::Grant::HostRestart
                         | crate::control::Grant::Upload
+                        | crate::control::Grant::FilesWrite
+                        | crate::control::Grant::FilesWriteHost
                         | crate::control::Grant::Terminal
                         | crate::control::Grant::VoiceSetup
                         | crate::control::Grant::Hosting
                 )
             }) {
                 return Err(refused(
-                    "control cannot hold config.write.sessions, overlay.write, host.restart, upload, terminal, voice.setup or hosting: a browser key does not get them through the door",
+                    "control cannot hold config.write.sessions, overlay.write, host.restart, upload, files.write, files.write.host, terminal, voice.setup or hosting: a browser key does not get them through the door",
                 ));
             }
             set

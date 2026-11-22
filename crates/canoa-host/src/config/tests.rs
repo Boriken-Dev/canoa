@@ -2008,6 +2008,14 @@ fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_neve
             "host.native",
         ),
         ("[host.native]\ncontrol = [\"upload\"]\n", "host.native"),
+        (
+            "[host.native]\ncontrol = [\"files.write\"]\n",
+            "host.native",
+        ),
+        (
+            "[host.native]\ncontrol = [\"files.write.host\"]\n",
+            "host.native",
+        ),
         ("[host.native]\ncontrol = [\"terminal\"]\n", "host.native"),
         (
             "[host.native]\ncontrol = [\"voice.setup\"]\n",

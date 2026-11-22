@@ -13,7 +13,7 @@ use serde_json::Value;
 use canoa::store::protect::Protected;
 
 /// What the host protects when the person wrote no list: the app's recommended list, one file both read.
-pub(crate) const RECOMMENDED: &str = include_str!("../../../protected_default.txt");
+pub(crate) const RECOMMENDED: &str = crate::config::RECOMMENDED_PROTECTED;
 
 /// The keys of a call's input that name a file.
 const PATH_KEYS: [&str; 4] = ["file_path", "path", "notebook_path", "filePath"];

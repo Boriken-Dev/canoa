@@ -11,6 +11,7 @@ use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
+use canoa::store::protect::Protected;
 use serde_json::{Value, json};
 
 use super::{Caller, EntryRoots, REFUSED, bad, private_dir, text_param, whole_machine};
@@ -122,6 +123,8 @@ pub(crate) struct Files {
     opener: workspace::Opener,
     /// Configured `[host] openers`, or `None` to offer today's seeded three.
     openers: RwLock<Option<Vec<crate::config::OpenerConfig>>>,
+    /// The person's protected paths, in gitignore syntax (`[permissions] protected`); the recommended list when none is written.
+    protected: Option<Vec<String>>,
 }
 
 mod config;
@@ -153,7 +156,15 @@ impl Files {
             documents: None,
             opener: workspace::Opener::default(),
             openers: RwLock::new(None),
+            protected: None,
         }
+    }
+
+    /// Takes the person's list of protected paths, which `fs/write` never writes; `None` is the recommended list.
+    #[must_use]
+    pub(crate) fn with_protected(mut self, lines: Option<Vec<String>>) -> Self {
+        self.protected = lines;
+        self
     }
 
     /// Starts programs through this opener instead of the computer's own.
@@ -474,6 +485,122 @@ impl Files {
             "offset": offset,
             "next": next,
             "data": data.map(|data| data_encoding::BASE64.encode(data)),
+        }))
+    }
+
+    /// Whether `path` is on, in or under a place of the person's protected list, as `path` is and as the links in it lead.
+    fn protects(&self, path: &Path) -> bool {
+        let list = self.protected.as_ref().map_or_else(
+            || Protected::new(crate::config::RECOMMENDED_PROTECTED.lines()),
+            Protected::new,
+        );
+        list.protects(path, self.home.as_deref())
+    }
+
+    /// The files and folders this host keeps for itself, which `fs/write` leaves alone unless the key holds `files.write.host`:
+    /// canoa.cfg and the host's state folder (the keys it trusts, the ledger, the accounts, the uploads).
+    fn keeps(&self, path: &Path) -> bool {
+        let resolved = |place: &Path| fs::canonicalize(place).map(plain).ok();
+        let file = self.config.as_deref().and_then(resolved);
+        let state = self
+            .uploads
+            .as_deref()
+            .and_then(|dir| dir.parent().and_then(Path::parent))
+            .and_then(resolved);
+        file.is_some_and(|file| path == file) || state.is_some_and(|state| path.starts_with(state))
+    }
+
+    /// `fs/write` `{"path", "text"}`: writes `text` as the whole of the regular file at `path`, whole or not at all, with the mode
+    /// the file has (a new file the mode any new file has here). The key holds `files` and `files.write`, and the place is one it
+    /// browses. What is refused is a place on the person's protected list, and, without `files.write.host`, canoa.cfg and the host's
+    /// own state folder; each refusal says which. The text arrives in one request, so `[host] max_message_bytes` bounds it.
+    pub(crate) fn write(&self, caller: &Caller, params: &Value) -> Outcome {
+        let asked = text_param(params, "path")?
+            .ok_or_else(|| bad("a path is needed: the file to write"))?;
+        let text = match params.get("text") {
+            Some(Value::String(text)) => text.as_str(),
+            _ => return Err(bad("text is needed: the UTF-8 contents to write")),
+        };
+        let path = Path::new(asked);
+        if !path.is_absolute()
+            || asked.chars().any(char::is_control)
+            || asked
+                .split(['/', '\\'])
+                .any(|segment| segment == "." || segment == "..")
+        {
+            return Err(bad(
+                "a path must be absolute, with no `.` or `..` and no control character",
+            ));
+        }
+        let missing = || {
+            (
+                super::NOT_FOUND,
+                "the parent folder does not exist, or this account cannot see it".to_owned(),
+            )
+        };
+        let resolved = match fs::canonicalize(path).map(plain) {
+            Ok(real) => {
+                let meta = fs::metadata(&real).map_err(|error| {
+                    refused(&format!("that file could not be inspected: {error}"))
+                })?;
+                if meta.is_dir() {
+                    return Err(bad("that is a folder, not a file"));
+                }
+                if !meta.is_file() {
+                    return Err(bad("that is not a regular file, so it is not written"));
+                }
+                real
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let name = path
+                    .file_name()
+                    .ok_or_else(|| bad("the path names no file"))?;
+                // Windows reads a name ending in a dot or a space, or holding a colon, as another one.
+                if cfg!(windows) {
+                    let shown = name.to_string_lossy();
+                    if shown.ends_with(['.', ' ']) || shown.contains(':') {
+                        return Err(bad(
+                            "on Windows a name ending in a dot or a space, or holding a colon, is read as another name",
+                        ));
+                    }
+                }
+                let parent = path.parent().ok_or_else(missing)?;
+                let real_parent = fs::canonicalize(parent).map(plain).map_err(|_| missing())?;
+                if !fs::metadata(&real_parent).is_ok_and(|meta| meta.is_dir()) {
+                    return Err(bad("its parent is not a folder"));
+                }
+                real_parent.join(name)
+            }
+            Err(_) => {
+                return Err((
+                    super::NOT_FOUND,
+                    "there is no file at that path, or this account cannot see it".to_owned(),
+                ));
+            }
+        };
+        if !self
+            .browse_roots(caller)
+            .iter()
+            .any(|root| resolved.starts_with(root))
+        {
+            return Err(refused("that place is not one this key may write in"));
+        }
+        if self.protects(&resolved) {
+            return Err(refused(
+                "that place is on your protected list ([permissions] protected), so it is not written from here",
+            ));
+        }
+        if self.keeps(&resolved) && !caller.may(super::Grant::FilesWriteHost) {
+            return Err(refused(
+                "that is canoa.cfg or this host's own state folder, which a key writes only with the files.write.host grant",
+            ));
+        }
+        crate::replace::write_file(&resolved, text.as_bytes(), crate::replace::SHARED)
+            .map_err(|error| refused(&format!("that file could not be written: {error}")))?;
+        Ok(json!({
+            "path": text_of(&resolved),
+            "name": visible_name(&shown_name(&resolved)),
+            "size": text.len(),
         }))
     }
 }

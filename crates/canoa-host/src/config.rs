@@ -35,6 +35,9 @@ use entries_parse::{
 };
 pub use entries_parse::{built_in_harnesses, is_built_in_harness};
 pub use layers::{ENTRIES, INSTALLED_DIR_VARIABLE, Layers, merge_into};
+
+/// What the host protects when the person wrote no `[permissions] protected` list: the app's recommended list, one file both read.
+pub(crate) const RECOMMENDED_PROTECTED: &str = include_str!("protected_default.txt");
 pub use profiles::CLIENT_KINDS;
 use profiles::{
     client_loadouts_of, default_loadout_of, loadouts_of, local_profiles_of, overlay_kb_of,

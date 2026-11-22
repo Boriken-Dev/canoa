@@ -75,6 +75,13 @@ pub enum Grant {
     /// `fs/read`, and with `folders` an `fs/list` not kept to any place: this computer's files as the account the host runs as can
     /// read them. The grant is the only gate.
     Files,
+    /// `fs/write`, together with `files`: writes a text file anywhere this computer's account can, but not a place on the person's
+    /// protected list, and not canoa.cfg or the host's own state folder, which `files.write.host` is for. What a file holds can be what
+    /// an agent or a program reads next, so it is as much as access to the agent; a delegated child connection never has it.
+    FilesWrite,
+    /// `fs/write` of canoa.cfg and of the host's own state folder, besides `files.write`: those files name the programs the host
+    /// runs and the keys it trusts, so this is as much as access to the host itself.
+    FilesWriteHost,
     /// `terminal/open`, `terminal/write`, `terminal/resize`, `terminal/scrollback` and `terminal/close`: the person's own shell on this
     /// computer, as this user, with output pushed back on the same link as `terminal/output`. It is a shell, so it is as much as
     /// access to the agent and to everything else this user can do here; a delegated child connection never holds it.
@@ -216,6 +223,16 @@ pub(super) const GRANT_SPECS: [GrantSpec; 27] = [
         control: true,
     },
     GrantSpec {
+        grant: Grant::FilesWrite,
+        name: "files.write",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::FilesWriteHost,
+        name: "files.write.host",
+        control: true,
+    },
+    GrantSpec {
         grant: Grant::Terminal,
         name: "terminal",
         control: true,
@@ -265,7 +282,7 @@ pub(super) const GRANT_SPECS: [GrantSpec; 27] = [
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub const fn all() -> [Self; 27] {
+    pub const fn all() -> [Self; 29] {
         [
             GRANT_SPECS[0].grant,
             GRANT_SPECS[1].grant,
@@ -294,6 +311,8 @@ impl Grant {
             GRANT_SPECS[24].grant,
             GRANT_SPECS[25].grant,
             GRANT_SPECS[26].grant,
+            GRANT_SPECS[27].grant,
+            GRANT_SPECS[28].grant,
         ]
     }
 

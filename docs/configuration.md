@@ -1225,6 +1225,9 @@ something is told instead of refused, it is in the log as `non-default:`, in `ca
 - **Foundry Local.** An account's `answer_seconds` (1800) is how long one answer may take.
 - **Files.** The host answers `fs/list` and `fs/read` a page at a time and says where the next one starts, so a long folder or a large
   file is reachable whole.
+- **Writing files.** `fs/write` (grants `files` and `files.write`) has no limit of its own beyond `[host] max_message_bytes`, which bounds the
+  one request that carries the text; it never writes a place on your protected list, nor canoa.cfg or the host's state folder without
+  `files.write.host`.
 - **Keep awake.** Settings > General > Power (`[settings.power] keep_awake`, off by default) keeps this computer from idle-sleeping while an
   agent turn runs, for as long as the turn does; it lets go when the turn ends, the connection closes or the host stops, however it
   stops. Read when the host starts.

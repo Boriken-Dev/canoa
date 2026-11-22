@@ -956,6 +956,8 @@ mod files_read_tests;
 #[cfg(test)]
 mod files_tests;
 #[cfg(test)]
+mod files_write_tests;
+#[cfg(test)]
 mod folders_tests;
 mod grants;
 pub(crate) mod hosting;

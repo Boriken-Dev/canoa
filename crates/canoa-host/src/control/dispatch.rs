@@ -129,6 +129,11 @@ pub(super) static ROUTES: &[Route] = &[
     rpc("peer/forget", Access::Open, Control::r_forget),
     rpc("host/grants", Access::Open, Control::r_grants),
     rpc("fs/read", Access::Require(Grant::Files), Control::r_fs_read),
+    rpc(
+        "fs/write",
+        Access::All(&[Grant::Files, Grant::FilesWrite]),
+        Control::r_fs_write,
+    ),
     rpc("state/get", Access::Require(Grant::State), Control::r_state),
     rpc("state/put", Access::Require(Grant::State), Control::r_state),
     rpc(
