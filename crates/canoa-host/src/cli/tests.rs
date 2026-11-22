@@ -50,7 +50,7 @@ fn a_legacy_name_never_replaces_the_new_one() {
         "new"
     );
     assert_eq!(
-        std::fs::read_to_string(dir.join("canoa.cfg")).expect("read"),
+        std::fs::read_to_string(dir.join("Canoa.cfg")).expect("read"),
         "old"
     );
     let _ = std::fs::remove_dir_all(&dir);
