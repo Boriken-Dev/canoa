@@ -295,7 +295,7 @@
       "url": {
         "type": "string",
         "title": "Address",
-        "description": "The address the audio is posted to, such as `https://api.openai.com/v1/audio/transcriptions`.",
+        "description": "The address the audio is posted to, such as `https://speech.example.test/v1/audio/transcriptions`.",
         "x-section": "endpoint"
       },
       "model": {
