@@ -811,63 +811,22 @@ pub struct MailConfig {
     pub accounts: IndexMap<String, MailAccount>,
 }
 
-/// What reaches a mailbox.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum MailBackend {
-    /// Exchange Server's web services (EWS).
-    Ews,
-    /// Exchange Online through Microsoft Graph, with a token from the person's Windows sign-in.
-    Graph,
-    /// Classic Outlook for Windows, through a PowerShell helper that drives its object model.
-    Outlook,
-}
-
-/// How an Exchange account signs in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum MailAuth {
-    /// A user name and a password the environment holds.
-    Basic,
-    /// The person's Windows logon.
-    Windows,
-}
-
-/// One `[host.mail.accounts.NAME]`. It holds no password: `password_env` names the variable that does, and `id` names the entry
+/// One `[host.mail.accounts.NAME]`. It holds no secret: `password_env` names the variable that does, and `id` names the entry
 /// of the host's account store that does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MailAccount {
-    /// What reaches the mailbox.
-    pub backend: MailBackend,
-    /// The mailbox's address, which Autodiscover asks about (`ews`), or the account Windows is asked to sign in as when it
-    /// holds several (`graph`).
-    pub email: Option<String>,
-    /// The EWS address; Autodiscover finds it from `email` when this is not given (`ews`). For `graph`, Graph's address
-    /// (default `https://graph.microsoft.com/v1.0`).
-    pub server: Option<String>,
-    /// The Autodiscover address to ask instead of the two the address's domain suggests (`ews`).
-    pub autodiscover: Option<String>,
-    /// How an Exchange account signs in.
-    pub auth: MailAuth,
-    /// The account's user name for Basic (`ews`).
-    pub user: Option<String>,
-    /// The variable that holds the password for Basic (`ews`); it is used before a stored password.
+    /// Which `mail_backend` provider opens this mailbox (for example `ews`, `graph`, `outlook`, or an extension's).
+    pub backend: String,
+    /// The variable that holds the secret; it is used before a stored secret.
     pub password_env: Option<String>,
-    /// The id the password for Basic rests under in the host's account store, which `canoa mail add` writes (`ews`).
+    /// The id the secret rests under in the host's account store, which `canoa mail add` or the settings dialog writes.
     pub id: Option<String>,
-    /// The Outlook profile to log on to; the one Outlook is running with otherwise (`outlook`).
-    pub profile: Option<String>,
-    /// The program and arguments that run the helper, instead of Windows PowerShell with the helper script (`outlook`,
-    /// `graph`).
-    pub command: Option<Vec<String>>,
-    /// The application (client) id of the app registration in Entra ID that the Windows sign-in is asked for a token for
-    /// (`graph`).
-    pub client_id: Option<String>,
-    /// The tenant the registration is in: its id or domain, `organizations` when not given (`graph`).
-    pub tenant: Option<String>,
     /// How long one call may take, in seconds (default 60).
     pub timeout_secs: u64,
+    /// Settings of the backend (`server`, `email`, `user`, `profile`, `client_id`, `tenant`, etc.), flattened in `canoa.cfg` and
+    /// checked by the `mail_backend` provider.
+    pub settings: Settings,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a
@@ -2046,31 +2005,20 @@ struct RawMail {
 
 /// `[host.mail.accounts.NAME]`.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawMailAccount {
     backend: Option<String>,
-    email: Option<String>,
-    server: Option<String>,
-    autodiscover: Option<String>,
-    auth: Option<String>,
-    user: Option<String>,
     password_env: Option<String>,
     id: Option<String>,
-    profile: Option<String>,
-    command: Option<Vec<String>>,
-    client_id: Option<String>,
-    tenant: Option<String>,
     timeout_secs: Option<u64>,
-}
-
-/// Whether `address` is an http or https address a mailbox may be reached at, wherever it is: plain http beyond this computer is the
-/// person's choice, and `canoa check` and the log tell it (`addresses::notes`).
-fn mail_address(address: &str) -> bool {
-    canoa::address::parse(address).is_ok()
+    #[serde(flatten)]
+    rest: toml::Table,
 }
 
 impl RawMail {
     fn into_config(self) -> Result<MailConfig, ConfigError> {
+        let trim = |value: Option<String>| -> Option<String> {
+            value.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
+        };
         let mut accounts = IndexMap::new();
         for (name, raw) in self.accounts {
             let invalid = |what: &str| ConfigError::Invalid {
@@ -2083,148 +2031,49 @@ impl RawMail {
                     .chars()
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
             {
-                return Err(ConfigError::Invalid {
-                    entry: None,
-                    what: format!(
-                        "[host.mail.accounts.{name}] the name is 1 to 32 lower-case letters, digits, - and _"
-                    ),
-                });
+                return Err(invalid(
+                    "the name is 1 to 32 lower-case letters, digits, - and _",
+                ));
             }
-            let backend = match raw.backend.as_deref() {
-                Some("ews") => MailBackend::Ews,
-                Some("graph") => MailBackend::Graph,
-                Some("outlook") => MailBackend::Outlook,
-                _ => return Err(invalid("backend is ews, graph or outlook")),
-            };
+            let backend = raw
+                .backend
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| canoa::mail_backend::is_valid_id(s))
+                .ok_or_else(|| invalid("backend must be 1 to 32 lower-case letters, digits or _"))?
+                .to_owned();
+            if raw.rest.contains_key("password") {
+                return Err(invalid(
+                    "password is a setting this host does not keep in canoa.cfg; use password_env or canoa mail add",
+                ));
+            }
             let timeout_secs = raw.timeout_secs.unwrap_or(60);
             if timeout_secs == 0 {
                 return Err(invalid(
                     "timeout_secs is a whole number of seconds, at least 1",
                 ));
             }
-            if backend != MailBackend::Graph && (raw.client_id.is_some() || raw.tenant.is_some()) {
-                return Err(invalid("client_id and tenant are for graph"));
-            }
-            let auth = match backend {
-                MailBackend::Graph => {
-                    if raw.autodiscover.is_some()
-                        || raw.auth.is_some()
-                        || raw.user.is_some()
-                        || raw.password_env.is_some()
-                        || raw.profile.is_some()
-                    {
-                        return Err(invalid(
-                            "graph signs in as Windows does: it takes client_id, tenant, email, server and command, not autodiscover, auth, user, password_env or profile",
-                        ));
-                    }
-                    if raw.client_id.as_deref().is_none_or(str::is_empty) {
-                        return Err(invalid(
-                            "graph needs the client_id of an app registration in Entra ID (a public client with the delegated permission Mail.ReadWrite), or use the outlook backend, which needs none",
-                        ));
-                    }
-                    if raw.tenant.as_deref().is_some_and(str::is_empty) {
-                        return Err(invalid("tenant is an id or a domain"));
-                    }
-                    if raw
-                        .server
-                        .as_deref()
-                        .is_some_and(|address| !mail_address(address))
-                    {
-                        return Err(invalid("server is an http or https address"));
-                    }
-                    if raw
-                        .command
-                        .as_ref()
-                        .is_some_and(|c| c.first().is_none_or(String::is_empty))
-                    {
-                        return Err(invalid("command names a program"));
-                    }
-                    MailAuth::Windows
+            let id = match raw.id {
+                Some(id) if id.trim().is_empty() => {
+                    return Err(invalid("id is empty; set it or run `canoa mail add`"));
                 }
-                MailBackend::Outlook => {
-                    if raw.email.is_some()
-                        || raw.server.is_some()
-                        || raw.autodiscover.is_some()
-                        || raw.auth.is_some()
-                        || raw.user.is_some()
-                        || raw.password_env.is_some()
-                        || raw.id.is_some()
-                    {
-                        return Err(invalid(
-                            "outlook signs in as Outlook does: it takes profile and command, not email, server, autodiscover, auth, user, password_env or id",
-                        ));
-                    }
-                    if raw
-                        .command
-                        .as_ref()
-                        .is_some_and(|c| c.first().is_none_or(String::is_empty))
-                    {
-                        return Err(invalid("command names a program"));
-                    }
-                    MailAuth::Windows
-                }
-                MailBackend::Ews => {
-                    if raw.profile.is_some() || raw.command.is_some() {
-                        return Err(invalid("profile and command are for outlook"));
-                    }
-                    if raw.server.is_none() && raw.email.is_none() {
-                        return Err(invalid(
-                            "ews needs a server, or an email for Autodiscover to find it by",
-                        ));
-                    }
-                    for (key, address) in
-                        [("server", &raw.server), ("autodiscover", &raw.autodiscover)]
-                    {
-                        if address.as_deref().is_some_and(|a| !mail_address(a)) {
-                            return Err(invalid(&format!("{key} is an http or https address")));
-                        }
-                    }
-                    let auth = match raw.auth.as_deref() {
-                        Some("basic") => MailAuth::Basic,
-                        Some("windows") => MailAuth::Windows,
-                        None if raw.user.is_some() => MailAuth::Basic,
-                        None => MailAuth::Windows,
-                        Some(_) => return Err(invalid("auth is basic or windows")),
-                    };
-                    match auth {
-                        MailAuth::Basic => {
-                            if raw.user.as_deref().is_none_or(str::is_empty)
-                                || (raw.password_env.as_deref().is_none_or(str::is_empty)
-                                    && raw.id.as_deref().is_none_or(str::is_empty))
-                            {
-                                return Err(invalid(
-                                    "basic needs a user and a password: `canoa mail add` stores one under an id, or password_env names the variable holding it",
-                                ));
-                            }
-                        }
-                        MailAuth::Windows => {
-                            if raw.user.is_some() || raw.password_env.is_some() || raw.id.is_some()
-                            {
-                                return Err(invalid(
-                                    "windows signs in as you: it takes no user, password_env or id",
-                                ));
-                            }
-                        }
-                    }
-                    auth
-                }
+                other => trim(other),
             };
+            let password_env = match raw.password_env {
+                Some(env) if env.trim().is_empty() => {
+                    return Err(invalid("password_env is empty"));
+                }
+                other => trim(other),
+            };
+            let settings = settings_of(&format!("host.mail.accounts.{name}"), raw.rest)?;
             accounts.insert(
                 name,
                 MailAccount {
                     backend,
-                    email: raw.email,
-                    server: raw.server,
-                    autodiscover: raw.autodiscover,
-                    auth,
-                    user: raw.user,
-                    password_env: raw.password_env,
-                    id: raw.id,
-                    profile: raw.profile,
-                    command: raw.command,
-                    client_id: raw.client_id,
-                    tenant: raw.tenant,
+                    password_env,
+                    id,
                     timeout_secs,
+                    settings,
                 },
             );
         }

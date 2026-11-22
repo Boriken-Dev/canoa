@@ -522,33 +522,7 @@ enum MailCommand {
     },
     /// Add a mail account: a password it needs is typed without echo, or read from standard input when that is not a terminal,
     /// and never taken from the command line. It rests in the account store; canoa.cfg gets `[host.mail.accounts.NAME]`.
-    Add {
-        /// The account's name: 1 to 32 lower-case letters, digits, `-` and `_`.
-        name: String,
-        /// What reaches the mailbox: `ews` (Exchange Server) or `outlook` (classic Outlook for Windows).
-        #[arg(long, value_enum)]
-        backend: MailBackendArg,
-        /// The mailbox's address, which Autodiscover asks about (ews).
-        #[arg(long)]
-        email: Option<String>,
-        /// The EWS address, when Autodiscover is not to find it (ews).
-        #[arg(long)]
-        server: Option<String>,
-        /// The Autodiscover address to ask (ews).
-        #[arg(long)]
-        autodiscover: Option<String>,
-        /// The user name, which signs in with a password (ews); without it the Windows logon is used.
-        #[arg(long)]
-        user: Option<String>,
-        /// The Outlook profile to log on to (outlook).
-        #[arg(long)]
-        profile: Option<String>,
-        /// How long one call may take, in seconds.
-        #[arg(long)]
-        timeout_secs: Option<u64>,
-        #[command(flatten)]
-        config: ConfigArgs,
-    },
+    Add(Box<MailAddArgs>),
     /// Forget a mail account: its stored password and its table in canoa.cfg. Nothing changes in the mailbox.
     Remove {
         /// The account's name.
@@ -558,11 +532,41 @@ enum MailCommand {
     },
 }
 
-/// The backends `canoa mail add` names.
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum MailBackendArg {
-    Ews,
-    Outlook,
+/// Options accepted by `canoa mail add`.
+#[derive(Debug, Args)]
+struct MailAddArgs {
+    /// The account's name: 1 to 32 lower-case letters, digits, `-` and `_`.
+    name: String,
+    /// The id of a `mail_backend` provider (for example `ews`, `graph`, `outlook`, or an extension's).
+    #[arg(long)]
+    backend: String,
+    /// A setting of the backend, KEY=VALUE (for example `server=https://...`, `client_id=...`), given as JSON when it is
+    /// valid JSON and as text otherwise; repeat for several.
+    #[arg(long = "setting", value_name = "KEY=VALUE", value_parser = parse_setting)]
+    settings: Vec<(String, serde_json::Value)>,
+    /// The mailbox's address, when the backend takes `email`.
+    #[arg(long)]
+    email: Option<String>,
+    /// The service address, when the backend takes `server`.
+    #[arg(long)]
+    server: Option<String>,
+    /// The Autodiscover address, when the backend takes `autodiscover`.
+    #[arg(long)]
+    autodiscover: Option<String>,
+    /// The user name, when the backend takes `user`.
+    #[arg(long)]
+    user: Option<String>,
+    /// The Outlook profile to log on to, when the backend takes `profile`.
+    #[arg(long)]
+    profile: Option<String>,
+    /// The variable that holds the secret when kept in the environment instead of the account store.
+    #[arg(long)]
+    password_env: Option<String>,
+    /// How long one call may take, in seconds.
+    #[arg(long)]
+    timeout_secs: Option<u64>,
+    #[command(flatten)]
+    config: ConfigArgs,
 }
 
 /// What `canoa agent` takes: the agent, its program and settings, and what every agent takes the same way.
@@ -1592,33 +1596,48 @@ fn mail(command: MailCommand, front: &dyn Front) -> Result<(), Failed> {
     use crate::mail::commands as run;
     match command {
         MailCommand::List { config } => run::list(&account_env(&config, front)?, config.format),
-        MailCommand::Add {
-            name,
-            backend,
-            email,
-            server,
-            autodiscover,
-            user,
-            profile,
-            timeout_secs,
-            config,
-        } => run::add(
-            &account_env(&config, front)?,
-            &name,
-            &run::NewAccount {
-                backend: Some(match backend {
-                    MailBackendArg::Ews => crate::MailBackend::Ews,
-                    MailBackendArg::Outlook => crate::MailBackend::Outlook,
-                }),
+        MailCommand::Add(args) => {
+            let MailAddArgs {
+                name,
+                backend,
+                settings,
                 email,
                 server,
                 autodiscover,
                 user,
                 profile,
+                password_env,
                 timeout_secs,
-            },
-            config.format,
-        ),
+                config,
+            } = *args;
+            let mut map = serde_json::Map::new();
+            for (k, v) in settings {
+                map.insert(k, v);
+            }
+            for (k, v) in [
+                ("email", email),
+                ("server", server),
+                ("autodiscover", autodiscover),
+                ("user", user),
+                ("profile", profile),
+            ] {
+                if let Some(v) = v {
+                    map.insert(k.to_owned(), serde_json::Value::String(v));
+                }
+            }
+            run::add(
+                &account_env(&config, front)?,
+                &name,
+                &run::NewAccount {
+                    backend,
+                    id: None,
+                    password_env,
+                    timeout_secs,
+                    settings: map,
+                },
+                config.format,
+            )
+        }
         MailCommand::Remove { name, config } => run::remove(&account_env(&config, front)?, &name),
     }
 }

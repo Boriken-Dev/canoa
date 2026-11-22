@@ -42,13 +42,15 @@ void main() {
     final host = FakeMailHost(accounts: [
       mailAccount('work', user: 'EXAMPLE\\ana'),
       mailAccount('late', state: 'needs a password'),
+      mailAccount('cloud', backend: 'graph', server: null, email: 'ana@example.com', state: 'signed in by Microsoft'),
       mailAccount('desktop', backend: 'outlook', server: null, state: 'signed in by Outlook'),
     ]);
     await _show(tester, host);
-    expect(find.text('Exchange · https://mail.example.test/EWS/Exchange.asmx · EXAMPLE\\ana · password stored'), findsOneWidget);
-    expect(find.text('Exchange · https://mail.example.test/EWS/Exchange.asmx · needs a password'), findsOneWidget);
+    expect(find.text('Exchange Server · https://mail.example.test/EWS/Exchange.asmx · EXAMPLE\\ana · password stored'), findsOneWidget);
+    expect(find.text('Exchange Server · https://mail.example.test/EWS/Exchange.asmx · needs a password'), findsOneWidget);
+    expect(find.text('Microsoft Graph · ana@example.com · signed in by Microsoft'), findsOneWidget);
     expect(find.text('Outlook · signed in by Outlook'), findsOneWidget);
-    for (final name in ['work', 'late', 'desktop']) {
+    for (final name in ['work', 'late', 'cloud', 'desktop']) {
       expect(find.byKey(Key('mail-test $name')), findsOneWidget);
     }
   });
@@ -60,26 +62,27 @@ void main() {
   });
 
   testWidgets('adding a mailbox sends the password to the host once and shows it nowhere', (tester) async {
+    const canary = 'Mail-canary-9a7c';
     final host = FakeMailHost();
     await _show(tester, host);
     await tester.tap(find.byKey(const Key('add-mail-account')));
     await tester.pumpAndSettle();
     await _fill(tester, 'mail-name', 'work');
-    await _fill(tester, 'mail-server', 'https://mail.example.test/EWS/Exchange.asmx');
-    await _fill(tester, 'mail-user', 'EXAMPLE\\ana');
-    await _fill(tester, 'mail-password', canary);
+    await _fill(tester, 'mail-field-server', 'https://mail.example.test/EWS/Exchange.asmx');
+    await _fill(tester, 'mail-field-user', 'EXAMPLE\\ana');
+    await _fill(tester, 'mail-field-password', canary);
     // The field hides what is typed.
-    expect(tester.widget<TextField>(find.byKey(const Key('mail-password'))).obscureText, isTrue);
+    expect(tester.widget<TextField>(find.byKey(const Key('mail-field-password'))).obscureText, isTrue);
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pumpAndSettle();
 
     expect(host.added, hasLength(1));
     final sent = host.added.single;
-    expect((sent.name, sent.backend, sent.user, sent.password), ('work', 'ews', 'EXAMPLE\\ana', canary));
+    expect((sent.name, sent.backend, sent.settings['user'], sent.settings['password']), ('work', 'ews', 'EXAMPLE\\ana', canary));
     expect(find.byKey(const Key('add-mail-dialog')), findsNothing, reason: 'the dialog closed');
     expect(find.byKey(const Key('mail-account work')), findsOneWidget);
     expect(find.textContaining(canary), findsNothing, reason: 'nothing on the page shows the password');
-    expect(find.text('Exchange · https://mail.example.test/EWS/Exchange.asmx · EXAMPLE\\ana · password stored'), findsOneWidget);
+    expect(find.text('Exchange Server · https://mail.example.test/EWS/Exchange.asmx · EXAMPLE\\ana · password stored'), findsOneWidget);
   });
 
   testWidgets('a mailbox with no user name signs in with the Windows logon and sends no password', (tester) async {
@@ -88,11 +91,11 @@ void main() {
     await tester.tap(find.byKey(const Key('add-mail-account')));
     await tester.pumpAndSettle();
     await _fill(tester, 'mail-name', 'logon');
-    await _fill(tester, 'mail-email', 'ana@example.test');
+    await _fill(tester, 'mail-field-email', 'ana@example.test');
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pumpAndSettle();
-    expect(host.added.single.password, isNull);
-    expect(host.added.single.user, isNull);
+    expect(host.added.single.settings['password'], isNull);
+    expect(host.added.single.settings['user'], isNull);
   });
 
   testWidgets('what is missing is said before the host is asked, and the host\'s own refusal is shown as it words it', (tester) async {
@@ -104,32 +107,62 @@ void main() {
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pump();
     expect(find.text('Name the mailbox'), findsOneWidget);
-    // What a name may hold is the host's to say, below: this one goes on to the missing server.
-    await _fill(tester, 'mail-name', 'Bad Name');
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
-    await tester.pump();
-    expect(find.text('Give the server address or the mailbox\'s email address'), findsOneWidget);
     await _fill(tester, 'mail-name', 'work');
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pump();
     expect(find.text('A mailbox is called that already'), findsOneWidget);
-    await _fill(tester, 'mail-name', 'other');
+
+    // Switching to Graph validates its required client_id from the backend schema.
+    await _fill(tester, 'mail-name', 'cloud');
+    await tester.tap(find.byKey(const Key('mail-backend-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Microsoft Graph').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pump();
-    expect(find.text('Give the server address or the mailbox\'s email address'), findsOneWidget);
-    await _fill(tester, 'mail-server', 'http://mail.example.com/EWS/Exchange.asmx');
-    await _fill(tester, 'mail-user', 'u');
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
-    await tester.pump();
-    expect(find.text('Type the password'), findsOneWidget);
+    expect(find.textContaining('Application (client) ID'), findsWidgets);
     expect(host.added, isEmpty);
 
     host.refuseAdd = 'the edited canoa.cfg would not be read: server is an http or https address';
-    await _fill(tester, 'mail-password', 'x');
+    await _fill(tester, 'mail-field-client_id', 'app-1');
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pumpAndSettle();
     expect(find.textContaining('server is an http or https address'), findsOneWidget);
     expect(find.byKey(const Key('add-mail-dialog')), findsOneWidget, reason: 'the dialog stays so the address can be fixed');
+  });
+
+  testWidgets('an extension mail backend renders and submits directly from its schema', (tester) async {
+    final host = FakeMailHost(backends: [
+      const MailBackendInfo(
+        id: 'imap',
+        title: 'IMAP',
+        description: 'Connect to any IMAP server.',
+        schema: {
+          'type': 'object',
+          'properties': {
+            'host': {'type': 'string', 'title': 'IMAP host'},
+            'password': {'type': 'string', 'title': 'Password', 'writeOnly': true, 'x-sensitive': true},
+          },
+          'required': ['host'],
+        },
+        form: {
+          'fields': {
+            'password': {'widget': 'password'},
+          },
+        },
+      ),
+    ]);
+    await _show(tester, host);
+    await tester.tap(find.byKey(const Key('add-mail-account')));
+    await tester.pumpAndSettle();
+    await _fill(tester, 'mail-name', 'fastmail');
+    await _fill(tester, 'mail-field-host', 'imap.fastmail.com');
+    await _fill(tester, 'mail-field-password', 'app-secret');
+    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    await tester.pumpAndSettle();
+    expect(host.added.single.backend, 'imap');
+    expect(host.added.single.settings, {'host': 'imap.fastmail.com', 'password': 'app-secret'});
+    expect(find.text('IMAP · imap.fastmail.com · password stored'), findsOneWidget);
   });
 
   testWidgets('Test sign-in asks the host and says how it went', (tester) async {
@@ -238,7 +271,7 @@ void main() {
 
 final class _Unreachable implements MailHost {
   @override
-  Future<List<MailAccountInfo>> list() async => throw StateError('no link');
+  Future<MailAccountsSnapshot> list() async => throw StateError('no link');
 
   @override
   Future<MailAccountInfo> add(NewMailAccount account) async => throw StateError('no link');

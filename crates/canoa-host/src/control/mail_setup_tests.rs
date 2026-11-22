@@ -18,7 +18,7 @@ use super::mail_setup::MailSetup;
 use super::{Caller, Control, DEFAULT_MAX_RECORD_BYTES, DEFAULT_MAX_RECORDS, Grant};
 use crate::config::Layers;
 use crate::mail::Mailboxes;
-use crate::mail::standin::{Mailbox, Standin};
+use canoa_microsoft_mail::standin::{Mailbox, Standin};
 
 const DENIED: i64 = -32001;
 const PASSWORD: &str = "CANARY-mail-setup-pw-51c2";
@@ -139,6 +139,14 @@ fn an_account_added_is_listed_tested_used_by_the_tools_and_removed_with_its_pass
     let owner = Caller::Owner;
     let none = ask(&control, &owner, "mail/accounts", json!({}));
     assert_eq!(none["result"]["accounts"], json!([]), "{none}");
+    let backends = none["result"]["backends"].as_array().expect("backends");
+    let backend_ids: Vec<&str> = backends.iter().filter_map(|b| b["id"].as_str()).collect();
+    assert_eq!(backend_ids, ["ews", "graph", "outlook"]);
+    for b in backends {
+        assert!(b["title"].as_str().is_some_and(|t| !t.is_empty()), "{b}");
+        assert!(b["schema"].is_object(), "{b}");
+        assert!(b["form"].is_object(), "{b}");
+    }
     assert!(boxes.is_empty());
 
     let added = ask(
@@ -148,6 +156,10 @@ fn an_account_added_is_listed_tested_used_by_the_tools_and_removed_with_its_pass
         exchange(&standin, "work", "s3cret"),
     );
     assert_eq!(added["result"]["account"]["name"], "work", "{added}");
+    assert_eq!(
+        added["result"]["account"]["backend_title"],
+        "Exchange Server"
+    );
     assert_eq!(added["result"]["account"]["state"], "password stored");
     assert_eq!(boxes.names(), ["work"], "the tools' mailboxes follow");
     let cfg = dir.cfg();
@@ -158,6 +170,10 @@ fn an_account_added_is_listed_tested_used_by_the_tools_and_removed_with_its_pass
 
     let listed = ask(&control, &owner, "mail/accounts", json!({}));
     assert_eq!(listed["result"]["accounts"][0]["backend"], "ews");
+    assert_eq!(
+        listed["result"]["accounts"][0]["backend_title"],
+        "Exchange Server"
+    );
     assert_eq!(listed["result"]["tools"], true);
 
     let tested = ask(&control, &owner, "mail/test", json!({"name": "work"}));
@@ -169,7 +185,9 @@ fn an_account_added_is_listed_tested_used_by_the_tools_and_removed_with_its_pass
     assert!(
         boxes
             .backend("work")
-            .and_then(|backend| backend.folders())
+            .and_then(|backend| backend
+                .folders()
+                .map_err(canoa::mail_backend::MailError::from))
             .is_ok(),
         "a session that starts now reads the mailbox with the stored password"
     );
@@ -229,9 +247,12 @@ fn what_the_host_would_refuse_is_refused_with_its_words_and_changes_nothing() {
         ),
         (
             json!({"name": "Bad Name", "backend": "outlook"}),
-            "would not be read",
+            "lower-case letters",
         ),
-        (json!({"name": "work", "backend": "imap"}), "ews or outlook"),
+        (
+            json!({"name": "work", "backend": "imap"}),
+            "no mail backend",
+        ),
         (json!({"backend": "ews"}), "name is a string"),
     ] {
         let answer = ask(&control, &owner, "mail/add", params.clone());

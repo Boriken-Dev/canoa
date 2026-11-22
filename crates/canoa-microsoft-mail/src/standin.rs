@@ -24,36 +24,55 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// One folder inside the stand-in mailbox.
 #[derive(Clone, Debug)]
-pub(crate) struct Folder {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) parent: Option<String>,
+pub struct Folder {
+    /// Folder identifier.
+    pub id: String,
+    /// Display name of the folder.
+    pub name: String,
+    /// Optional parent folder identifier.
+    pub parent: Option<String>,
     /// The well-known name Exchange knows it by.
-    pub(crate) well: Option<&'static str>,
+    pub well: Option<&'static str>,
 }
 
+/// One message stored in the stand-in mailbox.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Mail {
-    pub(crate) id: String,
-    pub(crate) folder: String,
-    pub(crate) conversation: String,
-    pub(crate) subject: String,
-    pub(crate) from: (String, String),
-    pub(crate) to: Vec<(String, String)>,
-    pub(crate) received: String,
-    pub(crate) read: bool,
-    pub(crate) attachments: bool,
-    pub(crate) categories: Vec<String>,
-    pub(crate) flag: String,
-    pub(crate) body: String,
+pub struct Mail {
+    /// Message identifier.
+    pub id: String,
+    /// Containing folder identifier.
+    pub folder: String,
+    /// Conversation or thread identifier.
+    pub conversation: String,
+    /// Message subject line.
+    pub subject: String,
+    /// Sender `(name, address)` pair.
+    pub from: (String, String),
+    /// Recipient `(name, address)` pairs.
+    pub to: Vec<(String, String)>,
+    /// Received timestamp in ISO-8601 format.
+    pub received: String,
+    /// Whether the message is marked as read.
+    pub read: bool,
+    /// Whether the message reports having attachments.
+    pub attachments: bool,
+    /// Assigned category names.
+    pub categories: Vec<String>,
+    /// Flag status name.
+    pub flag: String,
+    /// Message body content.
+    pub body: String,
 }
 
 /// The mailbox the stand-in serves.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Mailbox {
-    pub(crate) folders: Vec<Folder>,
-    pub(crate) mail: Vec<Mail>,
+pub struct Mailbox {
+    /// Folders present in the mailbox.
+    pub folders: Vec<Folder>,
+    /// Messages stored in the mailbox.
+    pub mail: Vec<Mail>,
     next: u32,
 }
 
@@ -67,7 +86,7 @@ fn person((name, address): (&str, &str)) -> (String, String) {
 impl Mailbox {
     /// A small mailbox with a conversation, a same-subject stranger, a same-sender message, an archived invoice and a message
     /// that tries to give the agent orders.
-    pub(crate) fn sample() -> Self {
+    pub fn sample() -> Self {
         let folder = |id: &str, name: &str, parent: Option<&str>, well| Folder {
             id: format!("AAFd/{id}+="),
             name: name.to_owned(),
@@ -201,7 +220,7 @@ impl Mailbox {
     }
 
     /// The id of the folder with the well-known name `well`.
-    pub(crate) fn folder_id(&self, well: &str) -> String {
+    pub fn folder_id(&self, well: &str) -> String {
         self.folder_by_well(well).expect("a folder").id.clone()
     }
 
@@ -212,17 +231,17 @@ impl Mailbox {
 
 /// One request the stand-in served.
 #[derive(Clone, Debug)]
-pub(crate) struct Logged {
+pub struct Logged {
     /// Which connection carried it, from 0.
-    #[cfg_attr(
-        not(windows),
-        expect(dead_code, reason = "read by the Windows sign-in tests")
-    )]
-    pub(crate) connection: usize,
-    pub(crate) path: String,
-    pub(crate) operation: String,
-    pub(crate) body: String,
-    pub(crate) authorization: Option<String>,
+    pub connection: usize,
+    /// Request HTTP path.
+    pub path: String,
+    /// SOAP operation name.
+    pub operation: String,
+    /// Raw XML request body.
+    pub body: String,
+    /// `Authorization` header sent by the client, if any.
+    pub authorization: Option<String>,
 }
 
 /// What the stand-in asks a request to prove.
@@ -233,12 +252,12 @@ struct Demand {
     /// Whether a refusal also offers Negotiate, which the stand-in then does not accept.
     offer_negotiate: bool,
     /// A Negotiate or NTLM exchange completed by the system's security package.
-    #[cfg(windows)]
+    #[cfg(all(test, windows))]
     security: Option<Security>,
 }
 
 /// A Negotiate or NTLM demand.
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 struct Security {
     /// The scheme word the stand-in offers and answers with.
     scheme: &'static str,
@@ -255,7 +274,7 @@ struct Shared {
     demand: Demand,
     /// The accounts a security-package exchange authenticated.
     #[cfg_attr(
-        not(windows),
+        not(all(test, windows)),
         expect(dead_code, reason = "written and read by the Windows sign-in")
     )]
     users: Mutex<Vec<String>>,
@@ -267,28 +286,36 @@ struct Shared {
 /// What one connection has proved so far.
 struct Session {
     connection: usize,
-    #[cfg(windows)]
+    #[cfg(all(test, windows))]
     package: Option<super::sspi_server::SspiServer>,
-    #[cfg(windows)]
+    #[cfg(all(test, windows))]
     signed_in: bool,
 }
 
 /// The running stand-in; it stops when dropped.
-pub(crate) struct Standin {
+pub struct Standin {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for Standin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Standin")
+            .field("addr", &self.shared.addr)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Standin {
     /// A server that asks for `login` (user and password) as Basic, or for nothing when it is `None`. A refusal offers Negotiate too.
     #[cfg_attr(
-        not(windows),
+        not(all(test, windows)),
         expect(
             clippy::needless_update,
             reason = "the demand's other fields are Windows-only"
         )
     )]
-    pub(crate) fn start(mailbox: Mailbox, login: Option<(&str, &str)>) -> Self {
+    pub fn start(mailbox: Mailbox, login: Option<(&str, &str)>) -> Self {
         Self::launch(
             mailbox,
             Demand {
@@ -300,7 +327,7 @@ impl Standin {
     }
 
     /// A server whose refusal offers Basic and nothing else.
-    pub(crate) fn start_basic_only(mailbox: Mailbox, user: &str, password: &str) -> Self {
+    pub fn start_basic_only(mailbox: Mailbox, user: &str, password: &str) -> Self {
         Self::launch(
             mailbox,
             Demand {
@@ -313,8 +340,8 @@ impl Standin {
     /// A server that signs a connection in with a Negotiate or NTLM exchange (`scheme` is the word it offers), run through the
     /// system's security package. With `refuse` it completes the exchange and then refuses the logon, as a server does for an
     /// account it does not know.
-    #[cfg(windows)]
-    pub(crate) fn start_security(mailbox: Mailbox, scheme: &'static str, refuse: bool) -> Self {
+    #[cfg(all(test, windows))]
+    pub fn start_security(mailbox: Mailbox, scheme: &'static str, refuse: bool) -> Self {
         Self::launch(
             mailbox,
             Demand {
@@ -360,40 +387,44 @@ impl Standin {
         }
     }
 
-    pub(crate) fn server(&self) -> String {
+    /// EWS endpoint URL of the running stand-in server.
+    pub fn server(&self) -> String {
         format!("http://{}/EWS/Exchange.asmx", self.shared.addr)
     }
 
-    pub(crate) fn autodiscover(&self) -> String {
+    /// Autodiscover endpoint URL of the running stand-in server.
+    pub fn autodiscover(&self) -> String {
         format!("http://{}/autodiscover/autodiscover.xml", self.shared.addr)
     }
 
     /// Answers the next Autodiscover request with `reply` instead of the stand-in's own answer.
-    pub(crate) fn queue_autodiscover(&self, reply: String) {
+    pub fn queue_autodiscover(&self, reply: String) {
         lock(&self.shared.autodiscover_replies).push(reply);
     }
 
-    pub(crate) fn mailbox(&self) -> Mailbox {
+    /// Current snapshot of the stand-in mailbox state.
+    pub fn mailbox(&self) -> Mailbox {
         lock(&self.shared.mailbox).clone()
     }
 
-    pub(crate) fn log(&self) -> Vec<Logged> {
+    /// Recorded requests served by the stand-in.
+    pub fn log(&self) -> Vec<Logged> {
         lock(&self.shared.log).clone()
     }
 
     /// The accounts a security-package exchange authenticated, in order.
-    #[cfg(windows)]
-    pub(crate) fn users(&self) -> Vec<String> {
+    #[cfg(all(test, windows))]
+    pub fn users(&self) -> Vec<String> {
         lock(&self.shared.users).clone()
     }
 
     /// The operations served, in order.
-    pub(crate) fn operations(&self) -> Vec<String> {
+    pub fn operations(&self) -> Vec<String> {
         self.log().into_iter().map(|l| l.operation).collect()
     }
 
     /// Everything that would have sent a message.
-    pub(crate) fn sent(&self) -> Vec<String> {
+    pub fn sent(&self) -> Vec<String> {
         lock(&self.shared.sent).clone()
     }
 }
@@ -485,7 +516,7 @@ fn serve(shared: &Shared, mut stream: TcpStream, connection: usize) -> std::io::
 }
 
 fn keeps_alive(shared: &Shared) -> bool {
-    #[cfg(windows)]
+    #[cfg(all(test, windows))]
     if shared.demand.security.is_some() {
         return true;
     }
@@ -498,13 +529,13 @@ impl Session {
         let _ = shared;
         Self {
             connection,
-            #[cfg(windows)]
+            #[cfg(all(test, windows))]
             package: shared
                 .demand
                 .security
                 .as_ref()
                 .map(|_| super::sspi_server::SspiServer::new()),
-            #[cfg(windows)]
+            #[cfg(all(test, windows))]
             signed_in: false,
         }
     }
@@ -522,7 +553,7 @@ fn refusal(offered: &[String]) -> Gate {
 }
 
 fn gate(shared: &Shared, session: &mut Session, authorization: Option<&str>) -> Gate {
-    #[cfg(windows)]
+    #[cfg(all(test, windows))]
     if let Some(security) = &shared.demand.security {
         return security_gate(shared, security, session, authorization);
     }
@@ -547,7 +578,7 @@ fn gate(shared: &Shared, session: &mut Session, authorization: Option<&str>) -> 
 
 /// A Negotiate or NTLM exchange: each leg is handed to the system's security package, and the connection is signed in when it
 /// completes.
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 fn security_gate(
     shared: &Shared,
     security: &Security,

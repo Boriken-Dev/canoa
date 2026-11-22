@@ -9,7 +9,7 @@ use core::fmt::Write as _;
 
 use serde_json::Value;
 
-use crate::mail::model::{Attachment, Folder, MailError, Message, Person, Query, Summary};
+use canoa::mail_backend::{Attachment, Folder, MailError, Message, Person, Query, Summary};
 
 /// The fields a list shows of each message.
 pub(super) const LIST_FIELDS: &str = "id,conversationId,parentFolderId,subject,from,toRecipients,ccRecipients,receivedDateTime,\

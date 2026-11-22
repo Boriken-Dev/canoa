@@ -18,7 +18,7 @@ use data_encoding::BASE64;
 use ureq::http::Request;
 use url::Url;
 
-use crate::mail::model::MailError;
+use canoa::mail_backend::MailError;
 
 /// The most bytes read from one answer: a page of a message list or one message with its body.
 const MAX_ANSWER: u64 = 64 * 1024 * 1024;
@@ -28,9 +28,14 @@ const ACCEPT: &str = "text/xml, application/xml";
 
 /// How the account signs in.
 #[derive(Clone, Debug)]
-pub(crate) enum Auth {
+pub enum Auth {
     /// The user name and password the account names, sent on every request.
-    Basic { user: String, password: Secret },
+    Basic {
+        /// Account user name (`DOMAIN\user` or UPN).
+        user: String,
+        /// Password or secret token.
+        password: Secret,
+    },
     /// The person's Windows logon.
     Windows,
 }

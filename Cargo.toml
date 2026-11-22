@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-bitwarden", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-git-bash", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-node", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-powershell", "crates/canoa-python", "crates/canoa-whisper"]
+members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-bitwarden", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-git-bash", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-microsoft-mail", "crates/canoa-node", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-powershell", "crates/canoa-python", "crates/canoa-whisper"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -149,6 +149,7 @@ canoa-git-bash = { path = "crates/canoa-git-bash" }
 canoa-grok = { path = "crates/canoa-grok" }
 canoa-litellm = { path = "crates/canoa-litellm" }
 canoa-node = { path = "crates/canoa-node" }
+canoa-microsoft-mail = { path = "crates/canoa-microsoft-mail" }
 canoa-openai = { path = "crates/canoa-openai" }
 canoa-opencode = { path = "crates/canoa-opencode" }
 canoa-pi = { path = "crates/canoa-pi" }

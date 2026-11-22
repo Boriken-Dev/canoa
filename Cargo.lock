@@ -882,6 +882,7 @@ dependencies = [
  "canoa-git-bash",
  "canoa-grok",
  "canoa-litellm",
+ "canoa-microsoft-mail",
  "canoa-node",
  "canoa-openai",
  "canoa-opencode",
@@ -989,6 +990,24 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "time",
+]
+
+[[package]]
+name = "canoa-microsoft-mail"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "coqui-syshttp",
+ "data-encoding",
+ "guatiao",
+ "guatiao-intake",
+ "httparse",
+ "percent-encoding",
+ "serde_json",
+ "ureq",
+ "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

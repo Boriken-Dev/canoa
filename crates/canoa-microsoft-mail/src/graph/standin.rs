@@ -19,7 +19,7 @@ use std::time::Duration;
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
-use crate::mail::standin::{Mail, Mailbox};
+use crate::standin::{Mail, Mailbox};
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)

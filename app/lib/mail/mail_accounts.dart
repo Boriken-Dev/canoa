@@ -5,61 +5,142 @@ import 'package:flutter/foundation.dart';
 import '../desktop/control_client.dart' show ControlClient, ControlFailed;
 import '../desktop/host_control.dart';
 
+/// A mail backend offered by the connected host (`mail/accounts` `"backends"`): its identifier, human label, and schema/form for
+/// adding an account.
+final class MailBackendInfo {
+  const MailBackendInfo({
+    required this.id,
+    required this.title,
+    this.description,
+    this.noSecretState,
+    this.schema,
+    this.form,
+  });
+
+  final String id;
+  final String title;
+  final String? description;
+  final String? noSecretState;
+  final Map<String, Object?>? schema;
+  final Map<String, Object?>? form;
+
+  static MailBackendInfo? parse(Object? json) {
+    if (json is! Map) return null;
+    final id = json['id'];
+    final title = json['title'];
+    if (id is! String || id.isEmpty || title is! String || title.isEmpty) return null;
+    return MailBackendInfo(
+      id: id,
+      title: title,
+      description: json['description'] is String ? json['description']! as String : null,
+      noSecretState: json['no_secret_state'] is String ? json['no_secret_state']! as String : null,
+      schema: json['schema'] is Map ? (json['schema']! as Map).cast<String, Object?>() : null,
+      form: json['form'] is Map ? (json['form']! as Map).cast<String, Object?>() : null,
+    );
+  }
+}
+
 /// One mail account of the host's canoa.cfg, as `mail/accounts` words it. It carries where the mailbox is and whether its password
-/// is there, never the password.
+/// is held; never the password itself.
 final class MailAccountInfo {
-  const MailAccountInfo({required this.name, required this.backend, required this.state, this.server, this.email, this.user});
+  const MailAccountInfo({
+    required this.name,
+    required this.backend,
+    this.backendTitle,
+    required this.state,
+    this.details = const [],
+    this.settings = const {},
+    this.server,
+    this.email,
+    this.user,
+  });
 
   final String name;
-
-  /// `ews` (Exchange Server) or `outlook` (classic Outlook for Windows).
   final String backend;
-
-  /// What the host says of the sign-in: `password stored`, `needs a password`, `signs in with the Windows logon`, and so on.
+  final String? backendTitle;
+  /// What the host says of the sign-in: `password stored`, `needs a password`, `signs in with the Windows logon`, `signed in by Outlook`, and so on.
   final String state;
-  final String? server, email, user;
+  final List<String> details;
+  final Map<String, Object?> settings;
+  final String? server;
+  final String? email;
+  final String? user;
 
   static MailAccountInfo? parse(Object? json) {
-    if (json is! Map || json['name'] is! String || json['backend'] is! String) return null;
-    String? text(String key) => json[key] is String && (json[key] as String).isNotEmpty ? json[key] as String : null;
+    if (json is! Map) return null;
+    final name = json['name'];
+    final backend = json['backend'];
+    final state = json['state'];
+    if (name is! String || backend is! String || state is! String) return null;
+    final rawDetails = json['details'];
+    final details = [
+      if (rawDetails is List)
+        for (final item in rawDetails)
+          if (item is String && item.isNotEmpty) item,
+    ];
+    final rawSettings = json['settings'];
+    final settings = rawSettings is Map ? rawSettings.cast<String, Object?>() : const <String, Object?>{};
     return MailAccountInfo(
-      name: json['name']! as String,
-      backend: json['backend']! as String,
-      state: text('state') ?? '',
-      server: text('server'),
-      email: text('email'),
-      user: text('user'),
+      name: name,
+      backend: backend,
+      backendTitle: json['backend_title'] is String ? json['backend_title']! as String : null,
+      state: state,
+      details: details,
+      settings: settings,
+      server: json['server'] is String ? json['server']! as String : null,
+      email: json['email'] is String ? json['email']! as String : null,
+      user: json['user'] is String ? json['user']! as String : null,
     );
   }
 
-  String get backendTitle => backend == 'outlook' ? 'Outlook' : 'Exchange';
+  /// Title shown for this account's backend, preferring the host-reported provider title and falling back to [backends].
+  String titleWith(List<MailBackendInfo> backends) =>
+      backendTitle ?? backends.where((b) => b.id == backend).firstOrNull?.title ?? backend;
 
-  /// Where the mailbox is, or whose it is.
-  String? get where => server ?? email;
-
-  /// Whether the account lacks the password it signs in with.
-  bool get needsPassword => state == 'needs a password' || state.startsWith('needs ');
+  /// Short subtitle details displayed after the backend title and before the sign-in state.
+  List<String> summaryDetails() {
+    if (details.isNotEmpty) return details;
+    return [?email, ?server, ?user];
+  }
 }
 
-/// An account to add. The password is sent once and held nowhere after.
-final class NewMailAccount {
-  const NewMailAccount({required this.name, required this.backend, this.email, this.server, this.user, this.password, this.profile});
+/// Accounts and backends returned by `mail/accounts`.
+final class MailAccountsSnapshot {
+  const MailAccountsSnapshot({
+    required this.accounts,
+    required this.backends,
+  });
 
-  final String name, backend;
-  final String? email, server, user, password, profile;
+  final List<MailAccountInfo> accounts;
+  final List<MailBackendInfo> backends;
+}
+
+/// Parameters sent to `mail/add`: account name, backend id, and dynamic form values matching the backend's schema.
+final class NewMailAccount {
+  const NewMailAccount({
+    required this.name,
+    required this.backend,
+    this.settings = const {},
+    this.passwordEnv,
+    this.timeoutSecs,
+  });
+
+  final String name;
+  final String backend;
+  final Map<String, Object?> settings;
+  final String? passwordEnv;
+  final int? timeoutSecs;
 
   Map<String, Object?> toParams() => {
-    'name': name,
-    'backend': backend,
-    'email': ?email,
-    'server': ?server,
-    'user': ?user,
-    'password': ?password,
-    'profile': ?profile,
-  };
+        'name': name,
+        'backend': backend,
+        ...settings,
+        if (passwordEnv != null) 'password_env': passwordEnv,
+        if (timeoutSecs != null) 'timeout_secs': timeoutSecs,
+      };
 }
 
-/// What `mail/test` answers: whether the host signed in to the mailbox with what it holds, and why not in the words of the connector.
+/// What `mail/test` answered: either signed in with a folder count, or why not.
 final class MailTest {
   const MailTest({required this.ok, this.folders, this.problem});
 
@@ -68,31 +149,25 @@ final class MailTest {
   final String? problem;
 
   static MailTest parse(Object? json) {
-    final map = json is Map ? json : const {};
+    if (json is! Map) return const MailTest(ok: false, problem: 'The host answered something unexpected');
+    final folders = json['folders'];
     return MailTest(
-      ok: map['ok'] == true,
-      folders: map['folders'] is num ? (map['folders'] as num).toInt() : null,
-      problem: map['problem'] is String ? map['problem'] as String : null,
+      ok: json['ok'] == true,
+      folders: folders is num ? folders.toInt() : null,
+      problem: json['problem'] is String ? json['problem']! as String : null,
     );
   }
 }
 
-/// What the app asks of the host about mail accounts. Nothing it returns holds a password.
+/// Where Settings' mail section reads and changes the host's `[host.mail]`.
 abstract interface class MailHost {
-  /// The accounts in canoa.cfg with the state of each.
-  Future<List<MailAccountInfo>> list();
-
-  /// Adds [account]: the host keeps its password in its account store and writes the account's table, which holds none.
+  Future<MailAccountsSnapshot> list();
   Future<MailAccountInfo> add(NewMailAccount account);
-
-  /// Has the host sign in to the account with what it holds and list its folders.
   Future<MailTest> test(String name);
-
-  /// Forgets the stored password and takes the account out of canoa.cfg. Nothing changes in the mailbox.
   Future<void> remove(String name);
 }
 
-/// The host's mail accounts over its control channel.
+/// The real control channel of a connected host.
 final class ControlMailHost implements MailHost {
   ControlMailHost(this._control);
 
@@ -102,10 +177,14 @@ final class ControlMailHost implements MailHost {
       (await _control.ready(wait: false)).call(method, params, null, wait);
 
   @override
-  Future<List<MailAccountInfo>> list() async {
+  Future<MailAccountsSnapshot> list() async {
     final result = await _call('mail/accounts', const {});
     final accounts = result is Map ? result['accounts'] : null;
-    return [if (accounts is List) for (final each in accounts) ?MailAccountInfo.parse(each)];
+    final backends = result is Map ? result['backends'] : null;
+    return MailAccountsSnapshot(
+      accounts: [if (accounts is List) for (final each in accounts) ?MailAccountInfo.parse(each)],
+      backends: [if (backends is List) for (final each in backends) ?MailBackendInfo.parse(each)],
+    );
   }
 
   @override
@@ -135,19 +214,21 @@ final class ControlMailHost implements MailHost {
   }
 }
 
-/// The mail accounts Settings lists: what the host says of each, and the result of the last sign-in test of each.
+/// The mail accounts and available backends Settings lists: what the host says of each, and the result of the last sign-in test of each.
 class MailAccountsController extends ChangeNotifier {
   MailAccountsController({required this.host});
 
   final MailHost host;
 
   List<MailAccountInfo> _accounts = const [];
+  List<MailBackendInfo> _backends = const [];
   final _tests = <String, MailTest>{};
   final _testing = <String>{};
   String? _problem;
   bool _loading = false, _disposed = false;
 
   List<MailAccountInfo> get accounts => _accounts;
+  List<MailBackendInfo> get backends => _backends;
   String? get problem => _problem;
   bool get loading => _loading;
 
@@ -162,7 +243,9 @@ class MailAccountsController extends ChangeNotifier {
     _loading = true;
     _notify();
     try {
-      _accounts = await host.list();
+      final snapshot = await host.list();
+      _accounts = snapshot.accounts;
+      _backends = snapshot.backends;
       _problem = null;
     } on ControlFailed catch (error) {
       _problem = error.code == -32001 ? 'This key may not manage the mail accounts of this host.' : error.message;

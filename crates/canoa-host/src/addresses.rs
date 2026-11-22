@@ -26,11 +26,13 @@ pub(crate) fn warnings(config: &Config) -> Vec<String> {
 pub(crate) fn mail_and_kb_warnings(config: &Config) -> Vec<String> {
     let mut notes = Vec::new();
     for (name, mailbox) in &config.mail.accounts {
-        for (key, address) in [
-            ("server", &mailbox.server),
-            ("autodiscover", &mailbox.autodiscover),
-        ] {
-            if let Some(address) = address {
+        for (key, value) in mailbox.settings.as_map() {
+            if let Some(address) = value.as_str()
+                && address
+                    .trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with("http://")
+            {
                 notes.extend(canoa::address::plain_http_note(
                     &format!("[host.mail.accounts.{name}] {key}"),
                     address,

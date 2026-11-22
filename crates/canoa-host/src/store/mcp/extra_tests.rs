@@ -14,9 +14,9 @@ use super::tests::{
 };
 use super::*;
 use crate::mail::Mailboxes;
-use crate::mail::model::Backend as MailBackend;
-use crate::mail::standin::{Mailbox, Standin};
 use crate::mail::tools::{MailTools, SERVER_NAME as MAIL};
+use canoa::mail_backend::Mailbox as MailBackend;
+use canoa_microsoft_mail::standin::{Mailbox, Standin};
 
 fn mail_grants() -> BTreeSet<Grant> {
     [Grant::Mail].into()

@@ -68,11 +68,10 @@ pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, CACHE_LIFETIMES, Config, ConfigError, ControlConfig, DEFAULT_PRESET,
     DelegateConfig, ENTRIES, Entry, EntryKind, Extension, ExtensionCheck, HarnessOptions,
-    INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, MailAccount, MailAuth, MailBackend,
-    MailConfig, NativeConfig, NetworkConfig, OpenerConfig, Origin, PoolConfig, Preset,
-    ResolvedLoadout, Settings, StoreConfig, TransportListen, UnknownLoadout, UnknownPreset,
-    WebConfig, WebMode, cache_lifetime_label, cache_lifetime_name, cache_lifetime_named,
-    merge_into,
+    INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, MailAccount, MailConfig,
+    NativeConfig, NetworkConfig, OpenerConfig, Origin, PoolConfig, Preset, ResolvedLoadout,
+    Settings, StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, WebConfig, WebMode,
+    cache_lifetime_label, cache_lifetime_name, cache_lifetime_named, merge_into,
 };
 pub use serve::MAX_MESSAGE_META;
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries

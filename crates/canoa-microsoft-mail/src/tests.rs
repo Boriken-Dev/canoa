@@ -14,9 +14,9 @@ use coqui_syshttp::tls::TlsBuilder;
 use coqui_syshttp::{Environment, Resolver};
 
 use super::ews::{Auth, Ews, EwsSettings};
-use super::model::{Backend, Change, Draft, FlagState, MailError, Query};
-use super::related::{self, BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
 use super::standin::{Mailbox, Standin};
+use canoa::mail_backend::{BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
+use canoa::mail_backend::{Change, Draft, FlagState, MailError, Mailbox as _, Query};
 
 pub(super) fn direct() -> Arc<Network> {
     let resolver = Resolver::builder()
@@ -50,7 +50,7 @@ pub(super) fn connected() -> (Standin, Ews) {
     (standin, ews)
 }
 
-fn subjects(items: &[super::model::Summary]) -> Vec<&str> {
+fn subjects(items: &[canoa::mail_backend::Summary]) -> Vec<&str> {
     items.iter().map(|item| item.subject.as_str()).collect()
 }
 
@@ -58,7 +58,7 @@ fn subjects(items: &[super::model::Summary]) -> Vec<&str> {
 fn a_search_with_filters_returns_only_the_items_that_match() {
     let (standin, ews) = connected();
     let everything = ews
-        .search(&Query {
+        .search(Query {
             limit: 50,
             ..Query::default()
         })
@@ -75,7 +75,7 @@ fn a_search_with_filters_returns_only_the_items_that_match() {
     );
 
     let page = ews
-        .search(&Query {
+        .search(Query {
             from: Some("ana".to_owned()),
             after: Some("2026-11-11".to_owned()),
             unread: Some(true),
@@ -112,7 +112,7 @@ fn a_search_with_filters_returns_only_the_items_that_match() {
 fn words_attachments_and_folders_narrow_a_search() {
     let (_standin, ews) = connected();
     let words = ews
-        .search(&Query {
+        .search(Query {
             text: Some("travel OR invoice".to_owned()),
             limit: 50,
             ..Query::default()
@@ -124,7 +124,7 @@ fn words_attachments_and_folders_narrow_a_search() {
     );
 
     let with_files = ews
-        .search(&Query {
+        .search(Query {
             attachments: Some(true),
             limit: 50,
             ..Query::default()
@@ -136,7 +136,7 @@ fn words_attachments_and_folders_narrow_a_search() {
     );
 
     let archive = ews
-        .search(&Query {
+        .search(Query {
             folder: Some("archive".to_owned()),
             limit: 50,
             ..Query::default()
@@ -145,7 +145,7 @@ fn words_attachments_and_folders_narrow_a_search() {
     assert_eq!(subjects(&archive.items), ["Invoice 4471"]);
 
     let sent = ews
-        .search(&Query {
+        .search(Query {
             folder: Some("Sent Items".to_owned()),
             subject: Some("budget".to_owned()),
             limit: 50,
@@ -155,7 +155,7 @@ fn words_attachments_and_folders_narrow_a_search() {
     assert_eq!(subjects(&sent.items), ["RE: Budget 2027 kickoff"]);
 
     let error = ews
-        .search(&Query {
+        .search(Query {
             folder: Some("Nowhere".to_owned()),
             ..Query::default()
         })
@@ -170,7 +170,7 @@ fn words_attachments_and_folders_narrow_a_search() {
 fn a_page_says_whether_more_follow() {
     let (_standin, ews) = connected();
     let first = ews
-        .search(&Query {
+        .search(Query {
             limit: 3,
             ..Query::default()
         })
@@ -180,7 +180,7 @@ fn a_page_says_whether_more_follow() {
         (3, true, Some(7))
     );
     let last = ews
-        .search(&Query {
+        .search(Query {
             limit: 3,
             offset: 6,
             ..Query::default()
@@ -193,10 +193,13 @@ fn a_page_says_whether_more_follow() {
 #[test]
 fn flagged_mail_is_filtered_after_the_fetch() {
     let (_standin, ews) = connected();
-    ews.change(&["AAMk/3+x=".to_owned()], &Change::Flag(FlagState::Flagged))
-        .expect("flags");
+    ews.change(
+        ["AAMk/3+x=".to_owned()].to_vec(),
+        Change::flag(FlagState::Flagged),
+    )
+    .expect("flags");
     let flagged = ews
-        .search(&Query {
+        .search(Query {
             flagged: Some(true),
             limit: 50,
             ..Query::default()
@@ -223,7 +226,7 @@ fn folders_have_paths_and_counts() {
 #[test]
 fn a_message_is_read_in_full() {
     let (_standin, ews) = connected();
-    let message = ews.read("AAMk/1+x=").expect("reads");
+    let message = ews.read("AAMk/1+x=".to_owned()).expect("reads");
     assert_eq!(message.summary.subject, "Budget 2027 kickoff");
     assert_eq!(message.body, "Let's plan the 2027 budget. The cap is 120k.");
     assert_eq!(message.attachments.len(), 1);
@@ -234,7 +237,7 @@ fn a_message_is_read_in_full() {
         Some("<AAMk/1+x=@example.test>")
     );
     assert!(message.summary.unread);
-    let error = ews.read("AAMk/nope").expect_err("missing");
+    let error = ews.read("AAMk/nope".to_owned()).expect_err("missing");
     assert!(error.to_string().contains("ErrorItemNotFound"), "{error}");
 }
 
@@ -242,12 +245,12 @@ fn a_message_is_read_in_full() {
 fn a_message_is_found_by_its_internet_message_id_in_any_folder() {
     let (standin, ews) = connected();
     assert_eq!(
-        ews.find_by_message_id("<AAMk/4+x=@example.test>")
+        ews.find_by_message_id("<AAMk/4+x=@example.test>".to_owned())
             .expect("searches"),
         Some("AAMk/4+x=".to_owned())
     );
     let archived = ews
-        .find_by_message_id("<AAMk/6+x=@example.test>")
+        .find_by_message_id("<AAMk/6+x=@example.test>".to_owned())
         .expect("searches");
     assert_eq!(
         archived.as_deref(),
@@ -255,20 +258,20 @@ fn a_message_is_found_by_its_internet_message_id_in_any_folder() {
         "the Archive folder is searched too"
     );
     assert_eq!(
-        ews.read(archived.as_deref().unwrap())
+        ews.read(archived.clone().unwrap())
             .expect("reads")
             .summary
             .subject,
         "Invoice 4471"
     );
     assert_eq!(
-        ews.find_by_message_id("<nobody@example.test>")
+        ews.find_by_message_id("<nobody@example.test>".to_owned())
             .expect("searches"),
         None
     );
     // The server compares the id whole: the same words without the brackets are another id.
     assert_eq!(
-        ews.find_by_message_id("AAMk/4+x=@example.test")
+        ews.find_by_message_id("AAMk/4+x=@example.test".to_owned())
             .expect("searches"),
         None
     );
@@ -292,7 +295,7 @@ fn a_message_is_found_by_its_internet_message_id_in_any_folder() {
 
     // A value that holds quotes and markup stays inside its attribute and matches nothing.
     let odd = ews
-        .find_by_message_id("<a\"/><t:Constant Value=\"x@example.test>")
+        .find_by_message_id("<a\"/><t:Constant Value=\"x@example.test>".to_owned())
         .expect("searches");
     assert_eq!(odd, None);
     let sent = standin
@@ -311,8 +314,8 @@ fn a_message_is_found_by_its_internet_message_id_in_any_folder() {
 #[test]
 fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
     let (_standin, ews) = connected();
-    let message = ews.read("AAMk/1+x=").expect("reads");
-    let found = related::related(&ews, &message.summary, 20).expect("related");
+    let message = ews.read("AAMk/1+x=".to_owned()).expect("reads");
+    let found = canoa::mail_backend::related(&ews, &message.summary, 20).expect("related");
     let by = |subject: &str, id: &str| {
         found
             .iter()
@@ -342,21 +345,21 @@ fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
 fn a_draft_is_saved_and_nothing_is_sent() {
     let (standin, ews) = connected();
     let saved = ews
-        .draft(&Draft::New {
-            to: vec!["ana@example.test".to_owned()],
-            cc: vec![],
-            bcc: vec![],
-            subject: "Numbers <draft>".to_owned(),
-            body: "Here they are & more.".to_owned(),
-        })
+        .draft(Draft::new_message(
+            vec!["ana@example.test".to_owned()],
+            vec![],
+            vec![],
+            "Numbers <draft>".to_owned(),
+            "Here they are & more.".to_owned(),
+        ))
         .expect("drafts");
     assert_eq!(saved.subject, "Numbers <draft>");
     let reply = ews
-        .draft(&Draft::Reply {
-            to: "AAMk/1+x=".to_owned(),
-            all: false,
-            body: "Thanks, on it.".to_owned(),
-        })
+        .draft(Draft::reply(
+            "AAMk/1+x=".to_owned(),
+            false,
+            "Thanks, on it.".to_owned(),
+        ))
         .expect("replies");
     assert_eq!(reply.subject, "RE: Budget 2027 kickoff");
 
@@ -396,30 +399,19 @@ fn a_draft_is_saved_and_nothing_is_sent() {
 fn moving_marking_flagging_and_categorizing_change_the_mailbox() {
     let (standin, ews) = connected();
     let ids = vec!["AAMk/1+x=".to_owned(), "AAMk/3+x=".to_owned()];
-    ews.change(
-        &ids,
-        &Change::Move {
-            folder: "Projects/Apollo".to_owned(),
-        },
-    )
-    .expect("moves by path");
-    ews.change(&ids, &Change::Read(true)).expect("marks");
-    ews.change(&ids[..1], &Change::Flag(FlagState::Flagged))
+    ews.change(ids.clone(), Change::move_to("Projects/Apollo".to_owned()))
+        .expect("moves by path");
+    ews.change(ids.clone(), Change::read(true)).expect("marks");
+    ews.change(ids[..1].to_vec(), Change::flag(FlagState::Flagged))
         .expect("flags");
     ews.change(
-        &ids,
-        &Change::Categories {
-            add: vec!["Budget".to_owned(), "Q4".to_owned()],
-            remove: vec![],
-        },
+        ids.clone(),
+        Change::categories(vec!["Budget".to_owned(), "Q4".to_owned()], vec![]),
     )
     .expect("adds");
     ews.change(
-        &ids[1..],
-        &Change::Categories {
-            add: vec![],
-            remove: vec!["q4".to_owned()],
-        },
+        ids[1..].to_vec(),
+        Change::categories(vec![], vec!["q4".to_owned()]),
     )
     .expect("removes, whatever the case");
     let mailbox = standin.mailbox();
@@ -445,11 +437,8 @@ fn moving_marking_flagging_and_categorizing_change_the_mailbox() {
     assert_eq!(second.categories, ["Budget"]);
     // Taking the last category away clears the field rather than writing an empty list.
     ews.change(
-        &ids[1..],
-        &Change::Categories {
-            add: vec![],
-            remove: vec!["Budget".to_owned()],
-        },
+        ids[1..].to_vec(),
+        Change::categories(vec![], vec!["Budget".to_owned()]),
     )
     .expect("clears");
     assert!(
@@ -468,7 +457,7 @@ fn moving_marking_flagging_and_categorizing_change_the_mailbox() {
 #[test]
 fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
     let (standin, ews) = connected();
-    ews.change(&["AAMk/4+x=".to_owned()], &Change::Archive)
+    ews.change(["AAMk/4+x=".to_owned()].to_vec(), Change::archive())
         .expect("archives");
     let mailbox = standin.mailbox();
     let archive = mailbox.folder_id("archive");
@@ -491,7 +480,7 @@ fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
     }
     let standin = Standin::start(plain, None);
     let ews = Ews::new(settings(Some(standin.server()), basic("x")), direct());
-    ews.change(&["AAMk/4+x=".to_owned()], &Change::Archive)
+    ews.change(["AAMk/4+x=".to_owned()].to_vec(), Change::archive())
         .expect("archives by name");
     let after = standin.mailbox();
     let archive = after
@@ -516,7 +505,7 @@ fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
     let standin = Standin::start(none, None);
     let ews = Ews::new(settings(Some(standin.server()), basic("x")), direct());
     let error = ews
-        .change(&["AAMk/4+x=".to_owned()], &Change::Archive)
+        .change(["AAMk/4+x=".to_owned()].to_vec(), Change::archive())
         .expect_err("no archive");
     assert!(error.to_string().contains("no Archive folder"), "{error}");
 }
@@ -525,16 +514,15 @@ fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
 fn a_failed_change_says_what_exchange_said() {
     let (_standin, ews) = connected();
     let error = ews
-        .change(&["AAMk/missing".to_owned()], &Change::Read(true))
+        .change(["AAMk/missing".to_owned()].to_vec(), Change::read(true))
         .expect_err("missing");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Backend(_)));
     assert!(error.to_string().contains("ErrorItemNotFound"), "{error}");
     let error = ews
         .change(
-            &["AAMk/1+x=".to_owned()],
-            &Change::Move {
-                folder: "Nope".to_owned(),
-            },
+            ["AAMk/1+x=".to_owned()].to_vec(),
+            Change::move_to("Nope".to_owned()),
         )
         .expect_err("no folder");
     assert!(
@@ -552,6 +540,7 @@ fn the_sign_in_is_basic_and_a_refusal_names_what_the_server_accepts() {
 
     let wrong = Ews::new(settings(Some(standin.server()), basic("wrong")), direct());
     let error = wrong.folders().expect_err("refused");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Auth(_)), "{error:?}");
     let text = error.to_string();
     assert!(
@@ -569,6 +558,7 @@ fn a_server_offering_only_basic_is_left_at_its_401_and_the_error_says_so() {
     let standin = Standin::start_basic_only(Mailbox::sample(), "EXAMPLE\\me", "s3cret");
     let ews = Ews::new(settings(Some(standin.server()), Auth::Windows), direct());
     let error = ews.folders().expect_err("the logon cannot answer Basic");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Auth(_)), "{error:?}");
     let text = error.to_string();
     assert!(
@@ -618,7 +608,7 @@ mod windows_logon {
         assert_eq!(legs.last().unwrap().operation, "FindFolder");
 
         let found = ews
-            .search(&Query {
+            .search(Query {
                 limit: 50,
                 ..Query::default()
             })
@@ -667,6 +657,7 @@ mod windows_logon {
         let standin = Standin::start_security(Mailbox::sample(), "Negotiate", true);
         let ews = Ews::new(settings(Some(standin.server()), Auth::Windows), direct());
         let error = ews.folders().expect_err("refused");
+        let error = MailError::from(error);
         assert!(matches!(error, MailError::Auth(_)), "{error:?}");
         let text = error.to_string();
         assert!(
@@ -734,6 +725,7 @@ fn an_unreachable_server_is_unreachable_not_a_panic() {
     let error = Ews::new(settings(Some(address), basic("x")), direct())
         .folders()
         .expect_err("down");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Unreachable(_)), "{error:?}");
 }
 

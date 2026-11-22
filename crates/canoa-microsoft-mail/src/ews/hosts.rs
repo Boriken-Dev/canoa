@@ -8,7 +8,7 @@ use core::net::IpAddr;
 
 use url::{Host, Url};
 
-use crate::mail::model::MailError;
+use canoa::mail_backend::MailError;
 
 /// The names an account gives for its own servers.
 #[derive(Clone, Debug)]

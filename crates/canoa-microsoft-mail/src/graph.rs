@@ -1,7 +1,7 @@
 //! Exchange Online through Microsoft Graph: the backend for a mailbox in the cloud, where Exchange's web services are going away.
 //! Messages are found with `$search` or `$filter` on `/me/messages`, read with a `GET` that expands the attachments, saved as
 //! drafts with `POST /me/messages` or `createReply` (the app asks for `Mail.ReadWrite` only, so no request here can send), and
-//! moved, flagged, marked and categorized with `move` and `PATCH`. Every request carries a bearer token a [`TokenSource`] gave, by
+//! moved, flagged, marked and categorized with `move` and `PATCH`. Every request carries a bearer token a `TokenSource` gave, by
 //! default the person's own Windows sign-in taken silently for an app registration the account names.
 
 mod token;
@@ -12,8 +12,8 @@ mod standin;
 #[cfg(test)]
 mod tests;
 
+use alloc::sync::Arc;
 use core::time::Duration;
-use std::sync::Arc;
 
 use canoa::network::{Network, Secret};
 use serde_json::{Value, json};
@@ -21,13 +21,14 @@ use serde_json::{Value, json};
 use self::token::Tokens;
 pub(crate) use self::token::{TokenSource, Wam};
 use self::wire::{FOLDER_FIELDS, LIST_FIELDS, Plan, encode, folder, message, plan, quote, summary};
-use super::model::{
-    Backend, Change, Draft, FlagState, Folder, MailError, Message, Page, Query, Summary,
-    find_folder, well_known,
+use canoa::mail_backend::{
+    Change, ChangeKind, Draft, DraftKind, FlagState, Folder, MailError, Mailbox, Message, Page,
+    Query, Summary, find_folder, well_known,
 };
+use coqui_acp_api::guatiao::library::ProviderError;
 
 /// Graph's address, which an account may replace.
-pub(crate) const DEFAULT_SERVER: &str = "https://graph.microsoft.com/v1.0";
+pub const DEFAULT_SERVER: &str = "https://graph.microsoft.com/v1.0";
 
 /// The most bytes read from one answer: a page of a message list or one message with its body.
 const MAX_ANSWER: u64 = 64 * 1024 * 1024;
@@ -40,15 +41,16 @@ const PREFER: &str = "IdType=\"ImmutableId\", outlook.body-content-type=\"text\"
 
 /// What an account names.
 #[derive(Clone, Debug)]
-pub(crate) struct GraphSettings {
+pub struct GraphSettings {
     /// Graph's address (`https://graph.microsoft.com/v1.0`).
-    pub(crate) server: String,
-    pub(crate) timeout: Duration,
+    pub server: String,
+    /// Timeout applied to individual Graph API requests.
+    pub timeout: Duration,
 }
 
 /// One Exchange Online mailbox.
 #[derive(Debug)]
-pub(crate) struct Graph {
+pub struct Graph {
     settings: GraphSettings,
     tokens: Tokens,
     network: Arc<Network>,
@@ -70,6 +72,7 @@ enum Method {
 }
 
 impl Graph {
+    /// Creates a Microsoft Graph client using the given settings, token source, and network policy.
     pub(crate) fn new(
         settings: GraphSettings,
         tokens: Arc<dyn TokenSource>,
@@ -301,8 +304,8 @@ impl Graph {
     }
 }
 
-impl Backend for Graph {
-    fn folders(&self) -> Result<Vec<Folder>, MailError> {
+impl Mailbox for Graph {
+    fn folders(&self) -> Result<Vec<Folder>, ProviderError> {
         let mut out: Vec<Folder> = Vec::new();
         // Each folder's children follow it, so a path is built from its parent's.
         let mut pending: Vec<(String, String)> = vec![(
@@ -332,11 +335,12 @@ impl Backend for Graph {
         Ok(out)
     }
 
-    fn search(&self, query: &Query) -> Result<Page, MailError> {
-        let plan: Plan = plan(query)?;
+    fn search(&self, query: Query) -> Result<Page, ProviderError> {
+        let plan: Plan = plan(&query)?;
         let scope = self.scope(query.folder.as_deref())?;
-        let limit = query.limit.max(1);
-        let wanted = query.offset + limit + 1;
+        let limit = usize::try_from(query.limit).unwrap_or(usize::MAX).max(1);
+        let offset = usize::try_from(query.offset).unwrap_or(usize::MAX);
+        let wanted = offset.saturating_add(limit).saturating_add(1);
         let mut params = vec![
             format!("$select={LIST_FIELDS}"),
             format!("$top={}", wanted.min(PAGE)),
@@ -362,7 +366,6 @@ impl Backend for Graph {
                 first = false;
                 total = body["@odata.count"]
                     .as_u64()
-                    .and_then(|count| usize::try_from(count).ok())
                     .filter(|_| !plan.filters_here());
             }
             for value in body["value"].as_array().into_iter().flatten() {
@@ -370,7 +373,7 @@ impl Backend for Graph {
                 if !plan.keeps(&message) {
                     continue;
                 }
-                if skipped < query.offset {
+                if skipped < offset {
                     skipped += 1;
                 } else if items.len() < limit {
                     items.push(message);
@@ -387,16 +390,16 @@ impl Backend for Graph {
         Ok(Page { items, total, more })
     }
 
-    fn read(&self, id: &str) -> Result<Message, MailError> {
+    fn read(&self, id: String) -> Result<Message, ProviderError> {
         let value = self.get(&self.url(&format!(
             "/me/messages/{}?$select={LIST_FIELDS},body,internetMessageId&$expand=attachments($select=name,size,contentType)",
-            encode(id)
+            encode(&id)
         )))?;
         Ok(message(&value))
     }
 
-    fn find_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
-        let filter = format!("internetMessageId eq {}", quote(message_id));
+    fn find_by_message_id(&self, message_id: String) -> Result<Option<String>, ProviderError> {
+        let filter = format!("internetMessageId eq {}", quote(&message_id));
         let found = self.get(&self.url(&format!(
             "/me/messages?$select=id&$top=1&$filter={}",
             encode(&filter)
@@ -408,7 +411,7 @@ impl Backend for Graph {
             .map(str::to_owned))
     }
 
-    fn summaries(&self, ids: &[String]) -> Result<Vec<Summary>, MailError> {
+    fn summaries(&self, ids: Vec<String>) -> Result<Vec<Summary>, ProviderError> {
         ids.iter()
             .map(|id| {
                 self.get(&self.url(&format!(
@@ -416,11 +419,12 @@ impl Backend for Graph {
                     encode(id)
                 )))
                 .map(|value| summary(&value))
+                .map_err(ProviderError::from)
             })
             .collect()
     }
 
-    fn thread(&self, summary_of: &Summary) -> Result<Vec<Summary>, MailError> {
+    fn thread(&self, summary_of: Summary) -> Result<Vec<Summary>, ProviderError> {
         let Some(conversation) = &summary_of.conversation else {
             return Ok(vec![summary_of.clone()]);
         };
@@ -434,15 +438,15 @@ impl Backend for Graph {
         Ok(items)
     }
 
-    fn draft(&self, draft: &Draft) -> Result<Summary, MailError> {
+    fn draft(&self, draft: Draft) -> Result<Summary, ProviderError> {
         let recipients = |addresses: &[String]| -> Vec<Value> {
             addresses
                 .iter()
                 .map(|address| json!({"emailAddress": {"address": address}}))
                 .collect()
         };
-        let saved = match draft {
-            Draft::New {
+        let saved = match draft.kind() {
+            DraftKind::New {
                 to,
                 cc,
                 bcc,
@@ -458,77 +462,74 @@ impl Backend for Graph {
                     "bccRecipients": recipients(bcc),
                 }),
             )?,
-            Draft::Reply { to, all, body } => self.post(
+            DraftKind::Reply { to, all, body } => self.post(
                 &format!(
                     "/me/messages/{}/{}",
                     encode(to),
-                    if *all {
-                        "createReplyAll"
-                    } else {
-                        "createReply"
-                    }
+                    if all { "createReplyAll" } else { "createReply" }
                 ),
                 &json!({"comment": body}),
             )?,
         };
         let saved = summary(&saved);
         if saved.id.is_empty() {
-            return Err(MailError::Backend(
-                "Graph saved the draft but gave no id".to_owned(),
-            ));
+            return Err(
+                MailError::Backend("Graph saved the draft but gave no id".to_owned()).into(),
+            );
         }
         Ok(saved)
     }
 
-    fn change(&self, ids: &[String], change: &Change) -> Result<(), MailError> {
+    fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError> {
         if ids.is_empty() {
             return Ok(());
         }
-        match change {
-            Change::Move { folder } => {
+        match change.kind() {
+            ChangeKind::Move { folder } => {
                 let to = self.destination(folder)?;
-                Self::each(ids, |id| self.move_one(id, &to))
+                Ok(Self::each(&ids, |id| self.move_one(id, &to))?)
             }
-            Change::Archive => {
+            ChangeKind::Archive => {
                 let first = self.move_one(&ids[0], "archive");
                 let to = match first {
                     Ok(()) => "archive".to_owned(),
                     Err(MailError::Backend(why)) if why.contains("ErrorFolderNotFound") => {
                         let folders = self.folders()?;
-                        let archive = find_folder(&folders, "Archive").map_err(|_| {
+                        let archive = find_folder(&folders, "Archive").map_err(|_| -> ProviderError {
                             MailError::Bad(
                                 "the mailbox has no Archive folder: move the messages to a folder named by mail_list".to_owned(),
                             )
+                            .into()
                         })?;
                         self.move_one(&ids[0], &archive.id)?;
                         archive.id.clone()
                     }
-                    Err(other) => return Err(other),
+                    Err(other) => return Err(other.into()),
                 };
-                Self::each(&ids[1..], |id| self.move_one(id, &to))
+                Ok(Self::each(&ids[1..], |id| self.move_one(id, &to))?)
             }
-            Change::Read(read) => Self::each(ids, |id| {
+            ChangeKind::Read(read) => Ok(Self::each(&ids, |id| {
                 self.patch(
                     &format!("/me/messages/{}", encode(id)),
                     &json!({"isRead": read}),
                 )
                 .map(drop)
-            }),
-            Change::Flag(state) => {
+            })?),
+            ChangeKind::Flag(state) => {
                 let status = match state {
                     FlagState::Flagged => "flagged",
                     FlagState::Complete => "complete",
                     FlagState::None => "notFlagged",
                 };
-                Self::each(ids, |id| {
+                Ok(Self::each(&ids, |id| {
                     self.patch(
                         &format!("/me/messages/{}", encode(id)),
                         &json!({"flag": {"flagStatus": status}}),
                     )
                     .map(drop)
-                })
+                })?)
             }
-            Change::Categories { add, remove } => Self::each(ids, |id| {
+            ChangeKind::Categories { add, remove } => Ok(Self::each(&ids, |id| {
                 let path = format!("/me/messages/{}", encode(id));
                 let current = self.get(&self.url(&format!("{path}?$select=categories")))?;
                 let mut kept: Vec<String> = current["categories"]
@@ -546,7 +547,7 @@ impl Backend for Graph {
                     }
                 }
                 self.patch(&path, &json!({"categories": kept})).map(drop)
-            }),
+            })?),
         }
     }
 }

@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::*;
-use crate::mail::model::FlagState;
-use crate::mail::related;
+use canoa::mail_backend::FlagState;
+use canoa::mail_backend::{Change, Draft, MailError};
 
 const STANDIN: &str = include_str!("standin.ps1");
 
@@ -101,7 +101,7 @@ fn the_requests_carry_the_query_and_the_profile_and_one_item_is_a_list_of_one() 
         Some("Work".to_owned()),
     );
     let page = outlook
-        .search(&Query {
+        .search(Query {
             text: Some("budget OR travel".to_owned()),
             from: Some("ana".to_owned()),
             attachments: Some(true),
@@ -120,22 +120,18 @@ fn the_requests_carry_the_query_and_the_profile_and_one_item_is_a_list_of_one() 
     outlook.folders().expect("folders");
     outlook
         .change(
-            &["E1|S".to_owned()],
-            &Change::Categories {
-                add: vec!["A".to_owned()],
-                remove: vec![],
-            },
+            ["E1|S".to_owned()].to_vec(),
+            Change::categories(vec!["A".to_owned()], vec![]),
         )
         .expect("changes");
     outlook
-        .change(&["E1|S".to_owned()], &Change::Flag(FlagState::Complete))
+        .change(
+            ["E1|S".to_owned()].to_vec(),
+            Change::flag(FlagState::Complete),
+        )
         .expect("flags");
     outlook
-        .draft(&Draft::Reply {
-            to: "E1|S".to_owned(),
-            all: true,
-            body: "ok".to_owned(),
-        })
+        .draft(Draft::reply("E1|S".to_owned(), true, "ok".to_owned()))
         .expect("drafts");
     let asked = runner.asked.lock().unwrap().clone();
     assert_eq!(asked[0]["op"], "search");
@@ -157,7 +153,7 @@ fn the_requests_carry_the_query_and_the_profile_and_one_item_is_a_list_of_one() 
         json!({"op": "draft", "reply_to": "E1|S", "reply_all": true, "body": "ok", "profile": "Work"})
     );
     // A summaries call that returns fewer messages than asked is an error, not a shorter list.
-    assert!(outlook.summaries(&["E1|S".to_owned()]).is_err());
+    assert!(outlook.summaries(["E1|S".to_owned()].to_vec()).is_err());
 }
 
 #[test]
@@ -169,13 +165,13 @@ fn a_message_id_is_asked_for_by_name_and_an_empty_answer_is_no_message() {
     );
     assert_eq!(
         outlook
-            .find_by_message_id("<one@example.test>")
+            .find_by_message_id("<one@example.test>".to_owned())
             .expect("asks"),
         Some("E1|S".to_owned())
     );
     assert_eq!(
         outlook
-            .find_by_message_id("<two@example.test>")
+            .find_by_message_id("<two@example.test>".to_owned())
             .expect("asks"),
         None
     );
@@ -195,24 +191,24 @@ fn the_helper_finds_a_message_by_its_internet_message_id_in_the_standins_mailbox
     let dir = Dir::new("message-id");
     let outlook = outlook_over_standin(&dir.state());
     let found = outlook
-        .find_by_message_id("<M6@example.test>")
+        .find_by_message_id("<M6@example.test>".to_owned())
         .expect("finds")
         .expect("the archived invoice");
     assert_eq!(found, "M6|STORE1");
     assert_eq!(
-        outlook.read(&found).expect("reads").summary.subject,
+        outlook.read(found).expect("reads").summary.subject,
         "Invoice 4471"
     );
     assert_eq!(
         outlook
-            .find_by_message_id("<nobody@example.test>")
+            .find_by_message_id("<nobody@example.test>".to_owned())
             .expect("finds"),
         None
     );
     // A quote in the id is doubled for the query, so it cannot end the text it is in.
     assert_eq!(
         outlook
-            .find_by_message_id("<a' OR 'b@example.test>")
+            .find_by_message_id("<a' OR 'b@example.test>".to_owned())
             .expect("finds"),
         None
     );
@@ -245,6 +241,7 @@ fn a_program_that_is_not_there_and_a_helper_that_hangs_are_said_so() {
         None,
     );
     let error = missing.folders().expect_err("not started");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Unreachable(_)), "{error:?}");
     assert!(error.to_string().contains("could not start"), "{error}");
 }
@@ -283,7 +280,7 @@ fn the_helper_searches_the_standins_mailbox_with_filters() {
     let dir = Dir::new("search");
     let outlook = outlook_over_standin(&dir.state());
     let page = outlook
-        .search(&Query {
+        .search(Query {
             from: Some("ana".to_owned()),
             unread: Some(true),
             after: Some("2026-11-12".to_owned()),
@@ -300,7 +297,7 @@ fn the_helper_searches_the_standins_mailbox_with_filters() {
     assert_eq!(page.total, Some(1));
 
     let words = outlook
-        .search(&Query {
+        .search(Query {
             text: Some("travel OR invoice".to_owned()),
             limit: 25,
             ..Query::default()
@@ -312,7 +309,7 @@ fn the_helper_searches_the_standins_mailbox_with_filters() {
     );
 
     let archived = outlook
-        .search(&Query {
+        .search(Query {
             folder: Some("archive".to_owned()),
             attachments: Some(true),
             limit: 25,
@@ -322,7 +319,7 @@ fn the_helper_searches_the_standins_mailbox_with_filters() {
     assert_eq!(subjects(&archived.items), ["Invoice 4471"]);
 
     let everything = outlook
-        .search(&Query {
+        .search(Query {
             limit: 3,
             ..Query::default()
         })
@@ -344,7 +341,7 @@ fn the_helper_searches_the_standins_mailbox_with_filters() {
 fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
     let dir = Dir::new("read");
     let outlook = outlook_over_standin(&dir.state());
-    let message = outlook.read("M1").expect("reads");
+    let message = outlook.read("M1".to_owned()).expect("reads");
     assert_eq!(message.summary.subject, "Budget 2027 kickoff");
     assert_eq!(message.body, "Let's plan the 2027 budget. The cap is 120k.");
     assert_eq!(message.attachments.len(), 1);
@@ -354,7 +351,7 @@ fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
         Some("application/pdf")
     );
     assert_eq!(message.message_id.as_deref(), Some("<M1@example.test>"));
-    let error = outlook.read("nope").expect_err("missing");
+    let error = outlook.read("nope".to_owned()).expect_err("missing");
     assert!(error.to_string().contains("Outlook said"), "{error}");
 
     let folders = outlook.folders().expect("folders");
@@ -362,7 +359,7 @@ fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
     assert_eq!(apollo.path, "standin@example.test/Projects/Apollo");
     assert!(folders.iter().all(|f| f.name != "Calendar"));
 
-    let found = related::related(&outlook, &message.summary, 20).expect("related");
+    let found = canoa::mail_backend::related(&outlook, &message.summary, 20).expect("related");
     let ids: Vec<&str> = found.iter().map(|r| r.summary.id.as_str()).collect();
     assert_eq!(
         ids[..2],
@@ -390,21 +387,21 @@ fn the_helper_saves_drafts_and_never_sends() {
     let dir = Dir::new("draft");
     let outlook = outlook_over_standin(&dir.state());
     let saved = outlook
-        .draft(&Draft::New {
-            to: vec!["ana@example.test".to_owned()],
-            cc: vec![],
-            bcc: vec![],
-            subject: "Numbers".to_owned(),
-            body: "Here they are.".to_owned(),
-        })
+        .draft(Draft::new_message(
+            vec!["ana@example.test".to_owned()],
+            vec![],
+            vec![],
+            "Numbers".to_owned(),
+            "Here they are.".to_owned(),
+        ))
         .expect("drafts");
     assert_eq!(saved.subject, "Numbers");
     let reply = outlook
-        .draft(&Draft::Reply {
-            to: "M3".to_owned(),
-            all: false,
-            body: "Travel is in.".to_owned(),
-        })
+        .draft(Draft::reply(
+            "M3".to_owned(),
+            false,
+            "Travel is in.".to_owned(),
+        ))
         .expect("replies");
     assert_eq!(reply.subject, "RE: Re: Budget 2027 kickoff");
     let drafts: Vec<Value> = dir
@@ -432,12 +429,7 @@ fn the_helper_moves_marks_flags_and_categorizes() {
     let outlook = outlook_over_standin(&dir.state());
     let both = vec!["M1".to_owned(), "M3".to_owned()];
     outlook
-        .change(
-            &both,
-            &Change::Move {
-                folder: "Projects/Apollo".to_owned(),
-            },
-        )
+        .change(both.clone(), Change::move_to("Projects/Apollo".to_owned()))
         .expect("moves");
     assert_eq!(
         (
@@ -448,26 +440,22 @@ fn the_helper_moves_marks_flags_and_categorizes() {
     );
     assert_eq!(dir.row("M2")["folder"], "Sent Items", "nothing else moved");
 
-    outlook.change(&both, &Change::Read(true)).expect("marks");
     outlook
-        .change(&both[..1], &Change::Flag(FlagState::Flagged))
+        .change(both.clone(), Change::read(true))
+        .expect("marks");
+    outlook
+        .change(both[..1].to_vec(), Change::flag(FlagState::Flagged))
         .expect("flags");
     outlook
         .change(
-            &both,
-            &Change::Categories {
-                add: vec!["Budget".to_owned(), "Q4".to_owned()],
-                remove: vec![],
-            },
+            both.clone(),
+            Change::categories(vec!["Budget".to_owned(), "Q4".to_owned()], vec![]),
         )
         .expect("adds");
     outlook
         .change(
-            &both[1..],
-            &Change::Categories {
-                add: vec![],
-                remove: vec!["q4".to_owned()],
-            },
+            both[1..].to_vec(),
+            Change::categories(vec![], vec!["q4".to_owned()]),
         )
         .expect("removes");
     let (first, second) = (dir.row("M1"), dir.row("M3"));
@@ -483,15 +471,13 @@ fn the_helper_moves_marks_flags_and_categorizes() {
     assert_eq!(second["categories"], "Budget");
 
     outlook
-        .change(&["M4".to_owned()], &Change::Archive)
+        .change(["M4".to_owned()].to_vec(), Change::archive())
         .expect("archives");
     assert_eq!(dir.row("M4")["folder"], "Archive");
     let error = outlook
         .change(
-            &["M1".to_owned()],
-            &Change::Move {
-                folder: "Nope".to_owned(),
-            },
+            ["M1".to_owned()].to_vec(),
+            Change::move_to("Nope".to_owned()),
         )
         .expect_err("no folder");
     assert!(

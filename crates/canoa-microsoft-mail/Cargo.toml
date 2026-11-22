@@ -1,0 +1,47 @@
+[package]
+name = "canoa-microsoft-mail"
+description = "Microsoft mail backends for Canoa: Exchange Server (EWS), Microsoft Graph and classic Outlook"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["canoa", "mail", "ews", "graph", "outlook"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# Canoa itself is not published yet.
+publish = false
+
+[features]
+# Exports `standin` (`Mailbox`, `Standin`) for integration tests in `canoa-host`.
+standin = ["dep:httparse"]
+
+[dependencies]
+canoa = { workspace = true, features = ["mail-backend", "network"] }
+coqui-acp-api.workspace = true
+data-encoding.workspace = true
+guatiao.workspace = true
+guatiao-intake.workspace = true
+httparse = { workspace = true, optional = true }
+percent-encoding.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+coqui-syshttp.workspace = true
+httparse.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# Completes a Negotiate / NTLM exchange against the local Windows security package in tests only.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security_Authentication_Identity", "Win32_Security_Credentials"] }
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

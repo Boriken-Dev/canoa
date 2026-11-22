@@ -22,10 +22,11 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
 use super::Mailboxes;
-use super::model::{Backend, Change, Draft, FlagState, MailError, Message, Person, Query, Summary};
-use super::related;
 use crate::control::Grant;
 use crate::store::mcp::{Access, Approval, Card, Extra};
+use canoa::mail_backend::{
+    Change, Draft, FlagState, MailError, Mailbox, Message, Person, Query, Summary, related,
+};
 
 /// The name of the MCP server the host adds to a session.
 pub(crate) const SERVER_NAME: &str = "canoa-mail";
@@ -449,7 +450,7 @@ impl MailTools {
             match self
                 .boxes
                 .backend(&name)
-                .and_then(|backend| backend.folders())
+                .and_then(|backend| backend.folders().map_err(MailError::from))
             {
                 Ok(folders) => {
                     row["folders"] = folders
@@ -495,8 +496,8 @@ impl MailTools {
             attachments: flag(args, "has_attachment")?,
             unread: flag(args, "unread")?,
             flagged: flag(args, "flagged")?,
-            limit,
-            offset: number(args, "offset", 0, 1_000_000)?,
+            limit: u64::try_from(limit).unwrap_or(u64::MAX),
+            offset: u64::try_from(number(args, "offset", 0, 1_000_000)?).unwrap_or(u64::MAX),
         };
         let names: Vec<String> = match text(args, "account")? {
             Some(name) => vec![name.to_owned()],
@@ -504,13 +505,13 @@ impl MailTools {
         };
         let mut rows: Vec<(Option<String>, Value)> = Vec::new();
         let mut errors = Vec::new();
-        let mut total: Option<usize> = Some(0);
+        let mut total: Option<u64> = Some(0);
         let mut more = false;
         for name in &names {
             match self
                 .boxes
                 .backend(name)
-                .and_then(|backend| backend.search(&query))
+                .and_then(|backend| backend.search(query.clone()).map_err(MailError::from))
             {
                 Ok(page) => {
                     total = total.zip(page.total).map(|(sum, n)| sum + n);
@@ -551,7 +552,7 @@ impl MailTools {
     fn backend_of(
         &self,
         id: &str,
-    ) -> Result<(String, String, std::sync::Arc<dyn Backend>), String> {
+    ) -> Result<(String, String, std::sync::Arc<dyn Mailbox>), String> {
         let (account, raw) = untag(id)?;
         let backend = self.boxes.backend(account).map_err(fail)?;
         Ok((account.to_owned(), raw.to_owned(), backend))
@@ -562,7 +563,7 @@ impl MailTools {
     fn target(
         &self,
         args: &Value,
-    ) -> Result<(String, String, std::sync::Arc<dyn Backend>), String> {
+    ) -> Result<(String, String, std::sync::Arc<dyn Mailbox>), String> {
         let id = text(args, "id")?;
         let message_id = text(args, "message_id")?;
         let item_id = text(args, "item_id")?;
@@ -590,7 +591,7 @@ impl MailTools {
         &self,
         message_id: &str,
         account: Option<&str>,
-    ) -> Result<(String, String, std::sync::Arc<dyn Backend>), String> {
+    ) -> Result<(String, String, std::sync::Arc<dyn Mailbox>), String> {
         let forms = message_id_forms(message_id)?;
         let mut errors = Vec::new();
         for name in self.searched(account) {
@@ -602,7 +603,10 @@ impl MailTools {
                 }
             };
             for form in &forms {
-                match backend.find_by_message_id(form) {
+                match backend
+                    .find_by_message_id(form.clone())
+                    .map_err(MailError::from)
+                {
                     Ok(Some(raw)) => return Ok((name, raw, backend)),
                     Ok(None) => {}
                     Err(error) => {
@@ -619,11 +623,14 @@ impl MailTools {
         &self,
         item_id: &str,
         account: Option<&str>,
-    ) -> Result<(String, String, std::sync::Arc<dyn Backend>), String> {
+    ) -> Result<(String, String, std::sync::Arc<dyn Mailbox>), String> {
         let mut errors = Vec::new();
         for name in self.searched(account) {
             match self.boxes.backend(&name) {
-                Ok(backend) => match backend.summaries(&[item_id.to_owned()]) {
+                Ok(backend) => match backend
+                    .summaries(vec![item_id.to_owned()])
+                    .map_err(MailError::from)
+                {
                     Ok(found) if !found.is_empty() => {
                         return Ok((name, item_id.to_owned(), backend));
                     }
@@ -639,11 +646,17 @@ impl MailTools {
     fn read(&self, args: &Value) -> Result<Value, String> {
         let max = number(args, "max_chars", DEFAULT_BODY, MAX_BODY)?.max(100);
         let (account, raw, backend) = self.target(args)?;
-        let message = backend.read(&raw).map_err(fail)?;
+        let message = backend
+            .read(raw.clone())
+            .map_err(MailError::from)
+            .map_err(fail)?;
         if flag(args, "thread")? != Some(true) {
             return Ok(message_json(&account, &message, max));
         }
-        let mut items = backend.thread(&message.summary).map_err(fail)?;
+        let mut items = backend
+            .thread(message.summary.clone())
+            .map_err(MailError::from)
+            .map_err(fail)?;
         if !items.iter().any(|item| item.id == raw) {
             items.push(message.summary.clone());
         }
@@ -656,7 +669,10 @@ impl MailTools {
             let full = if item.id == raw {
                 message.clone()
             } else {
-                backend.read(&item.id).map_err(fail)?
+                backend
+                    .read(item.id.clone())
+                    .map_err(MailError::from)
+                    .map_err(fail)?
             };
             messages.push(message_json(&account, &full, max));
         }
@@ -666,8 +682,8 @@ impl MailTools {
     fn related(&self, args: &Value) -> Result<Value, String> {
         let limit = number(args, "limit", 20, MAX_LIMIT)?.max(1);
         let (account, raw, backend) = self.target(args)?;
-        let message = backend.read(&raw).map_err(fail)?;
-        let found = related::related(&*backend, &message.summary, limit).map_err(fail)?;
+        let message = backend.read(raw).map_err(MailError::from).map_err(fail)?;
+        let found = related(&*backend, &message.summary, limit).map_err(fail)?;
         Ok(json!({
             "to": summary_json(&account, &message.summary),
             "results": found.iter().map(|item| {
@@ -683,7 +699,7 @@ impl MailTools {
         let (account, backend, draft) = if let Some(id) = text(args, "reply_to")? {
             let (account, raw, backend) = self.backend_of(id)?;
             let all = flag(args, "reply_all")?.unwrap_or(false);
-            (account, backend, Draft::Reply { to: raw, all, body })
+            (account, backend, Draft::reply(raw, all, body))
         } else {
             let to = list_of(args, "to")?;
             if to.is_empty() {
@@ -693,16 +709,19 @@ impl MailTools {
             (
                 account,
                 backend,
-                Draft::New {
+                Draft::new_message(
                     to,
-                    cc: list_of(args, "cc")?,
-                    bcc: list_of(args, "bcc")?,
-                    subject: text(args, "subject")?.unwrap_or_default().to_owned(),
+                    list_of(args, "cc")?,
+                    list_of(args, "bcc")?,
+                    text(args, "subject")?.unwrap_or_default().to_owned(),
                     body,
-                },
+                ),
             )
         };
-        let saved = backend.draft(&draft).map_err(fail)?;
+        let saved = backend
+            .draft(draft)
+            .map_err(MailError::from)
+            .map_err(fail)?;
         Ok(json!({
             "saved": true,
             "sent": false,
@@ -727,16 +746,16 @@ impl MailTools {
                     "Move to the folder {}",
                     clean(&folder, MAX_FIELD, false)
                 ));
-                changes.push(Change::Move { folder });
+                changes.push(Change::move_to(folder));
             }
             "mail_archive" => {
                 what.push("Move to the Archive folder".to_owned());
-                changes.push(Change::Archive);
+                changes.push(Change::archive());
             }
             _ => {
                 if let Some(read) = flag(args, "read")? {
                     what.push(format!("Mark as {}", if read { "read" } else { "unread" }));
-                    changes.push(Change::Read(read));
+                    changes.push(Change::read(read));
                 }
                 if let Some(state) = text(args, "flag")? {
                     let state = match state {
@@ -746,7 +765,7 @@ impl MailTools {
                         _ => return Err("flag is flagged, complete or none".to_owned()),
                     };
                     what.push(format!("Set the follow-up flag to {}", state.name()));
-                    changes.push(Change::Flag(state));
+                    changes.push(Change::flag(state));
                 }
                 let add = list_of(args, "add_categories")?;
                 let remove = list_of(args, "remove_categories")?;
@@ -770,7 +789,7 @@ impl MailTools {
                                 .join(", ")
                         ));
                     }
-                    changes.push(Change::Categories { add, remove });
+                    changes.push(Change::categories(add, remove));
                 }
                 if changes.is_empty() {
                     return Err(
@@ -783,7 +802,10 @@ impl MailTools {
             return Err("another change of this session is waiting for the person".to_owned());
         };
         // The person is shown the messages themselves, read from the mailbox now, not the agent's words about them.
-        let shown = backend.summaries(&raw).map_err(fail)?;
+        let shown = backend
+            .summaries(raw.clone())
+            .map_err(MailError::from)
+            .map_err(fail)?;
         let card = card_of(&account, &what, &shown);
         match access.approve(&card, false)? {
             Approval::Declined => Ok(json!({
@@ -793,7 +815,10 @@ impl MailTools {
             })),
             how => {
                 for change in &changes {
-                    backend.change(&raw, change).map_err(fail)?;
+                    backend
+                        .change(raw.clone(), change.clone())
+                        .map_err(MailError::from)
+                        .map_err(fail)?;
                 }
                 if how == Approval::Silent {
                     access.note(&format!(

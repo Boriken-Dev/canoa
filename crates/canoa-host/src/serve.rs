@@ -1526,7 +1526,7 @@ impl Serving {
         };
         // The mailboxes the mail tools use, which the control channel's `mail/*` methods change while sessions run.
         let mail_boxes = Arc::new(crate::mail::Mailboxes::from_config(
-            &config.mail,
+            config,
             accounts.clone(),
         ));
         if let (Some(accounts), Some(file)) = (&accounts, &options.config_file) {
@@ -3967,8 +3967,7 @@ mod tests {
         let grants = |text: &str| {
             let config = Config::from_str_in(text, std::path::Path::new("/canoa")).expect("parses");
             let tools = crate::mail::tools::MailTools::new(crate::mail::Mailboxes::from_config(
-                &config.mail,
-                None,
+                &config, None,
             ));
             let given = page_grants(&config);
             let offered = tools.offered(&given);

@@ -53,9 +53,9 @@ void main() {
         await tester.tap(find.byKey(const Key('add-mail-account')));
         await tester.pumpAndSettle();
         await tester.enterText(find.byKey(const Key('mail-name')), 'home');
-        await tester.enterText(find.byKey(const Key('mail-server')), 'https://mail.example.test/EWS/Exchange.asmx');
-        await tester.enterText(find.byKey(const Key('mail-user')), 'EXAMPLE\\ana');
-        await tester.enterText(find.byKey(const Key('mail-password')), 'not shown');
+        await tester.enterText(find.byKey(const Key('mail-field-server')), 'https://mail.example.test/EWS/Exchange.asmx');
+        await tester.enterText(find.byKey(const Key('mail-field-user')), 'EXAMPLE\\ana');
+        await tester.enterText(find.byKey(const Key('mail-field-password')), 'not shown');
         FocusManager.instance.primaryFocus?.unfocus();
         await tester.pumpAndSettle();
         await golden(tester, 'add');

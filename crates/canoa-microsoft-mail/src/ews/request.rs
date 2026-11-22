@@ -1,10 +1,10 @@
 //! The SOAP requests the connector sends to Exchange's web services, written as text. Every value that came from a caller goes
 //! through [`escape`](crate::mail::xml::escape).
 
-use std::fmt::Write as _;
+use core::fmt::Write as _;
 
-use crate::mail::model::{Change, Draft, FlagState, Query};
-use crate::mail::xml::escape;
+use crate::xml::escape;
+use canoa::mail_backend::{Change, ChangeKind, Draft, DraftKind, FlagState, Query};
 
 /// A folder as a request names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +25,7 @@ impl FolderRef {
     }
 }
 
-pub(super) use crate::mail::model::well_known;
+pub(super) use canoa::mail_backend::well_known;
 
 /// The whole envelope around one operation.
 pub(super) fn envelope(operation: &str) -> String {
@@ -199,8 +199,8 @@ fn mailboxes(tag: &str, addresses: &[String]) -> String {
 
 /// A draft saved in Drafts. The disposition is `SaveOnly` for every draft: no request this connector writes can send.
 pub(super) fn create_draft(draft: &Draft) -> String {
-    let item = match draft {
-        Draft::New {
+    let item = match draft.kind() {
+        DraftKind::New {
             to,
             cc,
             bcc,
@@ -214,12 +214,8 @@ pub(super) fn create_draft(draft: &Draft) -> String {
             mailboxes("CcRecipients", cc),
             mailboxes("BccRecipients", bcc),
         ),
-        Draft::Reply { to, all, body } => {
-            let tag = if *all {
-                "ReplyAllToItem"
-            } else {
-                "ReplyToItem"
-            };
+        DraftKind::Reply { to, all, body } => {
+            let tag = if all { "ReplyAllToItem" } else { "ReplyToItem" };
             format!(
                 "<t:{tag}><t:ReferenceItemId Id=\"{}\"/><t:NewBodyContent BodyType=\"Text\">{}</t:NewBodyContent></t:{tag}>",
                 escape(to),
@@ -263,11 +259,11 @@ fn categories_xml(categories: &[String]) -> String {
 /// Never for a move, which has no update: callers send those with [`move_items`].
 pub(super) fn update_items(ids: &[String], change: &Change, categories: &[Vec<String>]) -> String {
     let updates = |at: usize| -> String {
-        match change {
-            Change::Read(read) => {
+        match change.kind() {
+            ChangeKind::Read(read) => {
                 set_field("message:IsRead", &format!("<t:IsRead>{read}</t:IsRead>"))
             }
-            Change::Flag(state) => {
+            ChangeKind::Flag(state) => {
                 let status = match state {
                     FlagState::Flagged => "Flagged",
                     FlagState::Complete => "Complete",
@@ -278,7 +274,7 @@ pub(super) fn update_items(ids: &[String], change: &Change, categories: &[Vec<St
                     &format!("<t:Flag><t:FlagStatus>{status}</t:FlagStatus></t:Flag>"),
                 )
             }
-            Change::Categories { .. } => {
+            ChangeKind::Categories { .. } => {
                 let kept = categories.get(at).map_or(&[][..], Vec::as_slice);
                 if kept.is_empty() {
                     "<t:DeleteItemField><t:FieldURI FieldURI=\"item:Categories\"/></t:DeleteItemField>"
@@ -287,7 +283,7 @@ pub(super) fn update_items(ids: &[String], change: &Change, categories: &[Vec<St
                     set_field("item:Categories", &categories_xml(kept))
                 }
             }
-            Change::Move { .. } | Change::Archive => String::new(),
+            ChangeKind::Move { .. } | ChangeKind::Archive => String::new(),
         }
     };
     let changes = ids
@@ -368,20 +364,16 @@ mod tests {
 
     #[test]
     fn no_request_the_connector_writes_can_send() {
-        let draft = create_draft(&Draft::New {
-            to: vec!["a@example.test".to_owned()],
-            cc: vec![],
-            bcc: vec![],
-            subject: "S <1>".to_owned(),
-            body: "B".to_owned(),
-        });
+        let draft = create_draft(&Draft::new_message(
+            vec!["a@example.test".to_owned()],
+            vec![],
+            vec![],
+            "S <1>",
+            "B",
+        ));
         assert!(draft.contains("MessageDisposition=\"SaveOnly\""));
         assert!(draft.contains("S &lt;1&gt;"));
-        let reply = create_draft(&Draft::Reply {
-            to: "id1".to_owned(),
-            all: true,
-            body: "ok".to_owned(),
-        });
+        let reply = create_draft(&Draft::reply("id1", true, "ok"));
         assert!(reply.contains("ReplyAllToItem") && reply.contains("SaveOnly"));
         for xml in [draft, reply] {
             assert!(!xml.contains("SendItem") && !xml.contains("SendAndSaveCopy"));

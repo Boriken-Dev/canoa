@@ -19,11 +19,11 @@ use super::standin::Standin;
 use super::token::{SCOPE, SCRIPT, Token, Tokens, Wam, lifetime_of};
 use super::wire;
 use super::{Graph, GraphSettings};
-use crate::mail::model::{Backend, Change, Draft, FlagState, MailError, Query, Summary};
-use crate::mail::outlook::{PowerShell, Runner};
-use crate::mail::related::{self, BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
-use crate::mail::standin::Mailbox;
-use crate::mail::tests::direct;
+use crate::outlook::{PowerShell, Runner};
+use crate::standin::Mailbox;
+use crate::tests::direct;
+use canoa::mail_backend::{BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
+use canoa::mail_backend::{Change, Draft, FlagState, MailError, Mailbox as _, Query, Summary};
 
 /// Gives the tokens it was given in turn, the last one for ever, and counts how often it was asked.
 #[derive(Debug)]
@@ -100,7 +100,7 @@ fn query(configure: impl FnOnce(&mut Query)) -> Query {
 #[test]
 fn a_search_with_filters_returns_only_the_items_that_match() {
     let (standin, graph) = connected();
-    let everything = graph.search(&query(|_| {})).expect("searches");
+    let everything = graph.search(query(|_| {})).expect("searches");
     assert_eq!(
         everything.items.len(),
         7,
@@ -113,7 +113,7 @@ fn a_search_with_filters_returns_only_the_items_that_match() {
     );
 
     let page = graph
-        .search(&query(|q| {
+        .search(query(|q| {
             q.from = Some("ana".to_owned());
             q.after = Some("2026-11-11".to_owned());
             q.unread = Some(true);
@@ -154,7 +154,7 @@ fn a_search_with_filters_returns_only_the_items_that_match() {
 fn unread_and_attachments_are_a_filter_that_graph_counts() {
     let (standin, graph) = connected();
     let unread = graph
-        .search(&query(|q| q.unread = Some(true)))
+        .search(query(|q| q.unread = Some(true)))
         .expect("searches");
     assert_eq!(unread.items.len(), 4);
     assert_eq!(unread.total, Some(4));
@@ -170,7 +170,7 @@ fn unread_and_attachments_are_a_filter_that_graph_counts() {
     );
 
     let with_files = graph
-        .search(&query(|q| {
+        .search(query(|q| {
             q.attachments = Some(true);
             q.after = Some("2025-01-01T00:00:00Z".to_owned());
             q.before = Some("2026-11-30".to_owned());
@@ -196,7 +196,7 @@ fn unread_and_attachments_are_a_filter_that_graph_counts() {
 fn words_attachments_and_folders_narrow_a_search() {
     let (standin, graph) = connected();
     let words = graph
-        .search(&query(|q| q.text = Some("travel OR invoice".to_owned())))
+        .search(query(|q| q.text = Some("travel OR invoice".to_owned())))
         .expect("searches");
     assert_eq!(
         subjects(&words.items),
@@ -204,7 +204,7 @@ fn words_attachments_and_folders_narrow_a_search() {
     );
 
     let archive = graph
-        .search(&query(|q| q.folder = Some("archive".to_owned())))
+        .search(query(|q| q.folder = Some("archive".to_owned())))
         .expect("searches");
     assert_eq!(subjects(&archive.items), ["Invoice 4471"]);
     assert_eq!(
@@ -213,7 +213,7 @@ fn words_attachments_and_folders_narrow_a_search() {
     );
 
     let sent = graph
-        .search(&query(|q| {
+        .search(query(|q| {
             q.folder = Some("Sent Items".to_owned());
             q.subject = Some("budget".to_owned());
         }))
@@ -221,12 +221,12 @@ fn words_attachments_and_folders_narrow_a_search() {
     assert_eq!(subjects(&sent.items), ["RE: Budget 2027 kickoff"]);
 
     let by_path = graph
-        .search(&query(|q| q.folder = Some("Inbox".to_owned())))
+        .search(query(|q| q.folder = Some("Inbox".to_owned())))
         .expect("searches");
     assert_eq!(by_path.items.len(), 5);
 
     let in_apollo = graph
-        .search(&query(|q| q.folder = Some("Projects/Apollo".to_owned())))
+        .search(query(|q| q.folder = Some("Projects/Apollo".to_owned())))
         .expect("searches");
     assert!(in_apollo.items.is_empty());
     assert!(
@@ -241,14 +241,14 @@ fn words_attachments_and_folders_narrow_a_search() {
     );
 
     let error = graph
-        .search(&query(|q| q.folder = Some("Nowhere".to_owned())))
+        .search(query(|q| q.folder = Some("Nowhere".to_owned())))
         .expect_err("no such folder");
     assert!(
         error.to_string().contains("no folder is named Nowhere"),
         "{error}"
     );
     let error = graph
-        .search(&query(|q| q.after = Some("last week".to_owned())))
+        .search(query(|q| q.after = Some("last week".to_owned())))
         .expect_err("a date that is not one");
     assert!(
         error.to_string().contains("cannot read the date"),
@@ -260,7 +260,7 @@ fn words_attachments_and_folders_narrow_a_search() {
 fn a_page_says_whether_more_follow_and_graphs_own_paging_is_followed() {
     let (standin, graph) = connected();
     let first = graph
-        .search(&Query {
+        .search(Query {
             limit: 3,
             ..Query::default()
         })
@@ -270,7 +270,7 @@ fn a_page_says_whether_more_follow_and_graphs_own_paging_is_followed() {
         (3, true, Some(7))
     );
     let last = graph
-        .search(&Query {
+        .search(Query {
             limit: 3,
             offset: 6,
             ..Query::default()
@@ -283,7 +283,7 @@ fn a_page_says_whether_more_follow_and_graphs_own_paging_is_followed() {
     standin.page_size(2);
     let before = standin.log().len();
     let across = graph
-        .search(&Query {
+        .search(Query {
             limit: 3,
             offset: 1,
             ..Query::default()
@@ -308,7 +308,7 @@ fn a_page_says_whether_more_follow_and_graphs_own_paging_is_followed() {
 
     // A search with a filter applied here still fills the page from later pages.
     let unread = graph
-        .search(&query(|q| {
+        .search(query(|q| {
             q.text = Some("budget".to_owned());
             q.unread = Some(false);
         }))
@@ -324,10 +324,13 @@ fn a_page_says_whether_more_follow_and_graphs_own_paging_is_followed() {
 fn flagged_mail_is_a_server_side_filter() {
     let (standin, graph) = connected();
     graph
-        .change(&["AAMk/3+x=".to_owned()], &Change::Flag(FlagState::Flagged))
+        .change(
+            ["AAMk/3+x=".to_owned()].to_vec(),
+            Change::flag(FlagState::Flagged),
+        )
         .expect("flags");
     let flagged = graph
-        .search(&query(|q| q.flagged = Some(true)))
+        .search(query(|q| q.flagged = Some(true)))
         .expect("searches");
     assert_eq!(subjects(&flagged.items), ["Re: Budget 2027 kickoff"]);
     assert_eq!(flagged.total, Some(1));
@@ -341,7 +344,7 @@ fn flagged_mail_is_a_server_side_filter() {
             .ends_with("flag/flagStatus eq 'flagged'")
     );
     let not = graph
-        .search(&query(|q| q.flagged = Some(false)))
+        .search(query(|q| q.flagged = Some(false)))
         .expect("searches");
     assert_eq!(not.items.len(), 6);
     assert_eq!(not.total, None, "the flag is checked here, so no count");
@@ -362,7 +365,7 @@ fn folders_have_paths_and_counts() {
 #[test]
 fn a_message_is_read_in_full() {
     let (standin, graph) = connected();
-    let message = graph.read("AAMk/1+x=").expect("reads");
+    let message = graph.read("AAMk/1+x=".to_owned()).expect("reads");
     assert_eq!(message.summary.subject, "Budget 2027 kickoff");
     assert_eq!(message.body, "Let's plan the 2027 budget. The cap is 120k.");
     assert_eq!(message.attachments.len(), 1);
@@ -384,7 +387,8 @@ fn a_message_is_read_in_full() {
         prefer.contains("ImmutableId") && prefer.contains("outlook.body-content-type=\"text\""),
         "{prefer}"
     );
-    let error = graph.read("AAMk/nope").expect_err("missing");
+    let error = graph.read("AAMk/nope".to_owned()).expect_err("missing");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Backend(_)));
     assert!(error.to_string().contains("ErrorItemNotFound"), "{error}");
 }
@@ -402,8 +406,8 @@ fn a_body_graph_gives_as_html_is_read_as_text() {
 #[test]
 fn a_conversation_is_found_by_its_id_and_ordered_oldest_first() {
     let (standin, graph) = connected();
-    let message = graph.read("AAMk/1+x=").expect("reads");
-    let thread = graph.thread(&message.summary).expect("thread");
+    let message = graph.read("AAMk/1+x=".to_owned()).expect("reads");
+    let thread = graph.thread(message.summary.clone()).expect("thread");
     assert_eq!(
         thread.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
         ["AAMk/1+x=", "AAMk/2+x=", "AAMk/3+x="]
@@ -413,7 +417,7 @@ fn a_conversation_is_found_by_its_id_and_ordered_oldest_first() {
         Some("conversationId eq 'C1'")
     );
     let summaries = graph
-        .summaries(&["AAMk/3+x=".to_owned(), "AAMk/1+x=".to_owned()])
+        .summaries(["AAMk/3+x=".to_owned(), "AAMk/1+x=".to_owned()].to_vec())
         .expect("summaries");
     assert_eq!(
         subjects(&summaries),
@@ -427,7 +431,7 @@ fn a_message_is_found_by_its_internet_message_id_across_the_mailbox() {
     let (standin, graph) = connected();
     assert_eq!(
         graph
-            .find_by_message_id("<AAMk/6+x=@example.test>")
+            .find_by_message_id("<AAMk/6+x=@example.test>".to_owned())
             .expect("searches"),
         Some("AAMk/6+x=".to_owned())
     );
@@ -439,14 +443,14 @@ fn a_message_is_found_by_its_internet_message_id_across_the_mailbox() {
     );
     assert_eq!(
         graph
-            .find_by_message_id("<nobody@example.test>")
+            .find_by_message_id("<nobody@example.test>".to_owned())
             .expect("searches"),
         None
     );
     // A quote in the id is doubled, so it cannot end the string it is in.
     assert_eq!(
         graph
-            .find_by_message_id("<a' or isRead eq false or 'b@example.test>")
+            .find_by_message_id("<a' or isRead eq false or 'b@example.test>".to_owned())
             .expect("searches"),
         None
     );
@@ -465,8 +469,8 @@ fn a_message_is_found_by_its_internet_message_id_across_the_mailbox() {
 #[test]
 fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
     let (_standin, graph) = connected();
-    let message = graph.read("AAMk/1+x=").expect("reads");
-    let found = related::related(&graph, &message.summary, 20).expect("related");
+    let message = graph.read("AAMk/1+x=".to_owned()).expect("reads");
+    let found = canoa::mail_backend::related(&graph, &message.summary, 20).expect("related");
     let by = |id: &str| {
         found
             .iter()
@@ -495,29 +499,29 @@ fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
 fn a_draft_is_saved_and_nothing_is_sent() {
     let (standin, graph) = connected();
     let saved = graph
-        .draft(&Draft::New {
-            to: vec!["ana@example.test".to_owned()],
-            cc: vec![],
-            bcc: vec!["boss@example.test".to_owned()],
-            subject: "Numbers <draft>".to_owned(),
-            body: "Here they are & more.".to_owned(),
-        })
+        .draft(Draft::new_message(
+            vec!["ana@example.test".to_owned()],
+            vec![],
+            vec!["boss@example.test".to_owned()],
+            "Numbers <draft>".to_owned(),
+            "Here they are & more.".to_owned(),
+        ))
         .expect("drafts");
     assert_eq!(saved.subject, "Numbers <draft>");
     let reply = graph
-        .draft(&Draft::Reply {
-            to: "AAMk/1+x=".to_owned(),
-            all: false,
-            body: "Thanks, on it.".to_owned(),
-        })
+        .draft(Draft::reply(
+            "AAMk/1+x=".to_owned(),
+            false,
+            "Thanks, on it.".to_owned(),
+        ))
         .expect("replies");
     assert_eq!(reply.subject, "RE: Budget 2027 kickoff");
     graph
-        .draft(&Draft::Reply {
-            to: "AAMk/1+x=".to_owned(),
-            all: true,
-            body: "To all.".to_owned(),
-        })
+        .draft(Draft::reply(
+            "AAMk/1+x=".to_owned(),
+            true,
+            "To all.".to_owned(),
+        ))
         .expect("replies to all");
 
     let mailbox = standin.mailbox();
@@ -568,33 +572,24 @@ fn moving_marking_flagging_and_categorizing_change_the_mailbox() {
     let (standin, graph) = connected();
     let ids = vec!["AAMk/1+x=".to_owned(), "AAMk/3+x=".to_owned()];
     graph
-        .change(
-            &ids,
-            &Change::Move {
-                folder: "Projects/Apollo".to_owned(),
-            },
-        )
+        .change(ids.clone(), Change::move_to("Projects/Apollo".to_owned()))
         .expect("moves by path");
-    graph.change(&ids, &Change::Read(true)).expect("marks");
     graph
-        .change(&ids[..1], &Change::Flag(FlagState::Flagged))
+        .change(ids.clone(), Change::read(true))
+        .expect("marks");
+    graph
+        .change(ids[..1].to_vec(), Change::flag(FlagState::Flagged))
         .expect("flags");
     graph
         .change(
-            &ids,
-            &Change::Categories {
-                add: vec!["Budget".to_owned(), "Q4".to_owned()],
-                remove: vec![],
-            },
+            ids.clone(),
+            Change::categories(vec!["Budget".to_owned(), "Q4".to_owned()], vec![]),
         )
         .expect("adds");
     graph
         .change(
-            &ids[1..],
-            &Change::Categories {
-                add: vec![],
-                remove: vec!["q4".to_owned()],
-            },
+            ids[1..].to_vec(),
+            Change::categories(vec![], vec!["q4".to_owned()]),
         )
         .expect("removes, whatever the case");
     let mailbox = standin.mailbox();
@@ -620,11 +615,8 @@ fn moving_marking_flagging_and_categorizing_change_the_mailbox() {
     assert_eq!(second.categories, ["Budget"]);
     graph
         .change(
-            &ids[1..],
-            &Change::Categories {
-                add: vec![],
-                remove: vec!["Budget".to_owned()],
-            },
+            ids[1..].to_vec(),
+            Change::categories(vec![], vec!["Budget".to_owned()]),
         )
         .expect("clears");
     assert!(
@@ -638,10 +630,10 @@ fn moving_marking_flagging_and_categorizing_change_the_mailbox() {
             .is_empty()
     );
     graph
-        .change(&ids[..1], &Change::Flag(FlagState::Complete))
+        .change(ids[..1].to_vec(), Change::flag(FlagState::Complete))
         .expect("completes");
     graph
-        .change(&ids[..1], &Change::Flag(FlagState::None))
+        .change(ids[..1].to_vec(), Change::flag(FlagState::None))
         .expect("clears the flag");
     assert_eq!(
         standin
@@ -660,7 +652,7 @@ fn moving_marking_flagging_and_categorizing_change_the_mailbox() {
 fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
     let (standin, graph) = connected();
     graph
-        .change(&["AAMk/4+x=".to_owned()], &Change::Archive)
+        .change(["AAMk/4+x=".to_owned()].to_vec(), Change::archive())
         .expect("archives");
     let mailbox = standin.mailbox();
     assert_eq!(
@@ -685,8 +677,8 @@ fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
     let graph = graph_over(&standin, Fixed::new(&["tok-1"]));
     graph
         .change(
-            &["AAMk/4+x=".to_owned(), "AAMk/5+x=".to_owned()],
-            &Change::Archive,
+            ["AAMk/4+x=".to_owned(), "AAMk/5+x=".to_owned()].to_vec(),
+            Change::archive(),
         )
         .expect("archives by name");
     let after = standin.mailbox();
@@ -709,7 +701,7 @@ fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
     let standin = Standin::start(none, "tok-1");
     let graph = graph_over(&standin, Fixed::new(&["tok-1"]));
     let error = graph
-        .change(&["AAMk/4+x=".to_owned()], &Change::Archive)
+        .change(["AAMk/4+x=".to_owned()].to_vec(), Change::archive())
         .expect_err("no archive");
     assert!(error.to_string().contains("no Archive folder"), "{error}");
 }
@@ -718,14 +710,15 @@ fn archive_goes_to_the_archive_folder_or_to_one_named_archive() {
 fn a_failed_change_says_what_graph_said_and_how_far_it_got() {
     let (_standin, graph) = connected();
     let error = graph
-        .change(&["AAMk/missing".to_owned()], &Change::Read(true))
+        .change(["AAMk/missing".to_owned()].to_vec(), Change::read(true))
         .expect_err("missing");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Backend(_)));
     assert!(error.to_string().contains("ErrorItemNotFound"), "{error}");
     let error = graph
         .change(
-            &["AAMk/1+x=".to_owned(), "AAMk/missing".to_owned()],
-            &Change::Read(true),
+            ["AAMk/1+x=".to_owned(), "AAMk/missing".to_owned()].to_vec(),
+            Change::read(true),
         )
         .expect_err("the second is missing");
     assert!(
@@ -734,10 +727,8 @@ fn a_failed_change_says_what_graph_said_and_how_far_it_got() {
     );
     let error = graph
         .change(
-            &["AAMk/1+x=".to_owned()],
-            &Change::Move {
-                folder: "Nope".to_owned(),
-            },
+            ["AAMk/1+x=".to_owned()].to_vec(),
+            Change::move_to("Nope".to_owned()),
         )
         .expect_err("no folder");
     assert!(
@@ -750,7 +741,7 @@ fn a_failed_change_says_what_graph_said_and_how_far_it_got() {
 fn every_request_carries_the_bearer_token_in_a_header_and_never_in_an_address() {
     let (standin, graph) = connected();
     graph.folders().expect("folders");
-    graph.search(&query(|_| {})).expect("searches");
+    graph.search(query(|_| {})).expect("searches");
     for logged in standin.log() {
         assert_eq!(logged.authorization.as_deref(), Some("Bearer tok-1"));
         assert!(
@@ -766,22 +757,22 @@ fn a_token_is_held_until_it_nears_its_end() {
     let source = Fixed::new(&["tok-1"]);
     let graph = graph_over(&standin, source.clone());
     graph.folders().expect("folders");
-    graph.read("AAMk/1+x=").expect("reads");
-    graph.search(&query(|_| {})).expect("searches");
+    graph.read("AAMk/1+x=".to_owned()).expect("reads");
+    graph.search(query(|_| {})).expect("searches");
     assert_eq!(source.asked(), 1, "one token for every call");
 
     // A token that lasts less than the margin is not held at all.
     let short = Fixed::lasting(&["tok-1"], Some(Duration::from_secs(60)));
     let graph = graph_over(&standin, short.clone());
-    graph.read("AAMk/1+x=").expect("reads");
-    graph.read("AAMk/1+x=").expect("reads");
+    graph.read("AAMk/1+x=".to_owned()).expect("reads");
+    graph.read("AAMk/1+x=".to_owned()).expect("reads");
     assert_eq!(short.asked(), 2);
 
     // A token that says nothing of its end is held for a short while, and one that is a JWT is held by its own claim.
     let unknown = Fixed::lasting(&["tok-1"], None);
     let graph = graph_over(&standin, unknown.clone());
     graph.folders().expect("folders");
-    graph.read("AAMk/1+x=").expect("reads");
+    graph.read("AAMk/1+x=".to_owned()).expect("reads");
     assert_eq!(unknown.asked(), 1);
 }
 
@@ -800,7 +791,9 @@ fn a_refused_token_is_replaced_once() {
         ),
         (Some("Bearer stale"), Some("Bearer fresh"))
     );
-    graph.read("AAMk/1+x=").expect("the new token is held");
+    graph
+        .read("AAMk/1+x=".to_owned())
+        .expect("the new token is held");
     assert_eq!(source.asked(), 2);
 
     // When the new one is refused too, the call fails and is not tried again.
@@ -808,6 +801,7 @@ fn a_refused_token_is_replaced_once() {
     let graph = graph_over(&standin, source.clone());
     let before = standin.log().len();
     let error = graph.folders().expect_err("refused twice");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Auth(_)), "{error:?}");
     assert_eq!(standin.log().len() - before, 2);
     assert_eq!(source.asked(), 2);
@@ -844,7 +838,7 @@ fn a_next_page_at_another_address_is_not_followed_with_the_token() {
     standin.page_size(2);
     standin.name_next_at("http://127.0.0.1:9/v1.0");
     let error = graph
-        .search(&Query {
+        .search(Query {
             limit: 5,
             ..Query::default()
         })
@@ -858,6 +852,7 @@ fn an_unreachable_server_is_unreachable_not_a_panic() {
     let graph = graph_over(&standin, Fixed::new(&["tok-1"]));
     drop(standin);
     let error = graph.folders().expect_err("down");
+    let error = MailError::from(error);
     assert!(matches!(error, MailError::Unreachable(_)), "{error:?}");
     assert!(!error.to_string().contains("tok-1"));
 }
@@ -941,7 +936,7 @@ fn dates_and_searches_are_written_the_way_graph_reads_them() {
 // there is no Windows PowerShell.
 
 fn windows_powershell() -> bool {
-    crate::spawn::Command::new("powershell.exe")
+    std::process::Command::new("powershell.exe")
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -1073,20 +1068,6 @@ fn the_token_source_takes_the_helpers_token_and_its_lifetime() {
         .token()
         .expect_err("no token");
     assert!(matches!(error, MailError::Auth(_)));
-}
-
-#[test]
-fn an_account_names_a_graph_mailbox_without_reaching_anything() {
-    let config = crate::config::Config::from_str_in(
-        "[host.mail.accounts.cloud]\nbackend = \"graph\"\nclient_id = \"app-1\"\n",
-        std::path::Path::new("."),
-    )
-    .expect("parses");
-    let mailboxes = crate::mail::Mailboxes::from_config(&config.mail, None);
-    assert_eq!(mailboxes.list(), [("cloud".to_owned(), "graph")]);
-    mailboxes
-        .backend("cloud")
-        .expect("made with no call to Windows or Graph");
 }
 
 /// The real Windows sign-in, for the person who has an app registration: `CANOA_TEST_GRAPH_CLIENT_ID` names it, and

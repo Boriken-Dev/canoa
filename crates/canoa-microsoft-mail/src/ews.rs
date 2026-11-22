@@ -8,46 +8,52 @@ mod parse;
 mod request;
 mod transport;
 
+use alloc::sync::Arc;
 use core::time::Duration;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use canoa::network::Network;
 
 use self::hosts::Hosts;
 use self::request::{FolderRef, well_known};
-pub(crate) use self::transport::Auth;
+pub use self::transport::Auth;
 use self::transport::Transport;
-use super::model::{
-    Backend, Change, Draft, Folder, MailError, Message, Page, Query, Summary, find_folder,
-};
 use super::xml::Element;
+use canoa::mail_backend::{
+    Change, ChangeKind, Draft, DraftKind, Folder, MailError, Mailbox, Message, Page, Query,
+    Summary, default_thread, find_folder,
+};
+use coqui_acp_api::guatiao::library::ProviderError;
 
 /// How many Autodiscover redirects are followed.
 const MAX_REDIRECTS: usize = 3;
 
 /// What an account names.
 #[derive(Clone, Debug)]
-pub(crate) struct EwsSettings {
+pub struct EwsSettings {
     /// The mailbox's address, which Autodiscover asks about.
-    pub(crate) email: Option<String>,
+    pub email: Option<String>,
     /// The EWS address (`https://mail.example.com/EWS/Exchange.asmx`); Autodiscover finds it when this is not given.
-    pub(crate) server: Option<String>,
+    pub server: Option<String>,
     /// The Autodiscover address to ask instead of the two the address's domain suggests.
-    pub(crate) autodiscover: Option<String>,
-    pub(crate) auth: Auth,
-    pub(crate) timeout: Duration,
+    pub autodiscover: Option<String>,
+    /// Authentication method used when connecting to Exchange.
+    pub auth: Auth,
+    /// Timeout applied to individual Exchange requests.
+    pub timeout: Duration,
 }
 
 /// One Exchange mailbox.
 #[derive(Debug)]
-pub(crate) struct Ews {
+pub struct Ews {
     settings: EwsSettings,
     transport: Transport,
     found: Mutex<Option<String>>,
 }
 
 impl Ews {
-    pub(crate) fn new(settings: EwsSettings, network: Arc<Network>) -> Self {
+    /// Creates an Exchange Web Services client with the given settings and network policy.
+    pub fn new(settings: EwsSettings, network: Arc<Network>) -> Self {
         let transport = Transport::new(network, settings.auth.clone(), settings.timeout);
         Self {
             settings,
@@ -172,12 +178,12 @@ impl Ews {
     }
 }
 
-impl Backend for Ews {
-    fn folders(&self) -> Result<Vec<Folder>, MailError> {
+impl Mailbox for Ews {
+    fn folders(&self) -> Result<Vec<Folder>, ProviderError> {
         Ok(parse::folders(&self.call(&request::find_folders())?))
     }
 
-    fn search(&self, query: &Query) -> Result<Page, MailError> {
+    fn search(&self, query: Query) -> Result<Page, ProviderError> {
         let (scope, deep) = match query.folder.as_deref().map(str::trim) {
             None | Some("") => (FolderRef::Well("msgfolderroot"), true),
             Some(name) => {
@@ -186,9 +192,9 @@ impl Backend for Ews {
                 (scope, deep)
             }
         };
-        let body = self.call(&request::find_items(&scope, deep, query))?;
+        let body = self.call(&request::find_items(&scope, deep, &query))?;
         let (mut items, total, more) = parse::items(&body);
-        let mut total = total;
+        let mut total = total.map(|n| u64::try_from(n).unwrap_or(u64::MAX));
         if let Some(flagged) = query.flagged {
             // Exchange's query language has no follow-up flag, so the page is filtered here and its count is not known.
             items.retain(|item| item.flagged == flagged);
@@ -197,22 +203,22 @@ impl Backend for Ews {
         Ok(Page { items, total, more })
     }
 
-    fn read(&self, id: &str) -> Result<Message, MailError> {
-        let body = self.call(&request::get_items(&[id.to_owned()], true))?;
-        parse::got(&body)
+    fn read(&self, id: String) -> Result<Message, ProviderError> {
+        let body = self.call(&request::get_items(core::slice::from_ref(&id), true))?;
+        Ok(parse::got(&body)
             .first()
             .and_then(parse::message)
-            .ok_or_else(|| MailError::Bad(format!("no message has the id {id}")))
+            .ok_or_else(|| MailError::Bad(format!("no message has the id {id}")))?)
     }
 
-    fn find_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
-        let body = self.call(&request::find_by_message_id(message_id))?;
+    fn find_by_message_id(&self, message_id: String) -> Result<Option<String>, ProviderError> {
+        let body = self.call(&request::find_by_message_id(&message_id))?;
         let (items, _, _) = parse::items(&body);
         Ok(items.into_iter().next().map(|item| item.id))
     }
 
-    fn summaries(&self, ids: &[String]) -> Result<Vec<Summary>, MailError> {
-        let body = self.call(&request::get_items(ids, false))?;
+    fn summaries(&self, ids: Vec<String>) -> Result<Vec<Summary>, ProviderError> {
+        let body = self.call(&request::get_items(&ids, false))?;
         let found: Vec<Summary> = parse::got(&body)
             .iter()
             .filter_map(parse::summary)
@@ -220,21 +226,23 @@ impl Backend for Ews {
         if found.len() == ids.len() {
             Ok(found)
         } else {
-            Err(MailError::Bad(
-                "Exchange did not find every message named".to_owned(),
-            ))
+            Err(MailError::Bad("Exchange did not find every message named".to_owned()).into())
         }
     }
 
-    fn draft(&self, draft: &Draft) -> Result<Summary, MailError> {
-        let body = self.call(&request::create_draft(draft))?;
+    fn thread(&self, summary: Summary) -> Result<Vec<Summary>, ProviderError> {
+        default_thread(self, &summary)
+    }
+
+    fn draft(&self, draft: Draft) -> Result<Summary, ProviderError> {
+        let body = self.call(&request::create_draft(&draft))?;
         let mut saved = parse::created(&body).ok_or_else(|| {
             MailError::Backend("Exchange saved the draft but gave no id".to_owned())
         })?;
-        match draft {
-            Draft::New { subject, .. } => saved.subject.clone_from(subject),
-            Draft::Reply { .. } => {
-                if let Ok(read) = self.read(&saved.id) {
+        match draft.kind() {
+            DraftKind::New { subject, .. } => saved.subject = subject.to_owned(),
+            DraftKind::Reply { .. } => {
+                if let Ok(read) = self.read(saved.id.clone()) {
                     saved = read.summary;
                 }
             }
@@ -242,37 +250,39 @@ impl Backend for Ews {
         Ok(saved)
     }
 
-    fn change(&self, ids: &[String], change: &Change) -> Result<(), MailError> {
+    fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError> {
         if ids.is_empty() {
             return Ok(());
         }
-        match change {
-            Change::Move { folder } => {
+        match change.kind() {
+            ChangeKind::Move { folder } => {
                 let to = self.resolve(folder)?;
-                self.call(&request::move_items(ids, &to)).map(drop)
+                Ok(self.call(&request::move_items(&ids, &to)).map(drop)?)
             }
-            Change::Archive => {
-                match self.call(&request::move_items(ids, &FolderRef::Well("archive"))) {
+            ChangeKind::Archive => {
+                match self.call(&request::move_items(&ids, &FolderRef::Well("archive"))) {
                     Err(MailError::Backend(why)) if why.contains("FolderNotFound") => {
-                        let archive = self.lookup("Archive").map_err(|_| {
+                        let archive = self.lookup("Archive").map_err(|_| -> ProviderError {
                             MailError::Bad(
                                 "the mailbox has no Archive folder: move the messages to a folder named by mail_list".to_owned(),
                             )
+                            .into()
                         })?;
-                        self.call(&request::move_items(ids, &archive)).map(drop)
+                        Ok(self.call(&request::move_items(&ids, &archive)).map(drop)?)
                     }
-                    other => other.map(drop),
+                    other => Ok(other.map(drop)?),
                 }
             }
-            Change::Read(_) | Change::Flag(_) => self
-                .call(&request::update_items(ids, change, &[]))
-                .map(drop),
-            Change::Categories { add, remove } => {
-                let current = parse::categories(&self.call(&request::get_items(ids, false))?);
+            ChangeKind::Read(_) | ChangeKind::Flag(_) => Ok(self
+                .call(&request::update_items(&ids, &change, &[]))
+                .map(drop)?),
+            ChangeKind::Categories { add, remove } => {
+                let current = parse::categories(&self.call(&request::get_items(&ids, false))?);
                 if current.len() != ids.len() {
                     return Err(MailError::Backend(
                         "Exchange did not give the categories of every message".to_owned(),
-                    ));
+                    )
+                    .into());
                 }
                 let after: Vec<Vec<String>> = current
                     .into_iter()
@@ -288,8 +298,9 @@ impl Backend for Ews {
                         kept
                     })
                     .collect();
-                self.call(&request::update_items(ids, change, &after))
-                    .map(drop)
+                Ok(self
+                    .call(&request::update_items(&ids, &change, &after))
+                    .map(drop)?)
             }
         }
     }

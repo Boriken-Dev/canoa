@@ -1,8 +1,8 @@
 //! Mail accounts on the control channel: `mail/accounts`, `mail/add`, `mail/test` and `mail/remove`, under the `mail.setup` grant.
-//! They change the `[host.mail.accounts.NAME]` tables of canoa.cfg and the passwords the host's account store keeps for them, as
-//! `canoa mail` does, and the mailboxes the host's running mail tools use follow at once.
+//! They change the `[host.mail.accounts.NAME]` tables of `canoa.cfg` and the secrets the host's account store keeps for them,
+//! as `canoa mail` does, and the mailboxes the host's running mail tools use follow at once.
 //!
-//! A password arrives in `mail/add` and goes to the account store; no method answers one.
+//! A secret arrives in `mail/add` and goes to the account store; no method answers one.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -12,20 +12,24 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::{Map, Value, json};
 
 use super::{BAD_PARAMS, NOT_FOUND, REFUSED};
 use crate::accounts::Accounts;
 use crate::accounts::commands::Cfg;
 use crate::cli::Failed;
-use crate::config::{Config, Layers, MailBackend};
+use crate::config::{Config, Layers};
 use crate::home::Home;
-use crate::mail::Mailboxes;
-use crate::mail::commands::{self, NewAccount};
+use crate::mail::{
+    BackendCatalog, Mailboxes,
+    commands::{self, NewAccount},
+    open_account,
+};
 
 type Refusal = (i32, String);
 
-/// What `mail/*` reads and writes: canoa.cfg, the host's home, and the mailboxes the mail tools use.
+/// What `mail/*` reads and writes: `canoa.cfg`, the host's home, and the mailboxes the mail tools use.
 #[derive(Clone)]
 pub(crate) struct MailSetup {
     layers: Layers,
@@ -45,15 +49,6 @@ fn text<'a>(params: &'a Value, key: &str) -> Result<&'a str, Refusal> {
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| (BAD_PARAMS, format!("{key} is a string")))
-}
-
-fn optional(params: &Value, key: &str) -> Result<Option<String>, Refusal> {
-    match params.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(value)) if value.is_empty() => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        Some(_) => Err((BAD_PARAMS, format!("{key} is a string"))),
-    }
 }
 
 fn refusal(failed: &Failed) -> Refusal {
@@ -76,7 +71,7 @@ impl MailSetup {
         }
     }
 
-    /// canoa.cfg as it is on disk now.
+    /// `canoa.cfg` as it is on disk now.
     fn config(&self) -> Result<Config, Refusal> {
         match Config::load_layers(&self.layers) {
             Err(crate::ConfigError::Read { source, .. })
@@ -97,11 +92,11 @@ impl MailSetup {
         Accounts::open(config, &self.home).map_err(|error| (REFUSED, error.to_string()))
     }
 
-    /// The mail tools' mailboxes, made again from what canoa.cfg names now.
+    /// The mail tools' mailboxes, made again from what `canoa.cfg` names now.
     fn reload(&self) -> Result<Config, Refusal> {
         let config = self.config()?;
         let store = self.store(&config).ok();
-        self.boxes.reload(&config.mail, store);
+        self.boxes.reload(&config, store);
         Ok(config)
     }
 
@@ -130,37 +125,63 @@ impl MailSetup {
         };
         match method {
             "mail/accounts" => {
-                let rows: Vec<Value> = commands::rows(cfg)
+                let catalog = BackendCatalog::of(&config);
+                let store = self.store(&config).ok();
+                let rows: Vec<Value> = commands::rows_with(cfg, &catalog, store.as_deref())
                     .iter()
                     .map(commands::Row::json)
                     .collect();
-                Ok(json!({"accounts": rows, "tools": config.mail.tools != Some(false)}))
+                Ok(json!({
+                    "accounts": rows,
+                    "backends": commands::backends_json(&catalog),
+                    "tools": config.mail.tools != Some(false),
+                }))
             }
             "mail/add" => {
-                let name = text(params, "name")?;
-                let backend = match text(params, "backend")? {
-                    "ews" => MailBackend::Ews,
-                    "outlook" => MailBackend::Outlook,
-                    _ => return Err((BAD_PARAMS, "backend is ews or outlook".to_owned())),
-                };
+                #[derive(Deserialize)]
+                struct Params {
+                    #[serde(default)]
+                    name: Option<String>,
+                    #[serde(default)]
+                    backend: Option<String>,
+                    #[serde(default)]
+                    id: Option<String>,
+                    #[serde(default)]
+                    password_env: Option<String>,
+                    #[serde(default)]
+                    timeout_secs: Option<u64>,
+                    #[serde(default)]
+                    settings: Option<Map<String, Value>>,
+                    #[serde(flatten)]
+                    extra: Map<String, Value>,
+                }
+                let parsed: Params = serde_json::from_value(params.clone())
+                    .map_err(|_| (BAD_PARAMS, "name and backend are strings".to_owned()))?;
+                let name = parsed
+                    .name
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| (BAD_PARAMS, "name is a string".to_owned()))?;
+                let backend = parsed
+                    .backend
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| (BAD_PARAMS, "backend is a string".to_owned()))?;
+                let mut settings = parsed.settings.unwrap_or_default();
+                for (k, v) in parsed.extra {
+                    settings.entry(k).or_insert(v);
+                }
                 let new = NewAccount {
-                    backend: Some(backend),
-                    email: optional(params, "email")?,
-                    server: optional(params, "server")?,
-                    autodiscover: optional(params, "autodiscover")?,
-                    user: optional(params, "user")?,
-                    profile: optional(params, "profile")?,
-                    timeout_secs: params.get("timeout_secs").and_then(Value::as_u64),
+                    backend,
+                    id: parsed.id,
+                    password_env: parsed.password_env,
+                    timeout_secs: parsed.timeout_secs,
+                    settings,
                 };
-                let mut password = optional(params, "password")?;
-                commands::add_with(cfg, name, &new, &mut || {
-                    password
-                        .take()
-                        .ok_or_else(|| Failed::usage("a user name needs a password"))
+                commands::add_with(cfg, &name, &new, &mut || {
+                    Err(Failed::usage("a user name needs a password"))
                 })
                 .map_err(|failed| refusal(&failed))?;
                 let config = self.reload()?;
-                Ok(json!({"account": self.row(&config, name)}))
+                Ok(json!({"account": self.row(&config, &name)}))
             }
             "mail/test" => {
                 let name = text(params, "name")?;
@@ -169,9 +190,14 @@ impl MailSetup {
                     .accounts
                     .get(name)
                     .ok_or_else(|| (NOT_FOUND, format!("no mail account is called {name}")))?;
+                let catalog = BackendCatalog::of(&config);
                 let store = self.store(&config).ok();
-                let outcome = crate::mail::backend_for(account, store.as_deref())
-                    .and_then(|backend| backend.folders());
+                let outcome =
+                    open_account(&catalog, account, store.as_deref()).and_then(|backend| {
+                        backend
+                            .folders()
+                            .map_err(canoa::mail_backend::MailError::from)
+                    });
                 Ok(match outcome {
                     Ok(folders) => json!({"ok": true, "folders": folders.len()}),
                     Err(error) => json!({

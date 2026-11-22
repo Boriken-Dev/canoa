@@ -2,9 +2,9 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Eleven Cargo features (`api-gateway` is the generic account kind of an address and a key, below; `usage` is the `usage_reader` kind, `vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind, `settings-section` the `settings_section` kind and `panel-tab` the `panel_tab` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Twelve Cargo features (`api-gateway` is the generic account kind of an address and a key, below; `mail-backend` is the `mail_backend` kind, below; `usage` is the `usage_reader` kind, `vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind, `settings-section` the `settings_section` kind and `panel-tab` the `panel_tab` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
-The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`), the `account_speech` kind from `canoa::speech::account` and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
+The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`), the `account_speech` kind from `canoa::speech::account`, the `mail_backend` kind from `canoa::mail_backend` (feature `mail-backend`), and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
 
@@ -789,3 +789,30 @@ pub struct AccountSpeechModel { pub id: String, pub label: String }   // new(id,
 
 - A service's `id` is 1 to 32 lower-case letters and digits; the offer made of an account is `ID:ACCOUNT`. `standard` is the credential standard an account's kind provides (such as `openai-api`) and `address` the address that kind's model API is called at when nothing moves it: an account is offered when its provider has a kind that provides the standard from that address, and is listed as not offered, with the reason, when its own kind is not one or its settings move the address elsewhere. `url` is where a recording is posted (an http or https address, the key sent as `Authorization: Bearer`), `credential` the field of the account's stored credentials that holds the key, `summary` and `location` the words of the offer (what it is, and where the audio goes) and `models` the ones that transcribe, the recommended first.
 - Every model is `#[non_exhaustive]` with `new` and public fields.
+
+## `mail_backend` (`canoa::mail_backend`, feature `mail-backend`)
+
+The Guatiao extension kind for mailboxes (`mail_backend`, paired with the stateful Guatiao object `mailbox`), so mailbox connectors live in libraries outside `canoa-host` and describe their add-account form via `guatiao-intake` schemas.
+
+```rust
+pub const KIND: &str = "mail_backend";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+#[guatiao::kind(name = "mail_backend")]
+pub trait MailBackend: Send + Sync {
+    fn describe(&self) -> Result<BackendInfo, ProviderError>;
+    fn validate(&self, request: ValidateRequest) -> Result<PreparedAccount, ProviderError>;
+    fn open(&self, request: OpenMailbox) -> Result<Object<dyn Mailbox>, ProviderError>;
+}
+#[guatiao::kind(object, name = "mailbox")]
+pub trait Mailbox: Send + Sync {
+    fn folders(&self) -> Result<Vec<Folder>, ProviderError>;
+    fn search(&self, query: Query) -> Result<Page, ProviderError>;
+    fn read(&self, id: String) -> Result<Message, ProviderError>;
+    fn find_by_message_id(&self, message_id: String) -> Result<Option<String>, ProviderError>;
+    fn summaries(&self, ids: Vec<String>) -> Result<Vec<Summary>, ProviderError>;
+    fn thread(&self, id: String) -> Result<Vec<Summary>, ProviderError>;
+    fn draft(&self, draft: Draft) -> Result<String, ProviderError>;
+    fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError>;
+}
+```
+
+- `BackendInfo` (`new(id, title)`, `.taking::<S: SettingsSchema>()`, `.problem()`, `description`, `no_secret_state`, `schema`, `form`), `ValidateRequest` (`new(settings, has_secret)`), `PreparedAccount` (`needs_secret`, `state`, `details`, `check_urls`, `no_secret_state`), `OpenMailbox` (`new(settings, timeout_secs)`, `secret`, `no_store`), `MailError` (`Bad`, `Auth`, `Unreachable`, `Backend`, converting to and from `ProviderError` without losing variant meaning), `Person`, `Summary`, `Attachment`, `Message`, `Folder`, `Query`, `Page`, `Draft` (`new_message`, `reply`, `kind()`), `Change` (`move_to`, `archive`, `read`, `flag`, `categories`, `kind()`), `FlagState`, `Related`, and shared helpers `WELL_KNOWN_FOLDERS`, `is_valid_id`, `well_known`, `find_folder`, `plain_subject`, `related`, `default_summaries`, `default_thread`.

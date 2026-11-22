@@ -95,6 +95,21 @@ pub(crate) fn loaded(config: &Config) -> Vec<(String, Registry)> {
     registries
 }
 
+/// The registries available for mail and speech providers: `loaded(config)` when `Some`, else the carried libraries alone.
+pub(crate) fn registries_of(config: Option<&Config>) -> Vec<Registry> {
+    if let Some(config) = config {
+        return loaded(config)
+            .into_iter()
+            .map(|(_, registry)| registry)
+            .collect();
+    }
+    let mut carried = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    if let Err(why) = crate::bundled::register_included(&mut carried) {
+        tracing::warn!("the carried libraries could not be loaded: {why}");
+    }
+    vec![carried]
+}
+
 /// The registries of the libraries and sources `config` names, each with the name of the entry or extension that loads it: the
 /// agent entries' and the extensions' (an extension verified as the Store verifies it), each origin once.
 pub(crate) fn libraries(config: &Config) -> Vec<(String, Registry)> {

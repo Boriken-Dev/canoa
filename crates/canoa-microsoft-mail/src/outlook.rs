@@ -1,5 +1,5 @@
 //! Classic Outlook for Windows as a mail backend, through its object model (COM). The host has no `unsafe` of its own for COM, so a
-//! PowerShell helper ([`SCRIPT`]) drives Outlook and speaks JSON: the host starts Windows PowerShell once per call, hands it the
+//! PowerShell helper (`SCRIPT`) drives Outlook and speaks JSON: the host starts Windows PowerShell once per call, hands it the
 //! script and one request on its standard input (never on the command line, and never as a file that execution policy could
 //! block), and reads one answer from its standard output.
 //!
@@ -22,10 +22,12 @@ use std::time::Instant;
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 
-use super::model::{
-    Attachment, Backend, Change, Draft, Folder, MailError, Message, Page, Person, Query, Summary,
+use canoa::mail_backend::{
+    Attachment, Change, ChangeKind, Draft, DraftKind, Folder, MailError, Mailbox, Message, Page,
+    Person, Query, Summary,
 };
-use crate::spawn::{Command, Stdio};
+use coqui_acp_api::guatiao::library::ProviderError;
+use std::process::{Command, Stdio};
 
 /// The helper: the functions that read and change a mailbox through Outlook, and `Invoke-CanoaMail`, which does one request.
 pub(crate) const SCRIPT: &str = include_str!("outlook.ps1");
@@ -113,9 +115,9 @@ impl Runner for PowerShell {
         let mut command = Command::new(program);
         command
             .args(args)
-            .stdin(Stdio::Piped)
-            .stdout(Stdio::Piped)
-            .stderr(Stdio::Piped);
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let mut child = command
             .spawn()
             .map_err(|error| unreachable(format!("{program} could not start: {error}")))?;
@@ -193,7 +195,7 @@ fn tail(text: &str) -> String {
 
 /// Classic Outlook.
 #[derive(Debug)]
-pub(crate) struct Outlook {
+pub struct Outlook {
     runner: Arc<dyn Runner>,
     /// The Outlook profile to log on to; Outlook's own current one when none.
     profile: Option<String>,
@@ -205,7 +207,7 @@ impl Outlook {
     }
 
     /// An Outlook reached by the command, profile and timeout an account names.
-    pub(crate) fn powershell(
+    pub fn powershell(
         command: Option<Vec<String>>,
         profile: Option<String>,
         timeout: Duration,
@@ -271,8 +273,8 @@ fn summary_of(value: &Value) -> Summary {
     }
 }
 
-impl Backend for Outlook {
-    fn folders(&self) -> Result<Vec<Folder>, MailError> {
+impl Mailbox for Outlook {
+    fn folders(&self) -> Result<Vec<Folder>, ProviderError> {
         let result = self.ask(&json!({"op": "folders"}))?;
         Ok(one_or_many(&result)
             .iter()
@@ -286,7 +288,7 @@ impl Backend for Outlook {
             .collect())
     }
 
-    fn search(&self, query: &Query) -> Result<Page, MailError> {
+    fn search(&self, query: Query) -> Result<Page, ProviderError> {
         let result = self.ask(&json!({
             "op": "search",
             "text": query.text,
@@ -307,14 +309,12 @@ impl Backend for Outlook {
                 .iter()
                 .map(summary_of)
                 .collect(),
-            total: result["total"]
-                .as_u64()
-                .and_then(|n| usize::try_from(n).ok()),
+            total: result["total"].as_u64(),
             more: result["more"] == json!(true),
         })
     }
 
-    fn read(&self, id: &str) -> Result<Message, MailError> {
+    fn read(&self, id: String) -> Result<Message, ProviderError> {
         let result = self.ask(&json!({"op": "read", "id": id}))?;
         Ok(Message {
             summary: summary_of(&result["summary"]),
@@ -334,7 +334,7 @@ impl Backend for Outlook {
         })
     }
 
-    fn find_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
+    fn find_by_message_id(&self, message_id: String) -> Result<Option<String>, ProviderError> {
         let result = self.ask(&json!({"op": "find_by_message_id", "message_id": message_id}))?;
         Ok(result["id"]
             .as_str()
@@ -342,28 +342,26 @@ impl Backend for Outlook {
             .map(str::to_owned))
     }
 
-    fn summaries(&self, ids: &[String]) -> Result<Vec<Summary>, MailError> {
+    fn summaries(&self, ids: Vec<String>) -> Result<Vec<Summary>, ProviderError> {
         let result = self.ask(&json!({"op": "summaries", "ids": ids}))?;
         let found: Vec<Summary> = one_or_many(&result).iter().map(summary_of).collect();
         if found.len() == ids.len() {
             Ok(found)
         } else {
-            Err(MailError::Bad(
-                "Outlook did not find every message named".to_owned(),
-            ))
+            Err(MailError::Bad("Outlook did not find every message named".to_owned()).into())
         }
     }
 
-    fn thread(&self, summary: &Summary) -> Result<Vec<Summary>, MailError> {
+    fn thread(&self, summary: Summary) -> Result<Vec<Summary>, ProviderError> {
         let result = self.ask(&json!({"op": "thread", "id": summary.id}))?;
         let mut items: Vec<Summary> = one_or_many(&result).iter().map(summary_of).collect();
         items.sort_by(|a, b| a.received.cmp(&b.received));
         Ok(items)
     }
 
-    fn draft(&self, draft: &Draft) -> Result<Summary, MailError> {
-        let request = match draft {
-            Draft::New {
+    fn draft(&self, draft: Draft) -> Result<Summary, ProviderError> {
+        let request = match draft.kind() {
+            DraftKind::New {
                 to,
                 cc,
                 bcc,
@@ -372,25 +370,26 @@ impl Backend for Outlook {
             } => json!({
                 "op": "draft", "to": to, "cc": cc, "bcc": bcc, "subject": subject, "body": body,
             }),
-            Draft::Reply { to, all, body } => json!({
+            DraftKind::Reply { to, all, body } => json!({
                 "op": "draft", "reply_to": to, "reply_all": all, "body": body,
             }),
         };
         Ok(summary_of(&self.ask(&request)?))
     }
 
-    fn change(&self, ids: &[String], change: &Change) -> Result<(), MailError> {
-        let kind = match change {
-            Change::Move { folder } => json!({"kind": "move", "folder": folder}),
-            Change::Archive => json!({"kind": "archive"}),
-            Change::Read(read) => json!({"kind": "read", "read": read}),
-            Change::Flag(state) => json!({"kind": "flag", "flag": state.name()}),
-            Change::Categories { add, remove } => {
+    fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError> {
+        let kind = match change.kind() {
+            ChangeKind::Move { folder } => json!({"kind": "move", "folder": folder}),
+            ChangeKind::Archive => json!({"kind": "archive"}),
+            ChangeKind::Read(read) => json!({"kind": "read", "read": read}),
+            ChangeKind::Flag(state) => json!({"kind": "flag", "flag": state.name()}),
+            ChangeKind::Categories { add, remove } => {
                 json!({"kind": "categories", "add": add, "remove": remove})
             }
         };
-        self.ask(&json!({"op": "change", "ids": ids, "change": kind}))
-            .map(drop)
+        Ok(self
+            .ask(&json!({"op": "change", "ids": ids, "change": kind}))
+            .map(drop)?)
     }
 }
 

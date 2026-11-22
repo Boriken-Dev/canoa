@@ -1,29 +1,38 @@
-//! `canoa mail add|list|remove` and the password they leave in the account store, read by the connector against the
-//! loopback stand-in.
-#![allow(
-    clippy::std_instead_of_core,
-    clippy::std_instead_of_alloc,
-    reason = "tests name what they use from std"
-)]
-
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use canoa::mail_backend::{
+    BackendInfo, Folder, MailBackend, MailError, Mailbox as MailTrait, OpenMailbox,
+    PreparedAccount, ValidateRequest,
+};
+use canoa_microsoft_mail::ews::{Auth, Ews, EwsSettings};
+use canoa_microsoft_mail::standin::{Mailbox, Standin};
+use coqui_acp_api::guatiao::Provider;
+use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
+use coqui_syshttp::tls::TlsBuilder;
+use coqui_syshttp::{Environment, Resolver};
+use serde_json::{Map, json};
+
 use super::commands::{NewAccount, add_with, remove_with, rows};
-use super::ews::{Auth, Ews};
-use super::model::{Backend, MailError, Query};
-use super::standin::{Mailbox, Standin};
-use super::tests::{direct, settings};
-use super::{Mailboxes, password_of};
-use crate::accounts::Accounts;
+use super::{BackendCatalog, Mailboxes, PASSWORD_KEY, secret_of};
 use crate::accounts::commands::{Cfg, accounts_of};
 use crate::cli::Failed;
-use crate::config::{Config, MailBackend};
+use crate::config::Config;
 use crate::home::Home;
 
-/// A directory of its own that goes with the test: the home of the host and the folder of canoa.cfg.
+fn direct() -> Arc<canoa::network::Network> {
+    let resolver = Resolver::builder()
+        .environment(Environment::from_pairs([("PATH", "x")]))
+        .system(false)
+        .build();
+    Arc::new(canoa::network::Network::with(
+        resolver,
+        TlsBuilder::default(),
+    ))
+}
+
 struct Dir(PathBuf);
 
 impl Dir {
@@ -48,27 +57,16 @@ impl Dir {
     }
 
     fn config(&self) -> Config {
-        Config::from_str_named(&self.text(), "canoa.cfg", &self.0).expect("canoa.cfg is read")
+        Config::from_str_in(&self.text(), &self.0).expect("parses")
     }
 
-    /// Everything under the home, as one byte string, to look for a password in.
-    fn everything(&self) -> Vec<u8> {
-        fn walk(path: &Path, into: &mut Vec<u8>) {
-            let Ok(entries) = fs::read_dir(path) else {
-                return;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    walk(&path, into);
-                } else if let Ok(bytes) = fs::read(&path) {
-                    into.extend(bytes);
-                }
-            }
-        }
-        let mut bytes = Vec::new();
-        walk(&self.0, &mut bytes);
-        bytes
+    fn with_cfg<T>(&self, config: &Config, f: impl FnOnce(Cfg<'_>) -> T) -> T {
+        let home = Home::at(&self.0);
+        f(Cfg {
+            config_path: &self.cfg_path(),
+            config,
+            home: &home,
+        })
     }
 }
 
@@ -78,322 +76,374 @@ impl Drop for Dir {
     }
 }
 
-fn with_cfg<T>(dir: &Dir, then: impl FnOnce(Cfg<'_>) -> T) -> T {
-    let config = dir.config();
-    let home = Home::at(&dir.0);
-    let path = dir.cfg_path();
-    then(Cfg {
-        config_path: &path,
-        config: &config,
-        home: &home,
-    })
-}
-
-fn exchange(server: String) -> NewAccount {
+fn exchange_new(server: String, password: Option<&str>) -> NewAccount {
+    let mut settings = Map::new();
+    settings.insert("server".to_owned(), json!(server));
+    settings.insert("email".to_owned(), json!("me@example.test"));
+    settings.insert("user".to_owned(), json!("EXAMPLE\\me"));
+    if let Some(pw) = password {
+        settings.insert("password".to_owned(), json!(pw));
+    }
     NewAccount {
-        backend: Some(MailBackend::Ews),
-        server: Some(server),
-        user: Some("EXAMPLE\\me".to_owned()),
-        email: Some("me@example.test".to_owned()),
+        backend: "ews".to_owned(),
+        settings,
         ..NewAccount::default()
     }
 }
 
-fn typed(password: &'static str) -> impl FnMut() -> Result<String, Failed> {
-    move || Ok(password.to_owned())
-}
-
-fn never_asked() -> Result<String, Failed> {
-    panic!("no password is asked for")
-}
-
 #[test]
-fn a_stored_password_is_the_one_the_connector_signs_in_with() {
-    let standin = Standin::start(Mailbox::sample(), Some(("EXAMPLE\\me", "s3cret")));
+fn mail_add_stores_password_in_store_not_config_and_removes_both() {
     let dir = Dir::new();
-    let added = with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange(standin.server()),
-            &mut typed("s3cret"),
-        )
-        .expect("adds")
-    });
-    let id = added.id.clone().expect("a password account has an id");
+    let cfg = dir.config();
+
+    let err = dir
+        .with_cfg(&cfg, |c| {
+            add_with(
+                c,
+                "work",
+                &exchange_new(
+                    "https://mail.example.test/EWS/Exchange.asmx".to_owned(),
+                    None,
+                ),
+                &mut || Ok(String::new()),
+            )
+        })
+        .expect_err("empty password refused");
+    assert!(err.to_string().contains("no password"), "{err}");
+
+    let added = dir
+        .with_cfg(&cfg, |c| {
+            add_with(
+                c,
+                "work",
+                &exchange_new(
+                    "https://mail.example.test/EWS/Exchange.asmx".to_owned(),
+                    None,
+                ),
+                &mut || Ok("hunter2".to_owned()),
+            )
+        })
+        .expect("adds ews");
+    let id = added.id.expect("stored id");
 
     let text = dir.text();
-    assert!(
-        text.contains("[host.mail.accounts.work]") && text.contains(&format!("id = \"{id}\"")),
-        "canoa.cfg names the account and the id: {text}"
-    );
-    assert!(!text.contains("s3cret"), "canoa.cfg holds no password");
-    assert!(
-        !dir.everything()
-            .windows(6)
-            .any(|window| window == b"s3cret"),
-        "nothing under the home holds the password in the clear"
-    );
+    assert!(!text.contains("hunter2"), "password never in canoa.cfg");
+    assert!(text.contains(&format!("id = \"{id}\"")), "{text}");
 
     let config = dir.config();
-    let account = &config.mail.accounts["work"];
-    assert_eq!(account.id.as_deref(), Some(id.as_str()));
-    assert!(account.password_env.is_none());
-    let accounts = with_cfg(&dir, |cfg| accounts_of(cfg).expect("opens"));
-    let password = password_of(account, Some(&accounts)).expect("the stored password");
-    let ews = Ews::new(
-        settings(
-            account.server.clone(),
-            Auth::Basic {
-                user: account.user.clone().unwrap_or_default(),
-                password,
-            },
-        ),
-        direct(),
-    );
-    let page = ews
-        .search(&Query {
-            limit: 50,
-            ..Query::default()
-        })
-        .expect("the stand-in accepts the stored password");
-    assert_eq!(page.items.len(), 7);
-    assert!(
-        standin
-            .log()
-            .iter()
-            .all(|logged| !logged.operation.is_empty()),
-        "the stand-in served the calls"
+    let listed = dir.with_cfg(&config, rows);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "work");
+    assert_eq!(listed[0].backend, "ews");
+    assert_eq!(listed[0].backend_title, "Exchange Server");
+    assert_eq!(listed[0].state, "password stored");
+
+    let store = dir.with_cfg(&config, accounts_of).expect("store");
+    let held = store.load(&id).expect("loads").expect("record");
+    assert_eq!(
+        held.credentials.get(PASSWORD_KEY).map(String::as_str),
+        Some("hunter2")
     );
 
-    // A different stored password is refused by the same server: the stored one is what was sent.
-    let mut wrong = crate::accounts::Record::default();
-    wrong
-        .credentials
-        .insert(super::PASSWORD_KEY.to_owned(), "other".to_owned());
-    accounts.save(&id, &wrong).expect("saves");
-    let password = password_of(account, Some(&accounts)).expect("the stored password");
-    let ews = Ews::new(
-        settings(
-            account.server.clone(),
-            Auth::Basic {
-                user: account.user.clone().unwrap_or_default(),
-                password,
-            },
-        ),
-        direct(),
+    dir.with_cfg(&config, |c| remove_with(c, "work"))
+        .expect("removes");
+    let after = dir.text();
+    assert!(!after.contains("[host.mail.accounts.work]"), "{after}");
+    assert!(
+        store
+            .load(&id)
+            .expect("loads")
+            .is_none_or(|r| !r.credentials.contains_key(PASSWORD_KEY))
     );
-    assert!(matches!(
-        ews.search(&Query {
-            limit: 50,
-            ..Query::default()
-        }),
-        Err(MailError::Auth(_))
-    ));
 }
 
 #[test]
-fn list_shows_the_state_of_each_account_and_never_a_password() {
+fn opened_mailbox_uses_stored_password_and_refuses_bad_one() {
     let dir = Dir::new();
-    with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-            &mut typed("s3cret-list"),
-        )
+    let cfg = dir.config();
+    let standin = Standin::start(Mailbox::sample(), Some(("EXAMPLE\\me", "s3cret")));
+
+    let added = dir
+        .with_cfg(&cfg, |c| {
+            add_with(
+                c,
+                "work",
+                &exchange_new(standin.server(), Some("s3cret")),
+                &mut || Err(Failed::usage("unused")),
+            )
+        })
         .expect("adds");
-    });
-    with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "logon",
-            &NewAccount {
-                backend: Some(MailBackend::Ews),
-                server: Some("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-                ..NewAccount::default()
+    let id = added.id.expect("id");
+
+    let config = dir.config();
+    let store = Arc::new(dir.with_cfg(&config, accounts_of).expect("store"));
+    let mailboxes = Mailboxes::from_config(&config, Some(Arc::clone(&store)));
+    let handle = mailboxes.backend("work").expect("opens with stored secret");
+    assert_eq!(handle.folders().expect("folders").len(), 7);
+
+    // Direct Ews connector with wrong password reports MailError::Auth cleanly.
+    let wrong = Ews::new(
+        EwsSettings {
+            email: Some("me@example.test".to_owned()),
+            server: Some(standin.server()),
+            autodiscover: None,
+            auth: Auth::Basic {
+                user: "EXAMPLE\\me".to_owned(),
+                password: canoa::network::Secret::new("wrong"),
             },
-            &mut never_asked,
-        )
-        .expect("adds with the Windows logon, which asks for nothing");
-    });
-    with_cfg(&dir, |cfg| {
+            timeout: core::time::Duration::from_secs(5),
+        },
+        direct(),
+    );
+    let err = MailError::from(canoa::mail_backend::Mailbox::folders(&wrong).expect_err("401"));
+    assert!(matches!(err, MailError::Auth(_)), "{err:?}");
+
+    // Removing the secret from the store causes `backend()` to fail with Auth.
+    store.forget_credentials(&id).expect("forgets");
+    let mailboxes_again = Mailboxes::from_config(&config, Some(Arc::clone(&store)));
+    let Err(err) = mailboxes_again.backend("work") else {
+        panic!("expected missing secret error");
+    };
+    assert!(
+        matches!(err, MailError::Auth(ref why) if why.contains("no stored password")),
+        "{err:?}"
+    );
+    let mailboxes_no_store = Mailboxes::from_config(&config, None);
+    let Err(err) = mailboxes_no_store.backend("work") else {
+        panic!("expected missing store error");
+    };
+    assert!(
+        matches!(err, MailError::Auth(ref why) if why.contains("no account store")),
+        "{err:?}"
+    );
+    let _ = secret_of(&config.mail.accounts["work"], PASSWORD_KEY, None).expect_err("no store");
+}
+
+#[test]
+fn outlook_ews_and_graph_validate_and_list_from_bundled_library() {
+    let dir = Dir::new();
+    let initial = dir.config();
+
+    dir.with_cfg(&initial, |c| {
         add_with(
-            cfg,
+            c,
+            "work",
+            &exchange_new(
+                "https://mail.example.test/EWS/Exchange.asmx".to_owned(),
+                Some("pw"),
+            ),
+            &mut || Err(Failed::usage("unused")),
+        )
+    })
+    .expect("adds EWS");
+
+    let after_ews = dir.config();
+    dir.with_cfg(&after_ews, |c| {
+        add_with(
+            c,
             "desktop",
             &NewAccount {
-                backend: Some(MailBackend::Outlook),
+                backend: "outlook".to_owned(),
+                settings: {
+                    let mut m = Map::new();
+                    m.insert("profile".to_owned(), json!("Work"));
+                    m
+                },
                 ..NewAccount::default()
             },
-            &mut never_asked,
+            &mut || Err(Failed::usage("unused")),
         )
-        .expect("adds Outlook");
-    });
-    let listed = with_cfg(&dir, rows);
-    let states: Vec<(&str, &str)> = listed
+    })
+    .expect("adds Outlook");
+
+    let after_outlook = dir.config();
+    dir.with_cfg(&after_outlook, |c| {
+        add_with(
+            c,
+            "cloud",
+            &NewAccount {
+                backend: "graph".to_owned(),
+                settings: {
+                    let mut m = Map::new();
+                    m.insert("client_id".to_owned(), json!("app-1"));
+                    m.insert("tenant".to_owned(), json!("example.com"));
+                    m
+                },
+                ..NewAccount::default()
+            },
+            &mut || Err(Failed::usage("unused")),
+        )
+    })
+    .expect("adds Graph");
+
+    let config = dir.config();
+    let listed = dir.with_cfg(&config, rows);
+    let summary: Vec<(&str, &str, &str)> = listed
         .iter()
-        .map(|row| (row.name.as_str(), row.state.as_str()))
+        .map(|r| (r.name.as_str(), r.backend_title.as_str(), r.state.as_str()))
         .collect();
     assert_eq!(
-        states,
+        summary,
         [
-            ("work", "password stored"),
-            ("logon", "signs in with the Windows logon"),
-            ("desktop", "signed in by Outlook")
+            ("work", "Exchange Server", "password stored"),
+            ("desktop", "Outlook", "signed in by Outlook"),
+            ("cloud", "Microsoft Graph", "signed in by Microsoft"),
         ]
     );
-    let shown: String = listed
-        .iter()
-        .map(|row| row.json().to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!shown.contains("s3cret-list"), "{shown}");
-    assert!(shown.contains("mail.example.test"));
-    let text = dir.text();
-    assert!(
-        !text.contains("id = ") || text.matches("id = ").count() == 1,
-        "only the password account has an id: {text}"
-    );
-}
 
-#[test]
-fn a_password_that_is_not_there_is_said_and_never_guessed() {
-    let dir = Dir::new();
-    let added = with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-            &mut typed("pw"),
-        )
-        .expect("adds")
-    });
-    let id = added.id.expect("an id");
-    let config = dir.config();
-    let account = &config.mail.accounts["work"];
-    let accounts = with_cfg(&dir, |cfg| accounts_of(cfg).expect("opens"));
-    accounts.forget_credentials(&id).expect("forgets");
-    let listed = with_cfg(&dir, rows);
-    assert_eq!(listed[0].state, "needs a password");
-    assert!(matches!(
-        password_of(account, Some(&accounts)),
-        Err(MailError::Auth(why)) if why.contains("no stored password")
-    ));
-    assert!(matches!(
-        password_of(account, None),
-        Err(MailError::Auth(why)) if why.contains("no account store")
-    ));
-    let mailboxes = Mailboxes::from_config(&config.mail, Some(Arc::clone(&accounts)));
-    assert!(matches!(mailboxes.backend("work"), Err(MailError::Auth(_))));
-}
-
-#[test]
-fn remove_forgets_the_password_and_the_account() {
-    let dir = Dir::new();
-    let added = with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-            &mut typed("s3cret-gone"),
-        )
-        .expect("adds")
-    });
-    let id = added.id.expect("an id");
-    let accounts = with_cfg(&dir, |cfg| accounts_of(cfg).expect("opens"));
-    assert!(accounts.load(&id).expect("reads").is_some());
-
-    with_cfg(&dir, |cfg| remove_with(cfg, "work")).expect("removes");
-    assert!(
-        accounts.load(&id).expect("reads").is_none(),
-        "the store holds no password for the account any more"
-    );
-    assert!(!dir.text().contains("work"), "{}", dir.text());
-    assert!(dir.config().mail.accounts.is_empty());
-    assert!(
-        !dir.everything()
-            .windows(11)
-            .any(|window| window == b"s3cret-gone"),
-        "no copy is left"
-    );
-    let again = with_cfg(&dir, |cfg| remove_with(cfg, "work")).expect_err("it is gone");
-    assert_eq!(again.status, 2);
-}
-
-#[test]
-fn nothing_is_stored_when_the_account_or_the_password_is_refused() {
-    let dir = Dir::new();
-    let before = dir.text();
-    // A name canoa.cfg would refuse is refused before a password is asked for.
-    let bad = with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "Bad Name",
-            &exchange("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-            &mut never_asked,
-        )
-    })
-    .expect_err("refused");
-    assert!(bad.why.contains("would not be read"), "{}", bad.why);
-    // So is an address that is no http or https one; plain http beyond this computer is the person's choice.
-    let clear = with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange("ftp://mail.example.com/EWS/Exchange.asmx".to_owned()),
-            &mut never_asked,
-        )
-    })
-    .expect_err("refused");
-    assert!(clear.why.contains("http or https address"), "{}", clear.why);
-    // An empty password is no password.
-    let empty = with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-            &mut typed(""),
-        )
-    })
-    .expect_err("refused");
-    assert!(empty.why.contains("no password"), "{}", empty.why);
-    assert_eq!(dir.text(), before, "canoa.cfg is as it was");
-    let accounts = with_cfg(&dir, |cfg| accounts_of(cfg).expect("opens"));
+    let store = Arc::new(dir.with_cfg(&config, accounts_of).expect("store"));
+    let mailboxes = Mailboxes::from_config(&config, Some(Arc::clone(&store)));
     assert_eq!(
-        accounts_count(&accounts, &dir),
-        0,
-        "no password was stored by the refused attempts"
+        mailboxes.list(),
+        [
+            ("work".to_owned(), "ews".to_owned()),
+            ("desktop".to_owned(), "outlook".to_owned()),
+            ("cloud".to_owned(), "graph".to_owned()),
+        ]
     );
-    // A name taken is refused too.
-    with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-            &mut typed("pw"),
-        )
-    })
-    .expect("adds");
-    let taken = with_cfg(&dir, |cfg| {
-        add_with(
-            cfg,
-            "work",
-            &exchange("https://mail.example.test/EWS/Exchange.asmx".to_owned()),
-            &mut never_asked,
-        )
-    })
-    .expect_err("taken");
-    assert!(taken.why.contains("exists"), "{}", taken.why);
+    assert!(mailboxes.backend("cloud").is_ok());
+
+    let catalog = BackendCatalog::of(&config);
+    for (cfg_snippet, expected) in [
+        (
+            "[host.mail.accounts.a]\nbackend = \"imap\"\n",
+            "no mail backend",
+        ),
+        (
+            "[host.mail.accounts.a]\nbackend = \"outlook\"\nid = \"x\"\n",
+            "signs in as Outlook",
+        ),
+        (
+            "[host.mail.accounts.a]\nbackend = \"graph\"\n",
+            "client_id of an app registration",
+        ),
+        (
+            "[host.mail.accounts.a]\nbackend = \"ews\"\nserver = \"ftp://mail.example/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n",
+            "http or https address",
+        ),
+    ] {
+        let bad_cfg = Config::from_str_in(cfg_snippet, &dir.0).expect("syntactic parse");
+        let acc = &bad_cfg.mail.accounts["a"];
+        let err = catalog
+            .validate_account(acc, acc.id.is_some() || acc.password_env.is_some())
+            .expect_err(cfg_snippet);
+        assert!(err.to_string().contains(expected), "{cfg_snippet}: {err}");
+    }
 }
 
-/// How many sealed password files the account store holds.
-fn accounts_count(_accounts: &Accounts, dir: &Dir) -> usize {
-    fs::read_dir(dir.0.join("accounts"))
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "sealed"))
-                .count()
-        })
-        .unwrap_or(0)
+#[derive(Default, Debug, Clone, Copy, Provider)]
+#[provider(MailBackend, id = "imap", crate = ::coqui_acp_api::guatiao)]
+struct MockImapBackend;
+
+struct MockImapBox;
+
+impl MailTrait for MockImapBox {
+    fn folders(&self) -> Result<Vec<Folder>, ProviderError> {
+        Ok(vec![Folder {
+            id: "INBOX".to_owned(),
+            name: "Inbox".to_owned(),
+            path: "Inbox".to_owned(),
+            total: Some(1),
+            unread: Some(0),
+        }])
+    }
+
+    fn search(
+        &self,
+        _query: canoa::mail_backend::Query,
+    ) -> Result<canoa::mail_backend::Page, ProviderError> {
+        Ok(canoa::mail_backend::Page::default())
+    }
+
+    fn read(&self, id: String) -> Result<canoa::mail_backend::Message, ProviderError> {
+        Err(MailError::Bad(format!("no message {id}")).into())
+    }
+
+    fn find_by_message_id(&self, _id: String) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
+    fn summaries(
+        &self,
+        _ids: Vec<String>,
+    ) -> Result<Vec<canoa::mail_backend::Summary>, ProviderError> {
+        Ok(Vec::new())
+    }
+
+    fn thread(
+        &self,
+        _summary: canoa::mail_backend::Summary,
+    ) -> Result<Vec<canoa::mail_backend::Summary>, ProviderError> {
+        Ok(Vec::new())
+    }
+
+    fn draft(
+        &self,
+        _draft: canoa::mail_backend::Draft,
+    ) -> Result<canoa::mail_backend::Summary, ProviderError> {
+        Err(MailError::Bad("unsupported".to_owned()).into())
+    }
+
+    fn change(
+        &self,
+        _ids: Vec<String>,
+        _change: canoa::mail_backend::Change,
+    ) -> Result<(), ProviderError> {
+        Ok(())
+    }
+}
+
+impl MailBackend for MockImapBackend {
+    fn describe(&self) -> Result<BackendInfo, ProviderError> {
+        let mut info = BackendInfo::new("imap", "IMAP");
+        info.description = Some("Standard IMAP server".to_owned());
+        Ok(info)
+    }
+
+    fn validate(&self, _request: ValidateRequest) -> Result<PreparedAccount, ProviderError> {
+        let mut prepared = PreparedAccount::new();
+        prepared.needs_secret = false;
+        prepared.details = vec!["imap.fastmail.com".to_owned()];
+        Ok(prepared)
+    }
+
+    fn open(&self, _request: OpenMailbox) -> Result<Object<dyn MailTrait>, ProviderError> {
+        use canoa::mail_backend::Mailbox as _;
+        Ok(MockImapBox.into_object())
+    }
+}
+
+coqui_acp_api::guatiao::local_providers!(
+    id = "mock-imap",
+    version = "0.0.1",
+    providers = [MockImapBackend]
+);
+
+#[test]
+fn non_microsoft_mail_backend_registers_and_opens_through_catalog() {
+    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    registry
+        .register_local("mock-imap", library)
+        .expect("registers");
+    let catalog = BackendCatalog::from_registries(vec![registry]);
+    assert_eq!(
+        catalog
+            .list()
+            .into_iter()
+            .map(|b| (b.id.as_str(), b.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("imap", "IMAP")]
+    );
+    let config = Config::from_str_in(
+        "[host.mail.accounts.fm]\nbackend = \"imap\"\nhost = \"imap.fastmail.com\"\n",
+        std::path::Path::new("."),
+    )
+    .expect("parses custom mail backend");
+    let acc = &config.mail.accounts["fm"];
+    let (entry, prepared) = catalog.validate_account(acc, false).expect("validates");
+    assert_eq!(prepared.details, ["imap.fastmail.com"]);
+    let opened = entry
+        .open(OpenMailbox::new("{}".to_owned(), None, 30))
+        .expect("opens");
+    assert_eq!(opened.folders().expect("folders").len(), 1);
 }

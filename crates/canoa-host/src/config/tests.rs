@@ -2067,7 +2067,6 @@ fn the_store_tools_are_on_unless_the_file_says_false() {
 
 #[test]
 fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_one_in_the_clear() {
-    use crate::config::{MailAuth, MailBackend};
     let none = parse("").expect("parses");
     assert!(none.mail.accounts.is_empty() && none.mail.tools.is_none());
     let both = parse(
@@ -2079,25 +2078,14 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
     let names: Vec<&str> = both.mail.accounts.keys().map(String::as_str).collect();
     assert_eq!(names, ["work", "desktop"], "the file's order");
     let work = &both.mail.accounts["work"];
-    assert_eq!(
-        (work.backend, work.auth),
-        (MailBackend::Ews, MailAuth::Basic)
-    );
+    assert_eq!(work.backend, "ews");
     assert_eq!(work.password_env.as_deref(), Some("WORK_PW"));
     assert_eq!(work.timeout_secs, 60);
+    assert_eq!(work.settings.as_map()["email"], "ana@example.com");
     let desktop = &both.mail.accounts["desktop"];
     assert_eq!(
-        (desktop.backend, desktop.timeout_secs),
-        (MailBackend::Outlook, 90)
-    );
-    let windows = parse(
-        "[host.mail.accounts.w]\nbackend = \"ews\"\nserver = \"https://mail.example.com/EWS/Exchange.asmx\"\n",
-    )
-    .expect("parses");
-    assert_eq!(
-        windows.mail.accounts["w"].auth,
-        MailAuth::Windows,
-        "no user asks for the logon"
+        (desktop.backend.as_str(), desktop.timeout_secs),
+        ("outlook", 90)
     );
     let stored = parse(
         "[host.mail.accounts.s]\nbackend = \"ews\"\nserver = \"https://mail.example.com/EWS/Exchange.asmx\"\nuser = \"u\"\nid = \"0b8d-1\"\n",
@@ -2108,18 +2096,11 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
         (stored.id.as_deref(), stored.password_env.as_deref()),
         (Some("0b8d-1"), None)
     );
-    assert_eq!(stored.auth, MailAuth::Basic);
-    let local = parse(
-        "[host.mail.accounts.t]\nbackend = \"ews\"\nserver = \"http://127.0.0.1:9/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n",
-    );
-    assert!(local.is_ok(), "plain http on this computer");
-    let lan = parse(
-        "[host.mail.accounts.t]\nbackend = \"ews\"\nserver = \"http://mail.example.com/EWS/Exchange.asmx\"\nautodiscover = \"http://192.0.2.9/autodiscover/autodiscover.xml\"\nuser = \"u\"\npassword_env = \"P\"\n",
-    );
-    assert!(
-        lan.is_ok(),
-        "plain http beyond this computer is the person's choice: {lan:?}"
-    );
+    let custom = parse(
+        "[host.mail.accounts.fastmail]\nbackend = \"imap\"\nhost = \"imap.fastmail.com\"\nuser = \"ana@fastmail.com\"\nid = \"fm-1\"\n",
+    )
+    .expect("any custom mail_backend id can be configured in canoa.cfg");
+    assert_eq!(custom.mail.accounts["fastmail"].backend, "imap");
     let slow = parse(
         "[host.mail.accounts.slow]
 backend = \"outlook\"
@@ -2131,90 +2112,25 @@ timeout_secs = 86400
 
     for (bad, why) in [
         (
-            "backend = \"ews\"\nserver = \"ftp://mail.example.com/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"",
-            "http or https address",
-        ),
-        (
-            "backend = \"ews\"\nuser = \"u\"\npassword_env = \"P\"",
-            "needs a server",
-        ),
-        (
-            "backend = \"ews\"\nemail = \"a@b\"\nuser = \"u\"",
-            "password_env",
-        ),
-        (
-            "backend = \"ews\"\nemail = \"a@b\"\nauth = \"windows\"\nuser = \"u\"",
-            "takes no user",
-        ),
-        (
-            "backend = \"ews\"\nemail = \"a@b\"\nauth = \"windows\"\nid = \"x\"",
-            "takes no user, password_env or id",
-        ),
-        (
             "backend = \"ews\"\nemail = \"a@b\"\nuser = \"u\"\nid = \"\"",
             "canoa mail add",
         ),
         (
             "backend = \"ews\"\nemail = \"a@b\"\nuser = \"u\"\npassword = \"hunter2\"",
-            "a setting this host does not know",
+            "a setting this host does not",
         ),
-        ("backend = \"outlook\"\nid = \"x\"", "signs in as Outlook"),
-        (
-            "backend = \"ews\"\nemail = \"a@b\"\nprofile = \"p\"",
-            "for outlook",
-        ),
-        (
-            "backend = \"outlook\"\nserver = \"https://x\"",
-            "signs in as Outlook",
-        ),
-        ("backend = \"imap\"", "backend is ews, graph or outlook"),
-        ("", "backend is ews, graph or outlook"),
+        ("", "backend must be"),
+        ("backend = \"My Backend\"", "backend must be"),
         ("backend = \"outlook\"\ntimeout_secs = 0", "timeout_secs"),
-        ("backend = \"graph\"", "client_id of an app registration"),
         (
-            "backend = \"graph\"\nclient_id = \"c\"\nuser = \"u\"",
-            "not autodiscover",
+            "backend = \"outlook\"\npassword = \"x\"",
+            "a setting this host does not",
         ),
-        (
-            "backend = \"graph\"\nclient_id = \"c\"\nserver = \"graph.example.com/v1.0\"",
-            "http or https address",
-        ),
-        (
-            "backend = \"ews\"\nemail = \"a@b\"\nclient_id = \"c\"",
-            "for graph",
-        ),
-        ("backend = \"outlook\"\ntenant = \"t\"", "for graph"),
     ] {
         let error = parse(&format!("[host.mail.accounts.a]\n{bad}\n")).expect_err(bad);
         assert!(error.to_string().contains(why), "{bad}: {error}");
     }
-    let graph = parse(
-        "[host.mail.accounts.cloud]\nbackend = \"graph\"\nclient_id = \"11111111-2222-3333-4444-555555555555\"\ntenant = \"example.com\"\nemail = \"ana@example.com\"\n",
-    )
-    .expect("parses");
-    let cloud = &graph.mail.accounts["cloud"];
-    assert_eq!(cloud.backend, MailBackend::Graph);
-    assert_eq!(
-        (cloud.client_id.as_deref(), cloud.tenant.as_deref()),
-        (
-            Some("11111111-2222-3333-4444-555555555555"),
-            Some("example.com")
-        )
-    );
-    assert!(cloud.server.is_none(), "Graph's own address is the default");
-    assert!(
-        parse("[host.mail.accounts.g]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://localhost:9/v1.0\"\n").is_ok(),
-        "plain http on this computer"
-    );
-    assert!(
-        parse("[host.mail.accounts.g]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://graph.example.com/v1.0\"\n").is_ok(),
-        "plain http beyond this computer is the person's choice"
-    );
     assert!(parse("[host.mail.accounts.Bad_Name]\nbackend = \"outlook\"\n").is_err());
-    assert!(
-        parse("[host.mail.accounts.a]\nbackend = \"outlook\"\npassword = \"x\"\n").is_err(),
-        "no password key exists"
-    );
     assert!(parse("[host.mail]\ntools = \"no\"\n").is_err());
 }
 
