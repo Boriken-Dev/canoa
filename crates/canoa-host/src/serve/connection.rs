@@ -31,6 +31,7 @@ use crate::history::Recording;
 use crate::inproc::{self, InProcess};
 use crate::kb_mcp::{self, KbLayer};
 use crate::kind;
+use crate::mcp_list::Layer as McpListLayer;
 use crate::pipe;
 use crate::profile::hosted::{self, Connection, Hosted, Offer, Starting};
 use crate::profile::{Session, Who, account_words, plain_launch_line};
@@ -498,13 +499,13 @@ fn launch_agent_program<C: Channel>(
         Some(connection) => {
             let hosted = Hosted::new(channel, scope, connection).agent(agent.pid());
             let end = coqui_acp_bridge::relay::relay(
-                &ToolsLayer::new(
+                &McpListLayer::new(&ToolsLayer::new(
                     &KbLayer::new(
                         &StoreLayer::new(&Layer::new(&Delegating::new(&hosted, conn), link), store),
                         kb,
                     ),
                     tools,
-                ),
+                )),
                 &agent,
             );
             drop(hosted);
@@ -515,13 +516,13 @@ fn launch_agent_program<C: Channel>(
                 .agent(agent.pid())
                 .launching(plain_launch_line(identity));
             coqui_acp_bridge::relay::relay(
-                &ToolsLayer::new(
+                &McpListLayer::new(&ToolsLayer::new(
                     &KbLayer::new(
                         &StoreLayer::new(&Layer::new(&Delegating::new(&scoped, conn), link), store),
                         kb,
                     ),
                     tools,
-                ),
+                )),
                 &agent,
             )
         }
@@ -900,7 +901,7 @@ fn give_harness<C: Channel>(
     let to_provider = (started.request, started.spawner);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &ToolsLayer::new(
+            &McpListLayer::new(&ToolsLayer::new(
                 &KbLayer::new(
                     &StoreLayer::new(
                         &Layer::new(
@@ -920,7 +921,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            ),
+            )),
             &*started.harness,
             to_provider,
             started.watch,
@@ -928,7 +929,7 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &ToolsLayer::new(
+            &McpListLayer::new(&ToolsLayer::new(
                 &KbLayer::new(
                     &StoreLayer::new(
                         &Layer::new(
@@ -948,7 +949,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            ),
+            )),
             &*started.harness,
             to_provider,
             started.watch,

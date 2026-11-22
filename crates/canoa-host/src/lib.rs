@@ -29,6 +29,7 @@ mod local;
 mod loopback;
 mod mail;
 mod makers;
+mod mcp_list;
 pub mod native;
 mod network;
 pub mod options;
