@@ -23,6 +23,10 @@ const ALLOWED: &[(&str, &str)] = &[
     // Control channel dispatch table & lazy Stores cell on Control instances
     ("control.rs", "stores: OnceLock::new(),"),
     ("control/dispatch.rs", "pub(super) static ROUTES:"),
+    // The registry of the libraries this build carries, built once and shared by every speech-output call
+    ("control/say.rs", "static CARRIED:"),
+    // The addresses the loaded libraries say their programs reach, gathered process-wide as libraries load
+    ("network.rs", "static PROGRAM_ENDPOINTS:"),
     // Single-flight mDNS socket coordinator
     ("control/discover.rs", "static SLOT:"),
     ("control/discover.rs", "static DONE:"),

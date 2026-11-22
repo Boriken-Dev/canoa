@@ -120,9 +120,9 @@ fn kind(id: &str) -> Option<&'static Kind> {
     KINDS.iter().find(|kind| kind.id == id)
 }
 
+/// The libraries this build carries, as one registry: the providers of the speech-output kind they offer are kinds a table may name.
 static CARRIED: Mutex<Option<Arc<Registry>>> = Mutex::new(None);
 
-/// The libraries this build carries, as one registry: the providers of the speech-output kind they offer are kinds a table may name.
 fn carried() -> Option<Arc<Registry>> {
     let mut held = CARRIED.lock().unwrap_or_else(PoisonError::into_inner);
     if held.is_none() {

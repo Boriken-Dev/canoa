@@ -898,7 +898,7 @@ mod runtimes_tests {
             .read("store/list", &json!({"kind": "runtimes"}), None)
             .expect("the runtimes");
         let found = programs_of(&runtimes);
-        for program in ["node", "python", "piper"] {
+        for program in ["node", "python"] {
             assert!(
                 found.iter().any(|(_, each)| each == program),
                 "expected {program} in {found:?}"

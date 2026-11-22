@@ -156,9 +156,9 @@ fn only_a_kind_the_account_provider_offers_is_accepted_for_an_account() {
     let names = ["p".to_owned()];
     crate::serve::offered_accounts(&config("pi-oauth"), "pi", &names, &pi).expect("offered");
     crate::serve::offered_accounts(&config("pi-api-key"), "pi", &names, &pi).expect("offered");
-    let why = crate::serve::offered_accounts(&config("anthropic-api-key"), "pi", &names, &pi)
-        .expect_err("another vendor's kind is not offered");
-    assert!(why.contains("anthropic-api-key"), "{why}");
+    let why = crate::serve::offered_accounts(&config("claude-oauth"), "pi", &names, &pi)
+        .expect_err("a Claude kind is not offered by Pi");
+    assert!(why.contains("claude-oauth"), "{why}");
 }
 
 /// A harness whose account provider's id does not follow `<harness>_accounts`: the host finds it through what the harness
