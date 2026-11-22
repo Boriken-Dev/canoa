@@ -68,8 +68,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: "7585f6907750216d5c4f9a148b09381306e18dff"
-      resolved-ref: "7585f6907750216d5c4f9a148b09381306e18dff"
+      ref: "135f5dcea1d8cce2d76e4db42cf16892714f098c"
+      resolved-ref: "135f5dcea1d8cce2d76e4db42cf16892714f098c"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: "7585f6907750216d5c4f9a148b09381306e18dff"
-      resolved-ref: "7585f6907750216d5c4f9a148b09381306e18dff"
+      ref: "135f5dcea1d8cce2d76e4db42cf16892714f098c"
+      resolved-ref: "135f5dcea1d8cce2d76e4db42cf16892714f098c"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -86,8 +86,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: "7585f6907750216d5c4f9a148b09381306e18dff"
-      resolved-ref: "7585f6907750216d5c4f9a148b09381306e18dff"
+      ref: "135f5dcea1d8cce2d76e4db42cf16892714f098c"
+      resolved-ref: "135f5dcea1d8cce2d76e4db42cf16892714f098c"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -104,8 +104,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_transport_web"
-      ref: baebbd9550a936c883927b261738b21c0678729d
-      resolved-ref: baebbd9550a936c883927b261738b21c0678729d
+      ref: "1e19611126472e8dc47c0e640bae2b86a7e6d713"
+      resolved-ref: "1e19611126472e8dc47c0e640bae2b86a7e6d713"
       url: "https://github.com/Boriken-Dev/coqui-transport-web.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -838,14 +838,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.1"
-  xterm:
+  xterm2:
     dependency: "direct main"
     description:
-      name: xterm
-      sha256: "168dfedca77cba33fdb6f52e2cd001e9fde216e398e89335c19b524bb22da3a2"
+      name: xterm2
+      sha256: da8f15c6ecd0a0e06ca11f8d9fe55d6f1e686823ff084ad82fccf9a5fd1f8c00
       url: "https://pub.dev"
     source: hosted
-    version: "4.0.0"
+    version: "5.4.0"
+  xterm2_core:
+    dependency: transitive
+    description:
+      name: xterm2_core
+      sha256: "36bb8b0db005ec9e187a5e9f79bb82a8159343579a6b4dea734cabe7c0eeecea"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   yaml:
     dependency: "direct main"
     description:
