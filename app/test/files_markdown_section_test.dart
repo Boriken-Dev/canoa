@@ -110,13 +110,13 @@ void main() {
     });
 
     test('an anchor is the exact slug or the exact title, never a prefix', () {
-      final parsed = parseMarkdownSections('# Plan\n## Phase 2\n## Phase 20\n## Phase 2\n');
-      expect(parsed.findSection('phase-2')!.title, 'Phase 2');
-      expect(parsed.findSection('#phase-20')!.slug, 'phase-20');
-      expect(parsed.findSection('Phase 2')!.slug, 'phase-2');
-      expect(parsed.findSection('phase-2-2')!.slug, 'phase-2-2');
-      expect(parsed.findSection('phase'), isNull);
-      expect(parsed.findSection('pha'), isNull);
+      final parsed = parseMarkdownSections('# Plan\n## Part 2\n## Part 20\n## Part 2\n');
+      expect(parsed.findSection('part-2')!.title, 'Part 2');
+      expect(parsed.findSection('#part-20')!.slug, 'part-20');
+      expect(parsed.findSection('Part 2')!.slug, 'part-2');
+      expect(parsed.findSection('part-2-2')!.slug, 'part-2-2');
+      expect(parsed.findSection('part'), isNull);
+      expect(parsed.findSection('par'), isNull);
     });
 
     test('a file with frontmatter or three headings is structured, a short one is not', () {
