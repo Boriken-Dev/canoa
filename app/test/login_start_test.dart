@@ -20,16 +20,16 @@ final class _Recorded implements LoginStart {
   @override
   Future<bool> isOn() async => on;
   @override
-  Future<bool> set(bool value) async {
+  Future<String?> set(bool value) async {
     calls.add(value);
     on = value;
-    return true;
+    return null;
   }
 }
 
 final class _Shell implements DesktopShell {
   _Shell({this.accepts = true});
-  final bool accepts;
+  bool accepts;
   final asked = <bool>[];
   final updates = <bool?>[];
   @override
@@ -37,9 +37,9 @@ final class _Shell implements DesktopShell {
   @override
   bool get isDesktop => true;
   @override
-  Future<bool> setStartAtLogin(bool on) async {
+  Future<String?> setStartAtLogin(bool on) async {
     asked.add(on);
-    return accepts;
+    return accepts ? null : 'Access is denied.';
   }
 
   @override
@@ -70,12 +70,12 @@ void main() {
 
     test('on writes the quoted program with the background word, off removes it, off again is fine', () async {
       expect(await entry.isOn(), isFalse);
-      expect(await entry.set(true), isTrue);
+      expect(await entry.set(true), isNull);
       expect(await entry.isOn(), isTrue);
       expect(await entry.read(), r'"C:\Program Files\Canoa\CanoaUI.exe" --background');
-      expect(await entry.set(false), isTrue);
+      expect(await entry.set(false), isNull);
       expect(await entry.isOn(), isFalse);
-      expect(await entry.set(false), isTrue);
+      expect(await entry.set(false), isNull);
     });
   }, skip: Platform.isWindows ? false : 'the registry is Windows only');
 
@@ -87,30 +87,30 @@ void main() {
     test('an XDG autostart entry quotes a path with spaces and is removed again', () async {
       final entry = DesktopEntryLoginStart(folder: '${dir.path}/config/autostart', command: '/opt/My Canoa/CanoaUI');
       expect(await entry.isOn(), isFalse);
-      expect(await entry.set(true), isTrue);
+      expect(await entry.set(true), isNull);
       final text = File('${dir.path}/config/autostart/canoa.desktop').readAsStringSync();
       expect(text, contains('Exec="/opt/My Canoa/CanoaUI" --background\n'));
       expect(text, contains('Type=Application'));
       expect(await entry.isOn(), isTrue);
-      expect(await entry.set(false), isTrue);
+      expect(await entry.set(false), isNull);
       expect(await entry.isOn(), isFalse);
-      expect(await entry.set(false), isTrue);
+      expect(await entry.set(false), isNull);
     });
 
     test('a launch agent runs at load with the background word', () async {
       final entry = LaunchAgentLoginStart(folder: '${dir.path}/LaunchAgents', command: '/Apps/Canoa & Co/CanoaUI');
-      expect(await entry.set(true), isTrue);
+      expect(await entry.set(true), isNull);
       final text = File('${dir.path}/LaunchAgents/dev.boriken.canoa.plist').readAsStringSync();
       expect(text, contains('<string>/Apps/Canoa &amp; Co/CanoaUI</string>'));
       expect(text, contains('<string>--background</string>'));
       expect(text, contains('<key>RunAtLoad</key>\n  <true/>'));
-      expect(await entry.set(false), isTrue);
+      expect(await entry.set(false), isNull);
       expect(await entry.isOn(), isFalse);
     });
 
     test('a folder that cannot be written says so', () async {
       final blocker = File('${dir.path}/blocked')..writeAsStringSync('');
-      expect(await DesktopEntryLoginStart(folder: '${blocker.path}/autostart', command: 'c').set(true), isFalse);
+      expect(await DesktopEntryLoginStart(folder: '${blocker.path}/autostart', command: 'c').set(true), contains('blocked'));
     });
   });
 
@@ -230,6 +230,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(shell.updates.last, isFalse);
       expect(written.last.startAtLogin, isFalse);
+    });
+
+    testWidgets('a registration the computer refuses is said, and the switch keeps what is registered', (tester) async {
+      final shell = _Shell();
+      final written = await run(tester, shell, const CanoaConfig());
+      expect(written.map((c) => c.startAtLogin), [true]);
+      await tester.tap(find.byTooltip('Canoa settings'));
+      await tester.pumpAndSettle();
+      final toggle = find.descendant(of: find.byKey(const Key('settings-start-at-login')), matching: find.byType(Switch));
+      shell.accepts = false;
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('could not be stopped from starting when you sign in: Access is denied.'), findsOneWidget);
+      expect(tester.widget<Switch>(toggle).value, isTrue, reason: 'the entry is still registered');
+      expect(written.map((c) => c.startAtLogin), everyElement(isTrue), reason: 'nothing false was written');
     });
   });
 }

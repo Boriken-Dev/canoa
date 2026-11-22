@@ -43,15 +43,19 @@ final class RunKeyLoginStart implements LoginStart {
   }
 
   @override
-  Future<bool> set(bool on) async {
+  Future<String?> set(bool on) async {
     if (on) {
-      final wrote = await Process.run('reg', ['add', _path, '/v', name, '/t', 'REG_SZ', '/d', value, '/f']);
-      return wrote.exitCode == 0;
+      return _problem(await Process.run('reg', ['add', _path, '/v', name, '/t', 'REG_SZ', '/d', value, '/f']));
     }
     // A value that is not there is already removed.
-    if (!await isOn()) return true;
-    final removed = await Process.run('reg', ['delete', _path, '/v', name, '/f']);
-    return removed.exitCode == 0;
+    if (!await isOn()) return null;
+    return _problem(await Process.run('reg', ['delete', _path, '/v', name, '/f']));
+  }
+
+  static String? _problem(ProcessResult result) {
+    if (result.exitCode == 0) return null;
+    final said = '${result.stderr}'.trim();
+    return said.isEmpty ? 'reg.exe ended with ${result.exitCode}' : said;
   }
 
   /// The value now registered, or null; for a test to read what was written.
@@ -82,7 +86,7 @@ abstract base class FileLoginStart implements LoginStart {
   Future<bool> isOn() => file.exists();
 
   @override
-  Future<bool> set(bool on) async {
+  Future<String?> set(bool on) async {
     try {
       if (on) {
         await Directory(folder).create(recursive: true);
@@ -90,9 +94,9 @@ abstract base class FileLoginStart implements LoginStart {
       } else if (await file.exists()) {
         await file.delete();
       }
-      return true;
-    } on FileSystemException {
-      return false;
+      return null;
+    } on FileSystemException catch (error) {
+      return '${error.message}: ${error.path ?? file.path}';
     }
   }
 }

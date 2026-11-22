@@ -830,14 +830,23 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _decideStartAtLogin() async {
     final shell = widget.shell;
     if (shell == null || !shell.isDesktop || widget.served != null || config.startAtLogin != null || config.unreadable != null) return;
-    if (!await shell.setStartAtLogin(true) || !mounted || config.startAtLogin != null) return;
-    await _applySettings(config.copyWith(startAtLogin: true));
+    if (await shell.setStartAtLogin(true) != null || !mounted || config.startAtLogin != null) return;
+    await _applySettings(config.copyWith(startAtLogin: true), registered: true);
   }
 
   /// Applies and writes what Settings changed, as it is changed, and gives back what the app now holds.
   /// [host] stays as the app has it: Hosting writes it on its own.
-  Future<CanoaConfig> _applySettings(CanoaConfig fromPage) async {
+  Future<CanoaConfig> _applySettings(CanoaConfig fromPage, {bool registered = false}) async {
     var changed = fromPage.withHost(config.host);
+    // The switch shows what the computer holds: a registration it refused leaves it as it was, with the reason.
+    final wanted = changed.startAtLogin;
+    if (!registered && wanted != null && wanted != config.startAtLogin && widget.shell != null) {
+      if (await widget.shell!.setStartAtLogin(wanted) case final problem?) {
+        _messenger.currentState?.showSnackBar(SnackBar(
+            content: Text('Canoa could not ${wanted ? 'be set to start' : 'be stopped from starting'} when you sign in: $problem')));
+        changed = changed.copyWith(startAtLogin: config.startAtLogin ?? !wanted);
+      }
+    }
     // The host serves a source from the moment it starts, so adding or removing one restarts it, which ends the sessions open
     // on any of its sources. The profile tables are read again at each session, so changing them restarts nothing.
     var restart = widget.host != null && widget.served == null && !_sameAgents(changed.agents, config.agents);

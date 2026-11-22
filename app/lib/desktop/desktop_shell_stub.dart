@@ -21,7 +21,7 @@ class _NoShell implements DesktopShell {
   @override
   Future<void> quit() async {}
   @override
-  Future<bool> setStartAtLogin(bool on) async => false;
+  Future<String?> setStartAtLogin(bool on) async => 'This app has no computer to register with.';
   @override
   Future<void> showWaiting(int count) async {}
 }

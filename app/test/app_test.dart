@@ -303,7 +303,7 @@ final class _FakeShell implements DesktopShell {
   @override
   Future<void> showWaiting(int count) async {}
   @override
-  Future<bool> setStartAtLogin(bool on) async => false;
+  Future<String?> setStartAtLogin(bool on) async => 'no';
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

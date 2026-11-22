@@ -129,14 +129,14 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
   }
 
   @override
-  Future<bool> setStartAtLogin(bool on) async {
-    if (!_desktop) return false;
+  Future<String?> setStartAtLogin(bool on) async {
+    if (!_desktop) return 'This is not a desktop window.';
     final entry = _loginStart ?? systemLoginStart();
-    if (entry == null) return false;
+    if (entry == null) return 'This computer has no place to register a start at sign-in.';
     try {
       return await entry.set(on);
-    } on Object {
-      return false;
+    } on Object catch (error) {
+      return '$error';
     }
   }
   @override

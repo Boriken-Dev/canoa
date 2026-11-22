@@ -27,8 +27,9 @@ abstract interface class DesktopShell {
   /// Runs before the app quits, to end what it started.
   set beforeQuit(Future<void> Function()? ending);
 
-  /// Registers the app to start when this person signs in, or removes that. Returns whether the computer now holds it.
-  Future<bool> setStartAtLogin(bool on);
+  /// Registers the app to start when this person signs in, or removes that. Returns null once the computer holds it, else why it
+  /// does not, in words to show the person.
+  Future<String?> setStartAtLogin(bool on);
 
   /// Says on the tray how many sessions wait for the person's answer.
   Future<void> showWaiting(int count);

@@ -6,8 +6,9 @@ abstract interface class LoginStart {
   /// Whether an entry that starts the app is registered now.
   Future<bool> isOn();
 
-  /// Registers the entry, or removes it. Returns whether the computer now holds what was asked.
-  Future<bool> set(bool on);
+  /// Registers the entry, or removes it. Returns null once the computer holds what was asked, else why it does not, in the
+  /// system's own words.
+  Future<String?> set(bool on);
 }
 
 /// The word the registered command takes to start with no window, for the tray to hold.
