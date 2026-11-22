@@ -693,3 +693,14 @@ fn the_piper_the_store_installed_is_offered_with_its_voices_and_speaks_them() {
 fn control_without_piper(tmp: &Path) -> Control {
     control(tmp).with_offered_voices(Vec::new())
 }
+
+#[test]
+fn only_an_account_offer_loses_the_keys_the_host_wrote_and_a_table_the_person_wrote_keeps_its_own() {
+    let offer = json!({"provider": "speech_say_endpoint", "account": "a", "offer": "x:a", "credential": "api_key", "title": "X, account a"});
+    assert_eq!(
+        super::say::host_keys(&offer),
+        ["account", "offer", "credential", "title"]
+    );
+    let written = json!({"provider": "speech_say_command", "title": "Mine", "credential": "c"});
+    assert!(super::say::host_keys(&written).is_empty());
+}

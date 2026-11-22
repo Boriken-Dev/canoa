@@ -140,7 +140,7 @@ impl Services {
                         &service.standard,
                         &service.address,
                         &service.title,
-                        "speech-to-text",
+                        Direction::Dictation,
                         kinds,
                         account,
                     )?,
@@ -203,7 +203,7 @@ impl OutputServices {
                         &service.standard,
                         &service.address,
                         &service.title,
-                        "text-to-speech",
+                        Direction::Speaking,
                         kinds,
                         account,
                     )?,
@@ -261,12 +261,21 @@ fn is_key_for(standard: &str, address: &str, kind: &AccountKindInfo) -> bool {
             .is_some_and(|default| same(default, address))
 }
 
+/// Which way a service carries speech, for the words of a refusal.
+#[derive(Clone, Copy)]
+enum Direction {
+    /// Audio goes to the service and text comes back.
+    Dictation,
+    /// Text goes to the service and audio comes back.
+    Speaking,
+}
+
 /// What an account's kind says of a service described by `(standard, address, title)`.
 fn verdict_for(
     standard: &str,
     address: &str,
     title: &str,
-    what: &str,
+    direction: Direction,
     kinds: &Catalogs<'_>,
     account: &AccountConfig,
 ) -> Option<Result<(), String>> {
@@ -279,10 +288,21 @@ fn verdict_for(
         .find(|kind| kind.id == account.kind)
         .filter(|kind| is_key_for(standard, address, kind))
     else {
+        let (what, how) = match direction {
+            Direction::Dictation => (
+                "send audio to",
+                format!("{title}'s speech-to-text"),
+            ),
+            Direction::Speaking => ("speak through", format!("{title}'s voices")),
+        };
         return Some(Err(format!(
-            "an account of kind {} is not an API key for {title}, and Canoa has no measured way to send audio to {title} with it, so it is not offered: add an API key as an account to use {title}'s speech-to-text",
+            "an account of kind {} is not an API key for {title}, and Canoa has no measured way to {what} {title} with it, so it is not offered: add an API key as an account to use {how}",
             account.kind
         )));
+    };
+    let what = match direction {
+        Direction::Dictation => "speech-to-text",
+        Direction::Speaking => "text-to-speech",
     };
     let moved = model_api(kind)
         .and_then(|slot| slot.key.as_deref())

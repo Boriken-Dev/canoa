@@ -41,6 +41,16 @@ use crate::speech_scripts::{self, ORIGIN_KEYS};
 /// Host-managed keys on synthesized account voice entries that are stripped from provider settings.
 const ACCOUNT_KEYS: [&str; 4] = ["account", "offer", "credential", "title"];
 
+/// The keys of `table` that the host wrote: those of [`ACCOUNT_KEYS`] when it is an account offer (it names an `account`), none
+/// for a table the person wrote, whose `title` or `credential` is theirs.
+pub(super) fn host_keys(table: &Value) -> &'static [&'static str] {
+    if table.get("account").is_some() {
+        &ACCOUNT_KEYS
+    } else {
+        &[]
+    }
+}
+
 type Outcome = Result<Value, (i32, String)>;
 
 /// The table of canoa.cfg the providers are in.
@@ -443,8 +453,8 @@ impl Say {
             for key in ORIGIN_KEYS {
                 map.remove(key);
             }
-            for key in ACCOUNT_KEYS {
-                map.remove(key);
+            for key in host_keys(table) {
+                map.remove(*key);
             }
             if with_key && let Some(account) = table.get("account").and_then(Value::as_str) {
                 let service = table
@@ -555,11 +565,12 @@ impl Say {
         }
         let mut settings = Map::new();
         let mut set = Vec::new();
+        let host = host_keys(table);
         if let Some(map) = table.as_object() {
             for (key, value) in map.iter().filter(|(key, _)| {
                 *key != "provider"
                     && !ORIGIN_KEYS.contains(&key.as_str())
-                    && !ACCOUNT_KEYS.contains(&key.as_str())
+                    && !host.contains(&key.as_str())
             }) {
                 if secrets.contains(key) {
                     set.push(key.clone());
