@@ -84,6 +84,15 @@ class _GeneralSectionState extends State<GeneralSection> {
         if (!kIsWeb)
           SettingsGroup(title: 'Window', children: [
             SwitchRow(
+              key: const Key('settings-start-at-login'),
+              title: 'Start Canoa when I sign in',
+              configKey: const ['desktop', 'start_at_login'],
+              description: 'Canoa starts hidden in the tray when you sign in to this computer, for you only',
+              machine: true,
+              value: config.startAtLogin ?? false,
+              onChanged: (v) => c.change((x) => x.copyWith(startAtLogin: v)),
+            ),
+            SwitchRow(
               title: 'Start hidden in the tray',
               configKey: const ['desktop', 'start_hidden'],
               description: 'Canoa starts with no window; open it from the tray icon',

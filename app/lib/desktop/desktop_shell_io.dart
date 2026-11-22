@@ -5,6 +5,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import '../config/canoa_config.dart';
 import 'desktop_shell.dart';
+import 'login_start.dart';
 
 DesktopShell createDesktopShell() => TrayShell();
 
@@ -29,9 +30,11 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
     @visibleForTesting Future<bool> Function()? trayAvailable,
     @visibleForTesting bool? desktop,
     @visibleForTesting DateTime Function()? clock,
+    @visibleForTesting LoginStart? loginStart,
   }) : _trayAvailable = trayAvailable ?? (() async => !Platform.isLinux || await linuxShowsTrayIcons()),
        _desktop = desktop ?? (Platform.isWindows || Platform.isMacOS || Platform.isLinux),
-       _clock = clock ?? DateTime.now;
+       _clock = clock ?? DateTime.now,
+       _loginStart = loginStart;
 
   /// Two clicks this close together are a double click: Windows' own default.
   static const Duration doubleClick = Duration(milliseconds: 500);
@@ -39,6 +42,7 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
   final Future<bool> Function() _trayAvailable;
   final bool _desktop;
   final DateTime Function() _clock;
+  final LoginStart? _loginStart;
   CanoaConfig config = const CanoaConfig();
   void Function()? onSettings, onHosting;
   bool ready = false, quitting = false;
@@ -58,7 +62,7 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
   bool get hasTray => _hasTray;
 
   @override
-  Future<void> initialize(CanoaConfig settings, {required void Function() onSettings, void Function()? onHosting}) async {
+  Future<void> initialize(CanoaConfig settings, {required void Function() onSettings, void Function()? onHosting, bool background = false}) async {
     config = settings;
     this.onSettings = onSettings;
     this.onHosting = onHosting;
@@ -79,7 +83,9 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
       await trayManager.setContextMenu(menu = _menu(0));
     }
     ready = true;
-    if (config.startHidden) await _putAway();
+    // Sign-in's own entry asks for no window, whatever the person chose for a start they made themselves.
+    if (config.startHidden || background) await _putAway();
+    await _applyLoginStart(config);
   }
 
   /// The tray's menu, whose first item says how many sessions wait for the person.
@@ -110,7 +116,29 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell {
   Future<void> _putAway() => _hasTray ? windowManager.hide() : windowManager.minimize();
 
   @override
-  Future<void> update(CanoaConfig settings) async { config = settings; }
+  Future<void> update(CanoaConfig settings) async {
+    final before = config.startAtLogin;
+    config = settings;
+    if (ready && settings.startAtLogin != before) await _applyLoginStart(settings);
+  }
+
+  /// Makes the computer hold what the person chose; nothing is registered until the first run or the person chose.
+  Future<void> _applyLoginStart(CanoaConfig settings) async {
+    final chosen = settings.startAtLogin;
+    if (chosen != null) await setStartAtLogin(chosen);
+  }
+
+  @override
+  Future<bool> setStartAtLogin(bool on) async {
+    if (!_desktop) return false;
+    final entry = _loginStart ?? systemLoginStart();
+    if (entry == null) return false;
+    try {
+      return await entry.set(on);
+    } on Object {
+      return false;
+    }
+  }
   @override
   Future<void> open() async {
     if (!ready) return;

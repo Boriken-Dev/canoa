@@ -22,6 +22,8 @@ final class _Shell implements DesktopShell {
   @override
   Future<void> showWaiting(int count) async {}
   @override
+  Future<bool> setStartAtLogin(bool on) async => false;
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

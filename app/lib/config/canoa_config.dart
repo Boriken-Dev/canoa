@@ -35,6 +35,7 @@ final class CanoaConfig {
     this.closeToTray = true,
     this.minimizeToTray = false,
     this.localHost = true,
+    this.startAtLogin,
     this.preferWebTransport = true,
     this.connectTimeout = 10,
     this.look = LookId.canoa,
@@ -90,6 +91,10 @@ final class CanoaConfig {
 
   /// `[desktop] local_host`: whether the desktop app runs its own host.
   final bool localHost;
+
+  /// `[desktop] start_at_login`: whether the app starts, hidden in the tray, when this person signs in to the computer. Null until
+  /// the first run decided it, so that choosing once is never undone by a later start.
+  final bool? startAtLogin;
   /// `[network] connect_timeout`: seconds a connection may take before the app gives up; any number above 0.
   final num connectTimeout;
 
@@ -157,7 +162,7 @@ final class CanoaConfig {
   };
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
-      bool? minimizeToTray, bool? preferWebTransport, num? connectTimeout,
+      bool? minimizeToTray, bool? startAtLogin, bool? preferWebTransport, num? connectTimeout,
       LookId? look, bool? followProvider, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
       NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
@@ -166,6 +171,7 @@ final class CanoaConfig {
         closeToTray: closeToTray ?? this.closeToTray,
         minimizeToTray: minimizeToTray ?? this.minimizeToTray,
         localHost: localHost,
+        startAtLogin: startAtLogin ?? this.startAtLogin,
         preferWebTransport: preferWebTransport ?? this.preferWebTransport,
         connectTimeout: connectTimeout ?? this.connectTimeout,
         look: look ?? this.look,
@@ -199,6 +205,7 @@ final class CanoaConfig {
     closeToTray: closeToTray,
     minimizeToTray: minimizeToTray,
     localHost: localHost,
+    startAtLogin: startAtLogin,
     preferWebTransport: preferWebTransport,
     connectTimeout: connectTimeout,
     look: look,
@@ -1216,6 +1223,7 @@ final class CanoaConfig {
     closeToTray: closeToTray,
     minimizeToTray: minimizeToTray,
     localHost: localHost,
+    startAtLogin: startAtLogin,
     preferWebTransport: preferWebTransport,
     connectTimeout: connectTimeout,
     look: look,
@@ -1260,7 +1268,7 @@ final class CanoaConfig {
   /// The keys of each table the app edits through its own fields. Any other key of one of them is the host's or a later version's:
   /// kept as found, never refused here (the host says what it refuses, through `config/check`).
   static const _editedKeys = <String, Set<String>>{
-    'desktop': {'start_hidden', 'close_to_tray', 'minimize_to_tray', 'local_host'},
+    'desktop': {'start_hidden', 'close_to_tray', 'minimize_to_tray', 'local_host', 'start_at_login'},
     'network': {'prefer_webtransport', 'connect_timeout'},
     'appearance': {'look', 'follow_provider', 'brightness', 'density'},
     'sessions': {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'},
@@ -1562,6 +1570,7 @@ final class CanoaConfig {
       closeToTray: flag(desktop, 'close_to_tray', true),
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
       localHost: flag(desktop, 'local_host', true),
+      startAtLogin: desktop.containsKey('start_at_login') ? flag(desktop, 'start_at_login', false) : null,
       preferWebTransport: flag(network, 'prefer_webtransport', true),
       connectTimeout: timeout,
       defaultMode: defaultMode as String?,
@@ -1641,7 +1650,7 @@ start_hidden = $startHidden
 close_to_tray = $closeToTray
 minimize_to_tray = $minimizeToTray
 local_host = $localHost
-
+${startAtLogin == null ? '' : 'start_at_login = $startAtLogin\n'}
 [network]
 prefer_webtransport = $preferWebTransport
 connect_timeout = $connectTimeout

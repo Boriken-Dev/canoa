@@ -7,7 +7,7 @@ class _NoShell implements DesktopShell {
   Future<void> Function()? beforeQuit;
 
   @override
-  Future<void> initialize(CanoaConfig config, {required void Function() onSettings, void Function()? onHosting}) async {}
+  Future<void> initialize(CanoaConfig config, {required void Function() onSettings, void Function()? onHosting, bool background = false}) async {}
   @override
   Future<void> update(CanoaConfig config) async {}
   @override
@@ -20,6 +20,8 @@ class _NoShell implements DesktopShell {
   bool get isDesktop => false;
   @override
   Future<void> quit() async {}
+  @override
+  Future<bool> setStartAtLogin(bool on) async => false;
   @override
   Future<void> showWaiting(int count) async {}
 }

@@ -51,6 +51,8 @@ final class _Shell implements DesktopShell {
   @override
   Future<void> showWaiting(int count) async {}
   @override
+  Future<bool> setStartAtLogin(bool on) async => false;
+  @override
   Future<void> update(CanoaConfig config) async {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

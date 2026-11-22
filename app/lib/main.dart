@@ -10,6 +10,7 @@ import 'config/canoa_config.dart';
 import 'config/connection.dart' show Connection, ConnectionKind, ConnectionTransport;
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
+import 'desktop/login_start.dart' show backgroundFlag;
 import 'desktop/host_control.dart';
 import 'net/system_http.dart';
 import 'desktop/host_supervisor.dart';
@@ -296,6 +297,7 @@ Future<void> main(List<String> args) async {
     config,
     onSettings: () => settingsSignal.value++,
     onHosting: host == null || served != null ? null : () => hostingSignal.value++,
+    background: args.contains(backgroundFlag),
   );
   runApp(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
@@ -822,6 +824,15 @@ class _CanoaAppState extends State<CanoaApp> {
       reader: _reader,
       version: const String.fromEnvironment('CANOA_VERSION'),
     );
+
+  /// The first run turns starting at sign-in on and writes that down; once canoa.cfg holds an answer, on or off, it is the person's
+  /// and never decided again. A computer that could not register it is asked again at the next start.
+  Future<void> _decideStartAtLogin() async {
+    final shell = widget.shell;
+    if (shell == null || !shell.isDesktop || widget.served != null || config.startAtLogin != null || config.unreadable != null) return;
+    if (!await shell.setStartAtLogin(true) || !mounted || config.startAtLogin != null) return;
+    await _applySettings(config.copyWith(startAtLogin: true));
+  }
 
   /// Applies and writes what Settings changed, as it is changed, and gives back what the app now holds.
   /// [host] stays as the app has it: Hosting writes it on its own.
@@ -2995,6 +3006,7 @@ class _CanoaAppState extends State<CanoaApp> {
         SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, rules: widget.rules, defaultMode: config.defaultMode, bypassOnceOnly: config.allowOnceOnly,
             drafts: widget.drafts, embedLimit: config.embedLimit);
     store.queueDelivery = config.sessions.queueDelivery;
+    scheduleMicrotask(() => unawaited(_decideStartAtLogin()));
     store.starter = _startDraft;
     store.defaultPresetOf = () => config.presets[presetDefault];
     store.choicesLoader = _askChoices;
