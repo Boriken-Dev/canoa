@@ -347,7 +347,7 @@ void main() {
     useHostDials(HostControl.dialing(() async => host));
     addTearDown(resetSystemDial);
     final channel = await connectSystemChannel(
-      WebEndpoints(webSocket: Uri.parse('ws://127.0.0.1:${origin.port}/'), allowLocalPlainWebSocket: true),
+      WebEndpoints(webSocket: Uri.parse('ws://127.0.0.1:${origin.port}/'), allowPlainWebSocket: true),
     );
     expect(await channel.messages.first.timeout(const Duration(seconds: 10)), 'hello');
     await channel.close();
@@ -359,7 +359,7 @@ void main() {
     addTearDown(() => origin.close(force: true));
     resetSystemDial();
     final channel = await connectSystemChannel(
-      WebEndpoints(webSocket: Uri.parse('ws://127.0.0.1:${origin.port}/'), allowLocalPlainWebSocket: true),
+      WebEndpoints(webSocket: Uri.parse('ws://127.0.0.1:${origin.port}/'), allowPlainWebSocket: true),
     );
     expect(await channel.messages.first.timeout(const Duration(seconds: 10)), 'hello');
     await channel.close();

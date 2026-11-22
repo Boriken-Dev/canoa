@@ -10,11 +10,17 @@ WebEndpoints chatEndpoints({
   required String webSocket,
   String webTransport = '',
   bool preferWebTransport = true,
-}) => WebEndpoints(
-  webTransport: preferWebTransport && webTransport.isNotEmpty ? Uri.parse(webTransport) : null,
-  webSocket: webSocket.isEmpty ? null : Uri.parse(webSocket),
-  allowLocalPlainWebSocket: true,
-);
+}) {
+  final socket = webSocket.isEmpty ? null : Uri.parse(webSocket);
+  return WebEndpoints(
+    webTransport: preferWebTransport && webTransport.isNotEmpty ? Uri.parse(webTransport) : null,
+    webSocket: socket,
+    allowPlainWebSocket: plainOnLoopback(socket),
+  );
+}
+
+/// Whether [url] is a plain `ws://` address on this computer, the one place the chat takes an unencrypted WebSocket.
+bool plainOnLoopback(Uri? url) => url != null && url.scheme == 'ws' && const {'localhost', '127.0.0.1', '::1'}.contains(url.host);
 
 /// Opens the preferred network transport, then proves the SAME expected peer
 /// identity on that selected transport before sending any ACP message.
@@ -103,7 +109,7 @@ Future<VerifiedAgent> _verifiedAcp(
     // A channel that frames its own messages takes the limit the host applies, so a message the host takes is not refused here.
     final said = client.identity.maxMessageBytes;
     limit.bytes = said;
-    if (said != null && source is HostMessageLimit) (source as HostMessageLimit).followHost(said);
+    if (said != null) followHostLimit(source, said);
     return client;
   } catch (_) {
     await client.close();

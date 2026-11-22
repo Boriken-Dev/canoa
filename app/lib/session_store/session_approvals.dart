@@ -341,14 +341,14 @@ extension SessionApprovals on SessionStore {
       WebEndpoints(
         webTransport: endpoint,
         webSocket: websocketFallback,
-        allowLocalPlainWebSocket: true,
+        allowPlainWebSocket: plainOnLoopback(websocketFallback),
       );
     } else if (endpoint.scheme == 'wss' || endpoint.scheme == 'ws') {
       if (websocketFallback != null) {
         throw ArgumentError('A direct WSS endpoint cannot have a fallback');
       }
       // Plain WebSocket only on loopback, where canoa listens.
-      WebEndpoints(webSocket: endpoint, allowLocalPlainWebSocket: true);
+      WebEndpoints(webSocket: endpoint, allowPlainWebSocket: plainOnLoopback(endpoint));
     } else {
       throw ArgumentError.value(
         endpoint,

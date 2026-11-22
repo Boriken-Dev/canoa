@@ -35,7 +35,7 @@ dependencies:
     git:
       url: https://github.com/Boriken-Dev/coqui-transport-web.git
       path: bindings/dart/coqui_transport_web
-      ref: baebbd9550a936c883927b261738b21c0678729d
+      ref: 1e19611126472e8dc47c0e640bae2b86a7e6d713
   # The host, as a library inside the desktop app: builds crates/canoa-ffi with it.
   canoa_native:
     path: native

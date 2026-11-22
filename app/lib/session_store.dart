@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'acp/chat_connection.dart';
 import 'acp/client.dart';
+import 'acp/connect.dart' show plainOnLoopback;
 import 'acp/delegate.dart';
 import 'acp/delegate_targets.dart';
 import 'acp/local_agent.dart' show readLocalFile;

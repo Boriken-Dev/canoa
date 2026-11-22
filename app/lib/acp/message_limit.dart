@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:coqui_transport_web/coqui_transport_web.dart';
+
 /// What a message takes on a pipe besides its own bytes: the record it is sealed in.
 const int pipeRecordOverhead = 64 * 1024;
 
@@ -16,6 +18,22 @@ final class HostLimit {
     final size = utf8.encode(message).length;
     if (size <= limit) return null;
     return 'A message of $size bytes is over the limit the host takes, $limit: [host] max_message_bytes in its configuration';
+  }
+}
+
+/// What a message of [bytes] takes on a channel once sealed, whichever method seals it: the record around it, with Noise's
+/// per-part overhead (19 bytes each 65518) on top of the pipe's flat allowance.
+int sealedLimit(int bytes) => bytes + pipeRecordOverhead + 19 * (bytes ~/ 65518 + 1);
+
+/// Opens [channel]'s limit to the host's [bytes], when the channel takes it: a channel that frames its own messages
+/// (`HostMessageLimit`) or one whose limit is a setting (`LimitedWebChannel`, the WebSocket and WebTransport channels).
+void followHostLimit(WebChannel channel, int bytes) {
+  switch (channel) {
+    case final HostMessageLimit framed:
+      framed.followHost(bytes);
+    case final LimitedWebChannel limited:
+      limited.maxMessage = sealedLimit(bytes);
+    default:
   }
 }
 

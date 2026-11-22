@@ -104,8 +104,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_transport_web"
-      ref: baebbd9550a936c883927b261738b21c0678729d
-      resolved-ref: baebbd9550a936c883927b261738b21c0678729d
+      ref: 1e19611126472e8dc47c0e640bae2b86a7e6d713
+      resolved-ref: 1e19611126472e8dc47c0e640bae2b86a7e6d713
       url: "https://github.com/Boriken-Dev/coqui-transport-web.git"
     source: git
     version: "0.0.0-alpha.0"
