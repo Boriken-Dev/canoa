@@ -330,7 +330,7 @@ class _FilesPanelState extends State<FilesPanel> {
       });
       return _list(entry.path);
     }
-    await _openFilePath(entry.path, entry.name);
+    await _openFilePath(entry.path, entry.name, section: section);
   }
 
   /// Reads [file] to its end so that what is edited is the whole file.
@@ -344,7 +344,7 @@ class _FilesPanelState extends State<FilesPanel> {
     }
   }
 
-  Future<void> _openFilePath(String path, String name) async {
+  Future<void> _openFilePath(String path, String name, {String? section}) async {
     setState(() {
       _opening = path;
       _fileProblem = null;
