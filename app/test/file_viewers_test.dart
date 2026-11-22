@@ -13,6 +13,10 @@ import 'package:canoa/files/viewers/file_sample.dart';
 import 'package:canoa/files/viewers/file_viewer.dart';
 import 'package:canoa/files/viewers/standard_viewers.dart';
 import 'package:canoa/files/viewers/structured_viewer.dart';
+import 'package:canoa/files/viewers/text_viewer.dart' show TextLines;
+import 'package:canoa/highlight/syntax.dart' show languageForInfo;
+import 'package:canoa/highlight/syntax_theme.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLook;
 import 'package:canoa/served/host_files.dart';
 import 'package:canoa/shell/layout_state.dart' show MemoryLayoutBackend;
 import 'package:canoa/surfaces/files_surface.dart';
@@ -375,6 +379,122 @@ void main() {
           await expectLater(find.byType(FilesPanel), matchesGoldenFile('goldens/file_viewers_${golden}_$label.png'));
         }
       });
+    }
+  });
+
+  group('highlighted', () {
+    const rust = 'fn main() {\n    let x = 42; // answer\n    println!("hi");\n}\n';
+    const patch = '--- a/lib/a.dart\n+++ b/lib/a.dart\n@@ -1,3 +1,3 @@\n void main() {\n-  var a = 1;\n+  var a = 2; // two\n }\n';
+
+    /// The colour the first piece of text [text] is drawn in.
+    Color? colorOf(WidgetTester tester, String text) {
+      Color? found;
+      // A selectable line keeps its spans in its editing controller.
+      for (final field in tester.widgetList<EditableText>(find.byType(EditableText))) {
+        final built = field.controller.buildTextSpan(context: tester.element(find.byWidget(field)), style: field.style, withComposing: false);
+        built.visitChildren((span) {
+          if (span is TextSpan && span.text == text && found == null) {
+            found = span.style?.color;
+            return false;
+          }
+          return true;
+        });
+      }
+      return found;
+    }
+
+    Future<void> panel(WidgetTester tester, Map<String, Uint8List> files, Brightness brightness, Size size) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: themeFor(LookId.canoa, brightness),
+        home: Scaffold(body: FilesPanel(files: _Disk(files), root: _Disk.root)),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    for (final brightness in Brightness.values) {
+      testWidgets('a source file in the ${brightness.name} look, by its extension', (tester) async {
+        await panel(tester, {'main.rs': _text(rust), 'notes.xyz': _text(rust)}, brightness, const Size(560, 640));
+        await tester.tap(_key('files entry main.rs'));
+        await tester.pumpAndSettle();
+        final look = Theme.of(tester.element(find.byType(Scaffold))).extension<ChatLook>()!;
+        expect(colorOf(tester, 'fn'), look.accent);
+        expect(colorOf(tester, '42'), look.warning);
+        expect(colorOf(tester, '// answer'), look.muted);
+
+        await tester.tap(_key('files back'));
+        await tester.pumpAndSettle();
+        await tester.tap(_key('files entry notes.xyz'));
+        await tester.pumpAndSettle();
+        expect(colorOf(tester, 'fn'), isNull, reason: 'a name and a start nothing recognises is shown plain');
+        expect(_key('files line 0'), findsOneWidget);
+      });
+
+      testWidgets('a patch in the ${brightness.name} look colours the code of its file by that file\'s language', (tester) async {
+        await panel(tester, {'c.patch': _text(patch)}, brightness, const Size(560, 640));
+        await tester.tap(_key('files entry c.patch'));
+        await tester.pumpAndSettle();
+        final look = Theme.of(tester.element(find.byType(Scaffold))).extension<ChatLook>()!;
+        expect(colorOf(tester, 'var'), look.accent);
+        expect(colorOf(tester, '// two'), look.muted);
+        expect(_key('diff added 5'), findsOneWidget, reason: 'the added line keeps its row colour');
+      });
+    }
+
+    testWidgets('a large file stays responsive: only the lines in view are lexed', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(560, 640));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final big = [for (var i = 0; i < 40000; i++) 'let value_$i = $i; // line $i'].join('\n');
+      final watch = Stopwatch()..start();
+      await tester.pumpWidget(MaterialApp(
+        theme: themeFor(LookId.canoa, Brightness.dark),
+        home: Scaffold(body: TextLines(text: big, language: languageForInfo('rust'))),
+      ));
+      await tester.pumpAndSettle();
+      expect(watch.elapsedMilliseconds, lessThan(5000));
+      expect(_key('files line 0'), findsOneWidget);
+      expect(find.byType(SelectableText).evaluate().length, lessThan(80), reason: 'only the rows in view are built');
+      expect(colorOf(tester, 'let'), isNotNull);
+
+      // Past the default limit the same text is drawn plain, and as fast.
+      final huge = [for (var i = 0; i < 100000; i++) 'let value_$i = $i; // line $i'].join('\n');
+      watch.reset();
+      await tester.pumpWidget(MaterialApp(
+        theme: themeFor(LookId.canoa, Brightness.dark),
+        home: Scaffold(body: TextLines(text: huge, language: languageForInfo('rust'))),
+      ));
+      await tester.pumpAndSettle();
+      expect(watch.elapsedMilliseconds, lessThan(5000));
+      expect(colorOf(tester, 'let'), isNull);
+    });
+
+    testWidgets('a text past the theme\'s limit is shown plain', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(560, 640));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final themed = themeFor(LookId.canoa, Brightness.dark);
+      await tester.pumpWidget(MaterialApp(
+        theme: themed.copyWith(extensions: [...themed.extensions.values, const SyntaxTheme(maxChars: 20)]),
+        home: Scaffold(body: TextLines(text: rust, language: languageForInfo('rust'))),
+      ));
+      await tester.pumpAndSettle();
+      expect(colorOf(tester, 'fn'), isNull);
+    });
+
+    for (final (label, size) in [('desktop', const Size(560, 640)), ('phone', const Size(390, 780))]) {
+      for (final brightness in Brightness.values) {
+        testWidgets('as drawn at $label width, ${brightness.name}', (tester) async {
+          await panel(tester, {'main.rs': _text(rust), 'c.patch': _text(patch)}, brightness, size);
+          for (final name in ['main.rs', 'c.patch']) {
+            await tester.tap(_key('files entry $name'));
+            await tester.pumpAndSettle();
+            await expectLater(find.byType(FilesPanel), matchesGoldenFile('goldens/syntax_file_${name.split('.').last}_${label}_${brightness.name}.png'));
+            await tester.tap(_key('files back'));
+            await tester.pumpAndSettle();
+          }
+        });
+      }
     }
   });
 }

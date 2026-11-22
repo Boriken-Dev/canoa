@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show ChatMessage, MessageRol
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
+import '../highlight/highlighted.dart';
 import '../voice/reply_reader.dart';
 import '../voice/reply_speaker.dart';
 import 'dictation.dart';
@@ -29,7 +30,7 @@ class ReplyMessage extends StatelessWidget {
   Widget build(BuildContext context) {
     final look = context.chatLook;
     return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-      MessageBox(color: look.agent, inBubble: look.agentInBubble, child: AgentMarkdown(text: entry.text)),
+      MessageBox(color: look.agent, inBubble: look.agentInBubble, child: AgentMarkdown(text: entry.text, builders: highlightedMarkdown)),
       Row(mainAxisSize: MainAxisSize.min, children: [
         PlayReplyButton(reader: reader, replyKey: replyKey(entry.at), text: entry.text),
         CopyButton(text: entry.text, tooltip: 'Copy message'),

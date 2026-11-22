@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../acp/client.dart' show AcpSessionInfo;
 import '../desktop/control_client.dart' show hostWords;
+import '../highlight/highlighted.dart' show highlightRenderers;
 import '../history/session_import.dart' show earlierPage;
 import '../profile/report.dart';
 import '../rail/session_groups.dart' show rowStateOf;
@@ -134,7 +135,7 @@ class _ConversationViewState extends State<ConversationView> {
   chat.ChatRenderers _renderersFor(ChatSession session) {
     final reader = widget.kit.reader;
     final openFile = _filesSurface(session) == null ? null : (String path) => _openInFiles(session, path);
-    var renderers = filePathRenderers(root: FilesSurface.workspaceOf(session), onOpenFile: openFile, reader: reader)
+    var renderers = highlightRenderers.merge(filePathRenderers(root: FilesSurface.workspaceOf(session), onOpenFile: openFile, reader: reader))
         .merge(delegationRenderers)
         .merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command)));
     if (reader != null) renderers = renderers.merge(replyRenderers(reader));

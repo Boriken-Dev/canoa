@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import '../highlight/highlighted.dart';
+import '../highlight/syntax.dart' show languageForPath;
 import '../voice/reply_speaker.dart';
 import 'outputs.dart';
 import 'reply_voice.dart';
@@ -99,6 +101,7 @@ ChatRenderers filePathRenderers({
     final markdown = AgentMarkdown(
       text: entry.text,
       inlineSyntaxes: inlineSyntaxes,
+      builders: highlightedMarkdown,
       onTapLink: (href, _) => handleLink(context, href),
     );
     if (reader != null && reader.available) {
@@ -141,7 +144,7 @@ ChatRenderers filePathRenderers({
               onTap: () => onOpenFile(resolved),
             ),
             const SizedBox(height: 4),
-            DiffView(lines: withContext(diffLines(block.oldText, block.newText))),
+            HighlightedDiffView(lines: withContext(diffLines(block.oldText, block.newText)), language: languageForPath(block.path)),
           ]);
         },
     ],

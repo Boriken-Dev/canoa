@@ -1,6 +1,9 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
+import '../../highlight/highlighted.dart' show lineSpan;
+import '../../highlight/syntax.dart';
+import '../../highlight/syntax_theme.dart';
 import '../../theme/look.dart';
 import 'file_sample.dart';
 import 'file_viewer.dart';
@@ -41,6 +44,24 @@ List<(DiffRow, String)> classifyDiff(String text) {
   return rows;
 }
 
+/// The language of each row of [rows]: that of the file whose `+++ ` header came last, by its name; null for a row before any header
+/// or of a file of no known language.
+List<Language?> diffLanguages(List<(DiffRow, String)> rows) {
+  Language? current;
+  final out = <Language?>[];
+  for (final (row, line) in rows) {
+    if (row == DiffRow.meta && line.startsWith('+++ ')) {
+      var path = line.substring(4).split('\t').first.trim();
+      if (path.startsWith('b/')) path = path.substring(2);
+      current = languageForPath(path);
+    } else if (row == DiffRow.meta && line.startsWith('diff ')) {
+      current = null;
+    }
+    out.add(current);
+  }
+  return out;
+}
+
 /// A unified diff (`git diff`, `diff -u`, a `.patch` file): added and removed lines on the look's colours, the hunk headers and
 /// file headers set apart.
 class DiffViewer extends FileViewer {
@@ -63,13 +84,36 @@ class DiffViewer extends FileViewer {
   @override
   Widget build(BuildContext context, FileViewRequest request) {
     final rows = request.sample.memo('diff rows', () => classifyDiff(request.sample.text ?? ''));
+    final languages = request.sample.memo('diff languages', () => diffLanguages(rows));
     final look = context.chatLook;
+    final theme = SyntaxTheme.of(context);
     return ListView.builder(
       key: const ValueKey('diff lines'),
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: rows.length,
       itemBuilder: (context, at) {
         final (row, line) = rows[at];
+        final language = languages[at];
+        if (language != null && (row == DiffRow.added || row == DiffRow.removed || row == DiffRow.context) && line.isNotEmpty) {
+          // The sign stays where it is; the code after it is lexed alone, so a comment over several lines is coloured by line.
+          final base = TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, color: look.text);
+          final code = visibleText(line.substring(1));
+          return Container(
+            key: ValueKey('diff ${row.name} $at'),
+            color: switch (row) {
+              DiffRow.added => look.added,
+              DiffRow.removed => look.removed,
+              _ => null,
+            },
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SelectableText.rich(
+              TextSpan(style: base, children: [
+                TextSpan(text: line.substring(0, 1)),
+                lineSpan(code, lexLine(language, code).$1, theme.styles(look, base)),
+              ]),
+            ),
+          );
+        }
         final color = switch (row) {
           DiffRow.added => look.added,
           DiffRow.removed => look.removed,

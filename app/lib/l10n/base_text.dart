@@ -10,6 +10,7 @@ const Map<String, Map<String, String>> baseStrings = {
     'language.name': 'English',
     'common.cancel': 'Cancel',
     'common.save': 'Save',
+    'code.copy': 'Copy code',
     'files.viewer.text': 'Plain',
     'files.viewer.markdown': 'Sections',
     'files.viewer.tree': 'Tree',

@@ -5,6 +5,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
+import '../highlight/highlighted.dart';
 import '../selectable.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
@@ -181,7 +182,7 @@ class _PlanApprovalCard extends StatelessWidget {
                       border: Border.all(color: look.border),
                     ),
                     padding: const EdgeInsets.all(12),
-                    child: SingleChildScrollView(child: AgentMarkdown(text: planMarkdown)),
+                    child: SingleChildScrollView(child: AgentMarkdown(text: planMarkdown, builders: highlightedMarkdown)),
                   ),
                   if (notes.isNotEmpty) ...[const SizedBox(height: 8), ...notes],
                   const SizedBox(height: 10),

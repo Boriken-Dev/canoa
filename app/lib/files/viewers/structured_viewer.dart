@@ -210,7 +210,7 @@ class _StructuredTreeState extends State<StructuredTree> {
               style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
             ),
           ),
-          Expanded(child: TextLines(text: widget.sample.text ?? '')),
+          Expanded(child: TextLines(text: widget.sample.text ?? '', language: languageOfSample(widget.sample))),
         ],
       );
     }

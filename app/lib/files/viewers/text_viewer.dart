@@ -1,5 +1,9 @@
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'package:flutter/material.dart';
 
+import '../../highlight/highlighted.dart';
+import '../../highlight/syntax.dart';
+import '../../highlight/syntax_theme.dart';
 import '../../theme/look.dart';
 import 'file_viewer.dart';
 import 'file_sample.dart';
@@ -93,24 +97,57 @@ List<String> previewLines(String text) {
 /// The longest piece of a line the preview lays out at once.
 const int lineLength = 400;
 
-/// [text] as read-only monospace lines, laid out as they scroll into view.
-class TextLines extends StatelessWidget {
-  const TextLines({super.key, required this.text});
+/// The language of [sample]: by its file name, else by what it starts with; null for plain text.
+Language? languageOfSample(FileSample sample) =>
+    sample.memo('language', () => languageForPath(sample.path) ?? (sample.isText ? sniffLanguage(sample.text ?? '') : null));
+
+/// [text] as read-only monospace lines, laid out as they scroll into view and, for a [language], coloured as they do: only the
+/// lines drawn are lexed.
+class TextLines extends StatefulWidget {
+  const TextLines({super.key, required this.text, this.language});
 
   final String text;
+  final Language? language;
+
+  @override
+  State<TextLines> createState() => _TextLinesState();
+}
+
+class _TextLinesState extends State<TextLines> {
+  late List<String> _lines = previewLines(widget.text);
+  HighlightedLines? _lexed;
+  int _maxChars = SyntaxTheme.defaultMaxChars;
+
+  @override
+  void didUpdateWidget(TextLines old) {
+    super.didUpdateWidget(old);
+    if (old.text != widget.text) _lines = previewLines(widget.text);
+    if (old.text != widget.text || old.language != widget.language) _lexed = null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final lines = previewLines(text);
+    final look = context.chatLook;
+    final theme = SyntaxTheme.of(context);
+    if (theme.maxChars != _maxChars) {
+      _maxChars = theme.maxChars;
+      _lexed = null;
+    }
+    final lexed = _lexed ??= HighlightedLines(_lines, widget.language, maxChars: _maxChars);
+    final base = TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12, color: lexed.highlighted ? look.text : null);
+    final styles = theme.styles(look, base);
     return ListView.builder(
       key: const ValueKey('files text'),
       padding: const EdgeInsets.all(16),
-      itemCount: lines.length,
-      itemBuilder: (context, at) => SelectableText(
-        visibleText(lines[at]),
-        key: ValueKey('files line $at'),
-        style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
-      ),
+      itemCount: _lines.length,
+      itemBuilder: (context, at) {
+        final line = _lines[at];
+        if (!lexed.highlighted) return SelectableText(visibleText(line), key: ValueKey('files line $at'), style: base);
+        // A line is lexed as written; what is shown has the hidden characters spelt out, so its spans are cut from that text.
+        final shown = visibleText(line);
+        final spans = shown == line ? lexed.spansAt(at) : lexLine(widget.language!, shown, 0).$1;
+        return SelectableText.rich(lineSpan(shown, spans, styles), key: ValueKey('files line $at'));
+      },
     );
   }
 }
@@ -135,5 +172,6 @@ class TextViewer extends FileViewer {
   bool matches(FileSample sample, String type) => canShow(sample);
 
   @override
-  Widget build(BuildContext context, FileViewRequest request) => TextLines(text: request.sample.text ?? '');
+  Widget build(BuildContext context, FileViewRequest request) =>
+      TextLines(text: request.sample.text ?? '', language: languageOfSample(request.sample));
 }
