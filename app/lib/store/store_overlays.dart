@@ -424,10 +424,11 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         }
         await c.apply(await installPreview(home.overlays, c.config, preview, catalog: listed.label));
         if (preview.prepares.isNotEmpty) {
+          // The files stay installed when preparing fails; the loadout's problem line says what was not done.
           try {
             await home.overlays.prepare(preview.name);
-          } on OverlayException {
-            // The overlay stays installed when preparing fails; its report says what was not done.
+          } on OverlayException catch (error) {
+            throw OverlayException('installed, but preparing it failed: ${error.message}');
           }
         }
       });

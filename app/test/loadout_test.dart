@@ -299,6 +299,19 @@ void main() {
     expect(find.textContaining('Installed, but preparing it failed: dependencies (python) failed'), findsOneWidget);
   });
 
+  testWidgets('an install from the tile prepares the overlay, and says so when preparing fails', (tester) async {
+    overlays.put(teamRepo, {
+      'overlay.cfg': reviewCfg,
+      'lib/python/requirements.txt': 'requests==2.0\n',
+    });
+    overlays.prepareFails = 'dependencies (python) failed: no matching distribution';
+    await open(tester);
+    await tapKey(tester, 'overlays-discover');
+    await tapKey(tester, 'store-entry-install-main-review');
+    expect(overlays.records.keys, ['review'], reason: 'the files stay installed');
+    expect(find.textContaining('installed, but preparing it failed: dependencies (python) failed'), findsOneWidget);
+  });
+
   testWidgets('what a card says is not prepared is run only after the person is shown it and says yes', (tester) async {
     await open(tester, overlayNeeds: (name) async => const [
       NeedLine(
