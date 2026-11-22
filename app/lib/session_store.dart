@@ -48,6 +48,7 @@ import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
 
 export 'acp/delegate.dart' show DelegateTask, DelegateTasks, TaskPhase;
+export 'acp/mcp_list.dart' show McpInventory, McpResource, McpServerStatus, McpTool;
 export 'acp/secret_wire.dart' show SecretIdentity;
 export 'chat/agent_events.dart' show MessageRole;
 export 'chat/attachments.dart'
@@ -456,6 +457,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   final List<ChatSession> _sessions = [];
   final Map<String, VerifiedAgent> _clients = {};
+  final Map<String, Future<McpInventory?>> _mcpLoading = {};
   final Expando<VerifiedChatConnection> _connections = Expando();
   final Map<String, StreamSubscription<model.ChatEvent>> _eventSubscriptions =
       {};

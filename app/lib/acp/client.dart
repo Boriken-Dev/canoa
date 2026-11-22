@@ -13,12 +13,14 @@ import 'delegate_targets.dart';
 import 'hub_wire.dart';
 import 'link_secret.dart';
 import 'message_limit.dart';
+import 'mcp_list.dart';
 import 'noise_secret.dart';
 import 'secret_wire.dart';
 import 'usage_wire.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
 export 'delegate.dart' show DelegateNotice;
+export 'mcp_list.dart' show McpInventory, McpResource, McpServerStatus, McpTool;
 export 'hub_wire.dart' show HubClient, HubClosed, HubEnded, HubEvent, HubPresence, HubWire;
 export 'link_secret.dart' show LinkSecretIdentity, linkSecretIdentity;
 export 'secret_wire.dart' show AgentSecrets;
@@ -130,8 +132,9 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
   VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
-      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets, this.noiseSecrets, this.provedByNoise = false, HubWire? hub})
+      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, McpListWire? mcp, this.linkSecrets, this.noiseSecrets, this.provedByNoise = false, HubWire? hub})
       : _delegate = delegate,
+        _mcp = mcp,
         hub = hub ?? HubWire() {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
@@ -161,6 +164,7 @@ final class VerifiedAgent {
 
   final UsageWire _usage;
   final DelegateWire? _delegate;
+  final McpListWire? _mcp;
 
   /// What the host's session hub said on this connection: who else is attached, a request another client answered, and the cursor
   /// of the last message seen. Empty for an agent the host does not keep for several clients.
@@ -188,6 +192,9 @@ final class VerifiedAgent {
   /// Asks the host to start the person's own task in [sessionId].
   Future<DelegateOutcome> delegateStart(String sessionId, DelegateRequest request) async =>
       await _delegate?.start(sessionId, request) ?? const DelegateRefused('This connection takes no tasks.');
+
+  /// Lists the MCP tools and resources of every server attached to [sessionId]; null when the host did not answer or refused it.
+  Future<McpInventory?> mcpList(String sessionId) async => _mcp?.list(sessionId);
 
   /// The updates the host kept of [taskId]; null when it has none to give.
   Future<List<Map<String, Object?>>?> taskHistory(String sessionId, String taskId) async => _delegate?.history(sessionId, taskId);
@@ -225,6 +232,7 @@ final class VerifiedAgent {
       final usage = UsageWire(proven.send, initializeMeta: initializeMeta, approver: approver);
       // A person who can answer permission requests can answer a task's, which come the same way.
       final delegate = DelegateWire(proven.send, optIn: decider != null);
+      final mcp = McpListWire(proven.send);
       final hub = HubWire();
       // Only a host whose peer id was proven can ask for a secret: the answer is bound to that identity, and a program this app
       // started, or a provider, has none. A connection this app's own Noise key proved binds by the two static keys alone and offers
@@ -237,7 +245,7 @@ final class VerifiedAgent {
       final client = VerifiedAgent._(
         (decider, elicitor) => AcpClient(
           incoming: proven.messages
-              .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message))
+              .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message) && !mcp.takes(message))
               .map(identity._inspect)
               .map(hub.incoming)
               .map(usage.incoming),
@@ -258,6 +266,7 @@ final class VerifiedAgent {
         decider,
         elicitor: elicitor,
         delegate: delegate,
+        mcp: mcp,
         noiseSecrets: secretWire == null ? null : noiseIdentity,
         provedByNoise: noise != null,
         hub: hub,
@@ -288,13 +297,14 @@ final class VerifiedAgent {
     final identity = AgentIdentity();
     final usage = UsageWire(send, initializeMeta: initializeMeta, approver: approver);
     final delegate = DelegateWire(send, optIn: decider != null);
+    final mcp = McpListWire(send);
     final hub = HubWire();
     // Only the link to the host in this process, which has the secret it shares with it, can be asked for one.
     final secretWire = secrets == null || linkSecrets == null ? null : SecretWire(send, secrets, offer: linkSecrets.identity.offer);
     final client = VerifiedAgent._(
       (decider, elicitor) => AcpClient(
         incoming: messages
-            .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message))
+            .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message) && !mcp.takes(message))
             .map(identity._inspect)
             .map(hub.incoming)
             .map(usage.incoming),
@@ -314,6 +324,7 @@ final class VerifiedAgent {
       elicitor: elicitor,
       isChild: true,
       delegate: delegate,
+      mcp: mcp,
       linkSecrets: secretWire == null ? null : linkSecrets,
       hub: hub,
     );
@@ -418,6 +429,7 @@ final class VerifiedAgent {
     } finally {
       _usage.close();
       _delegate?.close();
+      _mcp?.close();
       hub.close();
       final actions = [..._afterClose];
       _afterClose.clear();

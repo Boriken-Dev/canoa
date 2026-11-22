@@ -49,6 +49,9 @@ final class OptionsAgent {
   static const claudeModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan'), ('bypass', 'Bypass')];
   static const codexModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan')];
 
+  /// What `_canoa/mcp/list` answers when set; by default `{}` (no attached MCP servers).
+  Map<String, Object?>? Function(Map<String, Object?> params)? onMcpList;
+
   /// What the host would report of a profile, put under `_meta` in the answer to `session/load`.
   Map<String, Object?>? profileMeta;
 
@@ -279,6 +282,12 @@ final class OptionsAgent {
               _held.add(end);
             } else {
               end();
+            }
+          case '_coqui_acp/mcp/list' || '_canoa/mcp/list':
+            if (onMcpList case final handler?) {
+              reply(id, handler(params) ?? <String, Object?>{});
+            } else if (id != null) {
+              reply(id, <String, Object?>{});
             }
           case 'session/load' || 'session/resume':
             session = params['sessionId'] as String? ?? session;

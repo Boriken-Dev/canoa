@@ -406,6 +406,32 @@ extension SessionSending on SessionStore {
     return _add(session, Attachment.conversation(label, text));
   }
 
+  /// Attaches MCP resource [uri] named [label] after an `@` so it goes as a resource link the agent reads through its server.
+  String? addResource(ChatSession session, String label, String uri, {String? mimeType}) {
+    if (session.attachments.any((item) => item.mention && item.uri == uri)) return null;
+    return _add(session, Attachment.resource(label, uri, mimeType: mimeType));
+  }
+
+  /// Reads attached MCP servers' tools and resources from [session]'s host, caching once loaded unless [force] is true.
+  Future<McpInventory?> refreshMcpInventory(ChatSession session, {bool force = false}) {
+    if (!force && session.mcpInventory != null) return Future.value(session.mcpInventory);
+    final inflight = _mcpLoading[session.id];
+    if (!force && inflight != null) return inflight;
+    final client = _clients[session.id];
+    final remote = session.remoteSessionId;
+    if (client == null || client.isClosed || remote == null) return Future.value(session.mcpInventory);
+    final future = client.mcpList(remote).then((loaded) {
+      _mcpLoading.remove(session.id);
+      if (loaded != null && !_disposed && _clients.containsKey(session.id)) {
+        session.mcpInventory = loaded;
+        _notify();
+      }
+      return loaded ?? session.mcpInventory;
+    });
+    _mcpLoading[session.id] = future;
+    return future;
+  }
+
   /// Takes the folder at [path] on this computer, which the agent is given a link to.
   String? addFolder(ChatSession session, String name, String path) =>
       _add(session, Attachment.folder(name, path));

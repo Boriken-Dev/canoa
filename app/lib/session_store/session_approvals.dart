@@ -410,6 +410,7 @@ extension SessionApprovals on SessionStore {
     _watchHub(session, client);
     if (record) _record(session, client);
     unawaited(refreshGit(session));
+    unawaited(refreshMcpInventory(session));
     _notify();
   }
 }

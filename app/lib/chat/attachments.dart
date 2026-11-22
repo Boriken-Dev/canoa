@@ -2,9 +2,9 @@ import 'dart:convert';
 
 import '../acp/client.dart' show AcpAttachment;
 
-/// What a person adds to a message: an image, text pasted or read with no file behind it, a file on this computer, or a
-/// folder named by its path.
-enum AttachmentKind { image, text, file, folder }
+/// What a person adds to a message: an image, text pasted or read with no file behind it, a file on this computer, a
+/// folder named by its path, or a resource URI on an MCP server.
+enum AttachmentKind { image, text, file, folder, resource }
 
 /// The most that goes with one message. An agent's context is what these fill, so they stay what a person would pick by hand.
 const int maxAttachments = 8;
@@ -27,7 +27,7 @@ String? imageTypeOf(String name, String? mimeType) {
 /// One thing that goes with a message, as Canoa keeps it until it is sent: how it reaches the agent is decided then, by
 /// what the agent takes.
 final class Attachment {
-  Attachment._(this.kind, this.name, {this.mimeType, this.bytes, this.text, this.path, required this.size, this.mention = false, this.onAgentHost = false});
+  Attachment._(this.kind, this.name, {this.mimeType, this.bytes, this.text, this.path, this.resourceUri, required this.size, this.mention = false, this.onAgentHost = false});
 
   /// An image, sent whole where the agent takes images; with a [path], linked where it does not.
   factory Attachment.image(String name, String mimeType, List<int> bytes, {String? path}) =>
@@ -57,6 +57,11 @@ final class Attachment {
   factory Attachment.mention(String name, String path, int size, {bool folder = false, bool onAgentHost = false}) =>
       Attachment._(folder ? AttachmentKind.folder : AttachmentKind.file, name, path: path, size: folder ? 0 : size, mention: true, onAgentHost: onAgentHost);
 
+  /// An MCP server resource named by an `@` in the message: always goes as a resource link with [uri] for the agent to read
+  /// through its server.
+  factory Attachment.resource(String name, String uri, {String? mimeType}) =>
+      Attachment._(AttachmentKind.resource, name, mimeType: mimeType, resourceUri: uri, size: 0, mention: true);
+
   final AttachmentKind kind;
   final String name;
 
@@ -72,19 +77,23 @@ final class Attachment {
   /// Where it is on this computer, when it is a file or folder there.
   final String? path;
 
+  /// Resource URI when this attachment references an MCP resource.
+  final String? resourceUri;
+
   /// In bytes; 0 for a folder.
   final int size;
 
   bool get isImage => kind == AttachmentKind.image;
 
-  /// Its `file:` URI, for a link.
-  String? get uri => path == null ? null : (kind == AttachmentKind.folder ? Uri.directory(path!) : Uri.file(path!)).toString();
+  /// Its `file:` URI or MCP resource URI, for a link.
+  String? get uri => resourceUri ?? (path == null ? null : (kind == AttachmentKind.folder ? Uri.directory(path!) : Uri.file(path!)).toString());
 
   Map<String, Object?> toJson({String? blob}) => {
     'kind': kind.name,
     'name': name,
     'mimeType': ?mimeType,
     'path': ?path,
+    'uri': ?resourceUri,
     'size': size,
     'text': ?text,
     'blob': ?blob,
@@ -111,6 +120,9 @@ final class Attachment {
       case 'folder':
         if (path == null) return null;
         return json['mention'] == true ? Attachment.mention(name, path, 0, folder: true, onAgentHost: json['onAgentHost'] == true) : Attachment.folder(name, path);
+      case 'resource':
+        final uri = json['uri'] is String ? json['uri'] as String : null;
+        return uri == null ? null : Attachment.resource(name, uri, mimeType: mimeType);
     }
     return null;
   }
@@ -131,6 +143,7 @@ final class PromptTakes {
 /// ever left out without saying so.
 (AttachmentRoute, String?) routeOf(Attachment attachment, PromptTakes takes, {required int embedLimit, String agent = 'The agent'}) =>
     switch (attachment.kind) {
+      AttachmentKind.resource => (AttachmentRoute.link, null),
       _ when attachment.mention && attachment.onAgentHost => (AttachmentRoute.link, null),
       AttachmentKind.file when attachment.mention && !(takes.files && attachment.size <= embedLimit) => takes.links
           ? (AttachmentRoute.link, null)
@@ -155,7 +168,7 @@ Future<AcpAttachment> toAcp(Attachment attachment, PromptTakes takes,
     {required int embedLimit, required Future<List<int>> Function(String path, {int? maxBytes}) read, String agent = 'The agent'}) async {
   final (route, why) = routeOf(attachment, takes, embedLimit: embedLimit, agent: agent);
   AcpAttachment link() => AcpAttachment.link(attachment.name, attachment.uri!, mimeType: attachment.mimeType,
-      size: attachment.kind == AttachmentKind.folder ? null : attachment.size);
+      size: attachment.kind == AttachmentKind.folder || attachment.kind == AttachmentKind.resource ? null : attachment.size);
   switch (route) {
     case AttachmentRoute.refused:
       throw StateError('${attachment.name}: $why');

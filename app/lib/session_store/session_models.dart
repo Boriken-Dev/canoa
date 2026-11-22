@@ -297,6 +297,9 @@ class ChatSession {
   /// What this session was given of its profile, and what it was not; null where the host applied none.
   ProfileReport? profile;
 
+  /// Tools, resources, and statuses reported for MCP servers attached to this session; null when not yet queried.
+  McpInventory? mcpInventory;
+
   /// What the host reported of the profile when the session opened, until [SessionStore.applyHostProfile] takes it.
   Object? hostReport;
 

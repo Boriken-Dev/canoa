@@ -111,8 +111,8 @@ final class SessionMentions implements ComposerMentions {
   }
 }
 
-/// What an `@` names in [session]: the files and folders [files] offers (when the session has a folder), then the other
-/// conversations this app holds, whose messages go to the agent as text.
+/// What an `@` names in [session]: the files and folders [files] offers (when the session has a folder), the session's MCP
+/// resources, its subagent tasks, and the other conversations this app holds.
 final class SessionAtMentions implements ComposerMentions {
   SessionAtMentions({required this.store, required this.session, this.files});
 
@@ -120,8 +120,8 @@ final class SessionAtMentions implements ComposerMentions {
   final ChatSession session;
   final ComposerMentions? files;
 
-  /// How many of each group the list holds, so that neither crowds out the other.
-  static const int filesShown = 6, conversationsShown = 3;
+  /// How many of each group the list holds, so that neither crowds out the others.
+  static const int filesShown = 6, resourcesShown = 4, subagentsShown = 4, conversationsShown = 3;
 
   /// The conversations other than [session] that have something said, the latest first, whose title holds [query] (any, with none).
   List<ChatSession> conversationsFor(String query) {
@@ -133,12 +133,81 @@ final class SessionAtMentions implements ComposerMentions {
     return found.take(conversationsShown).toList();
   }
 
+  /// MCP server resources offered to [session] whose name, title, server or uri matches [query].
+  List<McpResource> resourcesFor(String query) {
+    final all = session.mcpInventory?.resources ?? const <McpResource>[];
+    if (all.isEmpty) return const [];
+    final wanted = query.toLowerCase();
+    if (wanted.isEmpty) return all.take(resourcesShown).toList();
+    final starts = <McpResource>[], holds = <McpResource>[];
+    for (final res in all) {
+      final name = res.name.toLowerCase();
+      final title = (res.title ?? '').toLowerCase();
+      final server = res.server.toLowerCase();
+      final uri = res.uri.toLowerCase();
+      if (name.startsWith(wanted) || title.startsWith(wanted)) {
+        starts.add(res);
+      } else if (name.contains(wanted) || title.contains(wanted) || server.contains(wanted) || uri.contains(wanted)) {
+        holds.add(res);
+      }
+    }
+    return [...starts, ...holds].take(resourcesShown).toList();
+  }
+
+  /// Subagents (A2A tasks) of [session] matching [query], active tasks first.
+  List<DelegateTask> subagentsFor(String query) {
+    final all = session.tasks.all;
+    if (all.isEmpty) return const [];
+    final wanted = query.toLowerCase();
+    final matching = [
+      for (final task in all)
+        if (wanted.isEmpty ||
+            task.title.toLowerCase().contains(wanted) ||
+            task.source.toLowerCase().contains(wanted) ||
+            task.id.toLowerCase().contains(wanted))
+          task,
+    ]..sort((a, b) {
+      final aLive = a.phase.ended ? 1 : 0;
+      final bLive = b.phase.ended ? 1 : 0;
+      return aLive != bLive ? aLive.compareTo(bLive) : b.order.compareTo(a.order);
+    });
+    return matching.take(subagentsShown).toList();
+  }
+
+  static String _phaseLabel(TaskPhase phase) => switch (phase) {
+    TaskPhase.submitted => 'Queued',
+    TaskPhase.working => 'Working',
+    TaskPhase.inputRequired || TaskPhase.authRequired => 'Needs you',
+    TaskPhase.completed => 'Done',
+    TaskPhase.failed || TaskPhase.rejected => 'Failed',
+    TaskPhase.canceled => 'Stopped',
+  };
+
   @override
   Future<List<MentionCandidate>> search(String query) async {
     final named = files == null ? const <MentionCandidate>[] : (await files!.search(query)).take(filesShown).toList();
+    final resources = resourcesFor(query);
+    final subagents = subagentsFor(query);
+    final conversations = conversationsFor(query);
     return [
       ...named,
-      for (final other in conversationsFor(query))
+      for (final res in resources)
+        MentionCandidate(
+          label: res.name,
+          detail: '${res.server}${res.mimeType == null ? '' : ' · ${res.mimeType}'}',
+          group: 'Resources',
+          icon: Icons.description_outlined,
+          key: res,
+        ),
+      for (final task in subagents)
+        MentionCandidate(
+          label: task.title,
+          detail: '${task.source} · ${_phaseLabel(task.phase)}',
+          group: 'Subagents',
+          icon: Icons.account_tree_outlined,
+          key: task,
+        ),
+      for (final other in conversations)
         MentionCandidate(
           label: other.title,
           detail: other.agent,
@@ -151,9 +220,16 @@ final class SessionAtMentions implements ComposerMentions {
 
   @override
   String? pick(MentionCandidate candidate) {
-    final id = candidate.key;
-    if (candidate.group == 'Conversations' && id is String) {
-      final other = store.sessions.where((each) => each.id == id).firstOrNull;
+    final key = candidate.key;
+    if (candidate.group == 'Resources' && key is McpResource) {
+      return store.addResource(session, candidate.label, key.uri, mimeType: key.mimeType);
+    }
+    if (candidate.group == 'Subagents' && key is DelegateTask) {
+      // A subagent pick names the task in the message; no separate attachment is added.
+      return null;
+    }
+    if (candidate.group == 'Conversations' && key is String) {
+      final other = store.sessions.where((each) => each.id == key).firstOrNull;
       return other == null ? 'That conversation is gone.' : store.addConversation(session, other, candidate.label);
     }
     final source = files;

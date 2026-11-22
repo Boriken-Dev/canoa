@@ -301,11 +301,15 @@ final class SessionAttachments implements ComposerAttachments {
       ComposerChip(
         key: attachment,
         name: attachment.name,
-        detail: attachment.kind == AttachmentKind.folder ? 'Folder' : sizeLabel(attachment.size),
+        detail: switch (attachment.kind) {
+          AttachmentKind.folder => 'Folder',
+          AttachmentKind.resource => 'Resource',
+          _ => sizeLabel(attachment.size),
+        },
         kind: switch (attachment.kind) {
           AttachmentKind.image => ChipKind.image,
           AttachmentKind.text => ChipKind.text,
-          AttachmentKind.file => ChipKind.file,
+          AttachmentKind.file || AttachmentKind.resource => ChipKind.file,
           AttachmentKind.folder => ChipKind.folder,
         },
         thumbnail: attachment.isImage ? attachment.bytes : null,
@@ -444,9 +448,14 @@ class SessionComposer extends StatelessWidget {
               ? SessionMentions(store: store, session: session, list: kit.listFolder!, resolve: kit.resolveInside!)
               : null
         : null;
-    // An `@` also names the other conversations, which need no folder; only a session that can take attachments has any.
+    // An `@` also names MCP resources, subagents, and the other conversations; only a session that can take attachments has any.
     final atMentions = store.canAttach(session) ? SessionAtMentions(store: store, session: session, files: inFolder) : null;
-    final mentions = atMentions != null && (inFolder != null || atMentions.conversationsFor('').isNotEmpty) ? atMentions : null;
+    final hasAnyAt = atMentions != null &&
+        (inFolder != null ||
+            atMentions.conversationsFor('').isNotEmpty ||
+            atMentions.resourcesFor('').isNotEmpty ||
+            atMentions.subagentsFor('').isNotEmpty);
+    final mentions = hasAnyAt ? atMentions : null;
     final actions = _actions(session);
     final dictation = kit.dictation;
     return Composer(
@@ -570,11 +579,12 @@ class SessionComposer extends StatelessWidget {
       ComposerAction(name: 'profile', description: 'Show what this session was given', run: () => kit.onProfile!(session)),
   ];
 
-  /// The skills and MCP servers Canoa gave the session, which the agent may not list as commands: a pick writes a request for the
-  /// agent to use it, to finish and send. A skill the agent lists under its own commands is not listed twice.
+  /// The skills, MCP servers, and attached MCP server tools given to [session]. A pick writes a request for the agent to finish
+  /// and send. A skill the agent lists under its own commands is not listed twice.
   List<ComposerAction> _givenActions(ChatSession session) {
     final given = session.profile?.applied;
-    if (given == null) return const [];
+    final mcpTools = session.mcpInventory?.tools ?? const <McpTool>[];
+    if (given == null && mcpTools.isEmpty) return const [];
     final listed = {
       for (final command in commands) ...[command.name, command.name.substring(command.name.lastIndexOf(':') + 1)],
     };
@@ -587,15 +597,29 @@ class SessionComposer extends StatelessWidget {
         focusNode?.requestFocus();
       },
     );
+    final byServer = <String, List<McpTool>>{};
+    for (final tool in mcpTools) {
+      byServer.putIfAbsent(tool.server, () => []).add(tool);
+    }
     return [
-      for (final item in given)
-        if (item.key.startsWith('skills.') && !listed.contains(item.key.substring('skills.'.length)))
-          offer(item.key.substring('skills.'.length), 'Skills given to this session', 'Ask the agent to use this skill',
-              'Use the ${item.key.substring('skills.'.length)} skill to '),
-      for (final item in given)
-        if (item.key.startsWith('mcp.') && !item.key.substring('mcp.'.length).contains('.'))
-          offer(item.key.substring('mcp.'.length), 'MCP servers given to this session', 'Ask the agent to use this server\'s tools',
-              'Use the ${item.key.substring('mcp.'.length)} MCP server to '),
+      if (given != null) ...[
+        for (final item in given)
+          if (item.key.startsWith('skills.') && !listed.contains(item.key.substring('skills.'.length)))
+            offer(item.key.substring('skills.'.length), 'Skills given to this session', 'Ask the agent to use this skill',
+                'Use the ${item.key.substring('skills.'.length)} skill to '),
+        for (final item in given)
+          if (item.key.startsWith('mcp.') && !item.key.substring('mcp.'.length).contains('.'))
+            offer(item.key.substring('mcp.'.length), 'MCP servers given to this session', 'Ask the agent to use this server\'s tools',
+                'Use the ${item.key.substring('mcp.'.length)} MCP server to '),
+      ],
+      for (final entry in byServer.entries)
+        for (final tool in entry.value)
+          offer(
+            tool.name,
+            'Tools · ${entry.key}',
+            tool.description ?? tool.title ?? 'Ask the agent to run this tool on ${entry.key}',
+            'Use the ${tool.name} tool of ${entry.key} to ',
+          ),
     ];
   }
 

@@ -286,6 +286,103 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('/ lists MCP tools under their server from stand-in host answer, and picking writes the prompt without sending', (tester) async {
+    final (store, agent, _) = await _started(tester);
+    agent.onMcpList = (params) => switch (params['cursor']) {
+      null => {
+        'tools': [
+          {'server': 'probe', 'name': 'marker', 'description': 'Returns the marker word.'},
+          {'server': 'probe', 'name': 'probe', 'description': 'Checks probe settings.'},
+        ],
+        'resources': [
+          {'server': 'probe', 'uri': 'canoa://probe/readme', 'name': 'readme', 'description': 'Probe readme.', 'mimeType': 'text/plain'},
+        ],
+        'servers': [
+          {'name': 'probe', 'status': 'ok', 'tools': 2, 'resources': 1},
+          {'name': 'docs', 'status': 'ok', 'tools': 1, 'resources': 0},
+        ],
+        'nextCursor': 'page2',
+      },
+      'page2' => {
+        'tools': [
+          {'server': 'docs', 'name': 'search_docs', 'description': 'Search docs.'},
+        ],
+        'resources': <Object?>[],
+      },
+      _ => <String, Object?>{},
+    };
+
+    final loaded = await store.refreshMcpInventory(store.selected!, force: true);
+    expect(loaded?.tools.map((t) => '${t.server}:${t.name}'), ['probe:marker', 'probe:probe', 'docs:search_docs']);
+    expect(loaded?.resources.single.uri, 'canoa://probe/readme');
+    await tester.pump();
+
+    final before = agent.methods.where((method) => method == 'session/prompt').length;
+    await _type(tester, '/');
+    expect(find.byKey(const Key('group Tools · probe')), findsOneWidget);
+    expect(find.byKey(const Key('group Tools · docs')), findsOneWidget);
+    expect(find.byKey(const ValueKey('action Tools · probe marker')), findsOneWidget);
+    expect(find.byKey(const ValueKey('action Tools · docs search_docs')), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('action Tools · probe marker')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('action Tools · probe marker')));
+    await settle(tester);
+    expect(tester.widget<TextField>(_field).controller!.text, 'Use the marker tool of probe to ');
+    expect(agent.methods.where((method) => method == 'session/prompt').length, before);
+    await finish(tester);
+  });
+
+  testWidgets('@ lists MCP resources (sent as resource_link) and session subagents (naming the task)', (tester) async {
+    final (store, agent, _) = await _started(tester);
+    final session = store.selected!
+      ..mcpInventory = const McpInventory(
+        tools: [McpTool(server: 'probe', name: 'marker')],
+        resources: [McpResource(server: 'probe', uri: 'canoa://probe/readme', name: 'readme', mimeType: 'text/plain')],
+        servers: [McpServerStatus(name: 'probe', ok: true, tools: 1, resources: 1)],
+      );
+    session.tasks.apply({
+      'sessionId': 'o1',
+      'taskId': 't1',
+      'event': {
+        'task': {
+          'id': 't1',
+          'status': {'state': 'TASK_STATE_WORKING'},
+          'metadata': {'title': 'Audit tests', 'source': 'Codex'},
+        },
+      },
+    });
+    store.markViewed(session, 'x', null);
+    await tester.pump();
+
+    await _type(tester, 'check @');
+    await until(tester, () => find.byKey(const Key('mention-group Resources')).evaluate().isNotEmpty, 'resources group');
+    expect(find.byKey(const Key('mention-group Subagents')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mention Resources readme')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mention Subagents Audit tests')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('mention Resources readme')));
+    await settle(tester);
+    expect(tester.widget<TextField>(_field).controller!.text, 'check @readme ');
+    expect(find.byKey(const ValueKey('attachment readme')), findsOneWidget);
+
+    await _type(tester, 'check @readme with @Audit');
+    await until(tester, () => find.byKey(const ValueKey('mention Subagents Audit tests')).evaluate().isNotEmpty, 'subagent item');
+    await tester.tap(find.byKey(const ValueKey('mention Subagents Audit tests')));
+    await settle(tester);
+    expect(tester.widget<TextField>(_field).controller!.text, 'check @readme with @Audit tests ');
+
+    final before = agent.methods.where((method) => method == 'session/prompt').length;
+    await tester.tap(find.byTooltip('Send'));
+    await until(tester, () => agent.methods.where((method) => method == 'session/prompt').length > before, 'prompt sent');
+    final prompt = _lastPrompt(agent);
+    expect(prompt.map((block) => block['type']), ['text', 'resource_link']);
+    expect(prompt[1]['uri'], 'canoa://probe/readme');
+    expect(prompt[1]['name'], 'readme');
+    expect(prompt[1]['mimeType'], 'text/plain');
+    await finish(tester);
+  });
+
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
     testWidgets('the @ list draws at $label width', (tester) async {
       await _started(tester, size: size);
@@ -310,6 +407,56 @@ void main() {
       await _type(tester, '/');
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/slash_given_$label.png'));
+      await finish(tester);
+    });
+
+    testWidgets('the / list with MCP server tools draws at $label width', (tester) async {
+      final (store, _, _) = await _started(tester, size: size);
+      store.selected!
+        ..offerCommands(const [AgentCommandInfo('compact', 'Make room')])
+        ..mcpInventory = const McpInventory(
+          tools: [
+            McpTool(server: 'probe', name: 'marker', description: 'Returns the marker word.'),
+            McpTool(server: 'github', name: 'list_prs', description: 'List open pull requests.'),
+          ],
+          servers: [
+            McpServerStatus(name: 'probe', ok: true, tools: 1, resources: 0),
+            McpServerStatus(name: 'github', ok: true, tools: 1, resources: 0),
+          ],
+        );
+      store.markViewed(store.selected!, 'x', null);
+      await tester.pump();
+      await _type(tester, '/');
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/slash_mcp_tools_$label.png'));
+      await finish(tester);
+    });
+
+    testWidgets('the @ list with resources, subagents and conversations draws at $label width', (tester) async {
+      final (store, _, _) = await _started(tester, size: size);
+      await newSession(tester);
+      await chooseSource(tester, 'Scripted');
+      await openFolder(tester);
+      await send(tester, 'Second one');
+      final session = store.selected!
+        ..mcpInventory = const McpInventory(
+          resources: [McpResource(server: 'probe', uri: 'canoa://probe/readme', name: 'readme', mimeType: 'text/plain')],
+        );
+      session.tasks.apply({
+        'sessionId': 'o1',
+        'taskId': 't1',
+        'event': {
+          'task': {
+            'id': 't1',
+            'status': {'state': 'TASK_STATE_WORKING'},
+            'metadata': {'title': 'Audit tests', 'source': 'Codex'},
+          },
+        },
+      });
+      await _type(tester, 'see @');
+      await until(tester, () => find.byKey(const Key('mention-group Resources')).evaluate().isNotEmpty, 'resources list');
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/mention_mcp_and_subagents_$label.png'));
       await finish(tester);
     });
 
