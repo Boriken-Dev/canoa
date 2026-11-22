@@ -21,9 +21,9 @@ import '../workspace/open_in_ui.dart';
 /// What the conversation shown offers the keyboard and the palette, set by it while it is shown.
 final class ConversationHandle {
   Object? owner;
-  VoidCallback? focusComposer, showChanges;
+  VoidCallback? focusComposer, showChanges, find;
 
-  /// Copy and export the conversation shown; set by it.
+  /// Find in, copy and export the conversation shown; set by it.
   List<ConversationTool> Function()? tools;
   ValueChanged<String>? insert;
 

@@ -97,6 +97,7 @@ LogicalKeyboardKey? _parseKey(String name) => switch (name) {
 /// The one canonical shortcut table: bindings in `app_shortcuts.dart`, [showShortcutHelp], and Settings > Shortcuts all read this.
 final List<ShortcutSpec> appShortcutTable = [
   ShortcutSpec(id: 'palette', what: 'Open the command palette', defaultKeys: (m) => '$m+K', defaultActivator: () => chord(LogicalKeyboardKey.keyK)),
+  ShortcutSpec(id: 'find', what: 'Find in the conversation', defaultKeys: (m) => '$m+F', defaultActivator: () => chord(LogicalKeyboardKey.keyF)),
   ShortcutSpec(id: 'new_session', what: 'Start a new session', defaultKeys: (m) => '$m+N', defaultActivator: () => chord(LogicalKeyboardKey.keyN)),
   ShortcutSpec(id: 'close_session', what: 'Close the active conversation', defaultKeys: (m) => '$m+W', defaultActivator: () => chord(LogicalKeyboardKey.keyW)),
   ShortcutSpec(id: 'toggle_index', what: 'Hide or show the section index', defaultKeys: (m) => '$m+B', defaultActivator: () => chord(LogicalKeyboardKey.keyB)),

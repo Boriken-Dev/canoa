@@ -78,6 +78,7 @@ Map<ShortcutActivator, VoidCallback> buildAppShortcuts(
     'allow_once': () => answerAppPermission(store, 'allow_once'),
     'reject_once': () => answerAppPermission(store, 'reject_once'),
     'show_changes': () => conversation.showChanges?.call(),
+    'find': () => conversation.find?.call(),
     'shortcut_help': () => unawaited(showShortcutHelp(context, overrides: overrides)),
   };
 

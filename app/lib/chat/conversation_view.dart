@@ -30,6 +30,7 @@ import 'child_thread.dart';
 import 'activity_strip.dart';
 import 'composer.dart';
 import 'delegation_row.dart';
+import 'conversation_find.dart';
 import 'conversation_tools.dart';
 import 'delegation_view.dart';
 import 'file_links.dart';
@@ -81,6 +82,13 @@ class _ConversationViewState extends State<ConversationView> {
   final FocusNode _composerFocus = FocusNode();
   final _transcript = GlobalKey<chat.ChatTranscriptState>();
 
+  /// The find bar of this conversation.
+  final _find = ConversationFinder();
+
+  void _onFind() {
+    if (mounted) setState(() {});
+  }
+
   void _keepText() {
     final session = widget.store.selected;
     if (session != null && session.isDraft) widget.store.keepDraftText(session, _input.text);
@@ -93,6 +101,7 @@ class _ConversationViewState extends State<ConversationView> {
     if (session != null && (session.isDraft || session.draftText.isNotEmpty)) _input.text = session.draftText;
     _input.addListener(_keepText);
     widget.store.addListener(_followReplies);
+    _find.addListener(_onFind);
     widget.handle
       ..owner = this
       ..focusComposer = _composerFocus.requestFocus
@@ -102,9 +111,13 @@ class _ConversationViewState extends State<ConversationView> {
               final session = widget.store.selected;
               if (session != null && !session.isDraft) _showInspector(session);
             }
+      ..find = () {
+        final session = widget.store.selected;
+        if (session != null && !session.isDraft) _find.show();
+      }
       ..tools = () {
         final session = widget.store.selected;
-        return session == null || session.isDraft ? const [] : conversationTools(context, session);
+        return session == null || session.isDraft ? const [] : conversationTools(context, session, _find);
       }
       ..insert = (text) {
         _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
@@ -125,7 +138,7 @@ class _ConversationViewState extends State<ConversationView> {
         .merge(delegationRenderers)
         .merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command)));
     if (reader != null) renderers = renderers.merge(replyRenderers(reader));
-    return renderers.merge(widget.renderers);
+    return _find.decorate(renderers.merge(widget.renderers), session);
   }
 
   void _addToComposer(String text) {
@@ -209,9 +222,13 @@ class _ConversationViewState extends State<ConversationView> {
         ..owner = null
         ..focusComposer = null
         ..showChanges = null
+        ..find = null
         ..tools = null
         ..insert = null;
     }
+    _find
+      ..removeListener(_onFind)
+      ..dispose();
     _input.removeListener(_keepText);
     widget.store.removeListener(_followReplies);
     _composerFocus.dispose();
@@ -307,7 +324,7 @@ class _ConversationViewState extends State<ConversationView> {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && (widget.store.canListEarlier(session) || (widget.handle.canListImported?.call(session) ?? false)))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
-      if (session != null && !session.isDraft) ...conversationTools(context, session),
+      if (session != null && !session.isDraft) ...conversationTools(context, session, _find),
       if (session != null && !session.isDraft && !widget.chatOnly) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
       if (session != null && !widget.chatOnly && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
@@ -409,6 +426,7 @@ class _ConversationViewState extends State<ConversationView> {
           ),
         )
       else ...[
+        _find.bar(session),
         Expanded(
           child: _dropping(
             session,
@@ -421,6 +439,7 @@ class _ConversationViewState extends State<ConversationView> {
                 plan: session.plan,
                 working: session.status == SessionStatus.working || widget.store.isStarting(session),
                 agentName: session.agent,
+                density: _find.searching ? chat.ChatDensity.verbose : null,
                 turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
                 renderers: _renderersFor(session),
                 narrow: widget.narrow,
