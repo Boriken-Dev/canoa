@@ -77,7 +77,6 @@ use serde_json::Map;
 #[cfg(test)]
 use super::prepare;
 #[cfg(test)]
-#[cfg(test)]
 use offer::{INVALID_PARAMS, INVALID_REQUEST};
 #[cfg(test)]
 use parts::{Parts, Takes, add_parts, described, parts_for, parts_with};
