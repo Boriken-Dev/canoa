@@ -94,10 +94,9 @@ Future<void> _open(WidgetTester tester, Map<String, Uint8List> files, String nam
 
 /// A viewer an extension might add: it shows files of its own type, or of its own extension.
 final class _Stamp extends FileViewer {
-  const _Stamp({this.mime = 'application/x-stamp', this.ext = 'stamp', this.rank = 50});
+  const _Stamp({this.mime = 'application/x-stamp', this.ext = 'stamp'});
   final String mime;
   final String ext;
-  final int rank;
 
   @override
   String get id => 'stamp';
@@ -108,7 +107,7 @@ final class _Stamp extends FileViewer {
   @override
   Set<String> get extensions => {ext};
   @override
-  int get priority => rank;
+  int get priority => 50;
   @override
   bool canShow(FileSample sample) => sample.isText;
   @override
