@@ -118,7 +118,9 @@ fn stand_in_with(payload: Vec<Value>, check: fn(&str, &str, &str) -> bool) -> (S
                     api_key.clone(),
                     version.clone(),
                 ));
-                let (status, body) = if !line.starts_with("GET /v1/models ") {
+                let (status, body) = if !(line.starts_with("GET /v1/models ")
+                    || line.starts_with("GET /v1/models?"))
+                {
                     ("404 Not Found", json!({"error": "no such path"}))
                 } else if !check(&auth, &api_key, &version) {
                     ("401 Unauthorized", json!({"error": "bad key"}))
@@ -329,7 +331,7 @@ fn an_anthropic_only_gateway_lists_its_models_with_key_or_bearer_and_unknown_sta
     assert_eq!(
         seen_key.lock().unwrap_or_else(PoisonError::into_inner)[0],
         (
-            "GET /v1/models HTTP/1.1".to_owned(),
+            "GET /v1/models?limit=1000 HTTP/1.1".to_owned(),
             String::new(),
             CANARY.to_owned(),
             "2023-06-01".to_owned(),
@@ -363,7 +365,7 @@ fn an_anthropic_only_gateway_lists_its_models_with_key_or_bearer_and_unknown_sta
     assert_eq!(
         seen_bearer.lock().unwrap_or_else(PoisonError::into_inner)[0],
         (
-            "GET /v1/models HTTP/1.1".to_owned(),
+            "GET /v1/models?limit=1000 HTTP/1.1".to_owned(),
             format!("Bearer {CANARY}"),
             String::new(),
             "2023-06-01".to_owned(),
@@ -517,4 +519,92 @@ fn signing_in_with_an_address_for_a_standard_keeps_it_in_the_settings_and_the_mo
     let listing = models(account);
     assert!(listing.known, "{:?}", listing.unknown_because);
     assert_eq!(seen.lock().unwrap_or_else(PoisonError::into_inner).len(), 1);
+}
+
+/// An Anthropic gateway on loopback that lists `ids` two at a time with `has_more` and `last_id`, and records each request line.
+fn paged_stand_in(ids: &'static [&'static str]) -> (String, Requests) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("binds");
+    let address = format!("http://{}", listener.local_addr().expect("an address"));
+    let seen: Requests = Arc::default();
+    let record = Arc::clone(&seen);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let record = Arc::clone(&record);
+            std::thread::spawn(move || {
+                let mut head = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                let head = String::from_utf8_lossy(&head).into_owned();
+                let line = head.lines().next().unwrap_or("").to_owned();
+                record.lock().unwrap_or_else(PoisonError::into_inner).push((
+                    line.clone(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ));
+                let start = line
+                    .split("after_id=")
+                    .nth(1)
+                    .and_then(|rest| rest.split([' ', '&']).next())
+                    .map(|after| after.replace("%2D", "-"))
+                    .and_then(|after| ids.iter().position(|id| *id == after))
+                    .map_or(0, |at| at + 1);
+                let page: Vec<Value> = ids
+                    .iter()
+                    .skip(start)
+                    .take(2)
+                    .map(|id| json!({"id": id}))
+                    .collect();
+                let more = start + page.len() < ids.len();
+                let last = page
+                    .last()
+                    .and_then(|each| each["id"].as_str())
+                    .unwrap_or("");
+                let body = json!({"data": page, "has_more": more, "last_id": last}).to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            });
+        }
+    });
+    (address, seen)
+}
+
+#[test]
+fn an_anthropic_model_list_is_read_page_after_page_while_it_says_there_is_more() {
+    let (address, seen) =
+        paged_stand_in(&["claude-a", "claude-b", "claude-c", "claude-d", "claude-e"]);
+    let listed = models(grant(&address, &[ANTHROPIC_API]));
+    assert!(listed.known, "{:?}", listed.unknown_because);
+    let ids: Vec<&str> = listed
+        .models
+        .iter()
+        .map(|model| model.id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        ["claude-a", "claude-b", "claude-c", "claude-d", "claude-e"]
+    );
+    let lines: Vec<String> = seen
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|each| each.0.clone())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "GET /v1/models?limit=1000 HTTP/1.1",
+            "GET /v1/models?limit=1000&after_id=claude%2Db HTTP/1.1",
+            "GET /v1/models?limit=1000&after_id=claude%2Dd HTTP/1.1",
+        ]
+    );
 }

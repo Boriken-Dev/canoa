@@ -350,40 +350,71 @@ pub fn models_url(base: &str) -> String {
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const AUTH_TOKEN_CREDENTIAL: &str = "auth_token";
 
-fn list_models(base: &str, headers: &[(&str, &str)], format_name: &str) -> ModelListing {
+/// The most models Anthropic's model list gives in one page; it lists twenty unless asked for more.
+const ANTHROPIC_PAGE: u32 = 1000;
+
+fn list_models(
+    base: &str,
+    headers: &[(&str, &str)],
+    format_name: &str,
+    paged: bool,
+) -> ModelListing {
     if let Err(why) = check_address(base) {
         return ModelListing::unavailable(UnknownKind::Failed, why.to_string());
     }
-    let reply = match http::get_json_with(&models_url(base), headers) {
-        Ok(reply) => reply,
-        Err(why) => return ModelListing::unavailable(UnknownKind::Failed, why.to_string()),
-    };
-    if !(200..300).contains(&reply.status) {
-        return ModelListing::unavailable(
-            UnknownKind::Failed,
-            format!("the address answered {} to its model list", reply.status),
-        );
+    let mut models = Vec::new();
+    let mut after: Option<String> = None;
+    loop {
+        let mut url = models_url(base);
+        if paged {
+            url.push_str(&format!("?limit={ANTHROPIC_PAGE}"));
+            if let Some(after) = &after {
+                url.push_str("&after_id=");
+                url.extend(percent_encoding::utf8_percent_encode(
+                    after,
+                    percent_encoding::NON_ALPHANUMERIC,
+                ));
+            }
+        }
+        let reply = match http::get_json_with(&url, headers) {
+            Ok(reply) => reply,
+            Err(why) => return ModelListing::unavailable(UnknownKind::Failed, why.to_string()),
+        };
+        if !(200..300).contains(&reply.status) {
+            return ModelListing::unavailable(
+                UnknownKind::Failed,
+                format!("the address answered {} to its model list", reply.status),
+            );
+        }
+        let Some(list) = reply.body.get("data").and_then(Value::as_array) else {
+            return ModelListing::unavailable(
+                UnknownKind::Failed,
+                format!("the address's model list is not an {format_name} one (no `data`)"),
+            );
+        };
+        models.extend(list.iter().filter_map(|each| {
+            let id = each.get("id").and_then(Value::as_str)?;
+            let mut model = ModelInfo::new(id);
+            if let Some(name) = each.get("display_name").and_then(Value::as_str)
+                && !name.is_empty()
+            {
+                model.name = Some(name.to_owned());
+            }
+            Some(model)
+        }));
+        // A page says there is more and where it ended; an address that does not page answers whole and says neither.
+        let next = reply
+            .body
+            .get("last_id")
+            .and_then(Value::as_str)
+            .filter(|_| paged && reply.body.get("has_more").and_then(Value::as_bool) == Some(true))
+            .filter(|last| after.as_deref() != Some(*last));
+        match next {
+            Some(last) => after = Some(last.to_owned()),
+            None => break,
+        }
     }
-    let Some(list) = reply.body.get("data").and_then(Value::as_array) else {
-        return ModelListing::unavailable(
-            UnknownKind::Failed,
-            format!("the address's model list is not an {format_name} one (no `data`)"),
-        );
-    };
-    ModelListing::of(
-        list.iter()
-            .filter_map(|each| {
-                let id = each.get("id").and_then(Value::as_str)?;
-                let mut model = ModelInfo::new(id);
-                if let Some(name) = each.get("display_name").and_then(Value::as_str)
-                    && !name.is_empty()
-                {
-                    model.name = Some(name.to_owned());
-                }
-                Some(model)
-            })
-            .collect(),
-    )
+    ModelListing::of(models)
 }
 
 /// The models an OpenAI-API address serves, as its `GET /v1/models` lists them with `key`.
@@ -393,10 +424,10 @@ fn list_models(base: &str, headers: &[(&str, &str)], format_name: &str) -> Model
 #[must_use]
 pub fn openai_models(base: &str, key: &str) -> ModelListing {
     let authorization = format!("Bearer {key}");
-    list_models(base, &[("Authorization", &authorization)], "OpenAI")
+    list_models(base, &[("Authorization", &authorization)], "OpenAI", false)
 }
 
-/// The models an Anthropic-API address serves, as its `GET /v1/models` lists them with `key` (sent as `Authorization: Bearer`
+/// The models an Anthropic-API address serves, as its `GET /v1/models` lists them, page after page while it says there is more, with `key` (sent as `Authorization: Bearer`
 /// when `bearer` is set, else `x-api-key`) and `anthropic-version: 2023-06-01`.
 ///
 /// Anything it cannot say is an unknown with the reason (the address does not answer, refuses the key, answers what is not a list),
@@ -413,7 +444,7 @@ pub fn anthropic_models(base: &str, key: &str, bearer: bool) -> ModelListing {
     } else {
         [("x-api-key", key), ("anthropic-version", ANTHROPIC_VERSION)]
     };
-    list_models(base, &headers, "Anthropic")
+    list_models(base, &headers, "Anthropic", true)
 }
 
 /// The settings of an account of this kind, as its table holds them.
