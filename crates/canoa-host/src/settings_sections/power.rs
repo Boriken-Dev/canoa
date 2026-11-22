@@ -3,7 +3,7 @@
 
 use canoa::settings_section::{SectionInfo, SettingsSection};
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
-use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
+use coqui_acp_api::guatiao::{FromValue, Map, Provider, Schema, ToValue, Value};
 use guatiao_intake::Form;
 
 /// What the Power group holds.
@@ -30,11 +30,11 @@ impl SettingsSection for PowerSection {
         info.taking::<PowerValues>()
     }
 
-    fn read(&self) -> Result<String, ProviderError> {
-        Ok("{}".to_owned())
+    fn read(&self) -> Result<Value, ProviderError> {
+        Ok(Value::from(Map::new()))
     }
 
-    fn write(&self, _values: String) -> Result<(), ProviderError> {
+    fn write(&self, _values: Value) -> Result<(), ProviderError> {
         Ok(())
     }
 }

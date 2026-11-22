@@ -218,14 +218,14 @@ impl Environments {
         };
         let registries = match pending {
             Pending::Config(config) => {
-                let mut registries = crate::control::providers::loaded(&config);
+                let mut registries = crate::control::providers::loaded(&config).to_vec();
                 for (name, environment) in &config.environments {
                     let Some(origin) = &environment.origin else {
                         continue;
                     };
                     let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
                     match crate::provider::open(&mut registry, origin) {
-                        Ok(()) => registries.push((name.clone(), registry)),
+                        Ok(()) => registries.push((name.clone(), Arc::new(registry))),
                         Err(why) => {
                             tracing::warn!(environment = name, "its provider is not loaded: {why}")
                         }
@@ -234,22 +234,24 @@ impl Environments {
                 registries
             }
             #[cfg(test)]
-            Pending::Registries(registries) => registries,
+            Pending::Registries(registries) => registries
+                .into_iter()
+                .map(|(name, registry)| (name, Arc::new(registry)))
+                .collect(),
         };
-        let mut found: Vec<(String, Registry)> = Vec::new();
+        let mut found: Vec<(String, Arc<Registry>)> = Vec::new();
         let mut built_in = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
         let accepted = built_in
             .register_local("canoa-environments", library)
             .is_ok_and(|loading| loading.loaded().is_some());
         if accepted {
-            found.push((BUILT_IN.to_owned(), built_in));
+            found.push((BUILT_IN.to_owned(), Arc::new(built_in)));
         } else {
             tracing::warn!("the built-in environments are not offered");
         }
         found.extend(registries);
         let mut offered: Vec<Offered> = Vec::new();
         for (origin, registry) in found {
-            let registry = Arc::new(registry);
             let keys: Vec<String> = registry
                 .offers::<dyn Environment>()
                 .filter_map(|offer| offer.key().map(str::to_owned))

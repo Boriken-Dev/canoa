@@ -131,7 +131,7 @@ pub(super) struct GrantSpec {
     pub(super) control: bool,
 }
 
-pub(super) const GRANT_SPECS: [GrantSpec; 27] = [
+pub(super) const GRANT_SPECS: [GrantSpec; 29] = [
     GrantSpec {
         grant: Grant::LedgerRead,
         name: "ledger.read",

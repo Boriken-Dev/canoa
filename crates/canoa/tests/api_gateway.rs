@@ -615,7 +615,7 @@ fn an_anthropic_model_list_is_read_page_after_page_while_it_says_there_is_more()
 fn an_account_provides_the_standards_it_names_and_refuses_another_kind() {
     let provides = |account: coqui_acp_api::AccountRef| ApiGatewayAccounts.provides(account);
     let named = |standards: &Value| {
-        coqui_acp_api::AccountRef::new("id-one", KIND).settings(api_gateway::value(
+        coqui_acp_api::AccountRef::new("id-one", ACCOUNT_KIND).settings(api_gateway::value(
             &json!({"base_url": "https://llm.example.com", "standards": standards}),
         ))
     };
@@ -630,9 +630,9 @@ fn an_account_provides_the_standards_it_names_and_refuses_another_kind() {
     let other = provides(coqui_acp_api::AccountRef::new("id-one", "another-kind"))
         .expect_err("not a kind it keeps");
     assert_eq!(other.status, Status::GUATIAO_ERR_BAD_VALUE);
-    let bare = provides(coqui_acp_api::AccountRef::new("id-one", KIND))
+    let bare = provides(coqui_acp_api::AccountRef::new("id-one", ACCOUNT_KIND))
         .expect_err("an account with no standards is not one of this kind");
     assert_eq!(bare.status, Status::GUATIAO_ERR_BAD_VALUE);
-    let bad_id = provides(coqui_acp_api::AccountRef::new("", KIND)).expect_err("no id");
+    let bad_id = provides(coqui_acp_api::AccountRef::new("", ACCOUNT_KIND)).expect_err("no id");
     assert_eq!(bad_id.status, Status::GUATIAO_ERR_BAD_VALUE);
 }

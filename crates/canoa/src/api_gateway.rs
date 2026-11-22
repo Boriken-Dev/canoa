@@ -731,13 +731,17 @@ impl AccountProvider for ApiGatewayAccounts {
 
     fn provides(&self, account: AccountRef) -> Result<Vec<String>, ProviderError> {
         account.check_id()?;
-        if account.kind != KIND {
-            return Err(refused("this provider keeps no account of that kind"));
+        if account.kind != ACCOUNT_KIND {
+            return Err(crate::status::bad_value(
+                "this provider keeps no account of that kind",
+            ));
         }
         // The account's own list: the address speaks whichever standards the person named.
         let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&account.settings)
-            .map_err(|_| refused("the account's settings are not a table"))?;
-        Ok(Settings::from_map(&settings).map_err(refused)?.standards)
+            .map_err(|_| crate::status::bad_value("the account's settings are not a table"))?;
+        Ok(Settings::from_map(&settings)
+            .map_err(|error| crate::status::bad_value(error.to_string()))?
+            .standards)
     }
 
     fn login(
