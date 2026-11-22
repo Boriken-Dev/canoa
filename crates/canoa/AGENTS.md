@@ -25,6 +25,10 @@ The registry types are imported from the crate root, `SourcePreset` from `canoa:
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
 
+## `canoa::brand`
+
+The names of the environment variables the host reads, with the build's prefix: `ENV_PREFIX` (`CANOA` unless the build set `BRAND_ENV_PREFIX`, upper-case letters and digits) and the constants `CONFIG`, `INSTALLED_DIR`, `LOG`, `HOST_LOG`, `CREDENTIAL_STORE`, `DELEGATE_URL` and `DELEGATE_TOKEN`, each `<ENV_PREFIX>_<NAME>`. A program that starts another passes these names, never literals.
+
 ## `canoa::vendor` (feature `vendor`)
 
 The `agent_vendor` kind: who an agent is, how Canoa shows it and what Canoa does for it beyond that. A harness provider and an account provider say what they do; a provider of this kind says what the person calls the agent, its vendor, mark, credential standards and names, so the host and the application hold no list of agents, and answers the few things Canoa does per agent that are neither ACP nor an account's (below), so the host holds no string of an agent either.
