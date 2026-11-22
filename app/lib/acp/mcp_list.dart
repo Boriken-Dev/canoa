@@ -53,12 +53,15 @@ final class McpResource {
   }
 }
 
-/// Status reported for one attached MCP server (`ok` or `error` with reason).
+/// Status reported for one attached MCP server (`ok`, `pending` or `error` with reason).
 final class McpServerStatus {
-  const McpServerStatus({required this.name, required this.ok, this.tools = 0, this.resources = 0, this.error});
+  const McpServerStatus({required this.name, required this.ok, this.pending = false, this.tools = 0, this.resources = 0, this.error});
 
   final String name;
   final bool ok;
+
+  /// The agent starts this server, so its tools are listed when the agent reports them.
+  final bool pending;
   final int tools;
   final int resources;
   final String? error;
@@ -70,6 +73,7 @@ final class McpServerStatus {
     return McpServerStatus(
       name: name,
       ok: raw['status'] == 'ok',
+      pending: raw['status'] == 'pending',
       tools: raw['tools'] is int ? raw['tools'] as int : 0,
       resources: raw['resources'] is int ? raw['resources'] as int : 0,
       error: raw['error'] is String && (raw['error'] as String).trim().isNotEmpty ? (raw['error'] as String).trim() : null,
@@ -90,10 +94,8 @@ final class McpInventory {
 final class McpListWire {
   McpListWire(this._send);
 
-  static const int _maxPages = 20;
   final Future<void> Function(String) _send;
   final Map<String, Completer<Map<String, Object?>?>> _waiting = {};
-  final Set<Timer> _timers = {};
   int _next = 0;
   bool _closed = false;
   static final _random = Random.secure();
@@ -123,38 +125,31 @@ final class McpListWire {
     return true;
   }
 
-  Future<Map<String, Object?>?> _ask(Map<String, Object?> params, Duration timeout) async {
+  Future<Map<String, Object?>?> _ask(Map<String, Object?> params) async {
     if (_closed) return null;
     final nonce = [for (var i = 0; i < 8; i++) _random.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
     final id = 'canoa-mcp-${_next++}-$nonce';
     final waiting = Completer<Map<String, Object?>?>();
     _waiting[id] = waiting;
-    late final Timer timer;
-    timer = Timer(timeout, () {
-      _timers.remove(timer);
-      if (_waiting.remove(id) != null && !waiting.isCompleted) waiting.complete(null);
-    });
-    _timers.add(timer);
     try {
       await _send(jsonEncode({'jsonrpc': '2.0', 'id': id, 'method': mcpListMethod, 'params': params}));
       return await waiting.future;
     } on Object {
       return null;
     } finally {
-      timer.cancel();
-      _timers.remove(timer);
       _waiting.remove(id);
     }
   }
 
-  /// Queries all pages of [`mcpListMethod`] for [sessionId]; returns null if the host did not answer or refused it.
-  Future<McpInventory?> list(String sessionId, {Duration timeout = const Duration(seconds: 6)}) async {
+  /// Queries all pages of [`mcpListMethod`] for [sessionId]; returns null if the host refused it or the connection closed.
+  /// The host bounds how long a server may take (`[host.mcp_list]`), so the wait has no limit of its own.
+  Future<McpInventory?> list(String sessionId) async {
     final tools = <McpTool>[];
     final resources = <McpResource>[];
     var servers = const <McpServerStatus>[];
     String? cursor;
-    for (var page = 0; page < _maxPages; page++) {
-      final result = await _ask({'sessionId': sessionId, 'cursor': ?cursor}, timeout);
+    for (var page = 0;; page++) {
+      final result = await _ask({'sessionId': sessionId, 'cursor': ?cursor});
       if (result == null) return page == 0 ? null : McpInventory(tools: tools, resources: resources, servers: servers);
       if (result['tools'] case final List rawTools) {
         for (final item in rawTools) {
@@ -180,10 +175,6 @@ final class McpListWire {
 
   void close() {
     _closed = true;
-    for (final timer in [..._timers]) {
-      timer.cancel();
-    }
-    _timers.clear();
     for (final waiting in _waiting.values) {
       if (!waiting.isCompleted) waiting.complete(null);
     }
