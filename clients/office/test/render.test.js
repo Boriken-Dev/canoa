@@ -121,3 +121,17 @@ test('only the secret the host makes is carried: 64 hexadecimal digits, case and
     assert.throws(() => render('outlook', { origin, secret: bad }), /64 hexadecimal/);
   }
 });
+
+test('a manifest rendered for a static origin names only pages and icons the static site carries', async () => {
+  const { readdirSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const pane = fileURLToPath(new URL('../taskpane/', import.meta.url));
+  const carried = new Set([...readdirSync(pane), ...[16, 32, 64, 80].map((size) => `icon-${size}.png`)]);
+  const staticOrigin = 'https://panes.example.net:8443';
+  for (const kind of ['outlook', 'documents']) {
+    const xml = render(kind, { origin: staticOrigin }).replace(/<!--[\s\S]*?-->/g, '');
+    const pages = [...xml.matchAll(new RegExp(String.raw`${staticOrigin}/office/([^"<?\s]+)`, 'g'))].map((match) => match[1]);
+    assert.ok(pages.length > 0, kind);
+    for (const page of pages) assert.ok(carried.has(page), `${kind} names ${page}, which the static site does not carry`);
+  }
+});

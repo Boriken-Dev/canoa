@@ -377,5 +377,69 @@ class OfficeJsTests(unittest.TestCase):
             find.assert_not_called()
 
 
+class OfficeSiteTests(unittest.TestCase):
+    def make(self, root: Path, body: bytes = b"office"):
+        import hashlib
+        import json
+
+        web = root / "web"
+        (web / "icons").mkdir(parents=True)
+        (web / "index.html").write_text("<base href=\"/office/app/\">")
+        (web / "main.dart.js.map").write_text("map")
+        (web / "icons" / "Icon-192.png").write_bytes(b"png")
+        pane = root / "taskpane"
+        pane.mkdir()
+        (pane / "taskpane.html").write_text('<script src="@OFFICE_JS@"></script>\n')
+        (pane / "taskpane.js").write_text("export {};\n")
+        mirror = root / "mirror"
+        (mirror / "dist").mkdir(parents=True)
+        (mirror / "dist" / "office.js").write_bytes(body)
+        (mirror / "LICENSE.md").write_bytes(b"license")
+        listing = root / "office_js.json"
+        listing.write_text(json.dumps({
+            "carried": ["dist/office.js", "LICENSE.md"],
+            "files": {"dist/office.js": hashlib.sha256(b"office").hexdigest(), "LICENSE.md": hashlib.sha256(b"license").hexdigest()},
+        }))
+        return web, pane, mirror, listing
+
+    def test_the_site_holds_the_pages_the_app_the_library_and_the_icons_under_office(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            web, pane, mirror, listing = self.make(root)
+            target = build.package_office(web, root / "out", mirror, pane, listing)
+            office = target / "office"
+            self.assertEqual((office / "taskpane.html").read_text(), '<script src="js/office.js"></script>\n')
+            self.assertTrue((office / "taskpane.js").is_file())
+            self.assertTrue((office / "app" / "index.html").is_file())
+            self.assertFalse((office / "app" / "main.dart.js.map").exists())
+            self.assertEqual((office / "js" / "office.js").read_bytes(), b"office")
+            self.assertEqual((office / "js" / "LICENSE.md").read_bytes(), b"license")
+            for size in build.ICON_SIZES:
+                self.assertTrue((office / f"icon-{size}.png").is_file())
+
+    def test_a_library_file_that_is_not_the_pinned_one_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            web, pane, mirror, listing = self.make(root, body=b"tampered")
+            with self.assertRaisesRegex(RuntimeError, "pins"):
+                build.package_office(web, root / "out", mirror, pane, listing)
+
+    def test_a_library_file_missing_from_the_mirror_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            web, pane, mirror, listing = self.make(root)
+            (mirror / "LICENSE.md").unlink()
+            with self.assertRaisesRegex(RuntimeError, "not in the Office.js mirror"):
+                build.package_office(web, root / "out", mirror, pane, listing)
+
+    def test_the_real_pages_name_only_what_the_site_carries(self):
+        import re
+
+        pane = build.ROOT / "clients" / "office" / "taskpane"
+        for page in pane.glob("*.html"):
+            for source in re.findall(r'(?:src|href)="([^"]+)"', page.read_text(encoding="utf-8")):
+                self.assertTrue(source == "@OFFICE_JS@" or (pane / source).is_file(), f"{page.name}: {source}")
+
+
 if __name__ == "__main__":
     unittest.main()

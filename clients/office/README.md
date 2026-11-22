@@ -18,6 +18,7 @@ Nothing here is published to a marketplace. You render a manifest for your own h
 | `sideload.ps1` | Registers or removes a rendered manifest for Word, Excel and PowerPoint on Windows (`add`, `remove`, `status`; `-Key` names another registry key, which is how its test runs) |
 | `e2e/local.mjs` | A real Chromium against a host with `office_local` over HTTPS, resolving no name but localhost: the pages load Office.js from the host alone, under the policy, and the page's key is accepted with no pairing |
 | `e2e/extension.mjs` | A real Chromium with the Canoa extension framing the pane from a static origin with no `[host.web]` loopback server: with the extension, chat and Office write prompts reach the local host via `document.acp`; without it, the pane falls back and says so |
+| `e2e/static.mjs` | The static site `build.py office` makes, served from a folder in a real Chromium: Office.js and the chat-only app load with every request to the site's own origin |
 | `test/` | `npm test` runs `node --test` over `relation.js`, `launch.js`, `tools.js` and the tool modules (against stand-ins for Office.js), `render.mjs` and `sideload.ps1` (the last on a scratch registry key, skipped without PowerShell on Windows) |
 
 The pages are compiled into `canoa-host` and answered under `/office/` only when the configuration says so; the manifests are not
@@ -27,6 +28,10 @@ served by it. The app they frame is the web app the host already serves, under `
 ## On this computer, without a loopback web listener (Office on the web + Canoa extension)
 
 In Outlook, Word and Excel on the web in a Chromium browser with the Canoa extension, no `[host.web]` loopback server or `localhost` certificate is needed. Once the person grants the pane's origin to the extension (`allFrames: true`), `taskpane.js` sees `document.acp` offering `dev.boriken.canoa` when `/canoa.json` is absent, connects the Office tools over the extension's `@tools` bridge (`tool-provider.js`, still asking every write in the pane's `#ask` prompt), and loads `/office/app/?mode=chat` using `document.acp` to reach the local host. Without both `/canoa.json` and the extension, the pane falls back cleanly and says so.
+
+## From any static origin
+
+`python app/tool/build.py office` builds the pane's pages as a folder, `target/canoa-office/`, that any static host can serve: `office/taskpane.html` and its scripts, `office/app/` (the chat-only app built for that path, with its fonts and no service worker), `office/js/` (Office.js and the files it loads, taken from the deps mirror and checked against `tools/office_js.json`; nothing is fetched) and `office/icon-N.png`. Every request of the pages goes to the origin that serves them. Where it is published is your choice; no address is assumed. `node render.mjs outlook|documents --origin https://YOUR-ORIGIN` renders the manifest for it, and `e2e/static.mjs` loads the folder in a real browser and checks that nothing is requested from any other origin. The pages reach the local Canoa through the browser extension (above), so the origin needs no `[host.web]`; it must be an origin Office on the web may load an add-in from, and its response headers (framing by Office, the app's content security policy) are the publisher's to set.
 
 ## Turn it on
 

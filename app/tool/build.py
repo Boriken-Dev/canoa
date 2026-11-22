@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -288,6 +290,76 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
         print(f"Packaged {package_portable(platform, exe)}")
 
 
+ICON_SIZES = (16, 32, 64, 80)
+OFFICE_JS_LIST = ROOT / "tools" / "office_js.json"
+
+
+def office_js_folder() -> Path:
+    """The mirror of the office-js repository: CANOA_OFFICE_JS_DIR, else cdn/office-js of the deps checkout."""
+    own = os.environ.get("CANOA_OFFICE_JS_DIR")
+    if own:
+        return Path(own)
+    deps = os.environ.get("CANOA_DEPS")
+    found = Path(deps) if deps else offline_pub.find_deps(ROOT, SETTINGS)
+    if found is None:
+        raise RuntimeError("Office.js comes from the deps mirror: set CANOA_DEPS to a checkout of the deps branch")
+    return Path(found) / "cdn" / "office-js"
+
+
+def package_office(web: Path, target: Path, mirror: Path, taskpane: Path | None = None, listing: Path = OFFICE_JS_LIST) -> Path:
+    """The add-in's pages as a static site: what a host serves under /office/, in one folder to publish at any origin.
+
+    `web` is the app built with `--base-href /office/app/`. Office.js and the files it loads come from `mirror`, each checked
+    against the SHA-256 `listing` pins; nothing is fetched. Every page is self-contained: its requests all go to its own origin.
+    """
+    taskpane = taskpane or ROOT / "clients" / "office" / "taskpane"
+    if not (web / "index.html").is_file():
+        raise RuntimeError(f"{web} holds no built app")
+    pinned = json.loads(listing.read_text(encoding="utf-8"))
+    if target.exists():
+        shutil.rmtree(target)
+    office = target / "office"
+    shutil.copytree(web, office / "app", ignore=shutil.ignore_patterns("*.map"))
+    for page in sorted(taskpane.iterdir()):
+        if not page.is_file():
+            continue
+        if page.suffix == ".html":
+            html = page.read_text(encoding="utf-8").replace("@OFFICE_JS@", "js/office.js")
+            (office / page.name).write_text(html, encoding="utf-8", newline="")
+        else:
+            shutil.copyfile(page, office / page.name)
+    for name in pinned["carried"]:
+        source = mirror / name
+        try:
+            body = source.read_bytes()
+        except OSError as error:
+            raise RuntimeError(f"{name} is not in the Office.js mirror {mirror}: refresh the deps branch") from error
+        seen = hashlib.sha256(body).hexdigest()
+        if seen != pinned["files"][name]:
+            raise RuntimeError(f"{source} is not the file {listing.name} pins (SHA-256 {seen})")
+        destination = office / "js" / (name[len("dist/"):] if name.startswith("dist/") else name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(body)
+    icon = web / "icons" / "Icon-192.png"
+    for size in ICON_SIZES:
+        shutil.copyfile(icon, office / f"icon-{size}.png")
+    return target
+
+
+def build_office() -> Path:
+    """The pane's static site: the app built for /office/app/, with the pages and Office.js around it."""
+    mirror = office_js_folder()
+    subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
+    subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
+    subprocess.run(
+        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn", "--base-href", "/office/app/"],
+        check=True, cwd=APP,
+    )
+    dist = APP / "build" / "web"
+    finish_web(dist)
+    return package_office(dist, ROOT / "target" / "canoa-office", mirror)
+
+
 def flutter_args(kind: str, wasm: bool) -> list[str]:
     args = [flutter_program(), "build", "web", "--release", "--no-web-resources-cdn"]
     if wasm:
@@ -335,7 +407,7 @@ def package_debug_extension(source: Path, destination: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=("pwa", "chromium", "desktop"))
+    parser.add_argument("kind", choices=("pwa", "chromium", "desktop", "office"))
     parser.add_argument(
         "--wasm", action="store_true",
         help="Build Flutter web with --wasm (extension compatibility must be checked)",
@@ -366,6 +438,14 @@ def main() -> None:
         parser.error("--run, --platform, --portable, --online, --offline and --office-js are only valid for desktop")
     if opts.portable and (opts.debug or opts.run):
         parser.error("--portable packages a release build: not with --debug or --run")
+    if opts.kind == "office":
+        if opts.debug or opts.wasm:
+            parser.error("office takes no --debug or --wasm")
+        try:
+            print(f"Built the Office pane's static site in {build_office()}")
+        except (RuntimeError, subprocess.CalledProcessError) as error:
+            sys.exit(f"build.py: {error}")
+        return
     if opts.kind == "desktop":
         platform = opts.platform or host_platform()
         if platform != host_platform():

@@ -208,4 +208,8 @@ test('extension detection matches Canoa provider RDNS and waits briefly for acp:
   assert.equal(await pending, true);
   assert.ok(createExtensionToolsBridge(fakeWin) !== null);
   assert.equal(createExtensionToolsBridge({}), null);
+  const withWeb = createExtensionToolsBridge({ [OFFICE_TOOLS_SYMBOL]: { register() {}, unregister() {}, web: async () => 'https://localhost:7800' } });
+  assert.equal(await withWeb.web(), 'https://localhost:7800');
+  const without = createExtensionToolsBridge({ [OFFICE_TOOLS_SYMBOL]: { register() {}, unregister() {} } });
+  assert.equal(await without.web(), null);
 });

@@ -64,7 +64,7 @@ export async function detectExtensionProvider(win, { waitMs = 150 } = {}) {
 /**
  * Returns the extension's Office tools registration bridge when `acp-page.js` defined it on `win`, else null.
  * @param {Window|null|undefined} win
- * @returns {{register: (app: string, handler: Function) => Promise<unknown>, unregister: (app: string) => Promise<void>}|null}
+ * @returns {{register: (app: string, handler: Function) => Promise<unknown>, unregister: (app: string) => Promise<void>, web: () => Promise<string|null>}|null}
  */
 export function createExtensionToolsBridge(win) {
   const bridge = win?.[OFFICE_TOOLS_SYMBOL];
@@ -72,6 +72,7 @@ export function createExtensionToolsBridge(win) {
   return {
     register: (app, handler) => bridge.register(app, handler),
     unregister: (app) => bridge.unregister(app),
+    web: () => (typeof bridge.web === 'function' ? bridge.web() : Promise.resolve(null)),
   };
 }
 
