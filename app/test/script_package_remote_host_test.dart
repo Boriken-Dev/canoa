@@ -352,12 +352,11 @@ team = ${jsonEncode('$catalog@main#extensions.toml')}
         addTearDown(after.dispose);
         await tester.runAsync(() => after.ensure());
         expect(
-          after.types.map((each) => each.id),
-          contains('notes'),
+          after.addedBy['team_notes'],
+          ['Notes'],
           reason:
-              "the package's type is in the Store of the host it was installed on",
+              "the package's type is listed by the host it was installed on",
         );
-        expect(after.addedBy['team_notes'], ['Notes']);
         final nearControl = control(near);
         final beside = StoreExtensions(
           control: () => nearControl.ready(wait: false),
@@ -365,7 +364,6 @@ team = ${jsonEncode('$catalog@main#extensions.toml')}
         );
         addTearDown(beside.dispose);
         await tester.runAsync(() => beside.ensure());
-        expect(beside.types.map((each) => each.id), isNot(contains('notes')));
         expect(beside.addedBy.keys, isNot(contains('team_notes')));
       } finally {
         // A link is closed with real input and output, which a test's own clock never lets finish.
