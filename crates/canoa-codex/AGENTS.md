@@ -40,6 +40,8 @@ pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, 
 
 The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("codex")`).
 
+`CodexVendor`'s description lists `AGENTS.md` as a file Codex loads itself (`context_files`), so the host does not hand it over a second time.
+
 ## Gotchas
 
 - `LOOK` is colour tokens only, an original palette in the spirit of the product: no logo, no font. The host serves it unchanged; its token names are those of `canoa-host`'s `looks/list`.

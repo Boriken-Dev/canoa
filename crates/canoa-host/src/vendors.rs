@@ -29,6 +29,8 @@ pub(crate) struct Vendor {
     pub(crate) tool_name: Option<&'static str>,
     /// The folder below a project where it reads skills from.
     pub(crate) skills_folder: Option<&'static str>,
+    /// The files of a project's context it loads for itself.
+    pub(crate) context_files: Vec<&'static str>,
     /// The credential standards that are the vendor's own.
     pub(crate) standards: Vec<&'static str>,
     /// The names it reports in `initialize`.
@@ -49,6 +51,7 @@ impl Vendor {
             model_variable: info.model_variable.as_deref().map(keep),
             tool_name: info.tool_name.as_deref().map(keep),
             skills_folder: info.skills_folder.as_deref().map(keep),
+            context_files: info.context_files.iter().map(|path| keep(path)).collect(),
             standards: info.standards.iter().map(|each| keep(&each.id)).collect(),
             names: info.names.iter().map(|name| keep(name)).collect(),
         }

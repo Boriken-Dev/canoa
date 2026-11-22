@@ -89,6 +89,10 @@ pub struct VendorInfo {
     pub tool_name: Option<String>,
     /// The folder below a project where the agent reads skills from (`.claude/skills`), for a source of skills to be searched there.
     pub skills_folder: Option<String>,
+    /// The files of a project's context the agent loads for itself, as paths below a directory written with `/` (`AGENTS.md`), so the
+    /// host does not give it the same text a second time. Empty for an agent that loads none of the standard names.
+    #[map(default)]
+    pub context_files: Vec<String>,
     /// The credential standards that are the vendor's own, with their names for people.
     #[map(default)]
     pub standards: Vec<StandardTitle>,
@@ -125,6 +129,7 @@ impl VendorInfo {
             model_variable: None,
             tool_name: None,
             skills_folder: None,
+            context_files: Vec::new(),
             standards: Vec::new(),
             names: Vec::new(),
             markers: Vec::new(),
