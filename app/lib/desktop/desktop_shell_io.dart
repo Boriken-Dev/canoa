@@ -51,7 +51,7 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell, TrayA
   final LoginStart? _loginStart;
   final Future<String> Function(Color accent) _iconFile;
   AppText _text = AppText.base;
-  Color _accent = Brand.accent;
+  Color _accent = Color(Brand.accentArgb);
   CanoaConfig config = const CanoaConfig();
   void Function()? onSettings, onHosting;
   bool ready = false, quitting = false;

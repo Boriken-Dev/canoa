@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:ui' show Color;
 
 /// What this build is called and how it names things, set by the build from the brand file (`app/brand.json`) as
 /// `--dart-define`s: the display name, the identifiers, the prefix of the environment variables the app reads, the accent and the
@@ -23,8 +22,8 @@ abstract final class Brand {
   /// The mark's paths as the build read them from its SVG (a JSON object), or empty for Canoa's own.
   static const String markJson = String.fromEnvironment('BRAND_MARK');
 
-  /// The accent as a colour.
-  static Color get accent => Color(0xFF000000 | int.parse(accentHex.substring(1), radix: 16));
+  /// The accent as an opaque ARGB value, which `Color` takes; a number so that a program with no `dart:ui` can import this file.
+  static int get accentArgb => 0xFF000000 | int.parse(accentHex.substring(1), radix: 16);
 
   /// The environment variable `suffix` of this brand: `CONFIG` is `CANOA_CONFIG` in Canoa's own build.
   static String env(String suffix) => '${envPrefix}_$suffix';
