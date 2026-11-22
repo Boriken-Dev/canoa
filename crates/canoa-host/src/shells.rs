@@ -387,14 +387,48 @@ fn windows_bashes(lookup: &Lookup, found: &mut Found) {
 #[derive(Default)]
 struct Found(Vec<Shell>);
 
+/// A path as text for comparing: forward slashes, lower case.
+fn plain(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
+/// The folder the Microsoft Store puts a program's alias in. The package's own folder under it holds the same program, and both
+/// are on the `PATH`.
+const STORE_ALIASES: &str = "/windowsapps/";
+
+/// What `path` is a program of, so the same one found twice is listed once: the Store's alias `WindowsApps/pwsh.exe` and the
+/// package's `WindowsApps/Microsoft.PowerShell_x/pwsh.exe` name one program; any other path names itself.
+fn program_key(path: &Path) -> String {
+    let text = plain(path);
+    match text.find(STORE_ALIASES) {
+        Some(at) => {
+            let file = text.rsplit('/').next().unwrap_or_default();
+            format!("{}{STORE_ALIASES}{file}", &text[..at])
+        }
+        None => text,
+    }
+}
+
+/// Whether `path` is the Store's alias itself, which a person can run from anywhere, not a copy inside the package's folder.
+fn is_store_alias(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .is_some_and(|dir| dir.eq_ignore_ascii_case("WindowsApps"))
+}
+
 impl Found {
     fn push(&mut self, id: &str, label: &str, path: &Path, family: Family, origin: Origin) {
-        let same = |other: &Path| {
-            let (a, b) = (other.to_string_lossy(), path.to_string_lossy());
-            a.replace('\\', "/")
-                .eq_ignore_ascii_case(&b.replace('\\', "/"))
-        };
-        if self.0.iter().any(|shell| same(&shell.path)) {
+        let key = program_key(path);
+        if let Some(listed) = self
+            .0
+            .iter_mut()
+            .find(|shell| program_key(&shell.path) == key)
+        {
+            if is_store_alias(path) && !is_store_alias(&listed.path) {
+                listed.path = path.to_path_buf();
+            }
             return;
         }
         let mut unique = id.to_owned();
@@ -823,5 +857,44 @@ mod tests {
                 "{harness}"
             );
         }
+    }
+
+    #[test]
+    fn a_store_program_on_the_path_twice_is_listed_once_by_its_alias() {
+        let mut found = Found::default();
+        for path in [
+            "C:/Users/me/AppData/Local/Microsoft/WindowsApps/Microsoft.PowerShell_8wekyb3d8bbwe/pwsh.exe",
+            "C:/Users/me/AppData/Local/Microsoft/WindowsApps/pwsh.exe",
+        ] {
+            found.push(
+                "pwsh",
+                "PowerShell 7",
+                Path::new(path),
+                Family::PowerShell,
+                Origin::System,
+            );
+        }
+        found.push(
+            "pwsh",
+            "PowerShell 7",
+            Path::new("C:/Program Files/PowerShell/7/pwsh.exe"),
+            Family::PowerShell,
+            Origin::System,
+        );
+        let ids: Vec<_> = found.0.iter().map(|shell| shell.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["pwsh", "pwsh-2"],
+            "the Store's two paths are one entry, the installer's is another"
+        );
+        assert!(
+            found.0[0].path.ends_with("WindowsApps/pwsh.exe")
+                && !found.0[0]
+                    .path
+                    .to_string_lossy()
+                    .contains("Microsoft.PowerShell"),
+            "{:?}",
+            found.0[0].path
+        );
     }
 }
