@@ -48,6 +48,11 @@
         },
         "description": "How long, in milliseconds, each wait between tries is for such an agent to show something to read.",
         "default": []
+      },
+      "stored": {
+        "type": "boolean",
+        "description": "Whether it reads the account from what the agent stores (its login), with no process of the agent running. With no session open the host then opens a reading configured with the entry's account settings, asks [`UsageReading::read`] with `root` 0, and starts no agent to read: a failure is the answer.",
+        "default": false
       }
     },
     "additionalProperties": false,

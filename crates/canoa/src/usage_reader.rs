@@ -41,11 +41,16 @@ pub struct ReaderInfo {
     /// How long, in milliseconds, each wait between tries is for such an agent to show something to read.
     #[map(default)]
     pub private_retries_ms: Vec<u64>,
+    /// Whether it reads the account from what the agent stores (its login), with no process of the agent running. With no session
+    /// open the host then opens a reading configured with the entry's account settings, asks [`UsageReading::read`] with `root`
+    /// 0, and starts no agent to read: a failure is the answer.
+    #[map(default)]
+    pub stored: bool,
 }
 
 impl ReaderInfo {
     /// A reader `id` whose buckets start with `bucket_prefix`, read ten seconds after a session opens and kept for fifteen, with no
-    /// retries and forty seconds for an agent started only to read.
+    /// retries and forty seconds for an agent started only to read, that reads nothing the agent stores.
     #[must_use]
     pub fn new(id: impl Into<String>, bucket_prefix: impl Into<String>) -> Self {
         Self {
@@ -56,6 +61,7 @@ impl ReaderInfo {
             cache_ms: 15_000,
             private_limit_ms: 40_000,
             private_retries_ms: Vec::new(),
+            stored: false,
         }
     }
 
@@ -216,7 +222,8 @@ pub trait UsageReading: Send + Sync {
 
     /// Reads the figures of the agent whose process is `root`. `tree` says the agent may sit below a launcher, so the whole tree
     /// is looked through from the first try; otherwise the reader looks at the process itself first and widens when it finds
-    /// nothing there.
+    /// nothing there. `root` 0 is no process at all: a reader whose description says `stored` reads what the agent stores, and
+    /// any other answers a failure.
     fn read(&self, root: u32, tree: bool) -> Result<Reading, ProviderError>;
 }
 

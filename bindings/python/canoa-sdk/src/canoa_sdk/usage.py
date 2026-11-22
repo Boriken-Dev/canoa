@@ -61,6 +61,7 @@ class ReaderInfo(Model):
     cache_ms: int = 15_000
     private_limit_ms: int = 40_000
     private_retries_ms: List[int] = field(default_factory=list)
+    stored: bool = False
 
 
 def bucket(
@@ -142,6 +143,7 @@ class UsageReader(WithForm, provide.Provider, kinds.UsageReader, abstract=True):
     cache_ms: ClassVar[int] = 15_000
     private_limit_ms: ClassVar[int] = 40_000
     private_retries_ms: ClassVar[Sequence[int]] = ()
+    stored: ClassVar[bool] = False
 
     def info(self) -> ReaderInfo:
         """The description, from the class attributes."""
@@ -153,6 +155,7 @@ class UsageReader(WithForm, provide.Provider, kinds.UsageReader, abstract=True):
             cache_ms=self.cache_ms,
             private_limit_ms=self.private_limit_ms,
             private_retries_ms=list(self.private_retries_ms),
+            stored=self.stored,
         )
 
     def describe(self) -> ValueAnswer:

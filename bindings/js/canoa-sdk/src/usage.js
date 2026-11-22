@@ -90,6 +90,7 @@ export class UsageReader extends Provider {
   /** @type {number} how long a reading counts as current */ static cache_ms = 15_000;
   /** @type {number} how long an agent the host starts only to read may take */ static private_limit_ms = 40_000;
   /** @type {number[]} how long each wait between tries is for such an agent */ static private_retries_ms = [];
+  /** @type {boolean} whether it reads the account from what the agent stores, with no process of it running */ static stored = false;
 
   /** The description, from the static fields. */
   info() {
@@ -102,6 +103,7 @@ export class UsageReader extends Provider {
       cache_ms: c.cache_ms,
       private_limit_ms: c.private_limit_ms,
       private_retries_ms: c.private_retries_ms,
+      stored: c.stored,
     };
   }
 

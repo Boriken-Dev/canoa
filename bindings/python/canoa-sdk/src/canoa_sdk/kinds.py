@@ -973,7 +973,8 @@ class UsageReading(KindProtocol, Protocol, kind="usage_reading", floor_hash=2968
     def read(self, root: U32, tree: bool) -> ValueAnswer:
         """Reads the figures of the agent whose process is `root`. `tree` says the agent may sit below a launcher, so the whole tree
         is looked through from the first try; otherwise the reader looks at the process itself first and widens when it finds
-        nothing there.
+        nothing there. `root` 0 is no process at all: a reader whose description says `stored` reads what the agent stores, and
+        any other answers a failure.
         """
         ...
 

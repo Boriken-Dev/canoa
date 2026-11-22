@@ -89,8 +89,8 @@ The `usage_reader` kind: how an agent's own quota is read when the agent reports
 
 ```rust
 pub const KIND: &str = "usage_reader";
-#[non_exhaustive] pub struct ReaderInfo { pub id: String, pub bucket_prefix: String, pub settle_ms: u64, pub retries_ms: Vec<u64>, pub cache_ms: u64, pub private_limit_ms: u64, pub private_retries_ms: Vec<u64> }
-impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn is_id(text: &str) -> bool; pub fn problem(&self) -> Option<String> }   // new: settle 10 s, no retries, cache 15 s, 40 s for a private agent
+#[non_exhaustive] pub struct ReaderInfo { pub id: String, pub bucket_prefix: String, pub settle_ms: u64, pub retries_ms: Vec<u64>, pub cache_ms: u64, pub private_limit_ms: u64, pub private_retries_ms: Vec<u64>, pub stored: bool }
+impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn is_id(text: &str) -> bool; pub fn problem(&self) -> Option<String> }   // new: settle 10 s, no retries, cache 15 s, 40 s for a private agent, not stored
 #[non_exhaustive] pub enum Retry { Never, NotYet, NoAnswer }
 #[non_exhaustive] pub struct Failure { pub why: String, pub retry: Retry }
 #[non_exhaustive] pub struct AccountDetails { pub label: Option<String>, pub plan: Option<String> }   // who the account is: an email or a name, and its plan; new(label, plan), is_empty()
@@ -102,11 +102,11 @@ impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn is_id(text: &str
 }
 #[guatiao::kind(object, name = "usage_reading")] pub trait UsageReading: Send + Sync {
     fn opened(&self, result: &str) -> Result<(), ProviderError>;                  // the agent's `session/new` or `session/load` result, as JSON text
-    fn read(&self, root: u32, tree: bool) -> Result<Reading, ProviderError>;      // tree: look through the process tree from the first try
+    fn read(&self, root: u32, tree: bool) -> Result<Reading, ProviderError>;      // tree: look through the process tree from the first try; root 0: no process
 }
 ```
 
-- `ReaderInfo`: `id` is what an entry's `usage` names; `bucket_prefix` starts every bucket id, so the host replaces this reader's buckets and no other's. The times are milliseconds: `settle_ms` a session is open with no turn running before its first reading (the agent's own start and first turn go first), `retries_ms` each further try after that while the agent shows nothing to read, `cache_ms` a reading counts as current, `private_limit_ms` an agent the host starts only to read may take, `private_retries_ms` each wait between its tries.
+- `ReaderInfo`: `id` is what an entry's `usage` names; `bucket_prefix` starts every bucket id, so the host replaces this reader's buckets and no other's. The times are milliseconds: `settle_ms` a session is open with no turn running before its first reading (the agent's own start and first turn go first), `retries_ms` each further try after that while the agent shows nothing to read, `cache_ms` a reading counts as current, `private_limit_ms` an agent the host starts only to read may take, `private_retries_ms` each wait between its tries. `stored` says the reader reads the account from what the agent stores (its login) with no process of the agent running: with no session open the host opens a reading configured with the entry's `account_settings` (the reader's provider config) and asks `read(0, false)`, and starts no agent to read; a failure is then the answer.
 - `ProcessMembers` is the host's: `root` and the processes below it, plus on Unix those in its process group, from the operating system's process table (always holds `root`). The agent may sit below a launcher, so its port is not always its own process's. A reading that cannot ask treats the agent as `root` alone.
 - `Reading::account` is what the agent says of who is signed in; the host shows it beside the account's figures when it reads them for an account no session has run on (`usage/read`'s `details`). A reader that cannot say leaves it `None`.
 - A reading's methods are called one at a time from different threads. `Reading` with no `failure` is the complete set of buckets, which replaces the reader's earlier ones; `Retry::NotYet` says the agent shows nothing to read yet and `Retry::NoAnswer` that something showed and did not answer, both worth asking again; the connection's reading asks again after both, the host's private agent only after `NotYet`.

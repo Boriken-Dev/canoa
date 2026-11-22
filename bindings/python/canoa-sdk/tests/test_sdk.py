@@ -570,6 +570,7 @@ def test_a_usage_reader_answers_its_description_from_its_class_attributes() -> N
         "cache_ms": 15000,
         "private_limit_ms": 40000,
         "private_retries_ms": [],
+        "stored": False,
     }
     assert provide.library("quill", "1", providers=[QuillUsage]).kinds == ("usage_reader",)
 

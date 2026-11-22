@@ -30,7 +30,7 @@ class AccountSpeech extends Provider {        // speech.js: static services: [{i
 }
 class SecretProvider extends Provider {       // secret.js: static title, description, can_store, can_list, needs_person; get(request, spawner); names, put, forget refuse with Unsupported
 }
-class UsageReader extends Provider {          // usage.js: static reader (the id an entry's `usage` names), bucket_prefix; settle_ms = 10000, retries_ms = [], cache_ms = 15000, private_limit_ms = 40000, private_retries_ms = []; open(members) answers a UsageReading
+class UsageReader extends Provider {          // usage.js: static reader (the id an entry's `usage` names), bucket_prefix; settle_ms = 10000, retries_ms = [], cache_ms = 15000, private_limit_ms = 40000, private_retries_ms = [], stored = false; open(members) answers a UsageReading
 }
 class UsageReading {                          // usage.js: not a provider: constructor(members); opened(result); read(root, tree) answers reading([...]) or failed(why, retry); processes(root); destroys members when the host lets it go
 }

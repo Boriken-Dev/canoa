@@ -66,6 +66,7 @@ test('UsageReader and UsageReading describe, read process members, and build buc
     cache_ms: 15000,
     private_limit_ms: 40000,
     private_retries_ms: [],
+    stored: false,
   });
   const members = new Members();
   const q = new QuillUsage().open(members);

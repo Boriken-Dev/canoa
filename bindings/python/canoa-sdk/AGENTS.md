@@ -33,7 +33,7 @@ class SpeechOutput:       # canoa_sdk.speech: text in, audio out; abstract slots
 class AccountSpeech:      # canoa_sdk.speech: the speech-to-text services the accounts of some kinds can call; services: Sequence[AccountSpeechService] (id, title, standard, address, url, credential, summary, location, models: [AccountSpeechModel(id, label)])
 class SecretProvider:     # canoa_sdk.secret: somewhere a secret comes from; abstract slot get(request, spawner); names, put, forget refuse UNSUPPORTED
     title: str; description = None; can_store = can_list = needs_person = False
-class UsageReader:        # canoa_sdk.usage: how an agent's own quota is read; reader: str, bucket_prefix: str, settle_ms = 10000, retries_ms = (), cache_ms = 15000, private_limit_ms = 40000, private_retries_ms = (); abstract slot open(members) -> UsageReading
+class UsageReader:        # canoa_sdk.usage: how an agent's own quota is read; reader: str, bucket_prefix: str, settle_ms = 10000, retries_ms = (), cache_ms = 15000, private_limit_ms = 40000, private_retries_ms = (), stored = False; abstract slot open(members) -> UsageReading
 class UsageReading:       # canoa_sdk.usage: __init__(members); opened(result); abstract-ish read(root, tree) -> reading([...]) or failed(why, retry); processes(root) -> list[int]
 bucket(id, *, label, models, unit, used, limit, remaining, resets_at, status, observed_at, evidence) -> dict; reading(buckets); failed(why, retry=Retry.NEVER); Retry.NEVER|NOT_YET|NO_ANSWER
 class FormSecretProvider(SecretProvider)         # the person's form: needs_person, holds nothing
