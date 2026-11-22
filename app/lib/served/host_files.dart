@@ -62,6 +62,33 @@ abstract interface class WorkspaceFiles {
   Future<HostFileRead> readFile(String path, {int? maxBytes});
 }
 
+/// Optional write capability on a [WorkspaceFiles] host bridge: writes UTF-8 [contents] whole to [path] and returns the written byte
+/// length, and reads a file to its end so that what is edited is the whole file.
+abstract interface class WorkspaceFileWriter {
+  Future<int> writeFile(String path, String contents);
+
+  /// The file at [path] read to its end, a page after another.
+  Future<HostFileRead> readWhole(String path);
+}
+
+/// One instruction file an agent loads for a session's workspace (`fs/instructions`), with the agents that load it.
+final class HostInstructionFile {
+  const HostInstructionFile({required this.path, required this.name, required this.scope, required this.size, this.agents = const []});
+
+  final String path;
+  final String name;
+  final String scope;
+  final int size;
+
+  /// The titles of the agents that load it.
+  final List<String> agents;
+}
+
+/// Optional discovery capability for the instruction files loaded for a session's [workspace].
+abstract interface class WorkspaceInstructionFiles {
+  Future<List<HostInstructionFile>> instructionFiles(String workspace);
+}
+
 /// Where a [HostOpener] is offered.
 enum OpenerTarget { any, folder, item }
 
@@ -123,7 +150,7 @@ final class HostUpload {
 
 /// The host's files as a page may use them over the control channel: folders to browse, canoa.cfg by section, uploads, and the
 /// host's restart. Each is a grant the host gave this page's key; a refusal is the host's own words.
-final class HostFiles implements WorkspaceFiles, HostOpening {
+final class HostFiles implements WorkspaceFiles, WorkspaceFileWriter, WorkspaceInstructionFiles, HostOpening {
   HostFiles(this._control);
 
   final HostControl _control;
@@ -135,13 +162,19 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
   }
 
   @override
-  Future<HostFileRead> readFile(String path, {int? maxBytes}) async {
+  Future<HostFileRead> readFile(String path, {int? maxBytes}) => _read(path, maxBytes: maxBytes, whole: false);
+
+  @override
+  Future<HostFileRead> readWhole(String path) => _read(path, whole: true);
+
+  Future<HostFileRead> _read(String path, {int? maxBytes, required bool whole}) async {
     final first = await _call('fs/read', {'path': path, 'max_bytes': ?maxBytes});
     final data = first['data'];
     final parts = <Uint8List>[if (data is String) base64Decode(data)];
     var last = first;
-    // A cut image shows nothing, so an image is read to its end, a page after another; a text preview is the page asked for.
-    while (first['kind'] == 'image' && last['next'] is num && parts.isNotEmpty) {
+    // A cut image shows nothing, so an image is read to its end, a page after another, and so is a file to be edited; a text preview
+    // is the page asked for.
+    while ((whole || first['kind'] == 'image') && last['next'] is num && parts.isNotEmpty) {
       last = await _call('fs/read', {'path': path, 'offset': (last['next'] as num).toInt()});
       final more = last['data'];
       if (more is! String) break;
@@ -271,6 +304,32 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
             ),
       ],
     );
+  }
+
+  /// Writes [contents] as UTF-8 to [path] via `fs/write` (grant `files.write`).
+  @override
+  Future<int> writeFile(String path, String contents) async {
+    final answer = await _call('fs/write', {'path': path, 'text': contents});
+    return (answer['size'] as num?)?.toInt() ?? utf8.encode(contents).length;
+  }
+
+  /// Discovers instruction files loaded for [workspace] via `fs/instructions` (grant `folders`).
+  @override
+  Future<List<HostInstructionFile>> instructionFiles(String workspace) async {
+    final answer = await _call('fs/instructions', {'path': workspace});
+    final list = answer['files'];
+    if (list is! List) return const [];
+    return [
+      for (final item in list)
+        if (item is Map<Object?, Object?> && item['path'] is String && item['name'] is String)
+          HostInstructionFile(
+            path: item['path']! as String,
+            name: item['name']! as String,
+            scope: item['scope'] as String? ?? 'Workspace',
+            size: (item['size'] as num?)?.toInt() ?? 0,
+            agents: [for (final agent in item['agents'] as List<Object?>? ?? const []) if (agent is String) agent],
+          ),
+    ];
   }
 
   /// Starts [opener] (an id from `workspace/openers`) for [path] on the host; the host's own words when it cannot.

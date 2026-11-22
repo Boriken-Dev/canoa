@@ -14,10 +14,10 @@ import '../workspace/open_in.dart';
 import '../workspace/open_in_ui.dart';
 import 'markdown_section_viewer.dart';
 
-/// The files of the session's workspace, on the host the session runs on, to browse and preview. Read-only: nothing here writes, and
-/// the host decides what it shows (its own roots, its protected paths). It opens before any agent has started.
+/// The files of the session's workspace, on the host the session runs on, to browse, preview, and edit text files or open loaded
+/// session instruction files; the host decides what it shows and grants. It opens before any agent has started.
 class FilesSurface extends WorkSurface {
-  const FilesSurface(this.filesFor);
+  const FilesSurface(this.filesFor, {this.canWrite});
 
   static const surfaceId = 'files';
 
@@ -26,6 +26,10 @@ class FilesSurface extends WorkSurface {
 
   /// The files of the host [session] runs on; null where this app cannot reach that host's files.
   final WorkspaceFiles? Function(ChatSession session) filesFor;
+
+  /// Whether the host currently grants writing regular text files; null defaults to true when [WorkspaceFiles] implements
+  /// [WorkspaceFileWriter].
+  final bool Function()? canWrite;
 
   @override
   String get id => surfaceId;
@@ -48,7 +52,13 @@ class FilesSurface extends WorkSurface {
     if (root == null || files == null) return const Center(child: Text('This host\'s files cannot be reached from here.'));
     // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
     final here = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target != null;
-    return FilesPanel(files: files, root: root, opener: here ? workspaceOpener : null, reveal: controller.data[revealKey] as FileReveal?);
+    return FilesPanel(
+      files: files,
+      root: root,
+      opener: here ? workspaceOpener : null,
+      reveal: controller.data[revealKey] as FileReveal?,
+      canWrite: canWrite?.call() ?? true,
+    );
   }
 }
 
@@ -165,9 +175,10 @@ final class FileReveal {
   final String? section;
 }
 
-/// The panel's body: a listing of the workspace, a folder at a time, and a file's preview in its place.
+/// The panel's body: a listing of the workspace, a folder at a time, instruction files loaded for the session, and a file's
+/// preview/editor in its place.
 class FilesPanel extends StatefulWidget {
-  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal});
+  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal, this.canWrite = true});
 
   /// A file to open as soon as the panel shows, and again whenever a new request replaces it.
   final FileReveal? reveal;
@@ -180,6 +191,9 @@ class FilesPanel extends StatefulWidget {
   /// The workspace folder as the session names it.
   final String root;
 
+  /// Whether editing is permitted when [files] implements [WorkspaceFileWriter].
+  final bool canWrite;
+
   /// How much of a file a preview asks for.
   static const int previewBytes = 256 * 1024;
 
@@ -189,12 +203,20 @@ class FilesPanel extends StatefulWidget {
 
 class _FilesPanelState extends State<FilesPanel> {
   HostFolderListing? _listing;
+  List<HostInstructionFile> _instructions = const [];
   String? _top;
   String? _problem;
   bool _loading = true;
   HostFileRead? _file;
   String? _fileProblem;
   String? _opening;
+  bool _editing = false;
+  bool _saving = false;
+  String? _saveProblem;
+  TextEditingController? _editor;
+  String _initialEditText = '';
+
+  WorkspaceFileWriter? get _writer => widget.canWrite && widget.files is WorkspaceFileWriter ? widget.files as WorkspaceFileWriter : null;
 
   /// The Markdown section to focus in the open file, and whether the person chose the sectioned view (true) or the plain one (false);
   /// null leaves the choice to the file.
@@ -207,10 +229,39 @@ class _FilesPanelState extends State<FilesPanel> {
     unawaited(_start());
   }
 
+  @override
+  void dispose() {
+    _editor?.dispose();
+    super.dispose();
+  }
+
   Future<void> _start() async {
-    await _list(widget.root);
+    await Future.wait([_list(widget.root), _loadInstructions()]);
     final reveal = widget.reveal;
     if (reveal != null && mounted) await _reveal(reveal);
+  }
+
+  Future<void> _loadInstructions() async {
+    final files = widget.files;
+    if (files is WorkspaceInstructionFiles) {
+      try {
+        final found = await (files as WorkspaceInstructionFiles).instructionFiles(widget.root);
+        if (mounted) setState(() => _instructions = found);
+      } on Object {
+        // Optional discovery: folder listing still works if fs/instructions is unsupported or refused.
+      }
+      return;
+    }
+    if (mounted && _instructions.isNotEmpty) setState(() => _instructions = const []);
+  }
+
+  void _stopEditing() {
+    _editor?.dispose();
+    _editor = null;
+    _editing = false;
+    _saving = false;
+    _saveProblem = null;
+    _initialEditText = '';
   }
 
   /// Lists the folder holding [reveal]'s file and opens the file, or says it is not there.
@@ -218,7 +269,10 @@ class _FilesPanelState extends State<FilesPanel> {
     final path = reveal.path;
     final cut = path.lastIndexOf(RegExp(r'[\\/]'));
     final name = path.substring(cut + 1);
-    setState(() => _file = null);
+    setState(() {
+      _file = null;
+      _stopEditing();
+    });
     await _list(cut > 0 ? path.substring(0, cut) : widget.root);
     if (!mounted || widget.reveal != reveal || _problem != null) return;
     final entry = _listing?.entries.where((each) => !each.isFolder && each.name == name).firstOrNull;
@@ -236,6 +290,8 @@ class _FilesPanelState extends State<FilesPanel> {
       _top = null;
       _file = null;
       _fileProblem = null;
+      _instructions = const [];
+      _stopEditing();
       unawaited(_start());
     } else if (widget.reveal != null && widget.reveal != old.reveal) {
       unawaited(_reveal(widget.reveal!));
@@ -268,28 +324,96 @@ class _FilesPanelState extends State<FilesPanel> {
 
   Future<void> _open(HostFolderEntry entry, {String? section}) async {
     if (entry.isFolder) {
-      setState(() => _file = null);
+      setState(() {
+        _file = null;
+        _stopEditing();
+      });
       return _list(entry.path);
     }
+    await _openFilePath(entry.path, entry.name);
+  }
+
+  /// Reads [file] to its end so that what is edited is the whole file.
+  Future<void> _loadWhole(WorkspaceFileWriter writer, HostFileRead file) async {
+    setState(() => _fileProblem = null);
+    try {
+      final whole = await writer.readWhole(file.path);
+      if (mounted && _file?.path == file.path) setState(() => _file = whole);
+    } on Object catch (error) {
+      if (mounted) setState(() => _saveProblem = _said(error));
+    }
+  }
+
+  Future<void> _openFilePath(String path, String name) async {
     setState(() {
-      _opening = entry.path;
+      _opening = path;
       _fileProblem = null;
       _focusSection = section;
       _sectioned = null;
+      _stopEditing();
     });
     try {
-      final read = await widget.files.readFile(entry.path, maxBytes: FilesPanel.previewBytes);
-      if (!mounted || _opening != entry.path) return;
+      final read = await widget.files.readFile(path, maxBytes: FilesPanel.previewBytes);
+      if (!mounted || _opening != path) return;
       setState(() {
         _file = read;
         _opening = null;
       });
     } on Object catch (error) {
-      if (!mounted || _opening != entry.path) return;
+      if (!mounted || _opening != path) return;
       setState(() {
-        _file = HostFileRead(path: entry.path, name: entry.name, size: 0, kind: 'binary', truncated: false);
+        _file = HostFileRead(path: path, name: name, size: 0, kind: 'binary', truncated: false);
         _fileProblem = _said(error);
         _opening = null;
+      });
+    }
+  }
+
+  void _beginEdit(HostFileRead file, List<int> bytes) {
+    final text = _decode(bytes);
+    _editor?.dispose();
+    _editor = TextEditingController(text: text)
+      ..addListener(() {
+        if (mounted && _editing) setState(() {});
+      });
+    setState(() {
+      _initialEditText = text;
+      _saveProblem = null;
+      _editing = true;
+    });
+  }
+
+  Future<void> _saveEdit(HostFileRead file) async {
+    final writer = _writer;
+    final editor = _editor;
+    if (writer == null || editor == null || _saving) return;
+    final nextText = editor.text;
+    setState(() {
+      _saving = true;
+      _saveProblem = null;
+    });
+    try {
+      final size = await writer.writeFile(file.path, nextText);
+      if (!mounted) return;
+      final savedBytes = Uint8List.fromList(utf8.encode(nextText));
+      setState(() {
+        _file = HostFileRead(
+          path: file.path,
+          name: file.name,
+          size: size,
+          kind: 'text',
+          truncated: false,
+          mime: file.mime,
+          bytes: savedBytes,
+        );
+        _stopEditing();
+      });
+      unawaited(_loadInstructions());
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _saveProblem = _said(error);
       });
     }
   }
@@ -366,10 +490,34 @@ class _FilesPanelState extends State<FilesPanel> {
                 )
               : listing == null
               ? const SizedBox.shrink()
-              : listing.entries.isEmpty
+              : listing.entries.isEmpty && _instructions.isEmpty
               ? Center(child: Text('Nothing to show in this folder.', style: muted))
               : ListView(
                   children: [
+                    if (_instructions.isNotEmpty && _listing?.path == _top) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                        child: Text('Instructions', key: const ValueKey('files instructions'), style: muted.copyWith(fontWeight: FontWeight.w600)),
+                      ),
+                      for (final doc in _instructions)
+                        ListTile(
+                          key: ValueKey('files instruction ${doc.name}'),
+                          dense: true,
+                          leading: const Icon(Icons.description_outlined, size: 18),
+                          title: Text(visibleText(doc.name), overflow: TextOverflow.ellipsis),
+                          subtitle: Text([doc.scope, ...doc.agents].join(' · '), style: muted),
+                          trailing: _opening == doc.path
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                              : null,
+                          onTap: () => unawaited(_openFilePath(doc.path, doc.name)),
+                        ),
+                      const Divider(height: 1),
+                    ],
+                    if (listing.entries.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text('Nothing else in this folder.', style: muted),
+                      ),
                     for (final entry in listing.entries)
                       ListTile(
                         key: ValueKey('files entry ${entry.name}'),
@@ -396,6 +544,8 @@ class _FilesPanelState extends State<FilesPanel> {
   Widget _preview(BuildContext context, HostFileRead file) {
     final muted = TextStyle(color: context.chatLook.muted, fontSize: 12);
     final bytes = file.bytes;
+    final writer = _writer;
+    final dirty = _editing && (_editor?.text ?? '') != _initialEditText;
     Widget body;
     List<String>? lines;
     Widget? markdown;
@@ -434,21 +584,52 @@ class _FilesPanelState extends State<FilesPanel> {
                 key: const ValueKey('files back'),
                 tooltip: 'Back to the folder',
                 icon: const Icon(Icons.arrow_back, size: 18),
-                onPressed: () => setState(() {
-                  _file = null;
-                  _fileProblem = null;
-                }),
+                onPressed: _saving
+                    ? null
+                    : () => setState(() {
+                        _file = null;
+                        _fileProblem = null;
+                        _stopEditing();
+                      }),
               ),
               Expanded(
                 child: Text(visibleText(file.name), key: const ValueKey('files name'), overflow: TextOverflow.ellipsis),
               ),
-              ..._actions(context, file.path),
-              if (_fileProblem == null) Text(sizeText(file.size), style: muted),
+              if (_editing) ...[
+                TextButton(
+                  key: const ValueKey('files cancel'),
+                  onPressed: _saving ? null : () => setState(_stopEditing),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 4),
+                FilledButton(
+                  key: const ValueKey('files save'),
+                  onPressed: _saving || !dirty ? null : () => unawaited(_saveEdit(file)),
+                  child: Text(_saving ? 'Saving…' : 'Save'),
+                ),
+              ] else ...[
+                if (writer != null && _fileProblem == null && file.kind == 'text' && bytes != null)
+                  if (!file.truncated)
+                    IconButton(
+                      key: const ValueKey('files edit'),
+                      tooltip: 'Edit file',
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      onPressed: () => _beginEdit(file, bytes),
+                    )
+                  else
+                    TextButton(
+                      key: const ValueKey('files load full'),
+                      onPressed: () => unawaited(_loadWhole(writer, file)),
+                      child: const Text('Load all to edit'),
+                    ),
+                ..._actions(context, file.path),
+                if (_fileProblem == null) Text(sizeText(file.size), style: muted),
+              ],
             ],
           ),
         ),
         const Divider(height: 1),
-        if (markdownFile)
+        if (markdownFile && !_editing)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Align(
@@ -465,7 +646,16 @@ class _FilesPanelState extends State<FilesPanel> {
               ),
             ),
           ),
-        if (file.truncated && bytes != null && file.kind == 'text')
+        if (_saveProblem != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text(
+              _saveProblem!,
+              key: const ValueKey('files save error'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+            ),
+          ),
+        if (!_editing && file.truncated && bytes != null && file.kind == 'text')
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Text(
@@ -475,7 +665,24 @@ class _FilesPanelState extends State<FilesPanel> {
             ),
           ),
         Expanded(
-          child: markdown ??
+          child: _editing
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: TextField(
+                    key: const ValueKey('files editor'),
+                    controller: _editor,
+                    expands: true,
+                    maxLines: null,
+                    minLines: null,
+                    textAlignVertical: TextAlignVertical.top,
+                    style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                )
+              : markdown ??
               (lines == null
                   ? SingleChildScrollView(padding: const EdgeInsets.all(16), child: body)
                   : ListView.builder(

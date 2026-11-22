@@ -29,6 +29,9 @@ final class HostGrants extends ChangeNotifier {
   /// The grant that lists, pairs and removes keys, shows a PIN and edits `[host]`.
   static const hosting = 'hosting';
 
+  /// The grant that writes regular UTF-8 text files on the host via `fs/write`.
+  static const filesWrite = 'files.write';
+
   /// The grant that reads what the agents spent and the limits they reported.
   static const usage = 'usage';
 

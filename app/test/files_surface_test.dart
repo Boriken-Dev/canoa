@@ -510,7 +510,176 @@ void main() {
       expect((await files.readFile('/w/b')).bytes, isNull);
       await expectLater(files.readFile('/w/no'), throwsA(isA<ControlFailed>().having((e) => e.message, 'message', contains('protects'))));
     });
+
+    test('readWhole reads a text file page after page to its end, and a plain read stops at the page asked for', () async {
+      final text = utf8.encode('x' * 10);
+      final asked = <Object?>[];
+      final link = _Link((method, params) {
+        final from = (params['offset'] as int?) ?? 0;
+        asked.add(from);
+        final end = from + 4 < text.length ? from + 4 : text.length;
+        return {
+          'path': '/w/a.txt',
+          'name': 'a.txt',
+          'size': text.length,
+          'kind': 'text',
+          'truncated': end < text.length,
+          'offset': from,
+          'next': end < text.length ? end : null,
+          'data': base64Encode(text.sublist(from, end)),
+        };
+      });
+      final files = HostFiles(HostControl.dialing(() async => link));
+      final page = await files.readFile('/w/a.txt', maxBytes: 4);
+      expect((page.bytes!.length, page.truncated), (4, true));
+      asked.clear();
+      final whole = await files.readWhole('/w/a.txt');
+      expect(whole.bytes, text);
+      expect(whole.truncated, isFalse);
+      expect(asked, [0, 4, 8]);
+    });
+
+    test('writeFile calls fs/write and instructionFiles calls fs/instructions', () async {
+      final seen = <String>[];
+      final link = _Link((method, params) {
+        seen.add(method);
+        if (method == 'fs/write') {
+          return {'path': params['path'], 'name': 'AGENTS.md', 'size': (params['text']! as String).length};
+        }
+        return {
+          'files': [
+            {'path': '/w/AGENTS.md', 'name': 'AGENTS.md', 'scope': 'Workspace', 'size': 12, 'agents': ['Codex', 'OpenCode']},
+          ],
+        };
+      });
+      final files = HostFiles(HostControl.dialing(() async => link));
+      expect(await files.writeFile('/w/AGENTS.md', 'hello world!'), 12);
+      final instructions = await files.instructionFiles('/w');
+      expect(instructions.map((e) => '${e.name}@${e.scope}@${e.agents.join('+')}'), ['AGENTS.md@Workspace@Codex+OpenCode']);
+      expect(seen, ['fs/write', 'fs/instructions']);
+    });
   });
+
+  group('editing and instruction files', () {
+    testWidgets('editable text files can be edited, saved, or cancelled, and save failures preserve edits', (tester) async {
+      final home = _home('edit')..createSync();
+      final readme = File('${home.path}/README.md')..writeAsStringSync('# Initial\n');
+      final disk = _WritableDisk(home);
+      await _show(tester, FilesPanel(files: disk, root: home.path));
+
+      await tester.tap(_key('files entry README.md'));
+      await tester.pumpAndSettle();
+      expect(_key('files edit'), findsOneWidget);
+      await tester.tap(_key('files edit'));
+      await tester.pumpAndSettle();
+      expect(_key('files editor'), findsOneWidget);
+
+      await tester.enterText(_key('files editor'), '# Edited locally\n');
+      await tester.pumpAndSettle();
+      await tester.tap(_key('files cancel'));
+      await tester.pumpAndSettle();
+      expect(_key('files editor'), findsNothing);
+      expect(readme.readAsStringSync(), '# Initial\n');
+
+      await tester.tap(_key('files edit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('files editor'), '# Saved\n');
+      await tester.pumpAndSettle();
+      await tester.tap(_key('files save'));
+      await tester.pumpAndSettle();
+      expect(_key('files editor'), findsNothing);
+      expect(readme.readAsStringSync(), '# Saved\n');
+      expect(find.text('# Saved'), findsOneWidget);
+
+      disk.writeError = 'disk is read-only';
+      await tester.tap(_key('files edit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('files editor'), '# Unsaved draft\n');
+      await tester.pumpAndSettle();
+      await tester.tap(_key('files save'));
+      await tester.pumpAndSettle();
+      expect(_key('files editor'), findsOneWidget);
+      expect(_key('files save error'), findsOneWidget);
+      expect(find.textContaining('disk is read-only'), findsOneWidget);
+    });
+
+    testWidgets('a file the preview cut is edited only once it is read whole, and what is saved is all of it', (tester) async {
+      final home = _home('whole')..createSync();
+      final body = '${'line\n' * 60000}end\n';
+      final big = File('${home.path}/big.txt')..writeAsStringSync(body);
+      expect(big.lengthSync(), greaterThan(FilesPanel.previewBytes));
+      final disk = _WritableDisk(home);
+      await _show(tester, FilesPanel(files: disk, root: home.path));
+
+      await tester.tap(_key('files entry big.txt'));
+      await tester.pumpAndSettle();
+      expect(_key('files edit'), findsNothing, reason: 'a cut file is not edited: saving it would drop the rest');
+      expect(_key('files load full'), findsOneWidget);
+
+      await tester.tap(_key('files load full'));
+      await tester.pumpAndSettle();
+      expect(_key('files load full'), findsNothing);
+      expect(_key('files edit'), findsOneWidget);
+      await tester.tap(_key('files edit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('files editor'), '${body}more\n');
+      await tester.pumpAndSettle();
+      await tester.tap(_key('files save'));
+      await tester.pumpAndSettle();
+      expect(big.readAsStringSync(), '${body}more\n');
+    });
+
+    testWidgets('canWrite false hides edit button even when WorkspaceFileWriter is implemented', (tester) async {
+      final home = _home('no-write')..createSync();
+      File('${home.path}/a.txt').writeAsStringSync('hello');
+      final disk = _WritableDisk(home);
+      await _show(tester, FilesPanel(files: disk, root: home.path, canWrite: false));
+      await tester.tap(_key('files entry a.txt'));
+      await tester.pumpAndSettle();
+      expect(_key('files edit'), findsNothing);
+    });
+
+    testWidgets('workspace instruction files are listed and openable in FilesPanel', (tester) async {
+      final home = _home('instr')..createSync();
+      final agents = File('${home.path}/AGENTS.md')..writeAsStringSync('# Project rules\n');
+      final disk = _WritableDisk(home, instructions: [
+        HostInstructionFile(path: agents.path, name: 'AGENTS.md', scope: 'Workspace', size: agents.lengthSync()),
+      ]);
+      await _show(tester, FilesPanel(files: disk, root: home.path));
+      expect(_key('files instructions'), findsOneWidget);
+      expect(_key('files instruction AGENTS.md'), findsOneWidget);
+
+      await tester.tap(_key('files instruction AGENTS.md'));
+      await tester.pumpAndSettle();
+      expect(_key('files name'), findsOneWidget);
+      expect(find.text('# Project rules'), findsOneWidget);
+      expect(_key('files edit'), findsOneWidget);
+    });
+  });
+}
+
+final class _WritableDisk extends _Disk implements WorkspaceFileWriter, WorkspaceInstructionFiles {
+  _WritableDisk(super.home, {this.instructions = const []});
+
+  final List<HostInstructionFile> instructions;
+  String? writeError;
+
+  @override
+  Future<int> writeFile(String path, String contents) async {
+    if (writeError case final why?) throw ControlFailed(-32002, why);
+    final bytes = utf8.encode(contents);
+    File(path).writeAsBytesSync(bytes);
+    return bytes.length;
+  }
+
+  @override
+  Future<HostFileRead> readWhole(String path) async {
+    final bytes = File(path).readAsBytesSync();
+    return HostFileRead(path: path, name: path.split(RegExp(r'[\\/]')).last, size: bytes.length, kind: 'text', truncated: false, bytes: bytes);
+  }
+
+  @override
+  Future<List<HostInstructionFile>> instructionFiles(String workspace) async => instructions;
 }
 
 /// A control channel whose host answers each request with [answer].

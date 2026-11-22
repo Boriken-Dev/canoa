@@ -615,7 +615,7 @@ class _CanoaAppState extends State<CanoaApp> {
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
   late final WorkSurfaces _surfaces = widget.surfaces == null
       ? WorkSurfaces(
-          [...builtInSurfaces(), FilesSurface(_filesOf), TerminalSurface(_terminalOf, kinds: () => _panelTabs?.terminals ?? const [])],
+          [...builtInSurfaces(), FilesSurface(_filesOf, canWrite: () => _grants?.may(HostGrants.filesWrite) ?? (widget.served == null)), TerminalSurface(_terminalOf, kinds: () => _panelTabs?.terminals ?? const [])],
           added: () => [
             // A log is the host's own diagnostics: only a key that may change the host's settings reads it.
             if (_panelTabs case final kinds? when _grants?.may(HostGrants.hosting) ?? false)
