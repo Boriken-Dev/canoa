@@ -548,3 +548,127 @@ fn an_antigravity_sign_in_that_ends_with_no_login_stored_adds_nothing() {
     );
     host.stop();
 }
+
+/// A host with an agent entry made as the Antigravity source preset makes one (`usage = "antigravity"`), whose program is the
+/// `stdio_agent` example playing `agy` and logging what it is asked to `log`, reading its stored login from the test's home and
+/// Google's stand-in at `base`, never from the keyring. `login` stores the fixture login there.
+fn entry_host(base: &str, login: bool, log: &Path) -> Hosted {
+    isolate();
+    // SAFETY: the agent stand-in reads the variable from the host's environment; the tests that set it hold `LOG` for their whole run.
+    unsafe { std::env::set_var("CANOA_TEST_AGY_LOG", log) };
+    Hosted::start_with_setup(
+        |dir| {
+            std::fs::create_dir_all(gemini(dir)).expect("a home");
+            if login {
+                std::fs::write(
+                    gemini(dir).join("jetski-standalone-oauth-token"),
+                    login_json().to_string(),
+                )
+                .expect("the stored login");
+            }
+            let program = quoted(&example("stdio_agent", false).to_string_lossy());
+            let fixture = quoted(
+                &Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/agy/getuserstatus.json")
+                    .to_string_lossy(),
+            );
+            let home = quoted(&home(dir).to_string_lossy());
+            format!(
+                "[host.agents.Agy]\nprogram = {program}\nargs = [\"--agy\", {fixture}]\nlisten = \"127.0.0.1:0\"\nusage = \"antigravity\"\n\
+                 usage_settings = {{ home = {home}, keyring = false, token_url = \"{base}/token\", \
+                 userinfo_url = \"{base}/userinfo\", service = \"{base}\" }}\n"
+            )
+        },
+        &[],
+    )
+}
+
+/// Serializes the tests that set the stand-in's log variable.
+static LOG: Mutex<()> = Mutex::new(());
+
+/// What the agent stand-ins logged: one line per event, led by the process id.
+fn logged(log: &Path) -> String {
+    std::fs::read_to_string(log).unwrap_or_default()
+}
+
+/// Whether any agent opened a session: the connection's own agent never does here, so one that did was started to read.
+fn opened_a_session(log: &str) -> bool {
+    log.lines()
+        .any(|line| line.ends_with(" new") || line.contains(" cwd "))
+}
+
+/// Opens a link to the `Agy` entry and initializes it, with no session.
+fn initialized(host: &Hosted) -> Link {
+    let link = host.local.open("Agy").expect("a link");
+    linked::ask(
+        &link,
+        1,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}}),
+    )
+    .expect("initialize is answered");
+    link
+}
+
+#[test]
+fn an_agent_entrys_usage_is_read_from_the_stored_login_with_no_session_and_no_private_agent() {
+    let _serial = LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let google = Google::start();
+    let log = std::env::temp_dir().join(format!("canoa-agy-entry-log-{}", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    let host = entry_host(&google.base(), true, &log);
+    let link = initialized(&host);
+    // No session is open: the host answers from the login, and starts nothing to read it.
+    let (report, _) = linked::ask(&link, 2, "_coqui_acp/usage", json!({})).expect("answered");
+    assert_eq!(report["supported"], true, "{report}");
+    assert_eq!(report["account"], "Agy", "{report}");
+    let buckets = report["buckets"].as_array().expect("buckets");
+    assert_eq!(buckets.len(), 2, "{report}");
+    for bucket in buckets {
+        assert!(
+            bucket["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("agy:")),
+            "{bucket}"
+        );
+        assert_eq!(bucket["source"], "reported", "{bucket}");
+    }
+    assert!(
+        google
+            .paths()
+            .iter()
+            .any(|path| path == "/v1internal:fetchAvailableModels"),
+        "{:?}",
+        google.paths()
+    );
+    let text = report.to_string();
+    assert!(
+        !text.contains(EMAIL) && !text.contains(ACCESS),
+        "the login's details reached the client"
+    );
+    let seen = logged(&log);
+    assert!(!opened_a_session(&seen), "an agent read the quota: {seen}");
+    host.stop();
+    let _ = std::fs::remove_file(&log);
+}
+
+#[test]
+fn an_agent_entrys_usage_with_no_login_stored_is_empty_and_starts_no_private_agent() {
+    let _serial = LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let google = Google::start();
+    let log = std::env::temp_dir().join(format!("canoa-agy-entry-none-{}", std::process::id()));
+    let _ = std::fs::remove_file(&log);
+    let host = entry_host(&google.base(), false, &log);
+    let link = initialized(&host);
+    let (report, _) = linked::ask(&link, 2, "_coqui_acp/usage", json!({})).expect("answered");
+    assert_eq!(report["buckets"], json!([]), "{report}");
+    assert!(google.paths().is_empty(), "{:?}", google.paths());
+    let seen = logged(&log);
+    assert!(!opened_a_session(&seen), "an agent read the quota: {seen}");
+    host.stop();
+    let _ = std::fs::remove_file(&log);
+}

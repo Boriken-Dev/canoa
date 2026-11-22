@@ -564,14 +564,18 @@ fn words_said_in_a_session_with_no_open_turn_are_not_kept() {
     assert_eq!(report_of(&splice)["buckets"], json!([]));
 }
 
-/// The bundled Antigravity reader, which the tests below read their stand-in agent with.
+/// The bundled Antigravity reader as one that reads a session's own processes only, which the tests below read their stand-in
+/// agent with: the reader's stored login is the person's, which these tests never reach.
 fn antigravity() -> Reader {
-    Reader::named("antigravity").expect("a bundled agent offers it")
+    Reader::named("antigravity")
+        .expect("a bundled agent offers it")
+        .session_only()
 }
 
 fn quota_entry(state_dir: Option<std::path::PathBuf>, private: bool) -> Quota {
     Quota::new(Launch {
         reader: antigravity(),
+        settings: serde_json::Map::new(),
         program: "canoa-test-no-such-agy".into(),
         args: Vec::new(),
         state_dir,
@@ -823,6 +827,7 @@ fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
 fn per_connection_entry() -> Arc<Inference> {
     Arc::new(Inference::new(None).with_reader(Launch {
         reader: antigravity(),
+        settings: serde_json::Map::new(),
         program: "canoa-test-no-such-agy".into(),
         args: Vec::new(),
         state_dir: None,
@@ -972,6 +977,7 @@ fn a_panic_in_a_private_reading_still_answers_who_asked() {
     let state = std::env::temp_dir().join(format!("canoa-panic-test-{}", std::process::id()));
     let quota = Arc::new(Quota::new(Launch {
         reader: antigravity(),
+        settings: serde_json::Map::new(),
         program: "x".into(),
         args: Vec::new(),
         state_dir: Some(state.clone()),
@@ -995,6 +1001,7 @@ fn a_request_that_comes_while_a_private_agent_reads_waits_for_it() {
     let gate = Mutex::new(gate);
     let quota = Arc::new(Quota::new(Launch {
         reader: antigravity(),
+        settings: serde_json::Map::new(),
         program: "x".into(),
         args: Vec::new(),
         state_dir: Some(state.clone()),

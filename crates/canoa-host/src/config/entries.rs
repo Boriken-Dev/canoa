@@ -541,6 +541,9 @@ pub enum EntryKind {
         /// The id of the `usage_reader` provider that reads this agent's quota when the agent reports none itself (`usage = "..."`
         /// on the entry), one a bundled agent offers; `None` reads only its failed turns.
         usage: Option<String>,
+        /// The configuration of that reader (`usage_settings`), which a reader that reads what the agent stores takes: where the
+        /// login is kept and the service's addresses. `None` is the reader's defaults.
+        usage_settings: Option<Settings>,
     },
     /// An `acp_harness` provider, chosen by its id and run in this process: the host is the ACP client's end, and the provider
     /// starts the agent's program through the host's spawner. `claude` and `codex` are built in; any other id is an outside

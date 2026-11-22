@@ -618,7 +618,13 @@ fn build_agent_entry(
             &name,
             program,
             agent.args,
-            agent.usage,
+            (
+                agent.usage,
+                agent
+                    .usage_settings
+                    .map(|table| settings_of(&name, table))
+                    .transpose()?,
+            ),
             &asks,
             &offered_accounts,
             offered,
@@ -639,6 +645,7 @@ fn build_agent_entry(
             harness,
             HarnessRaw {
                 usage: agent.usage,
+                usage_settings: agent.usage_settings,
                 args: agent.args,
                 executable: agent.executable,
                 shell: agent.shell,
@@ -693,7 +700,7 @@ fn build_program_kind(
     name: &str,
     program: String,
     args: Option<Vec<String>>,
-    usage: Option<String>,
+    (usage, usage_settings): (Option<String>, Option<Settings>),
     asks: &RawAsks,
     offered_accounts: &[String],
     offered: Vec<String>,
@@ -741,6 +748,9 @@ fn build_program_kind(
             Some(text.to_owned())
         }
     };
+    if usage_settings.is_some() && usage.is_none() {
+        return Err(invalid(name, "usage_settings goes with usage"));
+    }
     Ok(EntryKind::Agent {
         program: OsString::from(program),
         args: args
@@ -750,11 +760,13 @@ fn build_program_kind(
             .collect(),
         profiles: offered,
         usage,
+        usage_settings,
     })
 }
 
 struct HarnessRaw<'a> {
     usage: Option<String>,
+    usage_settings: Option<toml::Table>,
     args: Option<Vec<String>>,
     executable: Option<String>,
     shell: Option<String>,
@@ -777,8 +789,11 @@ fn build_harness_kind(
     base: &Path,
     directory: &Path,
 ) -> Result<EntryKind, ConfigError> {
-    if raw.usage.is_some() {
-        return Err(invalid(name, "usage goes with program, not harness"));
+    if raw.usage.is_some() || raw.usage_settings.is_some() {
+        return Err(invalid(
+            name,
+            "usage and usage_settings go with program, not harness",
+        ));
     }
     if harness.is_empty() {
         return Err(invalid(name, "harness must not be empty"));

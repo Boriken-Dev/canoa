@@ -59,6 +59,7 @@ listen = "127.0.0.1:7801"
             args: vec!["agent.mjs".into()],
             profiles: Vec::new(),
             usage: None,
+            usage_settings: None,
         }
     );
     let EntryKind::Provider {
@@ -1046,6 +1047,38 @@ fn an_empty_usage_phrase_is_refused() {
         parse("[usage]\nlimit_phrases = \"quota\"\n"),
         Err(ConfigError::Parse { .. })
     ));
+}
+
+#[test]
+fn an_agent_entry_configures_its_usage_reader_and_only_with_one() {
+    let config = parse(
+        "[host.agents.a]
+program = \"agy\"
+usage = \"antigravity\"
+usage_settings = { keyring = false }
+",
+    )
+    .expect("parses");
+    let EntryKind::Agent { usage_settings, .. } = &config.entries[0].kind else {
+        panic!("an agent entry");
+    };
+    assert_eq!(
+        usage_settings.as_ref().expect("the reader's").as_map()["keyring"],
+        false
+    );
+    for text in [
+        "[host.agents.a]
+program = \"agy\"
+usage_settings = { keyring = false }
+",
+        "[host.agents.a]
+harness = \"antigravity\"
+usage_settings = { keyring = false }
+",
+    ] {
+        let refused = parse(text).expect_err("refused");
+        assert!(refused.to_string().contains("usage_settings"), "{refused}");
+    }
 }
 
 #[test]

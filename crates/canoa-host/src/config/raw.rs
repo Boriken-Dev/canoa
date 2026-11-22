@@ -612,6 +612,7 @@ pub(super) struct RawAgent {
     pub(super) profiles: Option<Vec<String>>,
     pub(super) accounts: Option<Vec<String>>,
     pub(super) usage: Option<String>,
+    pub(super) usage_settings: Option<toml::Table>,
     pub(super) title: Option<String>,
     pub(super) shared: Option<bool>,
     pub(super) environment: Option<String>,

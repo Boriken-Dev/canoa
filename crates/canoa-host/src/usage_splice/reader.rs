@@ -107,6 +107,13 @@ impl Reader {
             .collect()
     }
 
+    /// This reader as one that reads only from a session's own processes, whatever it says of what the agent stores.
+    #[cfg(test)]
+    pub(crate) fn session_only(mut self) -> Self {
+        Arc::make_mut(&mut self.info).stored = false;
+        self
+    }
+
     /// Description of how the reader polls and names its buckets.
     pub(crate) fn info(&self) -> &ReaderInfo {
         &self.info
@@ -247,6 +254,8 @@ impl core::fmt::Debug for Opened {
 pub(crate) struct Launch {
     /// What reads the agent's quota.
     pub(crate) reader: Reader,
+    /// The entry's `usage_settings`, the configuration of a reader that reads what the agent stores.
+    pub(crate) settings: serde_json::Map<String, Value>,
     pub(crate) program: OsString,
     pub(crate) args: Vec<OsString>,
     /// The host's state directory; a private agent needs it for its empty working directory.
@@ -375,16 +384,22 @@ impl Quota {
     /// then). A request that comes while one is reading waits for it. `false` says nothing was started and `done` will
     /// not run.
     pub(crate) fn read_privately(self: &Arc<Self>, done: impl FnOnce() + Send + 'static) -> bool {
-        let Some(directory) = self
+        // A reader of what the agent stores starts nothing, so it needs no directory and no way to start a program.
+        let stored = self.command.reader.info.stored;
+        let directory = if stored {
+            PathBuf::new()
+        } else if let Some(directory) = self
             .command
             .state_dir
             .as_ref()
-            .filter(|_| self.command.private && self.command.starter.is_some())
+            .filter(|_| self.command.starter.is_some())
             .map(|state| state.join("usage-read"))
-        else {
+        {
+            directory
+        } else {
             return false;
         };
-        if self.starting.load(Ordering::SeqCst) > 0 {
+        if !self.command.private || (!stored && self.starting.load(Ordering::SeqCst) > 0) {
             return false;
         }
         {
@@ -418,7 +433,12 @@ impl Quota {
                         answer();
                     }
                 }));
-                if let Err(why) = quota.private_reading(&directory) {
+                let read = if stored {
+                    quota.stored_reading()
+                } else {
+                    quota.private_reading(&directory)
+                };
+                if let Err(why) = read {
                     tracing::debug!(
                         "usage reader {}, private agent: {why}",
                         quota.command.reader.id()
@@ -437,6 +457,26 @@ impl Quota {
             return false;
         }
         true
+    }
+
+    /// Reads what the agent stores, with no process: the reader configured with the entry's `usage_settings` is asked with no
+    /// agent's process, and a failure (no login, a service that did not answer) is the answer.
+    fn stored_reading(&self) -> Result<(), String> {
+        let opened = self
+            .command
+            .reader
+            .open_configured(&Value::Object(self.command.settings.clone()))?;
+        let read = opened
+            .reading
+            .read(0, false)
+            .map_err(|error| error.message().to_owned())?;
+        match read.failure {
+            None => {
+                self.apply(read.buckets);
+                Ok(())
+            }
+            Some(failure) => Err(failure.why),
+        }
     }
 
     /// Starts the entry's agent, opens an empty session in `directory`, reads, and ends the agent.

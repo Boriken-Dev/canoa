@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use coqui_link::auth::Identity;
 use serde_json::{Value, json};
 use support::{
-    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, running, with_link,
+    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, with_link,
 };
 
 fn agent_entry(name: &str, extra: &str) -> String {
@@ -1077,13 +1077,22 @@ fn agy_fixture() -> String {
     )
 }
 
+/// A home with no Antigravity login in it, which the entries below read their stored login from, so no test reaches the person's.
+fn no_agy_login() -> String {
+    std::env::temp_dir()
+        .join(format!("canoa-no-agy-login-{}", std::process::id()))
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// A stdio agent entry running the agy stand-in, with its quota read by the host; `extra` is more of the entry's keys.
 fn agy_entry(name: &str, extra: &str) -> String {
     agent_entry(
         name,
         &format!(
-            "args = [\"--agy\", {}]\nusage = \"antigravity\"\n{extra}",
-            quoted(&agy_fixture())
+            "args = [\"--agy\", {}]\nusage = \"antigravity\"\nusage_settings = {{ home = {}, keyring = false }}\n{extra}",
+            quoted(&agy_fixture()),
+            quoted(&no_agy_login())
         ),
     )
 }
@@ -1256,79 +1265,8 @@ fn an_agys_figures_are_read_after_a_session_and_each_turn_and_not_again_while_cu
     .expect("a paired key is served");
 }
 
-#[test]
-fn with_no_session_open_an_agys_usage_is_read_by_an_agent_started_for_it_and_ended() {
-    let scratch = Scratch::new();
-    let agy_log = scratch.0.join("agy.log");
-    let (host, _) = Host::start_logged(
-        scratch,
-        &agy_entry("agy", ""),
-        1,
-        &[("CANOA_TEST_AGY_LOG", agy_log.clone().into())],
-    );
-    let client = support::key();
-    host.pair(&client);
-    let report = with_link(host.url("agy"), &client, host.peer, |rpc| {
-        rpc.request("initialize", asking(false)).expect("answered");
-        let report = rpc
-            .request("_coqui_acp/usage", json!({}))
-            .expect("answered once the agent started for it has been read");
-        // Asked again at once, the answer is the one just read.
-        let again = rpc
-            .request("_coqui_acp/usage", json!({}))
-            .expect("answered");
-        assert_eq!(again["buckets"], report["buckets"]);
-        report
-    })
-    .expect("a paired key is served");
-    let buckets = report["buckets"].as_array().expect("buckets");
-    assert!(buckets.len() >= 2, "{report}");
-    assert!(
-        buckets.iter().all(|bucket| bucket["source"] == "reported"),
-        "{report}"
-    );
-
-    let logged = std::fs::read_to_string(&agy_log).expect("the stand-ins' log");
-    let lines: Vec<(&str, &str)> = logged
-        .lines()
-        .filter_map(|line| line.split_once(' '))
-        .collect();
-    let says = |what: &str| {
-        lines
-            .iter()
-            .filter(|(_, line)| line.starts_with(what))
-            .count()
-    };
-    assert_eq!(says("new"), 1, "one agent opened a session: {logged}");
-    assert_eq!(says("prompt"), 0, "no prompt was sent: {logged}");
-    let (private, _) = lines
-        .iter()
-        .find(|(_, line)| *line == "new")
-        .expect("opened");
-    let (_, cwd) = lines
-        .iter()
-        .find(|(pid, line)| pid == private && line.starts_with("cwd "))
-        .expect("it was given a directory");
-    let directory = std::path::Path::new(cwd.trim_start_matches("cwd "));
-    assert!(
-        directory.starts_with(host.home()),
-        "{directory:?} is under the host's state"
-    );
-    assert!(directory.ends_with("usage-read"), "{directory:?}");
-    assert!(
-        std::fs::read_dir(directory).is_ok_and(|mut entries| entries.next().is_none()),
-        "the directory it worked in is empty"
-    );
-    let pid: u32 = private.parse().expect("a pid");
-    let until = Instant::now() + Duration::from_secs(15);
-    while running(pid) && Instant::now() < until {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert!(!running(pid), "the agent started for the reading was ended");
-}
-
-/// Reads a real Antigravity's quota through the host with no session open. Opt in with `CANOA_LIVE_AGY=1`, `agy` on PATH
-/// and a signed-in account; it sends no prompt, and the empty session agy keeps is the only trace.
+/// Reads a real Antigravity's quota through the host with no session open, from its stored login. Opt in with
+/// `CANOA_LIVE_AGY=1` and a signed-in account; it starts nothing and sends no prompt.
 #[test]
 #[ignore = "needs a signed-in agy; set CANOA_LIVE_AGY=1"]
 fn live_a_real_agys_quota_is_read_with_no_session_open() {
@@ -1359,42 +1297,6 @@ fn live_a_real_agys_quota_is_read_with_no_session_open() {
         "{text}"
     );
     assert!(!text.contains('@'), "no account detail in the report");
-}
-
-#[test]
-fn a_private_agent_that_ends_early_is_not_waited_for() {
-    let scratch = Scratch::new();
-    let agy_log = scratch.0.join("agy.log");
-    let (host, _) = Host::start_logged(
-        scratch,
-        &agy_entry("agy", ""),
-        1,
-        &[
-            ("CANOA_TEST_AGY_LOG", agy_log.clone().into()),
-            ("CANOA_TEST_AGY_EXITS", "1".into()),
-        ],
-    );
-    let client = support::key();
-    host.pair(&client);
-    let began = Instant::now();
-    let report = with_link(host.url("agy"), &client, host.peer, |rpc| {
-        rpc.request("initialize", asking(false)).expect("answered");
-        rpc.request("_coqui_acp/usage", json!({}))
-            .expect("answered, though the agent started for it ended without a reading")
-    })
-    .expect("a paired key is served");
-    assert!(
-        began.elapsed() < Duration::from_secs(15),
-        "the request waited out the reading's whole limit: {:?}",
-        began.elapsed()
-    );
-    assert_eq!(report["buckets"], json!([]), "{report}");
-    assert!(
-        std::fs::read_to_string(&agy_log)
-            .unwrap_or_default()
-            .contains("exits"),
-        "the agent started for the reading ended itself"
-    );
 }
 
 #[test]

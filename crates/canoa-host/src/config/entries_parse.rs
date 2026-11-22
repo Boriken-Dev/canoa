@@ -385,6 +385,7 @@ pub(super) fn local_agents_of(
                 args: args.into_iter().map(OsString::from).collect(),
                 profiles: Vec::new(),
                 usage,
+                usage_settings: None,
             },
             RawCommon {
                 listen: None,

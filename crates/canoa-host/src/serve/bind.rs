@@ -562,6 +562,7 @@ fn bind_entry(state: &mut BindState<'_>, entry: &Entry) -> Result<(), ServeError
             args,
             profiles,
             usage,
+            usage_settings,
         } => {
             let harness = std::path::Path::new(program)
                 .file_stem()
@@ -590,6 +591,10 @@ fn bind_entry(state: &mut BindState<'_>, entry: &Entry) -> Result<(), ServeError
                         })?;
                     scope.quota(Launch {
                         reader,
+                        settings: usage_settings
+                            .as_ref()
+                            .map(|settings| settings.as_map().clone())
+                            .unwrap_or_default(),
                         program: program.clone(),
                         args: args.clone(),
                         state_dir: state.options.state_dir.clone(),
