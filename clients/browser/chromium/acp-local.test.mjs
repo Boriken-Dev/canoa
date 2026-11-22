@@ -74,6 +74,21 @@ test("a stopped host still says what this computer is called, and names are boun
   assert.deepEqual((await createLocalHost(door).hello()).thisComputer, ["desk-one", "desk-one.local"]);
 });
 
+test("the host's web address is kept only as an origin on this computer", () => {
+  const web = (value, extra = {}) => readHello(runningReply({ web: value, ...extra })).web;
+  assert.equal(web("http://127.0.0.1:7800"), "http://127.0.0.1:7800");
+  assert.equal(web("https://localhost:7800"), "https://localhost:7800");
+  assert.equal(web("https://[::1]:7800"), "https://[::1]:7800");
+  assert.equal(web("https://desk-one:7800", { hostname: "desk-one" }), "https://desk-one:7800");
+  assert.equal(web("https://192.0.2.2:7800", { addresses: ["192.0.2.2"] }), "https://192.0.2.2:7800");
+  for (const bad of [
+    "https://evil.example:7800", "https://127.0.0.1", "https://127.0.0.1:7800/office", "https://127.0.0.1:7800?x=1",
+    "https://user:pw@127.0.0.1:7800", "ftp://127.0.0.1:21", "javascript:alert(1)", "127.0.0.1:7800", 7800, null,
+    `https://localhost:7800/${"a".repeat(400)}`,
+  ]) assert.equal(web(bad), undefined, String(bad));
+  assert.equal(readHello(runningReply()).web, undefined);
+});
+
 test("a reply that is not a host's is no claim", () => {
   assert.equal(readHello(undefined), null);
   assert.equal(readHello(runningReply({ peer: "me" })), null);

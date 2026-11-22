@@ -35,9 +35,10 @@ export function senderEndpoint(sender, { runtimeId, ownOrigin, uiPrefix }) {
 
 /**
  * Bridges Office pane tool providers (`outlook`, `word`, `excel`) arriving over granted page ports to the
- * local host's `@tools` door, and tells `gateway` which `(origin, tabId)` panes currently hold active tools.
+ * local host's `@tools` door, and tells `gateway` which `(origin, tabId)` panes currently hold active tools. A pane may also ask
+ * for the origin of the host's own web server (`localWeb`), which the native host's `hello` claims.
  */
-export function createOfficeToolsBridge({ dialLocal, gateway, callTimeoutMs = 190_000 }) {
+export function createOfficeToolsBridge({ dialLocal, gateway, localWeb = async () => null, callTimeoutMs = 190_000 }) {
   /** @type {Map<string, { provider: ReturnType<typeof createToolProvider>, regs: Set<object> }>} */
   const byApp = new Map();
   /** @type {Set<object>} */
@@ -195,6 +196,13 @@ export function createOfficeToolsBridge({ dialLocal, gateway, callTimeoutMs = 19
           }
           if (message.op === "tools.register" && typeof message.id === "number") {
             void registerApp(entry, message.args?.app, message.id);
+            return;
+          }
+          if (message.op === "host.web" && typeof message.id === "number") {
+            localWeb().then(
+              (web) => port.postMessage({ id: message.id, result: { web: typeof web === "string" ? web : null } }),
+              () => port.postMessage({ id: message.id, result: { web: null } }),
+            );
             return;
           }
           if (message.op === "tools.unregister" && typeof message.id === "number") {

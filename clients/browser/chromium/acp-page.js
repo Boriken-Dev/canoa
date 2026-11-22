@@ -245,6 +245,11 @@
           throw error;
         }
       },
+      /** The origin of the host's own web server on this computer, or null when it has none or is not running. */
+      async web() {
+        const answer = await call("host.web", {}).catch(() => null);
+        return typeof answer?.web === "string" ? answer.web : null;
+      },
       async unregister(app) {
         toolHandlers.delete(app);
         await call("tools.unregister", { app }).catch(() => {});

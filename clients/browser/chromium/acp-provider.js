@@ -599,6 +599,7 @@ export function installProvider() {
       return dialAgent({ native: { entry: "@tools" }, peer: pinned.peer, method: pinned.method, label: "Canoa" }, {});
     },
     gateway,
+    localWeb: async () => (await localHost.hello()).host?.web ?? null,
   });
 
   chrome.runtime.onConnect.addListener((port) => {

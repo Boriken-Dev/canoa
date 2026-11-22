@@ -55,6 +55,26 @@ function computerNames(reply) {
 }
 
 /**
+ * The origin of the host's own web server, as `hello` claims it: `http` or `https` with a host and a port and nothing after
+ * them, and a host that is loopback or one of this computer's names. Anything else is left out: the claim is shown to a pane, which
+ * must not be sent to an address that is not this computer's.
+ */
+function webOrigin(reply, names) {
+  if (typeof reply.web !== "string" || reply.web.length > 300) return undefined;
+  let url;
+  try {
+    url = new URL(reply.web);
+  } catch {
+    return undefined;
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.port === "") return undefined;
+  if (url.pathname !== "/" || url.search || url.hash || reply.web !== url.origin) return undefined;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const loopback = host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/.test(host);
+  return loopback || names.includes(host) ? url.origin : undefined;
+}
+
+/**
  * What the host's `hello` claims, kept to what a person can be shown and what can be dialed: entries that speak ACP, bounded,
  * with names and labels stripped of anything that reorders or hides text. A reply that is not a host's gives null.
  */
@@ -69,6 +89,7 @@ export function readHello(reply) {
     entries.push({ name, label: clean(item.label, MAX_LABEL) || name, kind: item.kind, local: item.local === true });
     if (entries.length === MAX_ENTRIES) break;
   }
+  const thisComputer = computerNames(reply);
   return {
     peer: reply.peer,
     method: reply.method,
@@ -77,7 +98,8 @@ export function readHello(reply) {
     entries,
     control: reply.control === true,
     hostname: HOSTNAME.test(typeof reply.hostname === "string" ? reply.hostname.trim().toLowerCase() : "") ? reply.hostname.trim().toLowerCase() : undefined,
-    thisComputer: computerNames(reply),
+    thisComputer,
+    web: webOrigin(reply, thisComputer),
   };
 }
 

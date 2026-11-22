@@ -111,3 +111,18 @@ test("createOfficeToolsBridge registers an Office provider on @tools, forwards M
   assert.equal(link.closed, true);
   assert.deepEqual(pageTools.at(-1), { origin: "https://pane.example", tabId: 9, apps: [] });
 });
+
+test("a pane asks for the host's web origin and gets what the native host claimed, or null", async () => {
+  const gateway = { setPageTools() {}, attach() {} };
+  const pane = fakePort();
+  createOfficeToolsBridge({ dialLocal: async () => fakeLocalLink(), gateway, localWeb: async () => "https://localhost:7800" }).attach(pane, { origin: "https://pane.example", tabId: 1 });
+  pane.emit({ id: 1, op: "host.web", args: {} });
+  await settle();
+  assert.deepEqual(pane.sent.find((m) => m.id === 1).result, { web: "https://localhost:7800" });
+
+  const none = fakePort();
+  createOfficeToolsBridge({ dialLocal: async () => fakeLocalLink(), gateway, localWeb: async () => { throw new Error("gone"); } }).attach(none, { origin: "https://pane.example", tabId: 1 });
+  none.emit({ id: 2, op: "host.web", args: {} });
+  await settle();
+  assert.deepEqual(none.sent.find((m) => m.id === 2).result, { web: null });
+});
