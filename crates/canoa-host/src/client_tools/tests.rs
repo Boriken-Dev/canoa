@@ -274,6 +274,34 @@ fn a_session_a_page_started_is_given_no_server_and_one_the_persons_own_pages_sta
 }
 
 #[test]
+fn a_page_session_with_office_tools_marked_gets_only_office_servers_and_never_browser() {
+    let hub = hub();
+    let (browser, browser_thread) = connect(&hub, "kb", providing());
+    register(&browser, "browser");
+    let (word, word_thread) = connect(&hub, "kw", providing());
+    register(&word, "word");
+    let link = ready(&hub);
+    let request = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "session/new",
+        "params": {"cwd": "/", "mcpServers": [], "_meta": {SITE_META: {"site": "office.example", "tools": ["word", "browser", "evil"]}}}
+    }))
+    .expect("json");
+    link.client_raw(&request);
+    let given: Vec<String> = servers(&link.client_said(session_new(9)))
+        .into_iter()
+        .filter_map(|entry| entry["name"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(given, ["canoa-word"]);
+    link.close();
+    drop(browser);
+    drop(word);
+    browser_thread.join().expect("ends");
+    word_thread.join().expect("ends");
+}
+
+#[test]
 fn a_page_reopening_a_session_is_marked_too() {
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());

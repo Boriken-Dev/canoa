@@ -25,7 +25,7 @@ mod http;
 mod tests;
 
 use core::time::Duration;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
@@ -63,6 +63,9 @@ const MAX_NOTES: usize = 64;
 const MAX_PENDING: usize = 64;
 /// The providers' names it will remember.
 const MAX_PROVIDERS: usize = 16;
+/// Office pane providers a web session may receive when the browser extension forwards one from the pane's origin;
+/// `"browser"` is never in this list, so a page's session can never read the person's tabs through it.
+const PAGE_OFFICE_PROVIDERS: [&str; 3] = ["outlook", "word", "excel"];
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -630,8 +633,8 @@ struct State {
     /// The ACP version the agent answered `initialize` in when it takes stdio servers, else 0.
     stdio: u64,
     pending: HashMap<String, Pending>,
-    /// Ids of session requests a web page made, which get no server.
-    page: HashSet<String>,
+    /// Ids of session requests a web page made: empty set gets no server; an Office pane session lists only the Office providers allowed for it.
+    page: HashMap<String, BTreeSet<String>>,
     sessions: HashMap<String, Vec<Arc<Access>>>,
     held: usize,
 }
@@ -696,9 +699,21 @@ impl Link {
         if named.get("own") == Some(&json!(true)) {
             return;
         }
+        let allowed = named
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter(|name| PAGE_OFFICE_PROVIDERS.contains(name))
+                    .map(str::to_owned)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
         let mut state = lock(&self.state);
         if state.page.len() < MAX_PENDING {
-            state.page.insert(id);
+            state.page.insert(id, allowed);
         }
     }
 
@@ -763,11 +778,19 @@ impl Link {
             let mut state = lock(&self.state);
             (state.page.remove(&id), state.http, state.stdio, state.held)
         };
-        // A page's session is never given them: a provider answers with the person's own tabs and documents.
-        if page || self.is_closed() || held >= MAX_SESSIONS || !(http || stdio > 0) {
+        if self.is_closed() || held >= MAX_SESSIONS || !(http || stdio > 0) {
             return false;
         }
-        let providers = self.hub.expected();
+        // A page's session gets none, except the Office providers the extension marked for that pane's tab.
+        let expected = self.hub.expected();
+        let providers: Vec<String> = match page {
+            Some(allowed) if allowed.is_empty() => return false,
+            Some(allowed) => expected
+                .into_iter()
+                .filter(|name| allowed.contains(name))
+                .collect(),
+            None => expected,
+        };
         if providers.is_empty() {
             return false;
         }
