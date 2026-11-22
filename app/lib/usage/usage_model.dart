@@ -6,7 +6,8 @@ import 'package:flutter/foundation.dart';
 import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
 import '../chat/session_picker.dart' show machineLoginLabel;
-import '../desktop/control_client.dart' show hostWords;
+import '../desktop/control_client.dart' show ControlFailed, hostWords;
+import '../providers/provider_catalog.dart' show providerCatalog;
 import '../desktop/host_control.dart';
 import 'spend_model.dart';
 
@@ -302,19 +303,17 @@ class UsageController extends ChangeNotifier {
       for (final (_, heard) in value) {
         if (heard.readAt > newest.readAt) newest = heard;
       }
-      final info = accounts?.listed
-          .where((each) => each.id == key)
-          .firstOrNull;
+      final resolved = _resolveAccount(key, value);
       merged.add(
         AccountLimits(
           id: key,
-          name: info == null ? key : _label(info),
-          provider: info?.groupId ?? otherProvider,
+          name: resolved.name,
+          provider: resolved.provider,
           hosts: {for (final (host, _) in value) host}.toList(),
           report: newest.report,
           readAt: newest.readAt,
           who: _whoOf(key),
-          automatic: info?.automatic ?? false,
+          automatic: resolved.automatic,
         ),
       );
     }
@@ -336,6 +335,102 @@ class UsageController extends ChangeNotifier {
 
   /// What the account is called on the page: the harness's own login is `local` for each harness, which says nothing.
   static String _label(AccountInfo account) => account.automatic ? machineLoginLabel : account.name;
+
+  ({String name, String provider, bool automatic}) _resolveAccount(
+    String key,
+    List<(String, _Heard)> heard,
+  ) {
+    final info = accounts?.listed.where((each) => each.id == key).firstOrNull;
+    if (info != null) {
+      return (name: _label(info), provider: info.groupId, automatic: info.automatic);
+    }
+    final localHarness = _localHarnessOf(key);
+    final heardProvider = _heardProvider(heard);
+    if (localHarness != null) {
+      final localInfo = accounts?.listed
+          .where(
+            (each) =>
+                each.automatic &&
+                (each.agent == localHarness ||
+                    each.groupId == localHarness ||
+                    each.provider == localHarness),
+          )
+          .firstOrNull;
+      if (localInfo != null) {
+        return (
+          name: _label(localInfo),
+          provider: localInfo.groupId,
+          automatic: true,
+        );
+      }
+      final provider =
+          _canonicalProvider(heardProvider) ??
+          _canonicalProvider(localHarness) ??
+          heardProvider ??
+          localHarness;
+      return (name: machineLoginLabel, provider: provider, automatic: true);
+    }
+    if (heardProvider != null) {
+      return (
+        name: key,
+        provider: _canonicalProvider(heardProvider) ?? heardProvider,
+        automatic: false,
+      );
+    }
+    final byKey = _canonicalProvider(key);
+    if (byKey != null) {
+      return (name: key, provider: byKey, automatic: false);
+    }
+    return (name: key, provider: otherProvider, automatic: false);
+  }
+
+  static String? _localHarnessOf(String key) {
+    if (key.startsWith('local:') && key.length > 6) return key.substring(6);
+    if (key.endsWith(':local') && key.length > 6) {
+      return key.substring(0, key.length - 6);
+    }
+    return null;
+  }
+
+  String? _heardProvider(List<(String, _Heard)> heard) {
+    _Heard? best;
+    for (final (_, each) in heard) {
+      final raw = each.provider?.trim();
+      if (raw == null || raw.isEmpty) continue;
+      if (best == null || each.readAt >= best.readAt) best = each;
+    }
+    return best?.provider?.trim();
+  }
+
+  String? _canonicalProvider(String? raw) {
+    final trimmed = raw?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    final providers = accounts?.providers ?? const [];
+    for (final each in providers) {
+      if (each.id == trimmed || each.agent == trimmed) return each.groupId;
+    }
+    final lower = trimmed.toLowerCase();
+    for (final each in providers) {
+      if (each.title.toLowerCase() == lower ||
+          each.groupId.toLowerCase() == lower ||
+          each.id.toLowerCase() == lower) {
+        return each.groupId;
+      }
+    }
+    for (final each in providerCatalog.providers) {
+      if (each.id == trimmed || each.accounts?.provider == trimmed) {
+        return each.id;
+      }
+    }
+    for (final each in providerCatalog.providers) {
+      if (each.id.toLowerCase() == lower ||
+          each.title.toLowerCase() == lower ||
+          each.accounts?.provider.toLowerCase() == lower) {
+        return each.id;
+      }
+    }
+    return providerCatalog.resolve(trimmed)?.id;
+  }
 
   /// What the filters leave.
   List<AccountLimits> get visible => [
@@ -441,7 +536,8 @@ class UsageController extends ChangeNotifier {
   String accountName(String? key) {
     if (key == null || key.isEmpty) return 'Unknown';
     final known = all.where((each) => each.id == key).firstOrNull?.name;
-    return known ?? 'Unknown';
+    if (known != null) return known;
+    return _localHarnessOf(key) == null ? 'Unknown' : machineLoginLabel;
   }
 
   /// What every host recorded the session with this id spending, over all time; null when no host answered.
@@ -532,7 +628,7 @@ class UsageController extends ChangeNotifier {
 }
 
 final class _Heard {
-  const _Heard(this.id, this.report, this.readAt, [this.who]);
+  const _Heard(this.id, this.report, this.readAt, [this.provider, this.who]);
 
   static _Heard? parse(Object? json) {
     if (json is! Map || json['account'] is! String) return null;
@@ -546,11 +642,16 @@ final class _Heard {
     final at = observed is int && observed > 0
         ? observed
         : (updated is int ? updated : 0);
-    return _Heard(id, report, at, AccountWho.parse(json['details']));
+    final rawProvider = json['provider'] ?? json['harness'];
+    final provider = rawProvider is String && rawProvider.trim().isNotEmpty
+        ? rawProvider.trim()
+        : null;
+    return _Heard(id, report, at, provider, AccountWho.parse(json['details']));
   }
 
   final AccountWho? who;
   final String id;
   final UsageReport report;
   final int readAt;
+  final String? provider;
 }

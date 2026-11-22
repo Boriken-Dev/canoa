@@ -972,3 +972,38 @@ fn conditional_and_link_only_routes_check_their_grants() {
         NO_METHOD
     );
 }
+
+#[test]
+fn usage_limits_fills_canonical_provider_for_local_and_legacy_accounts() {
+    let dir = std::env::temp_dir().join(format!("canoa-usage-limits-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let log = Arc::new(crate::usage_log::UsageLog::open(dir.clone(), 400, 0));
+    let mut report = coqui_acp_api::UsageReport::new();
+    report.observed_at = 1_776_000_000;
+    report.buckets = vec![coqui_acp_api::Bucket::new("five_hour")];
+    log.note_report("local:codex", None, &report, 1_776_000_000);
+    log.note_report("codex:local", None, &report, 1_776_000_000);
+    log.note_report("claude", None, &report, 1_776_000_000);
+    log.note_report("id-other", None, &report, 1_776_000_000);
+    let control = memory().with_usage(log);
+    let answer = ask(
+        &control,
+        &peer("sha256:aa", &[Grant::Usage]),
+        "usage/limits",
+        json!({}),
+    );
+    let accounts = answer["result"]["accounts"].as_array().expect("accounts");
+    let provider_of = |name: &str| {
+        accounts
+            .iter()
+            .find(|row| row["account"] == name)
+            .and_then(|row| row.get("provider"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    assert_eq!(provider_of("local:codex").as_deref(), Some("codex"));
+    assert_eq!(provider_of("codex:local").as_deref(), Some("codex"));
+    assert_eq!(provider_of("claude").as_deref(), Some("claude"));
+    assert_eq!(provider_of("id-other"), None);
+    let _ = fs::remove_dir_all(&dir);
+}

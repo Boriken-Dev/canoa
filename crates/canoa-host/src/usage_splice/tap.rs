@@ -236,7 +236,8 @@ impl Tap {
         let Ok(report) = serde_json::from_value::<UsageReport>(report.clone()) else {
             return;
         };
-        self.log.note_report(&self.account, &report, unix_now());
+        self.log
+            .note_report(&self.account, Some(&self.harness), &report, unix_now());
         let Some(spend) = report.spend else { return };
         let session = if spend.session_id.is_empty() {
             session.map(str::to_owned)

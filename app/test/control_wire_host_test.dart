@@ -114,6 +114,7 @@ peers = [${jsonEncode(browserId)}]
     }
   });
 
+  group('the real host wire', skip: skip, () {
   test('the sections the host lists are the pages the app draws itself, as the app reads them', () async {
     final sections = HostSections((method, params) async => (await control.ready(wait: false)).call(method, params));
     // Until it adopts the host's answer, the sections are the app's own. `load` keeps them when the host does not answer, so the
@@ -176,5 +177,6 @@ peers = [${jsonEncode(browserId)}]
     expect(row.actions.first.steps, isNotEmpty);
     expect(models.settings, isNotNull, reason: 'the type keeps a setting of a model');
     expect(models.settings!.schema, isNotEmpty);
+  });
   });
 }

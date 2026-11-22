@@ -77,11 +77,17 @@ final class _Far implements HostLink {
         result = {'path': '/srv/scratch/${params['session']}', 'made': true};
       case 'fs/scratch_remove':
         result = {'removed': true};
+      case 'accounts/providers':
+        result = {
+          'providers': [
+            {'id': 'claude_accounts', 'title': 'Claude', 'harness': 'claude'},
+          ],
+        };
       case 'accounts/list':
         result = {
           'accounts': [
             for (final name in ['far-work', 'far-other', 'far-key'])
-              {'name': name, 'harness': 'claude', 'kind': 'claude-login', 'id': 'id-$name', 'state': 'signed in'},
+              {'name': name, 'provider': 'claude_accounts', 'agent': 'claude', 'fits': ['claude'], 'kind': 'claude-login', 'id': 'id-$name', 'state': 'signed in'},
           ],
         };
       case 'accounts/entries':

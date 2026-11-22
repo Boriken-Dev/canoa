@@ -60,6 +60,10 @@ pub(super) fn call(
         .ok()
         .and_then(|held| held.get(&key).cloned())
         .filter(|(at, _)| at.elapsed() < KEEP);
+    let provider = crate::accounts::matching::Catalogs::new(&config)
+        .made(&account.kind)
+        .map(|(made, _)| made.harness.unwrap_or(made.provider))
+        .or_else(|| super::canonical_usage_provider(Some(&config), &account.usage_id()));
     let row = if let Some((_, held)) = held {
         held
     } else {
@@ -75,6 +79,7 @@ pub(super) fn call(
         if let Some(log) = log {
             log.note_report(
                 &account.usage_id(),
+                provider.as_deref(),
                 &read.report,
                 crate::usage_splice::unix_now(),
             );
@@ -85,7 +90,13 @@ pub(super) fn call(
         }
         row
     };
-    Ok(json!({"account": recorded(row, log, id.as_ref())}))
+    let mut row = recorded(row, log, id.as_ref());
+    if let (Some(provider), serde_json::Value::Object(fields)) = (provider, &mut row) {
+        fields
+            .entry("provider")
+            .or_insert_with(|| serde_json::Value::String(provider));
+    }
+    Ok(json!({"account": row}))
 }
 
 /// Whether `kind` is an API key or a gateway's token, which a provider bills by use and which so has no plan to read.

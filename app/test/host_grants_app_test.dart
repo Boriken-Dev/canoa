@@ -44,9 +44,15 @@ final class _Control implements HostLink {
     params.putIfAbsent(method, () => []).add((request['params'] as Map?)?.cast<String, Object?>() ?? const {});
     final Object? result = switch (method) {
       'host/grants' => {'grants': grants},
+      'accounts/providers' => {
+        'providers': [
+          {'id': 'claude_accounts', 'title': 'Claude', 'harness': 'claude'},
+          {'id': 'codex_accounts', 'title': 'Codex', 'harness': 'codex'},
+        ],
+      },
       'accounts/list' => {
         'accounts': [
-          {'name': 'work', 'harness': 'claude', 'kind': 'anthropic-api-key', 'id': 'id-work', 'state': 'signed in'},
+          {'name': 'work', 'provider': 'claude_accounts', 'agent': 'claude', 'fits': ['claude'], 'kind': 'anthropic-api-key', 'id': 'id-work', 'state': 'signed in'},
         ],
       },
       'accounts/entries' => {

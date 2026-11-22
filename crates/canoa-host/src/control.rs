@@ -520,7 +520,45 @@ impl Control {
             .ok_or((REFUSED, "this host keeps no usage records".to_owned()))?;
         match method {
             "usage/summary" => log.summary(params).map_err(|what| bad(&what)),
-            _ => Ok(log.limits()),
+            _ => {
+                let mut answer = log.limits();
+                self.fill_limit_providers(&mut answer);
+                Ok(answer)
+            }
+        }
+    }
+
+    fn fill_limit_providers(&self, answer: &mut Value) {
+        let Some(entries) = answer.get_mut("accounts").and_then(Value::as_array_mut) else {
+            return;
+        };
+        let config = self
+            .accounts
+            .as_ref()
+            .and_then(|accounts| accounts.config().ok());
+        for entry in entries {
+            let Some(fields) = entry.as_object_mut() else {
+                continue;
+            };
+            let existing = fields
+                .get("provider")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let canonical = existing
+                .and_then(|value| {
+                    canonical_usage_provider(config.as_ref(), value)
+                        .or_else(|| Some(value.to_owned()))
+                })
+                .or_else(|| {
+                    fields
+                        .get("account")
+                        .and_then(Value::as_str)
+                        .and_then(|account| canonical_usage_provider(config.as_ref(), account))
+                });
+            if let Some(provider) = canonical {
+                fields.insert("provider".to_owned(), Value::String(provider));
+            }
         }
     }
 
@@ -581,6 +619,52 @@ impl Control {
             .as_ref()
             .map_err(|why| (REFUSED, format!("this host keeps no programs: {why}")))
     }
+}
+
+/// Canonical provider `groupId` (`harness` if agent-owned, else maker provider id) for a usage row whose account id is `account_id`.
+pub(super) fn canonical_usage_provider(
+    config: Option<&crate::config::Config>,
+    account_id: &str,
+) -> Option<String> {
+    if account_id.is_empty() {
+        return None;
+    }
+    let local = account_id
+        .strip_prefix("local:")
+        .or_else(|| account_id.strip_suffix(":local"));
+    if let Some(config) = config {
+        let catalogs = crate::accounts::matching::Catalogs::new(config);
+        if let Some(account) = config
+            .accounts
+            .values()
+            .find(|account| account.usage_id() == account_id)
+            && let Some((made, _)) = catalogs.made(&account.kind)
+        {
+            return Some(made.harness.unwrap_or(made.provider));
+        }
+        let providers = crate::accounts::providers::all(config);
+        let from_providers = |candidate: &str| -> Option<String> {
+            providers.iter().find_map(|listed| {
+                (listed.harness.as_deref() == Some(candidate) || listed.id == candidate)
+                    .then(|| listed.harness.clone().unwrap_or_else(|| listed.id.clone()))
+            })
+        };
+        if let Some(harness) = local {
+            if let Some(found) = from_providers(harness) {
+                return Some(found);
+            }
+            if catalogs.harnesses().iter().any(|known| known == harness) {
+                return Some(harness.to_owned());
+            }
+        }
+        if let Some(found) = from_providers(account_id) {
+            return Some(found);
+        }
+    }
+    let bundled = local.unwrap_or(account_id);
+    crate::bundled::harness_sources()
+        .any(|(_, harness)| harness == bundled)
+        .then(|| bundled.to_owned())
 }
 
 fn bad(what: &str) -> (i32, String) {

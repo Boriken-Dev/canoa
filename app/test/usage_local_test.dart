@@ -158,4 +158,47 @@ void main() {
     expect([for (final each in accounts.logins) (each.agent, each.id)], [('claude', 'local:claude'), ('codex', 'local:codex')]);
     expect(accounts.logins.every((each) => each.automatic), isTrue);
   });
+
+  testWidgets('unlisted or legacy codex usage groups under codex instead of Other', (tester) async {
+    final (usage, _) = await _open(tester, (host) {
+      host.heard.addAll([
+        {
+          'account': 'codex:local',
+          'updated_at': _noon - 10,
+          'observed_at': _noon - 10,
+          'buckets': [_window('weekly', 'Weekly', 250, hours: 168, resetsIn: 4 * 86400)],
+        },
+        {
+          'account': 'codex',
+          'updated_at': _noon - 20,
+          'observed_at': _noon - 20,
+          'buckets': [_window('session', 'Session', 150, hours: 5, resetsIn: 3600)],
+        },
+        {
+          'account': 'id-remote-codex',
+          'provider': 'codex_accounts',
+          'updated_at': _noon - 30,
+          'observed_at': _noon - 30,
+          'buckets': [_window('weekly', 'Weekly', 350, hours: 168, resetsIn: 5 * 86400)],
+        },
+        {
+          'account': 'id-other',
+          'updated_at': _noon - 40,
+          'observed_at': _noon - 40,
+          'buckets': [_window('weekly', 'Weekly', 100, hours: 168, resetsIn: 2 * 86400)],
+        },
+      ]);
+    });
+    expect(find.byKey(const Key('usage-provider codex')), findsOneWidget);
+    expect(find.byKey(const Key('usage-index provider codex')), findsOneWidget);
+    expect(find.byKey(const Key('usage-provider Other')), findsOneWidget);
+    for (final id in ['codex:local', 'codex', 'id-remote-codex']) {
+      final entry = usage.all.firstWhere((each) => each.id == id);
+      expect(entry.provider, 'codex');
+      expect(entry.provider, isNot(otherProvider));
+    }
+    expect(usage.all.firstWhere((each) => each.id == 'codex:local').name, "This machine's login");
+    expect(usage.all.firstWhere((each) => each.id == 'id-other').provider, otherProvider);
+    expect(usage.accountName('codex:local'), "This machine's login");
+  });
 }

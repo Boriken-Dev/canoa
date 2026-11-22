@@ -273,16 +273,17 @@ fn the_latest_allowances_are_kept_for_each_account_and_survive_a_restart() {
     let mut report = UsageReport::new();
     report.observed_at = NOW - 5;
     report.buckets = vec![Bucket::new("five_hour")];
-    log.note_report("work", &report, NOW);
+    log.note_report("work", Some("claude"), &report, NOW);
     let bare = UsageReport::new();
-    log.note_report("home", &bare, NOW);
+    log.note_report("home", None, &bare, NOW);
     let kept = log.limits();
     assert_eq!(kept["accounts"].as_array().map(Vec::len), Some(1), "{kept}");
     assert_eq!(kept["accounts"][0]["account"], "work");
+    assert_eq!(kept["accounts"][0]["provider"], "claude");
     assert_eq!(kept["accounts"][0]["updated_at"], NOW);
     assert_eq!(kept["accounts"][0]["observed_at"], NOW - 5);
     // The same reading again keeps when the host first read it.
-    log.note_report("work", &report, NOW + 30);
+    log.note_report("work", Some("claude"), &report, NOW + 30);
     assert_eq!(log.limits()["accounts"][0]["updated_at"], NOW);
     drop(log);
     let log = UsageLog::open(dir.clone(), 400, NOW + 100);

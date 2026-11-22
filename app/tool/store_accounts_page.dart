@@ -61,7 +61,7 @@ Future<String> _first(String options) async {
     // The account: signed in by an API key typed into the form the host sealed to this browser's key.
     final name = asked['name']! as String;
     final host = ControlAccountsHost(app.control);
-    final run = host.signIn(name: name, harness: 'claude', method: 'api-key');
+    final run = host.signIn(name: name, provider: 'claude_accounts', method: 'api-key');
     await _until(() => run.asking != null || !run.running, 'the sign-in to ask for the key');
     if (run.asking == null) throw StateError('the sign-in ended without asking: ${run.problem}');
     final ask = run.asking!;

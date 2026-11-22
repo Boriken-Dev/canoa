@@ -104,6 +104,8 @@ struct Seen {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct Snapshot {
     account: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
     /// When the host read them, Unix seconds.
     updated_at: i64,
     observed_at: i64,
@@ -360,7 +362,13 @@ impl UsageLog {
     }
 
     /// Keeps the allowances `report` shows for `account` as its latest, when they are not what is kept.
-    pub(crate) fn note_report(&self, account: &str, report: &UsageReport, now: i64) {
+    pub(crate) fn note_report(
+        &self,
+        account: &str,
+        provider: Option<&str>,
+        report: &UsageReport,
+        now: i64,
+    ) {
         if !report.supported || (report.buckets.is_empty() && report.limit.is_none()) {
             return;
         }
@@ -371,19 +379,28 @@ impl UsageLog {
             .limit
             .as_ref()
             .and_then(|limit| serde_json::to_value(limit).ok());
+        let provider = provider.filter(|p| !p.is_empty()).map(str::to_owned);
         let bytes = {
             let mut state = lock(&self.state);
             if state.limits.get(account).is_some_and(|kept| {
                 kept.buckets == buckets
                     && kept.limit == limit
                     && kept.observed_at == report.observed_at
+                    && (provider.is_none() || kept.provider == provider)
             }) {
                 return;
             }
+            let kept_provider = provider.or_else(|| {
+                state
+                    .limits
+                    .get(account)
+                    .and_then(|kept| kept.provider.clone())
+            });
             state.limits.insert(
                 account.to_owned(),
                 Snapshot {
                     account: account.to_owned(),
+                    provider: kept_provider,
                     updated_at: now,
                     observed_at: report.observed_at,
                     buckets,
