@@ -401,6 +401,17 @@ fn an_initialize_answer_is_read_where_its_version_puts_what_it_says() {
 }
 
 #[test]
+fn a_system_prompt_said_beyond_the_standards_place_counts_only_where_the_preset_names_it() {
+    let (takes, _) = described(&json!({
+        "protocolVersion": 1,
+        "agentCapabilities": {"_meta": {"vendor": {"systemPrompt": true}}},
+    }));
+    assert!(!takes.system_prompt(None));
+    assert!(takes.system_prompt(Some(&["_meta", "vendor", "systemPrompt"])));
+    assert!(!takes.system_prompt(Some(&["_meta", "other", "systemPrompt"])));
+}
+
+#[test]
 fn a_session_request_gets_the_parts_and_a_client_server_may_not_take_a_profile_name() {
     let parts = Parts {
         system_prompt: Some("Host.".to_owned()),
@@ -2414,14 +2425,14 @@ fn what_preparing_made_reaches_the_session_only_for_the_version_it_was_made_for(
         "the state directory is `NAME_OVERLAY_STATE`"
     );
 
-    // A preparation of another version counts for nothing when dependency digests also differ.
+    // A preparation of another version counts for nothing when its dependency files differ too.
     prepared_by_hand(&temp, "needy", &format!("sha256:{}", "0".repeat(64)));
     let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
     let stale = report(&connection);
     assert_eq!(item(&stale, "setup: setup.py")["state"], "off", "{stale}");
     assert_eq!(env_value(&connection, "PYTHONPATH"), Some(own.as_str()));
 
-    // When dependency manifest digest is recorded and unchanged across a non-dependency edit, dependencies stay applied.
+    // A preparation of another version whose dependency files are the recorded ones keeps the dependencies applied.
     let dep_digest = prepare::dependency_digest_files(
         &temp.0.join("overlays/needy"),
         "lib/python/requirements.txt",
@@ -3783,6 +3794,125 @@ fn antigravity_overlay_context_applies_across_system_prompt_instruction_file_and
     );
 }
 
+fn team_connection(temp: &Temp) -> Connection {
+    temp.write(
+        "overlays/team/OVERLAY.md",
+        "---\nname: team\ndescription: Team\n---\nUse overlay rule alpha.\n",
+    );
+    let digest = digest_of(temp, "overlays/team");
+    temp.write(
+        "overlays/team.json",
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+    let cfg = "[host.agents.Antigravity]\nprogram = \"agent\"\nprofiles = [\"main\"]\n\
+               [host.profiles.main]\noverlays = [\"team\"]\n";
+    Connection::prepare(&offer_of(temp, cfg), 0, "Antigravity", &lookup).expect("prepared")
+}
+
+#[test]
+fn an_instruction_file_that_could_not_be_written_is_refused_and_its_directory_is_not_given() {
+    let temp = temp_with_skill();
+    let connection = team_connection(&temp);
+    // A directory already at the place the connection writes under is never taken, so nothing can be written there.
+    std::fs::create_dir_all(connection.skills()).expect("in the way");
+    let takes = Takes {
+        version: 1,
+        capabilities: json!({"sessionCapabilities": {"additionalDirectories": {}}}),
+    };
+    let parts = parts_for(&connection, Some("antigravity"), &takes, &lookup);
+    let context = item(&parts.report, "context");
+    assert_eq!(context["state"], "refused", "{context}");
+    assert!(
+        context["how"]
+            .as_str()
+            .is_some_and(|how| how.contains("could not be written")),
+        "{context}"
+    );
+    assert!(parts.directories.is_empty(), "{:?}", parts.directories);
+    assert!(parts.written.is_none());
+}
+
+#[test]
+fn a_sessions_directory_is_kept_for_a_new_or_loaded_session_and_dropped_when_it_ends_or_fails() {
+    struct Quiet;
+    impl coqui_transport::Channel for Quiet {
+        fn send(&self, _: &[u8]) -> Result<(), coqui_transport::Failure> {
+            Ok(())
+        }
+        fn receive(
+            &self,
+            _: Option<core::time::Duration>,
+        ) -> Result<Option<Vec<u8>>, coqui_transport::Failure> {
+            Ok(None)
+        }
+        fn close(&self) {}
+        fn set_max_message(&self, _: usize) {}
+    }
+    let temp = temp_with_skill();
+    let connection = team_connection(&temp);
+    let quiet = Quiet;
+    let scope = Scope::new(Vec::new());
+    let hosted = Hosted::in_process(&quiet, &scope, &connection);
+    hosted.hold().parts = Some(parts_for(
+        &connection,
+        Some("antigravity"),
+        &Takes::default(),
+        &lookup,
+    ));
+    let ask = |id: u64, method: &str, params: Value| {
+        hosted
+            .forward(
+                serde_json::to_vec(
+                    &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+                )
+                .expect("json"),
+                Vec::new(),
+            )
+            .expect("forwarded");
+    };
+    let answer = |message: Value| {
+        hosted
+            .send_profiled(&serde_json::to_vec(&message).expect("json"))
+            .expect("sent");
+    };
+    ask(1, "session/new", json!({"cwd": "/work/new"}));
+    ask(
+        2,
+        "session/load",
+        json!({"sessionId": "old", "cwd": "/work/old"}),
+    );
+    ask(3, "session/new", json!({"cwd": "/work/failed"}));
+    ask(
+        4,
+        "session/load",
+        json!({"sessionId": "gone", "cwd": "/work/gone"}),
+    );
+    assert!(
+        hosted.hold().session_cwds.is_empty(),
+        "nothing is kept before the agent answers"
+    );
+    answer(json!({"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "s1"}}));
+    answer(json!({"jsonrpc": "2.0", "id": 2, "result": {}}));
+    answer(json!({"jsonrpc": "2.0", "id": 3, "error": {"code": -32000, "message": "no"}}));
+    answer(json!({"jsonrpc": "2.0", "id": 4, "error": {"code": -32000, "message": "no"}}));
+    {
+        let hold = hosted.hold();
+        assert_eq!(
+            hold.session_cwds.get("s1"),
+            Some(&Some("/work/new".to_owned()))
+        );
+        assert_eq!(
+            hold.session_cwds.get("old"),
+            Some(&Some("/work/old".to_owned()))
+        );
+        assert_eq!(hold.session_cwds.len(), 2, "{:?}", hold.session_cwds);
+        assert!(hold.session_asks.is_empty(), "{:?}", hold.session_asks);
+    }
+    ask(5, "session/close", json!({"sessionId": "s1"}));
+    assert!(!hosted.hold().session_cwds.contains_key("s1"));
+    assert!(hosted.hold().session_cwds.contains_key("old"));
+}
+
 #[test]
 fn session_environment_exports_agents_python_agents_home_and_overlay_root() {
     let temp = temp_with_skill();
@@ -3866,12 +3996,12 @@ fn mcp_skills_deduplicate_between_scripts_mode_and_mcp_only_mode() {
         item(&coding.report, "skills.duho-skill")["state"],
         "applied"
     );
-    assert_eq!(item(&coding.report, "mcp.duho-mcp")["state"], "applied");
+    assert_eq!(item(&coding.report, "mcp.duho-mcp")["state"], "off");
     assert!(
         item(&coding.report, "mcp.duho-mcp")["how"]
             .as_str()
             .unwrap()
-            .contains("deduplicated")
+            .contains("not started")
     );
 
     // Compute digest for allow_mcp using a shell-less agent take.
@@ -3899,14 +4029,11 @@ fn mcp_skills_deduplicate_between_scripts_mode_and_mcp_only_mode() {
         ro_parts.written.is_none(),
         "SKILL.md suppressed when MCP server is delivered"
     );
-    assert_eq!(
-        item(&ro_parts.report, "skills.duho-skill")["state"],
-        "applied"
-    );
+    assert_eq!(item(&ro_parts.report, "skills.duho-skill")["state"], "off");
     assert!(
         item(&ro_parts.report, "skills.duho-skill")["how"]
             .as_str()
             .unwrap()
-            .contains("deduplicated")
+            .contains("not delivered")
     );
 }

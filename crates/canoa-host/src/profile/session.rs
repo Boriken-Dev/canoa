@@ -266,6 +266,26 @@ mod tests {
     }
 
     #[test]
+    fn the_hosts_home_and_python_never_replace_the_ones_the_person_has() {
+        let who = Who {
+            python: Some("/host/python"),
+            home: Some("/host/home"),
+            ..Who::default()
+        };
+        let session = Session::new(who, Vec::new(), &none);
+        assert_eq!(value(&session, "AGENTS_HOME"), Some("/host/home"));
+        assert_eq!(value(&session, "AGENTS_PYTHON"), Some("/host/python"));
+        let theirs = |name: &str| match name {
+            "AGENTS_HOME" => Some("/person/agents".to_string()),
+            "AGENTS_PYTHON" => Some("/person/python".to_string()),
+            _ => None,
+        };
+        let session = Session::new(who, Vec::new(), &theirs);
+        assert_eq!(value(&session, "AGENTS_HOME"), Some("/person/agents"));
+        assert_eq!(value(&session, "AGENTS_PYTHON"), Some("/person/python"));
+    }
+
+    #[test]
     fn nothing_is_ever_empty_and_an_unknown_agent_has_no_identity() {
         let session = Session::new(
             Who {

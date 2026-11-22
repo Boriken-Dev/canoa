@@ -115,7 +115,7 @@ pub(super) struct Hold {
     /// templates; dropped when the session closes.
     pub(super) session_cwds: BTreeMap<String, Option<String>>,
     /// The session id (a `session/load` names it) and working directory of each session request the agent has not answered.
-    session_asks: BTreeMap<String, (Option<String>, Option<String>)>,
+    pub(super) session_asks: BTreeMap<String, (Option<String>, Option<String>)>,
     /// Messages the client sent while the host waited for an approval, in order, to be read before any other.
     queued: alloc::collections::VecDeque<Vec<u8>>,
     asked: u64,
@@ -407,7 +407,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
 
 impl<C: Channel + ?Sized> Hosted<'_, C> {
     /// An answer to `initialize` or a session request gets the report; the first also settles what each session is given.
-    fn send_profiled(&self, message: &[u8]) -> Result<(), Failure> {
+    pub(super) fn send_profiled(&self, message: &[u8]) -> Result<(), Failure> {
         // `_canoa/` and the secret extension are the host's own to ask of its client: an agent's request of that name is never
         // passed on, or the client could be made to show the host's questions, or to answer the host's real ones, for the agent.
         let screened;

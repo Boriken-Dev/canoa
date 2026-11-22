@@ -697,3 +697,70 @@ fn a_setup_record_is_whole_with_nothing_beside_it_and_keeps_its_mode() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The plan of an overlay with one Python dependency file, and its dependency.
+fn one_dependency(scratch: &Scratch) -> (Plan, Dependency) {
+    let plan = plan_for(
+        scratch,
+        "needy",
+        &[
+            ("overlay.cfg", "name = \"needy\"\n"),
+            ("lib/python/requirements.txt", "canoa-test-pkg==1.0\n"),
+        ],
+    );
+    let dependency = plan.effective.dependencies[0].clone();
+    (plan, dependency)
+}
+
+fn record_deps(home: &Home, digest: &str, dependency: &Dependency, recorded: Option<String>) {
+    let mut deps = BTreeMap::new();
+    if let Some(recorded) = recorded {
+        deps.insert(dependency.runtime.as_str().to_owned(), recorded);
+    }
+    home.write_record_with_deps("needy", &SetupRecord::new(digest, Phase::Install), &deps)
+        .expect("recorded");
+}
+
+#[test]
+fn a_runtime_is_ready_by_the_overlays_whole_digest_or_by_its_dependency_files_alone() {
+    let scratch = Scratch::new("ready");
+    let (plan, dependency) = one_dependency(&scratch);
+    let home = Home::new(scratch.overlays());
+    let other = format!("sha256:{}", "1".repeat(64));
+    assert!(
+        !home.runtime_ready("needy", &plan.digest, &dependency),
+        "nothing was prepared"
+    );
+    record_deps(&home, &plan.digest, &dependency, None);
+    assert!(home.runtime_ready("needy", &plan.digest, &dependency));
+    assert!(
+        !home.runtime_ready("needy", &other, &dependency),
+        "another version, and no dependency digest was recorded"
+    );
+    let current = dependency_digest(&plan.root, &dependency).expect("a digest");
+    record_deps(&home, &plan.digest, &dependency, Some(current));
+    assert!(
+        home.runtime_ready("needy", &other, &dependency),
+        "another version whose dependency file is the recorded one"
+    );
+    scratch.write(
+        "overlays/needy/lib/python/requirements.txt",
+        "canoa-test-pkg==2.0\n",
+    );
+    assert!(
+        !home.runtime_ready("needy", &other, &dependency),
+        "the dependency file changed"
+    );
+}
+
+#[test]
+fn a_dependency_whose_lockfile_is_missing_has_no_digest_and_is_never_ready() {
+    let scratch = Scratch::new("lockless");
+    let (plan, mut dependency) = one_dependency(&scratch);
+    let home = Home::new(scratch.overlays());
+    let current = dependency_digest(&plan.root, &dependency).expect("a digest");
+    dependency.lock = Some("lib/python/requirements.lock".to_owned());
+    assert_eq!(dependency_digest(&plan.root, &dependency), None);
+    record_deps(&home, &plan.digest, &dependency, Some(current));
+    assert!(!home.runtime_ready("needy", &format!("sha256:{}", "1".repeat(64)), &dependency));
+}
