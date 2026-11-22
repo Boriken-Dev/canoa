@@ -10,7 +10,6 @@ import 'package:canoa/desktop/desktop_shell_io.dart';
 import 'package:canoa/desktop/tray_icon.dart';
 import 'package:canoa/l10n/app_text.dart';
 import 'package:canoa/l10n/text_pack.dart';
-import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
