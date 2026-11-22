@@ -70,7 +70,7 @@
                 "string",
                 "null"
               ],
-              "description": "The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a page of them after the type's own."
+              "description": "The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a page of them with the models of the other types."
             }
           },
           "additionalProperties": false,
@@ -148,7 +148,7 @@
           "string",
           "null"
         ],
-        "description": "The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a page of them after the type's own."
+        "description": "The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a page of them with the models of the other types."
       }
     },
     "additionalProperties": false,
