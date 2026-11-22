@@ -29,6 +29,7 @@ class DetailsSurface extends WorkSurface {
   @override
   Widget build(BuildContext context, ChatSession session, SurfaceController controller) {
     final env = SurfaceEnvironment.of(context);
+    final openSurface = env.onOpenSurface;
     return SessionInspectorPanel(
       store: env.store,
       session: session,
@@ -37,6 +38,10 @@ class DetailsSurface extends WorkSurface {
       onClose: () {},
       onOpenChild: env.onOpenChild,
       onOpenInFiles: env.onOpenInFiles,
+      openShells: env.openShells,
+      runningShells: env.runningShells,
+      onOpenTerminal: openSurface == null ? null : () => openSurface('terminal'),
+      onOpenSubagents: openSurface == null ? null : () => openSurface(SubagentsSurface.surfaceId),
       // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
       opener: workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target == null ? null : workspaceOpener,
     );

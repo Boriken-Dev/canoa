@@ -247,13 +247,31 @@ class WorkSurfaces extends ChangeNotifier {
 
 /// What the app gives every surface: the store, and the ways to reach the conversation beside it.
 class SurfaceEnvironment extends InheritedWidget {
-  const SurfaceEnvironment({super.key, required this.store, required this.onComment, required this.onOpenChild, this.sessionSpend, this.onAttachText, this.onOpenInFiles, required super.child});
+  const SurfaceEnvironment({
+    super.key,
+    required this.store,
+    required this.onComment,
+    required this.onOpenChild,
+    this.sessionSpend,
+    this.onAttachText,
+    this.onOpenInFiles,
+    this.onOpenSurface,
+    this.openShells = 0,
+    this.runningShells = 0,
+    required super.child,
+  });
 
   /// Attaches [text] to the message being written as a text file called [name]; null where the conversation takes no attachments.
   final void Function(String name, String text)? onAttachText;
 
   /// Shows a path in the Files surface; null where that surface has nothing to show for the session.
   final ValueChanged<String>? onOpenInFiles;
+
+  /// Opens another surface by id (`terminal`, `subagents`, `details`); null where there is no panel to open it in.
+  final ValueChanged<String>? onOpenSurface;
+
+  /// How many interactive shells are open for the session, and how many of them are running.
+  final int openShells, runningShells;
 
   final SessionStore store;
 
@@ -271,7 +289,8 @@ class SurfaceEnvironment extends InheritedWidget {
   static SurfaceEnvironment of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SurfaceEnvironment>()!;
 
   @override
-  bool updateShouldNotify(SurfaceEnvironment oldWidget) => store != oldWidget.store;
+  bool updateShouldNotify(SurfaceEnvironment oldWidget) =>
+      store != oldWidget.store || openShells != oldWidget.openShells || runningShells != oldWidget.runningShells;
 }
 
 /// What the bottom-panel key does for [session]: with the panel hidden it shows it, opening the Terminal when the host offers one

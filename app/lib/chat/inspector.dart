@@ -65,6 +65,10 @@ class SessionInspectorPanel extends StatefulWidget {
     required this.onClose,
     this.onOpenChild,
     this.onOpenInFiles,
+    this.openShells = 0,
+    this.runningShells = 0,
+    this.onOpenTerminal,
+    this.onOpenSubagents,
     this.opener,
     this.embedded = false,
     this.diffOnly = false,
@@ -82,6 +86,15 @@ class SessionInspectorPanel extends StatefulWidget {
 
   /// Opens a path in the Files surface; null where it has nothing to show for this session.
   final ValueChanged<String>? onOpenInFiles;
+
+  /// Open and running interactive shells for [session].
+  final int openShells, runningShells;
+
+  /// Opens the interactive terminal surface when shells exist.
+  final VoidCallback? onOpenTerminal;
+
+  /// Opens the Subagents surface when subagents exist.
+  final VoidCallback? onOpenSubagents;
 
   /// What can be done with a path on this computer; null when the session's files are on another host.
   final WorkspaceOpener? opener;
@@ -142,6 +155,10 @@ class _SessionInspectorPanelState extends State<SessionInspectorPanel> {
         onClose: widget.onClose,
         embedded: widget.embedded,
         onOpenInFiles: widget.onOpenInFiles,
+        openShells: widget.openShells,
+        runningShells: widget.runningShells,
+        onOpenTerminal: widget.onOpenTerminal,
+        onOpenSubagents: widget.onOpenSubagents,
         opener: widget.opener,
         onOpenChild: (id) {
           widget.store.openChild(widget.session, id);
@@ -166,10 +183,17 @@ class SessionInspector extends StatelessWidget {
     required this.onClose,
     this.onOpenChild,
     this.onOpenInFiles,
+    this.openShells = 0,
+    this.runningShells = 0,
+    this.onOpenTerminal,
+    this.onOpenSubagents,
     this.opener,
     this.sessionSpend,
     this.embedded = false,
   });
+
+  final int openShells, runningShells;
+  final VoidCallback? onOpenTerminal, onOpenSubagents;
 
   final bool embedded;
 
@@ -203,10 +227,69 @@ class SessionInspector extends StatelessWidget {
     final heading = Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600);
     final children = lineage(session);
     final commands = commandsOf(session);
-    final running = BackgroundTasks.runningIn(children, commands);
+    final running = BackgroundTasks.runningIn(children, commands) + runningShells;
+    final hasBackground = children.isNotEmpty || commands.isNotEmpty || openShells > 0;
+    final stoppableChildren = children.any((child) => child.live && !child.native);
     // The folder the Files surface shows, so a row's path reads the same in both.
     final workspace = worktree?.path ?? session.cwd;
     final outputs = outputsOf(session, workspace);
+    Widget backgroundSection() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const SizedBox(height: 16),
+      Row(children: [
+        Expanded(child: Text(running > 0 ? 'Background tasks · $running running' : 'Background tasks', style: heading)),
+        if (stoppableChildren)
+          TextButton(
+            key: const ValueKey('inspector stop all tasks'),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8), minimumSize: Size.zero),
+            onPressed: () => unawaited(store.stopTasks(session)),
+            child: const Text('Stop all'),
+          ),
+        if (children.isNotEmpty && onOpenSubagents != null)
+          TextButton(
+            key: const ValueKey('inspector open subagents'),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8), minimumSize: Size.zero),
+            onPressed: onOpenSubagents,
+            child: const Text('Subagents'),
+          ),
+      ]),
+      const SizedBox(height: 4),
+      if (openShells > 0)
+        InkWell(
+          key: const ValueKey('inspector open shells'),
+          borderRadius: BorderRadius.circular(look.radius / 2),
+          onTap: onOpenTerminal,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(children: [
+              SizedBox.square(dimension: 18, child: Icon(Icons.terminal, size: 16, color: runningShells > 0 ? look.accent : look.muted)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  runningShells > 0
+                      ? (runningShells == 1 ? '1 interactive shell running' : '$runningShells interactive shells running')
+                      : (openShells == 1 ? '1 interactive shell open' : '$openShells interactive shells open'),
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+              if (onOpenTerminal != null) Icon(Icons.chevron_right, size: 16, color: look.muted),
+            ]),
+          ),
+        ),
+      if (children.isNotEmpty || commands.isNotEmpty)
+        BackgroundTasks(
+          children: children,
+          commands: commands,
+          now: store.clock,
+          onOpenChild: onOpenChild,
+          onStopChild: (id) => unawaited(store.stopTask(session, id)),
+        ),
+    ]);
+    Widget outputsSection() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const SizedBox(height: 16),
+      Text('Outputs · ${outputs.length}', style: heading),
+      const SizedBox(height: 4),
+      OutputsList(outputs: outputs, root: workspace, onOpenInFiles: onOpenInFiles, opener: opener),
+    ]);
     return Material(
       color: context.look.rail,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -254,24 +337,9 @@ class SessionInspector extends StatelessWidget {
               const SizedBox(height: 6),
               _SessionTokens(sessionId: session.remoteSessionId!, load: sessionSpend!, revision: session.usage.used),
             ],
-            if (outputs.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text('Outputs · ${outputs.length}', style: heading),
-              const SizedBox(height: 4),
-              OutputsList(outputs: outputs, root: workspace, onOpenInFiles: onOpenInFiles, opener: opener),
-            ],
-            if (children.isNotEmpty || commands.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text(running > 0 ? 'Background tasks · $running running' : 'Background tasks', style: heading),
-              const SizedBox(height: 4),
-              BackgroundTasks(
-                children: children,
-                commands: commands,
-                now: store.clock,
-                onOpenChild: onOpenChild,
-                onStopChild: (id) => unawaited(store.stopTask(session, id)),
-              ),
-            ],
+            if (hasBackground && running > 0) backgroundSection(),
+            if (outputs.isNotEmpty) outputsSection(),
+            if (hasBackground && running == 0) backgroundSection(),
             const SizedBox(height: 16),
             Text('Changes', style: heading),
             const SizedBox(height: 6),

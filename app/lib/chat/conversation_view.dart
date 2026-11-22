@@ -19,12 +19,15 @@ import '../shell/layout_state.dart';
 import '../shell/surface.dart';
 import '../shell/work_panel.dart';
 import '../surfaces/files_surface.dart';
+import '../surfaces/subagents_surface.dart' show SubagentsSurface;
+import '../surfaces/terminal_controller.dart' show TerminalWorkspace;
 import '../surfaces/terminal_surface.dart';
 import '../theme/look.dart';
 import '../usage/spend_model.dart' show SpendRow;
 import '../workspace/open_in.dart' show workspaceOpener;
 import '../workspace/open_in_ui.dart';
 import 'child_thread.dart';
+import 'activity_strip.dart';
 import 'composer.dart';
 import 'delegation_row.dart';
 import 'delegation_view.dart';
@@ -139,6 +142,22 @@ class _ConversationViewState extends State<ConversationView> {
     widget.store.refreshGit(session);
     mine.openSurface(surface);
     slot == SurfaceSlot.right ? layout.showRight() : layout.showBottom();
+  }
+
+  /// Opens [id] and brings its panel into view without closing it if already active.
+  void _openSurface(ChatSession session, String id) {
+    final surface = widget.surfaces.registry.where((each) => each.id == id && each.available(session)).firstOrNull;
+    if (surface == null) return;
+    widget.store.refreshGit(session);
+    final opened = widget.surfaces.of(session.id).openSurface(surface);
+    opened.slot == SurfaceSlot.bottom ? widget.layout.showBottom() : widget.layout.showRight();
+  }
+
+  /// The shells open for [session], if its Terminal surface has made any.
+  TerminalWorkspace? _openTerminalWorkspace(ChatSession? session) {
+    if (session == null || widget.chatOnly) return null;
+    final open = widget.surfaces.of(session.id).find(TerminalSurface.surfaceId);
+    return open == null ? null : TerminalSurface.openWorkspace(open.controller);
   }
 
   TerminalSurface? _terminalSurface(ChatSession session) {
@@ -350,7 +369,7 @@ class _ConversationViewState extends State<ConversationView> {
               else if (widget.narrow || headerBox.maxWidth < 680)
                 Tooltip(message: _state(session), child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)))
               else
-                Chip(avatar: const Icon(Icons.hub_outlined, size: 16), label: Text(_state(session)), visualDensity: VisualDensity.compact),
+                Chip(key: const Key('session-state-chip'), avatar: const Icon(Icons.hub_outlined, size: 16), label: Text(_state(session)), visualDensity: VisualDensity.compact),
               if (!widget.narrow && !widget.chatOnly)
                 LayoutControls(
                   layout: widget.layout,
@@ -400,6 +419,29 @@ class _ConversationViewState extends State<ConversationView> {
             ),
           ),
         ),
+        ListenableBuilder(
+          listenable: widget.surfaces.of(session.id),
+          builder: (context, _) {
+            final workspace = _openTerminalWorkspace(session);
+            Widget strip() {
+              final openShells = workspace?.shells ?? 0;
+              final runningShells = workspace?.runningShells ?? 0;
+              if (!SessionActivityStrip.visibleFor(session, openShells: openShells, runningShells: runningShells)) {
+                return const SizedBox.shrink();
+              }
+              return SessionActivityStrip(
+                session: session,
+                openShells: openShells,
+                runningShells: runningShells,
+                onOpenSubagents: widget.chatOnly ? null : () => _openSurface(session, SubagentsSurface.surfaceId),
+                onOpenDetails: widget.chatOnly ? null : () => _openSurface(session, DetailsSurface.surfaceId),
+                onOpenTerminal: widget.chatOnly ? null : () => _openSurface(session, TerminalSurface.surfaceId),
+                onStopSubagents: () => unawaited(widget.store.stopTasks(session)),
+              );
+            }
+            return workspace == null ? strip() : ListenableBuilder(listenable: workspace, builder: (context, _) => strip());
+          },
+        ),
         if (session.status == SessionStatus.working && session.tasks.live.isNotEmpty)
           DelegationWaiting(
             children: [for (final task in session.tasks.live) ChildView.of(task)],
@@ -433,16 +475,26 @@ class _ConversationViewState extends State<ConversationView> {
       registry: widget.surfaces,
       narrow: widget.narrow,
       child: conversation,
-      wrap: (panels) => SurfaceEnvironment(
-        store: widget.store,
-        sessionSpend: widget.sessionSpend,
-        onComment: _addToComposer,
-        onAttachText: widget.store.canAttach(session) ? (name, text) => _attachText(session, name, text) : null,
-        onOpenInFiles: _filesSurface(session) == null ? null : (path) => _openInFiles(session, path),
-        onOpenChild: () {
-          if (widget.narrow) widget.layout.setRightOpen(false);
+      wrap: (panels) => ListenableBuilder(
+        listenable: widget.surfaces.of(session.id),
+        builder: (context, _) {
+          final workspace = _openTerminalWorkspace(session);
+          Widget env() => SurfaceEnvironment(
+            store: widget.store,
+            sessionSpend: widget.sessionSpend,
+            onComment: _addToComposer,
+            onAttachText: widget.store.canAttach(session) ? (name, text) => _attachText(session, name, text) : null,
+            onOpenInFiles: _filesSurface(session) == null ? null : (path) => _openInFiles(session, path),
+            onOpenSurface: (id) => _openSurface(session, id),
+            openShells: workspace?.shells ?? 0,
+            runningShells: workspace?.runningShells ?? 0,
+            onOpenChild: () {
+              if (widget.narrow) widget.layout.setRightOpen(false);
+            },
+            child: panels,
+          );
+          return workspace == null ? env() : ListenableBuilder(listenable: workspace, builder: (context, _) => env());
         },
-        child: panels,
       ),
     );
   }
