@@ -127,6 +127,20 @@ fn a_default_catalog_is_listed_first_until_its_label_is_named_or_turned_off() {
         ["boriken"]
     );
 
+    let mcps = types.iter().find(|kind| kind.id == "mcps").expect("mcps");
+    let mcp_labels = |table: Value| -> Vec<String> {
+        rows_of(mcps, &table)
+            .into_iter()
+            .map(|row| row["label"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    };
+    assert_eq!(mcp_labels(json!(null)), ["official"]);
+    assert!(mcp_labels(json!({"official": false})).is_empty());
+    assert_eq!(
+        mcp_labels(json!({"official": "https://mirror.example/"})),
+        ["official"]
+    );
+
     let extensions = types
         .iter()
         .find(|kind| kind.id == "extensions")

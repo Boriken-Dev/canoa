@@ -26,14 +26,24 @@ const MAX_DEPTH: usize = 5;
 /// a data file, one folder a line.
 const COMMON_FOLDERS: &str = include_str!("skill_folders.txt");
 
-/// The folders whose subfolders are skills: those of [`COMMON_FOLDERS`] and the folder each loaded agent says it reads skills from.
-fn skill_folders() -> Vec<String> {
-    let mut folders: Vec<String> = COMMON_FOLDERS
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_owned)
-        .collect();
+/// The folders whose subfolders are skills: `custom` when set (from `[host.store] skill_folders`), else [`COMMON_FOLDERS`],
+/// plus the folder each loaded agent says it reads skills from.
+fn skill_folders(custom: Option<&[String]>) -> Vec<String> {
+    let mut folders: Vec<String> = match custom {
+        Some(configured) => configured
+            .iter()
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_owned)
+            .collect(),
+        None => COMMON_FOLDERS
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_owned)
+            .collect(),
+    };
     for folder in crate::vendors::all()
         .into_iter()
         .filter_map(|vendor| vendor.skills_folder)
@@ -146,7 +156,7 @@ impl Overlays {
             });
         }
         found.sort_by(|a, b| a.folder.cmp(&b.folder));
-        Ok(choose(found))
+        Ok(choose(found, self.skill_folders.as_deref()))
     }
 
     /// The listing of each `SKILL.md` in `found`: read from its blob, its front matter alone.
@@ -227,7 +237,7 @@ impl Overlays {
 
 /// The `SKILL.md`s `npx skills` lists of `found`, in folder order: the folder's own alone when it has one, else those directly
 /// inside the usual folders, else any within [`MAX_DEPTH`] folders.
-fn choose(found: Vec<Found>) -> Vec<Found> {
+fn choose(found: Vec<Found>, custom_folders: Option<&[String]>) -> Vec<Found> {
     if found.iter().any(|each| each.folder.is_empty()) {
         return found
             .into_iter()
@@ -235,7 +245,7 @@ fn choose(found: Vec<Found>) -> Vec<Found> {
             .collect();
     }
     // A skill directly inside `skills/` has the folder `skills/<name>`, whose parent is a usual folder.
-    let folders = skill_folders();
+    let folders = skill_folders(custom_folders);
     let usual = |each: &Found| {
         each.folder
             .rsplit_once('/')

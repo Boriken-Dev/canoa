@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use canoa::store::exec::{GuardedSpawner, Run, clean, is_credential_name};
+use canoa::store::protect::Protected;
 use canoa::store::{Change, Check, FetchRequest, InstallTools, PATH, UnpackRequest};
 use canoa_host::store::footprint::{Footprint, Watch, uncovered};
 use canoa_host::store::tools::{HttpTransport, LocalTools};
@@ -45,8 +46,6 @@ fn names_that_carry_a_secret_are_credentials() {
         "NPMTOKEN",
         "GH_PAT",
         "SSH_AUTH_SOCK",
-        "DOTAGENTS_SECRET_THING",
-        "dotagents_x",
         "OPENAIAPIKEY",
         "GOOGLE_APPLICATION_CREDENTIALS",
         "AWS_SHARED_CREDENTIALS",
@@ -54,6 +53,9 @@ fn names_that_carry_a_secret_are_credentials() {
     ] {
         assert!(is_credential_name(name), "{name}");
     }
+    let recipe_declared = Protected::new(["DOTAGENTS_*"]);
+    assert!(recipe_declared.protects_name("DOTAGENTS_SECRET_THING"));
+    assert!(recipe_declared.protects_name("dotagents_x"));
     for name in ["PATH", "HOME", "TEMP", "SystemRoot", "PATHEXT", "LANG"] {
         assert!(!is_credential_name(name), "{name}");
     }

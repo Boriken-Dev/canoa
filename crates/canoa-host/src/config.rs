@@ -640,6 +640,9 @@ pub struct StoreConfig {
     pub protected: Option<Vec<String>>,
     /// `credential_variables`: the variables an install is never given, matched against a name, in the same form.
     pub credential_variables: Option<Vec<String>>,
+    /// `skill_folders`: folders searched for `SKILL.md` directories when scanning a skills source (a line or list, replacing
+    /// the built-in common list when set; loaded agent folders are still included).
+    pub skill_folders: Option<Vec<String>>,
     /// `index_ttl`: seconds the catalog index answers with no network (default 300); past it the stale index is served at once
     /// and refreshed in the background. 0 refreshes on every request.
     pub index_ttl: Option<u64>,
@@ -971,6 +974,7 @@ impl RawLines {
 struct RawStore {
     protected: Option<RawLines>,
     credential_variables: Option<RawLines>,
+    skill_folders: Option<RawLines>,
     index_ttl: Option<u64>,
     index_cache_bytes: Option<u64>,
     tools: Option<bool>,
@@ -2457,6 +2461,7 @@ impl Config {
             .map_or_else(StoreConfig::default, |raw| StoreConfig {
                 protected: raw.protected.map(RawLines::lines),
                 credential_variables: raw.credential_variables.map(RawLines::lines),
+                skill_folders: raw.skill_folders.map(RawLines::lines),
                 index_ttl: raw.index_ttl,
                 index_cache_bytes: raw.index_cache_bytes,
                 tools: raw.tools,

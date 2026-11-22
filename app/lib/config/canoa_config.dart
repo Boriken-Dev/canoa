@@ -1071,18 +1071,21 @@ final class CanoaConfig {
   /// `[store] skills_search`: the skills directory the Skills page searches, as the host asks it. Absent or `false` is off, which
   /// it is until the person turns it on; `true` is [defaultSkillsSearch]; an address is another directory that answers the same.
   /// Null when off.
-  String? get skillsSearch => _skillsSearch((tables['store'] as Map?)?['skills_search']);
+  String? get skillsSearch => skillsSearchWithDefault(defaultSkillsSearch);
+
+  /// Like [skillsSearch], resolving `true` with [defaultAddress] (for example, the host's reported default).
+  String? skillsSearchWithDefault(String defaultAddress) => _skillsSearch((tables['store'] as Map?)?['skills_search'], defaultAddress: defaultAddress);
 
   /// The directory `skills_search = true` names, which the Skills page shows by name while the host is not asked. The host reads
   /// the same address; `host_constants_test.dart` holds them equal.
   static const defaultSkillsSearch = 'https://skills.sh';
 
-  static String? _skillsSearch(Object? raw) {
+  static String? _skillsSearch(Object? raw, {String defaultAddress = defaultSkillsSearch}) {
     switch (raw) {
       case null || false:
         return null;
       case true:
-        return defaultSkillsSearch;
+        return defaultAddress;
       case final String address:
         final uri = Uri.tryParse(address);
         final loopback = uri != null && (uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host == '[::1]' || uri.host == '::1');

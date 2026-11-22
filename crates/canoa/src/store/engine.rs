@@ -91,7 +91,8 @@ impl<R: Recipe> Engine<R> {
             dir,
             environment.clone(),
             deadline_after(PROBE_TIMEOUT_MS),
-        );
+        )
+        .without_variables(self.recipe.protected_variables());
         let launch = self.recipe.launch_environment();
         let extra: Vec<(&str, &str)> = launch
             .iter()
@@ -355,6 +356,7 @@ impl<R: Recipe> Engine<R> {
             request.environment.expose().clone(),
             deadline,
         )
+        .without_variables(self.recipe.protected_variables())
         .prompter(prompter);
         self.recipe
             .finish(&Finish::new(&request.staging, &release, &run, tools))?;

@@ -69,7 +69,16 @@ final class CatalogRow {
 
 /// One Store type that reads catalogs.
 final class CatalogType {
-  const CatalogType({required this.id, required this.title, required this.words, this.defaultLabel, this.rows = const [], this.sources = const []});
+  const CatalogType({
+    required this.id,
+    required this.title,
+    required this.words,
+    this.defaultLabel,
+    this.defaultSpec,
+    this.skillsSearchDefault,
+    this.rows = const [],
+    this.sources = const [],
+  });
 
   factory CatalogType.fromAnswer(Map<Object?, Object?> each) {
     final words = each['words'];
@@ -81,6 +90,8 @@ final class CatalogType {
           ? CatalogWords(noun: '${words['noun']}', plural: '${words['plural']}', lists: '${words['lists']}')
           : CatalogWords.generic,
       defaultLabel: def is Map<Object?, Object?> ? def['label'] as String? : null,
+      defaultSpec: def is Map<Object?, Object?> ? def['source'] as String? : null,
+      skillsSearchDefault: each['skills_search'] as String?,
       rows: [
         for (final row in each['catalogs'] as List<Object?>? ?? const [])
           if (row is Map<Object?, Object?>)
@@ -101,8 +112,12 @@ final class CatalogType {
   final String id, title;
   final CatalogWords words;
 
-  /// The label of the catalog the type offers until the person removes it.
+  /// The label and source of the catalog the type offers until the person removes it.
   final String? defaultLabel;
+  final String? defaultSpec;
+
+  /// The directory address the host uses when `skills_search = true`.
+  final String? skillsSearchDefault;
   final List<CatalogRow> rows;
 
   /// The catalog sources that serve the type, the one that reads what the type reads itself first.

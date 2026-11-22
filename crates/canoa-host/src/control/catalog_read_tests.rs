@@ -350,7 +350,7 @@ fn a_catalog_that_is_not_there_a_type_read_elsewhere_and_a_key_without_the_grant
     let unknown = rig.catalog(&control, "toys", "x", json!({}));
     assert_eq!(unknown["error"]["code"], NOT_FOUND, "{unknown}");
 
-    // The official registry's label is the host's: a table cannot replace it.
+    // `official` is a removable default, so `[store.mcps.catalogs] official = ...` replaces it.
     let official = ask(
         &control,
         &Caller::Owner,
@@ -361,18 +361,7 @@ fn a_catalog_that_is_not_there_a_type_read_elsewhere_and_a_key_without_the_grant
         .as_array()
         .expect("rows");
     assert_eq!(rows[0]["label"], "official");
-    assert_eq!(rows[0]["fixed"], true);
-    assert_eq!(
-        rows[0]["source"],
-        "https://registry.modelcontextprotocol.io"
-    );
-    assert!(rows[1]["problem"].is_string(), "{rows:?}");
-    let answered = rig.catalog(&control, "mcps", "official", json!({}));
-    assert!(answered["result"]["servers"].is_array(), "{answered}");
-    assert!(
-        rig.transport.asked.lock().expect("lock")[0]
-            .starts_with("https://registry.modelcontextprotocol.io/"),
-    );
+    assert_eq!(rows[0]["source"], "https://elsewhere.example/");
 
     let reader = key("sha256:aa", &[Grant::OverlayRead]);
     let denied = ask(

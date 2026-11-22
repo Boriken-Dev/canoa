@@ -1,0 +1,7 @@
+[
+  {
+    "prefix": "qwen3.5-",
+    "start": "<tool_call>",
+    "end": "</tool_call>"
+  }
+]

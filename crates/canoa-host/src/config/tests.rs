@@ -1278,6 +1278,12 @@ fn the_store_table_holds_two_lists_as_text_or_lists() {
         text.store.credential_variables,
         Some(vec!["*TOKEN".to_owned()])
     );
+    let custom_folders =
+        parse("[host.store]\nskill_folders = [\"custom/skills\", \".other\"]\n").expect("parses");
+    assert_eq!(
+        custom_folders.store.skill_folders,
+        Some(vec!["custom/skills".to_owned(), ".other".to_owned()])
+    );
     let empty = parse("[host.store]\nprotected = []\n").expect("parses");
     assert_eq!(empty.store.protected, Some(Vec::new()));
     assert!(parse("[host.store]\nprotected = 3\n").is_err());

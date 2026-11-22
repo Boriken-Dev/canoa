@@ -73,7 +73,7 @@ const _standin = {
 const _types = [
   ('overlays', 'Overlays', 'catalog', 'catalogs', 'overlays', 'boriken', defaultCatalogSpec),
   ('skills', 'Skills', 'source', 'sources', 'skills', 'anthropics', 'anthropics/skills'),
-  ('mcps', 'MCP servers', 'registry', 'registries', 'MCP servers', null, null),
+  ('mcps', 'MCP servers', 'registry', 'registries', 'MCP servers', 'official', 'https://registry.modelcontextprotocol.io'),
   ('extensions', 'Extensions', 'catalog', 'catalogs', 'extensions', null, null),
 ];
 
@@ -87,9 +87,8 @@ Map<String, Object?> _answer(CanoaConfig config) => {
         'title': title,
         'words': {'noun': noun, 'plural': plural, 'lists': lists},
         'default': defaultLabel == null ? null : {'label': defaultLabel, 'source': defaultSource},
+        if (id == 'skills') 'skills_search': CanoaConfig.defaultSkillsSearch,
         'catalogs': [
-          if (id == 'mcps')
-            {'label': 'official', 'provider': 'read', 'fields': {'source': 'https://registry.modelcontextprotocol.io'}, 'source': 'https://registry.modelcontextprotocol.io', 'default': true, 'fixed': true},
           if (defaultLabel != null &&
               !((config.catalogTable(id) as Map?)?.keys.any((key) => '$key'.toLowerCase() == defaultLabel) ?? false))
             {'label': defaultLabel, 'provider': 'read', 'fields': {'source': defaultSource}, 'source': defaultSource, 'default': true},
@@ -286,10 +285,14 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       expect((stored.tables['store'] as Map).containsKey('catalog_max_depth'), isFalse, reason: 'back to its default, so not written');
     });
 
-    testWidgets('the official MCP registry is always listed first and has no Remove', (tester) async {
+    testWidgets('the official MCP registry is listed first and can be removed', (tester) async {
       await open(tester, 'mcps');
       expect(find.byKey(const Key('store-catalog-official')), findsOneWidget);
-      expect(find.byKey(const Key('store-remove-catalog-official')), findsNothing, reason: 'the type always offers it');
+      await tester.tap(find.byKey(const Key('store-remove-catalog-official')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-remove-yes')));
+      await tester.pumpAndSettle();
+      expect(stored.catalogTable('mcps'), {'official': false, 'corp': 'https://registry.corp.test'});
     });
 
     testWidgets('the sources a type is offered are those that serve it, and the others are not', (tester) async {

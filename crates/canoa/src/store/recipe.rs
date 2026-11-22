@@ -276,6 +276,11 @@ pub trait Recipe: Send + Sync + 'static {
         None
     }
 
+    /// Environment variable names or patterns (`NAME` or `PREFIX_*`) this recipe's store must never receive.
+    fn protected_variables(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// What runs after the files are placed: nothing, for a program that is one file.
     ///
     /// # Errors

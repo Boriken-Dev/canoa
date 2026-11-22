@@ -113,11 +113,11 @@ class _KnowledgeSearchPanelState extends State<KnowledgeSearchPanel> {
       const SizedBox(height: 12),
       Text('Meaning', style: text.titleSmall),
       const SizedBox(height: 6),
-      _field('embeddings', 'Embeddings server', 'http://127.0.0.1:60570'),
+      _field('embeddings', 'Embeddings server', 'http://127.0.0.1:PORT'),
       _field('model', 'Embeddings model', 'the exact id the server loaded'),
       Text('Ordering', style: text.titleSmall),
       const SizedBox(height: 6),
-      _field('llm_endpoint', 'Chat model server', 'http://127.0.0.1:60570'),
+      _field('llm_endpoint', 'Chat model server', 'http://127.0.0.1:PORT'),
       _field('llm_model', 'Chat model', 'the exact id the server loaded'),
       Row(children: [
         FilledButton(

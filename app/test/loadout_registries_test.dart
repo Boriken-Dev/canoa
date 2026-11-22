@@ -185,6 +185,11 @@ void main() {
       overlays.put(location, {'servers.json': jsonEncode({'not': 'a list'})});
       await controller.selectRegistry(spec);
       expect(controller.registryProblem, contains('not a list'));
+
+      // The official registry can also be removed: it is written as `official = false`.
+      await controller.removeRegistry(officialRegistry);
+      expect((saved.last.catalogTable('mcps') as Map?)?['official'], isFalse);
+      expect(controller.registries, isNot(contains(officialRegistry)));
     } finally {
       controller.dispose();
     }

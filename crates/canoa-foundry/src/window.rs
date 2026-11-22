@@ -11,6 +11,7 @@
     reason = "files are std's"
 )]
 
+use alloc::boxed::Box;
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 use core::fmt;
@@ -270,16 +271,46 @@ fn link_tree(from: &Path, to: &Path, top: bool) -> Result<(), WindowError> {
 /// The file in a mirrored folder that says what it was linked from, so that a folder already right is not made again.
 pub const MIRROR_MARKER: &str = "canoa-mirror.json";
 
+struct MarkerRule {
+    prefix: String,
+    start: &'static str,
+    end: &'static str,
+}
+
+fn loaded_tool_markers() -> &'static [MarkerRule] {
+    static RULES: std::sync::OnceLock<Vec<MarkerRule>> = std::sync::OnceLock::new();
+    RULES.get_or_init(|| {
+        let Ok(Value::Array(items)) =
+            serde_json::from_str::<Value>(include_str!("tool_markers.json"))
+        else {
+            return Vec::new();
+        };
+        items
+            .into_iter()
+            .filter_map(|item| {
+                let prefix = item["prefix"].as_str()?.to_ascii_lowercase();
+                let start = Box::leak(item["start"].as_str()?.to_owned().into_boxed_str());
+                let end = Box::leak(item["end"].as_str()?.to_owned().into_boxed_str());
+                Some(MarkerRule { prefix, start, end })
+            })
+            .collect()
+    })
+}
+
 /// The tool-call markers to register a model with when its own package publishes none, as `(opening, closing)`: Foundry Local
 /// refuses a request that carries tools to a model with no markers ("structured tool calling requires model-published opening and
-/// closing tool markers"), though the model writes calls in a fixed form. Only models whose form is known are here; `None` for
+/// closing tool markers"), though the model writes calls in a fixed form. Loaded from `tool_markers.json`; `None` for
 /// every other, which is registered as it is.
 #[must_use]
 pub fn tool_markers(id: &str) -> Option<(&'static str, &'static str)> {
-    let name = id.rsplit_once(':').map_or(id, |(name, _)| name);
-    name.to_ascii_lowercase()
-        .starts_with("qwen3.5-")
-        .then_some(("<tool_call>", "</tool_call>"))
+    let name = id
+        .rsplit_once(':')
+        .map_or(id, |(name, _)| name)
+        .to_ascii_lowercase();
+    loaded_tool_markers()
+        .iter()
+        .find(|rule| name.starts_with(&rule.prefix))
+        .map(|rule| (rule.start, rule.end))
 }
 
 fn mirror_marker(source: &Path) -> Value {

@@ -12,10 +12,6 @@ use super::{Caller, Control, NOT_FOUND, REFUSED, bad, text_param};
 use crate::store::catalogs::{self, Entry, READ, TypeCatalogs, built_in_types, table_of};
 use crate::store::listings::{self, SkillSpec};
 
-/// The label and source of the skills Canoa offers first, which the person never typed.
-const DEFAULT_SKILL_SOURCES: [&str; 2] =
-    ["anthropics/skills", "https://github.com/anthropics/skills"];
-
 /// How many servers one page of a registry asks for.
 const PAGE: u32 = 30;
 
@@ -75,8 +71,7 @@ impl Control {
             .source()
             .ok_or_else(|| bad("a skills source is written in the source field"))?;
         let spec = SkillSpec::parse(text).map_err(|why| (REFUSED, why))?;
-        let own = !(coqui_aos::normalize_name(&entry.label) == "anthropics"
-            && DEFAULT_SKILL_SOURCES.contains(&spec.spec.as_str()));
+        let own = !catalogs::is_default_skill_source(&entry.label, &spec.spec);
         let mut asked = json!({"repo": spec.repo, "path": spec.path, "own": own});
         if let Some(reference) = &spec.reference {
             asked["ref"] = json!(reference);

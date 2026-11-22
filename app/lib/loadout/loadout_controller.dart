@@ -176,10 +176,20 @@ class LoadoutController extends ChangeNotifier {
   String get selectedRegistry => _selectedRegistry ?? registry;
   String? _selectedRegistry;
 
-  /// The registries offered: the official one, then those `[store.mcps.catalogs]` names.
+  /// The default MCP registry label and address (from the host's `store/catalogs` once read, else the standalone fallback).
+  String get defaultRegistryLabel => typeOf('mcps')?.defaultLabel ?? officialRegistryLabel;
+  String get defaultRegistry => typeOf('mcps')?.defaultSpec ?? registry;
+
+  /// Whether `[store.mcps.catalogs]` explicitly names [defaultRegistryLabel] (either replacing it or turning it off with `false`).
+  bool get officialRegistryNamed {
+    final table = config.catalogTable('mcps');
+    return table is Map && table.keys.any((key) => aos.normalizeName('$key') == aos.normalizeName(defaultRegistryLabel));
+  }
+
+  /// The registries offered: the default one (unless `[store.mcps.catalogs]` replaced or turned it off), then those `[store.mcps.catalogs]` names.
   List<String> get registries => [
-    if (registry.isNotEmpty) registry,
-    ...config.storeRegistries.where((address) => address != registry),
+    if (!officialRegistryNamed && defaultRegistry.isNotEmpty) defaultRegistry,
+    ...config.storeRegistries.where((address) => officialRegistryNamed || address != defaultRegistry),
     for (final label in generatedRegistryLabels) '$generatedRegistryPrefix$label',
   ];
 
@@ -195,10 +205,10 @@ class LoadoutController extends ChangeNotifier {
           ? address.substring(generatedRegistryPrefix.length)
           : null;
 
-  /// The label the host knows the registry [address] by: `official` for the official one, the label canoa.cfg keeps an added address
+  /// The label the host knows the registry [address] by: `official` for the official one (when active), the label canoa.cfg keeps an added address
   /// under, or a generated registry's own. Null for an address canoa.cfg does not hold.
   String? registryLabelOf(String address) {
-    if (address == registry) return officialRegistryLabel;
+    if (!officialRegistryNamed && address == defaultRegistry) return defaultRegistryLabel;
     final generated = generatedRegistryOf(address);
     if (generated != null) return generated;
     return config.storeRegistryLabels.entries.where((each) => each.value == address).firstOrNull?.key;
@@ -533,8 +543,11 @@ class LoadoutController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The skills directory address `skills_search = true` resolves to (from the host when available).
+  String get defaultSkillsSearchAddress => typeOf('skills')?.skillsSearchDefault ?? CanoaConfig.defaultSkillsSearch;
+
   /// The skills directory the Skills page searches, or null while the search is off, which it is until the person turns it on.
-  String? get skillsSearch => config.skillsSearch;
+  String? get skillsSearch => config.skillsSearchWithDefault(defaultSkillsSearchAddress);
 
   /// The last search's results, the text it was for, why it failed, and whether one is running; and the result being looked up.
   List<SkillHit> skillHits = const [];
@@ -713,18 +726,30 @@ class LoadoutController extends ChangeNotifier {
     return null;
   }
 
-  /// Forgets a registry the person added; the official one stays.
+  /// Forgets a registry the person added, or disables the default one with `false`.
   Future<void> removeRegistry(String address) async {
     final generated = generatedRegistryOf(address);
     if (generated != null) {
       await apply(config.withoutCatalogOf('mcps', generated));
-      if (selectedRegistry == address) await selectRegistry(registry);
+      if (selectedRegistry == address) await selectRegistry(registries.firstOrNull ?? defaultRegistry);
+      return;
+    }
+    if (!officialRegistryNamed && address == defaultRegistry) {
+      await apply(config.withoutCatalogOf('mcps', defaultRegistryLabel, fallback: defaultRegistryLabel));
+      if (selectedRegistry == address && registries.isNotEmpty) {
+        await selectRegistry(registries.first);
+      } else if (registries.isEmpty) {
+        registryEntries = const [];
+        registryNext = null;
+        registryProblem = null;
+        notifyListeners();
+      }
       return;
     }
     if (!config.storeRegistries.contains(address)) return;
     await apply(config.withStoreRegistries([...config.storeRegistries]..remove(address)));
     if (isGitRegistry(address)) await home?.overlays.removeCatalog(gitRegistryLabel(address));
-    if (selectedRegistry == address) await selectRegistry(registry);
+    if (selectedRegistry == address && registries.isNotEmpty) await selectRegistry(registries.first);
   }
 
   /// Lists [address]'s servers in Discover.

@@ -347,3 +347,36 @@ fn a_scan_follows_the_overlay_grants_and_the_places_a_key_may_browse() {
     let wrong = scan(&control, bad);
     assert!(wrong["error"].is_object(), "{wrong}");
 }
+
+#[test]
+fn configured_skill_folders_replace_the_built_in_common_folders() {
+    let tmp = dir("scan-custom-folders");
+    let overlays = tmp.join("cfg").join("overlays");
+    let control = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_overlays(
+        Overlays::new(Some(overlays), OverlayLimits::default())
+            .with_skill_folders(Some(vec!["team-skills".to_owned()])),
+    );
+    let alpha = skill_md("alpha");
+    let beta = skill_md("beta");
+    let upstream = repo(
+        &tmp,
+        "custom-folders",
+        &[
+            ("team-skills/alpha/SKILL.md", &alpha),
+            (".cursor/skills/beta/SKILL.md", &beta),
+        ],
+    );
+    let answer = scan(&control, source(&upstream, ""));
+    assert_eq!(
+        listed(&answer),
+        [pair("alpha", "team-skills/alpha")],
+        "{answer}"
+    );
+}

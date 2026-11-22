@@ -190,7 +190,7 @@ void main() {
 
   testWidgets('the official registry and one the person added are read through the host by label', (tester) async {
     await open(tester, 'mcps');
-    expect(asked, ['mcps/official//'], reason: 'the official registry is the host fixed row');
+    expect(asked, ['mcps/official//'], reason: 'the official registry is the host default row');
     expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget);
 
     await tapKey(tester, 'mcps-registry-registry.team.test');

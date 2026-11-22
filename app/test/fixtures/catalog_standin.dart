@@ -205,7 +205,8 @@ CatalogRead standInCatalogRead(OverlayManager overlays, CanoaConfig Function() c
             'truncated': scan.truncated,
           };
         case 'mcps':
-          final address = aos.normalizeName(label) == 'official' ? officialRegistry : config.storeRegistryLabels[label];
+          final off = (config.catalogTable('mcps') as Map?)?.entries.any((e) => aos.normalizeName('${e.key}') == 'official' && e.value == false) ?? false;
+          final address = aos.normalizeName(label) == 'official' ? (off ? null : officialRegistry) : config.storeRegistryLabels[label];
           if (address == null) throw CatalogReadFailed('canoa.cfg has no registry $label');
           final String body;
           if (isGitRegistry(address)) {

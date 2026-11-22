@@ -195,7 +195,9 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
             selected: each == c.selectedRegistry,
             onSelected: c.loadingRegistry ? null : (_) => unawaited(c.selectRegistry(each)),
           ),
-        if (added.contains(c.selectedRegistry) || c.generatedRegistryOf(c.selectedRegistry) != null)
+        if (added.contains(c.selectedRegistry) ||
+            c.generatedRegistryOf(c.selectedRegistry) != null ||
+            (!c.officialRegistryNamed && c.selectedRegistry == c.defaultRegistry && c.registries.contains(c.selectedRegistry)))
           TextButton(
             key: const Key('mcps-registry-remove'),
             onPressed: c.busy != null ? null : () => unawaited(_removeRegistry(context, c.selectedRegistry)),

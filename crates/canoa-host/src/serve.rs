@@ -2132,14 +2132,17 @@ impl Serving {
                                 .as_ref()
                                 .map(|dir| dir.join("cache").join("contents")),
                         ))
-                        .with_overlays(control::Overlays::new(
-                            options
-                                .config_file
-                                .as_ref()
-                                .and_then(|file| file.parent())
-                                .map(|dir| dir.join("overlays")),
-                            control::OverlayLimits::default(),
-                        ))
+                        .with_overlays(
+                            control::Overlays::new(
+                                options
+                                    .config_file
+                                    .as_ref()
+                                    .and_then(|file| file.parent())
+                                    .map(|dir| dir.join("overlays")),
+                                control::OverlayLimits::default(),
+                            )
+                            .with_skill_folders(config.store.skill_folders.clone()),
+                        )
                         .with_extensions(control::ExtensionInstall::new(
                             options.state_dir.as_ref().map(|dir| dir.join("extensions")),
                         ))

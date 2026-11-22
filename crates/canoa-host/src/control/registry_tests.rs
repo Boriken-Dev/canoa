@@ -174,6 +174,8 @@ fn the_bases_a_key_may_read_are_the_official_one_and_the_http_ones_listed() {
         &bases[2],
         &list_endpoint_base("https://b.example/x/v0.1/servers?limit=1").expect("base")
     ));
+    let removed = json!({"mcps": {"catalogs": {"official": false, "a": "https://a.example/"}}});
+    assert_eq!(listed_bases(&removed), ["https://a.example/"]);
 }
 
 #[test]

@@ -49,7 +49,6 @@ pub const RECOMMENDED_VARIABLES: &[&str] = &[
     "*_CREDENTIALS",
     "*_CREDENTIAL",
     "SSH_AUTH_SOCK",
-    "DOTAGENTS_*",
 ];
 
 /// What a pattern is relative to.
@@ -332,7 +331,6 @@ mod tests {
             "AWS_SECRET",
             "OPENAI_API_KEY",
             "SSH_AUTH_SOCK",
-            "DOTAGENTS_X",
             "MY_PASSWORD",
         ] {
             assert!(rules.protects_name(name), "{name}");

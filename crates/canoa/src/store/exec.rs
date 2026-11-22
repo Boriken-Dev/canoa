@@ -282,6 +282,19 @@ impl<'a> Run<'a> {
         }
     }
 
+    /// Strips any environment variable matching one of the recipe's own protected `patterns` too.
+    pub fn without_variables(mut self, patterns: &[&str]) -> Self {
+        if !patterns.is_empty() {
+            let extra = Protected::new(patterns.iter().copied());
+            self.environment = self
+                .environment
+                .iter()
+                .filter(|(name, _)| !extra.protects_name(name))
+                .collect();
+        }
+        self
+    }
+
     /// Relays each line a program prints to `prompter`, and stops when it cancels.
     pub const fn prompter(mut self, prompter: &'a Object<dyn InstallPrompter>) -> Self {
         self.prompter = Some(prompter);
@@ -408,4 +421,60 @@ pub fn clean(line: &str) -> String {
 #[must_use]
 pub fn deadline_after(timeout_ms: u64) -> Instant {
     Instant::now() + Duration::from_millis(timeout_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coqui_acp_api::{
+        FileInfo, HarnessNotice, ProcessSpawner, SecretBytes, SpawnSpec, SpawnedProcess,
+        SpawnerInfo,
+    };
+
+    #[derive(Debug)]
+    struct DummySpawner;
+
+    impl ProcessSpawner for DummySpawner {
+        fn describe(&self) -> Result<SpawnerInfo, ProviderError> {
+            Ok(SpawnerInfo::new("windows", "x86_64", true))
+        }
+        fn spawn(&self, _: SpawnSpec) -> Result<Object<dyn SpawnedProcess>, ProviderError> {
+            Err(ProviderError::new(Status::GUATIAO_ERR_INTERNAL, "unused"))
+        }
+        fn write_file(
+            &self,
+            _: &str,
+            _: Secret<SecretBytes>,
+            _: bool,
+        ) -> Result<(), ProviderError> {
+            Ok(())
+        }
+        fn read_file(&self, _: &str, _: u64) -> Result<Secret<SecretBytes>, ProviderError> {
+            Err(ProviderError::new(Status::GUATIAO_ERR_NOT_FOUND, "unused"))
+        }
+        fn file_info(&self, _: &str) -> Result<Option<FileInfo>, ProviderError> {
+            Ok(None)
+        }
+        fn remove_file(&self, _: &str) -> Result<(), ProviderError> {
+            Ok(())
+        }
+        fn notice(&self, _: HarnessNotice) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn without_variables_strips_recipe_declared_patterns() {
+        let spawner = DummySpawner.into_object();
+        let mut env = Environment::new();
+        env.insert("PATH", "/usr/bin");
+        env.insert("DOTAGENTS_ID", "abc");
+        env.insert("CUSTOM_FOO", "bar");
+        let run =
+            Run::new(&spawner, ".", env, deadline_after(1000)).without_variables(&["DOTAGENTS_*"]);
+        let names: Vec<_> = run.environment.names().map(String::as_str).collect();
+        assert!(!names.contains(&"DOTAGENTS_ID"));
+        assert!(names.contains(&"PATH"));
+        assert!(names.contains(&"CUSTOM_FOO"));
+    }
 }

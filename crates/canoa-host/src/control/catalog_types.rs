@@ -78,12 +78,16 @@ fn answer_for(
         let id = each["id"].as_str().unwrap_or_default().to_owned();
         (id != crate::store::catalogs::READ, id)
     });
-    json!({
+    let mut row = json!({
         "type": kind.id,
         "title": kind.title,
         "words": {"noun": kind.noun, "plural": kind.plural, "lists": kind.lists},
         "default": kind.default.map(|(label, source)| json!({"label": label, "source": source})),
         "catalogs": rows_of(kind, table_of(store, &kind.id)),
         "sources": offered,
-    })
+    });
+    if kind.id == "skills" {
+        row["skills_search"] = json!(crate::control::skill_search::DEFAULT_BASE);
+    }
+    row
 }

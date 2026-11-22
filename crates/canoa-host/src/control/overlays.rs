@@ -157,6 +157,8 @@ pub(crate) struct Overlays {
     git_runs: std::sync::atomic::AtomicUsize,
     /// The network git reaches its remotes through; the process's when `None`.
     network: Option<std::sync::Arc<Network>>,
+    /// Configured common folders to scan for skills instead of `skill_folders.txt`.
+    skill_folders: Option<Vec<String>>,
     /// The environment a test makes this host's git runs inherit: a person's home, ssh agent and programs.
     #[cfg(test)]
     person: Vec<(OsString, OsString)>,
@@ -173,6 +175,13 @@ impl Overlays {
             limits,
             ..Self::default()
         }
+    }
+
+    /// Replaces the built-in common skill folders (`skill_folders.txt`) with `folders` when set.
+    #[must_use]
+    pub(crate) fn with_skill_folders(mut self, folders: Option<Vec<String>>) -> Self {
+        self.skill_folders = folders;
+        self
     }
 
     /// This host, whose git runs inherit `vars` as well as this process's environment; a variable with an empty value is one the

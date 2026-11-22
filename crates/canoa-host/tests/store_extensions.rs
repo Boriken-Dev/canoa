@@ -18,7 +18,6 @@ use canoa_grok::GrokStore;
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
 use canoa_host::store::tools::LocalTools;
 use canoa_opencode::OpenCodeStore;
-use canoa_pi as pi;
 use canoa_pi::PiStore;
 use coqui_acp_api::guatiao::Status;
 use sha2::{Digest, Sha256, Sha512};
@@ -444,7 +443,11 @@ impl Fixture for PiFixture {
             "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
             br#"{"version":"2.0.0"}"#.to_vec(),
         );
-        let node_v = pi::NODE_VERSION;
+        let node_v = "24.22.2";
+        world.put(
+            "https://nodejs.org/dist/index.json",
+            format!(r#"[{{"version":"v{node_v}","lts":"Krypton"}}]"#).into_bytes(),
+        );
         let os = if windows() { "win" } else { "linux" };
         let arch = if std::env::consts::ARCH == "aarch64" {
             "arm64"

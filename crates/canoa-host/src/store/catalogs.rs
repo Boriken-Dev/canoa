@@ -168,20 +168,16 @@ pub(crate) fn built_in_types() -> Vec<TypeCatalogs> {
             "source",
             "sources",
             "skills",
-            Some(("anthropics", "https://github.com/anthropics/skills")),
+            Some((DEFAULT_SKILL_LABEL, DEFAULT_SKILL_SOURCE)),
         ),
-        TypeCatalogs {
-            // The official registry is always offered first and cannot be taken away or replaced.
-            fixed: Some((OFFICIAL_LABEL, crate::control::registry::OFFICIAL)),
-            ..words(
-                "mcps",
-                "MCP servers",
-                "registry",
-                "registries",
-                "MCP servers",
-                None,
-            )
-        },
+        words(
+            "mcps",
+            "MCP servers",
+            "registry",
+            "registries",
+            "MCP servers",
+            Some((OFFICIAL_LABEL, crate::control::registry::OFFICIAL)),
+        ),
         words(
             "extensions",
             "Extensions",
@@ -193,7 +189,19 @@ pub(crate) fn built_in_types() -> Vec<TypeCatalogs> {
     ]
 }
 
-/// The label of the official MCP registry, which the MCP servers type always offers.
+/// The label and source of the skills source Canoa offers first.
+pub(crate) const DEFAULT_SKILL_LABEL: &str = "anthropics";
+pub(crate) const DEFAULT_SKILL_SOURCE: &str = "https://github.com/anthropics/skills";
+
+/// Whether `(label, spec)` names the default skills source offered by Canoa itself.
+pub(crate) fn is_default_skill_source(label: &str, spec: &str) -> bool {
+    let short = DEFAULT_SKILL_SOURCE
+        .strip_prefix("https://github.com/")
+        .unwrap_or(DEFAULT_SKILL_SOURCE);
+    same_label(label, DEFAULT_SKILL_LABEL) && (spec == DEFAULT_SKILL_SOURCE || spec == short)
+}
+
+/// The label of the official MCP registry, which the MCP servers type offers until removed or replaced.
 pub(crate) const OFFICIAL_LABEL: &str = "official";
 
 fn same_label(a: &str, b: &str) -> bool {

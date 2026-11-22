@@ -15,10 +15,10 @@ use alloc::string::String;
 pub use coqui_acp_pi as acp;
 
 use canoa::preset::SourcePreset;
-use canoa::store::recipe::{Finish, Part, Recipe, Release, UnpackStep};
+use canoa::store::recipe::{Finish, Recipe, Release};
 use canoa::store::{
-    Check, Download, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
+    InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM, MANAGER_UNKNOWN, Platform,
+    Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
     AccessTarget, AgentVendor, DeliveredFile, EntrySettingsRequest, GatewayRoute, ModeTitle,
@@ -28,16 +28,11 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
 use canoa::store::recipe::{
-    bad_value_error, dotted, get_json, internal_error, measured_platforms, path_has, pinned, spell,
-    unsupported_error,
+    dotted, get_json, internal_error, measured_platforms, path_has, pinned,
 };
-
-/// The Node this store installs Pi with: Pi needs 22.19 or newer.
-pub const NODE_VERSION: &str = "24.22.2";
 
 const PACKAGE: &str = "@earendil-works/pi-coding-agent";
 const REGISTRY: &str = "https://registry.npmjs.org";
-const NODE_ORIGIN: &str = "https://nodejs.org";
 
 /// Where Pi's own installer leaves it beyond `PATH`, which the Store's copy and the source preset both look in.
 const DIRS: &[&str] = &["~/.pi/agent/bin", "~/.local/bin"];
@@ -171,7 +166,7 @@ impl Recipe for PiRecipe {
         let mut info = StoreInfo::new("pi", "Pi", "Earendil Works");
         info.serves = vec![Serves::any("pi")];
         info.platforms = measured_platforms();
-        info.endpoints = vec![format!("{NODE_ORIGIN}/dist/"), format!("{REGISTRY}/")];
+        info.endpoints = vec![canoa_node::NODE_ORIGIN.to_owned(), format!("{REGISTRY}/")];
         info
     }
 
@@ -250,40 +245,10 @@ impl Recipe for PiRecipe {
                 )?
             }
         };
-        let os = spell(
-            &platform.os,
-            &[("windows", "win"), ("linux", "linux"), ("macos", "darwin")],
-        )
-        .ok_or_else(|| unsupported_error("Node is not published for this system"))?;
-        let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported_error("Node is not published for this processor"))?;
+        let node_release = canoa_node::NodeRecipe.release(None, Some("lts"), platform, tools)?;
         let windows = platform.os == "windows";
-        let archive = format!(
-            "node-v{NODE_VERSION}-{os}-{arch}.{}",
-            if windows { "zip" } else { "tar.gz" }
-        );
-        let base = format!("{NODE_ORIGIN}/dist/v{NODE_VERSION}");
-        let sums = tools.fetch_text(&format!("{base}/SHASUMS256.txt"), 64 * 1024)?;
-        let digest = sums
-            .lines()
-            .filter_map(|line| line.split_once(char::is_whitespace))
-            .find(|(_, name)| name.trim() == archive)
-            .map(|(hex, _)| hex.trim().to_ascii_lowercase())
-            .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| bad_value_error(format!("Node {NODE_VERSION} lists no {archive}")))?;
-        let download = Download::new(
-            format!("{base}/{archive}"),
-            None,
-            Check::Sha256 { value: digest },
-        );
-        let part = Part::new(download, "node-archive").unpacked(UnpackStep::new(
-            if windows { "zip" } else { "tar.gz" },
-            "node",
-            1,
-            true,
-        ));
         let script = "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js";
-        let mut release = Release::new(version.clone(), script, vec![part]);
+        let mut release = Release::new(version.clone(), script, node_release.parts);
         let (node, npm) = relative(windows);
         release.facts.insert("node".to_owned(), node.to_owned());
         release.facts.insert("npm".to_owned(), npm.to_owned());
@@ -291,7 +256,8 @@ impl Recipe for PiRecipe {
             "Run the downloaded Node's npm to install {PACKAGE}@{version} with install scripts off"
         ));
         release.notices.push(format!(
-            "npm fetches Pi's packages from {REGISTRY} itself and checks each against the registry's integrity; the host does not see those bytes. Node {NODE_VERSION} is checked against nodejs.org's SHASUMS256.txt, whose signature is not checked by this store."
+            "npm fetches Pi's packages from {REGISTRY} itself and checks each against the registry's integrity; the host does not see those bytes. Node {} is checked against nodejs.org's SHASUMS256.txt, whose signature is not checked by this store.",
+            node_release.version
         ));
         Ok(release)
     }
