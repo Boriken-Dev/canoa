@@ -130,10 +130,10 @@ void main() {
     final host = FakeAccountsHost(providers: providersOf(const ['claude', 'codex', 'opencode', 'pi']));
     final controller = _controller(host);
     await _show(tester, controller);
-    expect(find.byKey(const Key('accounts-pi')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('add-account-pi')));
+    expect(find.byKey(const Key('accounts-pi_accounts')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('add-account-pi_accounts')));
     await tester.pumpAndSettle();
-    final catalog = controller.catalogIfKnown('pi');
+    final catalog = controller.catalogIfKnown('pi_accounts');
     expect(catalog?.kind('pi-api-key')?.title, 'Pi provider key');
     expect(catalog?.kind('pi-oauth')?.provides, ['pi']);
     expect(catalog?.kind('pi-api-key')?.provides, isEmpty, reason: 'which API the key is for is its variable, which the host reads');

@@ -87,10 +87,10 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('header state chip uses capitalized Connected label instead of raw enum', (tester) async {
+  testWidgets('header state chip says the word of the row state', (tester) async {
     await _openApp(tester);
     final chip = tester.widget<Chip>(find.byKey(const Key('session-state-chip')));
-    expect((chip.label as Text).data, 'Connected');
+    expect((chip.label as Text).data, 'Idle');
     expect(find.byKey(const Key('session-activity-strip')), findsNothing);
   });
 
