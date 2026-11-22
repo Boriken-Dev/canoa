@@ -607,6 +607,8 @@ fn an_anthropic_model_list_is_read_page_after_page_while_it_says_there_is_more()
             "GET /v1/models?limit=1000&after_id=claude%2Dd HTTP/1.1",
         ]
     );
+}
+
 /// The kind lists no standard of its own, so what an account provides is the list it names, in the order it named them; an
 /// account of another kind, or one whose settings the kind refuses, is a bad value.
 #[test]

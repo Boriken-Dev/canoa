@@ -695,7 +695,8 @@ fn control_without_piper(tmp: &Path) -> Control {
 }
 
 #[test]
-fn only_an_account_offer_loses_the_keys_the_host_wrote_and_a_table_the_person_wrote_keeps_its_own() {
+fn only_an_account_offer_loses_the_keys_the_host_wrote_and_a_table_the_person_wrote_keeps_its_own()
+{
     let offer = json!({"provider": "speech_say_endpoint", "account": "a", "offer": "x:a", "credential": "api_key", "title": "X, account a"});
     assert_eq!(
         super::say::host_keys(&offer),

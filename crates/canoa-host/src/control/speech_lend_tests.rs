@@ -1308,7 +1308,13 @@ fn an_account_that_cannot_speak_through_a_service_is_told_so_in_words_of_speakin
     let why = lend
         .output_key("login", Some("standin"), "token")
         .expect_err("a login is not an API key");
-    assert!(why.contains("speak through") && why.contains("voices"), "{why}");
-    assert!(!why.contains("speech-to-text") && !why.contains("audio to"), "{why}");
+    assert!(
+        why.contains("speak through") && why.contains("voices"),
+        "{why}"
+    );
+    assert!(
+        !why.contains("speech-to-text") && !why.contains("audio to"),
+        "{why}"
+    );
     let _ = fs::remove_dir_all(&home.root);
 }

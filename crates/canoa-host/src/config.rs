@@ -44,8 +44,8 @@ use profiles::{
     overlay_options_of, presets_of, profile_of, settings_of, skill_pins_of,
 };
 use raw::{
-    RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawExtension, RawFile, RawHost, RawKb,
-    RawEnvironment, RawLines, RawMail, RawPool, RawProvider, network_of,
+    RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawEnvironment, RawExtension, RawFile,
+    RawHost, RawKb, RawLines, RawMail, RawPool, RawProvider, network_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
@@ -56,9 +56,8 @@ pub use types::{
     AgentProfile, Config, ControlConfig, DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS,
     DEFAULT_MAX_SESSIONS, DEFAULT_PRESET, DelegateConfig, Extension, ExtensionCheck, HistoryConfig,
     KbConfig, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, MailAccount, MailConfig, McpChoice,
-    McpListConfig,
-    NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, StoreConfig,
-    UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
+    McpListConfig, NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout,
+    StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_MAX_TOOL_SESSIONS, DEFAULT_OUTPUT_BYTES,

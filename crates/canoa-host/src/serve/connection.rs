@@ -522,13 +522,26 @@ fn launch_agent_program<C: Channel>(
                 .agent(agent.pid())
                 .given(given.clone());
             let end = coqui_acp_bridge::relay::relay(
-                &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
-                    &KbLayer::new(
-                        &StoreLayer::new(&Layer::new(&Delegating::new(&hosted, conn), link), store),
-                        kb,
+                &McpListLayer::new(
+                    &crate::awake::AwakeChannel::new(
+                        &EnvLayer::new(
+                            &ToolsLayer::new(
+                                &KbLayer::new(
+                                    &StoreLayer::new(
+                                        &Layer::new(&Delegating::new(&hosted, conn), link),
+                                        store,
+                                    ),
+                                    kb,
+                                ),
+                                tools,
+                            ),
+                            envs,
+                        ),
+                        Arc::clone(&shared.keep_awake),
                     ),
-                    tools,
-                ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
+                    shared.mcp_list,
+                    given,
+                ),
                 &agent,
             );
             drop(hosted);
@@ -543,13 +556,26 @@ fn launch_agent_program<C: Channel>(
                     .launching(plain_launch_line(identity))
             };
             coqui_acp_bridge::relay::relay(
-                &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
-                    &KbLayer::new(
-                        &StoreLayer::new(&Layer::new(&Delegating::new(&scoped, conn), link), store),
-                        kb,
+                &McpListLayer::new(
+                    &crate::awake::AwakeChannel::new(
+                        &EnvLayer::new(
+                            &ToolsLayer::new(
+                                &KbLayer::new(
+                                    &StoreLayer::new(
+                                        &Layer::new(&Delegating::new(&scoped, conn), link),
+                                        store,
+                                    ),
+                                    kb,
+                                ),
+                                tools,
+                            ),
+                            envs,
+                        ),
+                        Arc::clone(&shared.keep_awake),
                     ),
-                    tools,
-                ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, Given::for_connection(None)),
+                    shared.mcp_list,
+                    Given::for_connection(None),
+                ),
                 &agent,
             )
         }
@@ -960,27 +986,38 @@ fn give_harness<C: Channel>(
     let given = Given::for_connection(connection);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
-                &KbLayer::new(
-                    &StoreLayer::new(
-                        &Layer::new(
-                            &Delegating::new(
-                                &Recording::new(
-                                    &Hosted::in_process(&gated, scope, connection).given(given.clone()),
-                                    &shared.history,
-                                    &served.name,
-                                    harness.id(),
+            &McpListLayer::new(
+                &crate::awake::AwakeChannel::new(
+                    &EnvLayer::new(
+                        &ToolsLayer::new(
+                            &KbLayer::new(
+                                &StoreLayer::new(
+                                    &Layer::new(
+                                        &Delegating::new(
+                                            &Recording::new(
+                                                &Hosted::in_process(&gated, scope, connection)
+                                                    .given(given.clone()),
+                                                &shared.history,
+                                                &served.name,
+                                                harness.id(),
+                                            ),
+                                            conn,
+                                        ),
+                                        link,
+                                    ),
+                                    store,
                                 ),
-                                conn,
+                                kb,
                             ),
-                            link,
+                            tools,
                         ),
-                        store,
+                        envs,
                     ),
-                    kb,
+                    Arc::clone(&shared.keep_awake),
                 ),
-                tools,
-            ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
+                shared.mcp_list,
+                given,
+            ),
             &*started.harness,
             to_provider,
             started.watch,
@@ -988,27 +1025,37 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &McpListLayer::new(&crate::awake::AwakeChannel::new(&EnvLayer::new(&ToolsLayer::new(
-                &KbLayer::new(
-                    &StoreLayer::new(
-                        &Layer::new(
-                            &Delegating::new(
-                                &Recording::new(
-                                    &Scoped::new(&gated, scope),
-                                    &shared.history,
-                                    &served.name,
-                                    harness.id(),
+            &McpListLayer::new(
+                &crate::awake::AwakeChannel::new(
+                    &EnvLayer::new(
+                        &ToolsLayer::new(
+                            &KbLayer::new(
+                                &StoreLayer::new(
+                                    &Layer::new(
+                                        &Delegating::new(
+                                            &Recording::new(
+                                                &Scoped::new(&gated, scope),
+                                                &shared.history,
+                                                &served.name,
+                                                harness.id(),
+                                            ),
+                                            conn,
+                                        ),
+                                        link,
+                                    ),
+                                    store,
                                 ),
-                                conn,
+                                kb,
                             ),
-                            link,
+                            tools,
                         ),
-                        store,
+                        envs,
                     ),
-                    kb,
+                    Arc::clone(&shared.keep_awake),
                 ),
-                tools,
-            ), envs), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
+                shared.mcp_list,
+                given,
+            ),
             &*started.harness,
             to_provider,
             started.watch,

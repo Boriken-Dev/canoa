@@ -289,10 +289,7 @@ fn verdict_for(
         .filter(|kind| is_key_for(standard, address, kind))
     else {
         let (what, how) = match direction {
-            Direction::Dictation => (
-                "send audio to",
-                format!("{title}'s speech-to-text"),
-            ),
+            Direction::Dictation => ("send audio to", format!("{title}'s speech-to-text")),
             Direction::Speaking => ("speak through", format!("{title}'s voices")),
         };
         return Some(Err(format!(
