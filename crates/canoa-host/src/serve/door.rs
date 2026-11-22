@@ -152,3 +152,58 @@ fn meet(
     };
     connection(shared, target, channel, entered, Some(&admit));
 }
+
+/// The origin of the host's own web server as `hello` claims it, for a page on this computer that the extension serves: `http` or
+/// `https` by whether the server has a certificate, and the loopback address in place of an unspecified one. `None` when the
+/// server takes its port from the system (the address is then not known before it binds).
+pub(super) fn web_origin(web: &crate::config::WebConfig) -> Option<String> {
+    use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    if web.listen.port() == 0 {
+        return None;
+    }
+    let ip = match web.listen.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ip => ip,
+    };
+    let scheme = if web.tls.is_some() { "https" } else { "http" };
+    Some(format!(
+        "{scheme}://{}",
+        SocketAddr::new(ip, web.listen.port())
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_origin;
+    use crate::config::{WebConfig, WebTls};
+
+    fn web(listen: &str, tls: bool) -> WebConfig {
+        let mut web = WebConfig::default();
+        web.listen = listen.parse().unwrap();
+        web.tls = tls.then(|| WebTls::new("web.crt", "web.key"));
+        web
+    }
+
+    #[test]
+    fn the_web_origin_names_the_scheme_the_server_speaks_and_a_loopback_for_an_unspecified_address()
+    {
+        assert_eq!(
+            web_origin(&web("127.0.0.1:7800", false)).as_deref(),
+            Some("http://127.0.0.1:7800")
+        );
+        assert_eq!(
+            web_origin(&web("0.0.0.0:7800", true)).as_deref(),
+            Some("https://127.0.0.1:7800")
+        );
+        assert_eq!(
+            web_origin(&web("[::]:7800", true)).as_deref(),
+            Some("https://[::1]:7800")
+        );
+    }
+
+    #[test]
+    fn a_port_the_system_picks_is_no_address_to_claim() {
+        assert_eq!(web_origin(&web("127.0.0.1:0", false)), None);
+    }
+}

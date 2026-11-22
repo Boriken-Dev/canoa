@@ -1300,6 +1300,12 @@ impl Serving {
             "entries": entries,
             "control": true,
         });
+        if let (Some(claim), Some(web)) = (
+            hello.as_object_mut(),
+            config.web.as_ref().and_then(super::door::web_origin),
+        ) {
+            claim.insert("web".to_owned(), web.into());
+        }
         if let (Some(claim), Some(names)) = (
             hello.as_object_mut(),
             crate::native::this_computer().as_object(),
