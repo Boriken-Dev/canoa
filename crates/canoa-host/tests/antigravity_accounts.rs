@@ -176,8 +176,13 @@ fn grok_and_antigravity_account_providers_and_sources_are_listed() {
             .unwrap_or_else(|| panic!("{id} missing from {listed}"));
         assert_eq!(entry["harness"], true, "{entry}");
         assert_eq!(entry["accounts"]["provider"], accounts_id, "{entry}");
-        let catalog =
-            plain_call(&link, 2, "accounts/catalog", json!({"harness": id})).expect("catalog");
+        let catalog = plain_call(
+            &link,
+            2,
+            "accounts/catalog",
+            json!({"provider": format!("{id}_accounts")}),
+        )
+        .expect("catalog");
         assert!(catalog["kinds"].is_array(), "{id}: {catalog}");
         assert!(catalog["logins"].is_array(), "{id}: {catalog}");
     }
@@ -186,7 +191,7 @@ fn grok_and_antigravity_account_providers_and_sources_are_listed() {
     for harness in ["grok", "antigravity"] {
         assert!(
             rows.iter()
-                .any(|row| row["harness"] == harness && row["name"] == "local"),
+                .any(|row| row["agent"] == harness && row["name"] == "local"),
             "missing local account for {harness} in {accounts}"
         );
     }
@@ -209,7 +214,7 @@ fn antigravity_is_added_by_starting_it_and_its_row_says_who_is_signed_in_and_wha
         &link,
         1,
         "accounts/catalog",
-        json!({"harness": "antigravity"}),
+        json!({"provider": "antigravity_accounts"}),
     )
     .expect("catalog");
     let logins = catalog["logins"].as_array().expect("logins");
@@ -225,15 +230,22 @@ fn antigravity_is_added_by_starting_it_and_its_row_says_who_is_signed_in_and_wha
         &link,
         2,
         "accounts/add",
-        &json!({"name": "agy", "harness": "antigravity", "method": "start"}),
+        &json!({"name": "agy", "provider": "antigravity_accounts", "method": "start"}),
         &Typed::Leaves,
     );
-    let added = added.expect("the stand-in opens a session, so the account is added");
-    assert_eq!(added["account"]["name"], "agy", "{added}");
+    let added = added.expect("the stand-in opens a session, so the sign-in succeeds");
+    // Its own login is the automatic `local` account of Antigravity: nothing is added to canoa.cfg.
+    assert_eq!(added["account"]["name"], "local", "{added}");
     assert_eq!(added["account"]["kind"], "harness-login", "{added}");
     assert_eq!(added["account"]["checked"], true, "{added}");
 
-    let read = plain_call(&link, 3, "usage/read", json!({"account": "agy"})).expect("usage/read");
+    let read = plain_call(
+        &link,
+        3,
+        "usage/read",
+        json!({"account": "local", "harness": "antigravity"}),
+    )
+    .expect("usage/read");
     let row = &read["account"];
     assert_eq!(row["supported"], true, "{read}");
     assert!(
@@ -270,7 +282,7 @@ fn antigravity_that_opens_no_session_asks_the_person_to_start_it_and_adds_nothin
         &link,
         1,
         "accounts/add",
-        &json!({"name": "agy", "harness": "antigravity", "method": "start"}),
+        &json!({"name": "agy", "provider": "antigravity_accounts", "method": "start"}),
         &Typed::Leaves,
     );
     assert!(outcome.is_err(), "{outcome:?}");

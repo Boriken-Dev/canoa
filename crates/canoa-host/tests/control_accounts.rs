@@ -1187,8 +1187,13 @@ fn a_pi_provider_key_is_added_over_the_link_and_lands_in_the_pool_of_the_api_its
     let link = host.local.open("@control").expect("a link");
     let mut app = app_of(&host);
     // Pi lists the key kind and the way to sign one in.
-    let catalog =
-        plain_call(&link, 1, "accounts/catalog", json!({"harness": "pi"})).expect("catalog");
+    let catalog = plain_call(
+        &link,
+        1,
+        "accounts/catalog",
+        json!({"provider": "pi_accounts"}),
+    )
+    .expect("catalog");
     assert!(
         catalog["kinds"]
             .as_array()
@@ -1208,7 +1213,7 @@ fn a_pi_provider_key_is_added_over_the_link_and_lands_in_the_pool_of_the_api_its
         &link,
         2,
         "accounts/add",
-        &json!({"name": "one", "harness": "claude", "method": "api-key"}),
+        &json!({"name": "one", "provider": "claude_accounts", "method": "api-key"}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
     one.expect("an Anthropic key account");
@@ -1216,7 +1221,7 @@ fn a_pi_provider_key_is_added_over_the_link_and_lands_in_the_pool_of_the_api_its
         &link,
         3,
         "accounts/add",
-        &json!({"name": "pi-key", "harness": "pi", "method": "api-key",
+        &json!({"name": "pi-key", "provider": "pi_accounts", "method": "api-key",
                 "inputs": {"variable": "ANTHROPIC_API_KEY"}}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
@@ -1226,7 +1231,7 @@ fn a_pi_provider_key_is_added_over_the_link_and_lands_in_the_pool_of_the_api_its
         &link,
         4,
         "accounts/add",
-        &json!({"name": "pi-other", "harness": "pi", "method": "api-key",
+        &json!({"name": "pi-other", "provider": "pi_accounts", "method": "api-key",
                 "inputs": {"variable": "MISTRAL_API_KEY"}}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
@@ -1243,7 +1248,7 @@ fn a_pi_provider_key_is_added_over_the_link_and_lands_in_the_pool_of_the_api_its
             .expect("a list")
             .iter()
             .find(|row| row["name"] == name)
-            .unwrap_or_else(|| panic!("{name} is listed: {listed}"))["provides"]
+            .unwrap_or_else(|| panic!("{name} is listed: {listed}"))["types"]
             .clone()
     };
     assert_eq!(provides("pi-key"), json!(["anthropic-api"]));
