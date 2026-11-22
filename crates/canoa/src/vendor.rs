@@ -590,6 +590,9 @@ pub enum ToolRole {
     Shell,
     /// Reads, writes, edits, searches or lists files.
     Files,
+    /// Acts on nothing of the computer it runs on (a list of tasks, a question to the person, a search of the web): it runs as it
+    /// is, wherever the session's tools are served from.
+    Pass,
 }
 
 /// One of an agent's own tools that the host takes over when the session's tools are served from an environment.
@@ -629,6 +632,17 @@ impl HookTool {
             shell: None,
         }
     }
+
+    /// A tool that acts on nothing of the computer it runs on.
+    #[must_use]
+    pub fn passes(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            role: ToolRole::Pass,
+            command: None,
+            shell: None,
+        }
+    }
 }
 
 /// One of the agent's own words for a permission mode, and the mode it is.
@@ -659,8 +673,11 @@ impl ModeWord {
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
 pub struct ToolHook {
-    /// The tools the hook runs before; no other tool of the agent's is taken over.
+    /// The agent's tools by what they do. The hook runs before every tool: one listed here as a shell is taken over, one that
+    /// passes runs as it is, and every other (a file tool, a tool not listed, one the agent adds later) is refused.
     pub tools: Vec<HookTool>,
+    /// The beginnings of tool names that pass as [`ToolRole::Pass`] tools do (the tools of the MCP servers a session is given).
+    pub pass_prefixes: Vec<String>,
     /// Where the payload names the tool.
     pub name_at: String,
     /// Where the payload holds the tool's input, an object.
@@ -692,6 +709,7 @@ impl ToolHook {
     ) -> Self {
         Self {
             tools,
+            pass_prefixes: Vec::new(),
             name_at: payload.0.to_owned(),
             input_at: payload.1.to_owned(),
             mode_at: None,

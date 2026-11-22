@@ -830,11 +830,13 @@
         "type": "string",
         "enum": [
           "shell",
-          "files"
+          "files",
+          "pass"
         ],
         "x-enum-labels": {
           "shell": "Runs a shell command, which [`HookTool::command`] names in its input.",
-          "files": "Reads, writes, edits, searches or lists files."
+          "files": "Reads, writes, edits, searches or lists files.",
+          "pass": "Acts on nothing of the computer it runs on (a list of tasks, a question to the person, a search of the web): it runs as it is, wherever the session's tools are served from."
         },
         "description": "What it does."
       },
@@ -913,11 +915,13 @@
               "type": "string",
               "enum": [
                 "shell",
-                "files"
+                "files",
+                "pass"
               ],
               "x-enum-labels": {
                 "shell": "Runs a shell command, which [`HookTool::command`] names in its input.",
-                "files": "Reads, writes, edits, searches or lists files."
+                "files": "Reads, writes, edits, searches or lists files.",
+                "pass": "Acts on nothing of the computer it runs on (a list of tasks, a question to the person, a search of the web): it runs as it is, wherever the session's tools are served from."
               },
               "description": "What it does."
             },
@@ -960,7 +964,14 @@
             "role"
           ]
         },
-        "description": "The tools the hook runs before; no other tool of the agent's is taken over."
+        "description": "The agent's tools by what they do. The hook runs before every tool: one listed here as a shell is taken over, one that passes runs as it is, and every other (a file tool, a tool not listed, one the agent adds later) is refused."
+      },
+      "pass_prefixes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The beginnings of tool names that pass as [`ToolRole::Pass`] tools do (the tools of the MCP servers a session is given)."
       },
       "name_at": {
         "type": "string",
@@ -1019,6 +1030,7 @@
     "additionalProperties": false,
     "required": [
       "tools",
+      "pass_prefixes",
       "name_at",
       "input_at",
       "modes",

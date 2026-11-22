@@ -299,6 +299,45 @@ fn every_file_tool_is_refused_with_the_way_to_do_the_same_in_the_environment() {
 }
 
 #[test]
+fn every_tool_is_seen_and_only_those_that_act_on_nothing_here_pass() {
+    let box_ = env("box");
+    let call =
+        |tool: &str| json!({"tool_name": tool, "tool_input": {"command": "x", "file_path": "/a"}});
+    // Tools that act on this computer and are neither a shell nor a file tool, and one the agent adds later, are refused.
+    for tool in [
+        "LSP",
+        "EnterWorktree",
+        "ExitWorktree",
+        "Monitor",
+        "Skill",
+        "SomeToolOfTomorrow",
+    ] {
+        let Verdict::Deny(why) = judged(&box_, Mode::Bypass, &call(tool)) else {
+            panic!("{tool} is refused")
+        };
+        assert!(why.contains("would act on this computer"), "{why}");
+    }
+    for tool in [
+        "TodoWrite",
+        "Task",
+        "WebFetch",
+        "ExitPlanMode",
+        "mcp__env_box__fs_read",
+    ] {
+        assert_eq!(
+            judged(&box_, Mode::Bypass, &call(tool)),
+            Verdict::Pass,
+            "{tool}"
+        );
+    }
+    assert_eq!(
+        answer(&claude(), Verdict::Pass).as_deref(),
+        Some(""),
+        "a passing tool gets no answer to act on"
+    );
+}
+
+#[test]
 fn plan_mode_a_missing_capability_and_a_tool_not_described_are_refused_before_anything_is_prepared()
 {
     let never =
@@ -311,7 +350,7 @@ fn plan_mode_a_missing_capability_and_a_tool_not_described_are_refused_before_an
         never,
     ) {
         Verdict::Deny(why) => why,
-        Verdict::Rewrite(input) => panic!("rewritten: {input:?}"),
+        other => panic!("not refused: {other:?}"),
     };
     assert!(refused(&env("box"), Mode::Plan, &bash("ls")).contains("plan mode"));
     // The agent's own word for its mode makes the session stricter, never looser.
@@ -323,7 +362,7 @@ fn plan_mode_a_missing_capability_and_a_tool_not_described_are_refused_before_an
     let why = refused(
         &env("box"),
         Mode::Bypass,
-        &json!({"tool_name": "WebFetch", "tool_input": {}}),
+        &json!({"tool_name": "LSP", "tool_input": {}}),
     );
     assert!(why.contains("not a tool that can be run there"), "{why}");
     let why = refused(&env("box"), Mode::Bypass, &json!({"tool_name": "Bash"}));

@@ -23,6 +23,33 @@ const SHELL_TOOLS: [(&str, ShellFamily); 2] = [
     ("PowerShell", ShellFamily::Powershell),
 ];
 
+/// Claude Code's tools that act on nothing of the computer it runs on: tasks and subagents (whose own tools pass through the same
+/// hook), questions to the person, plan mode, the web, a background command's output (which the forwarder prints), and the
+/// resources of the session's MCP servers. Every tool not named here or below is refused.
+const PASS_TOOLS: [&str; 18] = [
+    "Task",
+    "Agent",
+    "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "TaskOutput",
+    "TaskStop",
+    "BashOutput",
+    "KillShell",
+    "KillBash",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "WebFetch",
+    "WebSearch",
+    "ListMcpResourcesTool",
+];
+
+/// The beginning of the name of every tool of an MCP server the session was given.
+const MCP_PREFIX: &str = "mcp__";
+
 /// Claude Code's tools that read, write, edit, search or list files where it runs.
 const FILE_TOOLS: [&str; 8] = [
     "Read",
@@ -88,9 +115,10 @@ fn hook_event(kind: HookKind) -> Option<&'static str> {
 
 /// Hooks as a local plugin whose commands run the host's forwarder; a moment Claude Code has no hook for is left out.
 ///
-/// A `PreToolUse` command runs only before the tools [`tool_hook`] names. Claude Code lets a call go on when its hook ends with any
-/// status but 0 or 2, so the command is followed by `|| exit 2`: a forwarder that cannot start, or ends in error, refuses the call.
-/// Its timeout also lets the call go on, so the forwarder answers within the request's `timeout_seconds`.
+/// A `PreToolUse` command runs before every tool (matcher `*`, "Match all" in Claude Code's hooks reference), and the host refuses
+/// what [`tool_hook`] does not let pass or take over. Claude Code lets a call go on when its hook ends with any status but 0 or 2,
+/// so the command is followed by `|| exit 2`: a forwarder that cannot start, or ends in error, refuses the call. Its timeout also
+/// lets the call go on, so the forwarder answers within the request's `timeout_seconds`.
 pub(crate) fn hooks_delivery(request: &HooksRequest) -> HooksDelivery {
     let mut hooks = serde_json::Map::new();
     let mut tools = false;
@@ -108,10 +136,7 @@ pub(crate) fn hooks_delivery(request: &HooksRequest) -> HooksDelivery {
         if each.kind == HookKind::PreTool {
             tools = true;
             hook["command"] = serde_json::json!(format!("{} || exit 2", each.command));
-            entry.insert(
-                "matcher".to_owned(),
-                serde_json::json!(format!("^({})$", tool_names().join("|"))),
-            );
+            entry.insert("matcher".to_owned(), serde_json::json!("*"));
         }
         entry.insert("hooks".to_owned(), serde_json::json!([hook]));
         hooks.insert(event.to_owned(), serde_json::json!([entry]));
@@ -139,15 +164,6 @@ pub(crate) fn hooks_delivery(request: &HooksRequest) -> HooksDelivery {
     )
 }
 
-/// The tools the `PreToolUse` hook runs before.
-fn tool_names() -> Vec<&'static str> {
-    SHELL_TOOLS
-        .iter()
-        .map(|(name, _)| *name)
-        .chain(FILE_TOOLS)
-        .collect()
-}
-
 /// How Claude Code's `PreToolUse` payload is read and answered. The rewritten input carries no `permissionDecision`, so Claude
 /// Code's own rules and mode still decide whether the call runs, judging the command as rewritten.
 pub(crate) fn tool_hook() -> ToolHook {
@@ -165,6 +181,7 @@ pub(crate) fn tool_hook() -> ToolHook {
             .iter()
             .map(|(name, shell)| HookTool::shell(*name, "command", *shell))
             .chain(FILE_TOOLS.iter().map(|name| HookTool::files(*name)))
+            .chain(PASS_TOOLS.iter().map(|name| HookTool::passes(*name)))
             .collect(),
         ("/tool_name", "/tool_input"),
         (
@@ -173,6 +190,7 @@ pub(crate) fn tool_hook() -> ToolHook {
         ),
         (rewrite.to_string(), "/hookSpecificOutput/updatedInput"),
     );
+    hook.pass_prefixes = vec![MCP_PREFIX.to_owned()];
     hook.mode_at = Some("/permission_mode".to_owned());
     hook.modes = [
         ("default", "manual"),
@@ -266,12 +284,12 @@ mod tests {
         ));
         let hooks = hooks_file(&delivery);
         let entry = &hooks["hooks"]["PreToolUse"][0];
-        let matcher = entry["matcher"].as_str().expect("a matcher");
-        let names: Vec<&str> = matcher
-            .trim_start_matches("^(")
-            .trim_end_matches(")$")
-            .split('|')
-            .collect();
+        assert_eq!(
+            entry["matcher"], "*",
+            "every tool, so none acts on this computer unseen"
+        );
+        let hook = tool_hook();
+        let names: Vec<&str> = hook.tools.iter().map(|tool| tool.name.as_str()).collect();
         for name in [
             "Bash",
             "PowerShell",
@@ -301,13 +319,11 @@ mod tests {
             "{}",
             manifest.text
         );
-        // Every tool the hook runs before is one the description says how to read, and no other.
-        let described: Vec<String> = tool_hook()
-            .tools
-            .into_iter()
-            .map(|tool| tool.name)
-            .collect();
-        assert_eq!(names, described);
+        // A tool that acts on this computer and is neither a shell nor a file tool is not let through.
+        for refused in ["LSP", "EnterWorktree", "ExitWorktree", "Monitor", "Skill"] {
+            assert!(!names.contains(&refused), "{refused}");
+        }
+        assert_eq!(hook.pass_prefixes, ["mcp__"]);
     }
 
     #[test]

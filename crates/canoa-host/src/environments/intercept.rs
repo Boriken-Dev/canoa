@@ -130,6 +130,8 @@ pub(crate) enum Verdict {
     Deny(String),
     /// The call goes on with this input, for the agent's own rules and mode to judge.
     Rewrite(Map<String, Value>),
+    /// The tool acts on nothing of this computer's: it goes on as it is.
+    Pass,
 }
 
 /// The command that runs the command prepared as `id` through the forwarder `prefix`, written for `shell`, then ends the shell with
@@ -233,12 +235,22 @@ pub(crate) fn evaluate(
     let Some(name) = payload.pointer(&hook.name_at).and_then(Value::as_str) else {
         return Verdict::Deny("the hook's payload names no tool".to_owned());
     };
+    if hook
+        .pass_prefixes
+        .iter()
+        .any(|prefix| !prefix.is_empty() && name.starts_with(prefix.as_str()))
+    {
+        return Verdict::Pass;
+    }
     let Some(tool) = hook.tools.iter().find(|each| each.name == name) else {
         return Verdict::Deny(format!(
             "{name} would act on this computer, not in environment {}, and is not a tool that can be run there",
             env.name()
         ));
     };
+    if tool.role == ToolRole::Pass {
+        return Verdict::Pass;
+    }
     let Some(input) = payload.pointer(&hook.input_at).and_then(Value::as_object) else {
         return Verdict::Deny(format!("the hook's payload holds no input for {name}"));
     };
@@ -289,10 +301,11 @@ pub(crate) fn evaluate(
     }
 }
 
-/// `verdict` in the agent's terms: the JSON text of `hook`'s answer with the reason or the input in place. `None` when the agent's
-/// answer form is not a JSON document holding the place.
+/// `verdict` in the agent's terms: the JSON text of `hook`'s answer with the reason or the input in place, or nothing for a tool
+/// that passes. `None` when the agent's answer form is not a JSON document holding the place.
 pub(crate) fn answer(hook: &ToolHook, verdict: Verdict) -> Option<String> {
     let (form, at, value) = match verdict {
+        Verdict::Pass => return Some(String::new()),
         Verdict::Deny(why) => (&hook.deny, &hook.deny_reason_at, Value::String(why)),
         Verdict::Rewrite(input) => (&hook.rewrite, &hook.rewrite_input_at, Value::Object(input)),
     };
