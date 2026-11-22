@@ -72,7 +72,12 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         if !gives_hooks(Some(&label)) {
             return Plugin::Nothing;
         }
-        let (kinds, guarded) = self.connection.hooks.native(&session.allowed);
+        let follows = session.follows
+            && matches!(
+                super::super::native::support(Some(&label), HookEvent::Cd, None),
+                Some(Ok(_))
+            );
+        let (kinds, guarded) = self.connection.hooks.native(&session.allowed, follows);
         if kinds.is_empty() {
             return Plugin::Nothing;
         }
@@ -296,6 +301,9 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 Verdict { block }
             }
             Kind::Batch => {
+                if moved.is_some() {
+                    self.follow_project(&session);
+                }
                 if moved.is_some() && hooks.listens(HookEvent::Cd, &session.allowed) {
                     let fired = self.fire(
                         HookEvent::Cd,

@@ -160,6 +160,8 @@ pub(super) struct Hooks {
     /// Where the copies of the overlays' files are made, removed with the connection.
     under: super::private::Private,
     copies: Mutex<BTreeMap<String, Written>>,
+    /// The two variables that name the places and files of a project's context, as the session starts with them.
+    project: super::project_context::Names,
 }
 
 impl Drop for Hooks {
@@ -253,7 +255,13 @@ impl Hooks {
                 .collect(),
             under: super::private::Private::new("canoa-hooks"),
             copies: Mutex::new(BTreeMap::new()),
+            project: super::project_context::Names::read(lookup),
         }
+    }
+
+    /// The variables that name the places and files of a project's context.
+    pub(super) const fn project_names(&self) -> &super::project_context::Names {
+        &self.project
     }
 
     /// Whether any overlay has hooks.
@@ -266,8 +274,9 @@ impl Hooks {
     pub(in crate::profile::hosted::hooks) fn native(
         &self,
         person: &BTreeSet<String>,
+        follows: bool,
     ) -> (Vec<(forward::Kind, bool)>, bool) {
-        let (mut start, mut pre, mut batch) = (false, false, false);
+        let (mut start, mut pre, mut batch) = (false, false, follows);
         let (mut refuse, mut guarded) = (false, false);
         for overlay in self
             .overlays

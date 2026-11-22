@@ -32,6 +32,7 @@ mod offer;
 mod overlays;
 mod parts;
 mod private;
+mod project_context;
 mod template;
 
 #[cfg(test)]

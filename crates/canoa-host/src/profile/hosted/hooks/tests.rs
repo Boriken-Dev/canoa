@@ -1314,6 +1314,8 @@ mod native {
 
     const CLAUDE: &str = "coqui-acp-claude";
 
+    mod project;
+
     #[test]
     fn claude_is_given_a_plugin_whose_hooks_run_the_forwarder_for_the_events_an_overlay_listens_to()
     {

@@ -15,11 +15,13 @@ use serde_json::{Map, Value, json};
 
 use super::forward::Forward;
 use super::{Firing, report_item};
+use crate::profile::hosted::project_context;
 use crate::profile::hosted::{
     Hosted, Item, LayerId, LayerKind, SESSION_METHODS, State, Written, error,
 };
 
 mod native;
+mod project;
 
 /// The outputs Canoa applies for each event over ACP.
 const SESSION_START: [&str; 2] = ["context", "refuse"];
@@ -42,6 +44,12 @@ pub(in crate::profile::hosted) struct SessionHooks {
     id: String,
     allowed: BTreeSet<String>,
     cwd: String,
+    /// Where the session opened: the walk of its project's context files starts here.
+    root: String,
+    /// The directories whose context files the session has been given.
+    fed: Vec<String>,
+    /// Whether the harness's own hooks tell the host where the session works, so a deeper directory's files can follow.
+    follows: bool,
 }
 
 /// A session request on its way to the agent.
@@ -77,6 +85,8 @@ pub(in crate::profile::hosted) struct Book {
     turns: BTreeMap<String, String>,
     /// Context for a session's next prompt, by Canoa's id for it: `(overlay, text)`.
     carry: BTreeMap<String, Vec<(String, String)>>,
+    /// The project's context files for a session's next prompt, by Canoa's id for it: `(path, text)`.
+    project: BTreeMap<String, Vec<(String, String)>>,
     /// Bytes of hook context each session (by Canoa's id for it) has been given.
     used: BTreeMap<String, usize>,
     /// Tool calls shown and not yet ended, by session and call.
@@ -171,6 +181,27 @@ fn blocks_of(context: &[(String, String)], event: &str) -> Vec<Value> {
         .collect()
 }
 
+/// Adds `blocks` to the end of the system prompt a new session's request carries, which it makes when it has none.
+fn append_system(params: &mut Map<String, Value>, blocks: Vec<Value>) {
+    match params
+        .get_mut("systemPrompt")
+        .and_then(Value::as_object_mut)
+    {
+        Some(prompt) => match prompt.get_mut("content").and_then(Value::as_array_mut) {
+            Some(content) => content.extend(blocks),
+            None => {
+                prompt.insert("content".to_owned(), Value::Array(blocks));
+            }
+        },
+        None => {
+            params.insert(
+                "systemPrompt".to_owned(),
+                json!({"mode": "append", "content": blocks}),
+            );
+        }
+    }
+}
+
 /// The tool of a tool call: the name the agent keeps in the call's `_meta` at `pointer` (its description's) when it has one, else the
 /// call's title.
 fn tool_of(call: &Value, pointer: Option<&str>) -> Tool {
@@ -210,6 +241,9 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 .directory
                 .to_string_lossy()
                 .into_owned(),
+            root: String::new(),
+            fed: Vec::new(),
+            follows: false,
         };
         if hold.book.sessions.len() < MAX_TRACKED {
             hold.book.sessions.insert(agent.to_owned(), session.clone());
@@ -278,9 +312,6 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         bytes: Vec<u8>,
         offered: &BTreeSet<String>,
     ) -> Result<Vec<u8>, Vec<u8>> {
-        if !self.connection.hooks.any() {
-            return Ok(bytes);
-        }
         let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
             return Ok(bytes);
         };
@@ -292,9 +323,9 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         let id = value.get("id").cloned();
         let rewritten = if SESSION_METHODS.contains(&method.as_str()) {
             self.session_start(&mut value, &method, id.as_ref(), offered)?
-        } else if method == "session/prompt" {
+        } else if method == "session/prompt" && self.tracking() {
             self.prompt(&mut value, id.as_ref())?
-        } else if method == "session/close" {
+        } else if method == "session/close" && self.tracking() {
             self.session_end(&value);
             false
         } else {
@@ -304,6 +335,15 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             return Ok(bytes);
         }
         serde_json::to_vec(&value).map_err(|_| Vec::new())
+    }
+
+    /// Whether the host has anything to do with what the agent says and what the client asks after a session opens: an overlay has
+    /// hooks, or a session it opened has something to follow or to report.
+    fn tracking(&self) -> bool {
+        self.connection.hooks.any() || {
+            let hold = self.hold();
+            !hold.book.sessions.is_empty() || !hold.book.opening.is_empty()
+        }
     }
 
     /// A session opens. `Ok(true)` when the request was changed.
@@ -330,7 +370,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         let known = named
             .as_ref()
             .and_then(|agent| self.hold().book.sessions.get(agent).cloned());
-        let session = known.unwrap_or_else(|| SessionHooks {
+        let mut session = known.unwrap_or_else(|| SessionHooks {
             id: format!("canoa-session-{}", data_encoding::HEXLOWER.encode(&random)),
             allowed: allowed.clone(),
             cwd: params
@@ -338,15 +378,43 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned(),
+            root: String::new(),
+            fed: Vec::new(),
+            follows: false,
         });
+        let takes = self
+            .hold()
+            .parts
+            .as_ref()
+            .is_some_and(|parts| parts.system_prompt_taken);
+        let into_system = method == "session/new" && takes;
+        let opened_in = params
+            .get("cwd")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let project = self.open_project(&mut session, &opened_in, into_system);
+        let mut changed = false;
+        if !project.files.is_empty() {
+            if into_system {
+                append_system(params, project_context::blocks(&project.files));
+                changed = true;
+            } else {
+                self.hold()
+                    .book
+                    .project
+                    .entry(session.id.clone())
+                    .or_default()
+                    .extend(project.files);
+            }
+        }
         let allowed = &session.allowed;
         let reason = if method == "session/new" {
             "new"
         } else {
             "resume"
         };
-        let mut notes = Vec::new();
-        let mut changed = false;
+        let mut notes = project.items;
         if self
             .connection
             .hooks
@@ -373,32 +441,8 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             }
             let context = self.hold().book.took(&session.id, fired.context);
             if !context.is_empty() {
-                let takes = self
-                    .hold()
-                    .parts
-                    .as_ref()
-                    .is_some_and(|parts| parts.system_prompt_taken);
-                if method == "session/new" && takes {
-                    let blocks = blocks_of(&context, "session-start");
-                    match params
-                        .get_mut("systemPrompt")
-                        .and_then(Value::as_object_mut)
-                    {
-                        Some(prompt) => {
-                            match prompt.get_mut("content").and_then(Value::as_array_mut) {
-                                Some(content) => content.extend(blocks),
-                                None => {
-                                    prompt.insert("content".to_owned(), Value::Array(blocks));
-                                }
-                            }
-                        }
-                        None => {
-                            params.insert(
-                                "systemPrompt".to_owned(),
-                                json!({"mode": "append", "content": blocks}),
-                            );
-                        }
-                    }
+                if into_system {
+                    append_system(params, blocks_of(&context, "session-start"));
                     changed = true;
                 } else {
                     // Where the agent takes no system prompt, or the session already has one, the first prompt carries it.
@@ -442,6 +486,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             Some(&self.harness_label()),
             failed.as_deref(),
         ));
+        // With no overlay hook to run and no project context to follow or to report, there is nothing to keep of the session.
+        if !self.connection.hooks.any() && !session.follows && notes.is_empty() && native.is_none()
+        {
+            return Ok(changed);
+        }
         let mut hold = self.hold();
         // A request the agent never answers is not kept for ever, nor is the channel it was given.
         if hold.book.opening.len() >= MAX_TRACKED {
@@ -529,10 +578,17 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             .remove(&session.id)
             .unwrap_or_default();
         context.extend(fresh);
+        let files = self
+            .hold()
+            .book
+            .project
+            .remove(&session.id)
+            .unwrap_or_default();
         let mut changed = false;
-        if !context.is_empty() {
+        if !context.is_empty() || !files.is_empty() {
             // After the user's own blocks, so the prompt still begins as the user wrote it.
-            let blocks = blocks_of(&context, "hook");
+            let mut blocks = project_context::blocks(&files);
+            blocks.extend(blocks_of(&context, "hook"));
             if let Some(prompt) = params.get_mut("prompt").and_then(Value::as_array_mut) {
                 prompt.extend(blocks);
                 changed = true;
@@ -561,7 +617,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
     }
 
     fn end(&self, session: &SessionHooks) {
-        self.hold().book.carry.remove(&session.id);
+        {
+            let mut hold = self.hold();
+            hold.book.carry.remove(&session.id);
+            hold.book.project.remove(&session.id);
+        }
         self.revoke_native(&session.id);
         if self
             .connection
@@ -574,9 +634,6 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
 
     /// The connection ends: every session still open ends with it, best effort.
     pub(in crate::profile::hosted) fn end_all(&self) {
-        if !self.connection.hooks.any() {
-            return;
-        }
         let open: Vec<SessionHooks> = {
             let mut hold = self.hold();
             core::mem::take(&mut hold.book.sessions)
@@ -590,7 +647,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
 
     /// The agent's message, before it goes to the client.
     pub(in crate::profile::hosted) fn on_agent(&self, message: &[u8]) -> Seen {
-        if !self.connection.hooks.any() {
+        if !self.tracking() {
             return Seen::Passed(None);
         }
         let Ok(value) = serde_json::from_slice::<Value>(message) else {
