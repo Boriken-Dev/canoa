@@ -2,7 +2,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/look.dart';
-import 'files_surface.dart' show visibleText;
+import '../files/viewers/text_viewer.dart' show visibleText;
 
 /// One heading-delimited section of a Markdown document.
 final class MarkdownSection {

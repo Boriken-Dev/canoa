@@ -6,18 +6,26 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart' show ControlFailed;
+import '../files/viewers/file_sample.dart';
+import '../files/viewers/file_viewer.dart';
+import '../files/viewers/standard_viewers.dart';
+import '../files/viewers/text_viewer.dart' show visibleText;
+import '../l10n/app_text.dart';
 import '../served/host_files.dart';
 import '../session_store.dart';
 import '../shell/surface.dart';
 import '../theme/look.dart';
 import '../workspace/open_in.dart';
 import '../workspace/open_in_ui.dart';
-import 'markdown_section_viewer.dart';
+
+export '../files/viewers/file_sample.dart' show sizeText;
+export '../files/viewers/image_viewer.dart' show ImagePreview, declaredImageSize, imagePixels, imageSide;
+export '../files/viewers/text_viewer.dart' show lineLength, markRun, previewLines, visibleText;
 
 /// The files of the session's workspace, on the host the session runs on, to browse, preview, and edit text files or open loaded
 /// session instruction files; the host decides what it shows and grants. It opens before any agent has started.
 class FilesSurface extends WorkSurface {
-  const FilesSurface(this.filesFor, {this.canWrite});
+  const FilesSurface(this.filesFor, {this.canWrite, this.viewers});
 
   static const surfaceId = 'files';
 
@@ -30,6 +38,9 @@ class FilesSurface extends WorkSurface {
   /// Whether the host currently grants writing regular text files; null defaults to true when [WorkspaceFiles] implements
   /// [WorkspaceFileWriter].
   final bool Function()? canWrite;
+
+  /// The viewers a file is shown with; null gives the panel the ones the app ships, with the person's choices kept only while it runs.
+  final ViewerRegistry? viewers;
 
   @override
   String get id => surfaceId;
@@ -58,110 +69,9 @@ class FilesSurface extends WorkSurface {
       opener: here ? workspaceOpener : null,
       reveal: controller.data[revealKey] as FileReveal?,
       canWrite: canWrite?.call() ?? true,
+      viewers: viewers,
     );
   }
-}
-
-/// [text] with every control, format, bidirectional or invisible character but a line break or tab shown as `<U+XXXX>`, so what a
-/// person reads is what the file says; and a run of combining marks cut after [markRun], the rest shown the same way. The host leaves
-/// such names out of its listings; this is for what it cannot know, the text.
-String visibleText(String text) {
-  final out = StringBuffer();
-  var run = 0;
-  for (final rune in text.runes) {
-    final combining = _combines(rune);
-    run = combining ? run + 1 : 0;
-    if (_hides(rune) || (combining && run > markRun)) {
-      out.write('<U+${rune.toRadixString(16).toUpperCase().padLeft(4, '0')}>');
-    } else {
-      out.writeCharCode(rune);
-    }
-  }
-  return out.toString();
-}
-
-/// How many combining marks may follow one character before the rest are shown as code points: enough for any language, too few to
-/// stack a line of text out of its row.
-const int markRun = 3;
-
-/// Whether [c] is a combining mark.
-bool _combines(int c) =>
-    (c >= 0x0300 && c <= 0x036f) ||
-    (c >= 0x0483 && c <= 0x0489) ||
-    (c >= 0x0591 && c <= 0x05bd) ||
-    (c >= 0x064b && c <= 0x065f) ||
-    (c >= 0x1ab0 && c <= 0x1aff) ||
-    (c >= 0x1dc0 && c <= 0x1dff) ||
-    (c >= 0x20d0 && c <= 0x20ff) ||
-    (c >= 0xfe20 && c <= 0xfe2f);
-
-/// The characters the host's own list of hidden text names (`store::text`), and the control characters but a line break, a carriage
-/// return and a tab.
-bool _hides(int c) =>
-    c <= 0x08 ||
-    c == 0x0b ||
-    c == 0x0c ||
-    (c >= 0x0e && c <= 0x1f) ||
-    (c >= 0x7f && c <= 0x9f) ||
-    c == 0xad ||
-    c == 0x034f ||
-    c == 0x061c ||
-    c == 0x115f ||
-    c == 0x1160 ||
-    (c >= 0x17b4 && c <= 0x17b5) ||
-    c == 0x180e ||
-    (c >= 0x200b && c <= 0x200f) ||
-    c == 0x2028 ||
-    c == 0x2029 ||
-    (c >= 0x202a && c <= 0x202e) ||
-    (c >= 0x2060 && c <= 0x206f) ||
-    c == 0x3164 ||
-    (c >= 0xfe00 && c <= 0xfe0f) ||
-    c == 0xfeff ||
-    c == 0xffa0 ||
-    (c >= 0xfff9 && c <= 0xfffb) ||
-    (c >= 0x1d173 && c <= 0x1d17a) ||
-    (c >= 0xe0000 && c <= 0xe007f) ||
-    (c >= 0xe0100 && c <= 0xe01ef);
-
-/// The lines of [text] as shown: each cut into pieces of at most [lineLength] characters, so no one line is a layout of the whole
-/// file, with a carriage return before a line break dropped.
-List<String> previewLines(String text) {
-  final lines = <String>[];
-  for (final line in text.split('\n')) {
-    final bare = line.endsWith('\r') ? line.substring(0, line.length - 1) : line;
-    if (bare.length <= lineLength) {
-      lines.add(bare);
-      continue;
-    }
-    var at = 0;
-    while (at < bare.length) {
-      var end = at + lineLength > bare.length ? bare.length : at + lineLength;
-      // Not between the halves of one character.
-      if (end < bare.length && bare.codeUnitAt(end) >= 0xdc00 && bare.codeUnitAt(end) <= 0xdfff) {
-        end--;
-      }
-      lines.add(bare.substring(at, end));
-      at = end;
-    }
-  }
-  return lines;
-}
-
-/// The longest piece of a line the preview lays out at once.
-const int lineLength = 400;
-
-/// The most pixels an image may declare for the preview to decode it: a small file can claim dimensions that take gigabytes to draw.
-const int imagePixels = 16 * 1000 * 1000;
-
-/// The longest side an image is decoded at; a larger one is scaled down as it is read.
-const int imageSide = 1600;
-
-/// What a size in bytes reads as.
-String sizeText(int bytes) {
-  if (bytes < 1024) return '$bytes bytes';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(bytes < 10 * 1024 ? 1 : 0)} KiB';
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MiB';
 }
 
 /// A request to show one file: each request is its own object, so asking for the same path again shows it again.
@@ -178,7 +88,10 @@ final class FileReveal {
 /// The panel's body: a listing of the workspace, a folder at a time, instruction files loaded for the session, and a file's
 /// preview/editor in its place.
 class FilesPanel extends StatefulWidget {
-  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal, this.canWrite = true});
+  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal, this.canWrite = true, this.viewers});
+
+  /// The viewers a file can be shown with, and the person's choice among them; null gives the panel its own set of the app's.
+  final ViewerRegistry? viewers;
 
   /// A file to open as soon as the panel shows, and again whenever a new request replaces it.
   final FileReveal? reveal;
@@ -218,19 +131,29 @@ class _FilesPanelState extends State<FilesPanel> {
 
   WorkspaceFileWriter? get _writer => widget.canWrite && widget.files is WorkspaceFileWriter ? widget.files as WorkspaceFileWriter : null;
 
-  /// The Markdown section to focus in the open file, and whether the person chose the sectioned view (true) or the plain one (false);
-  /// null leaves the choice to the file.
+  /// The heading of a document to open at, asked for by a reveal.
   String? _focusSection;
-  bool? _sectioned;
+
+  ViewerRegistry? _own;
+
+  ViewerRegistry get _viewers => widget.viewers ?? (_own ??= standardViewerRegistry());
 
   @override
   void initState() {
     super.initState();
+    unawaited(_viewers.choices.load());
+    _viewers.addListener(_viewersChanged);
     unawaited(_start());
+  }
+
+  void _viewersChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _viewers.removeListener(_viewersChanged);
+    _own?.dispose();
     _editor?.dispose();
     super.dispose();
   }
@@ -286,6 +209,11 @@ class _FilesPanelState extends State<FilesPanel> {
   @override
   void didUpdateWidget(FilesPanel old) {
     super.didUpdateWidget(old);
+    if (old.viewers != widget.viewers) {
+      (old.viewers ?? _own)?.removeListener(_viewersChanged);
+      _viewers.addListener(_viewersChanged);
+      unawaited(_viewers.choices.load());
+    }
     if (old.files != widget.files || old.root != widget.root) {
       _top = null;
       _file = null;
@@ -349,7 +277,6 @@ class _FilesPanelState extends State<FilesPanel> {
       _opening = path;
       _fileProblem = null;
       _focusSection = section;
-      _sectioned = null;
       _stopEditing();
     });
     try {
@@ -370,7 +297,7 @@ class _FilesPanelState extends State<FilesPanel> {
   }
 
   void _beginEdit(HostFileRead file, List<int> bytes) {
-    final text = _decode(bytes);
+    final text = decodeFileText(bytes);
     _editor?.dispose();
     _editor = TextEditingController(text: text)
       ..addListener(() {
@@ -546,33 +473,11 @@ class _FilesPanelState extends State<FilesPanel> {
     final bytes = file.bytes;
     final writer = _writer;
     final dirty = _editing && (_editor?.text ?? '') != _initialEditText;
-    Widget body;
-    List<String>? lines;
-    Widget? markdown;
-    var markdownFile = false;
-    var sectioned = false;
-    if (_fileProblem != null) {
-      body = Text(_fileProblem!, key: const ValueKey('files problem'));
-    } else if (file.kind == 'text' && bytes != null) {
-      final text = _decode(bytes);
-      final name = file.name.toLowerCase();
-      markdownFile = name.endsWith('.md') || name.endsWith('.markdown');
-      // A file with frontmatter or three headings, or one opened at a section, shows as sections; any other keeps the plain view
-      // until the person chooses the sections.
-      sectioned = markdownFile && (_sectioned ?? (_focusSection != null || parseMarkdownSections(text).isStructured));
-      if (sectioned) {
-        markdown = MarkdownSectionViewer(key: ValueKey('markdown ${file.path}'), text: text, initialSection: _focusSection);
-      } else {
-        lines = previewLines(text);
-      }
-      body = const SizedBox.shrink();
-    } else if (file.kind == 'image' && bytes != null) {
-      body = ImagePreview(key: ValueKey('image ${file.path}'), bytes: bytes);
-    } else if (file.kind == 'image') {
-      body = Text('This image is too large to preview (${sizeText(file.size)}).', key: const ValueKey('files too large'));
-    } else {
-      body = Text('This file cannot be previewed (${sizeText(file.size)}).', key: const ValueKey('files binary'));
-    }
+    final sample = FileSample.of(file);
+    final registry = _viewers;
+    final type = registry.typeOf(sample);
+    final viewer = _fileProblem == null ? registry.choose(sample, type: type, section: _focusSection) : null;
+    final options = _fileProblem == null ? [for (final each in registry.matching(sample, type: type)) if (!each.fallback) each] : const <FileViewer>[];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -629,20 +534,23 @@ class _FilesPanelState extends State<FilesPanel> {
           ),
         ),
         const Divider(height: 1),
-        if (markdownFile && !_editing)
+        if (!_editing && viewer != null && options.length > 1)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Align(
               alignment: Alignment.centerRight,
-              child: SegmentedButton<bool>(
-                key: const ValueKey('markdown view'),
-                segments: const [
-                  ButtonSegment<bool>(value: false, label: Text('Plain', key: ValueKey('markdown view plain'), style: TextStyle(fontSize: 11))),
-                  ButtonSegment<bool>(value: true, label: Text('Sections', key: ValueKey('markdown view sections'), style: TextStyle(fontSize: 11))),
+              child: SegmentedButton<String>(
+                key: const ValueKey('viewer switch'),
+                segments: [
+                  for (final each in options)
+                    ButtonSegment<String>(value: each.id, label: Text(context.t(each.labelKey), key: ValueKey('viewer switch ${each.id}'), style: const TextStyle(fontSize: 11))),
                 ],
-                selected: {sectioned},
+                selected: {viewer.id},
                 showSelectedIcon: false,
-                onSelectionChanged: (choice) => setState(() => _sectioned = choice.first),
+                onSelectionChanged: (choice) {
+                  setState(() => _focusSection = null);
+                  unawaited(registry.choices.choose(type, choice.first));
+                },
               ),
             ),
           ),
@@ -682,134 +590,13 @@ class _FilesPanelState extends State<FilesPanel> {
                     ),
                   ),
                 )
-              : markdown ??
-              (lines == null
-                  ? SingleChildScrollView(padding: const EdgeInsets.all(16), child: body)
-                  : ListView.builder(
-                      key: const ValueKey('files text'),
-                      padding: const EdgeInsets.all(16),
-                      itemCount: lines.length,
-                      itemBuilder: (context, at) => SelectableText(
-                        visibleText(lines![at]),
-                        key: ValueKey('files line $at'),
-                        style: const TextStyle(fontFamily: CanoaLook.monospaceFont, fontSize: 12),
-                      ),
-                    )),
+              : _fileProblem != null
+              ? SingleChildScrollView(padding: const EdgeInsets.all(16), child: Text(_fileProblem!, key: const ValueKey('files problem')))
+              : viewer == null
+              ? const SizedBox.shrink()
+              : viewer.build(context, FileViewRequest(sample: sample, type: type, section: _focusSection)),
         ),
       ],
-    );
-  }
-
-  /// UTF-8 [bytes] as text, a character cut off at the end left out and anything that is not UTF-8 shown as U+FFFD.
-  static String _decode(List<int> bytes) {
-    var end = bytes.length;
-    // A cut can leave the lead of a character and part of its tail: drop at most three bytes.
-    for (var back = 1; back <= 3 && back <= end; back++) {
-      final byte = bytes[end - back];
-      if (byte & 0xC0 == 0x80) continue;
-      final need = byte >= 0xF0
-          ? 4
-          : byte >= 0xE0
-          ? 3
-          : byte >= 0xC0
-          ? 2
-          : 1;
-      if (need > back) end -= back;
-      break;
-    }
-    return utf8.decode(bytes.sublist(0, end), allowMalformed: true);
-  }
-}
-
-/// The width and height a PNG, GIF, JPEG or WebP declares in its header, read from the bytes with nothing decoded, or null for bytes
-/// that are none of them or are cut before the size. Done here, not by the engine, so it is the same in every build and costs nothing.
-({int width, int height})? declaredImageSize(Uint8List b) {
-  int be16(int at) => (b[at] << 8) | b[at + 1];
-  int le16(int at) => b[at] | (b[at + 1] << 8);
-  int be32(int at) => (b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3];
-  bool starts(List<int> text, [int at = 0]) {
-    if (b.length < at + text.length) return false;
-    for (var i = 0; i < text.length; i++) {
-      if (b[at + i] != text[i]) return false;
-    }
-    return true;
-  }
-
-  // PNG: the header chunk follows the signature.
-  if (starts(const [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
-    if (b.length < 24 || !starts('IHDR'.codeUnits, 12)) return null;
-    return (width: be32(16), height: be32(20));
-  }
-  if (starts('GIF87a'.codeUnits) || starts('GIF89a'.codeUnits)) {
-    return b.length < 10 ? null : (width: le16(6), height: le16(8));
-  }
-  if (starts(const [0xff, 0xd8])) {
-    var at = 2;
-    while (at + 4 <= b.length) {
-      if (b[at] != 0xff) return null;
-      final marker = b[at + 1];
-      if (marker == 0xff) {
-        at++;
-        continue;
-      }
-      if (marker == 0xd9 || marker == 0xda) return null;
-      if (marker == 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
-        at += 2;
-        continue;
-      }
-      final isFrame = marker >= 0xc0 && marker <= 0xcf && marker != 0xc4 && marker != 0xc8 && marker != 0xcc;
-      if (isFrame) {
-        return at + 9 > b.length ? null : (width: be16(at + 7), height: be16(at + 5));
-      }
-      at += 2 + be16(at + 2);
-    }
-    return null;
-  }
-  if (starts('RIFF'.codeUnits) && starts('WEBP'.codeUnits, 8)) {
-    if (starts('VP8 '.codeUnits, 12)) {
-      if (b.length < 30 || !starts(const [0x9d, 0x01, 0x2a], 23)) return null;
-      return (width: le16(26) & 0x3fff, height: le16(28) & 0x3fff);
-    }
-    if (starts('VP8L'.codeUnits, 12)) {
-      if (b.length < 25 || b[20] != 0x2f) return null;
-      final bits = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
-      return (width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1);
-    }
-    if (starts('VP8X'.codeUnits, 12)) {
-      if (b.length < 30) return null;
-      return (width: (b[24] | (b[25] << 8) | (b[26] << 16)) + 1, height: (b[27] | (b[28] << 8) | (b[29] << 16)) + 1);
-    }
-  }
-  return null;
-}
-
-/// An image drawn only once its header says it is small enough: a file of a few bytes can declare dimensions that take gigabytes to
-/// decode. It reads the declared size, refuses past [imagePixels], and decodes no larger than [imageSide] on its long side.
-class ImagePreview extends StatelessWidget {
-  const ImagePreview({super.key, required this.bytes});
-
-  final Uint8List bytes;
-
-  @override
-  Widget build(BuildContext context) {
-    final size = declaredImageSize(bytes);
-    if (size == null || size.width < 1 || size.height < 1) {
-      return const Text('This image could not be drawn: its header does not say how large it is.', key: ValueKey('files image failed'));
-    }
-    if (size.width * size.height > imagePixels) {
-      return Text(
-        'This image is too large to draw (${size.width} by ${size.height} pixels): decoding it could use more memory than this computer has.',
-        key: const ValueKey('files too large'),
-      );
-    }
-    final wide = size.width >= size.height;
-    return Image.memory(
-      bytes,
-      key: const ValueKey('files image'),
-      fit: BoxFit.contain,
-      cacheWidth: wide && size.width > imageSide ? imageSide : null,
-      cacheHeight: !wide && size.height > imageSide ? imageSide : null,
-      errorBuilder: (_, _, _) => const Text('This image could not be drawn.'),
     );
   }
 }

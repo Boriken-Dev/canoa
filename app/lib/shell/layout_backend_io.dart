@@ -2,10 +2,10 @@ import 'dart:io';
 
 import 'layout_state.dart';
 
-/// `layout.json` beside canoa.cfg at [configPath]; in memory when there is no such place.
-LayoutBackend platformLayoutBackend({String? configPath}) => configPath == null
+/// A file named [name] (`layout.json`) beside canoa.cfg at [configPath]; in memory when there is no such place.
+LayoutBackend platformLayoutBackend({String? configPath, String name = 'layout.json'}) => configPath == null
     ? MemoryLayoutBackend()
-    : FileLayoutBackend('${File(configPath).parent.path}${Platform.pathSeparator}layout.json');
+    : FileLayoutBackend('${File(configPath).parent.path}${Platform.pathSeparator}$name');
 
 /// One file, written whole through a file beside it.
 final class FileLayoutBackend implements LayoutBackend {

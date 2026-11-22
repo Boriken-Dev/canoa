@@ -66,6 +66,8 @@ import 'chat/delegate_dialog.dart';
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/timing_log.dart';
 import 'chat/inspector_surfaces.dart';
+import 'files/viewers/file_viewer.dart' show ViewerChoices, ViewerRegistry;
+import 'files/viewers/standard_viewers.dart';
 import 'surfaces/files_surface.dart';
 import 'surfaces/terminal_controller.dart' show ControlTerminals;
 import 'surfaces/terminal_remote.dart';
@@ -613,9 +615,14 @@ class _CanoaAppState extends State<CanoaApp> {
   String? _settingsFirst;
 
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
+
+  /// The viewers the Files surface shows a file with; the person's choice per file type is kept in `viewers.json` beside canoa.cfg.
+  late final ViewerRegistry _fileViewers = standardViewerRegistry(
+    choices: ViewerChoices(backend: platformLayoutBackend(configPath: widget.served == null ? desktopConfigPath() : null, name: 'viewers.json')),
+  );
   late final WorkSurfaces _surfaces = widget.surfaces == null
       ? WorkSurfaces(
-          [...builtInSurfaces(), FilesSurface(_filesOf, canWrite: () => _grants?.may(HostGrants.filesWrite) ?? (widget.served == null)), TerminalSurface(_terminalOf, kinds: () => _panelTabs?.terminals ?? const [])],
+          [...builtInSurfaces(), FilesSurface(_filesOf, canWrite: () => _grants?.may(HostGrants.filesWrite) ?? (widget.served == null), viewers: _fileViewers), TerminalSurface(_terminalOf, kinds: () => _panelTabs?.terminals ?? const [])],
           added: () => [
             // A log is the host's own diagnostics: only a key that may change the host's settings reads it.
             if (_panelTabs case final kinds? when _grants?.may(HostGrants.hosting) ?? false)

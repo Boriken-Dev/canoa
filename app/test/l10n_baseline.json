@@ -97,7 +97,7 @@
   "lib/store/store_overlays.dart": 17,
   "lib/store/store_section.dart": 6,
   "lib/store/store_skills.dart": 40,
-  "lib/surfaces/files_surface.dart": 20,
+  "lib/surfaces/files_surface.dart": 13,
   "lib/surfaces/markdown_section_viewer.dart": 3,
   "lib/surfaces/subagents_surface.dart": 11,
   "lib/surfaces/terminal_controller.dart": 2,

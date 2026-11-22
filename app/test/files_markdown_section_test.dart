@@ -152,10 +152,10 @@ void main() {
       await _show(tester, FilesPanel(files: _Disk(home), root: home.path, reveal: FileReveal(file.path)));
       expect(_key('files text'), findsOneWidget);
       expect(_key('markdown section viewer'), findsNothing);
-      await tester.tap(_key('markdown view sections'));
+      await tester.tap(_key('viewer switch markdown'));
       await tester.pumpAndSettle();
       expect(_key('markdown section viewer'), findsOneWidget);
-      await tester.tap(_key('markdown view plain'));
+      await tester.tap(_key('viewer switch text'));
       await tester.pumpAndSettle();
       expect(_key('files text'), findsOneWidget);
     });
@@ -165,7 +165,7 @@ void main() {
       addTearDown(() => home.deleteSync(recursive: true));
       final file = _write(home, 'plan.md', _doc);
       await _show(tester, FilesPanel(files: _Disk(home), root: home.path, reveal: FileReveal(file.path)));
-      await tester.tap(_key('markdown view plain'));
+      await tester.tap(_key('viewer switch text'));
       await tester.pumpAndSettle();
       expect(_key('files text'), findsOneWidget);
       expect(_key('markdown frontmatter'), findsNothing);
