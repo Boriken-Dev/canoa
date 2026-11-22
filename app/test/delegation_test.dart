@@ -125,14 +125,14 @@ void main() {
       expect(rowStateOf(scene.session), isNot(RowState.waiting), reason: 'no turn runs');
       await scene.turn();
       expect(rowStateOf(scene.session), RowState.waiting);
-      expect(find.text('Waiting'), findsOneWidget);
-      expect(find.text('Working'), findsOneWidget, reason: "only the header's own state");
+      expect(find.text('Waiting'), findsNWidgets(2), reason: "the list's row and the header's state, which read the same word");
+      expect(find.text('Working'), findsOneWidget, reason: "the list's group heading");
       for (final id in ['c0', 'c1', 'c2', 'c3']) {
         await scene.end(id, 'COMPLETED');
       }
       expect(rowStateOf(scene.session), RowState.working);
       expect(find.text('Waiting'), findsNothing);
-      expect(find.text('Working'), findsNWidgets(2), reason: "the list's row and the header's state");
+      expect(find.text('Working'), findsNWidgets(3), reason: "the list's group heading, its row and the header's state");
     });
 
     testWidgets('a child that needs the person already raises the parent\'s own mark', (tester) async {

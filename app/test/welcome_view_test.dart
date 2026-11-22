@@ -125,7 +125,7 @@ void main() {
     await tester.tap(find.byKey(const Key('welcome-import')));
     await tester.pump();
     await tester.pump();
-    expect(find.textContaining('Could not look: Bad state: no history folder'), findsOneWidget);
+    expect(find.textContaining('Could not look: no history folder'), findsOneWidget);
     await tester.tap(find.byKey(const Key('welcome-import')));
     await tester.pump();
     await tester.pump();

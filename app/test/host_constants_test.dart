@@ -28,9 +28,9 @@ void main() {
   });
 
   test('every key of [host.kb] the app edits is one the host reads', () {
-    final kb = RegExp(r'struct RawKb \{([^}]+)\}').firstMatch(_host('config.rs'));
+    final kb = RegExp(r'struct RawKb \{([^}]+)\}').firstMatch(_host('config/raw.rs'));
     expect(kb, isNotNull);
-    final read = {for (final field in RegExp(r'^\s*(\w+):', multiLine: true).allMatches(kb!.group(1)!)) field.group(1)!};
+    final read = {for (final field in RegExp(r'^\s*(?:pub(?:\([a-z]+\))?\s+)?(\w+):', multiLine: true).allMatches(kb!.group(1)!)) field.group(1)!};
     expect(read.containsAll(CanoaConfig.hostKbKeys), isTrue, reason: '${CanoaConfig.hostKbKeys.toSet().difference(read)} is read by the app only');
   });
 }
