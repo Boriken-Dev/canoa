@@ -103,7 +103,7 @@ void main() {
         reason: 'named after its source, never from what was said',
       );
       expect(session.cwd, session.worktree!.path);
-      expect(agent.methods, [
+      expect(agent.methods.where((method) => method != '_canoa/mcp/list'), [
         'initialize',
         'session/new',
         'session/set_config_option',

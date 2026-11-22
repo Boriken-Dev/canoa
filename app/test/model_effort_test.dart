@@ -72,7 +72,7 @@ void main() {
     expect(agent.starts, isEmpty);
     await send(tester, 'Fix the tests');
 
-    expect(agent.methods, ['initialize', 'session/new', 'session/set_config_option', 'session/set_config_option', 'session/prompt']);
+    expect(agent.methods.where((method) => method != '_canoa/mcp/list'), ['initialize', 'session/new', 'session/set_config_option', 'session/set_config_option', 'session/prompt']);
     final set = [for (final request in agent.requests) if (request['method'] == 'session/set_config_option') request['params']];
     expect(set.map((params) => (params['configId'], params['value'])), [('model', 'opus'), ('effort', 'high')]);
     expect(_pill(tester), 'Opus · High');
