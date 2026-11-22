@@ -136,6 +136,9 @@ pub(crate) fn hooks_delivery(request: &HooksRequest) -> HooksDelivery {
         if each.kind == HookKind::PreTool {
             tools = true;
             hook["command"] = serde_json::json!(format!("{} || exit 2", each.command));
+            // Claude Code's hooks reference: "To block the action instead, set \"onFailure\": \"block\" on a command ... hook"
+            // (v2.1.295 and later), which makes a hook that cannot start, times out or exits with another status refuse the call.
+            hook["onFailure"] = serde_json::json!("block");
             entry.insert("matcher".to_owned(), serde_json::json!("*"));
         }
         entry.insert("hooks".to_owned(), serde_json::json!([hook]));
@@ -309,6 +312,10 @@ mod tests {
             "\"canoa\" hook-forward || exit 2"
         );
         assert_eq!(entry["hooks"][0]["timeout"], 45);
+        assert_eq!(
+            entry["hooks"][0]["onFailure"], "block",
+            "a failed hook refuses the call"
+        );
         let manifest = delivery
             .files
             .iter()

@@ -151,6 +151,7 @@ fn only_what_a_host_runs_for_itself_counts_as_its_own() {
     assert!(own(&["helper", "a-library", "--model", "m"]));
     assert!(own(&["hook-forward", "--channel", "x", "start"]));
     assert!(own(&["hook-forward", "--channel", "x", "env-tool"]));
+    assert!(own(&["hook-forward", "--channel", "x", "env-start"]));
     assert!(own(&["hook-forward", "--channel", "x", "env-exec", "0a1b"]));
     #[cfg(unix)]
     assert!(own(&[crate::spawn::SPAWNER_COMMAND]));

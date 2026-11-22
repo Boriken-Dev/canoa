@@ -212,6 +212,7 @@ pub(super) struct RawEnvironment {
     pub(super) output_bytes: Option<u64>,
     pub(super) scrollback_bytes: Option<u64>,
     pub(super) max_tool_sessions: Option<u64>,
+    pub(super) hook_seconds: Option<u64>,
     #[serde(flatten)]
     pub(super) settings: toml::Table,
 }

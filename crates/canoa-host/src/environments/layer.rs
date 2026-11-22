@@ -62,6 +62,20 @@ impl<C: Channel + ?Sized> Channel for EnvLayer<'_, C> {
             if let Some(answer) = link.next_answer() {
                 return Ok(Some(answer));
             }
+            // A prompt that waits for its session's hook holds back what the client sends after it.
+            if link.holding() {
+                match link.release() {
+                    Some(Said::On(message)) => return Ok(Some(message)),
+                    Some(Said::Answered(answer)) => self.inner.send(&answer)?,
+                    _ => {
+                        if until.is_some_and(|until| Instant::now() >= until) {
+                            return Err(Failure::Timeout);
+                        }
+                        std::thread::sleep(POLL);
+                    }
+                }
+                continue;
+            }
             let slice = match until {
                 Some(until) => {
                     let left = until.saturating_duration_since(Instant::now());
@@ -77,6 +91,7 @@ impl<C: Channel + ?Sized> Channel for EnvLayer<'_, C> {
                     Said::On(message) => return Ok(Some(message)),
                     // A request the host refused itself is answered to the client, and the agent never sees it.
                     Said::Answered(answer) => self.inner.send(&answer)?,
+                    Said::Held => {}
                 },
                 Ok(None) => return Ok(None),
                 Err(Failure::Timeout) => {}

@@ -190,8 +190,15 @@ mod library {
 }
 
 fn environments(message_bytes: usize) -> Arc<Environments> {
+    environments_with(message_bytes, "")
+}
+
+/// The stand-in environments, `box` with the settings `extra` adds to its table.
+fn environments_with(message_bytes: usize, extra: &str) -> Arc<Environments> {
     let config = Config::from_str_in(
-        "[host.environments.box]\nkind = \"elsewhere\"\n\n[host.environments.shelf]\nkind = \"files_only\"\n",
+        &format!(
+            "[host.environments.box]\nkind = \"elsewhere\"\n{extra}\n[host.environments.shelf]\nkind = \"files_only\"\n"
+        ),
         std::path::Path::new(""),
     )
     .expect("the tables parse");
@@ -229,9 +236,15 @@ const PREFIX: &str = "\"canoa\" hook-forward --channel \"c\"";
 
 /// What `payload` is answered for a session in `mode`, every command prepared as `ID`.
 fn judged(env: &Env, mode: Mode, payload: &Value) -> Verdict {
-    evaluate(&claude(), env, mode, payload, &mut |shell, command| {
-        rewritten(PREFIX, "ID", shell, command).ok_or_else(|| "no shell".to_owned())
-    })
+    evaluate(
+        &claude(),
+        (env.name(), &env.info()),
+        mode,
+        payload,
+        &mut |shell, command| {
+            rewritten(PREFIX, "ID", shell, command).ok_or_else(|| "no shell".to_owned())
+        },
+    )
 }
 
 #[test]
@@ -344,7 +357,7 @@ fn plan_mode_a_missing_capability_and_a_tool_not_described_are_refused_before_an
         &mut |_: ShellFamily, _: &str| -> Result<String, String> { panic!("nothing is prepared") };
     let mut refused = |env: &Env, mode: Mode, payload: &Value| match evaluate(
         &claude(),
-        env,
+        (env.name(), &env.info()),
         mode,
         payload,
         never,
@@ -654,8 +667,12 @@ fn a_command_prepared_before_the_session_went_to_plan_mode_or_closed_does_not_ru
 }
 
 fn hub(program: &str) -> Arc<super::super::mcp::Hub> {
+    hub_with(program, "")
+}
+
+fn hub_with(program: &str, extra: &str) -> Arc<super::super::mcp::Hub> {
     super::super::mcp::Hub::new(
-        environments(crate::config::DEFAULT_MAX_MESSAGE_BYTES),
+        environments_with(crate::config::DEFAULT_MAX_MESSAGE_BYTES, extra),
         crate::delegate::BridgeCommand::new(std::path::Path::new(program), &[]),
         None,
     )
@@ -794,4 +811,101 @@ fn a_mode_the_client_chooses_counts_once_the_agent_took_it_and_the_agent_can_onl
         "update": {"sessionUpdate": "current_mode_update", "currentModeId": "bypass"}}}),
     );
     assert_eq!(link.mode_of("s"), Mode::Plan, "the agent cannot raise it");
+}
+
+#[test]
+fn the_forwarder_has_one_budget_in_all_so_a_host_that_trickles_cannot_hold_it_past_the_hooks_timeout()
+ {
+    let modes = Arc::new(Modes::default());
+    let (interception, channel) = opened("box", 1 << 20, &modes);
+    // A stand-in that took the port: it reads the request and answers a byte at a time, never ending the line.
+    let fake = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let addr = fake.local_addr().expect("an address");
+    let trickle = std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = fake.accept() {
+            let mut line = [0_u8; 4096];
+            let _ = stream.read(&mut line);
+            for _ in 0..40 {
+                if stream.write_all(b" ").is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    });
+    let mut held: Value =
+        serde_json::from_slice(&std::fs::read(&channel).expect("read")).expect("JSON");
+    held["addr"] = json!(addr.to_string());
+    held["seconds"] = json!(1);
+    let slow = channel.parent().expect("a folder").join("slow.json");
+    std::fs::write(&slow, held.to_string()).expect("written");
+    let begun = std::time::Instant::now();
+    let (status, out, _) = forwarded(KIND_TOOL, &slow, None, bash("ls").to_string().as_bytes());
+    let took = begun.elapsed();
+    assert_eq!((status, out.is_empty()), (2, true));
+    assert!(
+        took < Duration::from_millis(2500),
+        "one budget of a second, not one per read: {took:?}"
+    );
+    let _ = trickle.join();
+    drop(interception);
+}
+
+#[test]
+fn a_prompt_waits_for_the_hook_to_report_it_is_in_force_and_is_refused_when_it_does_not() {
+    use super::super::mcp::Said;
+    let open = |id: u64| {
+        let link = hub_with("canoa", "hook_seconds = 1\n")
+            .for_connection(None, &serve("box"), Some("claude"))
+            .expect("made")
+            .expect("a link");
+        let request = json!({"jsonrpc": "2.0", "id": id, "method": "session/new", "params": {"cwd": "/w", "mcpServers": []}});
+        assert!(matches!(said(&link, &request), Said::On(_)));
+        let channel = link
+            .interception_for_tests()
+            .and_then(|interception| interception.channel_of(&id.to_string()))
+            .expect("a channel");
+        link.agent_said(
+            json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": "s1"}})
+                .to_string()
+                .as_bytes(),
+        );
+        (link, channel)
+    };
+    let prompt = json!({"jsonrpc": "2.0", "id": 9, "method": "session/prompt",
+        "params": {"sessionId": "s1", "prompt": [{"type": "text", "text": "hi"}]}});
+    // The hook reports: the prompt goes on.
+    let (link, channel) = open(2);
+    assert_eq!(said(&link, &prompt), Said::Held);
+    assert!(link.holding());
+    assert_eq!(link.release(), None, "it waits");
+    let (status, _, err) = forwarded(KIND_START, &channel, None, b"{\"source\": \"startup\"}");
+    assert_eq!(status, 0, "{err}");
+    let Some(Said::On(sent)) = link.release() else {
+        panic!("it goes on")
+    };
+    assert!(String::from_utf8_lossy(&sent).contains("session/prompt"));
+    assert!(
+        matches!(said(&link, &prompt), Said::On(_)),
+        "the next prompt does not wait"
+    );
+    // It never reports: the prompt is refused once hook_seconds have passed.
+    let (link, _) = open(3);
+    assert_eq!(said(&link, &prompt), Said::Held);
+    std::thread::sleep(Duration::from_millis(1200));
+    let Some(Said::Answered(answer)) = link.release() else {
+        panic!("refused")
+    };
+    let answer: Value = serde_json::from_slice(&answer).expect("JSON");
+    assert_eq!(
+        (answer["id"].clone(), answer["error"]["code"].clone()),
+        (json!(9), json!(-32602))
+    );
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .expect("why")
+            .contains("did not report"),
+        "{answer}"
+    );
 }

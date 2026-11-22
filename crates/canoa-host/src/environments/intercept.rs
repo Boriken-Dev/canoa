@@ -18,7 +18,7 @@
 )]
 
 use std::collections::BTreeMap;
-use std::io::{BufRead as _, Read, Write};
+use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use canoa::environment::capability;
+use canoa::environment::{EnvironmentInfo, capability};
 use canoa::vendor::{HookCommand, HookKind, HooksRequest, ShellFamily, ToolHook, ToolRole};
 use coqui_acp_api::{ErrorOutput, SpawnSpec};
 use serde_json::{Map, Value, json};
@@ -41,6 +41,8 @@ use crate::profile::hosted::{
 pub(crate) const KIND_TOOL: &str = "env-tool";
 /// The forwarder's kind that runs a command the hook prepared.
 pub(crate) const KIND_EXEC: &str = "env-exec";
+/// The forwarder's kind that says the agent's session started with the hook in force.
+pub(crate) const KIND_START: &str = "env-start";
 /// The file in a session request's directory that holds the channel.
 const CHANNEL_FILE: &str = "channel.json";
 /// The longest channel file the forwarder reads: the host writes an address, a secret and two numbers.
@@ -175,10 +177,9 @@ fn forwarder(program: &str, before: &[String], channel: &Path) -> Option<String>
     Some(parts.join(" "))
 }
 
-/// Why the file tool `tool` is refused, and how the same is done in `env`.
-fn files_refused(hook: &ToolHook, env: &Env, tool: &str) -> String {
-    let info = env.info();
-    let server = super::mcp::server_name(env.name());
+/// Why the file tool `tool` is refused, and how the same is done in the environment `env` that `info` describes.
+fn files_refused(hook: &ToolHook, (env, info): (&str, &EnvironmentInfo), tool: &str) -> String {
+    let server = super::mcp::server_name(env);
     let mut ways = Vec::new();
     let names: Vec<&str> = [
         (capability::FS_READ, "fs_read"),
@@ -206,28 +207,27 @@ fn files_refused(hook: &ToolHook, env: &Env, tool: &str) -> String {
             .collect();
         if !shells.is_empty() {
             ways.push(format!(
-                "the {} tool, whose commands run in {} (grep, find, ls, cat and the like)",
+                "the {} tool, whose commands run in {env} (grep, find, ls, cat and the like)",
                 shells.join(" or "),
-                env.name()
             ));
         }
     }
     let way = if ways.is_empty() {
-        format!("environment {} offers nothing to do it with", env.name())
+        format!("environment {env} offers nothing to do it with")
     } else {
         format!("use {}", ways.join(", or "))
     };
     format!(
-        "In this session the files are in environment {}, not on this computer, so {tool} is not used: {way}.",
-        env.name()
+        "In this session the files are in environment {env}, not on this computer, so {tool} is not used: {way}."
     )
 }
 
-/// What `payload`, a hook's payload in the terms `hook` describes, is answered, for a session in `session` mode. `prepare` keeps a
-/// command for `env-exec` and gives the command that runs it, or why it cannot.
+/// What `payload`, a hook's payload in the terms `hook` describes, is answered, for a session in `session` mode, in the environment
+/// `env` as `info` described it when the take-over began: nothing here waits on the environment. `prepare` keeps a command for
+/// `env-exec` and gives the command that runs it, or why it cannot.
 pub(crate) fn evaluate(
     hook: &ToolHook,
-    env: &Env,
+    (env, info): (&str, &EnvironmentInfo),
     session: Mode,
     payload: &Value,
     prepare: &mut dyn FnMut(ShellFamily, &str) -> Result<String, String>,
@@ -244,8 +244,7 @@ pub(crate) fn evaluate(
     }
     let Some(tool) = hook.tools.iter().find(|each| each.name == name) else {
         return Verdict::Deny(format!(
-            "{name} would act on this computer, not in environment {}, and is not a tool that can be run there",
-            env.name()
+            "{name} would act on this computer, not in environment {env}, and is not a tool that can be run there"
         ));
     };
     if tool.role == ToolRole::Pass {
@@ -270,9 +269,9 @@ pub(crate) fn evaluate(
         .unwrap_or(Mode::Manual);
     let mode = session.min(reported);
     match tool.role {
-        ToolRole::Files => Verdict::Deny(files_refused(hook, env, name)),
+        ToolRole::Files => Verdict::Deny(files_refused(hook, (env, info), name)),
         ToolRole::Shell => {
-            if let Err(why) = env.needs(capability::EXEC) {
+            if let Err(why) = super::offered(env, info.clone(), capability::EXEC) {
                 return Verdict::Deny(why);
             }
             if mode == Mode::Plan {
@@ -327,19 +326,25 @@ struct Holder {
     /// The ACP session, once the agent has answered.
     session: Option<String>,
     channel: PathBuf,
+    /// The agent's session started with the hook in force: the plugin's start hook reported.
+    started: bool,
 }
 
 /// What the accepting thread and its handlers share with the link.
 struct Shared {
     env: Arc<Env>,
+    /// What the environment said of itself when the take-over began, which a tool call is judged by.
+    info: EnvironmentInfo,
     hook: ToolHook,
     modes: Arc<Modes>,
     program: String,
     before: Vec<String>,
     secrets: Mutex<BTreeMap<String, Holder>>,
+    /// The secret of each session's latest request, whose plugin is the one in force.
+    latest: Mutex<BTreeMap<String, String>>,
     ops: Mutex<BTreeMap<String, Op>>,
     max_bytes: usize,
-    /// How long a forwarder waits for an answer, and the host for a request.
+    /// How long a forwarder may take for its answer, in all, and the host for a request: the environment's `hook_seconds`.
     seconds: u64,
 }
 
@@ -365,9 +370,9 @@ impl core::fmt::Debug for Interception {
     }
 }
 
-/// How long a forwarder waits for the host: the environment's `exec_seconds`, none being as long as a harness's hook can wait.
+/// How long a forwarder may take for its answer: the environment's `hook_seconds`, none being as long as a harness's hook can wait.
 fn answer_seconds(env: &Env) -> u64 {
-    match env.exec_seconds() {
+    match env.hook_seconds() {
         0 => LONGEST_HOOK_SECONDS,
         set => set.min(LONGEST_HOOK_SECONDS),
     }
@@ -391,13 +396,17 @@ impl Interception {
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
         let seconds = answer_seconds(&env);
+        // A tool call is judged by this, so an environment that is slow to say what it is never decides how long the hook takes.
+        let info = env.info();
         let shared = Arc::new(Shared {
             env,
+            info,
             hook,
             modes,
             program: program.to_owned(),
             before: before.to_vec(),
             secrets: Mutex::new(BTreeMap::new()),
+            latest: Mutex::new(BTreeMap::new()),
             ops: Mutex::new(BTreeMap::new()),
             max_bytes,
             seconds,
@@ -455,10 +464,10 @@ impl Interception {
             ));
         };
         let request_hooks = HooksRequest::new(
-            vec![HookCommand::new(
-                HookKind::PreTool,
-                format!("{prefix} {KIND_TOOL}"),
-            )],
+            vec![
+                HookCommand::new(HookKind::PreTool, format!("{prefix} {KIND_TOOL}")),
+                HookCommand::new(HookKind::Start, format!("{prefix} {KIND_START}")),
+            ],
             self.shared.seconds,
         );
         let delivery =
@@ -477,6 +486,7 @@ impl Interception {
             Holder {
                 session: None,
                 channel: at,
+                started: false,
             },
         );
         lock(&self.plugins).insert(request.to_owned(), (written, secret));
@@ -493,6 +503,7 @@ impl Interception {
                 if let Some(holder) = lock(&self.shared.secrets).get_mut(&secret) {
                     holder.session = Some(session.to_owned());
                 }
+                lock(&self.shared.latest).insert(session.to_owned(), secret.clone());
                 // A session loaded again keeps the plugin it had, beside the new one, until it closes.
                 lock(&self.plugins)
                     .insert(format!("session:{session}:{request}"), (written, secret));
@@ -516,6 +527,23 @@ impl Interception {
         }
         let prefix = format!("session:{session}:");
         lock(&self.plugins).retain(|key, _| !key.starts_with(&prefix));
+        lock(&self.shared.latest).remove(session);
+    }
+
+    /// Whether the plugin of `session`'s latest request reported that the agent's session started with it: until then its hook is
+    /// not known to be in force, so its prompts wait.
+    pub(crate) fn started(&self, session: &str) -> bool {
+        let Some(secret) = lock(&self.shared.latest).get(session).cloned() else {
+            return false;
+        };
+        lock(&self.shared.secrets)
+            .get(&secret)
+            .is_some_and(|holder| holder.started)
+    }
+
+    /// How long a prompt waits for the start report: the environment's `hook_seconds`.
+    pub(crate) fn seconds(&self) -> u64 {
+        self.shared.seconds
     }
 
     fn revoke(&self, secret: &str) {
@@ -618,7 +646,7 @@ fn handle(stream: &TcpStream, shared: &Shared) {
             let verdict = match request.get("payload") {
                 Some(payload) => evaluate(
                     &shared.hook,
-                    &shared.env,
+                    (shared.env.name(), &shared.info),
                     mode,
                     payload,
                     &mut |shell, command| shared.prepare(secret, &holder.channel, shell, command),
@@ -634,6 +662,12 @@ fn handle(stream: &TcpStream, shared: &Shared) {
             }
         }
         KIND_EXEC => shared.exec(stream, (&holder, secret, nonce), text("id")),
+        KIND_START => {
+            if let Some(held) = lock(&shared.secrets).get_mut(secret) {
+                held.started = true;
+            }
+            write_line(stream, &json!({"nonce": nonce, "output": ""}));
+        }
         _ => {}
     }
 }
@@ -854,44 +888,52 @@ fn read_channel(path: &Path) -> Result<Channel, String> {
     })
 }
 
-/// Connects to the host, sends `request` and reads its first answer line, which must carry `nonce`; the reader holds what follows.
+/// Connects to the host, sends `request` and reads its first answer line, which must carry `nonce`, all by `deadline`: one budget
+/// for the connection, the request and every read of the answer, so the forwarder answers its hook before the hook's own timeout,
+/// which would let the call go on. What follows the line is left in the stream.
 fn ask(
     channel: &Channel,
     mut request: Map<String, Value>,
     nonce: &str,
-) -> Result<(std::io::BufReader<TcpStream>, Value), String> {
-    let limit = Duration::from_secs(channel.seconds);
+    deadline: Instant,
+) -> Result<(TcpStream, Value), String> {
+    let left = || {
+        deadline
+            .checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(|| "the host did not answer in time".to_owned())
+    };
     request.insert("secret".to_owned(), json!(channel.secret));
     request.insert("nonce".to_owned(), json!(nonce));
-    let mut stream = TcpStream::connect_timeout(&channel.addr, limit)
+    let mut stream = TcpStream::connect_timeout(&channel.addr, left()?)
         .map_err(|error| format!("the host cannot be reached ({error})"))?;
-    stream
-        .set_read_timeout(Some(limit))
-        .and_then(|()| stream.set_write_timeout(Some(limit)))
-        .map_err(|error| error.to_string())?;
     let mut line = Value::Object(request).to_string().into_bytes();
     line.push(b'\n');
     stream
-        .write_all(&line)
+        .set_write_timeout(Some(left()?))
+        .and_then(|()| stream.write_all(&line))
         .map_err(|error| format!("the host cannot be reached ({error})"))?;
     let bound = channel.max_bytes.saturating_add(ENVELOPE);
-    let mut reader = std::io::BufReader::new(stream);
     let mut answer = Vec::new();
-    Read::take(
-        &mut reader,
-        u64::try_from(bound).unwrap_or(u64::MAX).saturating_add(1),
-    )
-    .read_until(b'\n', &mut answer)
-    .map_err(|error| format!("the host did not answer ({error})"))?;
-    if answer.len() > bound || !answer.ends_with(b"\n") {
-        return Err("the host did not answer".to_owned());
+    let mut byte = [0_u8; 1];
+    // A byte at a time, so nothing after the line is taken from the stream and every read is held to what is left.
+    loop {
+        stream
+            .set_read_timeout(Some(left()?))
+            .map_err(|error| error.to_string())?;
+        match stream.read(&mut byte) {
+            Ok(1) if byte[0] == b'\n' => break,
+            Ok(1) if answer.len() < bound => answer.push(byte[0]),
+            Ok(_) => return Err("the host did not answer".to_owned()),
+            Err(error) => return Err(format!("the host did not answer ({error})")),
+        }
     }
     let answer: Value = serde_json::from_slice(&answer)
         .map_err(|_| "the host's answer is not readable".to_owned())?;
     if answer.get("nonce").and_then(Value::as_str) != Some(nonce) {
         return Err("the answer is not the host's".to_owned());
     }
-    Ok((reader, answer))
+    Ok((stream, answer))
 }
 
 /// What `canoa hook-forward --channel FILE env-tool|env-exec [ID]` does, with the process's streams: answers the agent's hook for
@@ -930,6 +972,16 @@ pub(crate) fn forward(
                 NOT_RUN
             }
         },
+        KIND_START => match started(channel, stdin) {
+            Ok(()) => 0,
+            Err(why) => {
+                let _ = writeln!(
+                    stderr,
+                    "canoa: the host was not told the session started ({why}); its prompts are refused"
+                );
+                1
+            }
+        },
         _ => {
             let _ = writeln!(stderr, "canoa: {kind} is not a kind this forwarder knows");
             REFUSED
@@ -937,8 +989,26 @@ pub(crate) fn forward(
     }
 }
 
-fn tool(channel: &Path, stdin: impl Read) -> Result<String, String> {
+/// Tells the host the agent's session started with the hook in force.
+fn started(channel: &Path, stdin: impl Read) -> Result<(), String> {
+    let deadline = Instant::now();
     let channel = read_channel(channel)?;
+    let deadline = deadline + Duration::from_secs(channel.seconds);
+    // What the agent says of its start is not needed, only that the hook ran.
+    let _ = std::io::copy(
+        &mut stdin.take(u64::try_from(channel.max_bytes).unwrap_or(u64::MAX)),
+        &mut std::io::sink(),
+    );
+    let nonce = random_hex().map_err(|error| error.to_string())?;
+    let mut request = Map::new();
+    request.insert("kind".to_owned(), json!(KIND_START));
+    ask(&channel, request, &nonce, deadline).map(drop)
+}
+
+fn tool(channel: &Path, stdin: impl Read) -> Result<String, String> {
+    let deadline = Instant::now();
+    let channel = read_channel(channel)?;
+    let deadline = deadline + Duration::from_secs(channel.seconds);
     let mut bytes = Vec::new();
     stdin
         .take(
@@ -963,7 +1033,7 @@ fn tool(channel: &Path, stdin: impl Read) -> Result<String, String> {
     let mut request = Map::new();
     request.insert("kind".to_owned(), json!(KIND_TOOL));
     request.insert("payload".to_owned(), payload);
-    let (_, answer) = ask(&channel, request, &nonce)?;
+    let (_, answer) = ask(&channel, request, &nonce, deadline)?;
     if let Some(why) = answer.get("refused").and_then(Value::as_str) {
         return Err(why.to_owned());
     }
@@ -979,10 +1049,12 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
         let _ = writeln!(stderr, "canoa: {why}; nothing ran on this computer.");
         NOT_RUN
     };
+    let begun = Instant::now();
     let channel = match read_channel(channel) {
         Ok(channel) => channel,
         Err(why) => return failed(stderr, &why),
     };
+    let deadline = begun + Duration::from_secs(channel.seconds);
     let nonce = match random_hex() {
         Ok(nonce) => nonce,
         Err(error) => return failed(stderr, &error.to_string()),
@@ -990,7 +1062,7 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
     let mut request = Map::new();
     request.insert("kind".to_owned(), json!(KIND_EXEC));
     request.insert("id".to_owned(), json!(id));
-    let (mut reader, header) = match ask(&channel, request, &nonce) {
+    let (stream, header) = match ask(&channel, request, &nonce, deadline) {
         Ok(answered) => answered,
         Err(why) => return failed(stderr, &why),
     };
@@ -998,9 +1070,10 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
         return failed(stderr, why);
     }
     // The command may run as long as the environment lets it: the agent's harness bounds the wait.
-    if reader.get_ref().set_read_timeout(None).is_err() {
+    if stream.set_read_timeout(None).is_err() {
         return failed(stderr, "the connection to the host failed");
     }
+    let mut reader = std::io::BufReader::new(stream);
     loop {
         let mut head = [0_u8; 5];
         if reader.read_exact(&mut head).is_err() {

@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant};
 
 use canoa::environment::{State, capability};
 use canoa::store::protect::Protected;
@@ -796,6 +797,7 @@ impl Hub {
             plugins_are_hosts: AtomicBool::new(false),
             state: Mutex::new(LinkState::default()),
             queue: Mutex::new(VecDeque::new()),
+            held: Mutex::new(None),
             closed: AtomicBool::new(false),
         })))
     }
@@ -851,6 +853,8 @@ pub(crate) struct Link {
     state: Mutex<LinkState>,
     /// What the host answers the agent: its calls served from an environment.
     queue: Mutex<VecDeque<Vec<u8>>>,
+    /// A prompt that waits for its session's hook to report.
+    held: Mutex<Option<Held>>,
     closed: AtomicBool,
 }
 
@@ -861,6 +865,16 @@ pub(crate) enum Said {
     On(Vec<u8>),
     /// The host answered it: this goes back to the client, and nothing to the agent.
     Answered(Vec<u8>),
+    /// It waits for its session's hook to report that it is in force ([`Link::release`]).
+    Held,
+}
+
+/// A prompt waiting for its session's hook.
+struct Held {
+    message: Vec<u8>,
+    session: String,
+    id: Option<Value>,
+    until: Instant,
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1057,7 +1071,26 @@ impl Link {
                 }
                 false
             }
-            ("session/prompt", _) => self.brief(&mut value),
+            ("session/prompt", _) => {
+                let briefed = self.brief(&mut value);
+                if let (Some(interception), Some(session)) = (&self.interception, session)
+                    && !interception.started(&session)
+                {
+                    let message = if briefed {
+                        serde_json::to_vec(&value).unwrap_or(message)
+                    } else {
+                        message
+                    };
+                    *lock(&self.held) = Some(Held {
+                        message,
+                        session,
+                        id: value.get("id").cloned(),
+                        until: Instant::now() + Duration::from_secs(interception.seconds()),
+                    });
+                    return Said::Held;
+                }
+                briefed
+            }
             _ => false,
         };
         if changed {
@@ -1065,6 +1098,38 @@ impl Link {
         } else {
             Said::On(message)
         }
+    }
+
+    /// Whether a prompt waits for its session's hook.
+    pub(crate) fn holding(&self) -> bool {
+        lock(&self.held).is_some()
+    }
+
+    /// The prompt that waited, once its session's hook has reported (it goes on), or once the wait is over (it is refused, since
+    /// the session's commands would run on this computer); `None` while it still waits, or when none does.
+    pub(crate) fn release(&self) -> Option<Said> {
+        let mut held = lock(&self.held);
+        let waiting = held.as_ref()?;
+        let started = self
+            .interception
+            .as_ref()
+            .is_some_and(|interception| interception.started(&waiting.session));
+        if started {
+            return held.take().map(|held| Said::On(held.message));
+        }
+        if Instant::now() < waiting.until {
+            return None;
+        }
+        let held = held.take()?;
+        let why = format!(
+            "the hook that runs this session's tools in environment {} did not report that it is in force, so the prompt is not sent: the agent's commands would run on this computer (Claude Code's hooks may be turned off by disableAllHooks or a managed policy)",
+            self.served
+                .as_ref()
+                .map_or("", |served| served.env().name())
+        );
+        let answer = json!({"jsonrpc": "2.0", "id": held.id,
+            "error": {"code": crate::control::BAD_PARAMS, "message": why}});
+        Some(Said::Answered(answer.to_string().into_bytes()))
     }
 
     /// Gives a session request the plugin that takes the agent's own tools over, when they are; whether the request changed.
@@ -1391,6 +1456,12 @@ impl Link {
         lock(&self.state)
             .digests
             .retain(|held| !digests.contains(held));
+    }
+
+    /// The take-over of the agent's tools, for tests.
+    #[cfg(test)]
+    pub(crate) fn interception_for_tests(&self) -> Option<&Interception> {
+        self.interception.as_ref()
     }
 
     /// The mode the host holds for `session`, for tests.

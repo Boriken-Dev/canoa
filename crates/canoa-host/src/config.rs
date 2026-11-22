@@ -60,7 +60,7 @@ pub use types::{
     StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
-    DEFAULT_EXEC_SECONDS, DEFAULT_MAX_TOOL_SESSIONS, DEFAULT_OUTPUT_BYTES,
+    DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_SECONDS, DEFAULT_MAX_TOOL_SESSIONS, DEFAULT_OUTPUT_BYTES,
     DEFAULT_SCROLLBACK_BYTES, EnvironmentConfig,
 };
 
@@ -483,6 +483,7 @@ fn environment_of(
         output_bytes: raw.output_bytes,
         scrollback_bytes: raw.scrollback_bytes,
         max_tool_sessions: raw.max_tool_sessions,
+        hook_seconds: raw.hook_seconds,
     })
 }
 

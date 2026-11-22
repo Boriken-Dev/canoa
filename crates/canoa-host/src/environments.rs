@@ -332,6 +332,9 @@ impl Environments {
                 table.and_then(|config| config.scrollback_bytes),
                 crate::config::DEFAULT_SCROLLBACK_BYTES,
             ),
+            hook_seconds: table
+                .and_then(|config| config.hook_seconds)
+                .unwrap_or(crate::config::DEFAULT_HOOK_SECONDS),
             max_tool_sessions: limit_of(
                 table.and_then(|config| config.max_tool_sessions),
                 crate::config::DEFAULT_MAX_TOOL_SESSIONS,
@@ -385,6 +388,8 @@ pub(crate) struct Env {
     output_bytes: usize,
     scrollback_bytes: usize,
     max_tool_sessions: usize,
+    /// `hook_seconds` of its table; `0` for as long as the agent's hook can wait.
+    hook_seconds: u64,
 }
 
 /// A limit as a table sets it: `0` is none.
@@ -422,6 +427,11 @@ impl Env {
         self.max_tool_sessions
     }
 
+    /// How long the hook that takes an agent's own tools over may take to have the host's answer, in all, and a prompt waits for the hook to report that it is in force; `0` for as long as the agent's hook can wait.
+    pub(crate) fn hook_seconds(&self) -> u64 {
+        self.hook_seconds
+    }
+
     /// Its name in canoa.cfg, or `here`.
     pub(crate) fn name(&self) -> &str {
         &self.name
@@ -446,44 +456,7 @@ impl Env {
     ///
     /// In words, naming the capability: the environment is down or waiting, or does not offer it.
     pub(crate) fn needs(&self, name: &str) -> Result<EnvironmentInfo, String> {
-        let info = self.info();
-        match info.state {
-            State::Ready => {}
-            State::Waiting => {
-                return Err(format!(
-                    "environment {} is waiting: {}",
-                    self.name,
-                    info.detail
-                        .as_deref()
-                        .unwrap_or("it has not approved this host")
-                ));
-            }
-            _ => {
-                return Err(format!(
-                    "environment {} is down: {}",
-                    self.name,
-                    info.detail.as_deref().unwrap_or("it cannot be reached")
-                ));
-            }
-        }
-        if info.offers(name) {
-            Ok(info)
-        } else {
-            let has: Vec<&str> = info
-                .capabilities
-                .iter()
-                .map(|each| each.name.as_str())
-                .collect();
-            Err(format!(
-                "environment {} has no capability {name} (it offers {})",
-                self.name,
-                if has.is_empty() {
-                    "nothing".to_owned()
-                } else {
-                    has.join(", ")
-                }
-            ))
-        }
+        offered(&self.name, self.info(), name)
     }
 
     /// The spawner programs are started through there.
@@ -579,6 +552,55 @@ impl Env {
         spawner
             .spawn(spec)
             .map_err(|error| format!("environment {}: {error}", self.name))
+    }
+}
+
+/// `info`, when the environment `env` it describes can be used and offers `name`.
+///
+/// # Errors
+///
+/// In words, naming the capability: the environment is down or waiting, or does not offer it.
+pub(crate) fn offered(
+    env: &str,
+    info: EnvironmentInfo,
+    name: &str,
+) -> Result<EnvironmentInfo, String> {
+    match info.state {
+        State::Ready => {}
+        State::Waiting => {
+            return Err(format!(
+                "environment {} is waiting: {}",
+                env,
+                info.detail
+                    .as_deref()
+                    .unwrap_or("it has not approved this host")
+            ));
+        }
+        _ => {
+            return Err(format!(
+                "environment {} is down: {}",
+                env,
+                info.detail.as_deref().unwrap_or("it cannot be reached")
+            ));
+        }
+    }
+    if info.offers(name) {
+        Ok(info)
+    } else {
+        let has: Vec<&str> = info
+            .capabilities
+            .iter()
+            .map(|each| each.name.as_str())
+            .collect();
+        Err(format!(
+            "environment {} has no capability {name} (it offers {})",
+            env,
+            if has.is_empty() {
+                "nothing".to_owned()
+            } else {
+                has.join(", ")
+            }
+        ))
     }
 }
 

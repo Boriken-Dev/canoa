@@ -347,7 +347,8 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::HookForward {
             channel, kind, id, ..
         } if kind == crate::environments::intercept::KIND_TOOL
-            || kind == crate::environments::intercept::KIND_EXEC =>
+            || kind == crate::environments::intercept::KIND_EXEC
+            || kind == crate::environments::intercept::KIND_START =>
         {
             let status = crate::environments::intercept::forward(
                 &kind,
