@@ -244,6 +244,17 @@ impl Host {
                 command.env_remove(&name);
             }
         }
+        // Where each agent keeps its login is the test's own folder, so no test reads the person's: a default home is the person's.
+        for name in [
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "PI_CODING_AGENT_DIR",
+            "GROK_HOME",
+        ] {
+            if !env.iter().any(|(set, _)| *set == name) {
+                command.env(name, scratch.0.join("logins").join(name));
+            }
+        }
         let mut child = command
             .args(args)
             .args(["--method", method().name()])
