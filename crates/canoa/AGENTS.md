@@ -823,7 +823,7 @@ ended and the read says so; a non-zero exit is an error carrying the end of its 
 
 ## `account_speech` (`canoa::speech::account`, feature `speech`)
 
-The speech-to-text services the accounts of some kinds can call, described by a library, so a host holds no service's address, models or credential: it offers each of the person's accounts whose kind a service names, lends the key when a recording opens and never writes it down. A Guatiao kind, not ACP, of one slot with the same answer on every call and nothing run. The files an outside library is built against: `include/canoa.account_speech.kinds.json` and `include/canoa.account_speech.schemas.json`, checked current by `tests/account_speech.rs` (regenerate with `CANOA_SPEECH_WRITE_KINDS=1`).
+The speech-to-text services the accounts of some kinds can call, described by a library, so a host holds no service's address, models or credential: it offers each of the person's accounts whose kind a service names, lends the key when a recording opens (a description whose `url` is not the `address` or under it is refused, so a key goes only to its own address) and never writes it down. A Guatiao kind, not ACP, of one slot with the same answer on every call and nothing run. The files an outside library is built against: `include/canoa.account_speech.kinds.json` and `include/canoa.account_speech.schemas.json`, checked current by `tests/account_speech.rs` (regenerate with `CANOA_SPEECH_WRITE_KINDS=1`).
 
 ```rust
 #[guatiao::kind(name = "account_speech")]

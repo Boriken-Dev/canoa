@@ -131,6 +131,14 @@ impl AccountSpeechService {
                 self.id, self.url
             ));
         }
+        let address = self.address.trim().trim_end_matches('/');
+        let url = self.url.trim();
+        if url != address && !url.starts_with(&format!("{address}/")) {
+            return Some(format!(
+                "the service {} posts to {:?}, which is not under its address {:?}, so an account's key would leave it",
+                self.id, self.url, self.address
+            ));
+        }
         if self.models.iter().any(|model| model.id.trim().is_empty()) {
             return Some(format!("the service {} lists a model with no id", self.id));
         }
@@ -212,6 +220,17 @@ mod tests {
             let why = made.problem();
             assert!(why.is_some_and(|why| why.contains(word)), "{word}");
         }
+        let mut elsewhere = service();
+        elsewhere.url = "https://evil.test/v1/audio/transcriptions".into();
+        assert!(
+            elsewhere
+                .problem()
+                .is_some_and(|why| why.contains("not under its address")),
+            "{:?}",
+            elsewhere.problem()
+        );
+        elsewhere.url = "https://api.acme.test/v1evil/audio/transcriptions".into();
+        assert!(elsewhere.problem().is_some());
         let info = AccountSpeechInfo::new(vec![service(), service()]);
         assert!(info.problem().is_some_and(|why| why.contains("used twice")));
     }
