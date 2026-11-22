@@ -1,16 +1,19 @@
 //! An agent that does its own file and shell work, taken over so that what it does acts in the environment a session's tools are
-//! served from. Its vendor describes a hook of the agent's own ([`ToolHook`]) that runs `canoa hook-forward` before each of its
-//! shell and file tools; the forwarder asks the host on a loopback channel, and the host answers in the agent's terms.
+//! served from. Its vendor describes a hook of the agent's own ([`ToolHook`]) that runs `canoa hook-forward` before every tool
+//! and when a session starts; the forwarder asks the host on a loopback channel, and the host answers in the agent's terms.
 //!
 //! The hook changes where a command runs, never whether it may. A command is rewritten to run the host's `env-exec`, which runs
-//! it in the environment, followed by an unconditional `exit` and then the command as the agent wrote it, which never runs. The
-//! answer carries no decision, so the agent's own mode and the person's rules judge the call, and a rule that matches the
-//! command's first word still finds it among the parts. A file tool is refused, with the way to do the same in the environment.
+//! it in the environment, and the command as the agent wrote it stays only where the agent's rules read it and nothing runs it
+//! ([`rewritten`]). The answer carries no decision, so the agent's own mode and the person's rules judge the call. A tool the
+//! vendor lets pass runs as it is; a file tool is refused with the way to do the same in the environment; any other is refused.
 //!
 //! Every failure refuses the call and nothing runs on this computer: a forwarder that cannot read its channel or reach the host,
-//! a payload past `[host] max_message_bytes`, an answer not carrying the request's nonce, a host that does not answer in time
-//! (the environment's `exec_seconds`), an `env-exec` naming no command this session's hook prepared, or a session in plan
-//! mode. The channel's address and secret are in a file of a directory made for one session request.
+//! a payload past `[host] max_message_bytes`, an answer not signed for the request, a host that does not answer within the
+//! environment's `hook_seconds` (one budget in all), an `env-exec` naming no command this session's hook prepared within
+//! `prepared_seconds`, or a session in plan mode. A session's prompts wait until its hook reports that the session started with
+//! it, and are refused when it does not. The channel's address and secret are in a file of a directory made for one session
+//! request; a request names the secret by a public key and signs itself with it, and the host signs its answers, so the secret
+//! never crosses the channel and nothing that only took the port can answer.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -30,6 +33,7 @@ use canoa::environment::{EnvironmentInfo, capability};
 use canoa::vendor::{HookCommand, HookKind, HooksRequest, ShellFamily, ToolHook, ToolRole};
 use coqui_acp_api::{ErrorOutput, SpawnSpec};
 use serde_json::{Map, Value, json};
+use sha2::{Digest as _, Sha256};
 
 use super::remote::{Remote, code_of};
 use super::{Env, lock};
@@ -661,6 +665,46 @@ fn write_line(mut stream: &TcpStream, value: &Value) {
     let _ = stream.write_all(&out);
 }
 
+/// The public name of `secret` that a request carries in its place, so the secret never crosses the channel.
+fn key_of(secret: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"canoa environment channel key\0");
+    digest.update(secret.as_bytes());
+    data_encoding::HEXLOWER.encode(&digest.finalize()[..16])
+}
+
+/// HMAC-SHA256 (RFC 2104) of `parts`, each preceded by its length, under `secret`, in hexadecimal: what proves a request is the
+/// forwarder's and an answer the host's to whichever end holds the secret, and to nothing that only took the port.
+fn mac(secret: &str, parts: &[&str]) -> String {
+    const BLOCK: usize = 64;
+    let mut key = [0_u8; BLOCK];
+    if secret.len() > BLOCK {
+        key[..32].copy_from_slice(&Sha256::digest(secret.as_bytes()));
+    } else {
+        key[..secret.len()].copy_from_slice(secret.as_bytes());
+    }
+    let mut inner = Sha256::new();
+    inner.update(key.map(|byte| byte ^ 0x36));
+    for part in parts {
+        inner.update((part.len() as u64).to_be_bytes());
+        inner.update(part.as_bytes());
+    }
+    let mut outer = Sha256::new();
+    outer.update(key.map(|byte| byte ^ 0x5c));
+    outer.update(inner.finalize());
+    data_encoding::HEXLOWER.encode(&outer.finalize())
+}
+
+/// An answer of the host's: `field` (`output`, `refused` or `ok`) holding `text`, signed for the request's `nonce`.
+fn answer_line(stream: &TcpStream, secret: &str, nonce: &str, (field, text): (&str, &str)) {
+    let signed = mac(secret, &["answer", &key_of(secret), nonce, field, text]);
+    let mut line = Map::new();
+    line.insert("nonce".to_owned(), json!(nonce));
+    line.insert(field.to_owned(), json!(text));
+    line.insert("mac".to_owned(), json!(signed));
+    write_line(stream, &Value::Object(line));
+}
+
 /// One request. Anything that is not one well-formed request with a secret the host holds is dropped unanswered, which the
 /// forwarder takes for a refusal.
 fn handle(stream: &TcpStream, shared: &Shared) {
@@ -680,27 +724,38 @@ fn handle(stream: &TcpStream, shared: &Shared) {
         return;
     };
     let text = |key: &str| request.get(key).and_then(Value::as_str);
-    let (Some(secret), Some(nonce), Some(kind)) = (
-        text("secret"),
+    let (Some(key), Some(nonce), Some(kind), Some(signed)) = (
+        text("key"),
         text("nonce").filter(|nonce| (8..=64).contains(&nonce.len())),
         text("kind"),
+        text("mac"),
     ) else {
         return;
     };
-    let holder = {
-        let secrets = lock(&shared.secrets);
-        // Every secret is compared, so how long it takes says nothing of how much of one was right.
-        let mut found = None;
-        for (held, holder) in secrets.iter() {
-            if same(held, secret) {
-                found = Some(holder.clone());
-            }
-        }
-        found
-    };
-    let Some(holder) = holder else {
+    let (id, payload) = (text("id"), text("payload"));
+    // The request names its secret by a public key and proves it holds it; the secret itself is never sent.
+    let found = lock(&shared.secrets)
+        .iter()
+        .find(|(secret, _)| key_of(secret) == key)
+        .map(|(secret, holder)| (secret.clone(), holder.clone()));
+    let Some((secret, holder)) = found else {
         return;
     };
+    let expected = mac(
+        &secret,
+        &[
+            "request",
+            key,
+            nonce,
+            kind,
+            id.unwrap_or(""),
+            payload.unwrap_or(""),
+        ],
+    );
+    if !same(&expected, signed) {
+        return;
+    }
+    let secret = secret.as_str();
     let _ = stream.set_write_timeout(Some(Duration::from_secs(shared.seconds)));
     match kind {
         KIND_TOOL => {
@@ -708,7 +763,8 @@ fn handle(stream: &TcpStream, shared: &Shared) {
                 .session
                 .as_deref()
                 .map_or(Mode::Manual, |session| shared.modes.of(session));
-            let verdict = match request.get("payload") {
+            let payload = payload.and_then(|text| serde_json::from_str::<Value>(text).ok());
+            let verdict = match &payload {
                 Some(payload) => evaluate(
                     &shared.hook,
                     (shared.env.name(), &shared.info),
@@ -719,19 +775,21 @@ fn handle(stream: &TcpStream, shared: &Shared) {
                 None => Verdict::Deny("the forwarder sent no payload".to_owned()),
             };
             match answer(&shared.hook, verdict) {
-                Some(output) => write_line(stream, &json!({"nonce": nonce, "output": output})),
-                None => write_line(
+                Some(output) => answer_line(stream, secret, nonce, ("output", &output)),
+                None => answer_line(
                     stream,
-                    &json!({"nonce": nonce, "refused": "the agent's form of an answer is not usable"}),
+                    secret,
+                    nonce,
+                    ("refused", "the agent's form of an answer is not usable"),
                 ),
             }
         }
-        KIND_EXEC => shared.exec(stream, (&holder, secret, nonce), text("id")),
+        KIND_EXEC => shared.exec(stream, (&holder, secret, nonce), id),
         KIND_START => {
             if let Some(held) = lock(&shared.secrets).get_mut(secret) {
                 held.started = true;
             }
-            write_line(stream, &json!({"nonce": nonce, "output": ""}));
+            answer_line(stream, secret, nonce, ("output", ""));
         }
         _ => {}
     }
@@ -791,7 +849,7 @@ impl Shared {
         (holder, secret, nonce): (&Holder, &str, &str),
         id: Option<&str>,
     ) {
-        let refuse = |why: &str| write_line(stream, &json!({"nonce": nonce, "refused": why}));
+        let refuse = |why: &str| answer_line(stream, secret, nonce, ("refused", why));
         let op = id.and_then(|id| {
             let mut ops = lock(&self.ops);
             let mine = ops.get(id).is_some_and(|op| same(&op.secret, secret));
@@ -832,7 +890,7 @@ impl Shared {
             Err(why) => return refuse(&why),
         };
         drop(process.input());
-        write_line(stream, &json!({"nonce": nonce}));
+        answer_line(stream, secret, nonce, ("ok", ""));
         let gone = Arc::new(AtomicBool::new(false));
         let reader = {
             let (process, gone) = (process.clone(), Arc::clone(&gone));
@@ -900,7 +958,17 @@ impl Shared {
             let _ = reader.join();
         }
         let code = process.exit(0).map_or(-1, |exit| code_of(&exit));
-        let end = json!({"code": code, "error": error});
+        let signed = mac(
+            secret,
+            &[
+                "end",
+                &key_of(secret),
+                nonce,
+                &code.to_string(),
+                error.as_deref().unwrap_or(""),
+            ],
+        );
+        let end = json!({"code": code, "error": error, "mac": signed});
         if let Ok(mut sink) = stream.try_clone() {
             let _ = frame(&mut sink, TAG_END, end.to_string().as_bytes());
         }
@@ -992,8 +1060,28 @@ fn ask(
             .filter(|left| !left.is_zero())
             .ok_or_else(|| "the host did not answer in time".to_owned())
     };
-    request.insert("secret".to_owned(), json!(channel.secret));
+    let key = key_of(&channel.secret);
+    let field = |name: &str| {
+        request
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
+    let signed = mac(
+        &channel.secret,
+        &[
+            "request",
+            &key,
+            nonce,
+            &field("kind"),
+            &field("id"),
+            &field("payload"),
+        ],
+    );
+    request.insert("key".to_owned(), json!(key));
     request.insert("nonce".to_owned(), json!(nonce));
+    request.insert("mac".to_owned(), json!(signed));
     let mut stream = TcpStream::connect_timeout(&channel.addr, left()?)
         .map_err(|error| format!("the host cannot be reached ({error})"))?;
     let mut line = Value::Object(request).to_string().into_bytes();
@@ -1021,6 +1109,15 @@ fn ask(
         .map_err(|_| "the host's answer is not readable".to_owned())?;
     if answer.get("nonce").and_then(Value::as_str) != Some(nonce) {
         return Err("the answer is not the host's".to_owned());
+    }
+    // Only the end holding the secret signs an answer: a process that took the port cannot make one.
+    let signed = ["output", "refused", "ok"].into_iter().find_map(|field| {
+        let text = answer.get(field)?.as_str()?;
+        Some(mac(&channel.secret, &["answer", &key, nonce, field, text]))
+    });
+    let given = answer.get("mac").and_then(Value::as_str).unwrap_or("");
+    if !signed.is_some_and(|signed| same(&signed, given)) {
+        return Err("the answer is not signed by the host".to_owned());
     }
     Ok((stream, answer))
 }
@@ -1118,10 +1215,11 @@ fn tool(channel: &Path, stdin: impl Read) -> Result<String, String> {
     if !payload.is_object() {
         return Err("the call is not a JSON object".to_owned());
     }
+    let payload = payload.to_string();
     let nonce = random_hex().map_err(|error| error.to_string())?;
     let mut request = Map::new();
     request.insert("kind".to_owned(), json!(KIND_TOOL));
-    request.insert("payload".to_owned(), payload);
+    request.insert("payload".to_owned(), json!(payload));
     let (_, answer) = ask(&channel, request, &nonce, deadline)?;
     if let Some(why) = answer.get("refused").and_then(Value::as_str) {
         return Err(why.to_owned());
@@ -1201,6 +1299,25 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
             }
             TAG_END => {
                 let end: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                let code = end.get("code").and_then(Value::as_i64).unwrap_or(-1);
+                let error = end.get("error").and_then(Value::as_str).unwrap_or("");
+                let signed = mac(
+                    &channel.secret,
+                    &[
+                        "end",
+                        &key_of(&channel.secret),
+                        &nonce,
+                        &code.to_string(),
+                        error,
+                    ],
+                );
+                if !same(
+                    &signed,
+                    end.get("mac").and_then(Value::as_str).unwrap_or(""),
+                ) {
+                    let _ = writeln!(stderr, "canoa: the command's end is not signed by the host");
+                    return 1;
+                }
                 if let Some(why) = end.get("error").and_then(Value::as_str) {
                     let _ = writeln!(stderr, "canoa: {why}");
                 }

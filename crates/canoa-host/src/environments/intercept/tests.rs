@@ -1086,3 +1086,53 @@ fn a_prepared_command_runs_only_within_prepared_seconds_and_only_the_latest_max_
     assert_eq!(started_with("PRINT:6c617465"), 0);
     drop(interception);
 }
+
+#[test]
+fn the_secret_never_crosses_the_channel_and_an_answer_not_signed_by_the_host_refuses_the_call() {
+    let modes = Arc::new(Modes::default());
+    let (interception, channel) = opened("box", 1 << 20, &modes);
+    let mut held: Value =
+        serde_json::from_slice(&std::fs::read(&channel).expect("read")).expect("JSON");
+    let secret = held["secret"].as_str().expect("a secret").to_owned();
+    // A process that took the port answers with the request's nonce: unsigned, then signed with another key.
+    let impostor = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    held["addr"] = json!(impostor.local_addr().expect("an address").to_string());
+    let taken = channel.parent().expect("a folder").join("taken.json");
+    std::fs::write(&taken, held.to_string()).expect("written");
+    let allow = json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}).to_string();
+    let answers = std::thread::spawn(move || {
+        let mut seen = Vec::new();
+        for forged in [None, Some("another secret")] {
+            let (mut stream, _) = impostor.accept().expect("a connection");
+            let mut line = Vec::new();
+            let mut byte = [0_u8; 1];
+            while stream.read(&mut byte).is_ok_and(|n| n == 1) && byte[0] != b'\n' {
+                line.push(byte[0]);
+            }
+            let request: Value = serde_json::from_slice(&line).expect("a request");
+            let nonce = request["nonce"].as_str().expect("a nonce").to_owned();
+            let signed = forged.map_or_else(
+                || "00".repeat(32),
+                |other| mac(other, &["answer", &key_of(other), &nonce, "output", &allow]),
+            );
+            let answer = json!({"nonce": nonce, "output": allow, "mac": signed});
+            let _ = stream.write_all(format!("{answer}\n").as_bytes());
+            seen.push(String::from_utf8(line).expect("text"));
+        }
+        seen
+    });
+    for _ in 0..2 {
+        let (status, out, err) =
+            forwarded(KIND_TOOL, &taken, None, bash("ls").to_string().as_bytes());
+        assert_eq!((status, out.is_empty()), (2, true), "{err}");
+        assert!(err.contains("not signed by the host"), "{err}");
+    }
+    for request in answers.join().expect("the impostor") {
+        assert!(!request.contains(&secret), "the secret was sent: {request}");
+        assert!(request.contains("\"mac\""), "{request}");
+    }
+    // The host itself is still heard, its answers signed.
+    let (status, _, err) = forwarded(KIND_TOOL, &channel, None, bash("ls").to_string().as_bytes());
+    assert_eq!(status, 0, "{err}");
+    drop(interception);
+}
