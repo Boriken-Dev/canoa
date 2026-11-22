@@ -624,6 +624,9 @@ def test_account_provider_and_model_gateway_describe_and_answer_defaults() -> No
         ]
         logins = [sdk.LoginMethodInfo(id="demo-login", title="Key", produces="demo-key", steps=["ask"])]
 
+        def provides(self, account: Any) -> List[str]:
+            return ["openai-api"]
+
     destroyed: List[str] = []
 
     class DummyHandle:

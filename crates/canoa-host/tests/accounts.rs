@@ -1050,7 +1050,10 @@ accounts = \"file\"
     assert!(added.status.success(), "{}", text(&added.stderr));
     let listed = fixture.canoa_on(&["accounts", "list"], None, true);
     let out = text(&listed.stdout);
-    assert!(out.contains("work claude_accounts claude-login signed in"), "{out}");
+    assert!(
+        out.contains("work claude_accounts claude-login signed in"),
+        "{out}"
+    );
     assert!(
         out.contains("non-default: [secrets] accounts is auto and "),
         "{out}"

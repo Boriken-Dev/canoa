@@ -114,6 +114,9 @@ test('AccountProvider, ModelGateway, and helpers build valid answers and destroy
       }),
     ];
     static logins = [loginMethod({ id: 'demo-login', title: 'Key', produces: 'demo-key', steps: ['ask'] })];
+    provides() {
+      return ['openai-api'];
+    }
   }
 
   const accounts = new DemoAccounts();
