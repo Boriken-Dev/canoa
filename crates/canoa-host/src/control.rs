@@ -164,79 +164,209 @@ pub enum Grant {
     Secrets,
 }
 
+struct GrantSpec {
+    grant: Grant,
+    name: &'static str,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "checked against ROUTES in tests")
+    )]
+    control: bool,
+}
+
+const GRANT_SPECS: [GrantSpec; 27] = [
+    GrantSpec {
+        grant: Grant::LedgerRead,
+        name: "ledger.read",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::LedgerWrite,
+        name: "ledger.write",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Worktree,
+        name: "worktree",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::StoreRead,
+        name: "store.read",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Folders,
+        name: "folders",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::WorkspaceOpen,
+        name: "workspace.open",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::ConfigRead,
+        name: "config.read",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::ConfigWrite,
+        name: "config.write",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::ConfigWriteSessions,
+        name: "config.write.sessions",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Upload,
+        name: "upload",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::HostRestart,
+        name: "host.restart",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::OverlayRead,
+        name: "overlay.read",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::OverlayWrite,
+        name: "overlay.write",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::StorePrograms,
+        name: "store.programs",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Accounts,
+        name: "accounts",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Discover,
+        name: "discover",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Usage,
+        name: "usage",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Files,
+        name: "files",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Terminal,
+        name: "terminal",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Voice,
+        name: "voice",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::VoiceSetup,
+        name: "voice.setup",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::State,
+        name: "state",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Hosting,
+        name: "hosting",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::ToolsProvide,
+        name: "tools.provide",
+        control: false,
+    },
+    GrantSpec {
+        grant: Grant::Mail,
+        name: "mail",
+        control: false,
+    },
+    GrantSpec {
+        grant: Grant::MailSetup,
+        name: "mail.setup",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Secrets,
+        name: "secrets",
+        control: true,
+    },
+];
+
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 27] {
+    pub const fn all() -> [Self; 27] {
         [
-            Self::LedgerRead,
-            Self::LedgerWrite,
-            Self::Worktree,
-            Self::StoreRead,
-            Self::Folders,
-            Self::WorkspaceOpen,
-            Self::ConfigRead,
-            Self::ConfigWrite,
-            Self::ConfigWriteSessions,
-            Self::Upload,
-            Self::HostRestart,
-            Self::OverlayRead,
-            Self::OverlayWrite,
-            Self::StorePrograms,
-            Self::Accounts,
-            Self::Discover,
-            Self::Usage,
-            Self::Files,
-            Self::Terminal,
-            Self::Voice,
-            Self::VoiceSetup,
-            Self::State,
-            Self::Hosting,
-            Self::ToolsProvide,
-            Self::Mail,
-            Self::MailSetup,
-            Self::Secrets,
+            GRANT_SPECS[0].grant,
+            GRANT_SPECS[1].grant,
+            GRANT_SPECS[2].grant,
+            GRANT_SPECS[3].grant,
+            GRANT_SPECS[4].grant,
+            GRANT_SPECS[5].grant,
+            GRANT_SPECS[6].grant,
+            GRANT_SPECS[7].grant,
+            GRANT_SPECS[8].grant,
+            GRANT_SPECS[9].grant,
+            GRANT_SPECS[10].grant,
+            GRANT_SPECS[11].grant,
+            GRANT_SPECS[12].grant,
+            GRANT_SPECS[13].grant,
+            GRANT_SPECS[14].grant,
+            GRANT_SPECS[15].grant,
+            GRANT_SPECS[16].grant,
+            GRANT_SPECS[17].grant,
+            GRANT_SPECS[18].grant,
+            GRANT_SPECS[19].grant,
+            GRANT_SPECS[20].grant,
+            GRANT_SPECS[21].grant,
+            GRANT_SPECS[22].grant,
+            GRANT_SPECS[23].grant,
+            GRANT_SPECS[24].grant,
+            GRANT_SPECS[25].grant,
+            GRANT_SPECS[26].grant,
         ]
     }
 
     /// Its name in canoa.cfg.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::LedgerRead => "ledger.read",
-            Self::LedgerWrite => "ledger.write",
-            Self::Worktree => "worktree",
-            Self::StoreRead => "store.read",
-            Self::Folders => "folders",
-            Self::WorkspaceOpen => "workspace.open",
-            Self::ConfigRead => "config.read",
-            Self::ConfigWrite => "config.write",
-            Self::ConfigWriteSessions => "config.write.sessions",
-            Self::Upload => "upload",
-            Self::HostRestart => "host.restart",
-            Self::OverlayRead => "overlay.read",
-            Self::OverlayWrite => "overlay.write",
-            Self::StorePrograms => "store.programs",
-            Self::Accounts => "accounts",
-            Self::Discover => "discover",
-            Self::Usage => "usage",
-            Self::Files => "files",
-            Self::Terminal => "terminal",
-            Self::Voice => "voice",
-            Self::VoiceSetup => "voice.setup",
-            Self::State => "state",
-            Self::Hosting => "hosting",
-            Self::ToolsProvide => "tools.provide",
-            Self::Mail => "mail",
-            Self::MailSetup => "mail.setup",
-            Self::Secrets => "secrets",
+        let mut index = 0;
+        while index < GRANT_SPECS.len() {
+            if GRANT_SPECS[index].grant as u8 == self as u8 {
+                return GRANT_SPECS[index].name;
+            }
+            index += 1;
         }
+        ""
     }
 
     /// The grant of that name.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        Self::all().into_iter().find(|grant| grant.as_str() == name)
+        GRANT_SPECS
+            .iter()
+            .find(|spec| spec.name == name)
+            .map(|spec| spec.grant)
     }
 }
 
@@ -827,11 +957,819 @@ impl Control {
         crate::replace::write_file(path, &bytes, crate::replace::PRIVATE)
             .map_err(|error| error.to_string())
     }
+}
 
-    fn fs_read(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {
-        allow(caller, Grant::Files).and_then(|()| self.files.read(params))
+#[derive(Clone, Copy)]
+enum Access {
+    Open,
+    Require(Grant),
+    All(&'static [Grant]),
+    Any(&'static [Grant]),
+    Owner(&'static str),
+    Dynamic(
+        #[cfg_attr(
+            not(test),
+            expect(dead_code, reason = "checked against GRANT_SPECS in tests")
+        )]
+        &'static [Grant],
+    ),
+}
+
+impl Access {
+    fn check(self, caller: &Caller) -> Result<(), (i32, String)> {
+        match self {
+            Self::Open | Self::Dynamic(_) => Ok(()),
+            Self::Require(grant) => allow(caller, grant),
+            Self::All(grants) => {
+                for &grant in grants {
+                    allow(caller, grant)?;
+                }
+                Ok(())
+            }
+            Self::Any(grants) => {
+                if grants.iter().any(|&grant| caller.may(grant)) {
+                    Ok(())
+                } else if let Some(&last) = grants.last() {
+                    allow(caller, last)
+                } else {
+                    Ok(())
+                }
+            }
+            Self::Owner(message) => match caller {
+                Caller::Owner => Ok(()),
+                Caller::Peer { .. } => Err((DENIED, message.to_owned())),
+            },
+        }
     }
 
+    #[cfg(test)]
+    fn mentions(self, grant: Grant) -> bool {
+        match self {
+            Self::Open | Self::Owner(_) => false,
+            Self::Require(held) => held == grant,
+            Self::All(list) | Self::Any(list) | Self::Dynamic(list) => list.contains(&grant),
+        }
+    }
+}
+
+type RpcHandler = fn(&Control, &Caller, &str, &Value) -> Result<Value, (i32, String)>;
+type RawHandler = fn(&Control, &Caller, &str, &Value, &Value) -> Vec<u8>;
+
+#[derive(Clone, Copy)]
+enum Handler {
+    Rpc(RpcHandler),
+    Raw(RawHandler),
+}
+
+#[derive(Clone, Copy)]
+struct Route {
+    method: &'static str,
+    access: Access,
+    handler: Handler,
+}
+
+const fn rpc(method: &'static str, access: Access, handler: RpcHandler) -> Route {
+    Route {
+        method,
+        access,
+        handler: Handler::Rpc(handler),
+    }
+}
+
+const fn raw(method: &'static str, access: Access, handler: RawHandler) -> Route {
+    Route {
+        method,
+        access,
+        handler: Handler::Raw(handler),
+    }
+}
+
+const OWNER_NETWORK_MSG: &str =
+    "only the person running this host sends requests through its network";
+const OWNER_HISTORY_MSG: &str =
+    "only the person running this host reads or moves a recorded session";
+
+static ROUTES: &[Route] = &[
+    rpc(
+        "ledger/list",
+        Access::Require(Grant::LedgerRead),
+        Control::r_ledger_list,
+    ),
+    rpc(
+        "sessions/running",
+        Access::Require(Grant::LedgerRead),
+        Control::r_running_sessions,
+    ),
+    rpc(
+        "ledger/put",
+        Access::Require(Grant::LedgerWrite),
+        Control::r_ledger_put,
+    ),
+    rpc(
+        "ledger/remove",
+        Access::Require(Grant::LedgerWrite),
+        Control::r_ledger_remove,
+    ),
+    rpc(
+        "ledger/clear",
+        Access::Require(Grant::LedgerWrite),
+        Control::r_ledger_clear,
+    ),
+    rpc("peer/forget", Access::Open, Control::r_forget),
+    rpc("host/grants", Access::Open, Control::r_grants),
+    rpc("fs/read", Access::Require(Grant::Files), Control::r_fs_read),
+    rpc("state/get", Access::Require(Grant::State), Control::r_state),
+    rpc("state/put", Access::Require(Grant::State), Control::r_state),
+    rpc(
+        "state/append",
+        Access::Require(Grant::State),
+        Control::r_state,
+    ),
+    rpc(
+        "state/list",
+        Access::Require(Grant::State),
+        Control::r_state,
+    ),
+    rpc(
+        "state/remove",
+        Access::Require(Grant::State),
+        Control::r_state,
+    ),
+    rpc("fs/list", Access::Require(Grant::Folders), Control::r_files),
+    rpc("fs/info", Access::Require(Grant::Folders), Control::r_files),
+    rpc(
+        "fs/realpath",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "fs/guards",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "fs/repo_root",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "fs/mentions",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "fs/resolve",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "fs/scratch",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "fs/scratch_remove",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "fs/scratch_preview",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "profile/project",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
+        "workspace/openers",
+        Access::Require(Grant::WorkspaceOpen),
+        Control::r_files,
+    ),
+    rpc(
+        "workspace/open",
+        Access::Require(Grant::WorkspaceOpen),
+        Control::r_files,
+    ),
+    rpc(
+        "profile/canonical",
+        Access::Require(Grant::OverlayRead),
+        Control::r_files,
+    ),
+    rpc(
+        "profile/tree",
+        Access::Require(Grant::OverlayRead),
+        Control::r_files,
+    ),
+    rpc(
+        "trust/list",
+        Access::Require(Grant::ConfigRead),
+        Control::r_files,
+    ),
+    rpc(
+        "trust/set",
+        Access::Require(Grant::ConfigWriteSessions),
+        Control::r_files,
+    ),
+    rpc(
+        "trust/revoke",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_files,
+    ),
+    rpc(
+        "config/get",
+        Access::Dynamic(&[Grant::ConfigRead, Grant::Hosting]),
+        Control::r_config_get,
+    ),
+    rpc(
+        "config/set",
+        Access::Dynamic(&[
+            Grant::ConfigWrite,
+            Grant::Hosting,
+            Grant::ConfigWriteSessions,
+        ]),
+        Control::r_config_set,
+    ),
+    rpc(
+        "config/check",
+        Access::Dynamic(&[
+            Grant::ConfigWrite,
+            Grant::Hosting,
+            Grant::ConfigWriteSessions,
+        ]),
+        Control::r_config_check,
+    ),
+    rpc(
+        "looks/list",
+        Access::Require(Grant::ConfigRead),
+        Control::r_config_view,
+    ),
+    rpc(
+        "profile_items/list",
+        Access::Require(Grant::ConfigRead),
+        Control::r_config_view,
+    ),
+    rpc(
+        "settings/sections",
+        Access::Dynamic(&[Grant::ConfigRead]),
+        Control::r_settings_sections,
+    ),
+    rpc(
+        "settings/section_get",
+        Access::Require(Grant::ConfigRead),
+        Control::r_section_get,
+    ),
+    rpc(
+        "settings/section_set",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_section_set,
+    ),
+    rpc(
+        "panel_tabs/list",
+        Access::Require(Grant::ConfigRead),
+        Control::r_config_view,
+    ),
+    rpc(
+        "panel_tabs/tail",
+        Access::Require(Grant::Hosting),
+        Control::r_panel_tabs_tail,
+    ),
+    rpc(
+        "providers/list",
+        Access::Require(Grant::ConfigRead),
+        Control::r_config_view,
+    ),
+    rpc(
+        "host/keys",
+        Access::Require(Grant::Hosting),
+        Control::r_hosting,
+    ),
+    rpc(
+        "host/accept",
+        Access::Require(Grant::Hosting),
+        Control::r_hosting,
+    ),
+    rpc(
+        "host/revoke",
+        Access::Require(Grant::Hosting),
+        Control::r_hosting,
+    ),
+    rpc(
+        "host/which",
+        Access::Require(Grant::StoreRead),
+        Control::r_which,
+    ),
+    rpc(
+        "host/restart",
+        Access::Require(Grant::HostRestart),
+        Control::r_restart,
+    ),
+    rpc(
+        "extension/catalogs",
+        Access::Dynamic(&[Grant::OverlayRead, Grant::OverlayWrite]),
+        Control::r_extension_catalogs,
+    ),
+    rpc(
+        "store/catalogs",
+        Access::Dynamic(&[Grant::OverlayRead]),
+        Control::r_store_catalogs,
+    ),
+    rpc(
+        "store/catalog",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_store_catalog,
+    ),
+    rpc(
+        "extension/plan",
+        Access::Require(Grant::Hosting),
+        Control::r_extension_act,
+    ),
+    rpc(
+        "extension/apply",
+        Access::Require(Grant::Hosting),
+        Control::r_extension_act,
+    ),
+    rpc(
+        "extension/remove",
+        Access::Require(Grant::Hosting),
+        Control::r_extension_act,
+    ),
+    rpc(
+        "upload/put",
+        Access::Require(Grant::Upload),
+        Control::r_upload,
+    ),
+    rpc(
+        "upload/remove",
+        Access::Require(Grant::Upload),
+        Control::r_upload,
+    ),
+    rpc(
+        "overlay/installed",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
+        "overlay/needs",
+        Access::All(&[Grant::OverlayRead, Grant::StorePrograms]),
+        Control::r_overlays,
+    ),
+    rpc(
+        "overlay/prepare",
+        Access::All(&[Grant::OverlayWrite, Grant::StorePrograms]),
+        Control::r_overlays,
+    ),
+    rpc(
+        "overlay/read",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
+        "catalog/read",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
+        "skill/list",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
+        "skill/read",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
+        "store/contents",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
+        "store/contents_put",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
+        "overlay/check",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "overlay/apply",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "overlay/remove",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "overlay/discard",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "catalog/fetch",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "catalog/remove",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "skill/fetch",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "skill/scan",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "skill/save",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "skill/remove",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "registry/fetch",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "skill/search",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "store/read_ahead",
+        Access::Require(Grant::OverlayWrite),
+        Control::r_overlays,
+    ),
+    rpc(
+        "network/fetch",
+        Access::Owner(OWNER_NETWORK_MSG),
+        Control::r_network,
+    ),
+    rpc(
+        "network/tunnel",
+        Access::Owner(OWNER_NETWORK_MSG),
+        Control::r_network,
+    ),
+    rpc(
+        "network/client_certificates",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_network,
+    ),
+    raw(
+        "worktree/new",
+        Access::Require(Grant::Worktree),
+        Control::r_worktree,
+    ),
+    raw(
+        "worktree/status",
+        Access::Require(Grant::Worktree),
+        Control::r_worktree,
+    ),
+    raw(
+        "worktree/remove",
+        Access::Require(Grant::Worktree),
+        Control::r_worktree,
+    ),
+    raw(
+        "worktree/diff",
+        Access::Require(Grant::Worktree),
+        Control::r_worktree,
+    ),
+    rpc(
+        "store/list",
+        Access::Require(Grant::StoreRead),
+        Control::r_stores_read,
+    ),
+    rpc(
+        "store/extensions",
+        Access::Require(Grant::StoreRead),
+        Control::r_stores_read,
+    ),
+    rpc(
+        "store/report",
+        Access::Dynamic(&[Grant::StoreRead, Grant::StorePrograms]),
+        Control::r_stores_report,
+    ),
+    rpc(
+        "store/latest",
+        Access::Require(Grant::StoreRead),
+        Control::r_stores_read,
+    ),
+    rpc(
+        "store/plan",
+        Access::Require(Grant::StoreRead),
+        Control::r_stores_read,
+    ),
+    rpc(
+        "store/models",
+        Access::Require(Grant::StorePrograms),
+        Control::r_stores_programs,
+    ),
+    rpc(
+        "store/model",
+        Access::Require(Grant::StorePrograms),
+        Control::r_stores_programs,
+    ),
+    rpc(
+        "store/model_setting",
+        Access::Require(Grant::StorePrograms),
+        Control::r_stores_programs,
+    ),
+    rpc(
+        "store/rollback",
+        Access::Require(Grant::StorePrograms),
+        Control::r_stores_programs,
+    ),
+    rpc(
+        "store/remove",
+        Access::Require(Grant::StorePrograms),
+        Control::r_stores_programs,
+    ),
+    rpc(
+        "store/index",
+        Access::Dynamic(&[
+            Grant::OverlayRead,
+            Grant::StorePrograms,
+            Grant::OverlayWrite,
+        ]),
+        Control::r_store_index,
+    ),
+    rpc(
+        "history/export",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
+        "history/move",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
+        "history/portable",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
+        "history/account",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
+        "history/importable",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
+        "history/import",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
+        "history/imported",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
+        "accounts/catalog",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "accounts/list",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "accounts/remove",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "accounts/entries",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "accounts/offer",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "pools/list",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "pools/set",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "pools/remove",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "pools/turn",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
+        "mail/accounts",
+        Access::Require(Grant::MailSetup),
+        Control::r_mail,
+    ),
+    rpc(
+        "mail/add",
+        Access::Require(Grant::MailSetup),
+        Control::r_mail,
+    ),
+    rpc(
+        "mail/test",
+        Access::Require(Grant::MailSetup),
+        Control::r_mail,
+    ),
+    rpc(
+        "mail/remove",
+        Access::Require(Grant::MailSetup),
+        Control::r_mail,
+    ),
+    rpc(
+        "usage/summary",
+        Access::Require(Grant::Usage),
+        Control::r_usage,
+    ),
+    rpc(
+        "usage/limits",
+        Access::Require(Grant::Usage),
+        Control::r_usage,
+    ),
+    rpc(
+        "usage/read",
+        Access::Require(Grant::Usage),
+        Control::r_usage,
+    ),
+    rpc("options/choices", Access::Open, Control::r_options_choices),
+    rpc(
+        "discover/nearby",
+        Access::Require(Grant::Discover),
+        Control::r_discover,
+    ),
+    rpc(
+        "speech/offers",
+        Access::Require(Grant::Voice),
+        Control::r_speech_offers,
+    ),
+    rpc(
+        "speech/enable",
+        Access::Require(Grant::VoiceSetup),
+        Control::r_speech_offers,
+    ),
+    rpc(
+        "speech/voices",
+        Access::Require(Grant::Voice),
+        Control::r_say,
+    ),
+    rpc("speech/say", Access::Require(Grant::Voice), Control::r_say),
+    rpc(
+        "speech/audio",
+        Access::Require(Grant::Voice),
+        Control::r_say,
+    ),
+    rpc("speech/stop", Access::Require(Grant::Voice), Control::r_say),
+    rpc(
+        "speech/say_configure",
+        Access::Require(Grant::VoiceSetup),
+        Control::r_say,
+    ),
+    rpc(
+        "speech/providers",
+        Access::Require(Grant::Voice),
+        Control::r_speech,
+    ),
+    rpc(
+        "speech/configure",
+        Access::Require(Grant::VoiceSetup),
+        Control::r_speech,
+    ),
+    rpc(
+        "speech/open",
+        Access::Require(Grant::Voice),
+        Control::r_speech,
+    ),
+    rpc(
+        "speech/push",
+        Access::Require(Grant::Voice),
+        Control::r_speech,
+    ),
+    rpc(
+        "speech/finish",
+        Access::Require(Grant::Voice),
+        Control::r_speech,
+    ),
+    rpc(
+        "speech/cancel",
+        Access::Require(Grant::Voice),
+        Control::r_speech,
+    ),
+    rpc(
+        "shell/list",
+        Access::Any(&[Grant::StoreRead, Grant::Terminal]),
+        Control::r_shell_list,
+    ),
+    rpc(
+        "terminal/open",
+        Access::Require(Grant::Terminal),
+        Control::r_needs_output_link,
+    ),
+    rpc(
+        "terminal/write",
+        Access::Require(Grant::Terminal),
+        Control::r_needs_output_link,
+    ),
+    rpc(
+        "terminal/resize",
+        Access::Require(Grant::Terminal),
+        Control::r_needs_output_link,
+    ),
+    rpc(
+        "terminal/scrollback",
+        Access::Require(Grant::Terminal),
+        Control::r_needs_output_link,
+    ),
+    rpc(
+        "terminal/close",
+        Access::Require(Grant::Terminal),
+        Control::r_needs_output_link,
+    ),
+    rpc(
+        "secrets/providers",
+        Access::Require(Grant::Secrets),
+        Control::r_secrets,
+    ),
+    rpc(
+        "secrets/list",
+        Access::Require(Grant::Secrets),
+        Control::r_secrets,
+    ),
+    rpc(
+        "secrets/reveal",
+        Access::Require(Grant::Secrets),
+        Control::r_secrets,
+    ),
+    rpc(
+        "secrets/forget",
+        Access::Require(Grant::Secrets),
+        Control::r_secrets,
+    ),
+    rpc(
+        "secrets/configure",
+        Access::Require(Grant::Secrets),
+        Control::r_secrets,
+    ),
+    rpc(
+        "store/apply",
+        Access::Require(Grant::StorePrograms),
+        Control::r_needs_progress_link,
+    ),
+    rpc(
+        "accounts/add",
+        Access::Require(Grant::Accounts),
+        Control::r_needs_progress_link,
+    ),
+    rpc(
+        "accounts/login",
+        Access::Require(Grant::Accounts),
+        Control::r_needs_progress_link,
+    ),
+    rpc(
+        "host/pair",
+        Access::Require(Grant::Hosting),
+        Control::r_needs_progress_link,
+    ),
+    rpc(
+        "secrets/set",
+        Access::Require(Grant::Secrets),
+        Control::r_needs_progress_link,
+    ),
+];
+
+impl Control {
     /// The answer to one request line.
     pub(crate) fn handle(&self, caller: &Caller, line: &[u8]) -> Option<Vec<u8>> {
         let request: Value = match serde_json::from_slice(line) {
@@ -840,404 +1778,27 @@ impl Control {
         };
         let id = request.get("id")?.clone();
         let params = request.get("params").cloned().unwrap_or(Value::Null);
-        let outcome =
-            match request.get("method").and_then(Value::as_str) {
-                Some("ledger/list") => self.list(caller, &params),
-                Some("sessions/running") => {
-                    allow(caller, Grant::LedgerRead).and_then(|()| self.running_sessions(caller))
-                }
-                Some("ledger/put") => self.put(caller, &params),
-                Some("ledger/remove") => self.remove(caller, &params),
-                Some("ledger/clear") => self.clear(caller),
-                Some("peer/forget") => self.forget(caller),
-                Some("fs/read") => self.fs_read(caller, &params),
-                Some(
-                    method @ ("state/get" | "state/put" | "state/append" | "state/list"
-                    | "state/remove"),
-                ) => allow(caller, Grant::State).and_then(|()| match method {
-                    "state/get" => self.state.get(&params),
-                    "state/put" => self.state.put(&params),
-                    "state/append" => self.state.append(&params),
-                    "state/list" => self.state.list(&params),
-                    _ => self.state.remove(&params),
-                }),
-                Some("fs/list") => {
-                    allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
-                }
-                Some("workspace/openers") => allow(caller, Grant::WorkspaceOpen)
-                    .and_then(|()| self.files.workspace_openers()),
-                Some("workspace/open") => allow(caller, Grant::WorkspaceOpen)
-                    .and_then(|()| self.files.workspace_open(caller, &params)),
-                Some("fs/info") => {
-                    allow(caller, Grant::Folders).and_then(|()| self.files.info(caller, &params))
-                }
-                Some("fs/realpath") => allow(caller, Grant::Folders)
-                    .and_then(|()| self.files.realpath(caller, &params)),
-                Some("fs/guards") => {
-                    allow(caller, Grant::Folders).and_then(|()| self.files.guards())
-                }
-                Some("fs/repo_root") => allow(caller, Grant::Folders)
-                    .and_then(|()| self.files.repo_root(caller, &params)),
-                Some("fs/mentions") => allow(caller, Grant::Folders)
-                    .and_then(|()| self.files.mentions(caller, &params)),
-                Some("fs/resolve") => {
-                    allow(caller, Grant::Folders).and_then(|()| self.files.resolve(caller, &params))
-                }
-                Some(method @ ("fs/scratch" | "fs/scratch_remove" | "fs/scratch_preview")) => {
-                    allow(caller, Grant::Folders).and_then(|()| {
-                        self.files.scratch(
-                            &params,
-                            match method {
-                                "fs/scratch" => files::Scratch::Make,
-                                "fs/scratch_remove" => files::Scratch::Remove,
-                                _ => files::Scratch::Preview,
-                            },
-                        )
-                    })
-                }
-                Some("profile/canonical") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.files.profile_canonical(caller, &params)),
-                Some("profile/tree") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.files.profile_tree(&params)),
-                Some("profile/project") => allow(caller, Grant::Folders)
-                    .and_then(|()| self.files.profile_project(caller, &params)),
-                Some("trust/list") => {
-                    allow(caller, Grant::ConfigRead).and_then(|()| self.files.trust_list())
-                }
-                Some("trust/set") => allow(caller, Grant::ConfigWriteSessions)
-                    .and_then(|()| self.files.trust_set(caller, &params)),
-                Some("trust/revoke") => allow(caller, Grant::ConfigWrite)
-                    .and_then(|()| self.files.trust_revoke(caller, &params)),
-                Some("config/get") if owner_section(caller, &params).is_some() => self
-                    .files
-                    .owner_get(owner_section(caller, &params).unwrap_or_default()),
-                Some("config/set") if owner_section(caller, &params).is_some() => {
-                    self.files.owner_set(
-                        &params,
-                        owner_section(caller, &params).unwrap_or_default(),
-                        true,
-                    )
-                }
-                Some("config/check") if owner_section(caller, &params).is_some() => {
-                    self.files.owner_set(
-                        &params,
-                        owner_section(caller, &params).unwrap_or_default(),
-                        false,
-                    )
-                }
-                Some("config/get") if names_host(&params) => {
-                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_get())
-                }
-                Some("config/get") => {
-                    allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
-                }
-                Some("config/set") if names_host(&params) => {
-                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, true))
-                }
-                Some("looks/list") => allow(caller, Grant::ConfigRead)
-                    .and_then(|()| self.loaded_config())
-                    .map(|config| looks::list(&config)),
-                Some("profile_items/list") => allow(caller, Grant::ConfigRead)
-                    .and_then(|()| self.loaded_config())
-                    .map(|config| profile_items::list(&config)),
-                // The list of pages is the application's own preferences too, so any key reads it; the pages a provider adds, whose forms
-                // hold what the host keeps, are listed only to a key that reads the configuration.
-                Some("settings/sections") => {
-                    if caller.may(Grant::ConfigRead) {
-                        self.loaded_config().map(|config| {
-                            settings_sections::list(
-                                &crate::settings_sections::SectionCatalog::of(&config),
-                                true,
-                            )
-                        })
-                    } else {
-                        Ok(settings_sections::list(
-                            &crate::settings_sections::SectionCatalog::from_registries(Vec::new()),
-                            false,
-                        ))
-                    }
-                }
-                Some("settings/section_get") => allow(caller, Grant::ConfigRead)
-                    .and_then(|()| self.loaded_config())
-                    .and_then(|config| {
-                        settings_sections::get(
-                            &crate::settings_sections::SectionCatalog::of(&config),
-                            &self.files,
-                            &settings_sections::Keeper::new(&config, self.section_home()),
-                            &params,
-                        )
-                    }),
-                Some("settings/section_set") => allow(caller, Grant::ConfigWrite)
-                    .and_then(|()| self.loaded_config())
-                    .and_then(|config| {
-                        settings_sections::set(
-                            &crate::settings_sections::SectionCatalog::of(&config),
-                            &self.files,
-                            &settings_sections::Keeper::new(&config, self.section_home()),
-                            &params,
-                        )
-                    }),
-                Some("panel_tabs/list") => allow(caller, Grant::ConfigRead)
-                    .and_then(|()| self.loaded_config())
-                    .map(|config| panel_tabs::list(&crate::panel_tabs::TabCatalog::of(&config))),
-                Some("panel_tabs/tail") => allow(caller, Grant::Hosting)
-                    .and_then(|()| self.loaded_config())
-                    .and_then(|config| {
-                        panel_tabs::tail(&crate::panel_tabs::TabCatalog::of(&config), &params)
-                    }),
-                Some("providers/list") => allow(caller, Grant::ConfigRead)
-                    .and_then(|()| self.loaded_config())
-                    .map(|config| providers::list(&config)),
-                Some("config/set") => allow(caller, Grant::ConfigWrite)
-                    .and_then(|()| self.guard_sources(caller, &params))
-                    .and_then(|()| {
-                        self.files
-                            .config_set(&params, caller.may(Grant::ConfigWriteSessions))
-                    }),
-                Some("config/check") if names_host(&params) => {
-                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, false))
-                }
-                Some("config/check") => allow(caller, Grant::ConfigWrite)
-                    .and_then(|()| self.guard_sources(caller, &params))
-                    .and_then(|()| {
-                        self.files
-                            .config_check(&params, caller.may(Grant::ConfigWriteSessions))
-                    }),
-                Some("host/keys") => allow(caller, Grant::Hosting)
-                    .and_then(|()| self.keys_store())
-                    .and_then(|store| hosting::keys(store)),
-                Some("host/accept") => allow(caller, Grant::Hosting)
-                    .and_then(|()| self.keys_store())
-                    .and_then(|store| hosting::accept(store, &params)),
-                Some("extension/catalogs") => self.extension_catalogs(caller, &params),
-                Some("store/catalogs") => self.store_catalogs(caller, &params),
-                Some("store/catalog") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.store_catalog(caller, &params)),
-                Some("extension/plan") => {
-                    allow(caller, Grant::Hosting).and_then(|()| self.extension_plan(&params))
-                }
-                Some("extension/apply") => {
-                    allow(caller, Grant::Hosting).and_then(|()| self.extension_apply(&params))
-                }
-                Some("extension/remove") => {
-                    allow(caller, Grant::Hosting).and_then(|()| self.extension_remove(&params))
-                }
-                Some("host/revoke") => allow(caller, Grant::Hosting)
-                    .and_then(|()| self.keys_store())
-                    .and_then(|store| hosting::revoke(store, &params)),
-                Some("upload/put") => allow(caller, Grant::Upload)
-                    .and_then(|()| self.files.upload_put(caller, &params)),
-                Some("upload/remove") => allow(caller, Grant::Upload)
-                    .and_then(|()| self.files.upload_remove(caller, &params)),
-                Some("overlay/installed") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.overlays.installed(&params)),
-                Some("overlay/needs") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| allow(caller, Grant::StorePrograms))
-                    .and_then(|()| self.overlays.needs(&params)),
-                Some("overlay/prepare") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| allow(caller, Grant::StorePrograms))
-                    .and_then(|()| self.overlays.prepare(&params)),
-                Some("overlay/read") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.overlays.read(caller, &params)),
-                Some("catalog/read") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.overlays.catalog_read(&params)),
-                Some("overlay/check") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .check(caller, &params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("overlay/apply") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.apply(caller, &params)),
-                Some("overlay/remove") => {
-                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.remove(&params))
-                }
-                Some("overlay/discard") => {
-                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.discard(&params))
-                }
-                Some("catalog/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .catalog_fetch(&params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("catalog/remove") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.catalog_remove(&params)),
-                Some("skill/list") => {
-                    allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.skill_list())
-                }
-                Some("skill/read") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.overlays.skill_read(&params)),
-                Some("skill/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .skill_fetch(&params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("skill/scan") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .skill_scan(&params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("skill/save") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.skill_save(&params)),
-                Some("skill/remove") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.skill_remove(&params)),
-                Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.registry_fetch(caller, &params)),
-                Some("skill/search") => {
-                    allow(caller, Grant::OverlayWrite).and_then(|()| self.skill_search(&params))
-                }
-                Some("store/read_ahead") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .read_ahead(caller, &params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("store/contents") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.registry.contents(caller, &params)),
-                Some("store/contents_put") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.registry.put_contents(caller, &params)),
-                Some("network/fetch") => {
-                    owner_only_network(caller).and_then(|()| self.fetch.run(&params))
-                }
-                Some("network/tunnel") => {
-                    owner_only_network(caller).and_then(|()| self.tunnel.run(&params))
-                }
-                Some("network/client_certificates") => {
-                    allow(caller, Grant::ConfigWrite).map(|()| self.client_certificates.list())
-                }
-                Some("host/which") => allow(caller, Grant::StoreRead)
-                    .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
-                Some("host/restart") => {
-                    allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
-                }
-                Some(
-                    method @ ("worktree/new" | "worktree/status" | "worktree/remove"
-                    | "worktree/diff"),
-                ) => {
-                    return Some(self.worktree(caller, method, &request, &id));
-                }
-                Some(
-                    method @ ("store/list" | "store/extensions" | "store/report" | "store/latest"
-                    | "store/plan"),
-                ) => {
-                    // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
-                    let runs = method == "store/report"
-                        && (params
-                            .get("probe")
-                            .is_some_and(|probe| probe != &Value::Bool(false))
-                            || params.get("pick").is_some_and(|pick| !pick.is_null()));
-                    allow(caller, Grant::StoreRead)
-                        .and_then(|()| {
-                            if runs {
-                                allow(caller, Grant::StorePrograms)
-                            } else {
-                                Ok(())
-                            }
-                        })
-                        .and_then(|()| self.stores())
-                        .and_then(|stores| {
-                            stores.read(
-                                method,
-                                &params,
-                                caller.may(Grant::StorePrograms).then(|| caller.owner()),
-                            )
-                        })
-                }
-                Some("store/models") => allow(caller, Grant::StorePrograms)
-                    .and_then(|()| self.stores())
-                    .and_then(|stores| stores.models_read(&params, &self.files)),
-                Some("store/model") => allow(caller, Grant::StorePrograms)
-                    .and_then(|()| self.stores())
-                    .and_then(|stores| stores.model_act(&params)),
-                Some("store/model_setting") => allow(caller, Grant::StorePrograms)
-                    .and_then(|()| self.stores())
-                    .and_then(|stores| stores.model_setting(&params, &self.files)),
-                Some("store/index") => self.store_index(caller, &params),
-                Some(method @ ("store/rollback" | "store/remove")) => {
-                    allow(caller, Grant::StorePrograms)
-                        .and_then(|()| self.stores())
-                        .and_then(|stores| stores.change(method, &params))
-                }
-                Some(method @ ("history/export" | "history/move")) => {
-                    owner_only_history(caller).and_then(|()| self.history_call(method, &params))
-                }
-                Some("history/portable") => {
-                    owner_only_history(caller).and_then(|()| self.history_portable())
-                }
-                Some("history/account") => {
-                    owner_only_history(caller).and_then(|()| self.account_move(&params))
-                }
-                Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
-                    owner_only_history(caller).and_then(|()| self.import_call(method, &params))
-                }
-                Some(
-                    method @ ("accounts/catalog" | "accounts/list" | "accounts/remove"
-                    | "accounts/entries" | "accounts/offer" | "pools/list" | "pools/set"
-                    | "pools/remove" | "pools/turn"),
-                ) => allow(caller, Grant::Accounts)
-                    .and_then(|()| self.accounts())
-                    .and_then(|accounts| accounts.call(method, &params)),
-                Some(method @ ("mail/accounts" | "mail/add" | "mail/test" | "mail/remove")) => {
-                    allow(caller, Grant::MailSetup)
-                        .and_then(|()| self.mail_setup())
-                        .and_then(|setup| setup.call(method, &params))
-                }
-                Some(method @ ("usage/summary" | "usage/limits")) => {
-                    allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
-                }
-                Some("usage/read") => allow(caller, Grant::Usage)
-                    .and_then(|()| self.accounts())
-                    .and_then(|accounts| {
-                        usage_read::call(accounts, self.usage.as_deref(), &params)
-                    }),
-                Some("options/choices") => self
-                    .accounts()
-                    .and_then(|accounts| choices::call(accounts, caller, &params)),
-                Some("discover/nearby") => {
-                    allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
-                }
-                Some(method @ ("speech/offers" | "speech/enable")) => speech_offers::call(
-                    caller,
-                    &self.files,
-                    &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
-                    method,
-                    &params,
-                ),
-                Some(
-                    method @ ("speech/voices"
-                    | "speech/say"
-                    | "speech/audio"
-                    | "speech/stop"
-                    | "speech/say_configure"),
-                ) => self.say.call(caller, &self.files, method, &params),
-                Some(method) if method.starts_with("speech/") => self.speech.call(
-                    caller,
-                    &self.files,
-                    &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
-                    method,
-                    &params,
-                ),
-                Some("host/grants") => Ok(caller.grants_json()),
-                // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
-                // or read what programs are installed here (their paths are in `store/report` too).
-                Some("shell/list") => if caller.may(Grant::StoreRead) {
-                    Ok(())
-                } else {
-                    allow(caller, Grant::Terminal)
-                }
-                .map(|()| self.shells.report(&crate::shells::Lookup::here())),
-                Some(method) if method.starts_with("terminal/") => allow(caller, Grant::Terminal)
-                    .and_then(|()| {
+        let outcome = match request.get("method").and_then(Value::as_str) {
+            Some(method) => match ROUTES.iter().find(|route| route.method == method) {
+                Some(route) => match route.access.check(caller) {
+                    Err(error) => Err(error),
+                    Ok(()) => match route.handler {
+                        Handler::Rpc(run) => run(self, caller, method, &params),
+                        Handler::Raw(run) => return Some(run(self, caller, method, &request, &id)),
+                    },
+                },
+                None if method.starts_with("terminal/") => {
+                    allow(caller, Grant::Terminal).and_then(|()| {
                         Err((
                             REFUSED,
                             "this needs a link that can carry its output".to_owned(),
                         ))
-                    }),
-                Some(
-                    method @ ("secrets/providers" | "secrets/list" | "secrets/reveal"
-                    | "secrets/forget" | "secrets/configure"),
-                ) => allow(caller, Grant::Secrets)
-                    .and_then(|()| self.vault())
-                    .and_then(|vault| secrets::call(&vault, &self.files, method, &params)),
-                Some("store/apply" | "accounts/add" | "accounts/login" | "host/pair") => Err((
-                    REFUSED,
-                    "this needs a link that can carry its progress".to_owned(),
-                )),
-                _ => Err((NO_METHOD, "this host has no such method".to_owned())),
-            };
+                    })
+                }
+                None => Err((NO_METHOD, "this host has no such method".to_owned())),
+            },
+            None => Err((NO_METHOD, "this host has no such method".to_owned())),
+        };
         Some(match outcome {
             Ok(result) => {
                 serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
@@ -1245,6 +1806,493 @@ impl Control {
             }
             Err((code, message)) => error_line(&id, code, &message),
         })
+    }
+
+    fn r_ledger_list(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.list(caller, params)
+    }
+
+    fn r_running_sessions(
+        &self,
+        caller: &Caller,
+        _: &str,
+        _: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.running_sessions(caller)
+    }
+
+    fn r_ledger_put(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.put(caller, params)
+    }
+
+    fn r_ledger_remove(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.remove(caller, params)
+    }
+
+    fn r_ledger_clear(&self, caller: &Caller, _: &str, _: &Value) -> Result<Value, (i32, String)> {
+        self.clear(caller)
+    }
+
+    fn r_forget(&self, caller: &Caller, _: &str, _: &Value) -> Result<Value, (i32, String)> {
+        self.forget(caller)
+    }
+
+    fn r_grants(&self, caller: &Caller, _: &str, _: &Value) -> Result<Value, (i32, String)> {
+        Ok(caller.grants_json())
+    }
+
+    fn r_fs_read(&self, _: &Caller, _: &str, params: &Value) -> Result<Value, (i32, String)> {
+        self.files.read(params)
+    }
+
+    fn r_state(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        match method {
+            "state/get" => self.state.get(params),
+            "state/put" => self.state.put(params),
+            "state/append" => self.state.append(params),
+            "state/list" => self.state.list(params),
+            _ => self.state.remove(params),
+        }
+    }
+
+    fn r_files(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        match method {
+            "fs/list" => self.files.list(caller, params),
+            "fs/info" => self.files.info(caller, params),
+            "fs/realpath" => self.files.realpath(caller, params),
+            "fs/guards" => self.files.guards(),
+            "fs/repo_root" => self.files.repo_root(caller, params),
+            "fs/mentions" => self.files.mentions(caller, params),
+            "fs/resolve" => self.files.resolve(caller, params),
+            "fs/scratch" => self.files.scratch(params, files::Scratch::Make),
+            "fs/scratch_remove" => self.files.scratch(params, files::Scratch::Remove),
+            "fs/scratch_preview" => self.files.scratch(params, files::Scratch::Preview),
+            "profile/canonical" => self.files.profile_canonical(caller, params),
+            "profile/tree" => self.files.profile_tree(params),
+            "profile/project" => self.files.profile_project(caller, params),
+            "workspace/openers" => self.files.workspace_openers(),
+            "workspace/open" => self.files.workspace_open(caller, params),
+            "trust/list" => self.files.trust_list(),
+            "trust/set" => self.files.trust_set(caller, params),
+            _ => self.files.trust_revoke(caller, params),
+        }
+    }
+
+    fn r_config_get(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        if let Some(section) = owner_section(caller, params) {
+            return self.files.owner_get(section);
+        }
+        if names_host(params) {
+            return allow(caller, Grant::Hosting).and_then(|()| self.files.host_get());
+        }
+        allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(params))
+    }
+
+    fn r_config_set(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.config_write(caller, params, true)
+    }
+
+    fn r_config_check(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.config_write(caller, params, false)
+    }
+
+    fn config_write(
+        &self,
+        caller: &Caller,
+        params: &Value,
+        apply: bool,
+    ) -> Result<Value, (i32, String)> {
+        if let Some(section) = owner_section(caller, params) {
+            return self.files.owner_set(params, section, apply);
+        }
+        if names_host(params) {
+            return allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(params, apply));
+        }
+        allow(caller, Grant::ConfigWrite)?;
+        self.guard_sources(caller, params)?;
+        if apply {
+            self.files
+                .config_set(params, caller.may(Grant::ConfigWriteSessions))
+        } else {
+            self.files
+                .config_check(params, caller.may(Grant::ConfigWriteSessions))
+        }
+    }
+
+    fn r_config_view(&self, _: &Caller, method: &str, _: &Value) -> Result<Value, (i32, String)> {
+        let config = self.loaded_config()?;
+        Ok(match method {
+            "looks/list" => looks::list(&config),
+            "profile_items/list" => profile_items::list(&config),
+            "panel_tabs/list" => panel_tabs::list(&crate::panel_tabs::TabCatalog::of(&config)),
+            _ => providers::list(&config),
+        })
+    }
+
+    fn r_settings_sections(
+        &self,
+        caller: &Caller,
+        _: &str,
+        _: &Value,
+    ) -> Result<Value, (i32, String)> {
+        // The list of pages is the application's own preferences too, so any key reads it; the pages a provider adds, whose forms
+        // hold what the host keeps, are listed only to a key that reads the configuration.
+        if caller.may(Grant::ConfigRead) {
+            self.loaded_config().map(|config| {
+                settings_sections::list(
+                    &crate::settings_sections::SectionCatalog::of(&config),
+                    true,
+                )
+            })
+        } else {
+            Ok(settings_sections::list(
+                &crate::settings_sections::SectionCatalog::from_registries(Vec::new()),
+                false,
+            ))
+        }
+    }
+
+    fn r_section_get(&self, _: &Caller, _: &str, params: &Value) -> Result<Value, (i32, String)> {
+        let config = self.loaded_config()?;
+        settings_sections::get(
+            &crate::settings_sections::SectionCatalog::of(&config),
+            &self.files,
+            &settings_sections::Keeper::new(&config, self.section_home()),
+            params,
+        )
+    }
+
+    fn r_section_set(&self, _: &Caller, _: &str, params: &Value) -> Result<Value, (i32, String)> {
+        let config = self.loaded_config()?;
+        settings_sections::set(
+            &crate::settings_sections::SectionCatalog::of(&config),
+            &self.files,
+            &settings_sections::Keeper::new(&config, self.section_home()),
+            params,
+        )
+    }
+
+    fn r_panel_tabs_tail(
+        &self,
+        _: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        let config = self.loaded_config()?;
+        panel_tabs::tail(&crate::panel_tabs::TabCatalog::of(&config), params)
+    }
+
+    fn r_hosting(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        let store = self.keys_store()?;
+        match method {
+            "host/keys" => hosting::keys(store),
+            "host/accept" => hosting::accept(store, params),
+            _ => hosting::revoke(store, params),
+        }
+    }
+
+    fn r_which(&self, _: &Caller, _: &str, params: &Value) -> Result<Value, (i32, String)> {
+        registry::which(params, &crate::sources::runtime_dirs())
+    }
+
+    fn r_restart(&self, _: &Caller, _: &str, _: &Value) -> Result<Value, (i32, String)> {
+        self.restart_now()
+    }
+
+    fn r_extension_catalogs(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.extension_catalogs(caller, params)
+    }
+
+    fn r_store_catalogs(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.store_catalogs(caller, params)
+    }
+
+    fn r_store_catalog(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.store_catalog(caller, params)
+    }
+
+    fn r_extension_act(
+        &self,
+        _: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        match method {
+            "extension/plan" => self.extension_plan(params),
+            "extension/apply" => self.extension_apply(params),
+            _ => self.extension_remove(params),
+        }
+    }
+
+    fn r_upload(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        match method {
+            "upload/put" => self.files.upload_put(caller, params),
+            _ => self.files.upload_remove(caller, params),
+        }
+    }
+
+    fn r_overlays(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        match method {
+            "overlay/installed" => self.overlays.installed(params),
+            "overlay/needs" => self.overlays.needs(params),
+            "overlay/prepare" => self.overlays.prepare(params),
+            "overlay/read" => self.overlays.read(caller, params),
+            "catalog/read" => self.overlays.catalog_read(params),
+            "overlay/check" => self
+                .overlays
+                .check(caller, params, &|repo| self.may_read_source(caller, repo)),
+            "overlay/apply" => self.overlays.apply(caller, params),
+            "overlay/remove" => self.overlays.remove(params),
+            "overlay/discard" => self.overlays.discard(params),
+            "catalog/fetch" => self
+                .overlays
+                .catalog_fetch(params, &|repo| self.may_read_source(caller, repo)),
+            "catalog/remove" => self.overlays.catalog_remove(params),
+            "skill/list" => self.overlays.skill_list(),
+            "skill/read" => self.overlays.skill_read(params),
+            "skill/fetch" => self
+                .overlays
+                .skill_fetch(params, &|repo| self.may_read_source(caller, repo)),
+            "skill/scan" => self
+                .overlays
+                .skill_scan(params, &|repo| self.may_read_source(caller, repo)),
+            "skill/save" => self.overlays.skill_save(params),
+            "skill/remove" => self.overlays.skill_remove(params),
+            "registry/fetch" => self.registry_fetch(caller, params),
+            "skill/search" => self.skill_search(params),
+            "store/read_ahead" => self
+                .overlays
+                .read_ahead(caller, params, &|repo| self.may_read_source(caller, repo)),
+            "store/contents" => self.registry.contents(caller, params),
+            _ => self.registry.put_contents(caller, params),
+        }
+    }
+
+    fn r_network(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        match method {
+            "network/fetch" => self.fetch.run(params),
+            "network/tunnel" => self.tunnel.run(params),
+            _ => Ok(self.client_certificates.list()),
+        }
+    }
+
+    fn r_worktree(&self, caller: &Caller, method: &str, request: &Value, id: &Value) -> Vec<u8> {
+        self.worktree(caller, method, request, id)
+    }
+
+    fn r_stores_read(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.stores()?.read(
+            method,
+            params,
+            caller.may(Grant::StorePrograms).then(|| caller.owner()),
+        )
+    }
+
+    fn r_stores_report(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
+        let runs = params
+            .get("probe")
+            .is_some_and(|probe| probe != &Value::Bool(false))
+            || params.get("pick").is_some_and(|pick| !pick.is_null());
+        allow(caller, Grant::StoreRead)?;
+        if runs {
+            allow(caller, Grant::StorePrograms)?;
+        }
+        self.r_stores_read(caller, method, params)
+    }
+
+    fn r_stores_programs(
+        &self,
+        _: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        let stores = self.stores()?;
+        match method {
+            "store/models" => stores.models_read(params, &self.files),
+            "store/model" => stores.model_act(params),
+            "store/model_setting" => stores.model_setting(params, &self.files),
+            _ => stores.change(method, params),
+        }
+    }
+
+    fn r_store_index(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.store_index(caller, params)
+    }
+
+    fn r_history(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        match method {
+            "history/export" | "history/move" => self.history_call(method, params),
+            "history/portable" => self.history_portable(),
+            "history/account" => self.account_move(params),
+            _ => self.import_call(method, params),
+        }
+    }
+
+    fn r_accounts(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        self.accounts()?.call(method, params)
+    }
+
+    fn r_mail(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        self.mail_setup()?.call(method, params)
+    }
+
+    fn r_usage(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        match method {
+            "usage/read" => usage_read::call(self.accounts()?, self.usage.as_deref(), params),
+            _ => self.usage_call(method, params),
+        }
+    }
+
+    fn r_options_choices(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        choices::call(self.accounts()?, caller, params)
+    }
+
+    fn r_discover(&self, _: &Caller, _: &str, params: &Value) -> Result<Value, (i32, String)> {
+        discover::nearby(params)
+    }
+
+    fn r_speech_offers(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        speech_offers::call(
+            caller,
+            &self.files,
+            &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
+            method,
+            params,
+        )
+    }
+
+    fn r_say(&self, caller: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        self.say.call(caller, &self.files, method, params)
+    }
+
+    fn r_speech(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.speech.call(
+            caller,
+            &self.files,
+            &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
+            method,
+            params,
+        )
+    }
+
+    fn r_shell_list(&self, _: &Caller, _: &str, _: &Value) -> Result<Value, (i32, String)> {
+        // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
+        // or read what programs are installed here (their paths are in `store/report` too).
+        Ok(self.shells.report(&crate::shells::Lookup::here()))
+    }
+
+    fn r_secrets(&self, _: &Caller, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        secrets::call(&self.vault()?, &self.files, method, params)
+    }
+
+    fn r_needs_output_link(&self, _: &Caller, _: &str, _: &Value) -> Result<Value, (i32, String)> {
+        Err((
+            REFUSED,
+            "this needs a link that can carry its output".to_owned(),
+        ))
+    }
+
+    fn r_needs_progress_link(
+        &self,
+        _: &Caller,
+        _: &str,
+        _: &Value,
+    ) -> Result<Value, (i32, String)> {
+        Err((
+            REFUSED,
+            "this needs a link that can carry its progress".to_owned(),
+        ))
     }
 
     /// canoa.cfg's `[store]` table as the person wrote it, or null.
@@ -1483,29 +2531,6 @@ fn whole_machine() -> Vec<PathBuf> {
             .collect()
     } else {
         vec![PathBuf::from("/")]
-    }
-}
-
-/// A recorded session is the person's: only this process reads or moves one, and no grant says otherwise.
-fn owner_only_history(caller: &Caller) -> Result<(), (i32, String)> {
-    match caller {
-        Caller::Owner => Ok(()),
-        Caller::Peer { .. } => Err((
-            DENIED,
-            "only the person running this host reads or moves a recorded session".to_owned(),
-        )),
-    }
-}
-
-/// What the app fetches or dials through this host is sent as the person's computer, with its proxy login and client certificates:
-/// only this process asks for it, and no grant says otherwise.
-fn owner_only_network(caller: &Caller) -> Result<(), (i32, String)> {
-    match caller {
-        Caller::Owner => Ok(()),
-        Caller::Peer { .. } => Err((
-            DENIED,
-            "only the person running this host sends requests through its network".to_owned(),
-        )),
     }
 }
 

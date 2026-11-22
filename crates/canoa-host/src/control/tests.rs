@@ -869,3 +869,105 @@ fn usage_read_needs_the_usage_grant_and_a_host_that_manages_accounts() {
     );
     assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
 }
+
+#[test]
+fn dispatch_table_grants_and_docs_stay_in_step() {
+    let mut seen_methods = BTreeSet::new();
+    for route in ROUTES {
+        assert!(
+            seen_methods.insert(route.method),
+            "duplicate control route method: {}",
+            route.method
+        );
+    }
+
+    let mut seen_grants = BTreeSet::new();
+    let mut seen_names = BTreeSet::new();
+    for spec in GRANT_SPECS {
+        assert!(
+            seen_grants.insert(spec.grant),
+            "duplicate grant: {:?}",
+            spec.grant
+        );
+        assert!(
+            seen_names.insert(spec.name),
+            "duplicate grant name: {}",
+            spec.name
+        );
+        assert_eq!(spec.grant.as_str(), spec.name);
+        assert_eq!(Grant::named(spec.name), Some(spec.grant));
+        let in_routes = ROUTES.iter().any(|route| route.access.mentions(spec.grant));
+        assert_eq!(
+            in_routes, spec.control,
+            "grant {:?} ({}) control flag {} disagrees with ROUTES presence {}",
+            spec.grant, spec.name, spec.control, in_routes
+        );
+    }
+    assert_eq!(Grant::all().len(), GRANT_SPECS.len());
+
+    let docs = include_str!("../../AGENTS.md");
+    for spec in GRANT_SPECS {
+        assert!(
+            docs.contains(spec.name),
+            "crates/canoa-host/AGENTS.md is missing grant {}",
+            spec.name
+        );
+    }
+    for route in ROUTES {
+        assert!(
+            docs.contains(route.method),
+            "crates/canoa-host/AGENTS.md is missing control method {}",
+            route.method
+        );
+    }
+}
+
+#[test]
+fn conditional_and_link_only_routes_check_their_grants() {
+    let control = memory();
+    let none = peer("sha256:aa", &[]);
+    let reader = peer("sha256:bb", &[Grant::ConfigRead]);
+    let hosting = peer("sha256:cc", &[Grant::Hosting]);
+
+    // `config/get` on `[host]` requires `hosting`, not `config.read`.
+    assert_eq!(
+        ask(&control, &reader, "config/get", json!({"section": "host"}))["error"]["code"],
+        DENIED
+    );
+    assert_ne!(
+        ask(&control, &hosting, "config/get", json!({"section": "host"}))["error"]["code"],
+        DENIED
+    );
+
+    // Owner-only network and history routes reject peers and leave owners to run the handler.
+    for method in ["network/fetch", "history/portable"] {
+        assert_eq!(
+            ask(&control, &hosting, method, json!({}))["error"]["code"],
+            DENIED
+        );
+    }
+
+    // Link-only methods enforce their grant before telling the caller a link is needed.
+    for method in [
+        "store/apply",
+        "accounts/add",
+        "accounts/login",
+        "host/pair",
+        "secrets/set",
+        "terminal/open",
+    ] {
+        assert_eq!(
+            ask(&control, &none, method, json!({}))["error"]["code"],
+            DENIED
+        );
+        assert_eq!(
+            ask(&control, &Caller::Owner, method, json!({}))["error"]["code"],
+            REFUSED
+        );
+    }
+
+    assert_eq!(
+        ask(&control, &none, "no/such/method", json!({}))["error"]["code"],
+        NO_METHOD
+    );
+}
