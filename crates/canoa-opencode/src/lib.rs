@@ -56,6 +56,9 @@ impl AgentVendor for OpenCodeVendor {
         info.program = Some("OpenCode".to_owned());
         info.aos = Some("opencode".to_owned());
         info.skills_folder = Some(".opencode/skills".to_owned());
+        info.context_files = vec!["AGENTS.md".to_owned()];
+        info.home_folder = Some(".config/opencode".to_owned());
+        info.home_context_files = vec!["AGENTS.md".to_owned()];
         info.standards = vec![
             StandardTitle::new("opencode", "OpenCode"),
             StandardTitle::new("opencode-key", "OpenCode provider key"),

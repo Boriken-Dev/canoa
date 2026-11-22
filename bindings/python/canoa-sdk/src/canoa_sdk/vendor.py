@@ -54,6 +54,9 @@ class VendorInfo(Model):
     tool_name: Optional[str] = None
     skills_folder: Optional[str] = None
     context_files: List[str] = field(default_factory=list)
+    home_variable: Optional[str] = None
+    home_folder: Optional[str] = None
+    home_context_files: List[str] = field(default_factory=list)
     standards: List[StandardTitle] = field(default_factory=list)
     names: List[str] = field(default_factory=list)
     markers: List[str] = field(default_factory=list)
@@ -81,6 +84,9 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
     tool_name: ClassVar[Optional[str]] = None
     skills_folder: ClassVar[Optional[str]] = None
     context_files: ClassVar[Sequence[str]] = ()
+    home_variable: ClassVar[Optional[str]] = None
+    home_folder: ClassVar[Optional[str]] = None
+    home_context_files: ClassVar[Sequence[str]] = ()
     standards: ClassVar[Sequence[StandardTitle]] = ()
     names: ClassVar[Sequence[str]] = ()
     markers: ClassVar[Sequence[str]] = ()
@@ -101,6 +107,9 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
             tool_name=self.tool_name,
             skills_folder=self.skills_folder,
             context_files=list(self.context_files),
+            home_variable=self.home_variable,
+            home_folder=self.home_folder,
+            home_context_files=list(self.home_context_files),
             standards=list(self.standards),
             names=list(self.names),
             markers=list(self.markers),

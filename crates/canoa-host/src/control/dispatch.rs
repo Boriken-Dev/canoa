@@ -169,6 +169,11 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_files,
     ),
     rpc(
+        "fs/instructions",
+        Access::Require(Grant::Folders),
+        Control::r_files,
+    ),
+    rpc(
         "fs/mentions",
         Access::Require(Grant::Folders),
         Control::r_files,

@@ -126,6 +126,7 @@ impl Control {
             "fs/realpath" => self.files.realpath(caller, params),
             "fs/guards" => self.files.guards(),
             "fs/repo_root" => self.files.repo_root(caller, params),
+            "fs/instructions" => self.files.instructions(caller, params),
             "fs/mentions" => self.files.mentions(caller, params),
             "fs/resolve" => self.files.resolve(caller, params),
             "fs/scratch" => self.files.scratch(params, files::Scratch::Make),

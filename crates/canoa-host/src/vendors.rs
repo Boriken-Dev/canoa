@@ -31,6 +31,12 @@ pub(crate) struct Vendor {
     pub(crate) skills_folder: Option<&'static str>,
     /// The files of a project's context it loads for itself.
     pub(crate) context_files: Vec<&'static str>,
+    /// The variable that names the folder it keeps its own files in.
+    pub(crate) home_variable: Option<&'static str>,
+    /// That folder when the variable is not set, below the person's home.
+    pub(crate) home_folder: Option<&'static str>,
+    /// The files in that folder it loads as the person's own instructions.
+    pub(crate) home_context_files: Vec<&'static str>,
     /// The credential standards that are the vendor's own.
     pub(crate) standards: Vec<&'static str>,
     /// The names it reports in `initialize`.
@@ -52,6 +58,13 @@ impl Vendor {
             tool_name: info.tool_name.as_deref().map(keep),
             skills_folder: info.skills_folder.as_deref().map(keep),
             context_files: info.context_files.iter().map(|path| keep(path)).collect(),
+            home_variable: info.home_variable.as_deref().map(keep),
+            home_folder: info.home_folder.as_deref().map(keep),
+            home_context_files: info
+                .home_context_files
+                .iter()
+                .map(|path| keep(path))
+                .collect(),
             standards: info.standards.iter().map(|each| keep(&each.id)).collect(),
             names: info.names.iter().map(|name| keep(name)).collect(),
         }

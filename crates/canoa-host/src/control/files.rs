@@ -129,6 +129,7 @@ pub(crate) struct Files {
 
 mod config;
 mod folders;
+mod instructions;
 mod links;
 mod profiles;
 mod uploads;

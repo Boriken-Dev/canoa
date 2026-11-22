@@ -93,6 +93,13 @@ pub struct VendorInfo {
     /// host does not give it the same text a second time. Empty for an agent that loads none of the standard names.
     #[map(default)]
     pub context_files: Vec<String>,
+    /// The variable that names the folder the agent keeps its own files in (`CLAUDE_CONFIG_DIR`), which a person may point elsewhere.
+    pub home_variable: Option<String>,
+    /// That folder when the variable is not set, below the person's home (`.claude`).
+    pub home_folder: Option<String>,
+    /// The files in that folder the agent loads as the person's own instructions, as paths below it written with `/` (`CLAUDE.md`).
+    #[map(default)]
+    pub home_context_files: Vec<String>,
     /// The credential standards that are the vendor's own, with their names for people.
     #[map(default)]
     pub standards: Vec<StandardTitle>,
@@ -130,6 +137,9 @@ impl VendorInfo {
             tool_name: None,
             skills_folder: None,
             context_files: Vec::new(),
+            home_variable: None,
+            home_folder: None,
+            home_context_files: Vec::new(),
             standards: Vec::new(),
             names: Vec::new(),
             markers: Vec::new(),

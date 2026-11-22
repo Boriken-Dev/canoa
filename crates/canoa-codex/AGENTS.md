@@ -40,7 +40,7 @@ pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, 
 
 The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("codex")`).
 
-`CodexVendor`'s description lists `AGENTS.md` as a file Codex loads itself (`context_files`), so the host does not hand it over a second time.
+`CodexVendor`'s description lists `AGENTS.md` and `AGENTS.override.md` as files Codex loads itself (`context_files`), so the host does not hand them over a second time and `fs/instructions` lists them; Codex keeps the person's own in `$CODEX_HOME` (`.codex` below the home when it is not set), where it loads the same two names (`home_variable`, `home_folder`, `home_context_files`).
 
 ## Gotchas
 

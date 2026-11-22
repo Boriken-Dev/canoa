@@ -41,6 +41,8 @@ pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, 
 
 The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("claude")`).
 
+`ClaudeVendor`'s description names the files Claude Code loads itself, in a project (`CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`: `context_files`) and in `$CLAUDE_CONFIG_DIR` (`.claude` below the home when it is not set: `home_variable`, `home_folder`, `home_context_files`), which `fs/instructions` lists.
+
 ## Gotchas
 
 - `LOOK` is colour tokens only, an original palette in the spirit of the product: no logo, no font. The host serves it unchanged; its token names are those of `canoa-host`'s `looks/list`.

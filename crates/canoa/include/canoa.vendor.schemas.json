@@ -61,6 +61,28 @@
         "description": "The files of a project's context the agent loads for itself, as paths below a directory written with `/` (`AGENTS.md`), so the host does not give it the same text a second time. Empty for an agent that loads none of the standard names.",
         "default": []
       },
+      "home_variable": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The variable that names the folder the agent keeps its own files in (`CLAUDE_CONFIG_DIR`), which a person may point elsewhere."
+      },
+      "home_folder": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "That folder when the variable is not set, below the person's home (`.claude`)."
+      },
+      "home_context_files": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The files in that folder the agent loads as the person's own instructions, as paths below it written with `/` (`CLAUDE.md`).",
+        "default": []
+      },
       "standards": {
         "type": "array",
         "items": {

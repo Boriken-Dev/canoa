@@ -64,7 +64,10 @@ impl AgentVendor for CodexVendor {
         info.aos = Some("codex".to_owned());
         info.model_variable = Some("OPENAI_MODEL".to_owned());
         info.skills_folder = Some(".codex/skills".to_owned());
-        info.context_files = vec!["AGENTS.md".to_owned()];
+        info.context_files = vec!["AGENTS.md".to_owned(), "AGENTS.override.md".to_owned()];
+        info.home_variable = Some("CODEX_HOME".to_owned());
+        info.home_folder = Some(".codex".to_owned());
+        info.home_context_files = vec!["AGENTS.md".to_owned(), "AGENTS.override.md".to_owned()];
         info.standards = vec![
             StandardTitle::new("codex", "Codex"),
             StandardTitle::new("openai-api", "OpenAI API"),

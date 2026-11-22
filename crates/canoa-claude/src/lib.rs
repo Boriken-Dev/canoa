@@ -64,6 +64,12 @@ impl AgentVendor for ClaudeVendor {
         info.model_variable = Some("ANTHROPIC_MODEL".to_owned());
         info.tool_name = Some("/claudeCode/toolName".to_owned());
         info.skills_folder = Some(".claude/skills".to_owned());
+        info.context_files = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]
+            .map(str::to_owned)
+            .to_vec();
+        info.home_variable = Some("CLAUDE_CONFIG_DIR".to_owned());
+        info.home_folder = Some(".claude".to_owned());
+        info.home_context_files = vec!["CLAUDE.md".to_owned()];
         info.standards = vec![
             StandardTitle::new("claude-code", "Claude Code"),
             StandardTitle::new("anthropic-api", "Anthropic API"),

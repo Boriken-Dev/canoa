@@ -161,7 +161,7 @@ fn follow(path: &Path) -> Option<PathBuf> {
 }
 
 /// The folder at or above `folder` that holds `.git`, with a linked worktree's or a submodule's answered as its main repository.
-fn repository_root(folder: &Path) -> Option<PathBuf> {
+pub(super) fn repository_root(folder: &Path) -> Option<PathBuf> {
     for dir in folder.ancestors() {
         match fs::symlink_metadata(dir.join(".git")) {
             Ok(meta) if meta.is_file() => {
