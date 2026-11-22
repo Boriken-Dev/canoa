@@ -28,7 +28,7 @@ use canoa::vendor::{
     AccessTarget, AgentVendor, GatewayRoute, HistoryAnswer, HistoryRequest, HookSupport,
     HookSupportRequest, HooksDelivery, HooksRequest, LoginFile, ModeTitle, SessionListing,
     SessionsRequest, ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle,
-    Variable, VendorInfo,
+    ToolHook, Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -124,6 +124,10 @@ impl AgentVendor for ClaudeVendor {
         request: HookSupportRequest,
     ) -> Result<Option<HookSupport>, ProviderError> {
         Ok(delivery::hook_support(&request))
+    }
+
+    fn tool_hook(&self) -> Result<Option<ToolHook>, ProviderError> {
+        Ok(Some(delivery::tool_hook()))
     }
 
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {

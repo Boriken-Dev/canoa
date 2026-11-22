@@ -2,8 +2,8 @@
 //! local plugin that the session request's `_meta` loads.
 
 use canoa::vendor::{
-    DeliveredFile, HookKind, HookSupport, HookSupportRequest, HooksDelivery, HooksRequest,
-    PLUGIN_PATH, PluginDelivery, SkillsDelivery,
+    DeliveredFile, HookKind, HookSupport, HookSupportRequest, HookTool, HooksDelivery,
+    HooksRequest, ModeWord, PLUGIN_PATH, PluginDelivery, ShellFamily, SkillsDelivery, ToolHook,
 };
 use coqui_acp_api::guatiao::{Map, ToValue as _, Value};
 
@@ -12,6 +12,28 @@ const SKILLS_PLUGIN: &str = "canoa-profile";
 
 /// The plugin the host's hooks are given in.
 const HOOKS_PLUGIN: &str = "canoa-hooks";
+
+/// The plugin of the hook that runs a session's own tools in an environment: a name of its own, so a session can load it beside
+/// the other.
+const TOOLS_PLUGIN: &str = "canoa-environment";
+
+/// Claude Code's tools that run a command, with the shell each command is written for.
+const SHELL_TOOLS: [(&str, ShellFamily); 2] = [
+    ("Bash", ShellFamily::Bash),
+    ("PowerShell", ShellFamily::Powershell),
+];
+
+/// Claude Code's tools that read, write, edit, search or list files where it runs.
+const FILE_TOOLS: [&str; 8] = [
+    "Read",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "Grep",
+    "Glob",
+    "LS",
+];
 
 /// What a session request gains to load the local plugin at the folder the host wrote.
 fn plugin_meta() -> Value {
@@ -59,36 +81,55 @@ fn hook_event(kind: HookKind) -> Option<&'static str> {
         HookKind::Start => Some("SessionStart"),
         HookKind::PreCompact => Some("PreCompact"),
         HookKind::Batch => Some("PostToolBatch"),
+        HookKind::PreTool => Some("PreToolUse"),
         _ => None,
     }
 }
 
 /// Hooks as a local plugin whose commands run the host's forwarder; a moment Claude Code has no hook for is left out.
+///
+/// A `PreToolUse` command runs only before the tools [`tool_hook`] names. Claude Code lets a call go on when its hook ends with any
+/// status but 0 or 2, so the command is followed by `|| exit 2`: a forwarder that cannot start, or ends in error, refuses the call.
+/// Its timeout also lets the call go on, so the forwarder answers within the request's `timeout_seconds`.
 pub(crate) fn hooks_delivery(request: &HooksRequest) -> HooksDelivery {
     let mut hooks = serde_json::Map::new();
+    let mut tools = false;
     for each in &request.commands {
         let Some(event) = hook_event(each.kind) else {
             continue;
         };
-        hooks.insert(
-            event.to_owned(),
-            serde_json::json!([{"hooks": [{
-                "type": "command",
-                "shell": "bash",
-                "command": each.command,
-                "timeout": request.timeout_seconds.saturating_add(5),
-            }]}]),
-        );
+        let mut hook = serde_json::json!({
+            "type": "command",
+            "shell": "bash",
+            "command": each.command,
+            "timeout": request.timeout_seconds.saturating_add(5),
+        });
+        let mut entry = serde_json::Map::new();
+        if each.kind == HookKind::PreTool {
+            tools = true;
+            hook["command"] = serde_json::json!(format!("{} || exit 2", each.command));
+            entry.insert(
+                "matcher".to_owned(),
+                serde_json::json!(format!("^({})$", tool_names().join("|"))),
+            );
+        }
+        entry.insert("hooks".to_owned(), serde_json::json!([hook]));
+        hooks.insert(event.to_owned(), serde_json::json!([entry]));
     }
+    let (name, description) = if tools {
+        (
+            TOOLS_PLUGIN,
+            "Runs this session's commands in the environment its tools are served from, and turns its file tools to that environment",
+        )
+    } else {
+        (
+            HOOKS_PLUGIN,
+            "Reports compaction and working directory changes to the host that runs this session",
+        )
+    };
     HooksDelivery::new(
         vec![
-            DeliveredFile::new(
-                ".claude-plugin/plugin.json",
-                manifest(
-                    HOOKS_PLUGIN,
-                    "Reports compaction and working directory changes to the host that runs this session",
-                ),
-            ),
+            DeliveredFile::new(".claude-plugin/plugin.json", manifest(name, description)),
             DeliveredFile::new(
                 "hooks/hooks.json",
                 serde_json::json!({ "hooks": hooks }).to_string(),
@@ -96,6 +137,55 @@ pub(crate) fn hooks_delivery(request: &HooksRequest) -> HooksDelivery {
         ],
         PluginDelivery::new("", plugin_meta()),
     )
+}
+
+/// The tools the `PreToolUse` hook runs before.
+fn tool_names() -> Vec<&'static str> {
+    SHELL_TOOLS
+        .iter()
+        .map(|(name, _)| *name)
+        .chain(FILE_TOOLS)
+        .collect()
+}
+
+/// How Claude Code's `PreToolUse` payload is read and answered. The rewritten input carries no `permissionDecision`, so Claude
+/// Code's own rules and mode still decide whether the call runs, judging the command as rewritten.
+pub(crate) fn tool_hook() -> ToolHook {
+    let rewrite = serde_json::json!({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "updatedInput": {},
+    }});
+    let deny = serde_json::json!({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "",
+    }});
+    let mut hook = ToolHook::new(
+        SHELL_TOOLS
+            .iter()
+            .map(|(name, shell)| HookTool::shell(*name, "command", *shell))
+            .chain(FILE_TOOLS.iter().map(|name| HookTool::files(*name)))
+            .collect(),
+        ("/tool_name", "/tool_input"),
+        (
+            deny.to_string(),
+            "/hookSpecificOutput/permissionDecisionReason",
+        ),
+        (rewrite.to_string(), "/hookSpecificOutput/updatedInput"),
+    );
+    hook.mode_at = Some("/permission_mode".to_owned());
+    hook.modes = [
+        ("default", "manual"),
+        ("acceptEdits", "accept_edits"),
+        ("auto", "auto"),
+        ("plan", "plan"),
+        ("bypassPermissions", "bypass"),
+        ("dontAsk", "dont_ask"),
+    ]
+    .into_iter()
+    .map(|(word, mode)| ModeWord::new(word, mode))
+    .collect();
+    hook
 }
 
 /// What Claude Code's hooks give for the events ACP does not show.
@@ -154,6 +244,95 @@ mod tests {
             "the commands are written for bash"
         );
         assert_eq!(delivery.plugin.folder, "");
+    }
+
+    fn hooks_file(delivery: &HooksDelivery) -> serde_json::Value {
+        let file = delivery
+            .files
+            .iter()
+            .find(|file| file.path == "hooks/hooks.json")
+            .expect("the hooks file");
+        serde_json::from_str(&file.text).expect("JSON")
+    }
+
+    #[test]
+    fn the_pre_tool_hook_runs_before_every_shell_and_file_tool_and_refuses_when_it_fails() {
+        let delivery = hooks_delivery(&HooksRequest::new(
+            vec![HookCommand::new(
+                HookKind::PreTool,
+                "\"canoa\" hook-forward",
+            )],
+            40,
+        ));
+        let hooks = hooks_file(&delivery);
+        let entry = &hooks["hooks"]["PreToolUse"][0];
+        let matcher = entry["matcher"].as_str().expect("a matcher");
+        let names: Vec<&str> = matcher
+            .trim_start_matches("^(")
+            .trim_end_matches(")$")
+            .split('|')
+            .collect();
+        for name in [
+            "Bash",
+            "PowerShell",
+            "Read",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "Grep",
+            "Glob",
+            "LS",
+        ] {
+            assert!(names.contains(&name), "{name}");
+        }
+        assert_eq!(
+            entry["hooks"][0]["command"],
+            "\"canoa\" hook-forward || exit 2"
+        );
+        assert_eq!(entry["hooks"][0]["timeout"], 45);
+        let manifest = delivery
+            .files
+            .iter()
+            .find(|file| file.path == ".claude-plugin/plugin.json")
+            .expect("a manifest");
+        assert!(
+            manifest.text.contains("canoa-environment"),
+            "{}",
+            manifest.text
+        );
+        // Every tool the hook runs before is one the description says how to read, and no other.
+        let described: Vec<String> = tool_hook()
+            .tools
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(names, described);
+    }
+
+    #[test]
+    fn the_tool_description_decides_nothing_when_it_rewrites_and_tells_dont_ask_from_bypass() {
+        let hook = tool_hook();
+        let rewrite: serde_json::Value = serde_json::from_str(&hook.rewrite).expect("JSON");
+        assert!(rewrite.pointer(&hook.rewrite_input_at).is_some());
+        assert!(
+            rewrite
+                .pointer("/hookSpecificOutput/permissionDecision")
+                .is_none(),
+            "a rewrite leaves the decision to Claude Code"
+        );
+        let deny: serde_json::Value = serde_json::from_str(&hook.deny).expect("JSON");
+        assert_eq!(deny["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert!(deny.pointer(&hook.deny_reason_at).is_some());
+        let mode = |word: &str| {
+            hook.modes
+                .iter()
+                .find(|each| each.word == word)
+                .map(|each| each.mode.clone())
+        };
+        assert_eq!(mode("dontAsk").as_deref(), Some("dont_ask"));
+        assert_eq!(mode("bypassPermissions").as_deref(), Some("bypass"));
+        assert_eq!(mode("default").as_deref(), Some("manual"));
     }
 
     #[test]
