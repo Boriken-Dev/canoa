@@ -136,22 +136,52 @@ pub(crate) enum Verdict {
     Pass,
 }
 
+/// Whether `text` holds `word` as a word of its own, whatever its case.
+fn has_word(text: &str, word: &str) -> bool {
+    let lower = text.to_lowercase();
+    let is_word = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    lower.match_indices(word).any(|(at, _)| {
+        !lower[..at].chars().next_back().is_some_and(is_word)
+            && !lower[at + word.len()..].chars().next().is_some_and(is_word)
+    })
+}
+
 /// The command that runs the command prepared as `id` through the forwarder `prefix`, written for `shell`, then ends the shell with
-/// its status before `original`, which stays only for the agent's rules to read. `None` for a shell this cannot write for.
+/// its status before `original`, which stays only for the agent's rules to read.
+///
+/// A POSIX shell reads a line whole before it runs it, so `original` after `exit $?` never runs. PowerShell reads the whole script
+/// first and acts on some of it before the first statement: a `trap` anywhere covers the statements before it, and `#requires`
+/// loads modules. So for PowerShell `original` is the body of a script block that is never invoked, the forwarder runs inside
+/// `try` with an `exit` in `finally` (a forwarder that cannot start, or a status turned into an error, still ends the script),
+/// and a command naming `trap` or `#requires` is not rewritten.
+///
+/// # Errors
+///
+/// Why the command cannot be run in the environment: a shell this cannot write for, or a PowerShell command of that kind.
 pub(crate) fn rewritten(
     prefix: &str,
     id: &str,
     shell: ShellFamily,
     original: &str,
-) -> Option<String> {
+) -> Result<String, String> {
     match shell {
         ShellFamily::Bash | ShellFamily::Zsh | ShellFamily::Other => {
-            Some(format!("{prefix} {KIND_EXEC} {id}; exit $?; {original}"))
+            Ok(format!("{prefix} {KIND_EXEC} {id}; exit $?; {original}"))
         }
-        ShellFamily::Powershell => Some(format!(
-            "& {prefix} {KIND_EXEC} {id}; exit $LASTEXITCODE; {original}"
+        ShellFamily::Powershell => {
+            if has_word(original, "trap") || original.to_lowercase().contains("#requires") {
+                return Err(
+                    "a PowerShell command that holds trap or #requires is not run in the environment: PowerShell acts on those before the command's first statement, on this computer. Write it without them".to_owned(),
+                );
+            }
+            Ok(format!(
+                "try {{ & {prefix} {KIND_EXEC} {id} }} finally {{ exit $(if ($null -eq $LASTEXITCODE) {{ {NOT_RUN} }} else {{ $LASTEXITCODE }}) }}; $null = {{ {original} }}"
+            ))
+        }
+        other => Err(format!(
+            "a command for {} cannot be written to run elsewhere",
+            other.as_str()
         )),
-        _ => None,
     }
 }
 
@@ -684,13 +714,7 @@ impl Shared {
         let prefix = forwarder(&self.program, &self.before, channel)
             .ok_or("the host's program is at a path a command cannot quote")?;
         let id = random_hex().map_err(|error| error.to_string())?;
-        let run = rewritten(&prefix, &id, shell, command).ok_or_else(|| {
-            format!(
-                "a command for {} cannot be run in environment {}",
-                shell.as_str(),
-                self.env.name()
-            )
-        })?;
+        let run = rewritten(&prefix, &id, shell, command)?;
         lock(&self.ops).insert(
             id,
             Op {

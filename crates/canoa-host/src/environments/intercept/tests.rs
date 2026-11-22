@@ -241,9 +241,7 @@ fn judged(env: &Env, mode: Mode, payload: &Value) -> Verdict {
         (env.name(), &env.info()),
         mode,
         payload,
-        &mut |shell, command| {
-            rewritten(PREFIX, "ID", shell, command).ok_or_else(|| "no shell".to_owned())
-        },
+        &mut |shell, command| rewritten(PREFIX, "ID", shell, command),
     )
 }
 
@@ -274,8 +272,81 @@ fn a_command_is_turned_to_the_environment_with_the_original_after_an_exit_and_th
     };
     assert_eq!(
         input["command"],
-        format!("& {PREFIX} env-exec ID; exit $LASTEXITCODE; Remove-Item x")
+        format!(
+            "try {{ & {PREFIX} env-exec ID }} finally {{ exit $(if ($null -eq $LASTEXITCODE) {{ 126 }} else {{ $LASTEXITCODE }}) }}; $null = {{ Remove-Item x }}"
+        )
     );
+}
+
+#[test]
+fn a_powershell_command_that_powershell_acts_on_before_its_first_statement_is_not_rewritten() {
+    for command in [
+        "trap { Remove-Item C:/x; continue } ls",
+        "TRAP{1}",
+        "#Requires -Modules Evil\nls",
+    ] {
+        let why = rewritten(PREFIX, "ID", ShellFamily::Powershell, command).expect_err(command);
+        assert!(why.contains("trap or #requires"), "{why}");
+    }
+    for fine in ["Get-Content trapdoor.txt", "ls ./traps", "$trap_count = 1"] {
+        rewritten(PREFIX, "ID", ShellFamily::Powershell, fine).expect(fine);
+    }
+    // The typographic quotes PowerShell reads as quotes cannot be in a path the forwarder is named by.
+    for quote in [
+        '\u{2018}', '\u{2019}', '\u{201a}', '\u{201b}', '\u{201c}', '\u{201d}', '\u{201e}',
+    ] {
+        assert!(!crate::profile::hosted::quotable(&format!(
+            "D:/Apps/Bob{quote}/canoa.exe"
+        )));
+    }
+    assert!(crate::profile::hosted::quotable("D:/Apps/Bob/canoa.exe"));
+}
+
+/// Runs `script` with `shell` and says its status and whether the file `marker` was made.
+#[cfg(windows)]
+fn ran_in(shell: &str, script: &str, marker: &Path) -> (i32, bool) {
+    let _ = std::fs::remove_file(marker);
+    let status = std::process::Command::new(shell)
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .expect("the shell runs")
+        .status
+        .code()
+        .unwrap_or(-1);
+    let made = marker.exists();
+    let _ = std::fs::remove_file(marker);
+    (status, made)
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "needs pwsh (PowerShell 7) and powershell (Windows PowerShell 5.1) on PATH"]
+fn in_both_powershells_the_original_never_runs_here_whether_the_forwarder_runs_fails_or_cannot_start()
+ {
+    let dir = std::env::temp_dir().join(format!("canoa-ps-form-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a folder");
+    let marker = dir.join("ran-here.txt");
+    let original = format!("Set-Content -Path '{}' -Value x", marker.display());
+    let strict =
+        "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; ";
+    for shell in ["pwsh", "powershell"] {
+        for (prefix, status) in [
+            ("\"C:/nowhere/canoa.exe\"", 126),
+            ("\"C:/Windows/System32/cmd.exe\" \"/c\" \"exit 3\"", 3),
+            ("\"C:/Windows/System32/cmd.exe\" \"/c\" \"exit 0\"", 0),
+        ] {
+            let form =
+                rewritten(prefix, "ID", ShellFamily::Powershell, &original).expect("rewritten");
+            for script in [form.clone(), format!("{strict}{form}")] {
+                assert_eq!(
+                    ran_in(shell, &script, &marker),
+                    (status, false),
+                    "{shell}: {script}"
+                );
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

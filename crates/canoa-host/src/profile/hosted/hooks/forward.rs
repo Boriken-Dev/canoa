@@ -350,11 +350,14 @@ fn handle(stream: &TcpStream, shared: &Shared) {
     let _ = writer.write_all(&out);
 }
 
-/// The characters a path may hold to be put inside double quotes in a command an agent runs through a shell.
+/// The characters a path may hold to be put inside double quotes in a command an agent runs through a shell. PowerShell also ends
+/// or starts a string at the typographic quotes (U+2018 to U+201E), so those are refused too.
 pub(crate) fn quotable(text: &str) -> bool {
-    !text
-        .chars()
-        .any(|c| c.is_control() || matches!(c, '"' | '$' | '`' | '\\' | '!' | '%'))
+    !text.chars().any(|c| {
+        c.is_control()
+            || matches!(c, '"' | '$' | '`' | '\\' | '!' | '%')
+            || ('\u{2018}'..='\u{201e}').contains(&c)
+    })
 }
 
 /// `program [before] hook-forward --channel FILE KIND`, quoted for a shell: `None` when a path holds a character that
