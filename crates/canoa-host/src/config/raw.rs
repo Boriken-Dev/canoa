@@ -1,0 +1,698 @@
+//! Serde deserialization shapes for `canoa.cfg` tables and direct subsection conversions.
+
+use alloc::string::String;
+use alloc::vec::Vec;
+use std::path::Path;
+
+use canoa::network::{ClientCertificate, GitTls, ProxyChoice};
+use coqui_peer_webcrypto::PeerId;
+use indexmap::IndexMap;
+use serde::Deserialize;
+
+use super::entries_parse::TransportSpec;
+use super::profiles::settings_of;
+use super::{
+    ConfigError, DelegateConfig, KbConfig, MailAccount, MailConfig, NetworkConfig, OpenerConfig,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawDelegate {
+    pub(super) enabled: Option<bool>,
+    pub(super) sources: Option<Vec<String>>,
+    pub(super) max_children: Option<usize>,
+    pub(super) max_running: Option<usize>,
+    pub(super) max_depth: Option<usize>,
+    pub(super) a2a: Option<Vec<String>>,
+    pub(super) task_bytes: Option<usize>,
+    pub(super) result_bytes: Option<usize>,
+    pub(super) history_bytes: Option<usize>,
+    pub(super) context_bytes: Option<usize>,
+    pub(super) wait_seconds: Option<u64>,
+    pub(super) dial_seconds: Option<u64>,
+}
+
+impl RawDelegate {
+    pub(super) fn into_config(self) -> Result<DelegateConfig, ConfigError> {
+        let defaults = DelegateConfig::default();
+        if let Some(sources) = &self.sources
+            && sources.iter().any(|name| name.trim().is_empty())
+        {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: "host.delegate: sources holds an empty name".to_owned(),
+            });
+        }
+        let a2a = self
+            .a2a
+            .unwrap_or_default()
+            .iter()
+            .map(|peer| peer.parse::<PeerId>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| ConfigError::Invalid {
+                entry: None,
+                what: "host.delegate: a2a holds something that is not a peer id".to_owned(),
+            })?;
+        Ok(DelegateConfig {
+            enabled: self.enabled.unwrap_or(defaults.enabled),
+            sources: self.sources,
+            max_children: self.max_children.unwrap_or(defaults.max_children),
+            max_running: self.max_running.unwrap_or(defaults.max_running),
+            max_depth: self.max_depth.unwrap_or(defaults.max_depth),
+            a2a,
+            task_bytes: self.task_bytes.unwrap_or(defaults.task_bytes),
+            result_bytes: self.result_bytes.unwrap_or(defaults.result_bytes),
+            history_bytes: self.history_bytes.unwrap_or(defaults.history_bytes),
+            context_bytes: self.context_bytes.unwrap_or(defaults.context_bytes),
+            wait_seconds: self.wait_seconds.unwrap_or(defaults.wait_seconds),
+            dial_seconds: self.dial_seconds.unwrap_or(defaults.dial_seconds),
+        })
+    }
+}
+
+/// A list of lines as canoa.cfg writes it: one string, a line a line, or a list of strings.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(super) enum RawLines {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl RawLines {
+    pub(super) fn lines(self) -> Vec<String> {
+        match self {
+            Self::One(text) => text.lines().map(str::to_owned).collect(),
+            Self::Many(lines) => lines,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawStore {
+    pub(super) protected: Option<RawLines>,
+    pub(super) credential_variables: Option<RawLines>,
+    pub(super) skill_folders: Option<RawLines>,
+    pub(super) index_ttl: Option<u64>,
+    pub(super) index_cache_bytes: Option<u64>,
+    pub(super) tools: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct RawFile {
+    #[serde(default)]
+    pub(super) host: Option<RawHost>,
+    #[serde(default)]
+    pub(super) usage: Option<RawUsage>,
+    /// `[permissions]`: the app's table, of which the host reads `protected` and lets the rest go by.
+    #[serde(default)]
+    pub(super) permissions: Option<RawPermissions>,
+    /// `[agents.NAME]`: the app's table, of which the host reads `program` and `args` and lets the rest go by.
+    #[serde(default)]
+    pub(super) agents: IndexMap<String, toml::Value>,
+    /// `[profile]`: the person's own layer.
+    #[serde(default)]
+    pub(super) profile: Option<toml::Table>,
+    /// `[overlays]`: the app's table, of which the host reads the names.
+    #[serde(default)]
+    pub(super) overlays: IndexMap<String, toml::Value>,
+    #[serde(default)]
+    pub(super) skill_pins: toml::Table,
+    /// `[loadouts.NAME]`: the named collections a session starts with.
+    #[serde(default)]
+    pub(super) loadouts: IndexMap<String, toml::Value>,
+    /// `[defaults]`: the app's table, of which the host reads `loadout`.
+    #[serde(default)]
+    pub(super) defaults: Option<toml::Table>,
+    /// `[profiles.NAME]`: the named presets of a session's own values.
+    #[serde(default)]
+    pub(super) profiles: IndexMap<String, toml::Value>,
+    /// `[secrets]`: the secret providers' table, which they read; the host keeps it for who keeps the accounts' credentials.
+    #[serde(default)]
+    pub(super) secrets: Option<toml::Table>,
+}
+
+/// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.
+#[derive(Deserialize)]
+pub(super) struct RawPermissions {
+    #[serde(default)]
+    pub(super) protected: Option<RawLines>,
+}
+
+/// `[usage]`: the app reads `warn_permille`, so only the key the host acts on is named and the others are let go by.
+#[derive(Deserialize)]
+pub(super) struct RawUsage {
+    #[serde(default)]
+    pub(super) limit_phrases: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawHost {
+    #[serde(default)]
+    pub(super) origins: Vec<String>,
+    #[serde(default)]
+    pub(super) agents: IndexMap<String, RawAgent>,
+    #[serde(default)]
+    pub(super) providers: IndexMap<String, RawProvider>,
+    #[serde(default)]
+    pub(super) tools: IndexMap<String, toml::Table>,
+    #[serde(default)]
+    pub(super) extensions: IndexMap<String, RawExtension>,
+    #[serde(default)]
+    pub(super) profiles: IndexMap<String, toml::Table>,
+    #[serde(default)]
+    pub(super) accounts: IndexMap<String, RawAccount>,
+    #[serde(default)]
+    pub(super) pools: IndexMap<String, RawPool>,
+    pub(super) shell: Option<String>,
+    pub(super) openers: Option<Vec<RawOpener>>,
+    pub(super) max_message_bytes: Option<usize>,
+    pub(super) web: Option<RawWeb>,
+    pub(super) control: Option<RawControl>,
+    pub(super) native: Option<RawNative>,
+    pub(super) history: Option<RawHistory>,
+    pub(super) worktrees: Option<RawWorktrees>,
+    pub(super) usage: Option<RawHostUsage>,
+    pub(super) store: Option<RawStore>,
+    pub(super) network: Option<RawNetwork>,
+    pub(super) delegate: Option<RawDelegate>,
+    pub(super) kb: Option<RawKb>,
+    pub(super) mail: Option<RawMail>,
+}
+
+/// `[host.network]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawNetwork {
+    pub(super) proxy: Option<String>,
+    pub(super) proxy_user: Option<String>,
+    pub(super) proxy_password_env: Option<String>,
+    pub(super) no_proxy: Option<RawLines>,
+    pub(super) negotiate: Option<bool>,
+    pub(super) client_certificate: Option<String>,
+    pub(super) ca_file: Option<String>,
+    pub(super) git_tls: Option<String>,
+    #[serde(default)]
+    pub(super) endpoints: Vec<String>,
+    pub(super) proxy_idle_seconds: Option<u64>,
+}
+
+/// `[host.network]`, its paths made absolute from canoa.cfg's directory. Errors name a key, never a value.
+pub(super) fn network_of(raw: RawNetwork, directory: &Path) -> Result<NetworkConfig, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("network: {what}"),
+    };
+    let path = |text: String, key: &str| {
+        if text.is_empty() {
+            return Err(refused(&format!("{key} is empty")));
+        }
+        let path = directory.join(text);
+        Ok(std::path::absolute(&path).unwrap_or(path))
+    };
+    let proxy = match raw.proxy.as_deref().map(str::trim) {
+        None => ProxyChoice::System,
+        Some("") => return Err(refused("proxy is empty")),
+        Some(text) if text.eq_ignore_ascii_case("system") => ProxyChoice::System,
+        Some(text) if text.eq_ignore_ascii_case("none") => ProxyChoice::None,
+        Some(text) => match text.strip_prefix("pac:") {
+            Some("") => return Err(refused("proxy pac: names no location")),
+            Some(location) => ProxyChoice::Pac(location.to_owned()),
+            None => ProxyChoice::Proxy(text.to_owned()),
+        },
+    };
+    let client_certificate = match raw.client_certificate {
+        None => ClientCertificate::System,
+        Some(text) if text.eq_ignore_ascii_case("system") => ClientCertificate::System,
+        Some(text) if text.eq_ignore_ascii_case("none") => ClientCertificate::None,
+        Some(text) => ClientCertificate::File(path(text, "client_certificate")?),
+    };
+    let git_tls = match raw.git_tls.as_deref() {
+        None | Some("system") => GitTls::System,
+        Some("git") => GitTls::Git,
+        Some(_) => return Err(refused("git_tls is system or git")),
+    };
+    if raw.proxy_user.as_deref().is_some_and(str::is_empty) {
+        return Err(refused("proxy_user is empty"));
+    }
+    if raw.proxy_password_env.is_some() && raw.proxy_user.is_none() {
+        return Err(refused("proxy_password_env goes with proxy_user"));
+    }
+    Ok(NetworkConfig {
+        proxy,
+        proxy_user: raw.proxy_user,
+        proxy_password_env: raw.proxy_password_env,
+        no_proxy: raw.no_proxy.map(|lines| {
+            lines
+                .lines()
+                .iter()
+                .flat_map(|line| line.split(|c: char| c == ',' || c.is_whitespace()))
+                .filter(|entry| !entry.is_empty())
+                .map(str::to_owned)
+                .collect()
+        }),
+        negotiate: raw.negotiate,
+        client_certificate,
+        ca_file: raw.ca_file.map(|file| path(file, "ca_file")).transpose()?,
+        git_tls,
+        endpoints: raw.endpoints,
+        proxy_idle_seconds: raw.proxy_idle_seconds,
+    })
+}
+
+/// `[host.kb]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawKb {
+    pub(super) tools: Option<bool>,
+    pub(super) embeddings: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) api_key_env: Option<String>,
+    pub(super) document_prefix: Option<String>,
+    pub(super) query_prefix: Option<String>,
+    pub(super) chunk_bytes: Option<usize>,
+    pub(super) overlap_bytes: Option<usize>,
+    pub(super) llm_endpoint: Option<String>,
+    pub(super) llm_model: Option<String>,
+    pub(super) llm_api_key_env: Option<String>,
+    pub(super) llm_candidates: Option<usize>,
+    pub(super) llm_timeout_secs: Option<u64>,
+}
+
+impl RawKb {
+    pub(super) fn into_config(self) -> Result<KbConfig, ConfigError> {
+        let invalid = |what: &str| ConfigError::Invalid {
+            entry: None,
+            what: format!("[host.kb] {what}"),
+        };
+        if let Some(address) = &self.embeddings {
+            let parsed =
+                url::Url::parse(address).map_err(|_| invalid("embeddings is not an address"))?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+                return Err(invalid("embeddings is an http or https address"));
+            }
+            if self.model.as_deref().is_none_or(str::is_empty) {
+                return Err(invalid("embeddings needs the model its server loaded"));
+            }
+        } else if self.model.is_some() || self.api_key_env.is_some() {
+            return Err(invalid("model and api_key_env need embeddings"));
+        }
+        if let Some(address) = &self.llm_endpoint {
+            let parsed =
+                url::Url::parse(address).map_err(|_| invalid("llm_endpoint is not an address"))?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+                return Err(invalid("llm_endpoint is an http or https address"));
+            }
+            if self.llm_model.as_deref().is_none_or(str::is_empty) {
+                return Err(invalid("llm_endpoint needs the model its server loaded"));
+            }
+        } else if self.llm_model.is_some() || self.llm_api_key_env.is_some() {
+            return Err(invalid("llm_model and llm_api_key_env need llm_endpoint"));
+        }
+        if self
+            .llm_candidates
+            .is_some_and(|count| !(1..=100).contains(&count))
+        {
+            return Err(invalid("llm_candidates is 1 to 100"));
+        }
+        if self.llm_timeout_secs == Some(0) {
+            return Err(invalid("llm_timeout_secs is at least 1"));
+        }
+        let chunk = self.chunk_bytes.unwrap_or(1024);
+        if !(4..=65536).contains(&chunk) {
+            return Err(invalid("chunk_bytes is 4 to 65536"));
+        }
+        let prefix = self.document_prefix.as_deref().map_or(0, str::len);
+        if chunk.saturating_sub(prefix) < 4
+            || self.overlap_bytes.unwrap_or(0) >= chunk - prefix.min(chunk)
+        {
+            return Err(invalid(
+                "overlap_bytes is below the room a passage has after its document prefix",
+            ));
+        }
+        Ok(KbConfig {
+            tools: self.tools,
+            embeddings: self.embeddings,
+            model: self.model,
+            api_key_env: self.api_key_env,
+            document_prefix: self.document_prefix,
+            query_prefix: self.query_prefix,
+            chunk_bytes: self.chunk_bytes,
+            overlap_bytes: self.overlap_bytes,
+            llm_endpoint: self.llm_endpoint,
+            llm_model: self.llm_model,
+            llm_api_key_env: self.llm_api_key_env,
+            llm_candidates: self.llm_candidates,
+            llm_timeout_secs: self.llm_timeout_secs,
+        })
+    }
+}
+
+/// `[host.mail]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawMail {
+    pub(super) tools: Option<bool>,
+    #[serde(default)]
+    pub(super) accounts: IndexMap<String, RawMailAccount>,
+}
+
+/// `[host.mail.accounts.NAME]`.
+#[derive(Deserialize)]
+pub(super) struct RawMailAccount {
+    pub(super) backend: Option<String>,
+    pub(super) password_env: Option<String>,
+    pub(super) id: Option<String>,
+    pub(super) timeout_secs: Option<u64>,
+    #[serde(flatten)]
+    pub(super) rest: toml::Table,
+}
+
+impl RawMail {
+    pub(super) fn into_config(self) -> Result<MailConfig, ConfigError> {
+        let trim = |value: Option<String>| -> Option<String> {
+            value.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
+        };
+        let mut accounts = IndexMap::new();
+        for (name, raw) in self.accounts {
+            let invalid = |what: &str| ConfigError::Invalid {
+                entry: None,
+                what: format!("[host.mail.accounts.{name}] {what}"),
+            };
+            if name.is_empty()
+                || name.len() > 32
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+            {
+                return Err(invalid(
+                    "the name is 1 to 32 lower-case letters, digits, - and _",
+                ));
+            }
+            let backend = raw
+                .backend
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| canoa::mail_backend::is_valid_id(s))
+                .ok_or_else(|| invalid("backend must be 1 to 32 lower-case letters, digits or _"))?
+                .to_owned();
+            if raw.rest.contains_key("password") {
+                return Err(invalid(
+                    "password is a setting this host does not keep in canoa.cfg; use password_env or canoa mail add",
+                ));
+            }
+            let timeout_secs = raw.timeout_secs.unwrap_or(60);
+            if timeout_secs == 0 {
+                return Err(invalid(
+                    "timeout_secs is a whole number of seconds, at least 1",
+                ));
+            }
+            let id = match raw.id {
+                Some(id) if id.trim().is_empty() => {
+                    return Err(invalid("id is empty; set it or run `canoa mail add`"));
+                }
+                other => trim(other),
+            };
+            let password_env = match raw.password_env {
+                Some(env) if env.trim().is_empty() => {
+                    return Err(invalid("password_env is empty"));
+                }
+                other => trim(other),
+            };
+            let settings = settings_of(&format!("host.mail.accounts.{name}"), raw.rest)?;
+            accounts.insert(
+                name,
+                MailAccount {
+                    backend,
+                    password_env,
+                    id,
+                    timeout_secs,
+                    settings,
+                },
+            );
+        }
+        Ok(MailConfig {
+            tools: self.tools,
+            accounts,
+        })
+    }
+}
+
+/// `[host.native]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawNative {
+    pub(super) enabled: Option<bool>,
+    pub(super) control: Option<Vec<String>>,
+}
+
+/// `[host.usage]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawHostUsage {
+    pub(super) keep_days: Option<u32>,
+}
+
+/// `[host.worktrees]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawWorktrees {
+    pub(super) max_per_repository: Option<usize>,
+    pub(super) git_seconds: Option<u64>,
+}
+
+/// `[host.history]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawHistory {
+    pub(super) record: Option<bool>,
+    pub(super) max_session_bytes: Option<u64>,
+    pub(super) max_sessions: Option<usize>,
+    pub(super) max_total_bytes: Option<u64>,
+}
+
+/// `[host.control]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawControl {
+    pub(super) listen: Option<String>,
+    #[serde(default)]
+    pub(super) grants: IndexMap<String, Vec<String>>,
+    pub(super) max_records: Option<usize>,
+    pub(super) max_record_bytes: Option<usize>,
+    pub(super) max_upload_bytes: Option<u64>,
+    pub(super) max_upload_total_bytes: Option<u64>,
+    pub(super) max_uploads: Option<usize>,
+}
+
+/// `[host.accounts.NAME]`. A key it does not list is collected, so that it is refused by name and a credential written
+/// there is never quoted.
+#[derive(Deserialize)]
+pub(super) struct RawAccount {
+    pub(super) harness: Option<String>,
+    pub(super) kind: Option<String>,
+    pub(super) id: Option<String>,
+    pub(super) settings: Option<toml::Table>,
+    #[serde(flatten)]
+    pub(super) rest: toml::Table,
+}
+
+/// `[host.pools.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawPool {
+    pub(super) standard: Option<String>,
+    #[serde(default)]
+    pub(super) accounts: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawWeb {
+    pub(super) dir: Option<String>,
+    pub(super) listen: Option<String>,
+    pub(super) cert: Option<String>,
+    pub(super) key: Option<String>,
+    #[serde(default)]
+    pub(super) hosts: Vec<String>,
+    #[serde(default)]
+    pub(super) connect: Vec<String>,
+    pub(super) mode: Option<String>,
+    pub(super) office: Option<bool>,
+    #[serde(default)]
+    pub(super) office_frames: Vec<String>,
+    pub(super) office_local: Option<bool>,
+    pub(super) office_secret: Option<bool>,
+    pub(super) max_connections: Option<usize>,
+    pub(super) max_connections_per_address: Option<usize>,
+    pub(super) connection_seconds: Option<u64>,
+    pub(super) max_request_bytes: Option<usize>,
+    pub(super) max_requests: Option<usize>,
+    pub(super) request_seconds: Option<u64>,
+    pub(super) idle_seconds: Option<u64>,
+    pub(super) send_seconds: Option<u64>,
+    pub(super) immutable_seconds: Option<u64>,
+}
+
+/// The settings both tables share. serde does not hold `deny_unknown_fields` across `flatten`, so each table lists them.
+pub(super) struct RawCommon {
+    pub(super) listen: Option<String>,
+    pub(super) transport: Option<TransportSpec>,
+    pub(super) working_roots: Vec<String>,
+    pub(super) worktrees: Option<bool>,
+    pub(super) peers: Option<Vec<String>>,
+    pub(super) max_peers: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawAgent {
+    pub(super) program: Option<String>,
+    pub(super) args: Option<Vec<String>>,
+    pub(super) harness: Option<String>,
+    pub(super) library: Option<String>,
+    pub(super) source: Option<String>,
+    pub(super) source_settings: Option<toml::Table>,
+    pub(super) import_search: Option<String>,
+    pub(super) settings: Option<toml::Table>,
+    pub(super) account_settings: Option<toml::Table>,
+    pub(super) executable: Option<String>,
+    pub(super) setting_sources: Option<Vec<String>>,
+    pub(super) cache_lifetime: Option<String>,
+    pub(super) shell: Option<String>,
+    pub(super) profiles: Option<Vec<String>>,
+    pub(super) accounts: Option<Vec<String>>,
+    pub(super) usage: Option<String>,
+    pub(super) title: Option<String>,
+    pub(super) shared: Option<bool>,
+    pub(super) shared_idle_seconds: Option<u64>,
+    pub(super) shared_permission_window_seconds: Option<u64>,
+    pub(super) shared_keep_log: Option<bool>,
+    pub(super) shared_log_entries: Option<usize>,
+    pub(super) shared_log_bytes: Option<usize>,
+    pub(super) listen: Option<String>,
+    pub(super) transport: Option<String>,
+    pub(super) transport_library: Option<String>,
+    pub(super) transport_source: Option<String>,
+    pub(super) transport_source_settings: Option<toml::Table>,
+    pub(super) transport_import_search: Option<String>,
+    pub(super) transport_settings: Option<toml::Table>,
+    #[serde(default)]
+    pub(super) working_roots: Vec<String>,
+    pub(super) worktrees: Option<bool>,
+    pub(super) peers: Option<Vec<String>>,
+    pub(super) max_peers: Option<usize>,
+}
+
+/// A harness entry's keys for what its command line asks, taken out of [`RawAgent`].
+pub(super) struct RawAsks {
+    pub(super) setting_sources: Option<Vec<String>>,
+}
+
+/// `[host.extensions.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawExtension {
+    pub(super) library: Option<String>,
+    pub(super) source: Option<String>,
+    pub(super) source_settings: Option<toml::Table>,
+    pub(super) import_search: Option<String>,
+    pub(super) provider: String,
+    pub(super) pin: Option<String>,
+    pub(super) sha256: Option<String>,
+    pub(super) root: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawProvider {
+    pub(super) library: Option<String>,
+    pub(super) source: Option<String>,
+    pub(super) source_settings: Option<toml::Table>,
+    pub(super) import_search: Option<String>,
+    pub(super) settings: Option<toml::Table>,
+    pub(super) provider: String,
+    pub(super) max_sessions: Option<usize>,
+    pub(super) listen: Option<String>,
+    pub(super) transport: Option<String>,
+    pub(super) transport_library: Option<String>,
+    pub(super) transport_source: Option<String>,
+    pub(super) transport_source_settings: Option<toml::Table>,
+    pub(super) transport_import_search: Option<String>,
+    pub(super) transport_settings: Option<toml::Table>,
+    #[serde(default)]
+    pub(super) working_roots: Vec<String>,
+    pub(super) peers: Option<Vec<String>>,
+    pub(super) max_peers: Option<usize>,
+}
+
+/// One `[[host.openers]]` entry.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawOpener {
+    pub(super) id: String,
+    pub(super) label: String,
+    pub(super) program: String,
+    #[serde(default = "default_opener_args")]
+    pub(super) args: Vec<String>,
+    pub(super) item: Option<bool>,
+}
+
+fn default_opener_args() -> Vec<String> {
+    vec!["{path}".to_owned()]
+}
+
+pub(super) fn openers_of(
+    raw: Option<Vec<RawOpener>>,
+) -> Result<Option<Vec<OpenerConfig>>, ConfigError> {
+    let Some(entries) = raw else {
+        return Ok(None);
+    };
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("host.openers: {what}"),
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let valid_id = (1..=64).contains(&entry.id.len())
+            && entry
+                .id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'));
+        if !valid_id {
+            return Err(refused(
+                "id must be 1 to 64 lower-case letters, digits, '-' or '_'",
+            ));
+        }
+        if out.iter().any(|seen: &OpenerConfig| seen.id == entry.id) {
+            return Err(refused(&format!("duplicate opener id {:?}", entry.id)));
+        }
+        if entry.label.trim().is_empty() || entry.label.chars().any(char::is_control) {
+            return Err(refused("label must be non-empty text"));
+        }
+        if entry.program.trim().is_empty() || entry.program.chars().any(char::is_control) {
+            return Err(refused("program must be a non-empty program name or path"));
+        }
+        if entry.args.is_empty()
+            || !entry
+                .args
+                .iter()
+                .any(|arg| arg.contains("{path}") || arg.contains("{parent}"))
+            || entry
+                .args
+                .iter()
+                .any(|arg| arg.chars().any(|c| matches!(c, '\0' | '\r' | '\n')))
+        {
+            return Err(refused("args must carry {path} (or {parent})"));
+        }
+        out.push(OpenerConfig {
+            id: entry.id,
+            label: entry.label,
+            program: entry.program,
+            args: entry.args,
+            item: entry.item,
+        });
+    }
+    Ok(Some(out))
+}

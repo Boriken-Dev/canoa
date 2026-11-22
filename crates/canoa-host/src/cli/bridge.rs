@@ -15,7 +15,9 @@ use crate::config::Config;
 use crate::home::Home;
 use coqui_peer_webcrypto::PeerId;
 
-use super::{Failed, Front, ServeArgs, home_of};
+use super::args::{ForceArg, MethodArg, ServeArgs};
+use super::commands::layers_of;
+use super::{Failed, Front, home_of};
 
 /// How a command of the library ends: a status of its own (an agent's) ends the process with that status and no message, and a
 /// message is a usage failure.
@@ -55,7 +57,7 @@ fn limited_keys(
     args: &ServeArgs,
     front: &dyn Front,
 ) -> Result<std::collections::HashSet<PeerId>, Failed> {
-    let layers = super::layers_of(&args.config, front, false)?;
+    let layers = layers_of(&args.config, front, false)?;
     let config = match Config::load_layers(&layers) {
         Ok(config) => config,
         Err(crate::ConfigError::Read { source, .. })
@@ -105,8 +107,8 @@ pub(super) fn serve_program(args: &ServeArgs, front: &dyn Front) -> Result<(), F
 
 /// The method a command names while a host runs on the home: the same refusal `id` and `pair` give.
 fn method_unless_running(home: &Home, method: Option<Method>) -> Result<(), Failed> {
-    super::MethodArg { method }
-        .identity_unless_running(home, super::ForceArg { force: false })
+    MethodArg { method }
+        .identity_unless_running(home, ForceArg { force: false })
         .map(drop)
 }
 
