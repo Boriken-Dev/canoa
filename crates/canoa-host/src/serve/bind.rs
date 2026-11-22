@@ -411,7 +411,11 @@ fn bind_harness_entry(
             &registry,
             harness,
             (settings, &account_settings.cloned().unwrap_or_default()),
-            !profiles.is_empty() || local_profile.is_some(),
+            // An agent whose tools a session may serve from an environment takes the host's plugin of the hook that turns them there.
+            !profiles.is_empty()
+                || local_profile.is_some()
+                || (!state.config.environments.is_empty()
+                    && crate::bundled::does_own_tool_work(harness)),
             roots.clone(),
             crate::makers::Makers::of(state.config),
         )
@@ -1179,6 +1183,7 @@ impl Serving {
                 env_tools: crate::environments::mcp::Hub::new(
                     Arc::clone(&environments),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
+                    config.protected_paths.as_deref(),
                 ),
                 client_tools: client_tools::Hub::new(delegate::BridgeCommand::new(
                     &options.provider_program,

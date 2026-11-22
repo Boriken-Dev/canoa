@@ -271,7 +271,9 @@ pub(super) enum Command {
     /// Report what a harness's own hook was told to the host that runs the session, on the channel in a file only that
     /// session's directory holds, and exit with the status that says whether the harness is to stop what it was about to
     /// do (2) or not (0). Prints nothing: what an overlay's hook says never reaches the harness. Reads the harness's payload
-    /// from standard input.
+    /// from standard input. For a session whose tools are served from an environment, `env-tool` prints the host's answer to
+    /// one of the agent's own tool calls (status 2 when it cannot be had, which refuses the call), and `env-exec ID` runs the
+    /// command the hook prepared as ID there, printing its output and ending with its status (126 when nothing ran).
     #[command(hide = true, name = "hook-forward")]
     HookForward {
         /// The file that holds the channel's address and secret.
@@ -280,8 +282,10 @@ pub(super) enum Command {
         /// Stop what the harness was about to do when the host cannot be asked: an overlay's hook that guards it is on.
         #[arg(long)]
         refuse: bool,
-        /// What the harness reports: `start`, `pre-compact` or `batch`.
+        /// What the harness reports: `start`, `pre-compact` or `batch`; or `env-tool` or `env-exec`.
         kind: String,
+        /// For `env-exec`, the command the hook prepared.
+        id: Option<String>,
     },
     /// Let a browser's extension reach the Canoa on this computer: register, remove or show the native messaging host the
     /// browser starts, for this user only.

@@ -939,6 +939,21 @@ fn give_harness<C: Channel>(
         Ok(spawner) => spawner,
         Err(why) => return turn_away(why),
     };
+    // A session whose agent's own tools are turned to an environment takes the host's plugin; an agent started so that it takes
+    // none would do its work on this computer.
+    let plugins = envs.is_some_and(|link| link.gives_plugins());
+    if plugins && !harness.takes_plugins() {
+        return turn_away(format!(
+            "{} does its own file and shell work, and the hook that turns it to an environment is a plugin its provider does not take",
+            served.name
+        ));
+    }
+    if plugins
+        && connection.is_none()
+        && let Some(link) = envs
+    {
+        link.plugins_are_hosts();
+    }
     let control = InProcess::new();
     let key = match shared.record(|| Ok((Process::Translator(Arc::clone(&control)), ()))) {
         Ok(Some((key, ()))) => key,
@@ -953,7 +968,7 @@ fn give_harness<C: Channel>(
                 .collect();
             (environment, connection.skills())
         }),
-        identity,
+        (identity, plugins),
         account.as_ref(),
         lifetime,
     );

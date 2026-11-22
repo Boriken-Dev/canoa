@@ -31,7 +31,9 @@ use crate::config::HostProfile;
 use crate::profile::{AosLayer, active_facts};
 
 pub(super) use events::{Book, Seen};
-pub(crate) use forward::forward;
+pub(crate) use forward::{
+    COMMAND as FORWARD_COMMAND, forward, quotable, random_hex, read_line, same,
+};
 
 /// The events Canoa fires: the ones it sees itself over ACP, and `cd` and `pre-compact`, which only a harness's own hooks
 /// show and which it fires for the harnesses whose hooks it can reach (`native`).

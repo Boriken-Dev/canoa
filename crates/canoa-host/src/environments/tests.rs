@@ -325,7 +325,8 @@ fn files_and_programs_are_served_from_the_environment_with_lines_sliced_as_the_a
 }
 
 #[test]
-fn an_agent_that_does_its_own_file_and_shell_work_is_told_that_serving_its_tools_changes_nothing() {
+fn an_agent_that_does_its_own_file_and_shell_work_is_told_its_tools_are_turned_to_the_environment()
+{
     for id in ["claude", "codex", "pi"] {
         assert!(crate::bundled::does_own_tool_work(id), "{id}");
     }
@@ -336,20 +337,95 @@ fn an_agent_that_does_its_own_file_and_shell_work_is_told_that_serving_its_tools
     let hub = super::mcp::Hub::new(
         environments("[host.environments.small]\nkind = \"runs_only\"\n"),
         crate::delegate::BridgeCommand::new(std::path::Path::new("canoa"), &[]),
+        None,
     );
     let placement = Placement {
         serve: Some("small".to_owned()),
         ..Placement::default()
     };
-    let told = |own_tools: bool| {
-        hub.for_connection(None, &placement, own_tools)
+    let told = |harness: &str| {
+        hub.for_connection(None, &placement, Some(harness))
             .expect("the environment exists")
             .expect("a link")
             .briefing()
     };
-    assert!(told(true).contains("does its own file and shell work and never asks its client"));
-    assert!(told(true).contains("use this environment's tools"));
-    assert!(!told(false).contains("does its own file and shell work"));
+    let claude = told("claude");
+    assert!(
+        claude.contains("each command it runs runs here"),
+        "{claude}"
+    );
+    assert!(claude.contains("env_small"), "{claude}");
+    assert!(!told("opencode").contains("turned here"));
+}
+
+#[test]
+fn a_file_is_edited_as_bytes_and_patched_in_the_environment_and_a_protected_place_waits_for_bypass()
+{
+    let dir = std::env::temp_dir().join(format!("canoa-env-edit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a folder");
+    let file = dir.join("data.bin");
+    std::fs::write(&file, b"\xff\xfe head\r\nold \x80 tail\n").expect("written");
+    let path = file.to_string_lossy().into_owned();
+    let modes = Arc::new(super::intercept::Modes::default());
+    let access = super::mcp::Access::guarded(
+        here_with("", 1 << 20),
+        super::mcp::Guard::listing(&["secret.txt"], Arc::clone(&modes)),
+    );
+    access.opened("s");
+    let text = |result: &Value| {
+        result["content"][0]["text"]
+            .as_str()
+            .expect("text")
+            .to_owned()
+    };
+    let edited = access.call(
+        "edit",
+        &json!({"path": path, "old_string": "old", "new_string": "new"}),
+    );
+    assert_eq!(edited["isError"], false, "{edited}");
+    assert_eq!(
+        std::fs::read(&file).expect("read"),
+        b"\xff\xfe head\r\nnew \x80 tail\n".to_vec(),
+        "every byte the edit does not change is kept"
+    );
+    let twice = access.call(
+        "edit",
+        &json!({"path": path, "old_string": " ", "new_string": "_"}),
+    );
+    assert!(text(&twice).contains("3 times"), "{twice}");
+    // A patch is text: a line of the file that is not UTF-8 is not one it can name.
+    let patch = format!(
+        "*** Begin Patch\n*** Update File: {path}\n@@\n-new \u{80} tail\n+patched\n*** End Patch\n"
+    );
+    let added = dir.join("added.txt").to_string_lossy().into_owned();
+    let applied = access.call(
+        "apply_patch",
+        &json!({"patch": format!("*** Begin Patch\n*** Add File: {added}\n+one\n+two\n*** End Patch\n")}),
+    );
+    assert_eq!(applied["isError"], false, "{applied}");
+    assert_eq!(
+        std::fs::read(&added).expect("added"),
+        b"one\ntwo\n".to_vec()
+    );
+    let not_found = access.call("apply_patch", &json!({"patch": patch}));
+    assert_eq!(
+        not_found["isError"], true,
+        "a line that is not there: {not_found}"
+    );
+    // A protected place is refused until the session is in Bypass.
+    let secret = dir.join("secret.txt").to_string_lossy().into_owned();
+    let refused = access.call("fs_write", &json!({"path": secret, "content": "x"}));
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(text(&refused).contains("protected"), "{refused}");
+    assert!(!dir.join("secret.txt").exists());
+    for climbing in ["../x", "~/x", ""] {
+        let refused = access.call("fs_read", &json!({"path": climbing}));
+        assert!(text(&refused).contains("cannot be placed"), "{refused}");
+    }
+    modes.chosen("s", super::intercept::Mode::Bypass);
+    let allowed = access.call("fs_write", &json!({"path": secret, "content": "x"}));
+    assert_eq!(allowed["isError"], false, "{allowed}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -484,16 +560,17 @@ fn a_connection_is_given_an_environments_tools_for_that_many_sessions() {
                 "[host.environments.small]\nkind = \"runs_only\"\n{limit}"
             )),
             crate::delegate::BridgeCommand::new(std::path::Path::new("canoa"), &[]),
+            None,
         );
         let placement = Placement {
             tools: vec!["small".to_owned()],
             ..Placement::default()
         };
         let link = hub
-            .for_connection(None, &placement, false)
+            .for_connection(None, &placement, None)
             .expect("exists")
             .expect("a link");
-        link.client_said(
+        let _ = link.client_said(
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
                 .to_string()
                 .into_bytes(),
@@ -506,12 +583,14 @@ fn a_connection_is_given_an_environments_tools_for_that_many_sessions() {
         );
         (1..=3)
             .filter(|id| {
-                let sent = link.client_said(
+                let super::mcp::Said::On(sent) = link.client_said(
                     json!({"jsonrpc": "2.0", "id": id + 1, "method": "session/new",
                         "params": {"cwd": "/", "mcpServers": []}})
                     .to_string()
                     .into_bytes(),
-                );
+                ) else {
+                    panic!("it goes on to the agent")
+                };
                 let sent: Value = serde_json::from_slice(&sent).expect("JSON");
                 sent["params"]["mcpServers"]
                     .as_array()

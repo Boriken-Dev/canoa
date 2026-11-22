@@ -594,15 +594,21 @@ impl Harness {
         account: Option<&Held>,
         lifetime: CacheLifetime,
     ) -> Connection {
-        self.connection_as(profile, &[], account, lifetime)
+        self.connection_as(profile, (&[], false), account, lifetime)
+    }
+
+    /// Whether a connection can be started to take a plugin of the host's (a provider that takes client plugins, built so).
+    pub(crate) fn takes_plugins(&self) -> bool {
+        self.profiled.is_some()
     }
 
     /// [`Self::connection`] for a session. One with no profile is given `identity`, the variables that say who the session is,
-    /// for its program's own tools to read, as a profile's connection's environment carries them.
+    /// for its program's own tools to read, as a profile's connection's environment carries them; with `plugins` it is started to
+    /// take the host's plugin as a profile's is (see [`Self::takes_plugins`]).
     pub(crate) fn connection_as(
         &self,
         profile: Option<(Environment, &Path)>,
-        identity: &[(String, String)],
+        (identity, plugins): (&[(String, String)], bool),
         account: Option<&Held>,
         lifetime: CacheLifetime,
     ) -> Connection {
@@ -637,7 +643,13 @@ impl Harness {
                 if !environment.is_empty() {
                     request = request.environment(environment);
                 }
-                Arc::clone(&self.plain)
+                match &self.profiled {
+                    Some(profiled) if plugins => {
+                        source = self.accounts.as_ref().map_or(0, |offer| offer.sources.1);
+                        Arc::clone(profiled)
+                    }
+                    _ => Arc::clone(&self.plain),
+                }
             }
         };
         request = request.cache_lifetime(honoured(harness.as_ref(), lifetime));

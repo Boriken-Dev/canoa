@@ -111,7 +111,7 @@ fn protect(path: &Path) -> std::io::Result<()> {
 
 /// A private directory with a name of its own, made at its first use and removed, with all it holds, when this is dropped.
 #[derive(Debug)]
-pub(super) struct Private {
+pub(crate) struct Private {
     path: PathBuf,
     made: OnceLock<Result<(), String>>,
     #[cfg(windows)]
@@ -120,7 +120,7 @@ pub(super) struct Private {
 
 impl Private {
     /// A directory named `PREFIX-PID-RANDOM` in [`base`]; nothing is made until [`Self::ensure`].
-    pub(super) fn new(prefix: &str) -> Self {
+    pub(crate) fn new(prefix: &str) -> Self {
         Self::under(&base(), prefix)
     }
 
@@ -147,7 +147,7 @@ impl Private {
     /// # Errors
     ///
     /// As [`make`]: nothing is written under a directory that was not made here.
-    pub(super) fn ensure(&self) -> std::io::Result<&Path> {
+    pub(crate) fn ensure(&self) -> std::io::Result<&Path> {
         let made = self.made.get_or_init(|| {
             make(&self.path).map_err(|error| error.to_string())?;
             self.lock();

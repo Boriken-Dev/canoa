@@ -30,8 +30,10 @@ use serde_json::{Map, Value};
 use crate::config::{Config, EnvironmentConfig};
 
 pub(crate) mod agent;
+pub(crate) mod intercept;
 pub(crate) mod layer;
 pub(crate) mod mcp;
+mod patch;
 pub(crate) mod remote;
 pub(crate) mod served;
 #[cfg(test)]
@@ -747,7 +749,6 @@ pub(crate) fn attach(
         Some(name) if name != HERE => Some(hub.environments().get(name)?),
         _ => None,
     };
-    let own_tools = harness.is_some_and(crate::bundled::does_own_tool_work);
-    let link = hub.for_connection(run.clone(), &placement, own_tools)?;
+    let link = hub.for_connection(run.clone(), &placement, harness)?;
     Ok(Attached { run, link })
 }

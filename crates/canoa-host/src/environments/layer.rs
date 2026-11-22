@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use coqui_transport::{Channel, Failure};
 
-use super::mcp::Link;
+use super::mcp::{Link, Said};
 
 /// How often a read looks up for what the host answered the agent.
 const POLL: Duration = Duration::from_millis(50);
@@ -73,7 +73,11 @@ impl<C: Channel + ?Sized> Channel for EnvLayer<'_, C> {
                 None => POLL,
             };
             match self.inner.receive(Some(slice)) {
-                Ok(Some(message)) => return Ok(Some(link.client_said(message))),
+                Ok(Some(message)) => match link.client_said(message) {
+                    Said::On(message) => return Ok(Some(message)),
+                    // A request the host refused itself is answered to the client, and the agent never sees it.
+                    Said::Answered(answer) => self.inner.send(&answer)?,
+                },
                 Ok(None) => return Ok(None),
                 Err(Failure::Timeout) => {}
                 Err(failure) => return Err(failure),

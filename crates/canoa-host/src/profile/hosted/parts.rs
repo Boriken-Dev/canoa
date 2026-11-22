@@ -101,13 +101,10 @@ pub(super) fn described(result: &Value) -> (Takes, Option<&str>) {
 
 /// A private directory in a connection's own, removed with it; `under` is that directory, which is never made here.
 #[derive(Debug)]
-pub(in crate::profile::hosted) struct Written(pub(in crate::profile::hosted) PathBuf);
+pub(crate) struct Written(pub(in crate::profile::hosted) PathBuf);
 
 impl Written {
-    pub(in crate::profile::hosted) fn create(
-        under: &Path,
-        files: &BTreeMap<String, Vec<u8>>,
-    ) -> std::io::Result<Self> {
+    pub(crate) fn create(under: &Path, files: &BTreeMap<String, Vec<u8>>) -> std::io::Result<Self> {
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
         let name: String = data_encoding::HEXLOWER.encode(&random);
@@ -139,12 +136,12 @@ impl Written {
     }
 
     /// The directory everything is written under.
-    pub(in crate::profile::hosted) fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.0
     }
 
     /// Writes one more file, at a plain relative path.
-    pub(in crate::profile::hosted) fn add(&self, path: &str, bytes: &[u8]) -> std::io::Result<()> {
+    pub(crate) fn add(&self, path: &str, bytes: &[u8]) -> std::io::Result<()> {
         let mut target = self.0.clone();
         for part in path.split('/') {
             if part.is_empty() || part == "." || part == ".." {
@@ -1337,7 +1334,7 @@ fn merge_meta(params: &mut Map<String, Value>, meta: &Value) {
 }
 
 /// Adds what `from` holds to `into`: an object's keys are merged, a list is appended to, and any other value `into` has stays.
-pub(in crate::profile::hosted) fn merge_json(into: &mut Value, from: &Value) {
+pub(crate) fn merge_json(into: &mut Value, from: &Value) {
     match (into, from) {
         (Value::Object(into), Value::Object(from)) => {
             for (key, value) in from {
@@ -1360,7 +1357,7 @@ pub(in crate::profile::hosted) fn merge_json(into: &mut Value, from: &Value) {
 /// # Errors
 ///
 /// Why the agent's text is not a JSON object.
-pub(in crate::profile::hosted) fn plugin_meta(
+pub(crate) fn plugin_meta(
     plugin: &canoa::vendor::PluginDelivery,
     written: &Written,
 ) -> Result<Value, String> {

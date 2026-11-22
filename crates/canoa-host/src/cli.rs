@@ -345,9 +345,33 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             })?
             .map_err(Failed::run),
         Command::HookForward {
+            channel, kind, id, ..
+        } if kind == crate::environments::intercept::KIND_TOOL
+            || kind == crate::environments::intercept::KIND_EXEC =>
+        {
+            let status = crate::environments::intercept::forward(
+                &kind,
+                &channel,
+                id.as_deref(),
+                std::io::stdin(),
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            );
+            if status == 0 {
+                Ok(())
+            } else {
+                // What went wrong is on standard error already; the status is the answer.
+                Err(Failed {
+                    status,
+                    why: String::new(),
+                })
+            }
+        }
+        Command::HookForward {
             channel,
             refuse,
             kind,
+            ..
         } => match crate::profile::forward_hook(&kind, &channel, refuse, std::io::stdin()) {
             Ok(false) => Ok(()),
             Ok(true) => Err(Failed::usage("an overlay's hook stopped this")),

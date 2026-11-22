@@ -145,14 +145,14 @@ impl core::fmt::Debug for Forward {
 }
 
 /// A random 128-bit value in hexadecimal.
-fn random_hex() -> std::io::Result<String> {
+pub(crate) fn random_hex() -> std::io::Result<String> {
     let mut random = [0_u8; 16];
     getrandom::fill(&mut random).map_err(|error| std::io::Error::other(error.to_string()))?;
     Ok(data_encoding::HEXLOWER.encode(&random))
 }
 
 /// Whether two strings are the same, taking as long for any two of the same length.
-fn same(a: &str, b: &str) -> bool {
+pub(crate) fn same(a: &str, b: &str) -> bool {
     bool::from(subtle::ConstantTimeEq::ct_eq(a.as_bytes(), b.as_bytes()))
 }
 
@@ -267,7 +267,7 @@ fn accept(listener: &TcpListener, shared: &Arc<Shared>, stop: &AtomicBool) {
 
 /// The line `stream` sends, read within `deadline` in all (a peer that sends a byte at a time does not hold a handler) and
 /// within `max` bytes.
-fn read_line(stream: &TcpStream, deadline: Instant, max: usize) -> Option<Vec<u8>> {
+pub(crate) fn read_line(stream: &TcpStream, deadline: Instant, max: usize) -> Option<Vec<u8>> {
     let mut line = Vec::new();
     let mut byte = [0_u8; 256];
     let mut reader = stream;
@@ -351,7 +351,7 @@ fn handle(stream: &TcpStream, shared: &Shared) {
 }
 
 /// The characters a path may hold to be put inside double quotes in a command an agent runs through a shell.
-fn quotable(text: &str) -> bool {
+pub(crate) fn quotable(text: &str) -> bool {
     !text
         .chars()
         .any(|c| c.is_control() || matches!(c, '"' | '$' | '`' | '\\' | '!' | '%'))

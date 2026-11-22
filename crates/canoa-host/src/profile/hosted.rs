@@ -41,6 +41,7 @@ mod tests;
 pub(crate) use channel::Hosted;
 pub use channel::{APPROVE_META, APPROVE_METHOD};
 pub(crate) use hooks::forward as forward_hook;
+pub(crate) use hooks::{FORWARD_COMMAND, quotable, random_hex, read_line, same};
 pub(crate) use offer::{
     Choices, Offer, choose, choose_client, choose_loadout, choose_overlays, choose_preset, offer,
 };
@@ -54,11 +55,13 @@ use overlays::{
     read_overlays, same_name,
 };
 pub(crate) use overlays::{harness_identity, harness_version, host_variables};
+pub(crate) use parts::{Written, merge_json, plugin_meta};
 #[cfg_attr(
     not(test),
     allow(unused_imports, reason = "re-exported for hosted submodules and tests")
 )]
-use parts::{Written, access_table, merge_json, plugin_meta, program_of, runnable};
+use parts::{access_table, program_of, runnable};
+pub(crate) use private::Private;
 
 #[allow(unused_imports, reason = "used by hosted/hooks submodules and tests")]
 use channel::SESSION_METHODS;
