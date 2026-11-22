@@ -26,7 +26,7 @@ has an `AGENTS.md` with the whole API, and `examples/providers` has a library of
 
 **JavaScript is built in.** Canoa carries QuickJS, so a script in JavaScript needs no installed runtime, on any platform it runs on.
 **Python is optional**: a Guatiao source for Python (`guatiao_source_py`) loads a library written in Python for a person who has Python,
-which the Runtimes store installs. Nothing Canoa ships depends on it.
+which the Store's Programs list installs. Nothing Canoa ships depends on it.
 
 A script has no files, network or programs of its own. It is handed what it may use:
 
