@@ -33,7 +33,7 @@ const UNLOAD_TIME: Duration = Duration::from_secs(2 * 60);
 
 /// What the page says when the program is not found.
 const MISSING: &str =
-    "Not installed: install it from the Foundry Local list, and its models are listed here.";
+    "Not installed: install it from the Store's Programs list, and its models are listed here.";
 
 /// What a load leaves behind, for the confirmation and the note after it.
 const MEMORY: &str = "A loaded model stays in memory until Foundry Local's service is stopped (`foundry server stop`), and takes about as much as its download.";
@@ -319,7 +319,7 @@ impl ModelStore for FoundryModels {
         let args =
             models::action_args(action, &request.model).map_err(|why| bad(why.to_string()))?;
         let program = request.program.ok_or_else(|| {
-            failed("Foundry Local is not installed: install it from the Store's Foundry Local list")
+            failed("Foundry Local is not installed: install it from the Store's Programs list")
         })?;
         let limit = match action {
             ModelAction::Download => DOWNLOAD_TIME,

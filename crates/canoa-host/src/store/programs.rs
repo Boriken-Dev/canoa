@@ -471,6 +471,22 @@ impl Programs {
         Ok(Arc::new(built))
     }
 
+    /// The name of the library that offers the store `id`, when a registry says.
+    #[must_use]
+    pub fn library_of(&self, id: &str) -> Option<String> {
+        let extras = self
+            .extras
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        core::iter::once(&self.registry)
+            .chain(&extras)
+            .find_map(|registry| registry.offer::<dyn ProgramStore>(id))?
+            .ok()?
+            .library()
+            .map(str::to_owned)
+    }
+
     fn lookup(&self, environment: &Environment) -> Lookup {
         let path = environment
             .get("PATH")

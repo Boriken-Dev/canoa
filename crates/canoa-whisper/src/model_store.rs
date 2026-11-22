@@ -108,7 +108,7 @@ fn row_of(model: &Model, held: Option<&Model>) -> ModelRow {
     let mut how = Section::new("Install it");
     how.paragraphs = vec![
         format!(
-            "Install whisper.cpp from the Store's Whisper list and choose the channel {}: the Store downloads the program and this model together, each checked against its publisher's checksum.",
+            "Install whisper.cpp from the Store's Programs list and choose the channel {}: the Store downloads the program and this model together, each checked against its publisher's checksum.",
             model.id
         ),
         "Dictation then runs on this computer's processor and the audio goes nowhere else. A larger model is slower and uses more memory.".to_owned(),

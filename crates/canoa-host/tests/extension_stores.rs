@@ -117,33 +117,33 @@ fn an_extension_adds_a_type_the_host_lists_and_installs_from() {
     assert_eq!(types[0]["extension"], "sample");
     assert_eq!(types[0]["stores"], json!(["echo_archive_store"]));
 
-    // The Agents type does not list it; the extension's own type does.
+    // The Agents type does not list it; the programs of every library do, with the type that claims it.
     let (agents, _) = ask(&link, 2, "store/list", json!({})).expect("agents");
     assert_eq!(
         agents["stores"].as_array().map(Vec::len),
         Some(1),
         "{agents}"
     );
-    let (listed, _) = ask(
-        &link,
-        3,
-        "store/list",
-        json!({"kind": "extension", "type": "echoes"}),
-    )
-    .expect("the type's stores");
-    assert_eq!(
-        listed["stores"][0]["provider"], "echo_archive_store",
-        "{listed}"
-    );
-    assert_eq!(listed["stores"][0]["program"], "echo-archive", "{listed}");
+    let (listed, _) =
+        ask(&link, 3, "store/list", json!({"kind": "programs"})).expect("the programs");
+    let echo = listed["stores"]
+        .as_array()
+        .and_then(|stores| {
+            stores
+                .iter()
+                .find(|store| store["provider"] == "echo_archive_store")
+        })
+        .unwrap_or_else(|| panic!("the extension's program is listed: {listed}"));
+    assert_eq!(echo["program"], "echo-archive", "{listed}");
+    assert_eq!(echo["type"], "echoes", "{listed}");
     let none = ask(
         &link,
         4,
         "store/list",
-        json!({"kind": "extension", "type": "nothing"}),
+        json!({"kind": "extension", "type": "echoes"}),
     )
-    .expect_err("no such type");
-    assert!(none.contains("-32003"), "{none}");
+    .expect_err("the per-type listing is gone");
+    assert!(none.contains("-32602"), "{none}");
 
     let (plan, _) = ask(
         &link,

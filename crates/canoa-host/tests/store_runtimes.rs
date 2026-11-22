@@ -1,4 +1,4 @@
-//! The Runtimes type's stores (Node, Python, Foundry Local, whisper.cpp, Git Bash and PowerShell) against stand-in archives served from a world
+//! The programs' stores (Node, Python, Foundry Local, whisper.cpp, Git Bash and PowerShell) against stand-in archives served from a world
 //! of documents: the store contract suite, what each plan fetches and checks, and the folder a managed copy puts on a search path.
 //! No runtime is downloaded.
 #![allow(

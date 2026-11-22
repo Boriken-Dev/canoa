@@ -35,7 +35,7 @@ const NOT_FOUND: i32 = -32003;
 pub(crate) struct Stores {
     programs: Arc<Programs>,
     providers: Vec<String>,
-    /// The stores of the Runtimes type, listed by `store/list` only when asked for.
+    /// The stores no agent and no type claims (Node, Python and the like), listed by `store/list` with the other programs.
     runtimes: Vec<String>,
     /// The store types the extensions of canoa.cfg add.
     types: Vec<AddedType>,
@@ -424,38 +424,45 @@ impl Stores {
             return Ok(json!({"types": types}));
         }
         if method == "store/list" {
-            // The Agents type's stores, with `{"kind": "runtimes"}` the Runtimes type's, or with
-            // `{"kind": "extension", "type": ID}` those of a type an extension adds.
+            // The Agents type's stores, or with `{"kind": "programs"}` every other program a library offers: the runtimes and
+            // the programs of each type a library adds, each row naming its library and, when a type claims it, the type.
             let kind = params.get("kind").and_then(Value::as_str);
-            let added;
-            let of = match kind {
-                None | Some("agents") => &self.providers,
-                Some("runtimes") => &self.runtimes,
-                Some("extension") => {
-                    let id = text(params, "type")?;
-                    added = self
-                        .types
-                        .iter()
-                        .find(|t| t.info.id == id)
-                        .ok_or_else(|| (NOT_FOUND, format!("no extension adds the type {id}")))?
-                        .info
-                        .stores
-                        .clone();
-                    &added
-                }
+            let programs = match kind {
+                None | Some("agents") => false,
+                Some("programs") => true,
                 Some(_) => {
-                    return Err((
-                        BAD_PARAMS,
-                        "kind is agents, runtimes or extension".to_owned(),
-                    ));
+                    return Err((BAD_PARAMS, "kind is agents or programs".to_owned()));
                 }
             };
-            let ids: Vec<&str> = of.iter().map(String::as_str).collect();
+            let mut rows: Vec<(&str, Option<&str>)> = Vec::new();
+            if programs {
+                rows.extend(self.runtimes.iter().map(|id| (id.as_str(), None)));
+                for added in &self.types {
+                    rows.extend(
+                        added
+                            .info
+                            .stores
+                            .iter()
+                            .map(|id| (id.as_str(), Some(added.info.id.as_str()))),
+                    );
+                }
+            } else {
+                rows.extend(self.providers.iter().map(|id| (id.as_str(), None)));
+            }
+            let ids: Vec<&str> = rows.iter().map(|(id, _)| *id).collect();
             let listed = self.programs.list(&ids).map_err(|error| refusal(&error))?;
             let mut stores = Vec::new();
-            for each in &listed {
+            for (each, (_, of_type)) in listed.iter().zip(&rows) {
                 let mut info = json_of(&each.info)?;
                 info["provider"] = Value::String(each.provider.clone());
+                if programs {
+                    if let Some(library) = self.programs.library_of(&each.provider) {
+                        info["library"] = Value::String(library);
+                    }
+                    if let Some(of_type) = of_type {
+                        info["type"] = Value::String((*of_type).to_owned());
+                    }
+                }
                 stores.push(info);
             }
             return Ok(json!({"stores": stores}));
@@ -853,17 +860,26 @@ impl Stores {
 }
 
 #[cfg(test)]
-mod runtimes_tests {
+mod programs_tests {
     use super::*;
+    use crate::store::runtimes::extension_store_ids;
+    use canoa::store::Launch;
 
-    fn stores() -> (Stores, std::path::PathBuf) {
-        let root = std::env::temp_dir().join(format!("canoa-runtime-list-{}", std::process::id()));
+    fn stores(name: &str) -> (Stores, std::path::PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("canoa-program-list-{name}-{}", std::process::id()));
         let registry = crate::store::registry::built_in().expect("the built-in stores");
         let programs = Programs::new(Shelf::unchecked(&root), Arc::clone(&registry));
         let stores = Stores::new(Arc::new(programs), agent_stores(crate::bundled::ALL))
             .with_included_extensions(&registry)
             .with_included_runtimes(&registry);
         (stores, root)
+    }
+
+    fn programs(stores: &Stores) -> Value {
+        stores
+            .read("store/list", &json!({"kind": "programs"}), None)
+            .expect("the programs")
     }
 
     fn programs_of(listed: &Value) -> Vec<(String, String)> {
@@ -880,29 +896,102 @@ mod runtimes_tests {
             .collect()
     }
 
+    fn row<'a>(listed: &'a Value, provider: &str) -> &'a Value {
+        listed["stores"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|store| store["provider"] == provider)
+            .unwrap_or_else(|| panic!("{provider} is listed in {listed}"))
+    }
+
     #[test]
-    fn runtimes_are_listed_apart_from_agents_and_both_are_asked_through_the_same_calls() {
-        let (stores, root) = stores();
-        let agents = stores
+    fn every_program_a_library_offers_is_listed_in_one_store_apart_from_the_agents() {
+        let (stores, root) = stores("all");
+        let registry = crate::store::registry::built_in().expect("the built-in stores");
+        let agents = agent_stores(crate::bundled::ALL);
+        let in_types = extension_store_ids(&registry);
+        let mut expected = runtimes_in(&registry, &agents, &in_types, std::env::consts::OS);
+        expected.extend(in_types);
+        assert!(
+            expected.len() > 6,
+            "the libraries offer the runtimes and the programs of their types: {expected:?}"
+        );
+        let listed = programs(&stores);
+        let found: Vec<String> = programs_of(&listed)
+            .into_iter()
+            .map(|(provider, _)| provider)
+            .collect();
+        let mut sorted = found.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), found.len(), "a program is listed once");
+        for id in &expected {
+            assert!(found.contains(id), "{id} is listed in {found:?}");
+        }
+        assert_eq!(found.len(), expected.len(), "nothing else is listed");
+        assert!(
+            found.iter().all(|id| !agents.contains(id)),
+            "no agent's store is listed with the programs: {found:?}"
+        );
+        for store in listed["stores"].as_array().expect("a list") {
+            assert!(
+                store["library"]
+                    .as_str()
+                    .is_some_and(|name| !name.is_empty()),
+                "each program names the library that offers it: {store}"
+            );
+            assert!(
+                store["icon"].is_string()
+                    && store["summary"].is_string()
+                    && store["commands"].is_array(),
+                "each says what it is, its icon and which commands it provides: {store}"
+            );
+        }
+        let agent_list = stores
             .read("store/list", &json!({}), None)
             .expect("the agents");
-        let agents = programs_of(&agents);
-        assert!(agents.iter().any(|(_, program)| program == "claude"));
         assert!(
-            agents
+            programs_of(&agent_list)
                 .iter()
-                .all(|(_, program)| program != "node" && program != "python"),
-            "the Agents type does not list runtimes: {agents:?}"
+                .all(|(provider, _)| !found.contains(provider)),
+            "an agent's program is the agents' alone"
         );
-        let runtimes = stores
-            .read("store/list", &json!({"kind": "runtimes"}), None)
-            .expect("the runtimes");
-        let found = programs_of(&runtimes);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_program_names_its_library_and_the_type_that_claims_it_and_the_old_kinds_are_gone() {
+        let (stores, root) = stores("kinds");
+        let listed = programs(&stores);
+        let node = row(&listed, "node_store");
+        assert_eq!(node["library"], canoa_node::LIBRARY);
+        assert!(node["type"].is_null(), "a runtime belongs to no type");
+        for (provider, library, kind) in [
+            (
+                "whisper_store",
+                canoa_whisper::LIBRARY,
+                canoa_whisper::STORE_TYPE,
+            ),
+            ("piper_store", canoa_piper::LIBRARY, canoa_piper::STORE_TYPE),
+            (
+                "foundry_store",
+                canoa_foundry::LIBRARY,
+                canoa_foundry::STORE_TYPE,
+            ),
+        ] {
+            let each = row(&listed, provider);
+            assert_eq!(each["library"], library, "{provider}");
+            assert_eq!(each["type"], kind, "{provider}");
+        }
+        assert_eq!(row(&listed, "bitwarden_store")["type"], "secrets");
+        for old in ["runtimes", "extension", "toys"] {
+            let refused = stores.read("store/list", &json!({"kind": old}), None);
+            assert_eq!(refused.expect_err("refused").0, BAD_PARAMS, "{old}");
+        }
+        let found = programs_of(&listed);
         for program in ["node", "python"] {
-            assert!(
-                found.iter().any(|(_, each)| each == program),
-                "expected {program} in {found:?}"
-            );
+            assert!(found.iter().any(|(_, each)| each == program), "{program}");
         }
         assert_eq!(
             found.iter().any(|(_, each)| each == "git-bash"),
@@ -912,202 +1001,98 @@ mod runtimes_tests {
             found.iter().any(|(_, each)| each == "powershell"),
             cfg!(any(windows, target_os = "linux"))
         );
-        let listed = runtimes["stores"].as_array().expect("a list");
-        assert!(
-            listed.iter().all(|store| {
-                store["icon"].is_string()
-                    && store["summary"].is_string()
-                    && store["commands"].is_array()
-            }),
-            "each runtime says what it is, its icon and which commands it provides: {listed:?}"
-        );
-        let bad = stores.read("store/list", &json!({"kind": "toys"}), None);
-        assert_eq!(bad.expect_err("refused").0, BAD_PARAMS);
-        // Nothing is installed: a report asks the shelf and the search path, and a runtime's store answers it.
-        let (node_provider, _) = found
-            .iter()
-            .find(|(_, program)| program == "node")
-            .expect("node store");
-        let report = stores.read("store/report", &json!({"provider": node_provider}), None);
-        assert!(report.is_ok(), "{report:?}");
+        // Nothing is installed: a report asks the shelf and the search path, and each program's store answers it.
+        for provider in ["node_store", "whisper_store", "foundry_store"] {
+            let report = stores.read("store/report", &json!({"provider": provider}), None);
+            assert!(report.is_ok(), "{provider}: {report:?}");
+        }
         let unknown = stores.read("store/report", &json!({"provider": "bun_store"}), None);
         assert_eq!(unknown.expect_err("unknown").0, NOT_FOUND);
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn a_library_this_build_carries_adds_its_type_and_its_program_is_no_runtime_and_no_agents() {
-        let (stores, root) = stores();
+    fn a_copy_installed_before_the_programs_were_one_store_is_still_found_and_listed() {
+        let (stores, root) = stores("old");
+        // What an install of whisper.cpp left under its own type: the program's folder on the shelf, whose name is the program's.
+        let shelf = Shelf::unchecked(&root);
+        let dir = shelf.program("whisper").expect("the program's folder");
+        let locked = dir.lock().expect("the lock");
+        let staging = locked.stage("1.8.0").expect("a staging folder");
+        let file = staging.join("bin").join(if cfg!(windows) {
+            "whisper-cli.exe"
+        } else {
+            "whisper-cli"
+        });
+        std::fs::create_dir_all(file.parent().expect("bin")).expect("bin");
+        std::fs::write(&file, b"program").expect("the program");
+        locked
+            .commit(
+                &staging,
+                "1.8.0",
+                &Launch::new(file.to_string_lossy()),
+                Vec::new(),
+                crate::store::shelf::MadeBy {
+                    provider: "whisper_store".to_owned(),
+                    version: "0.0.0".to_owned(),
+                },
+            )
+            .expect("committed");
+        drop(locked);
+        let listed = programs(&stores);
+        assert!(
+            programs_of(&listed)
+                .iter()
+                .any(|(provider, program)| provider == "whisper_store" && program == "whisper"),
+            "the program is listed with the others"
+        );
+        let report = stores
+            .read("store/report", &json!({"provider": "whisper_store"}), None)
+            .expect("a report");
+        let copies = report["copies"].as_array().expect("copies");
+        let own = copies
+            .iter()
+            .find(|copy| copy["managed"] == true)
+            .unwrap_or_else(|| panic!("the host's own copy is found: {report}"));
+        assert_eq!(own["version"], "1.8.0");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_models_of_a_type_are_asked_apart_from_its_programs() {
+        let (stores, root) = stores("models");
         let types = stores
             .read("store/extensions", &json!({}), None)
             .expect("the types");
-        let added = types["types"]
-            .as_array()
-            .expect("a list")
-            .iter()
-            .find(|each| each["id"] == canoa_foundry::STORE_TYPE)
-            .expect("the type the library adds is listed");
-        assert_eq!(added["stores"], json!(["foundry_store"]));
-        assert_eq!(added["extension"], "built-in");
-        let listed = stores
-            .read(
-                "store/list",
-                &json!({"kind": "extension", "type": canoa_foundry::STORE_TYPE}),
-                None,
-            )
-            .expect("the type's stores");
-        assert_eq!(
-            programs_of(&listed),
-            [("foundry_store".to_owned(), "foundry".to_owned())]
-        );
-        for kind in [json!({}), json!({"kind": "runtimes"})] {
-            let other = stores.read("store/list", &kind, None).expect("a list");
-            assert!(
-                programs_of(&other)
-                    .iter()
-                    .all(|(id, _)| id != "foundry_store"),
-                "{kind}: the library's program is its type's alone"
-            );
+        let types = types["types"].as_array().expect("a list");
+        for (kind, models) in [
+            (canoa_whisper::STORE_TYPE, "whisper_models"),
+            (canoa_piper::STORE_TYPE, "piper_voices"),
+        ] {
+            let added = types
+                .iter()
+                .find(|each| each["id"] == kind)
+                .unwrap_or_else(|| panic!("{kind} is listed"));
+            assert_eq!(added["models"]["provider"], models);
+            assert_eq!(added["extension"], "built-in");
         }
-        let report = stores.read("store/report", &json!({"provider": "foundry_store"}), None);
-        assert!(report.is_ok(), "{report:?}");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn the_speech_program_is_a_type_its_library_adds_and_no_runtime() {
-        let (stores, root) = stores();
-        let types = stores
-            .read("store/extensions", &json!({}), None)
-            .expect("the types");
-        let added = types["types"]
-            .as_array()
-            .expect("a list")
+        let secrets = types
             .iter()
-            .find(|each| each["id"] == canoa_whisper::STORE_TYPE)
-            .expect("the type the library adds is listed");
-        assert_eq!(added["stores"], json!(["whisper_store"]));
-        assert_eq!(added["models"]["provider"], "whisper_models");
-        let listed = stores
-            .read(
-                "store/list",
-                &json!({"kind": "extension", "type": canoa_whisper::STORE_TYPE}),
-                None,
-            )
-            .expect("the type's stores");
-        assert_eq!(
-            programs_of(&listed),
-            [("whisper_store".to_owned(), "whisper".to_owned())]
-        );
-        let runtimes = stores
-            .read("store/list", &json!({"kind": "runtimes"}), None)
-            .expect("the runtimes");
+            .find(|each| each["id"] == "secrets")
+            .expect("the Secret providers type is listed");
+        assert_eq!(secrets["stores"], json!(["bitwarden_store"]));
+        assert!(secrets["models"].is_null());
+        let voices = stores
+            .voice_services()
+            .contains(&("piper".to_owned(), "speech_say_piper".to_owned()));
         assert!(
-            programs_of(&runtimes)
-                .iter()
-                .all(|(id, _)| id != "whisper_store"),
-            "a library's program is its type's alone"
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn the_voice_program_is_a_type_its_library_adds_and_offers_a_voice_provider() {
-        let (stores, root) = stores();
-        let types = stores
-            .read("store/extensions", &json!({}), None)
-            .expect("the types");
-        let added = types["types"]
-            .as_array()
-            .expect("a list")
-            .iter()
-            .find(|each| each["id"] == canoa_piper::STORE_TYPE)
-            .expect("the type the library adds is listed");
-        assert_eq!(added["stores"], json!(["piper_store"]));
-        assert_eq!(added["models"]["provider"], "piper_voices");
-        let listed = stores
-            .read(
-                "store/list",
-                &json!({"kind": "extension", "type": canoa_piper::STORE_TYPE}),
-                None,
-            )
-            .expect("the type's stores");
-        assert_eq!(
-            programs_of(&listed),
-            [("piper_store".to_owned(), "piper".to_owned())]
-        );
-        let runtimes = stores
-            .read("store/list", &json!({"kind": "runtimes"}), None)
-            .expect("the runtimes");
-        assert!(
-            programs_of(&runtimes)
-                .iter()
-                .all(|(id, _)| id != "piper_store"),
-            "a library's program is its type's alone"
-        );
-        assert!(
-            stores
-                .voice_services()
-                .contains(&("piper".to_owned(), "speech_say_piper".to_owned())),
+            voices,
             "the type names the provider that speaks with its program"
         );
         assert!(
             stores.voice_settings("piper").is_none(),
             "nothing is installed, so no settings"
         );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn secret_providers_are_a_store_type_that_lists_bitwardens_command_apart_from_agents_and_runtimes()
-     {
-        let (stores, root) = stores();
-        let types = stores
-            .read("store/extensions", &json!({}), None)
-            .expect("the types");
-        let secrets = types["types"]
-            .as_array()
-            .expect("a list")
-            .iter()
-            .find(|each| each["id"] == "secrets")
-            .expect("the Secret providers type is listed");
-        assert_eq!(secrets["title"], "Secret providers");
-        assert_eq!(secrets["stores"], json!(["bitwarden_store"]));
-        let listed = stores
-            .read(
-                "store/list",
-                &json!({"kind": "extension", "type": "secrets"}),
-                None,
-            )
-            .expect("the type's stores");
-        assert_eq!(
-            programs_of(&listed),
-            [("bitwarden_store".to_owned(), "bw".to_owned())]
-        );
-        let store = &listed["stores"][0];
-        assert_eq!(store["title"], "Bitwarden");
-        assert_eq!(store["icon"], "brackets");
-        assert_eq!(
-            store["commands"],
-            json!([]),
-            "it is on no search path, so it provides no command"
-        );
-        for kind in [json!({}), json!({"kind": "runtimes"})] {
-            let other = stores.read("store/list", &kind, None).expect("a list");
-            assert!(
-                programs_of(&other)
-                    .iter()
-                    .all(|(_, program)| program != "bw"),
-                "{kind}: Bitwarden's command is the Secret providers type's"
-            );
-        }
-        // Nothing is installed: a report asks the shelf and the search path.
-        let report = stores.read(
-            "store/report",
-            &json!({"provider": "bitwarden_store"}),
-            None,
-        );
-        assert!(report.is_ok(), "{report:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

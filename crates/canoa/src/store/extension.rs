@@ -19,12 +19,13 @@ pub const KIND: &str = "store_extension";
 pub const KIND_VERSIONS: [&str; 1] = ["1"];
 
 /// The type ids the Store has of its own, which an extension cannot add.
-pub const RESERVED_TYPES: [&str; 6] = [
+pub const RESERVED_TYPES: [&str; 7] = [
     "overlays",
     "skills",
     "agents",
     "mcps",
-    "runtimes",
+    "programs",
+    "models",
     "extensions",
 ];
 
@@ -59,7 +60,7 @@ pub struct ExtensionType {
     /// `catalog_source` providers that serve the type.
     pub catalogs: Option<CatalogWords>,
     /// The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a
-    /// page of them after the type's own.
+    /// page of them with the models of the other types.
     pub models: Option<String>,
 }
 
