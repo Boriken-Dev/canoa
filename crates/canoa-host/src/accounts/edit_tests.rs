@@ -195,7 +195,7 @@ fn a_canoa_cfg_that_is_a_link_is_written_through_by_the_accounts_commands() {
         &link,
         &["host", "accounts"],
         "work",
-        &table("harness = \"claude\"\nkind = \"api\"\nid = \"i\"\n"),
+        &table("kind = \"api\"\nid = \"i\"\n"),
     )
     .expect("added");
     assert!(
