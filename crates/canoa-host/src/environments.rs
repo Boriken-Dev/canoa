@@ -412,6 +412,11 @@ impl Env {
         self.exec_seconds
     }
 
+    /// `[host] max_message_bytes`: the longest file read, and the longest a change may make one.
+    pub(crate) fn message_bytes(&self) -> usize {
+        self.message_bytes
+    }
+
     /// How much output an agent's terminal keeps when it names no limit.
     pub(crate) fn output_bytes(&self) -> usize {
         self.output_bytes

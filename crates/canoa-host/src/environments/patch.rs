@@ -2,35 +2,60 @@
 //! Add File:`, `*** Update File:`, `@@` hunks of context, removed and added lines). Lines are compared and written as bytes, so a
 //! file that is not UTF-8 keeps every byte a change does not touch, and each line keeps its own line ending.
 
-/// `bytes` with `old` replaced by `new`: its first occurrence, or every one with `all`; and how many occurrences there are.
-pub(crate) fn replace(bytes: &[u8], old: &[u8], new: &[u8], all: bool) -> (Vec<u8>, usize) {
-    let mut at = Vec::new();
-    let mut from = 0;
-    while !old.is_empty() && from + old.len() <= bytes.len() {
-        match bytes[from..]
-            .windows(old.len())
-            .position(|window| window == old)
-        {
-            Some(found) => {
-                at.push(from + found);
-                from += found + old.len();
-            }
-            None => break,
-        }
+/// Where `old` next is in `bytes`, from `from`, without overlapping what was found before.
+fn next(bytes: &[u8], old: &[u8], from: usize) -> Option<usize> {
+    if old.is_empty() || from + old.len() > bytes.len() {
+        return None;
     }
-    let count = at.len();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut last = 0;
-    for (n, start) in at.into_iter().enumerate() {
-        if n > 0 && !all {
-            break;
-        }
+    bytes[from..]
+        .windows(old.len())
+        .position(|window| window == old)
+        .map(|found| from + found)
+}
+
+/// How many times `old` is in `bytes`, not overlapping.
+pub(crate) fn count(bytes: &[u8], old: &[u8]) -> usize {
+    let (mut found, mut from) = (0, 0);
+    while let Some(at) = next(bytes, old, from) {
+        found += 1;
+        from = at + old.len();
+    }
+    found
+}
+
+/// `bytes` with `old` replaced by `new`: its first occurrence, or every one with `all`.
+///
+/// # Errors
+///
+/// The result would be longer than `limit` bytes: it is not built.
+pub(crate) fn replace(
+    bytes: &[u8],
+    old: &[u8],
+    new: &[u8],
+    all: bool,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    let times = if all {
+        count(bytes, old)
+    } else {
+        usize::from(next(bytes, old, 0).is_some())
+    };
+    let length = (bytes.len() - times * old.len()).checked_add(times.saturating_mul(new.len()));
+    let length = length.filter(|length| *length <= limit).ok_or_else(|| {
+        format!("the file would be larger than [host] max_message_bytes ({limit} bytes), so it is not changed")
+    })?;
+    let mut out = Vec::with_capacity(length);
+    let (mut last, mut done) = (0, 0);
+    while done < times
+        && let Some(start) = next(bytes, old, last)
+    {
         out.extend_from_slice(&bytes[last..start]);
         out.extend_from_slice(new);
         last = start + old.len();
+        done += 1;
     }
     out.extend_from_slice(&bytes[last..]);
-    (out, count)
+    Ok(out)
 }
 
 /// One hunk of an update: what it is found by, the lines it replaces and the lines that take their place.
@@ -213,8 +238,13 @@ fn find(lines: &[Line], old: &[String], from: usize) -> Option<usize> {
         bytes
     }
     let ways: [Fold; 3] = [as_written, <[u8]>::trim_ascii_end, <[u8]>::trim_ascii];
+    // A hunk longer than what is left of the file is not in it.
+    let last = lines
+        .len()
+        .checked_sub(old.len())
+        .filter(|last| *last >= from)?;
     for way in ways {
-        let found = (from..=lines.len().saturating_sub(old.len())).find(|start| {
+        let found = (from..=last).find(|start| {
             old.iter()
                 .enumerate()
                 .all(|(n, want)| way(&lines[start + n].text) == way(want.as_bytes()))
@@ -356,14 +386,38 @@ mod tests {
     #[test]
     fn a_replacement_counts_every_occurrence_and_keeps_every_other_byte() {
         let bytes = b"\xff\xfeA-x-\x80x\x00";
-        let (once, count) = replace(bytes, b"x", b"yy", false);
+        assert_eq!(count(bytes, b"x"), 2);
+        let once = replace(bytes, b"x", b"yy", false, 100).expect("small");
+        assert_eq!(once.as_slice(), &b"\xff\xfeA-yy-\x80x\x00"[..]);
+        let every = replace(bytes, b"x", b"", true, 100).expect("small");
+        assert_eq!(every.as_slice(), &b"\xff\xfeA--\x80\x00"[..]);
+        assert_eq!(count(b"abc", b"z"), 0);
+    }
+
+    #[test]
+    fn a_replacement_that_would_pass_the_limit_is_refused_before_it_is_built() {
+        // A mebibyte of `a`, each made 64 KiB: 64 GiB if it were built.
+        let file = vec![b'a'; 1 << 20];
+        let new = vec![b'b'; 64 * 1024];
+        let why = replace(&file, b"a", &new, true, 16 << 20).expect_err("refused");
+        assert!(why.contains("max_message_bytes"), "{why}");
         assert_eq!(
-            (once.as_slice(), count),
-            (&b"\xff\xfeA-yy-\x80x\x00"[..], 2)
+            replace(b"aa", b"a", b"bb", true, 4).expect("fits"),
+            b"bbbb".to_vec()
         );
-        let (every, count) = replace(bytes, b"x", b"", true);
-        assert_eq!((every.as_slice(), count), (&b"\xff\xfeA--\x80\x00"[..], 2));
-        assert_eq!(replace(b"abc", b"z", b"y", true).1, 0);
+        assert!(
+            replace(b"aa", b"a", b"bb", true, 3).is_err(),
+            "one byte over"
+        );
+    }
+
+    #[test]
+    fn a_hunk_longer_than_the_file_is_not_found_and_nothing_panics() {
+        let held = files(&[("a.txt", b"x\n")]);
+        let patch = "*** Begin Patch\n*** Update File: a.txt\n-x\n-y\n-z\n+w\n*** End Patch\n";
+        let why = run(patch, &held).expect_err("not found");
+        assert!(why.contains("not in the file"), "{why}");
+        assert_eq!(held.borrow()["a.txt"], b"x\n".to_vec());
     }
 
     fn files(start: &[(&str, &[u8])]) -> RefCell<BTreeMap<String, Vec<u8>>> {

@@ -359,21 +359,29 @@ impl Access {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let bytes = self.env.read(path)?;
-        let (changed, count) = super::patch::replace(&bytes, old.as_bytes(), new.as_bytes(), all);
+        let count = super::patch::count(&bytes, old.as_bytes());
         match count {
-            0 => Err(format!("old_string is not in {path}")),
-            1 => {
-                self.env.write(path, changed)?;
-                Ok(format!("{path}: replaced once"))
+            0 => return Err(format!("old_string is not in {path}")),
+            n if n > 1 && !all => {
+                return Err(format!(
+                    "old_string is in {path} {n} times: give more of the text around it, or set replace_all"
+                ));
             }
-            n if all => {
-                self.env.write(path, changed)?;
-                Ok(format!("{path}: replaced {n} times"))
-            }
-            n => Err(format!(
-                "old_string is in {path} {n} times: give more of the text around it, or set replace_all"
-            )),
+            _ => {}
         }
+        let changed = super::patch::replace(
+            &bytes,
+            old.as_bytes(),
+            new.as_bytes(),
+            all,
+            self.env.message_bytes(),
+        )?;
+        self.env.write(path, changed)?;
+        Ok(if count == 1 {
+            format!("{path}: replaced once")
+        } else {
+            format!("{path}: replaced {count} times")
+        })
     }
 
     /// Applies a patch through the environment's own reads and writes; every file it names is checked before any is written.
@@ -883,14 +891,6 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
-/// Takes out of `meta` every list that `gained` holds at the same place: what the client put where the host's plugins go.
-fn without_lists_of(meta: &mut Value, gained: &Value) {
-    let (Value::Object(meta), Value::Object(gained)) = (meta, gained) else {
-        return;
-    };
-    for (key, value) in gained {
-        match value {
-            Value::Array(_) => {
 /// Whether `meta` holds everything `gained` adds: each list's entries, at the same place.
 fn holds(meta: &Value, gained: &Value) -> bool {
     match (meta, gained) {
@@ -902,6 +902,14 @@ fn holds(meta: &Value, gained: &Value) -> bool {
     }
 }
 
+/// Takes out of `meta` every list that `gained` holds at the same place: what the client put where the host's plugins go.
+fn without_lists_of(meta: &mut Value, gained: &Value) {
+    let (Value::Object(meta), Value::Object(gained)) = (meta, gained) else {
+        return;
+    };
+    for (key, value) in gained {
+        match value {
+            Value::Array(_) => {
                 meta.remove(key);
             }
             Value::Object(_) => {
@@ -1168,14 +1176,6 @@ impl Link {
             without_lists_of(meta, &gained);
         }
         crate::profile::hosted::merge_json(meta, &gained);
-        Ok(true)
-    }
-
-    /// The session ended: its plugin, the commands it prepared and its bearers end.
-    fn end(&self, session: &str) {
-        if let Some(interception) = &self.interception {
-            interception.closed(session);
-        }
         // A merge keeps a value of the client's where the host's object or list would go, and the agent would then load no
         // plugin: the request is refused rather than opened without the hook.
         if !holds(meta, &gained) {
@@ -1183,6 +1183,14 @@ impl Link {
             return Err(
                 "the request's _meta holds a value where the agent reads the host's plugin, so the hook that runs this session's tools in its environment cannot be given".to_owned(),
             );
+        }
+        Ok(true)
+    }
+
+    /// The session ended: its plugin, the commands it prepared and its bearers end.
+    fn end(&self, session: &str) {
+        if let Some(interception) = &self.interception {
+            interception.closed(session);
         }
         self.modes.forget(session);
         let mut state = lock(&self.state);
