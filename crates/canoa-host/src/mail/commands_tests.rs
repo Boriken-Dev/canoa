@@ -220,6 +220,97 @@ fn opened_mailbox_uses_stored_password_and_refuses_bad_one() {
 }
 
 #[test]
+fn list_shows_the_state_of_each_account_and_never_a_password() {
+    let dir = Dir::new();
+    let server = "https://mail.example.test/EWS/Exchange.asmx".to_owned();
+    let config = dir.config();
+    dir.with_cfg(&config, |c| {
+        add_with(c, "work", &exchange_new(server.clone(), None), &mut || {
+            Ok("s3cret-list".to_owned())
+        })
+    })
+    .expect("adds");
+    let config = dir.config();
+    dir.with_cfg(&config, |c| {
+        add_with(
+            c,
+            "desktop",
+            &NewAccount {
+                backend: "outlook".to_owned(),
+                ..NewAccount::default()
+            },
+            &mut || Err(Failed::usage("no password is asked for")),
+        )
+    })
+    .expect("adds Outlook, which asks for nothing");
+    let config = dir.config();
+    let listed = dir.with_cfg(&config, rows);
+    let states: Vec<(&str, &str)> = listed
+        .iter()
+        .map(|row| (row.name.as_str(), row.state.as_str()))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("work", "password stored"),
+            ("desktop", "signed in by Outlook")
+        ]
+    );
+    let shown: String = listed
+        .iter()
+        .map(|row| row.json().to_string())
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    assert!(!shown.contains("s3cret-list"), "{shown}");
+    assert!(shown.contains("mail.example.test"));
+    let text = dir.text();
+    assert_eq!(
+        text.matches("id = ").count(),
+        1,
+        "only the password account has an id: {text}"
+    );
+}
+
+#[test]
+fn a_password_that_is_not_there_is_said_and_never_guessed() {
+    let dir = Dir::new();
+    let config = dir.config();
+    let added = dir
+        .with_cfg(&config, |c| {
+            add_with(
+                c,
+                "work",
+                &exchange_new(
+                    "https://mail.example.test/EWS/Exchange.asmx".to_owned(),
+                    None,
+                ),
+                &mut || Ok("pw".to_owned()),
+            )
+        })
+        .expect("adds");
+    let id = added.id.expect("an id");
+    let config = dir.config();
+    let accounts = Arc::new(dir.with_cfg(&config, accounts_of).expect("opens"));
+    accounts.forget_credentials(&id).expect("forgets");
+    let listed = dir.with_cfg(&config, rows);
+    assert_eq!(listed[0].state, "needs a password");
+    let account = &config.mail.accounts["work"];
+    assert!(matches!(
+        secret_of(account, PASSWORD_KEY, Some(&accounts)),
+        Err(MailError::Auth(why)) if why.contains("no stored password")
+    ));
+    assert!(matches!(
+        secret_of(account, PASSWORD_KEY, None),
+        Err(MailError::Auth(why)) if why.contains("no account store")
+    ));
+    let mailboxes = Mailboxes::from_config(&config, Some(Arc::clone(&accounts)));
+    assert!(matches!(mailboxes.backend("work"), Err(MailError::Auth(_))));
+}
+
+#[test]
 fn outlook_ews_and_graph_validate_and_list_from_bundled_library() {
     let dir = Dir::new();
     let initial = dir.config();
