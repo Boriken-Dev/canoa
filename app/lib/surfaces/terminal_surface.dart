@@ -500,21 +500,24 @@ class _ScreenState extends State<_Screen> {
           Expanded(
             child: Listener(
               onPointerDown: (_) => widget.onFocus(),
-              child: TerminalView(
-                pane.terminal,
-                key: ValueKey('terminal view ${pane.hashCode}'),
-                controller: pane.view,
-                focusNode: pane.focusNode,
-                padding: const EdgeInsets.all(6),
-                theme: _theme,
-                textStyle: terminalTextStyle,
-                // The clipboard keys are `terminalClipboardKey`'s; the terminal's own shortcuts, which use the system clipboard
-                // directly and take Ctrl+A from the shell, are left out.
-                shortcuts: const {},
-                onKeyEvent: (_, event) => terminalClipboardKey(event, pane, say: (problem) {
-                  if (mounted) _tell(this.context, problem);
-                }),
-                onSecondaryTapDown: (details, _) => unawaited(_menu(context, details.globalPosition)),
+              // The screen's selection area stays out of the terminal: the terminal selects its own cells and copies with its own keys.
+              child: SelectionContainer.disabled(
+                child: TerminalView(
+                  pane.terminal,
+                  key: ValueKey('terminal view ${pane.hashCode}'),
+                  controller: pane.view,
+                  focusNode: pane.focusNode,
+                  padding: const EdgeInsets.all(6),
+                  theme: _theme,
+                  textStyle: terminalTextStyle,
+                  // The clipboard keys are `terminalClipboardKey`'s; the terminal's own shortcuts, which use the system clipboard
+                  // directly and take Ctrl+A from the shell, are left out.
+                  shortcuts: const {},
+                  onKeyEvent: (_, event) => terminalClipboardKey(event, pane, say: (problem) {
+                    if (mounted) _tell(this.context, problem);
+                  }),
+                  onSecondaryTapDown: (details, _) => unawaited(_menu(context, details.globalPosition)),
+                ),
               ),
             ),
           ),

@@ -384,16 +384,19 @@ class _ConversationViewState extends State<ConversationView> {
         Expanded(
           child: _dropping(
             session,
-            chat.ChatTranscript(
-              key: _transcript,
-              entries: delegationEntries(session, onOpen: (id) => widget.store.openChild(session, id), now: widget.store.clock),
-              terminals: session.terminals,
-              plan: session.plan,
-              working: session.status == SessionStatus.working || widget.store.isStarting(session),
-              agentName: session.agent,
-              turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
-              renderers: _renderersFor(session),
-              narrow: widget.narrow,
+            // The transcript is its own selection area: the one around the screen does not take part in its drag or Select all.
+            SelectionContainer.disabled(
+              child: chat.ChatTranscript(
+                key: _transcript,
+                entries: delegationEntries(session, onOpen: (id) => widget.store.openChild(session, id), now: widget.store.clock),
+                terminals: session.terminals,
+                plan: session.plan,
+                working: session.status == SessionStatus.working || widget.store.isStarting(session),
+                agentName: session.agent,
+                turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
+                renderers: _renderersFor(session),
+                narrow: widget.narrow,
+              ),
             ),
           ),
         ),
