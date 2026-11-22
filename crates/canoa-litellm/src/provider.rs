@@ -12,9 +12,9 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status};
 use coqui_acp_api::{
     AccountGrant, AccountKeeper, AccountModelsQuery, AccountOffer, AccountProvider,
-    AccountProviderInfo, AccountUsage, AccountUsageQuery, AccountWatch, Credentials, LoginOutcome,
-    LoginPrompter, LoginRequest, ModelListing, ProcessSpawner, RenewReport, RenewRequest,
-    WatchRequest,
+    AccountProviderInfo, AccountRef, AccountUsage, AccountUsageQuery, AccountWatch, Credentials,
+    LoginOutcome, LoginPrompter, LoginRequest, ModelListing, ProcessSpawner, RenewReport,
+    RenewRequest, WatchRequest,
 };
 use serde_json::{Map, Value};
 
@@ -63,6 +63,15 @@ impl AccountProvider for LiteLlmAccounts {
 
     fn offers(&self) -> Result<AccountOffer, ProviderError> {
         Ok(account::offer())
+    }
+
+    fn provides(&self, account: AccountRef) -> Result<Vec<String>, ProviderError> {
+        account.check_id()?;
+        if account.kind != KIND {
+            return Err(refused("this provider keeps no account of that kind"));
+        }
+        // The proxy serves both APIs on the one address, whatever the account's settings say.
+        Ok(account::provides())
     }
 
     fn login(

@@ -454,3 +454,20 @@ fn a_signed_in_key_is_renewed_by_its_refresh_token_which_the_proxy_rotates() {
             .is_some_and(|why| why.contains("sign in again"))
     );
 }
+
+/// The proxy serves both APIs on the one address and the one key, whichever way the account was made.
+#[test]
+fn an_account_provides_both_apis_and_another_kind_is_refused() {
+    let provides =
+        |kind: &str| LiteLlmAccounts.provides(coqui_acp_api::AccountRef::new("id-one", kind));
+    assert_eq!(
+        provides(KIND).expect("its own kind"),
+        ["openai-api", "anthropic-api"]
+    );
+    assert_eq!(
+        provides("another-kind")
+            .expect_err("not a kind it keeps")
+            .status,
+        Status::GUATIAO_ERR_BAD_VALUE
+    );
+}

@@ -17,8 +17,9 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status};
 use coqui_acp_api::{
     AccountKeeper, AccountModelsQuery, AccountOffer, AccountProvider, AccountProviderInfo,
-    AccountUsage, AccountUsageQuery, AccountWatch, Credentials, LoginOutcome, LoginPrompter,
-    LoginRequest, ModelListing, ProcessSpawner, RenewReport, RenewRequest, WatchRequest,
+    AccountRef, AccountUsage, AccountUsageQuery, AccountWatch, Credentials, LoginOutcome,
+    LoginPrompter, LoginRequest, ModelListing, ProcessSpawner, RenewReport, RenewRequest,
+    WatchRequest,
 };
 use serde_json::{Map, Value};
 
@@ -64,6 +65,14 @@ impl AccountProvider for FoundryAccounts {
 
     fn offers(&self) -> Result<AccountOffer, ProviderError> {
         Ok(account::offer())
+    }
+
+    fn provides(&self, account: AccountRef) -> Result<Vec<String>, ProviderError> {
+        account.check_id()?;
+        account::offer()
+            .kind(&account.kind)
+            .map(|kind| kind.provides.clone())
+            .ok_or_else(|| refused("this provider keeps no account of that kind"))
     }
 
     fn login(
@@ -356,6 +365,29 @@ mod tests {
 
     use super::*;
     use crate::{Cancel, Engine, EngineError, ModelInfo};
+
+    #[test]
+    fn an_account_provides_what_its_kind_lists_and_another_kind_is_refused() {
+        let kind = account::offer()
+            .kind(KIND)
+            .expect("the kind")
+            .provides
+            .clone();
+        assert!(!kind.is_empty());
+        assert_eq!(
+            FoundryAccounts
+                .provides(AccountRef::new("id-one", KIND))
+                .expect("its own kind"),
+            kind
+        );
+        assert_eq!(
+            FoundryAccounts
+                .provides(AccountRef::new("id-one", "another-kind"))
+                .expect_err("not a kind it keeps")
+                .status,
+            Status::GUATIAO_ERR_BAD_VALUE
+        );
+    }
 
     struct Local;
 

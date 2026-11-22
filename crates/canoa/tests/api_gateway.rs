@@ -607,4 +607,30 @@ fn an_anthropic_model_list_is_read_page_after_page_while_it_says_there_is_more()
             "GET /v1/models?limit=1000&after_id=claude%2Dd HTTP/1.1",
         ]
     );
+/// The kind lists no standard of its own, so what an account provides is the list it names, in the order it named them; an
+/// account of another kind, or one whose settings the kind refuses, is a bad value.
+#[test]
+fn an_account_provides_the_standards_it_names_and_refuses_another_kind() {
+    let provides = |account: coqui_acp_api::AccountRef| ApiGatewayAccounts.provides(account);
+    let named = |standards: &Value| {
+        coqui_acp_api::AccountRef::new("id-one", KIND).settings(api_gateway::value(
+            &json!({"base_url": "https://llm.example.com", "standards": standards}),
+        ))
+    };
+    assert_eq!(
+        provides(named(&json!([ANTHROPIC_API, OPENAI_API]))).expect("two standards"),
+        [ANTHROPIC_API, OPENAI_API]
+    );
+    assert_eq!(
+        provides(named(&json!([OPENAI_API]))).expect("one standard"),
+        [OPENAI_API]
+    );
+    let other = provides(coqui_acp_api::AccountRef::new("id-one", "another-kind"))
+        .expect_err("not a kind it keeps");
+    assert_eq!(other.status, Status::GUATIAO_ERR_BAD_VALUE);
+    let bare = provides(coqui_acp_api::AccountRef::new("id-one", KIND))
+        .expect_err("an account with no standards is not one of this kind");
+    assert_eq!(bare.status, Status::GUATIAO_ERR_BAD_VALUE);
+    let bad_id = provides(coqui_acp_api::AccountRef::new("", KIND)).expect_err("no id");
+    assert_eq!(bad_id.status, Status::GUATIAO_ERR_BAD_VALUE);
 }

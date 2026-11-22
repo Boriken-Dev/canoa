@@ -26,9 +26,10 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::standard::{ANTHROPIC_API, OPENAI_API, is_standard, well_known};
 use coqui_acp_api::{
     AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer, AccountProvider,
-    AccountProviderInfo, AccountUsage, AccountUsageQuery, AccountWatch, Credentials, EndpointSlot,
-    LoginAnswer, LoginForm, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest, MODEL_API,
-    ModelInfo, ModelListing, ProcessSpawner, RenewReport, RenewRequest, UnknownKind, WatchRequest,
+    AccountProviderInfo, AccountRef, AccountUsage, AccountUsageQuery, AccountWatch, Credentials,
+    EndpointSlot, LoginAnswer, LoginForm, LoginMethodInfo, LoginOutcome, LoginPrompter,
+    LoginRequest, MODEL_API, ModelInfo, ModelListing, ProcessSpawner, RenewReport, RenewRequest,
+    UnknownKind, WatchRequest,
 };
 use serde_json::{Map, Value, json};
 
@@ -726,6 +727,17 @@ impl AccountProvider for ApiGatewayAccounts {
 
     fn offers(&self) -> Result<AccountOffer, ProviderError> {
         Ok(offer())
+    }
+
+    fn provides(&self, account: AccountRef) -> Result<Vec<String>, ProviderError> {
+        account.check_id()?;
+        if account.kind != KIND {
+            return Err(refused("this provider keeps no account of that kind"));
+        }
+        // The account's own list: the address speaks whichever standards the person named.
+        let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&account.settings)
+            .map_err(|_| refused("the account's settings are not a table"))?;
+        Ok(Settings::from_map(&settings).map_err(refused)?.standards)
     }
 
     fn login(

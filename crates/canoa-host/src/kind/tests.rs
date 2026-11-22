@@ -259,6 +259,21 @@ mod declared_link {
             Ok(offer)
         }
 
+        fn provides(
+            &self,
+            account: coqui_acp_api::AccountRef,
+        ) -> Result<Vec<String>, ProviderError> {
+            self.offers()?
+                .kind(&account.kind)
+                .map(|kind| kind.provides.clone())
+                .ok_or_else(|| {
+                    ProviderError::new(
+                        coqui_acp_api::guatiao::Status::GUATIAO_ERR_BAD_VALUE,
+                        "no such kind",
+                    )
+                })
+        }
+
         fn login(
             &self,
             _: LoginRequest,

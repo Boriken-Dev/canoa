@@ -7,7 +7,7 @@ account is an address and a key the person pastes; nothing is asked of the addre
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from canoa_sdk import (
     AccountKindInfo,
@@ -68,6 +68,12 @@ class Accounts(AccountProvider, display_name="Stand-in gateway accounts", defaul
             steps=["ask"],
         )
     ]
+
+    def provides(self, account: Ref) -> List[str]:
+        asked = account.to_python()
+        if asked.get("kind") != KIND:
+            raise BadValue("the stand-in gateway keeps no account of that kind")
+        return [STANDARD]
 
     def login(self, request: Ref, spawner: Any, prompter: Any) -> Dict[str, Any]:
         release(spawner)
