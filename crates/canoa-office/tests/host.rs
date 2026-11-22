@@ -97,7 +97,7 @@ fn stand_in_door(home: &Path, reply: Value) -> JoinHandle<Value> {
 fn hello_with(web: Value) -> Value {
     let mut hello = json!({ "name": "Canoa", "version": "0", "peer": "p", "method": "noise", "entries": [], "control": true });
     if !web.is_null() {
-        hello["web"] = web;
+        hello["web_app"] = web;
     }
     hello
 }

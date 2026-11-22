@@ -249,7 +249,7 @@ fn the_pane_finds_the_host_with_no_address_and_shows_the_chat_of_the_open_docume
     let origin = format!("http://localhost:{port}");
     stand_in_door(
         &host::home_dir().unwrap(),
-        json!({ "name": "Canoa", "entries": [], "web": { "url": origin, "office": true, "office_local": true } }),
+        json!({ "name": "Canoa", "entries": [], "web_app": { "url": origin, "office": true, "office_local": true } }),
     );
 
     let first = document_relation("word", r"D:\Papers\Plan.docx").unwrap();

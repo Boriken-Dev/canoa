@@ -207,7 +207,7 @@ pub fn is_local(url: &str) -> bool {
 /// [`Failure::NoWebApp`] with no `web` in it, [`Failure::WebAppNotForOffice`] when the add-in's pages or its admission are off,
 /// [`Failure::NotLocal`] for an address that is not on this computer, [`Failure::Unreadable`] for anything else.
 pub fn web_of(hello: &Value) -> Result<Web, Failure> {
-    let Some(web) = hello.get("web") else {
+    let Some(web) = hello.get("web_app") else {
         return Err(Failure::NoWebApp);
     };
     let url = web

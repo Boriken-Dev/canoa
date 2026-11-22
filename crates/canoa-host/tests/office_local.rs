@@ -206,7 +206,7 @@ fn the_native_door_says_where_the_web_app_is_so_the_add_in_needs_no_address() {
     let port = authority.rsplit(':').next().expect("a port");
     let hello = door_hello(&host.scratch.0.join("home"));
     assert_eq!(
-        hello["web"],
+        hello["web_app"],
         json!({ "url": format!("http://localhost:{port}"), "office": true, "office_local": true }),
         "{hello}"
     );
@@ -216,5 +216,5 @@ fn the_native_door_says_where_the_web_app_is_so_the_add_in_needs_no_address() {
 fn a_door_with_no_web_app_says_none() {
     let host = Hosted::start_with_setup(|_| entry("agent", ""), &[]);
     let hello = door_hello(&host.scratch.0.join("home"));
-    assert!(hello.get("web").is_none(), "{hello}");
+    assert!(hello.get("web_app").is_none(), "{hello}");
 }
