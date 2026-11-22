@@ -54,8 +54,11 @@ impl Vendor {
     }
 }
 
+/// Process-wide interned table of loaded agent vendor descriptions (bundled vendors first, then extensions).
 static KEPT: Mutex<Vec<Vendor>> = Mutex::new(Vec::new());
+/// The `AgentVendor` provider each interned vendor was built from, by agent id.
 static KEPT_PROVIDERS: Mutex<Vec<(&'static str, Arc<dyn AgentVendor>)>> = Mutex::new(Vec::new());
+/// Ensures bundled agent vendor descriptions are registered once per process.
 static BUNDLED: OnceLock<()> = OnceLock::new();
 
 fn keep_all(registry: &Registry) {
@@ -153,6 +156,7 @@ pub(crate) fn behave_name<T>(name: &str, f: impl FnOnce(&dyn AgentVendor) -> T) 
     behave(known.agent, f)
 }
 
+/// Process-wide registry holding the bundled agent vendor providers, initialized once.
 static BUNDLED_PROVIDERS: OnceLock<Option<Arc<Registry>>> = OnceLock::new();
 
 /// The registry of the bundled agents' providers, made once and kept for the life of the process.

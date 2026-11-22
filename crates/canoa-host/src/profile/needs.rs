@@ -153,6 +153,7 @@ pub(crate) fn version_in(answer: &str) -> Option<String> {
 
 type Stamp = (u64, Option<SystemTime>);
 
+/// Process-wide cache of binary `--version` probe answers keyed by executable path, file size, and mtime.
 static VERSIONS: Mutex<BTreeMap<PathBuf, (Stamp, Option<String>)>> = Mutex::new(BTreeMap::new());
 
 /// The version `program` says of itself, asked once for as long as the file stays as it is. A program that does not answer in

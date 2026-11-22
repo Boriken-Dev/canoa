@@ -28,11 +28,13 @@ struct Slot {
     answer: Value,
 }
 
+/// Shared single-flight discovery state so concurrent callers coalesce onto one mDNS socket.
 static SLOT: Mutex<Slot> = Mutex::new(Slot {
     running: false,
     finished: 0,
     answer: Value::Null,
 });
+/// Notifies callers waiting on the active mDNS discovery run in `SLOT`.
 static DONE: Condvar = Condvar::new();
 
 /// Ends the running search when dropped, so a search that panics frees the callers waiting on it.

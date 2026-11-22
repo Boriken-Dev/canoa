@@ -14,6 +14,7 @@ type Found = BTreeMap<&'static str, PathBuf>;
 
 type Searched = HashMap<(String, Option<String>), Found>;
 
+/// Process-wide cache of runnable interpreter binaries found per `(PATH, PATHEXT)` key.
 static INTERPRETERS: Mutex<Option<Searched>> = Mutex::new(None);
 
 /// The interpreters for `path` and `extensions`: those an earlier walk of the same values found, while each is still a
@@ -58,6 +59,7 @@ struct Kept {
     tree: OverlayTree,
 }
 
+/// Process-wide cache of validated overlay trees keyed by root directory, checked against file size and mtime stamps.
 static OVERLAYS: Mutex<Option<HashMap<PathBuf, Kept>>> = Mutex::new(None);
 
 /// Every file below `root` with its size and modification time, in path order; nothing when a link, an entry that cannot

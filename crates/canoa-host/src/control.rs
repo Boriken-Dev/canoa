@@ -125,6 +125,8 @@ pub(crate) struct Control {
     mail: Option<mail_setup::MailSetup>,
     /// What the agents spent, once the host has a home to keep it in.
     usage: Option<Arc<crate::usage_log::UsageLog>>,
+    /// Per-host `usage/read` allowance cache.
+    usage_cache: usage_read::Cache,
     /// The paired keys, so a key can take itself out.
     trust: Option<Arc<TrustStore>>,
     /// What seals a form the host puts to the person, for the accounts' sign-in and a program install alike.
@@ -254,6 +256,7 @@ impl Control {
             accounts: None,
             mail: None,
             usage: None,
+            usage_cache: usage_read::Cache::default(),
             trust: None,
             sealer: None,
             entries,

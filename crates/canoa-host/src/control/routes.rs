@@ -505,7 +505,12 @@ impl Control {
         params: &Value,
     ) -> Result<Value, (i32, String)> {
         match method {
-            "usage/read" => usage_read::call(self.accounts()?, self.usage.as_deref(), params),
+            "usage/read" => usage_read::call(
+                self.accounts()?,
+                self.usage.as_deref(),
+                &self.usage_cache,
+                params,
+            ),
             _ => self.usage_call(method, params),
         }
     }

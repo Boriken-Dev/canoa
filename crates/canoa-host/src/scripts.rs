@@ -26,6 +26,7 @@ pub(crate) struct Bundle {
     pub(crate) files: &'static [(&'static str, &'static str)],
 }
 
+/// Process-wide home override set by `Serving::bind` when no explicit home directory is threaded into bundled script lookups.
 static ROOT: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 /// Keeps the bundled files in `home` from now on, as the host that serves `home` does, so a host started on a home of its own writes

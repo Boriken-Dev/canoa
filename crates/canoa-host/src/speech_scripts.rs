@@ -67,6 +67,7 @@ pub(crate) fn kept_in(home: &Path) -> Result<PathBuf, String> {
     BUNDLE.keep(home).map(|folder| folder.join("speech/sdk"))
 }
 
+/// Process-wide cache of the bundled speech JS provider registry keyed by unpacked root path.
 static BUNDLED: Mutex<Option<(PathBuf, Arc<Registry>)>> = Mutex::new(None);
 
 /// The registry of the script providers that ship in the host, made once for the home they are kept in.

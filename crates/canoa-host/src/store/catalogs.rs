@@ -5,9 +5,37 @@
 //! a table naming a provider and the fields its form asks for, or `false`, which takes a default catalog away. One reader serves
 //! every type, so a catalog written under one type is never listed under another.
 
+#[cfg(test)]
+use alloc::collections::BTreeMap;
+
+use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
+#[cfg(test)]
+use coqui_acp_api::guatiao::{Value as GuatiaoValue, ValueError};
+use coqui_aos::valid_overlay_name;
 use serde_json::{Map, Value, json};
 
-use coqui_aos::valid_overlay_name;
+/// Guatiao-derived schema for one Store type subsection under `[store.<type>]`.
+#[cfg(test)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+pub(crate) struct CatalogTableSchema {
+    /// Catalog rows keyed by catalog label.
+    #[map(default)]
+    pub(crate) catalogs: BTreeMap<String, GuatiaoValue>,
+}
+
+/// Guatiao-derived fields of a catalog entry table (`[store.<type>.catalogs.<label>]`).
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct CatalogEntryHeader {
+    provider: Option<String>,
+}
+
+/// The guatiao schema describing `[store.<type>]` catalog sections in `canoa.cfg`.
+#[cfg(test)]
+pub(crate) fn schema() -> Result<GuatiaoValue, ValueError> {
+    <CatalogTableSchema as Schema>::schema()
+}
 
 /// The provider that reads an address or a file the way the Store type reads one: the default when a label names none.
 pub(crate) const READ: &str = "read";
@@ -78,9 +106,21 @@ pub(crate) fn read(table: &Value) -> Vec<Parsed> {
                     fields: Map::from_iter([("source".to_owned(), json!(source))]),
                 }),
                 Value::Object(table) => {
-                    let provider = match table.get("provider") {
+                    let gval = match guatiao_serde::from_serde(Value::Object(table.clone())) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            return Err(problem("provider is the id of a source provider"));
+                        }
+                    };
+                    let header = match CatalogEntryHeader::from_value(&gval) {
+                        Ok(header) => header,
+                        Err(_) => {
+                            return Err(problem("provider is the id of a source provider"));
+                        }
+                    };
+                    let provider = match header.provider {
                         None => READ.to_owned(),
-                        Some(Value::String(id)) if !id.is_empty() => id.clone(),
+                        Some(id) if !id.is_empty() => id,
                         Some(_) => return Err(problem("provider is the id of a source provider")),
                     };
                     let fields = table

@@ -19,13 +19,16 @@ use crate::options::limits::Endpoints;
 /// How long an answer stands, so a view that is opened again and again does not start the provider's program each time.
 const KEEP: Duration = Duration::from_secs(60);
 
-static ASKED: Mutex<BTreeMap<String, (Instant, Value)>> = Mutex::new(BTreeMap::new());
+/// Cached per-account allowance readings (`home_dir\0usage_id -> (fetched_at, row)`), owned by [`super::Control`].
+#[derive(Debug, Default)]
+pub(super) struct Cache(Mutex<BTreeMap<String, (Instant, Value)>>);
 
 /// `usage/read` `{"account", "harness"?}` (the account's name) -> `{"account": row}` with the row `usage/limits` lists. `local` is
 /// the login of each harness that has one, so it takes the `harness` it is read for; any other account's harness is its own.
 pub(super) fn call(
     accounts: &Accounts,
     log: Option<&crate::usage_log::UsageLog>,
+    cache: &Cache,
     params: &Value,
 ) -> Result<Value, (i32, String)> {
     let name =
@@ -51,7 +54,8 @@ pub(super) fn call(
     };
     let id = Some((account.usage_id(), records_tokens(&account.kind)));
     let key = format!("{}\0{}", accounts.home_dir().display(), account.usage_id());
-    let held = ASKED
+    let held = cache
+        .0
         .lock()
         .ok()
         .and_then(|held| held.get(&key).cloned())
@@ -64,7 +68,7 @@ pub(super) fn call(
         let row =
             crate::options::usage_for(&config, (name, &account), &store, &Endpoints::default())
                 .map_err(|why| (REFUSED, why))?;
-        if let Ok(mut held) = ASKED.lock() {
+        if let Ok(mut held) = cache.0.lock() {
             held.insert(key, (Instant::now(), row.clone()));
         }
         row
@@ -166,5 +170,18 @@ mod tests {
         assert!(records_tokens("anthropic-api-key") && records_tokens(HARNESS_LOGIN));
         assert!(!records_tokens("claude-login"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn usage_cache_is_scoped_per_control_cache_instance() {
+        let first = Cache::default();
+        let second = Cache::default();
+        first
+            .0
+            .lock()
+            .expect("lock")
+            .insert("k".to_owned(), (Instant::now(), json!({"supported": true})));
+        assert!(first.0.lock().expect("lock").contains_key("k"));
+        assert!(!second.0.lock().expect("lock").contains_key("k"));
     }
 }

@@ -127,6 +127,7 @@ type Stamp = (
     String,
 );
 
+/// Process-wide cache of managed runtime copies already integrity-verified for a `(dir_stamp, bin_stamp, path, program)`.
 static VERIFIED: std::sync::Mutex<Vec<Stamp>> = std::sync::Mutex::new(Vec::new());
 
 fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {

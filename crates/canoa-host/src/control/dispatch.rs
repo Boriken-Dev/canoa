@@ -99,6 +99,7 @@ const OWNER_NETWORK_MSG: &str =
 const OWNER_HISTORY_MSG: &str =
     "only the person running this host reads or moves a recorded session";
 
+/// Dispatch table mapping control RPC method names to required grants and handlers.
 pub(super) static ROUTES: &[Route] = &[
     rpc(
         "ledger/list",

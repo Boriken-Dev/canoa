@@ -54,6 +54,8 @@ mod site;
 mod sources;
 pub mod spawn;
 mod speech_scripts;
+#[cfg(test)]
+mod statics_tests;
 pub mod store;
 mod terminal;
 pub mod tool;

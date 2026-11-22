@@ -261,6 +261,7 @@ fn serve_on(
 /// What adds the source of JavaScript libraries to a registry, with the source's settings (`dirs`, `kinds`, `limits`).
 pub type AddJs = fn(&mut Registry, &Map) -> Result<(), String>;
 
+/// Process-wide hook registering the bundled QuickJS runtime factory linked into the host binary (not into Guatiao libraries).
 static JS: std::sync::OnceLock<AddJs> = std::sync::OnceLock::new();
 
 /// Gives the host the source of JavaScript libraries that the program running it carries (QuickJS, built in), so `source =

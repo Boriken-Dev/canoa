@@ -25,7 +25,9 @@ const REPORTED_FOR: Duration = Duration::from_secs(60);
 
 type Kept<T> = Mutex<BTreeMap<String, (Instant, T)>>;
 
+/// Process-wide short-lived cache of pool account model listings keyed by `(provider, kind, account_id)`.
 static LISTED: Kept<Choices> = Mutex::new(BTreeMap::new());
+/// Process-wide short-lived cache of pool account usage reports keyed by `(provider, kind, account_id)`.
 static REPORTED: Kept<Option<UsageReport>> = Mutex::new(BTreeMap::new());
 
 fn kept<T: Clone>(cache: &Kept<T>, key: &str, life: Duration) -> Option<T> {

@@ -30,6 +30,9 @@
 
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+use coqui_acp_api::guatiao::ValueError;
+use coqui_acp_api::guatiao::{FromValue, Schema, ToValue, Value as GuatiaoValue};
 use serde_json::{Map, Value};
 
 use super::builtin::{FILE, FORM, SYSTEM};
@@ -190,7 +193,58 @@ const HOST_KEYS: [&str; 3] = ["provider", "keep", "from"];
 /// The longest name an entry or a secret may be given.
 const MAX_ENTRY: usize = 64;
 
+/// Guatiao-derived schema for `[secrets]` in `canoa.cfg`.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+struct RawSection {
+    /// Entry that answers a secret name when `[secrets.names]` does not override it.
+    default: Option<String>,
+    /// Entry `"remember"` stores a typed secret in, or `"none"`.
+    store: Option<String>,
+    /// Default lifetime option offered by the prompt form (`once`, `session`, `close`, `15m`, `1h`, `8h`, `1d`, `ttl:SECONDS`).
+    keep: Option<String>,
+    /// Entry keeping account credentials and mail passwords (`auto` or an entry name).
+    accounts: Option<String>,
+    /// Most seconds a prompt waits for the person (at least 1).
+    max_wait: Option<u64>,
+    /// Per-secret routing from secret name to provider entry name.
+    #[map(default)]
+    names: BTreeMap<String, String>,
+    /// Configured `secret_provider` entries keyed by entry name.
+    #[map(default)]
+    providers: BTreeMap<String, GuatiaoValue>,
+}
+
+/// Guatiao-derived reference from one provider setting to another secret entry.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+struct RawTaken {
+    /// Entry that gives the secret.
+    entry: String,
+    /// Secret name requested from that entry.
+    name: String,
+}
+
+/// Host-owned keys decoded from `[secrets.providers.<name>]`.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct RawEntryFields {
+    /// Id of the `secret_provider`.
+    provider: String,
+    /// How long values from this entry are kept in memory.
+    keep: Option<String>,
+    /// Settings populated from another secret entry rather than literals.
+    #[map(default)]
+    from: BTreeMap<String, RawTaken>,
+}
+
 impl Settings {
+    /// The guatiao schema describing `[secrets]` in `canoa.cfg`.
+    #[cfg(test)]
+    pub(crate) fn schema() -> Result<GuatiaoValue, ValueError> {
+        <RawSection as Schema>::schema()
+    }
+
     /// Reads the `[secrets]` section as JSON, or the defaults for `None`.
     ///
     /// # Errors
@@ -201,45 +255,45 @@ impl Settings {
         let Some(section) = section.filter(|section| !section.is_null()) else {
             return Ok(settings);
         };
-        let table = section.as_object().ok_or("[secrets] is a table")?;
-        for (key, value) in table {
-            match key.as_str() {
-                "default" => settings.default = text(value, "default")?,
-                "store" => {
-                    let store = text(value, "store")?;
-                    settings.store = (store != "none").then_some(store);
-                }
-                "keep" => {
-                    settings.first = Keep::parse(&text(value, "keep")?)
-                        .filter(|keep| *keep != Keep::Store)
-                        .ok_or("[secrets] keep is once, session, close, 15m, 1h, 8h, 1d or ttl:SECONDS")?;
-                }
-                "accounts" => settings.accounts = text(value, "accounts")?,
-                "max_wait" => {
-                    settings.max_wait = value
-                        .as_u64()
-                        .filter(|seconds| *seconds >= 1)
-                        .ok_or("[secrets] max_wait is a whole number of seconds, at least 1")?;
-                }
-                "names" => {
-                    for (name, entry) in value.as_object().ok_or("[secrets.names] is a table")? {
-                        if let Some(why) = canoa::secret_provider::name_problem(name) {
-                            return Err(format!("[secrets.names] {name}: {why}"));
-                        }
-                        settings
-                            .names
-                            .insert(name.clone(), text(entry, &format!("names.{name}"))?);
-                    }
-                }
-                "providers" => {
-                    for (name, table) in
-                        value.as_object().ok_or("[secrets.providers] is a table")?
-                    {
-                        settings.entries.insert(name.clone(), entry(name, table)?);
-                    }
-                }
-                other => return Err(format!("[secrets] has no key {other}")),
+        if !section.is_object() {
+            return Err("[secrets] is a table".to_owned());
+        }
+        let gval = guatiao_serde::from_serde(section.clone())
+            .map_err(|error| format!("[secrets] {error}"))?;
+        let raw = RawSection::from_value(&gval).map_err(|error| format!("[secrets] {error}"))?;
+        if let Some(default_entry) = raw.default {
+            settings.default = non_empty(default_entry, "default")?;
+        }
+        if let Some(store) = raw.store {
+            let store = non_empty(store, "store")?;
+            settings.store = (store != "none").then_some(store);
+        }
+        if let Some(keep) = raw.keep {
+            settings.first = Keep::parse(&non_empty(keep, "keep")?)
+                .filter(|keep| *keep != Keep::Store)
+                .ok_or("[secrets] keep is once, session, close, 15m, 1h, 8h, 1d or ttl:SECONDS")?;
+        }
+        if let Some(accounts) = raw.accounts {
+            settings.accounts = non_empty(accounts, "accounts")?;
+        }
+        if let Some(max_wait) = raw.max_wait {
+            if max_wait == 0 {
+                return Err(
+                    "[secrets] max_wait is a whole number of seconds, at least 1".to_owned(),
+                );
             }
+            settings.max_wait = max_wait;
+        }
+        for (name, target) in raw.names {
+            if let Some(why) = canoa::secret_provider::name_problem(&name) {
+                return Err(format!("[secrets.names] {name}: {why}"));
+            }
+            settings
+                .names
+                .insert(name.clone(), non_empty(target, &format!("names.{name}"))?);
+        }
+        for (name, table) in raw.providers {
+            settings.entries.insert(name.clone(), entry(&name, &table)?);
         }
         for (what, name) in settings
             .names
@@ -287,15 +341,15 @@ impl Settings {
     }
 }
 
-fn text(value: &Value, key: &str) -> Result<String, String> {
-    value
-        .as_str()
-        .map(str::to_owned)
-        .filter(|text| !text.is_empty())
-        .ok_or_else(|| format!("[secrets] {key} is text"))
+fn non_empty(text: String, key: &str) -> Result<String, String> {
+    if text.is_empty() {
+        Err(format!("[secrets] {key} is text"))
+    } else {
+        Ok(text)
+    }
 }
 
-fn entry(name: &str, table: &Value) -> Result<Entry, String> {
+fn entry(name: &str, value: &GuatiaoValue) -> Result<Entry, String> {
     if name.is_empty()
         || name.len() > MAX_ENTRY
         || !name
@@ -306,19 +360,27 @@ fn entry(name: &str, table: &Value) -> Result<Entry, String> {
             "[secrets.providers.{name}] is not 1 to {MAX_ENTRY} letters, digits, - and _"
         ));
     }
-    let table = table
-        .as_object()
-        .ok_or_else(|| format!("[secrets.providers.{name}] is a table"))?;
-    let provider = table
-        .get("provider")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("[secrets.providers.{name}] names no provider"))?
-        .to_owned();
-    let keep = match table.get("keep") {
+    let json_val = guatiao_serde::adapt::from_value::<Value>(value)
+        .map_err(|error| format!("[secrets.providers.{name}] {error}"))?;
+    let Some(obj) = json_val.as_object() else {
+        return Err(format!("[secrets.providers.{name}] is a table"));
+    };
+    if !obj.contains_key("provider") {
+        return Err(format!("[secrets.providers.{name}] names no provider"));
+    }
+    let parsed = RawEntryFields::from_value(value).map_err(|error| {
+        let msg = error.to_string();
+        if msg.contains("keep") {
+            format!("[secrets.providers.{name}] keep is once, session, close, 15m, 1h, 8h, 1d or ttl:SECONDS")
+        } else if msg.contains("from") {
+            format!("[secrets.providers.{name}.from] is a table of an entry and a name")
+        } else {
+            format!("[secrets.providers.{name}] {msg}")
+        }
+    })?;
+    let keep = match parsed.keep.as_deref() {
         None => Keep::Session,
-        Some(value) => value
-            .as_str()
-            .and_then(Keep::parse)
+        Some(text) => Keep::parse(text)
             .filter(|keep| *keep != Keep::Store)
             .ok_or_else(|| {
                 format!(
@@ -326,48 +388,36 @@ fn entry(name: &str, table: &Value) -> Result<Entry, String> {
                 )
             })?,
     };
-    let config: Map<String, Value> = table
+    let config: Map<String, Value> = obj
         .iter()
         .filter(|(key, _)| !HOST_KEYS.contains(&key.as_str()))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     let mut from = BTreeMap::new();
-    if let Some(taken) = table.get("from") {
-        let taken = taken
-            .as_object()
-            .ok_or_else(|| format!("[secrets.providers.{name}.from] is a table"))?;
-        for (setting, source) in taken {
-            if config.contains_key(setting) {
-                return Err(format!(
-                    "[secrets.providers.{name}] gives {setting} twice: as a setting and in from"
-                ));
-            }
-            let part = |key: &str| {
-                source
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .filter(|text| !text.is_empty())
-                    .map(str::to_owned)
-            };
-            let (Some(entry), Some(secret)) = (part("entry"), part("name")) else {
-                return Err(format!(
-                    "[secrets.providers.{name}.from] {setting} is a table of an entry and a name"
-                ));
-            };
-            if let Some(why) = canoa::secret_provider::name_problem(&secret) {
-                return Err(format!("[secrets.providers.{name}.from] {setting}: {why}"));
-            }
-            from.insert(
-                setting.clone(),
-                Taken {
-                    entry,
-                    name: secret,
-                },
-            );
+    for (setting, taken) in parsed.from {
+        if config.contains_key(&setting) {
+            return Err(format!(
+                "[secrets.providers.{name}] gives {setting} twice: as a setting and in from"
+            ));
         }
+        if taken.entry.is_empty() || taken.name.is_empty() {
+            return Err(format!(
+                "[secrets.providers.{name}.from] {setting} is a table of an entry and a name"
+            ));
+        }
+        if let Some(why) = canoa::secret_provider::name_problem(&taken.name) {
+            return Err(format!("[secrets.providers.{name}.from] {setting}: {why}"));
+        }
+        from.insert(
+            setting,
+            Taken {
+                entry: taken.entry,
+                name: taken.name,
+            },
+        );
     }
     Ok(Entry {
-        provider,
+        provider: parsed.provider,
         keep,
         config,
         from,
@@ -439,7 +489,7 @@ mod tests {
     #[test]
     fn what_cannot_be_read_is_refused_by_name_and_nothing_is_guessed() {
         for (section, why) in [
-            (json!({"surprise": 1}), "no key surprise"),
+            (json!({"surprise": 1}), "'surprise' is not a declared field"),
             (json!({"keep": "forever"}), "keep is"),
             (json!({"keep": "store"}), "keep is"),
             (json!({"default": "ghost"}), "no provider"),
@@ -471,5 +521,45 @@ mod tests {
             assert_eq!(Keep::parse(&keep.id()), Some(keep), "{keep:?}");
         }
         assert_eq!(Keep::parse("ttl:abc"), None);
+    }
+
+    #[test]
+    fn secrets_and_host_store_sections_expose_closed_guatiao_schemas() {
+        let secrets_schema =
+            guatiao_serde::adapt::from_value::<Value>(&Settings::schema().expect("schema"))
+                .expect("json");
+        assert_eq!(secrets_schema["additionalProperties"], false);
+        for field in [
+            "default",
+            "store",
+            "keep",
+            "accounts",
+            "max_wait",
+            "names",
+            "providers",
+        ] {
+            assert!(
+                secrets_schema["properties"].get(field).is_some(),
+                "missing field {field}"
+            );
+        }
+
+        let host_store_schema = guatiao_serde::adapt::from_value::<Value>(
+            &crate::config::StoreConfig::schema().expect("schema"),
+        )
+        .expect("json");
+        assert_eq!(host_store_schema["additionalProperties"], false);
+        for field in [
+            "protected",
+            "credential_variables",
+            "index_ttl",
+            "index_cache_bytes",
+            "tools",
+        ] {
+            assert!(
+                host_store_schema["properties"].get(field).is_some(),
+                "missing field {field}"
+            );
+        }
     }
 }

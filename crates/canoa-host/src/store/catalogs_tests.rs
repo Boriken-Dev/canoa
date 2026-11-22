@@ -150,3 +150,20 @@ fn a_default_catalog_is_listed_first_until_its_label_is_named_or_turned_off() {
         "none until the table names one"
     );
 }
+
+#[test]
+fn store_catalogs_section_uses_a_closed_guatiao_schema() {
+    use coqui_acp_api::guatiao::FromValue as _;
+
+    let doc = guatiao_serde::adapt::from_value::<Value>(&schema().expect("schema")).expect("json");
+    assert_eq!(doc["additionalProperties"], false);
+    assert!(doc["properties"].get("catalogs").is_some());
+
+    let valid =
+        guatiao_serde::from_serde(json!({"catalogs": {"team": "owner/repo"}})).expect("val");
+    let decoded = CatalogTableSchema::from_value(&valid).expect("decodes");
+    assert!(decoded.catalogs.contains_key("team"));
+
+    let unknown = guatiao_serde::from_serde(json!({"unexpected": 1})).expect("val");
+    assert!(CatalogTableSchema::from_value(&unknown).is_err());
+}

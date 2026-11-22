@@ -1148,6 +1148,7 @@ struct Starter {
     link: Option<Arc<Link>>,
 }
 
+/// Process-wide handle to the detached starter binary and its active pipe link across fork gates.
 static STARTER: Mutex<Starter> = Mutex::new(Starter {
     program: None,
     link: None,

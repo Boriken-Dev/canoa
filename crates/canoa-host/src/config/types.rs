@@ -694,6 +694,32 @@ pub struct StoreConfig {
     pub tools: Option<bool>,
 }
 
+/// Guatiao-derived schema for `[host.store]`.
+#[derive(
+    coqui_acp_api::guatiao::ToValue,
+    coqui_acp_api::guatiao::FromValue,
+    coqui_acp_api::guatiao::Schema,
+)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+struct StoreSectionSchema {
+    protected: Option<Vec<String>>,
+    credential_variables: Option<Vec<String>>,
+    index_ttl: Option<u64>,
+    index_cache_bytes: Option<u64>,
+    tools: Option<bool>,
+}
+
+impl StoreConfig {
+    /// The guatiao schema describing `[host.store]` in `canoa.cfg`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`coqui_acp_api::guatiao::ValueError`] if building the schema value fails.
+    pub fn schema() -> Result<coqui_acp_api::guatiao::Value, coqui_acp_api::guatiao::ValueError> {
+        <StoreSectionSchema as coqui_acp_api::guatiao::Schema>::schema()
+    }
+}
+
 /// `[host.network]`: how every fetch the host makes, and every program it starts, reaches the network. With no key the host follows
 /// the system: the proxy variables of its environment, else the operating system's proxy settings (PAC and WPAD included) and its
 /// proxy login, the operating system's certificate verifier and the client certificates of its keystores. Each key is an

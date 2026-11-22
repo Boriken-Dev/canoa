@@ -83,7 +83,7 @@ pub(crate) fn harness_settings(
             serde_json::Value::from(sources.clone()),
         );
     }
-    if let Some(modes) = map.get("modes") {
+    if let Some(modes) = own.and_then(|own| own.as_map().get("modes")) {
         tracing::info!(
             "host.agents.{}.settings.modes is {modes}: a paired client may choose those besides the entry's own mode and stricter ones",
             entry.name
