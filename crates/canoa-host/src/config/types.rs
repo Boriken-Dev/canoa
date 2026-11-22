@@ -703,6 +703,12 @@ pub const DEFAULT_HOOK_HANDLERS: u64 = 16;
 /// How long a connection to the take-over's channel has to send its request when `hook_read_ms` is not set: one second.
 pub const DEFAULT_HOOK_READ_MS: u64 = 1000;
 
+/// How long a command the take-over's hook rewrote may wait to run when `prepared_seconds` is not set: ten minutes, time for the person to answer the agent's question.
+pub const DEFAULT_PREPARED_SECONDS: u64 = 600;
+
+/// How many commands of the take-over's hook may wait to run at once when `max_prepared` is not set: 256.
+pub const DEFAULT_MAX_PREPARED: u64 = 256;
+
 /// One `[host.environments.NAME]`: a place an agent works, made by an `environment` provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -726,6 +732,10 @@ pub struct EnvironmentConfig {
     /// How many sessions of one connection may be given this environment's tool server (`max_tool_sessions`), `0` for any number;
     /// `None` is [`DEFAULT_MAX_TOOL_SESSIONS`].
     pub max_tool_sessions: Option<u64>,
+    /// How many commands the hook rewrote may wait at once; past it the oldest is dropped (`max_prepared`), `0` for any number; `None` is [`DEFAULT_MAX_PREPARED`].
+    pub max_prepared: Option<u64>,
+    /// How long a command the hook rewrote may wait for its env-exec, which covers the agent asking the person first (`prepared_seconds`), `0` for as long as the session lasts; `None` is [`DEFAULT_PREPARED_SECONDS`].
+    pub prepared_seconds: Option<u64>,
     /// How long a connection to the hook's channel has to send its request, in milliseconds, before its secret is checked (`hook_read_ms`), `0` for as long as it takes; `None` is [`DEFAULT_HOOK_READ_MS`].
     pub hook_read_ms: Option<u64>,
     /// How many requests of the hook's channel are handled at once; one past it is dropped, which refuses that call (`hook_handlers`), `0` for any number; `None` is [`DEFAULT_HOOK_HANDLERS`].

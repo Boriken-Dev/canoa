@@ -212,6 +212,8 @@ pub(super) struct RawEnvironment {
     pub(super) output_bytes: Option<u64>,
     pub(super) scrollback_bytes: Option<u64>,
     pub(super) max_tool_sessions: Option<u64>,
+    pub(super) max_prepared: Option<u64>,
+    pub(super) prepared_seconds: Option<u64>,
     pub(super) hook_read_ms: Option<u64>,
     pub(super) hook_handlers: Option<u64>,
     pub(super) hook_seconds: Option<u64>,

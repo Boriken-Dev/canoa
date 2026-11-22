@@ -348,6 +348,8 @@ struct Op {
     secret: String,
     shell: ShellFamily,
     command: String,
+    /// When the hook prepared it.
+    at: Instant,
 }
 
 /// The session request a secret was given for.
@@ -748,15 +750,38 @@ impl Shared {
             .ok_or("the host's program is at a path a command cannot quote")?;
         let id = random_hex().map_err(|error| error.to_string())?;
         let run = rewritten(&prefix, &id, shell, command)?;
-        lock(&self.ops).insert(
+        let mut ops = lock(&self.ops);
+        ops.retain(|_, op| !self.expired(op));
+        let most = usize::try_from(self.env.max_prepared()).unwrap_or(usize::MAX);
+        // Past the bound the oldest waits no more; its env-exec is refused.
+        while most != 0 && ops.len() >= most {
+            let Some(oldest) = ops
+                .iter()
+                .min_by_key(|(_, op)| op.at)
+                .map(|(id, _)| id.clone())
+            else {
+                break;
+            };
+            ops.remove(&oldest);
+        }
+        ops.insert(
             id,
             Op {
                 secret: secret.to_owned(),
                 shell,
                 command: command.to_owned(),
+                at: Instant::now(),
             },
         );
         Ok(run)
+    }
+
+    /// Whether `op` waited longer than the environment's `prepared_seconds`.
+    fn expired(&self, op: &Op) -> bool {
+        match self.env.prepared_seconds() {
+            0 => false,
+            set => op.at.elapsed() > Duration::from_secs(set),
+        }
     }
 
     /// Runs the command prepared as `id` in the environment, sending its output as it comes and then how it ended.
@@ -777,6 +802,13 @@ impl Shared {
                 "no command of this session's waits under that id: only a command its hook rewrote runs, and once",
             );
         };
+        if self.expired(&op) {
+            return refuse(&format!(
+                "the command waited longer than {} seconds, the prepared_seconds of environment {}, and does not run",
+                self.env.prepared_seconds(),
+                self.env.name()
+            ));
+        }
         let mode = holder
             .session
             .as_deref()

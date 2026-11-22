@@ -1046,3 +1046,43 @@ fn the_channel_handles_a_bounded_number_of_requests_and_drops_an_idle_connection
     drop(idle);
     drop(interception);
 }
+
+#[test]
+fn a_prepared_command_runs_only_within_prepared_seconds_and_only_the_latest_max_prepared_wait() {
+    let modes = Arc::new(Modes::default());
+    let (interception, channel) = opened_with(
+        "box",
+        1 << 20,
+        &modes,
+        "prepared_seconds = 1\nmax_prepared = 2\n",
+    );
+    let prepare = |marker: &str| {
+        let (status, out, err) = forwarded(
+            KIND_TOOL,
+            &channel,
+            None,
+            bash(marker).to_string().as_bytes(),
+        );
+        assert_eq!(status, 0, "{err}");
+        prepared(&out)
+    };
+    let late = prepare("PRINT:6c617465");
+    std::thread::sleep(Duration::from_millis(1300));
+    let (status, _, err) = forwarded(KIND_EXEC, &channel, Some(&late), b"");
+    assert_eq!(status, 126);
+    assert!(err.contains("prepared_seconds"), "{err}");
+    let first = prepare("PRINT:6669727374");
+    let second = prepare("PRINT:7365636f6e64");
+    let third = prepare("PRINT:7468697264");
+    let (status, _, _) = forwarded(KIND_EXEC, &channel, Some(&first), b"");
+    assert_eq!(
+        status, 126,
+        "the oldest of three, past max_prepared = 2, waits no more"
+    );
+    for id in [second, third] {
+        let (status, _, err) = forwarded(KIND_EXEC, &channel, Some(&id), b"");
+        assert_eq!(status, 3, "{err}");
+    }
+    assert_eq!(started_with("PRINT:6c617465"), 0);
+    drop(interception);
+}

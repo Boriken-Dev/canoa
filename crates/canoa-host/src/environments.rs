@@ -342,6 +342,12 @@ impl Environments {
             hook_read_ms: table
                 .and_then(|config| config.hook_read_ms)
                 .unwrap_or(crate::config::DEFAULT_HOOK_READ_MS),
+            prepared_seconds: table
+                .and_then(|config| config.prepared_seconds)
+                .unwrap_or(crate::config::DEFAULT_PREPARED_SECONDS),
+            max_prepared: table
+                .and_then(|config| config.max_prepared)
+                .unwrap_or(crate::config::DEFAULT_MAX_PREPARED),
             max_tool_sessions: limit_of(
                 table.and_then(|config| config.max_tool_sessions),
                 crate::config::DEFAULT_MAX_TOOL_SESSIONS,
@@ -395,6 +401,10 @@ pub(crate) struct Env {
     output_bytes: usize,
     scrollback_bytes: usize,
     max_tool_sessions: usize,
+    /// `max_prepared` of its table; `0` for any number.
+    max_prepared: u64,
+    /// `prepared_seconds` of its table; `0` for as long as the session lasts.
+    prepared_seconds: u64,
     /// `hook_read_ms` of its table; `0` for as long as it takes.
     hook_read_ms: u64,
     /// `hook_handlers` of its table; `0` for any number.
@@ -456,6 +466,16 @@ impl Env {
     /// How long a connection to the hook's channel has to send its request, in milliseconds, before its secret is checked; `0` for as long as it takes.
     pub(crate) fn hook_read_ms(&self) -> u64 {
         self.hook_read_ms
+    }
+
+    /// How long a command the hook rewrote may wait for its env-exec, which covers the agent asking the person first; `0` for as long as the session lasts.
+    pub(crate) fn prepared_seconds(&self) -> u64 {
+        self.prepared_seconds
+    }
+
+    /// How many commands the hook rewrote may wait at once; past it the oldest is dropped; `0` for any number.
+    pub(crate) fn max_prepared(&self) -> u64 {
+        self.max_prepared
     }
 
     /// Its name in canoa.cfg, or `here`.
