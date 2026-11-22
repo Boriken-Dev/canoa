@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use canoa::usage_reader::{
-    Failure, ProcessMembers, ReaderInfo, Reading, Retry, UsageReader, UsageReading,
+    AccountDetails, Failure, ProcessMembers, ReaderInfo, Reading, Retry, UsageReader, UsageReading,
 };
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -95,7 +95,7 @@ impl UsageReading for Quota {
         let mut reader = lock(&self.reader);
         // The agent keeps its port for its life: ports are listed for the first reading and after a failure.
         if let Some(buckets) = reader.read_remembered(&models) {
-            return Ok(Reading::read(buckets));
+            return Ok(Reading::read(buckets).with_account(details(&reader)));
         }
         let wide = tree || self.wide.load(Ordering::SeqCst);
         let mut read = reader.read(
@@ -114,10 +114,21 @@ impl UsageReading for Quota {
             }
         }
         Ok(match read {
-            Ok(buckets) => Reading::read(buckets),
+            Ok(buckets) => Reading::read(buckets).with_account(details(&reader)),
             Err(error) => Reading::failed(Failure::new(error.to_string(), retry_of(&error))),
         })
     }
+}
+
+/// Who the reader's last answer said is signed in: the email, else the name, and the plan.
+fn details(reader: &AgyQuota) -> AccountDetails {
+    let Some(account) = reader.account() else {
+        return AccountDetails::default();
+    };
+    AccountDetails::new(
+        account.email.clone().or_else(|| account.name.clone()),
+        account.plan.clone(),
+    )
 }
 
 /// Whether a reading that failed for `error` is worth asking for again: while the agent has no port yet, and when a port did not answer.

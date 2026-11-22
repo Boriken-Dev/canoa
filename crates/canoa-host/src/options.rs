@@ -694,6 +694,28 @@ pub(crate) fn usage_at(
     usage_for(config, (name, account), store, endpoints)
 }
 
+/// What an account's provider reported with no session: the report, and who the account is when its agent says.
+#[derive(Debug)]
+pub(crate) struct UsageRead {
+    pub(crate) report: coqui_acp_api::UsageReport,
+    /// The account's email or name and its plan, from the agent's own reader.
+    pub(crate) account: Option<canoa::usage_reader::AccountDetails>,
+}
+
+impl UsageRead {
+    /// The row `usage/read` and `usage/limits` list: the report, and `details` (`label`, `plan`) when the agent said who it is.
+    pub(crate) fn row(self) -> Result<Value, String> {
+        let mut row = serde_json::to_value(self.report).map_err(|error| error.to_string())?;
+        if let (Some(object), Some(details)) = (row.as_object_mut(), self.account) {
+            object.insert(
+                "details".to_owned(),
+                json!({"label": details.label, "plan": details.plan}),
+            );
+        }
+        Ok(row)
+    }
+}
+
 /// What the provider of the account `name` reports of its allowances with no session, as one row of `usage/limits` (`account`,
 /// `observed_at`, `buckets`, `limit`); `supported: false` with a reason when the provider learns them only in a turn. The account
 /// is `name` in canoa.cfg or the automatic `local` account of a harness (`AccountConfig::local`, which no file holds). Asked
@@ -708,8 +730,7 @@ pub(crate) fn usage_for(
     store: &Arc<crate::accounts::Accounts>,
     endpoints: &limits::Endpoints,
 ) -> Result<Value, String> {
-    let report = usage_report_for(config, (name, account), store, endpoints)?;
-    serde_json::to_value(report).map_err(|error| error.to_string())
+    usage_report_for(config, (name, account), store, endpoints)?.row()
 }
 
 pub(crate) fn usage_report_for(
@@ -717,7 +738,7 @@ pub(crate) fn usage_report_for(
     (name, account): (&str, &crate::config::AccountConfig),
     store: &Arc<crate::accounts::Accounts>,
     endpoints: &limits::Endpoints,
-) -> Result<coqui_acp_api::UsageReport, String> {
+) -> Result<UsageRead, String> {
     let harness = account.harness.as_str();
     let runs = |entry: &&crate::config::Entry| matches!(&entry.kind, EntryKind::Harness { harness: each, .. } if each == harness);
     let entry = config
@@ -786,9 +807,17 @@ pub(crate) fn usage_report_for(
     let built = built.offering(store, listed, Vec::new());
     let report = limits::read(&built, name, account)?;
     if report.supported {
-        return Ok(report);
+        return Ok(UsageRead {
+            report,
+            account: None,
+        });
     }
-    Ok(usage_via_reader(&registry, harness, &configured, account).unwrap_or(report))
+    Ok(
+        usage_via_reader(&registry, harness, &configured, account).unwrap_or(UsageRead {
+            report,
+            account: None,
+        }),
+    )
 }
 
 fn usage_via_reader(
@@ -796,7 +825,7 @@ fn usage_via_reader(
     harness: &str,
     configured: &Settings,
     account: &crate::config::AccountConfig,
-) -> Option<coqui_acp_api::UsageReport> {
+) -> Option<UsageRead> {
     let preset = crate::bundled::ALL
         .iter()
         .find(|bundle| bundle.preset.harness == Some(harness))
@@ -830,14 +859,29 @@ fn usage_via_reader(
     let args: Vec<OsString> = preset
         .map(|preset| preset.args.iter().map(OsString::from).collect())
         .unwrap_or_default();
-    let buckets = probe::ask_usage(&reader, &program, &args, &[]).ok()?;
+    let asked = match probe::ask_usage(&reader, &program, &args, &[]) {
+        Ok(asked) => asked,
+        Err(why) => {
+            let name = preset.map_or(harness, |preset| preset.name);
+            return Some(UsageRead {
+                report: coqui_acp_api::UsageReport::unsupported(format!(
+                    "{name} was started to read the account and gave nothing ({}): start {name} and sign in there",
+                    why.text()
+                )),
+                account: None,
+            });
+        }
+    };
     let mut report = coqui_acp_api::UsageReport::new();
     report.supported = true;
     report.sources = vec![coqui_acp_api::Source::Reported];
     report.account = Some(account.usage_id());
     report.observed_at = crate::usage_splice::unix_now();
-    report.buckets = buckets;
-    Some(report)
+    report.buckets = asked.buckets;
+    Some(UsageRead {
+        report,
+        account: asked.account,
+    })
 }
 
 #[cfg(test)]

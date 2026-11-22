@@ -404,6 +404,30 @@
           "retry"
         ],
         "description": "Why nothing was read; absent when `buckets` is the reading."
+      },
+      "account": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What names the account to a person: an email address, else a name."
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The plan the account is on, as the agent words it."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Who the account is, when the agent says."
       }
     },
     "additionalProperties": false

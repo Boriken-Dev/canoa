@@ -361,9 +361,13 @@ fn antigravity_usage_read_without_session_uses_agy_usage_reader_and_records_buck
         "[host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {quoted_exe}\n",
     ));
     let account = crate::config::AccountConfig::local("antigravity");
-    let report =
+    let read =
         crate::options::usage_report_for(&cfg, ("local", &account), &store, &Endpoints::default())
             .expect("read");
+    let who = read.account.expect("the agent says who is signed in");
+    assert!(who.label.is_some_and(|label| !label.is_empty()));
+    assert_eq!(who.plan.as_deref(), Some("Google AI Pro"));
+    let report = read.report;
     assert!(report.supported, "{report:?}");
     assert!(
         report

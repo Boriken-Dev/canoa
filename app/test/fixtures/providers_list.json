@@ -251,9 +251,15 @@
       "accounts": {
         "provider": "antigravity_accounts",
         "title": "Antigravity accounts",
-        "description": "Antigravity's sign-in is unmeasured, so it keeps no account yet.",
+        "description": "Antigravity keeps its own login; this provider starts it to see who is signed in.",
         "kinds": [],
-        "logins": [],
+        "logins": [
+          {
+            "id": "start",
+            "title": "Start Antigravity to sign in",
+            "produces": "harness-login"
+          }
+        ],
         "usage": [],
         "local": true
       },

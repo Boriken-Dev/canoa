@@ -117,6 +117,31 @@ impl Failure {
     }
 }
 
+/// Who the agent's account is, as far as the agent says, for the host to show beside the account's figures.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct AccountDetails {
+    /// What names the account to a person: an email address, else a name.
+    pub label: Option<String>,
+    /// The plan the account is on, as the agent words it.
+    pub plan: Option<String>,
+}
+
+impl AccountDetails {
+    /// Details of an account called `label` on `plan`.
+    #[must_use]
+    pub fn new(label: Option<String>, plan: Option<String>) -> Self {
+        Self { label, plan }
+    }
+
+    /// Whether the agent said nothing of who the account is.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.label.is_none() && self.plan.is_none()
+    }
+}
+
 /// One reading: the complete set of buckets, or why there is none.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
@@ -127,6 +152,8 @@ pub struct Reading {
     pub buckets: Vec<Bucket>,
     /// Why nothing was read; absent when `buckets` is the reading.
     pub failure: Option<Failure>,
+    /// Who the account is, when the agent says.
+    pub account: Option<AccountDetails>,
 }
 
 impl Reading {
@@ -136,7 +163,15 @@ impl Reading {
         Self {
             buckets,
             failure: None,
+            account: None,
         }
+    }
+
+    /// This reading, saying who the account is.
+    #[must_use]
+    pub fn with_account(mut self, account: AccountDetails) -> Self {
+        self.account = (!account.is_empty()).then_some(account);
+        self
     }
 
     /// No reading, for `failure`.
@@ -145,6 +180,7 @@ impl Reading {
         Self {
             buckets: Vec::new(),
             failure: Some(failure),
+            account: None,
         }
     }
 }

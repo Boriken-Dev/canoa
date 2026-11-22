@@ -75,13 +75,19 @@ pub(crate) fn ask(
     )
 }
 
+/// What a reader found in a scratch session: the buckets and, when the agent says, who the account is.
+pub(crate) struct UsageAsked {
+    pub(crate) buckets: Vec<coqui_acp_api::usage::Bucket>,
+    pub(crate) account: Option<canoa::usage_reader::AccountDetails>,
+}
+
 /// Starts `program args` in a scratch session, reads quota through `reader`, and stops the process group.
 pub(crate) fn ask_usage(
     reader: &crate::usage_splice::Reader,
     program: &OsString,
     args: &[OsString],
     environment: &[(OsString, OsString)],
-) -> Result<Vec<coqui_acp_api::usage::Bucket>, Failure> {
+) -> Result<UsageAsked, Failure> {
     let info = reader.info();
     let wait = Duration::from_millis(info.private_limit_ms.max(1_000));
     with_session(program, args, environment, wait, |pid, opened, deadline| {
@@ -108,7 +114,12 @@ pub(crate) fn ask_usage(
             }
             match reading.read(pid, true) {
                 Ok(out) => match out.failure {
-                    None => return Ok(out.buckets),
+                    None => {
+                        return Ok(UsageAsked {
+                            buckets: out.buckets,
+                            account: out.account,
+                        });
+                    }
                     Some(failure) => {
                         last = failure.why;
                         if failure.retry == canoa::usage_reader::Retry::Never {
