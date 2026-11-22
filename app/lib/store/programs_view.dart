@@ -49,6 +49,7 @@ List<String> statusLines(ProgramStatus status) {
         'Up to date (${latest.version})'
       else
         'Newest version: ${latest.version}',
+    if (latest != null && latest.known && latest.note != null) latest.note!,
     if (copy?.update case UpdatedElsewhere(:final how)) 'Updated by the program itself, or by: $how',
     if (copy?.update case UpdatedNever(:final why)) 'Canoa cannot update it: $why',
   ];

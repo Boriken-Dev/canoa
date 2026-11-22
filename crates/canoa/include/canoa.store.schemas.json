@@ -884,6 +884,13 @@
         "description": "Whether the newest version is known. A failure to ask is `false`, never \"current\".",
         "type": "boolean"
       },
+      "note": {
+        "description": "A caveat about the report that the person should read next to the version, such as a newer release the store cannot install.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "notes_url": {
         "description": "A page about it.",
         "type": [

@@ -67,6 +67,7 @@ final class FakeStore {
     this.latest,
     this.plan,
     this.latestFails,
+    this.latestNote,
     this.runtime = false,
     this.extensionType,
     this.summary,
@@ -93,6 +94,9 @@ final class FakeStore {
   /// The version the publisher says is newest; null answers that it is not known.
   String? latest;
   String? latestFails;
+
+  /// A caveat the host sends beside the newest version.
+  String? latestNote;
 
   /// The plan `store/plan` answers with, by action; the token is added.
   Map<String, Map<String, Object?>>? plan;
@@ -282,7 +286,7 @@ final class FakeStoreHost {
         return {'copies': store.copies};
       case 'store/latest':
         if (store.latest == null) return {'known': false, 'unknown_because': store.latestFails ?? 'the publisher did not answer'};
-        return {'known': true, 'version': store.latest};
+        return {'known': true, 'version': store.latest, if (store.latestNote != null) 'note': store.latestNote};
       case 'store/plan':
         final action = given['action'] as String;
         final made = store.plan?[action] ?? {'action': action, 'version': store.latest, 'downloads': <Object?>[], 'changes': <Object?>[]};

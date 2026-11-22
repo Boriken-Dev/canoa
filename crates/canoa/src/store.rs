@@ -314,6 +314,9 @@ pub struct LatestReport {
     pub channel: Option<String>,
     /// A page about it.
     pub notes_url: Option<String>,
+    /// A caveat about the report that the person should read next to the version, such as a newer release the store cannot
+    /// install.
+    pub note: Option<String>,
 }
 
 impl LatestReport {
@@ -325,6 +328,13 @@ impl LatestReport {
             version: Some(version.into()),
             ..Self::default()
         }
+    }
+
+    /// Adds a caveat to read next to the version.
+    #[must_use]
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
     }
 
     /// The newest version is not known, for `why`.

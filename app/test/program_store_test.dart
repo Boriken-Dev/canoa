@@ -178,6 +178,16 @@ void main() {
     });
   });
 
+  group('a caveat beside the newest version', () {
+    testWidgets('is shown with the version', (tester) async {
+      final host = FakeStoreHost([claudeLike(copies: [copyOf('1.2.3')], latest: '1.2.3')]);
+      host.store('one_store').latestNote = 'The newest release, cli-v2.0.0, lists no file with a digest, so the store offers 1.2.3 instead.';
+      await _page(tester, host.programs());
+      expect(find.textContaining('lists no file with a digest'), findsOneWidget);
+      expect(find.text('Up to date (1.2.3)'), findsOneWidget);
+    });
+  });
+
   group('install', () {
     FakeStoreHost installable({void Function(FakeStoreHost host)? script}) {
       final host = FakeStoreHost([

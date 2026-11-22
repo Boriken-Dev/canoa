@@ -19,7 +19,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
-use canoa::status::{bad_value, internal, unsupported};
+use canoa::status::{bad_value, unsupported};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
 use canoa::store::recipe::{
     Finish, Part, Published, Recipe, Release, UnpackStep, dotted, dotted_numbers, get_json,
@@ -92,6 +92,56 @@ fn cli_releases(listing: &serde_json::Value) -> Vec<Published<3>> {
             })
         })
         .collect()
+}
+
+/// The newest release whose zip for the platform carries a digest, and the newest release when that is a newer one without a
+/// digest. The store installs only a file it can check, so a newer release without one is reported rather than skipped silently.
+struct Verified {
+    release: Published<3>,
+    unverified_newer: Option<(String, String)>,
+}
+
+impl Verified {
+    /// What to tell the person about a newer release this store will not install, if there is one.
+    fn caveat(&self, spelled: &str) -> Option<String> {
+        let (tag, version) = self.unverified_newer.as_ref()?;
+        Some(format!(
+            "The newest release, {tag}, lists no bw-{spelled}-{version}.zip with a digest, so the store offers {} instead.",
+            self.release.version
+        ))
+    }
+}
+
+fn verified_release(all: Vec<Published<3>>, spelled: &str) -> Result<Verified, ProviderError> {
+    let Some((order, tag, version)) = all
+        .iter()
+        .max_by_key(|release| release.order)
+        .map(|release| (release.order, release.tag.clone(), release.version.clone()))
+    else {
+        return Err(unsupported(
+            "the repository lists no release of the command line",
+        ));
+    };
+    let verified: Vec<Published<3>> = all
+        .into_iter()
+        .filter(|release| {
+            release
+                .digest_of(&format!("bw-{spelled}-{}.zip", release.version))
+                .is_some()
+        })
+        .collect();
+    match newest_published(verified) {
+        Some(release) => {
+            let unverified_newer = (release.order != order).then_some((tag, version));
+            Ok(Verified {
+                release,
+                unverified_newer,
+            })
+        }
+        None => Err(bad_value(format!(
+            "release {tag} lists no bw-{spelled}-{version}.zip with a digest"
+        ))),
+    }
 }
 
 fn listing(tools: &Object<dyn InstallTools>) -> Result<serde_json::Value, ProviderError> {
@@ -181,12 +231,19 @@ impl Recipe for BitwardenRecipe {
     }
 
     fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        match listing(tools)
-            .map(|doc| newest_published(cli_releases(&doc)))
-            .and_then(|found| {
-                found.ok_or_else(|| internal("the repository lists no release of the command line"))
-            }) {
-            Ok(release) => LatestReport::known(release.version),
+        let platform = Platform::new(std::env::consts::OS, std::env::consts::ARCH);
+        match spelled(&platform).and_then(|spelled| {
+            let found = verified_release(cli_releases(&listing(tools)?), spelled)?;
+            Ok((spelled, found))
+        }) {
+            Ok((spelled, found)) => {
+                let caveat = found.caveat(spelled);
+                let report = LatestReport::known(found.release.version);
+                match caveat {
+                    Some(note) => report.with_note(note),
+                    None => report,
+                }
+            }
             Err(error) => LatestReport::unknown(error.message().to_owned()),
         }
     }
@@ -200,14 +257,21 @@ impl Recipe for BitwardenRecipe {
     ) -> Result<Release, ProviderError> {
         let spelled = spelled(platform)?;
         let all = cli_releases(&listing(tools)?);
-        let release = match version {
+        let (release, caveat) = match version {
             Some(wanted) => {
                 let wanted = pinned(wanted)?;
-                all.into_iter().find(|release| release.version == wanted)
+                let release = all
+                    .into_iter()
+                    .find(|release| release.version == wanted)
+                    .ok_or_else(|| unsupported("the repository lists no such release"))?;
+                (release, None)
             }
-            None => newest_published(all),
-        }
-        .ok_or_else(|| unsupported("the repository lists no such release"))?;
+            None => {
+                let found = verified_release(all, spelled)?;
+                let caveat = found.caveat(spelled);
+                (found.release, caveat)
+            }
+        };
         let name = format!("bw-{spelled}-{}.zip", release.version);
         let digest = release.digest_of(&name).ok_or_else(|| {
             bad_value(format!(
@@ -235,6 +299,7 @@ impl Recipe for BitwardenRecipe {
             "Bitwarden's command line {} is checked against the SHA-256 GitHub lists for the release's file, whose publisher signature is not checked by this store.",
             release.version
         ));
+        made.notices.extend(caveat);
         Ok(made)
     }
 
@@ -316,6 +381,52 @@ mod tests {
         assert_eq!(name("linux", "aarch64"), Some("linux-arm64"));
         assert_eq!(name("macos", "aarch64"), Some("macos-arm64"));
         assert_eq!(name("freebsd", "x86_64"), None);
+    }
+
+    #[test]
+    fn a_newer_release_without_a_digest_is_reported_and_the_newest_verified_one_is_taken() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let doc = serde_json::json!([
+            {"tag_name": "cli-v2026.11.0", "draft": false, "prerelease": false, "assets": [
+                {"name": "bw-windows-2026.11.0.zip"}
+            ]},
+            {"tag_name": "cli-v2026.10.1", "draft": false, "prerelease": false, "assets": [
+                {"name": "bw-windows-2026.10.1.zip", "digest": digest}
+            ]}
+        ]);
+        let found = verified_release(cli_releases(&doc), "windows").expect("falls back");
+        assert_eq!(found.release.version, "2026.10.1");
+        let caveat = found
+            .caveat("windows")
+            .expect("the newer release is reported");
+        assert!(
+            caveat.contains("cli-v2026.11.0") && caveat.contains("2026.10.1"),
+            "{caveat}"
+        );
+
+        let all_good = serde_json::json!([
+            {"tag_name": "cli-v2026.10.1", "draft": false, "prerelease": false, "assets": [
+                {"name": "bw-windows-2026.10.1.zip", "digest": digest}
+            ]}
+        ]);
+        let found = verified_release(cli_releases(&all_good), "windows").expect("verified");
+        assert!(found.caveat("windows").is_none());
+    }
+
+    #[test]
+    fn no_verified_release_is_a_refusal_naming_the_newest() {
+        let doc = serde_json::json!([
+            {"tag_name": "cli-v2026.11.0", "draft": false, "prerelease": false, "assets": [
+                {"name": "bw-windows-2026.11.0.zip"}
+            ]}
+        ]);
+        let why = verified_release(cli_releases(&doc), "windows")
+            .err()
+            .expect("refuses when no digest exists")
+            .message()
+            .to_owned();
+        assert!(why.contains("cli-v2026.11.0"), "{why}");
+        assert!(verified_release(Vec::new(), "windows").is_err());
     }
 
     #[test]

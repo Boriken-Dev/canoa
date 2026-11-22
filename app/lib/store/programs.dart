@@ -170,10 +170,12 @@ final class ProgramCopy {
 
 /// The newest version, or why it is not known.
 final class ProgramLatest {
-  const ProgramLatest({this.known = false, this.version, this.unknownBecause, this.notesUrl});
+  const ProgramLatest({this.known = false, this.version, this.unknownBecause, this.notesUrl, this.note});
 
   final bool known;
-  final String? version, unknownBecause, notesUrl;
+
+  /// [note] is a caveat to read next to the version, such as a newer release the store cannot install.
+  final String? version, unknownBecause, notesUrl, note;
 
   static ProgramLatest parse(Object? json) {
     final map = _map(json);
@@ -182,6 +184,7 @@ final class ProgramLatest {
       version: _text(map['version']),
       unknownBecause: _text(map['unknown_because']),
       notesUrl: _text(map['notes_url']),
+      note: _text(map['note']),
     );
   }
 }

@@ -525,7 +525,7 @@ Every method is required and synchronous. Every object a method is handed is the
 - `program`: every copy it can find, the host's own (`query.managed`) first. With `probe` false it spawns nothing and opens no
   connection; with it true it may run each absolute copy's version flag through `spawner`, within `PROBE_TIMEOUT_MS`. Never a
   network call.
-- `latest`: through `tools.fetch_text` only. A failure is `known: false` with `unknown_because`, never "current".
+- `latest`: through `tools.fetch_text` only. A failure is `known: false` with `unknown_because`, never "current". A caveat the person should read beside a known version (a newer release the store cannot install) is `note`.
 - `plan`: what `apply` would do, before anything is written: every `Download` with its `Check`, every program it runs (`steps`), every
   change outside the host's folder (`changes`, kinds `USER_PATH`, `PROFILE_FILE`, `REGISTRY`, `PATH`, `STATE_DIR`, ...), and an
   opaque `token`. An update to the version already current is a plan with `version == from_version` and nothing in it, never a

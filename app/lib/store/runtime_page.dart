@@ -127,7 +127,7 @@ class RuntimePage extends StatelessWidget {
     final latest = status.latest;
     if (latest == null) return 'not asked yet';
     if (!latest.known) return 'unknown${latest.unknownBecause == null ? '' : ': ${latest.unknownBecause}'}';
-    return '${latest.version ?? 'unknown'}${status.updateAvailable ? ' (an update)' : ''}';
+    return '${latest.version ?? 'unknown'}${status.updateAvailable ? ' (an update)' : ''}${latest.note == null ? '' : ' · ${latest.note}'}';
   }
 }
 
