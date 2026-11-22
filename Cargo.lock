@@ -1635,7 +1635,7 @@ dependencies = [
 [[package]]
 name = "coqui-aos"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=b766c775b0600cdec6f5695cdaad8dffe64790e9#b766c775b0600cdec6f5695cdaad8dffe64790e9"
+source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=9d473be5084684109790f24837eec0d596b1f8f3#9d473be5084684109790f24837eec0d596b1f8f3"
 dependencies = [
  "data-encoding",
  "globset",
