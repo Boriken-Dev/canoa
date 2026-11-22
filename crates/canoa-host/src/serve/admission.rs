@@ -13,7 +13,7 @@ use std::thread;
 use coqui_link::auth::{Proof, Trust};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 
-use super::connection::serve_proven;
+use super::connection::{Reach, serve_proven};
 use super::{Agent, Run, Served, Shared};
 use crate::client_tools;
 use crate::config::Config;
@@ -250,7 +250,14 @@ impl Local {
             .name("canoa-local".to_owned())
             .spawn(move || {
                 let peer = shared.method.peer_id();
-                serve_proven(&shared, &served, &host, &peer, context.as_ref(), true);
+                serve_proven(
+                    &shared,
+                    &served,
+                    &host,
+                    &peer,
+                    context.as_ref(),
+                    Reach::InProcess,
+                );
                 host.close();
             })
             .map_err(|_| LocalError::Thread)?;

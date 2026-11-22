@@ -11,6 +11,7 @@ fn who() -> Who {
     Who {
         agent: "Claude".to_owned(),
         via: Via::App,
+        extension: false,
     }
 }
 
@@ -76,7 +77,14 @@ fn servers(message: &[u8]) -> Vec<Value> {
 
 /// A link that has been through `initialize` with an agent that takes HTTP servers, and a provider that has been seen.
 fn ready(hub: &Arc<Hub>) -> Arc<Link> {
-    let link = hub.for_connection(false, who()).expect("a link");
+    ready_as(hub, false)
+}
+
+/// As [`ready`], on a link that is, or is not, the browser extension's own.
+fn ready_as(hub: &Arc<Hub>, extension: bool) -> Arc<Link> {
+    let link = hub
+        .for_connection(false, Who { extension, ..who() })
+        .expect("a link");
     let _ = link.client_said(initialize());
     link.agent_said(&answered(
         1,
@@ -280,7 +288,7 @@ fn a_page_session_with_office_tools_marked_gets_only_office_servers_and_never_br
     register(&browser, "browser");
     let (word, word_thread) = connect(&hub, "kw", providing());
     register(&word, "word");
-    let link = ready(&hub);
+    let link = ready_as(&hub, true);
     let request = serde_json::to_vec(&json!({
         "jsonrpc": "2.0",
         "id": 9,
@@ -299,6 +307,74 @@ fn a_page_session_with_office_tools_marked_gets_only_office_servers_and_never_br
     drop(word);
     browser_thread.join().expect("ends");
     word_thread.join().expect("ends");
+}
+
+fn office_request(id: u64, pane: Option<&str>) -> Vec<u8> {
+    let mut site = json!({"site": "office.example", "tools": ["word"]});
+    if let Some(pane) = pane {
+        site["pane"] = json!(pane);
+    }
+    serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "method": "session/new",
+        "params": {"cwd": "/", "mcpServers": [], "_meta": {SITE_META: site}}}))
+    .expect("json")
+}
+
+#[test]
+fn a_client_that_is_not_the_extension_cannot_claim_office_tools_for_its_session() {
+    let hub = hub();
+    let (word, thread) = connect(&hub, "kw", providing());
+    register(&word, "word");
+    // A paired client of another kind, with the same claim the extension would make.
+    let other = ready_as(&hub, false);
+    other.client_raw(&office_request(9, Some("0123456789abcdef")));
+    assert!(
+        servers(&other.client_said(session_new(9))).is_empty(),
+        "a page's session on a link that is not the extension's gets none"
+    );
+    // The control: the same claim on the extension's link is honoured.
+    let extension = ready_as(&hub, true);
+    extension.client_raw(&office_request(9, Some("0123456789abcdef")));
+    assert_eq!(servers(&extension.client_said(session_new(9))).len(), 1);
+    other.close();
+    extension.close();
+    drop(word);
+    thread.join().expect("ends");
+}
+
+#[test]
+fn the_provider_is_told_which_pane_opened_a_session_and_only_the_extension_names_one() {
+    let hub = hub();
+    let (word, thread) = connect(&hub, "kw", providing());
+    register(&word, "word");
+    let link = ready_as(&hub, true);
+    link.client_raw(&office_request(9, Some("0123456789abcdef")));
+    let _ = link.client_said(session_new(9));
+    let access = lock(&hub.tokens.0)
+        .values()
+        .next()
+        .cloned()
+        .expect("a bearer");
+    let asking = {
+        let hub = Arc::clone(&hub);
+        std::thread::spawn(move || {
+            hub.answer(
+                &access,
+                &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}),
+            )
+        })
+    };
+    let opened = hear(&word);
+    assert_eq!(opened["type"], "open");
+    assert_eq!(opened["session"]["pane"], "0123456789abcdef");
+    let forwarded = hear(&word);
+    say(
+        &word,
+        &json!({"type": "mcp", "stream": forwarded["stream"], "message": {"jsonrpc": "2.0", "id": 9, "result": {"tools": []}}}),
+    );
+    asking.join().expect("answered");
+    link.close();
+    drop(word);
+    thread.join().expect("ends");
 }
 
 #[test]

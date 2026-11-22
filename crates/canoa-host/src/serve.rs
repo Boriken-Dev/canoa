@@ -60,7 +60,7 @@ pub(crate) use accounts::{
 };
 pub(crate) use admission::{Admission, NotAdmitted};
 pub use admission::{Local, LocalError};
-pub(crate) use connection::plain_listener;
+pub(crate) use connection::{Reach, plain_listener};
 use connection::{accept_loop, accept_pipe_loop, accept_transport_loop, connection};
 pub(crate) use options::{Entered, Gate};
 pub use options::{Listening, ServeError, ServeOptions};

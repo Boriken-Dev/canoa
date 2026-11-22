@@ -150,7 +150,18 @@ fn meet(
             native::origin_allows(home, &peer, &origin)
         }
     };
-    connection(shared, target, channel, entered, Some(&admit));
+    // Only a key the extension's PIN pairing bound to this origin speaks for the extension: what it says of a page's session
+    // (which Office tools its pane holds) is taken from it and from no other key.
+    let extension =
+        |peer: &coqui_peer_webcrypto::PeerId| native::bound_to(home, &peer.to_string(), &origin);
+    connection(
+        shared,
+        target,
+        channel,
+        entered,
+        Some(&admit),
+        Some(&extension),
+    );
 }
 
 /// The origin of the host's own web server as `hello` claims it, for a page on this computer that the extension serves: `http` or

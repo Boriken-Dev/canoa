@@ -122,6 +122,8 @@ pub(crate) struct Who {
     /// The entry the session runs on.
     pub(crate) agent: String,
     pub(crate) via: Via,
+    /// Whether the link is the browser extension's own: the door, with the key its PIN pairing bound to the extension's origin.
+    pub(crate) extension: bool,
 }
 
 impl Who {
@@ -147,6 +149,8 @@ pub(crate) struct Access {
     stream: String,
     digest: [u8; 32],
     who: Who,
+    /// The token of the pane that opened the session, when the extension named one.
+    pane: Option<String>,
     calls: AtomicUsize,
     /// The connection of the provider this stream was opened on.
     attached: Mutex<Option<Arc<Attached>>>,
@@ -268,7 +272,11 @@ impl Attached {
             );
         }
         *lock(&access.attached) = Some(Arc::clone(self));
-        self.push(&json!({"type": "open", "stream": access.stream, "session": access.who.json()}))
+        let mut session = access.who.json();
+        if let (Some(pane), Some(fields)) = (&access.pane, session.as_object_mut()) {
+            fields.insert("pane".to_owned(), pane.clone().into());
+        }
+        self.push(&json!({"type": "open", "stream": access.stream, "session": session}))
     }
 
     fn close_stream(&self, stream: &str) {
@@ -626,6 +634,13 @@ enum Pending {
     },
 }
 
+/// What the extension said of a page's session request: the Office providers its pane holds and the pane's token, which the
+/// provider's `open` message repeats so that the pane that opened the session is the one asked.
+struct PagePanes {
+    tools: BTreeSet<String>,
+    pane: Option<String>,
+}
+
 #[derive(Default)]
 struct State {
     /// The agent takes MCP servers over HTTP.
@@ -634,7 +649,7 @@ struct State {
     stdio: u64,
     pending: HashMap<String, Pending>,
     /// Ids of session requests a web page made: empty set gets no server; an Office pane session lists only the Office providers allowed for it.
-    page: HashMap<String, BTreeSet<String>>,
+    page: HashMap<String, PagePanes>,
     sessions: HashMap<String, Vec<Arc<Access>>>,
     held: usize,
 }
@@ -699,8 +714,10 @@ impl Link {
         if named.get("own") == Some(&json!(true)) {
             return;
         }
+        // Which Office providers a pane holds is the extension's word, and a client that is not the extension has none.
         let allowed = named
             .get("tools")
+            .filter(|_| self.who.extension)
             .and_then(Value::as_array)
             .map(|items| {
                 items
@@ -711,9 +728,23 @@ impl Link {
                     .collect::<BTreeSet<_>>()
             })
             .unwrap_or_default();
+        let pane = named
+            .get("pane")
+            .and_then(Value::as_str)
+            .filter(|_| self.who.extension && !allowed.is_empty())
+            .filter(|token| {
+                (8..=64).contains(&token.len()) && token.bytes().all(|b| b.is_ascii_hexdigit())
+            })
+            .map(str::to_owned);
         let mut state = lock(&self.state);
         if state.page.len() < MAX_PENDING {
-            state.page.insert(id, allowed);
+            state.page.insert(
+                id,
+                PagePanes {
+                    tools: allowed,
+                    pane,
+                },
+            );
         }
     }
 
@@ -783,13 +814,16 @@ impl Link {
         }
         // A page's session gets none, except the Office providers the extension marked for that pane's tab.
         let expected = self.hub.expected();
-        let providers: Vec<String> = match page {
-            Some(allowed) if allowed.is_empty() => return false,
-            Some(allowed) => expected
-                .into_iter()
-                .filter(|name| allowed.contains(name))
-                .collect(),
-            None => expected,
+        let (providers, pane): (Vec<String>, Option<String>) = match page {
+            Some(allowed) if allowed.tools.is_empty() => return false,
+            Some(allowed) => (
+                expected
+                    .into_iter()
+                    .filter(|name| allowed.tools.contains(name))
+                    .collect(),
+                allowed.pane,
+            ),
+            None => (expected, None),
         };
         if providers.is_empty() {
             return false;
@@ -811,6 +845,7 @@ impl Link {
                 stream,
                 digest,
                 who: self.who.clone(),
+                pane: pane.clone(),
                 calls: AtomicUsize::new(0),
                 attached: Mutex::new(None),
                 notes: Mutex::new(VecDeque::new()),

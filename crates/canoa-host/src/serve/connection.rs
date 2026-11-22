@@ -101,7 +101,7 @@ pub(super) fn accept_loop(
             .name("canoa-peer".to_owned())
             .spawn(move || match pending.handshake() {
                 Ok(channel) => {
-                    connection(&shared, &served, &channel, entered, None);
+                    connection(&shared, &served, &channel, entered, None, None);
                     channel.close();
                 }
                 Err(failure) => tracing::debug!("a handshake failed: {failure}"),
@@ -144,7 +144,7 @@ pub(super) fn accept_transport_loop(
         let spawned = thread::Builder::new()
             .name("canoa-peer".to_owned())
             .spawn(move || {
-                connection(&shared, &served, &link, entered, None);
+                connection(&shared, &served, &link, entered, None, None);
                 link.close();
             });
         if let Err(error) = spawned {
@@ -196,7 +196,7 @@ pub(super) fn accept_pipe_loop(
         let spawned = thread::Builder::new()
             .name("canoa-peer".to_owned())
             .spawn(move || {
-                connection(&shared, &served, &channel, entered, None);
+                connection(&shared, &served, &channel, entered, None, None);
                 channel.close();
             });
         if let Err(error) = spawned {
@@ -213,6 +213,7 @@ pub(super) fn connection<C: Channel>(
     channel: &C,
     unproven: Entered,
     admit: Option<&dyn Fn(&PeerId) -> bool>,
+    extension: Option<&dyn Fn(&PeerId) -> bool>,
 ) {
     let established = match auth::prove(
         &shared.method,
@@ -252,19 +253,41 @@ pub(super) fn connection<C: Channel>(
     let checked = peer;
     let sealed = Sealed::new(channel, established.session)
         .with_check(move || !stopped.load(Ordering::SeqCst) && store.is_accepted(&checked));
-    serve_proven(shared, served, &sealed, &peer, None, false);
+    let reach = if extension.is_some_and(|bound| bound(&peer)) {
+        Reach::Extension
+    } else {
+        Reach::Remote
+    };
+    serve_proven(shared, served, &sealed, &peer, None, reach);
     sealed.close();
 }
 
-/// Serves a connection whose peer is known, from its first message to its end; the caller closes `channel` after. `in_process` is
-/// true only for the connections [`super::Local`] opens, whose peer is this process.
+/// How a connection reached the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reach {
+    /// A key that proved itself over a listener.
+    Remote,
+    /// A key the browser extension's PIN pairing bound to its origin, through the native door.
+    Extension,
+    /// The application in this process.
+    InProcess,
+}
+
+impl Reach {
+    pub(crate) const fn in_process(self) -> bool {
+        matches!(self, Self::InProcess)
+    }
+}
+
+/// Serves a connection whose peer is known, from its first message to its end; the caller closes `channel` after. `reach` is
+/// [`Reach::InProcess`] only for the connections [`super::Local`] opens, whose peer is this process.
 pub(super) fn serve_proven<C: Channel>(
     shared: &Arc<Shared>,
     served: &Arc<Served>,
     sealed: &C,
     peer: &PeerId,
     context: Option<&delegate::ChildContext>,
-    in_process: bool,
+    reach: Reach,
 ) {
     let Some(_running) = served.running.enter() else {
         tracing::info!(entry = served.name, %peer, "turned away: max_peers are running");
@@ -309,7 +332,7 @@ pub(super) fn serve_proven<C: Channel>(
                 served,
                 &Prefilled::new(&super::limit::Naming::new(sealed, shared.max_line), first),
                 (&copy, peer),
-                (context, in_process),
+                (context, reach),
             );
         }
         Ok(None) | Err(_) => {}
@@ -321,18 +344,12 @@ fn give_agent<C: Channel>(
     served: &Arc<Served>,
     channel: &C,
     (first, peer): (&[u8], &PeerId),
-    (context, in_process): (Option<&delegate::ChildContext>, bool),
+    (context, reach): (Option<&delegate::ChildContext>, Reach),
 ) {
     if let (Some(keep), Run::Agent { .. }, None) = (&served.keep, &served.run, context) {
-        return super::sessions::serve(shared, served, keep, channel, (first, peer), in_process);
+        return super::sessions::serve(shared, served, keep, channel, (first, peer), reach);
     }
-    give_agent_flow(
-        shared,
-        served,
-        channel,
-        (first, peer),
-        (context, in_process),
-    );
+    give_agent_flow(shared, served, channel, (first, peer), (context, reach));
 }
 
 fn dispatch_non_agent<C: Channel>(
@@ -520,9 +537,9 @@ pub(super) fn give_agent_flow<C: Channel>(
     served: &Served,
     channel: &C,
     (first, peer): (&[u8], &PeerId),
-    (context, in_process): (Option<&delegate::ChildContext>, bool),
+    (context, reach): (Option<&delegate::ChildContext>, Reach),
 ) {
-    if dispatch_non_agent(shared, served, channel, peer, in_process) {
+    if dispatch_non_agent(shared, served, channel, peer, reach.in_process()) {
         return;
     }
     let Run::Agent {
@@ -585,7 +602,7 @@ pub(super) fn give_agent_flow<C: Channel>(
         });
     let link = shared
         .secrets
-        .for_connection(peer, in_process, context.is_some());
+        .for_connection(peer, reach.in_process(), context.is_some());
     let store = shared
         .store_tools
         .for_connection(shared.store_grants(peer, context.is_some()).as_ref());
@@ -596,11 +613,12 @@ pub(super) fn give_agent_flow<C: Channel>(
         context.is_some(),
         client_tools::Who {
             agent: served.name.clone(),
-            via: if in_process {
+            via: if reach.in_process() {
                 client_tools::Via::App
             } else {
                 client_tools::Via::Paired(peer.to_string())
             },
+            extension: reach == Reach::Extension,
         },
     );
     let tools_peek = ToolsPeek::new(&store_peek, tools.as_ref());

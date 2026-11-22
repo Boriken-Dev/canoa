@@ -909,7 +909,7 @@ pub(super) fn serve<C: Channel>(
     keep: &Keep,
     channel: &C,
     (first, peer): (&[u8], &PeerId),
-    in_process: bool,
+    reach: super::Reach,
 ) {
     let who = Client::new(peer.to_string())
         .label(served.name.clone())
@@ -992,7 +992,7 @@ pub(super) fn serve<C: Channel>(
         channel,
         (first, peer),
         (who, swallow, replay),
-        in_process,
+        reach,
     );
 }
 
@@ -1025,7 +1025,7 @@ fn open<C: Channel>(
     channel: &C,
     (first, peer): (&[u8], &PeerId),
     (who, swallow, replay): (Client, Vec<Value>, Vec<Vec<u8>>),
-    in_process: bool,
+    reach: super::Reach,
 ) {
     let request = serde_json::from_slice::<Value>(first)
         .ok()
@@ -1109,7 +1109,7 @@ fn open<C: Channel>(
                     &served,
                     &prefilled,
                     (&first, &peer),
-                    (None, in_process),
+                    (None, reach),
                 );
                 host.close();
             })
