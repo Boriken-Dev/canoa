@@ -876,6 +876,9 @@ fn give_harness<C: Channel>(
         }
         None => scope,
     };
+    // One program per client connection, which carries every session of that connection: a second line for the same peer
+    // and entry means a client connected again, never that a prompt restarted the program.
+    tracing::info!(entry = %served.name, harness = harness.id(), %peer, "starting the harness program: a client connected");
     let to_provider = (started.request, started.spawner);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
