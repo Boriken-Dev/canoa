@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Documented process-wide statics and `OnceLock` / `LazyLock` / `thread_local!` exceptions allowed in non-test code of
-/// `canoa-host` (per `API.md` Process-wide state: every exception is listed here by file and declaration).
+/// `canoa-host`: every exception is listed here by file and declaration.
 /// Home-bound runtime state (such as `usage/read`'s allowance cache) belongs on `Control` or `Serving`, not here.
 const ALLOWED: &[(&str, &str)] = &[
     // Config serialization lock across file reads/rewrites
