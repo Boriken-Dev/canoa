@@ -13,6 +13,7 @@ import '../usage/tokens_view.dart' show tokenColumns;
 import '../workspace/open_in.dart' show WorkspaceOpener;
 import 'background_tasks.dart';
 import 'context_kinds.dart';
+import 'context_pill.dart' show compactPrompt;
 import 'delegation_view.dart' show lineage;
 import 'git_changes.dart';
 import 'git_changes_pane.dart';
@@ -330,7 +331,13 @@ class SessionInspector extends StatelessWidget {
             const SizedBox(height: 16),
             Text('Context', style: heading),
             const SizedBox(height: 6),
-            _ContextMeter(usage: session.usage, kinds: session.contextKinds),
+            _ContextMeter(
+              usage: session.usage,
+              kinds: session.contextKinds,
+              onCompact: identical(store.selected, session) && compactPrompt(session) != null
+                  ? () => unawaited(store.sendText(compactPrompt(session)!))
+                  : null,
+            ),
             if (sessionSpend != null && session.remoteSessionId != null) ...[
               const SizedBox(height: 16),
               Text('Tokens spent', style: heading),
@@ -373,10 +380,11 @@ class _Fact extends StatelessWidget {
 /// How full the context window is: what is used out of what there is, a bar split by the kinds the agent names, and a row for
 /// each. An agent that names none gets the two rows the figures give, used and free, and a line saying the rest is not reported.
 class _ContextMeter extends StatelessWidget {
-  const _ContextMeter({required this.usage, required this.kinds});
+  const _ContextMeter({required this.usage, required this.kinds, this.onCompact});
 
   final SessionUsage usage;
   final List<ContextKind> kinds;
+  final VoidCallback? onCompact;
 
   static String _share(int tokens, int size) => '${(100 * tokens / size).toStringAsFixed(1)}%';
 
@@ -408,6 +416,15 @@ class _ContextMeter extends StatelessWidget {
       Row(children: [
         Expanded(child: Text('$percent% used', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
         Text('${compactCount(used)} / ${compactCount(size)}', style: muted),
+        if (onCompact != null) ...[
+          const SizedBox(width: 8),
+          TextButton(
+            key: const ValueKey('context-inspector-compact'),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+            onPressed: onCompact,
+            child: const Text('Compact'),
+          ),
+        ],
       ]),
       const SizedBox(height: 6),
       ClipRRect(

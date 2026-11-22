@@ -19,6 +19,7 @@ import '../workspace/remote_host.dart' show HostChoice;
 import 'agent_events.dart' show AgentCommandInfo, MessageRole;
 import 'attachments.dart';
 import '../voice/reply_reader.dart';
+import 'context_pill.dart';
 import 'dictation.dart';
 import 'palette.dart' show dictationKeys;
 import 'reply_voice.dart';
@@ -75,6 +76,8 @@ final class ComposerKit {
     this.onAccountSettings,
     this.switchAccount,
     this.switchAgent,
+    this.onCompact,
+    this.onDetails,
     this.portable,
     this.programs,
     this.extension,
@@ -243,6 +246,12 @@ final class ComposerKit {
   /// Moves a running session to another account, ending its agent and starting one on that account that opens the same
   /// conversation; answers whether it moved. Null where the app cannot start agents.
   final Future<bool> Function(ChatSession session, String account)? switchAccount;
+
+  /// Sends the compact command [session]'s agent reports; offered only when it reports one.
+  final void Function(ChatSession session)? onCompact;
+
+  /// Opens the Details inspector for [session].
+  final void Function(ChatSession session)? onDetails;
 
   /// Moves a running session to another agent of this computer: the host exports the conversation and imports it into that agent,
   /// which opens it; answers whether it moved. Null where the app cannot do that.
@@ -542,6 +551,16 @@ class SessionComposer extends StatelessWidget {
         if (kit.overlays.isNotEmpty || kit.loadouts.isNotEmpty || session.profile != null) OverlaysChooser(store: store, session: session, kit: kit),
         if (session.status != SessionStatus.preview && session.reportsUsage)
           UsagePill(report: session.usageReport, warnPermille: kit.warnPermille),
+        if (!draft)
+          ContextComposerPill(
+            usage: session.usage,
+            onCompact: !working &&
+                    compactPrompt(session) != null &&
+                    kit.onCompact != null
+                ? () => kit.onCompact!(session)
+                : null,
+            onOpenDetails: kit.onDetails == null ? null : () => kit.onDetails!(session),
+          ),
         if (kit.reader case final reader? when reader.available)
           VoiceModeStatus(reader: reader, controller: controller, dictation: kit.dictation, onChanged: kit.onVoiceMode ?? (_) {}),
         if (working) const _Busy(),

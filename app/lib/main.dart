@@ -77,6 +77,7 @@ import 'served/host_state.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat show ChatRenderers, ClipboardReader;
 import 'chat/clipboard.dart';
 import 'chat/composer.dart';
+import 'chat/context_pill.dart' show compactPrompt;
 import 'chat/dictation.dart';
 import 'chat/source_trouble.dart';
 import 'chat/update_log.dart';
@@ -3319,6 +3320,10 @@ class _CanoaAppState extends State<CanoaApp> {
     portable: _portable,
     programs: _programs,
     extension: _tabs,
+    onCompact: (session) {
+      if (compactPrompt(session) case final prompt? when identical(store.selected, session)) unawaited(store.sendText(prompt));
+    },
+    onDetails: _mode.chatOnly ? null : (_) => _conversation.showChanges?.call(),
     onDelegate: (session) {
       final above = _navigator.currentContext;
       if (above != null) unawaited(showDelegateDialog(above, store, session));

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../acp/client.dart' show AcpSessionInfo;
 import '../chat/agent_events.dart' show AgentCommandInfo;
+import '../chat/context_pill.dart' show compactPrompt;
 import '../chat/delegate_dialog.dart';
 import '../chat/delegation_setup_dialog.dart';
 import '../chat/inspector.dart' show changeTotals;
@@ -91,6 +92,8 @@ Future<void> showAppPalette(
             ]
           : [
               PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
+              if (session != null && !session.isDraft && compactPrompt(session) != null)
+                PaletteItem('Compact context', () => unawaited(store.sendText(compactPrompt(session)!)), icon: Icons.compress),
               if (!chatOnly && session != null && conversation.showChanges != null && (changeTotals(session) != null))
                 PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
               if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', onStop, icon: Icons.stop_circle_outlined),
