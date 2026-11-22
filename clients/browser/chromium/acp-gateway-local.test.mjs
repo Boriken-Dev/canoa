@@ -127,3 +127,50 @@ test("a session of a local agent is told to run in a folder the host makes, and 
   assert.deepEqual(made.params.additionalDirectories, ["/mine"], "Canoa's own chat adds its own directories");
   assert.equal(made.params.cwd, "/");
 });
+
+test("an Office pane tab carries its allowed Office tools in site meta without own, while other sites carry none", async () => {
+  const sent = [];
+  const agents = [{ key: "local:claude", label: "Claude", source: "local", native: { entry: "claude" }, peer: "sha256:c", local: true }];
+  const grants = [{ origin: PAGE, agent: "local:claude", lifetime: "always", cwd: null, folder: "provider", peer: "sha256:c", permissions: false, mcpOrigins: [], sessions: [] }];
+  const store = {
+    agents: async () => agents,
+    addAgent: async (agent) => agent,
+    markProven: async () => {},
+    grants: async (origin) => grants.filter((grant) => grant.origin === origin),
+    saveGrant: async () => {},
+    deleteGrant: async () => {},
+    secret: async () => "secret",
+  };
+  const gateway = createGateway({
+    store,
+    dial: async () => ({ proven: true, send: async (text) => sent.push(JSON.parse(text)), onMessage: () => {}, onClose: () => {}, close: () => {} }),
+    askPerson: async () => null,
+    askPermission: async () => null,
+    ownOrigin: OWN,
+  });
+  const received = [];
+  const listeners = [];
+  gateway.attach({
+    postMessage: (message) => received.push(message),
+    onMessage: { addListener: (listen) => listeners.push(listen) },
+    onDisconnect: { addListener: () => {} },
+  }, { origin: PAGE, tabId: 42 });
+  gateway.setPageTools(PAGE, 42, ["word", "browser", "evil"]);
+  const ask = async (id, op, args) => {
+    listeners.forEach((listen) => listen({ id, op, args }));
+    for (let tries = 0; tries < 40 && !received.some((message) => message.id === id); tries += 1) await settle();
+    return received.find((message) => message.id === id);
+  };
+  const [agent] = (await ask(1, "agents", [])).result;
+  const conn = (await ask(2, "connect", { id: agent.id })).result.conn;
+  listeners.forEach((listen) => listen({ conn, msg: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "session/new", params: { cwd: "/", mcpServers: [] } }) }));
+  for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
+  const marked = sent.find((message) => message.method === "session/new");
+  assert.deepEqual(marked.params._meta, { "dev.boriken.canoa/site": { site: "site.example", tools: ["word"] } });
+  assert.equal(marked.params._meta["dev.boriken.canoa/site"].own, undefined);
+  gateway.setPageTools(PAGE, 42, []);
+  listeners.forEach((listen) => listen({ conn, msg: JSON.stringify({ jsonrpc: "2.0", id: 6, method: "session/new", params: { cwd: "/", mcpServers: [] } }) }));
+  for (let tries = 0; tries < 40 && sent.filter((m) => m.method === "session/new").length < 2; tries += 1) await settle();
+  const plain = sent.filter((m) => m.method === "session/new")[1];
+  assert.deepEqual(plain.params._meta, { "dev.boriken.canoa/site": { site: "site.example" } });
+});

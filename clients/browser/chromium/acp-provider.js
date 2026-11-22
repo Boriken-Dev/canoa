@@ -5,6 +5,7 @@ import { addedMethod, lookNearby, mcpConfigCommand, offersOf, readCandidates, sa
 import { createGateway, dialRecord, sameGrant, supersedes } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
 import { createTools, OFFER } from "./acp-tools.js";
+import { createOfficeToolsBridge, secureOrigin, senderEndpoint } from "./office-tools-bridge.js";
 import { createToolProvider } from "./tool-provider.js";
 import { dispatchBrowserTool } from "./browser-tools.js";
 import { markActing } from "./tab-marks.js";
@@ -528,29 +529,21 @@ async function programsShare(peer) {
   return on !== null && (await store.stored()).find((agent) => agent.key === on)?.peer === peer;
 }
 
-function secureOrigin(origin) {
-  try {
-    const url = new URL(origin);
-    return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
-  } catch {
-    return false;
-  }
-}
-
 const scriptId = (origin, world) => `canoa-acp-${world}-${origin}`;
 
-/** Puts the provider into a site, from now on and into its open tabs. Only after the person allowed that site. */
-export async function allowSite(origin, tabId) {
+/** Puts the provider into a site (top frame and matching subframes), from now on and into its open tabs. Only after the person allowed that site. */
+export async function allowSite(origin, tabId, frameId) {
   const matches = [`${origin}/*`];
   const scripts = [
-    { id: scriptId(origin, "main"), matches, js: ["acp-page.js"], runAt: "document_start", world: "MAIN" },
-    { id: scriptId(origin, "isolated"), matches, js: ["acp-content.js"], runAt: "document_start", world: "ISOLATED" },
+    { id: scriptId(origin, "main"), matches, js: ["acp-page.js"], runAt: "document_start", world: "MAIN", allFrames: true, matchOriginAsFallback: true },
+    { id: scriptId(origin, "isolated"), matches, js: ["acp-content.js"], runAt: "document_start", world: "ISOLATED", allFrames: true, matchOriginAsFallback: true },
   ];
   const existing = await chrome.scripting.getRegisteredContentScripts({ ids: scripts.map((script) => script.id) });
   if (existing.length === 0) await chrome.scripting.registerContentScripts(scripts);
   if (tabId !== undefined) {
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["acp-page.js"] });
-    await chrome.scripting.executeScript({ target: { tabId }, world: "ISOLATED", files: ["acp-content.js"] });
+    const target = frameId !== undefined ? { tabId, frameIds: [frameId] } : { tabId };
+    await chrome.scripting.executeScript({ target, world: "MAIN", files: ["acp-page.js"] }).catch(() => {});
+    await chrome.scripting.executeScript({ target, world: "ISOLATED", files: ["acp-content.js"] }).catch(() => {});
   }
 }
 
@@ -599,20 +592,31 @@ export function installProvider() {
     }
   });
 
+  const officeToolsBridge = createOfficeToolsBridge({
+    dialLocal: async () => {
+      const pinned = await pinnedHost();
+      if (pinned === null) throw new Error("this browser is not paired with Canoa on this computer");
+      return dialAgent({ native: { entry: "@tools" }, peer: pinned.peer, method: pinned.method, label: "Canoa" }, {});
+    },
+    gateway,
+  });
+
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== PORT_NAME) return;
-    const { id, origin, frameId, tab, url } = port.sender ?? {};
-    // Canoa's own chat, which a side panel shows in no tab. Only its pages: this origin is what gets the browser's tools.
-    if (id === chrome.runtime.id && origin === OWN_ORIGIN && url?.startsWith(chrome.runtime.getURL("ui/"))) {
-      gateway.attach(port, { origin, tabId: tab?.id });
-      return;
-    }
-    // A top-level document of a secure origin, as the browser reports it. A cross-origin frame gets nothing in this version.
-    if (id !== chrome.runtime.id || frameId !== 0 || tab?.id === undefined || !secureOrigin(origin)) {
+    const endpoint = senderEndpoint(port.sender, {
+      runtimeId: chrome.runtime.id,
+      ownOrigin: OWN_ORIGIN,
+      uiPrefix: chrome.runtime.getURL("ui/"),
+    });
+    if (endpoint === null) {
       port.disconnect();
       return;
     }
-    gateway.attach(port, { origin, tabId: tab.id });
+    if (endpoint.kind === "own") {
+      gateway.attach(port, { origin: endpoint.origin, tabId: endpoint.tabId });
+      return;
+    }
+    officeToolsBridge.attach(port, { origin: endpoint.origin, tabId: endpoint.tabId });
   });
 
   chrome.tabs.onRemoved.addListener(async (tabId) => {
@@ -671,17 +675,24 @@ export function installProvider() {
   });
 
   chrome.runtime.onInstalled.addListener(() => {
-    chrome.contextMenus.create({ id: "canoa-acp-site", title: "Let this site ask for my agents", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "canoa-acp-site", title: "Let this site ask for my agents", contexts: ["action", "frame"] });
     chrome.contextMenus.create({ id: "canoa-acp-agents", title: "Canoa agents", contexts: ["action"] });
   });
   chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === "canoa-acp-agents") {
       chrome.tabs.create({ url: chrome.runtime.getURL("acp-request.html?manage=1") });
-    } else if (info.menuItemId === "canoa-acp-site" && tab?.url && secureOrigin(new URL(tab.url).origin)) {
-      const origin = new URL(tab.url).origin;
+    } else if (info.menuItemId === "canoa-acp-site" && tab?.id !== undefined) {
+      const targetUrl = info.frameUrl ?? tab.url;
+      let origin;
+      try {
+        origin = targetUrl ? new URL(targetUrl).origin : undefined;
+      } catch {
+        origin = undefined;
+      }
+      if (!origin || !secureOrigin(origin)) return;
       // The click is the gesture Chrome needs for this, and the prompt is Chrome's own.
       chrome.permissions.request({ origins: [`${origin}/*`] }).then((granted) => {
-        if (granted) allowSite(origin, tab.id);
+        if (granted) allowSite(origin, tab.id, info.frameId);
       });
     }
   });

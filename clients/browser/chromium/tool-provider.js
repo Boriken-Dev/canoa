@@ -24,12 +24,16 @@ export function whereOf(session) {
 }
 
 /**
+ * @param [provider]  provider name registered at `@tools` (default `"browser"`, or `"outlook"`, `"word"`, `"excel"`)
  * @param dial () => the proven link to `@tools`: { send(text), onMessage(fn), onClose(fn), close() }
- * @param serve ({ principal, label, where, request, still }) => the answer to one MCP message, or null for none
- * @param forget (principal) => ends what the person gave that session: its grants, and a window still asking
+ * @param serve ({ principal, stream, session, label, where, request, still }) => the answer to one MCP message, or null for none
+ * @param forget (principal, stream) => ends what the person gave that session: its grants, and a window still asking
  * @param onStatus (state) => told what to show: "connected", "off" or "unavailable"
  */
-export function createToolProvider({ dial, serve, forget = () => {}, onStatus = () => {} }) {
+export function createToolProvider({ provider = PROVIDER, dial, serve, forget = () => {}, onStatus = () => {} }) {
+  if (typeof provider !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(provider)) {
+    throw new TypeError("provider must be a plain tool name");
+  }
   let live = null;
   let connecting = null;
 
@@ -39,7 +43,7 @@ export function createToolProvider({ dial, serve, forget = () => {}, onStatus = 
     if (entry.ended) return;
     entry.ended = true;
     if (live === entry) live = null;
-    for (const stream of entry.streams.values()) forget(principalOf(stream.id));
+    for (const stream of entry.streams.values()) forget(principalOf(stream.id), stream.id);
     entry.streams.clear();
     try {
       entry.link.close();
@@ -67,6 +71,7 @@ export function createToolProvider({ dial, serve, forget = () => {}, onStatus = 
     const session = message.session ?? {};
     entry.streams.set(message.stream, {
       id: message.stream,
+      rawSession: session,
       label: text(session.agent) || "An agent",
       where: whereOf(session),
       running: 0,
@@ -87,6 +92,8 @@ export function createToolProvider({ dial, serve, forget = () => {}, onStatus = 
       try {
         const reply = await serve({
           principal: principalOf(stream.id),
+          stream: stream.id,
+          session: stream.rawSession,
           label: stream.label,
           where: stream.where,
           request: body,
@@ -115,7 +122,7 @@ export function createToolProvider({ dial, serve, forget = () => {}, onStatus = 
       const stream = entry.streams.get(message.stream);
       if (stream !== undefined) {
         entry.streams.delete(message.stream);
-        forget(principalOf(stream.id));
+        forget(principalOf(stream.id), stream.id);
       }
     }
   }
@@ -152,7 +159,7 @@ export function createToolProvider({ dial, serve, forget = () => {}, onStatus = 
       end(entry, "unavailable");
     });
     try {
-      await link.send(JSON.stringify({ type: "register", provider: PROVIDER }));
+      await link.send(JSON.stringify({ type: "register", provider }));
       await answer;
     } catch (error) {
       end(entry, "unavailable");

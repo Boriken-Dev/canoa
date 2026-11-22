@@ -172,6 +172,10 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
   const dialing = new Map();
   // Origins with a window open about a mode: one at a time, as for a request, so a page cannot raise window after window.
   const modeAsking = new Set();
+  // Active Office pane tool names per (origin, tabId), set only by the extension worker from verified senders.
+  const pageTools = new Map();
+  const OFFICE_TOOLS = new Set(["outlook", "word", "excel"]);
+  const pageToolsKey = (origin, tabId) => `${origin}\0${tabId}`;
 
   async function publicId(origin, key) {
     return hash(`${await store.secret()}\0${origin}\0${key}`);
@@ -450,7 +454,9 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
     if (!["session/new", "session/load", "session/resume"].includes(message?.method)) return text;
     // Canoa's own pages say so, which no page can: its sessions are the person's own, not a site's.
     const own = link.entry.origin === ownOrigin;
-    const params = { ...message.params, _meta: { [SITE_META]: own ? { site: link.site, own: true } : { site: link.site } } };
+    const tools = own || link.entry.tabId === undefined ? undefined : pageTools.get(pageToolsKey(link.entry.origin, link.entry.tabId));
+    const siteMeta = own ? { site: link.site, own: true } : tools?.length ? { site: link.site, tools } : { site: link.site };
+    const params = { ...message.params, _meta: { [SITE_META]: siteMeta } };
     if (link.placedByHost && message.method !== "session/new") {
       const folder = link.folders.get(params.sessionId);
       if (typeof folder === "string") params.cwd = folder;
@@ -665,6 +671,15 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       const origins = closeLinks((held) => held.agent === key);
       await store.removeAgent(key);
       for (const origin of origins) announce(origin);
+    },
+
+    /** Sets the Office providers allowed for sessions opened by a verified `(origin, tabId)` pane tab. */
+    setPageTools(origin, tabId, apps) {
+      if (origin === ownOrigin || typeof origin !== "string" || tabId === undefined) return;
+      const allowed = [...new Set([...(apps ?? [])].filter((name) => OFFICE_TOOLS.has(name)))].sort();
+      const key = pageToolsKey(origin, tabId);
+      if (allowed.length === 0) pageTools.delete(key);
+      else pageTools.set(key, allowed);
     },
 
     /** One document's port. `origin` and `tabId` are what the browser reported about its sender. */

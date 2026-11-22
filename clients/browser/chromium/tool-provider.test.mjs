@@ -257,3 +257,30 @@ test("a session that asks for more calls than it may at once is refused the rest
   assert.equal(refused[0].id, 17);
   assert.equal(refused[0].error.code, -32000);
 });
+
+test("another tool provider registers under its own name and forwards stream metadata", async () => {
+  const link = fakeLink();
+  const seen = [];
+  const forgotten = [];
+  const provider = createToolProvider({
+    provider: "word",
+    dial: async () => link,
+    serve: async ({ principal, stream, session, request }) => {
+      seen.push({ principal, stream, session, method: request.method });
+      return { jsonrpc: "2.0", id: request.id, result: { tools: [] } };
+    },
+    forget: (principal, stream) => forgotten.push({ principal, stream }),
+  });
+  const ready = provider.ensure();
+  await settle();
+  assert.deepEqual(link.sent[0], { type: "register", provider: "word" });
+  link.hear({ type: "registered", provider: "word" });
+  await ready;
+  open(link, A, { agent: "Codex", via: "app" });
+  ask(link, A, 4, "tools/list");
+  await settle();
+  assert.deepEqual(seen, [{ principal: `local:${A}`, stream: A, session: { agent: "Codex", via: "app" }, method: "tools/list" }]);
+  assert.equal(link.mcp(A).length, 1);
+  link.hear({ type: "close", stream: A });
+  assert.deepEqual(forgotten, [{ principal: `local:${A}`, stream: A }]);
+});

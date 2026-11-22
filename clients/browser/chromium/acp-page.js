@@ -3,6 +3,7 @@
 // what the browser reports about the sender.
 (() => {
   const REGISTRY = Symbol.for("coqui-acp.registry");
+  const OFFICE_TOOLS = Symbol.for("dev.boriken.canoa.officeTools");
   const TAG = "canoa-acp";
 
   function route(providers, agent) {
@@ -71,6 +72,7 @@
   const info = Object.freeze({ uuid: "dev.boriken.canoa", name: "Canoa", rdns: "dev.boriken.canoa" });
   const pending = new Map();
   const connections = new Map();
+  const toolHandlers = new Map();
   const events = new EventTarget();
   let port;
   let next = 1;
@@ -97,6 +99,27 @@
       closeAll(data.closedAll);
       for (const waiting of pending.values()) waiting.reject(new DOMException("the provider restarted", "NetworkError"));
       pending.clear();
+      for (const [app, handler] of toolHandlers) {
+        try {
+          handler({ type: "reset" });
+        } catch {
+          // Listener decides whether to ignore.
+        }
+        call("tools.register", { app }).catch(() => {});
+      }
+    } else if (data.toolsCall !== undefined) {
+      const handler = toolHandlers.get(data.app);
+      if (handler === undefined) {
+        port?.postMessage({ toolsReply: data.toolsCall, message: null });
+      } else {
+        Promise.resolve(handler(data.event)).then(
+          (reply) => port?.postMessage({ toolsReply: data.toolsCall, message: reply ?? null }),
+          () => port?.postMessage({ toolsReply: data.toolsCall, message: null }),
+        );
+      }
+    } else if (data.toolsEvent !== undefined) {
+      const handler = toolHandlers.get(data.toolsEvent?.app);
+      if (handler !== undefined) handler(data.toolsEvent.event);
     } else if (data.event === "agentschange") {
       events.dispatchEvent(new Event("agentschange"));
     }
@@ -210,6 +233,24 @@
     attach();
   });
   window.addEventListener("pagehide", () => closeAll("navigation"));
+  Object.defineProperty(window, OFFICE_TOOLS, {
+    value: Object.freeze({
+      async register(app, handler) {
+        if (typeof handler !== "function") throw new TypeError("handler must be a function");
+        toolHandlers.set(app, handler);
+        try {
+          return await call("tools.register", { app });
+        } catch (error) {
+          if (toolHandlers.get(app) === handler) toolHandlers.delete(app);
+          throw error;
+        }
+      },
+      async unregister(app) {
+        toolHandlers.delete(app);
+        await call("tools.unregister", { app }).catch(() => {});
+      },
+    }),
+  });
   registerProvider(provider);
   window.postMessage({ [TAG]: "page-ready" }, location.origin);
 })();
