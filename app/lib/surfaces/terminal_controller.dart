@@ -422,6 +422,10 @@ class TerminalTab {
   String name;
   final List<TerminalPane> panes;
   late TerminalPane focused;
+
+  /// How many shells in this tab are currently starting or running.
+  int get runningCount =>
+      panes.where((pane) => pane.state == PaneState.starting || pane.state == PaneState.running).length;
 }
 
 /// The shells open for one conversation, in tabs. Held by the surface's controller, so hiding the panel or moving the surface to
@@ -443,11 +447,29 @@ class TerminalWorkspace extends ChangeNotifier {
   bool _released = false;
   bool _focusWished = false;
 
+  /// How many shells each tab had running when listeners were last told.
+  List<int> _told = const [];
+
   /// The most shells open at once in one conversation; the host holds 8 to a link.
   static const limit = 8;
 
   int get shells => [for (final tab in tabs) ...tab.panes].length;
+  int get runningShells => tabs.fold(0, (sum, tab) => sum + tab.runningCount);
   bool get full => shells >= limit;
+
+  @override
+  void notifyListeners() {
+    _told = _runningByTab();
+    super.notifyListeners();
+  }
+
+  List<int> _runningByTab() => [for (final tab in tabs) tab.runningCount];
+
+  /// A shell changed (its title, its output, its state): listeners hear of it only when a tab's count of running shells moved, so a
+  /// shell's title changing does not rebuild what the counts are shown in.
+  void _paneChanged() {
+    if (!listEquals(_runningByTab(), _told)) notifyListeners();
+  }
 
   TerminalTab? get active => _active ?? tabs.firstOrNull;
 
@@ -464,6 +486,7 @@ class TerminalWorkspace extends ChangeNotifier {
 
   TerminalPane _pane([String? own]) {
     final pane = TerminalPane(host: host, cwd: cwd, shell: own ?? shell, clipboard: clipboard);
+    pane.addListener(_paneChanged);
     unawaited(pane.start());
     return pane;
   }
@@ -514,6 +537,7 @@ class TerminalWorkspace extends ChangeNotifier {
   /// Ends one shell of a tab; the tab goes with its last one.
   void closePane(TerminalTab tab, TerminalPane pane) {
     if (!tab.panes.remove(pane)) return;
+    pane.removeListener(_paneChanged);
     unawaited(pane.close().whenComplete(pane.dispose));
     if (tab.panes.isEmpty) {
       final at = tabs.indexOf(tab);
@@ -539,6 +563,9 @@ class TerminalWorkspace extends ChangeNotifier {
     final panes = [for (final tab in tabs) ...tab.panes];
     tabs.clear();
     _active = null;
+    for (final pane in panes) {
+      pane.removeListener(_paneChanged);
+    }
     await Future.wait([for (final pane in panes) pane.close()]);
     for (final pane in panes) {
       pane.dispose();

@@ -33,6 +33,12 @@ class SubagentsSurface extends WorkSurface {
   bool available(ChatSession session) => !session.isDraft && !session.tasks.isEmpty;
 
   @override
+  String? badge(ChatSession session, SurfaceController controller) {
+    final live = session.tasks.live.length;
+    return live > 0 ? '$live' : null;
+  }
+
+  @override
   Widget build(BuildContext context, ChatSession session, SurfaceController controller) => SubagentsPanel(session: session);
 }
 

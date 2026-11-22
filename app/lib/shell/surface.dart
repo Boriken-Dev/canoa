@@ -42,7 +42,7 @@ class SurfaceController extends ChangeNotifier {
 
 /// A tab a surface puts in the panel's one tab bar, in place of its own single tab: a terminal's shells, each its own tab.
 class SurfaceTab {
-  const SurfaceTab({required this.id, required this.title, required this.selected, required this.select, this.close});
+  const SurfaceTab({required this.id, required this.title, required this.selected, required this.select, this.close, this.badge});
 
   /// Unique among the surface's tabs; the tab's key is `tab <surface id>:<id>`.
   final String id;
@@ -54,6 +54,9 @@ class SurfaceTab {
 
   /// Closes just this tab; null for one that closes with its surface.
   final VoidCallback? close;
+
+  /// A short count shown beside the title, such as how many of the tab's shells are running; null for none.
+  final String? badge;
 }
 
 /// Something a surface does for its chosen tab, listed in the panel's actions menu.
@@ -101,6 +104,12 @@ abstract class WorkSurface {
 
   /// What changes [tabs], listened to by the panel.
   Listenable? tabsChanged(ChatSession session, SurfaceController controller) => null;
+
+  /// A short count shown beside this surface's single tab, such as how many things in it are running; null for none.
+  String? badge(ChatSession session, SurfaceController controller) => null;
+
+  /// What changes [badge], listened to by the panel.
+  Listenable? badgeChanged(ChatSession session, SurfaceController controller) => null;
 
   /// What the surface does for its chosen tab, listed in the panel's actions menu.
   List<SurfaceAction> actions(BuildContext context, ChatSession session, SurfaceController controller) => const [];

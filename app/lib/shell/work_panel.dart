@@ -74,6 +74,7 @@ class WorkPanel extends StatelessWidget {
                           key: ValueKey('tab ${each.surface.id}:${tab.id}'),
                           title: tab.title,
                           icon: each.surface.icon,
+                          badge: tab.badge,
                           closeKey: ValueKey('close ${each.surface.id}:${tab.id}'),
                           selected: identical(each, active) && tab.selected,
                           onSelect: () {
@@ -90,6 +91,7 @@ class WorkPanel extends StatelessWidget {
                         key: ValueKey('tab ${each.surface.id}'),
                         title: each.title,
                         icon: each.surface.icon,
+                        badge: each.surface.badge(session, each.controller),
                         closeKey: ValueKey('close ${each.surface.id}'),
                         selected: identical(each, active),
                         onSelect: () => surfaces.activate(each.surface.id),
@@ -240,7 +242,14 @@ class WorkPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([surfaces, layout, for (final each in surfaces.inSlot(slot)) ?each.surface.tabsChanged(session, each.controller)]),
+    listenable: Listenable.merge([
+      surfaces,
+      layout,
+      for (final each in surfaces.inSlot(slot)) ...[
+        ?each.surface.tabsChanged(session, each.controller),
+        ?each.surface.badgeChanged(session, each.controller),
+      ],
+    ]),
     builder: (context, _) {
       final here = surfaces.inSlot(slot);
       final active = surfaces.activeIn(slot);
@@ -257,10 +266,11 @@ class WorkPanel extends StatelessWidget {
 }
 
 class _Tab extends StatelessWidget {
-  const _Tab({super.key, required this.title, required this.icon, required this.closeKey, required this.selected, required this.onSelect, required this.onClose});
+  const _Tab({super.key, required this.title, required this.icon, this.badge, required this.closeKey, required this.selected, required this.onSelect, required this.onClose});
 
   final String title;
   final IconData icon;
+  final String? badge;
   final Key closeKey;
   final bool selected;
   final VoidCallback onSelect, onClose;
@@ -271,7 +281,7 @@ class _Tab extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: title,
+      label: badge == null ? title : '$title ($badge)',
       child: Material(
         color: selected ? context.look.selected : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
@@ -284,6 +294,20 @@ class _Tab extends StatelessWidget {
               Icon(icon, size: 16, color: selected ? scheme.primary : scheme.onSurfaceVariant),
               const SizedBox(width: 6),
               Text(title, style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.w600 : FontWeight.w400)),
+              if (badge != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    badge!,
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: scheme.primary),
+                  ),
+                ),
+              ],
               if (selected)
                 IconButton(
                   key: closeKey,

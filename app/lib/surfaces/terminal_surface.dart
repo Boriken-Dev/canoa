@@ -64,6 +64,12 @@ class TerminalSurface extends WorkSurface {
 
   static const _key = 'terminal workspace';
 
+  /// The workspace already opened on [controller], or null if no shell has been opened yet.
+  static TerminalWorkspace? openWorkspace(SurfaceController controller) {
+    if (controller.data[_key] case final TerminalWorkspace made) return made;
+    return null;
+  }
+
   /// The shells of [controller]'s surface for [session], made with a first one (running [firstShell], the host's own choice when
   /// null) the first time; null where the host offers none.
   TerminalWorkspace? workspaceFor(SurfaceController controller, ChatSession session, {String? firstShell}) {
@@ -87,6 +93,7 @@ class TerminalSurface extends WorkSurface {
         SurfaceTab(
           id: '${tab.id}',
           title: tab.name,
+          badge: tab.runningCount > 0 ? '${tab.runningCount}' : null,
           selected: identical(tab, workspace.active),
           select: () => workspace.activate(tab),
           close: () => workspace.closeTab(tab),
@@ -96,6 +103,15 @@ class TerminalSurface extends WorkSurface {
 
   @override
   Listenable? tabsChanged(ChatSession session, SurfaceController controller) => workspaceFor(controller, session);
+
+  @override
+  String? badge(ChatSession session, SurfaceController controller) {
+    final running = openWorkspace(controller)?.runningShells ?? 0;
+    return running > 0 ? '$running' : null;
+  }
+
+  @override
+  Listenable? badgeChanged(ChatSession session, SurfaceController controller) => openWorkspace(controller);
 
   @override
   List<SurfaceAction> actions(BuildContext context, ChatSession session, SurfaceController controller) {
