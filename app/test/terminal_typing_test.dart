@@ -13,6 +13,7 @@ import 'package:canoa/shell/shell.dart';
 import 'package:canoa/shell/surface.dart';
 import 'package:canoa/shell/work_panel.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
+import 'package:canoa/surfaces/terminal_keys.dart' show terminalReadsKeysDirectly;
 import 'package:canoa/surfaces/terminal_surface.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
@@ -119,10 +120,19 @@ Future<({SessionSurfaces open, TerminalSurface surface, ChatSession session})> _
   return (open: open, surface: terminal, session: session);
 }
 
-/// Types through the platform's text input, which is how letters reach a terminal.
+/// Types as a person does on this platform: key events that carry their character where the terminal reads keys itself, the
+/// platform's text input elsewhere.
 Future<void> _typeText(WidgetTester tester, String text) async {
-  expect(tester.testTextInput.isRegistered, isTrue, reason: 'no text input is connected: the terminal does not have the keyboard');
-  tester.testTextInput.enterText(text);
+  if (terminalReadsKeysDirectly()) {
+    for (final unit in text.runes) {
+      final key = LogicalKeyboardKey.findKeyByKeyId(unit);
+      expect(key, isNotNull, reason: 'no key for ${String.fromCharCode(unit)}');
+      await tester.sendKeyEvent(key!, character: String.fromCharCode(unit));
+    }
+  } else {
+    expect(tester.testTextInput.isRegistered, isTrue, reason: 'no text input is connected: the terminal does not have the keyboard');
+    tester.testTextInput.enterText(text);
+  }
   await tester.pump();
 }
 
@@ -150,6 +160,34 @@ void _tests() {
     await _settle(tester);
     expect(host.opened.single.writes.join(), 'ls\r');
   });
+
+  testWidgets('Windows: letters typed as key events and Enter reach the host, and no text input is needed', (tester) async {
+    final host = _Host();
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    await _panel(tester, host, store);
+
+    for (final letter in ['a', 'b', 'c']) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.findKeyByKeyId(letter.codeUnitAt(0))!, character: letter);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await _settle(tester);
+    expect(host.opened.single.writes.join(), 'abc\r');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('Linux: letters arrive through the platform text input, and Enter as a key', (tester) async {
+    final host = _Host();
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    await _panel(tester, host, store);
+    expect(tester.testTextInput.isRegistered, isTrue);
+
+    tester.testTextInput.enterText('abc');
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await _settle(tester);
+    expect(host.opened.single.writes.join(), 'abc\r');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
   testWidgets('the bottom panel: after a click in the screen, typing reaches the host', (tester) async {
     final host = _Host();

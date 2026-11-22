@@ -128,7 +128,7 @@ Future<_Rig> _rig(WidgetTester tester, TerminalClipboard clip) async {
   ));
   await tester.pump(const Duration(milliseconds: 50));
   await _settle(tester);
-  expect(tester.testTextInput.isRegistered, isTrue, reason: 'the shell has the keyboard');
+  expect(workspace.focused!.focusNode.hasPrimaryFocus, isTrue, reason: 'the shell has the keyboard');
   return _Rig(host, workspace);
 }
 

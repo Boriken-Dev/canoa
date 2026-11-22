@@ -508,6 +508,7 @@ class _ScreenState extends State<_Screen> {
                 padding: const EdgeInsets.all(6),
                 theme: _theme,
                 textStyle: terminalTextStyle,
+                hardwareKeyboardOnly: terminalReadsKeysDirectly(),
                 // The clipboard keys are `terminalClipboardKey`'s; the terminal's own shortcuts, which use the system clipboard
                 // directly and take Ctrl+A from the shell, are left out.
                 shortcuts: const {},
