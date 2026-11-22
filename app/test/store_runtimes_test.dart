@@ -1,4 +1,4 @@
-// The Runtimes type's data over a scripted host (test/fixtures/store_link.dart): the host lists the type apart from the agents'
+// The Programs type's data over a scripted host (test/fixtures/store_link.dart): the host lists the type apart from the agents'
 // programs, a row says what is installed, installing shows the plan first and a refused plan installs nothing, and removing asks
 // the host to take its own copy away.
 import 'package:canoa/store/store_runtimes.dart';
@@ -10,12 +10,12 @@ FakeStore _node({List<Map<String, Object?>> copies = const [], String? latest}) 
     FakeStore('node_store', title: 'Node.js', copies: copies, latest: latest, runtime: true);
 
 void main() {
-  test('the runtimes are listed apart from the agents and asked as their own kind', () async {
+  test('the programs are listed apart from the agents and asked as their own kind', () async {
     final host = FakeStoreHost([claudeLike(), _node(latest: '24.2.0')]);
-    final runtimes = host.programs(kind: runtimesTypeId);
+    final runtimes = host.programs(kind: programsTypeId);
     await runtimes.refresh();
     expect(runtimeItems(runtimes).map((each) => each.provider), ['node_store']);
-    expect(host.params['store/list']!.single, {'kind': 'runtimes'});
+    expect(host.params['store/list']!.single, {'kind': 'programs'});
     final agents = host.programs();
     await agents.refresh();
     expect(agents.statuses.map((each) => each.info.provider), ['one_store']);
@@ -26,7 +26,7 @@ void main() {
     final host = FakeStoreHost([
       _node(copies: [copyOf('24.1.0', managed: true)], latest: '24.2.0'),
     ]);
-    final runtimes = host.programs(kind: runtimesTypeId);
+    final runtimes = host.programs(kind: programsTypeId);
     await runtimes.refresh(latest: true);
     final item = runtimeItems(runtimes).single;
     expect(item.name, 'Node.js');
@@ -49,7 +49,7 @@ void main() {
   test('an install that is confirmed is applied, and a remove asks the host to take its copy away', () async {
     final host = FakeStoreHost([_node(latest: '24.2.0')]);
     host.afterApply = (store, plan) => store.copies = [copyOf('24.2.0', managed: true)];
-    final runtimes = host.programs(kind: runtimesTypeId);
+    final runtimes = host.programs(kind: programsTypeId);
     await runtimes.refresh();
     var item = runtimeItems(runtimes).single;
     expect(item.installed, isFalse);

@@ -118,7 +118,7 @@ TypeModels _models(FakeStoreHost host) {
   return TypeModels(type: _type, title: 'Runner models', control: () async => shared, open: () async => host.client());
 }
 
-ExtensionStoreType _typeOf(TypeModels models) => modelsStoreType(id: _type, models: models, icon: Icons.memory);
+ExtensionStoreType _typeOf(TypeModels models) => modelsStoreType(models: [models], icon: Icons.memory);
 
 Future<void> _open(WidgetTester tester, ExtensionStoreItem item) async {
   await tester.pumpWidget(
@@ -149,8 +149,8 @@ void main() {
     final host = _host(models);
     final shown = _models(host);
     final type = _typeOf(shown);
-    expect(type.id, modelsTypeId(_type));
-    expect(type.label, 'Runner models');
+    expect(type.id, modelsTypeId);
+    expect(type.label, 'Models');
     expect(type.items(), isEmpty, reason: 'nothing is shown before the host has answered');
     await type.load!();
     final items = type.items();
@@ -173,6 +173,28 @@ void main() {
     expect(only.install, isNull, reason: 'there is nothing to download or load');
     expect(only.summary, contains('Runner list'));
     none.dispose();
+  });
+
+  test('the models of every type are one page, each grouped under the catalog its library names', () async {
+    final host = FakeStoreHost([])
+      ..modelsAnswer = (given) => {
+        'type': given['type'],
+        'catalog': given['type'] == 'runner' ? 'Runner' : 'Speaker',
+        'publisher': 'Acme',
+        'models': [
+          {'id': '${given['type']}-one', 'summary': 'one', 'tags': <String>[], 'actions': <Object?>[]},
+          {'id': '${given['type']}-two', 'summary': 'two', 'tags': <String>[], 'actions': <Object?>[]},
+        ],
+      };
+    final shared = host.client();
+    final runner = TypeModels(type: 'runner', title: 'Runner models', control: () async => shared, open: () async => host.client());
+    final speaker = TypeModels(type: 'speaker', title: 'Speaker voices', control: () async => shared, open: () async => host.client());
+    final page = modelsStoreType(models: [runner, speaker]);
+    expect(page.id, modelsTypeId);
+    await page.load!();
+    expect(page.items().map((each) => '${each.catalog}/${each.name}'), ['Runner/runner-one', 'Runner/runner-two', 'Speaker/speaker-one', 'Speaker/speaker-two']);
+    runner.dispose();
+    speaker.dispose();
   });
 
   test('a host that cannot list them is shown in its own words, and asked again the next time', () async {

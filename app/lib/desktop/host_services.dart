@@ -78,7 +78,7 @@ final class HostServices {
             c,
             capture: speechCapture ?? const RecordCapture(),
             grants: grants,
-            programs: ProgramStores(control: () => c.ready(wait: false), open: c.open, kind: 'runtimes'),
+            programs: ProgramStores(control: () => c.ready(wait: false), open: c.open, kind: 'programs'),
           );
     hostVoices = hostSpeech == null ? null : HostVoiceCatalog(hostSpeech!.call);
     terminals = c == null ? null : ControlTerminals(c);

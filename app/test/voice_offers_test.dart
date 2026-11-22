@@ -66,7 +66,7 @@ Future<(OffersHost, HostSpeechCatalog, SettingsHarness)> _page(
   final catalog = HostSpeechCatalog(
     HostControl.dialing(() async => link),
     grants: grants,
-    programs: store?.programs(kind: 'runtimes'),
+    programs: store?.programs(kind: 'programs'),
   );
   await tester.runAsync(catalog.refresh);
   final harness = await openSettings(tester, section: 'voice', hostSpeech: catalog, config: config);

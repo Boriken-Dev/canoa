@@ -104,7 +104,7 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 Future<ProgramStores> _load(WidgetTester tester, FakeStoreHost host) async {
-  final programs = host.programs(kind: runtimesTypeId);
+  final programs = host.programs(kind: programsTypeId);
   await tester.runAsync(() => programs.refresh(latest: true));
   return programs;
 }
@@ -131,7 +131,7 @@ void main() {
 
     test('agents of the host and of the person and the MCP servers that start a command it provides', () async {
       final host = _host();
-      final programs = host.programs(kind: runtimesTypeId);
+      final programs = host.programs(kind: programsTypeId);
       await programs.refresh();
       final node = RuntimeItem.find(programs, 'node_store')!;
       expect([for (final user in node.users(_config)) '${user.kind} ${user.name} ${user.command}'], [
@@ -156,7 +156,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: StoreView(runtimesTypeId), config: _config)),
+      home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: StoreView(programsTypeId), config: _config)),
     ));
     await tester.runAsync(extensions.ensure);
     await _settle(tester);
@@ -334,7 +334,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: StoreView(runtimesTypeId), config: _config)),
+        home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: StoreView(programsTypeId), config: _config)),
       ));
       await tester.runAsync(extensions.ensure);
       await _settle(tester);
@@ -418,7 +418,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: StoreView(runtimesTypeId), config: config)),
+        home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: StoreView(programsTypeId), config: config)),
       ));
       await tester.runAsync(extensions.ensure);
       await _settle(tester);

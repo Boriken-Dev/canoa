@@ -334,7 +334,7 @@ class _ShellsSectionState extends State<ShellsSection> {
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  'The host found no shell it knows. Install Git Bash or PowerShell from the Store, under Runtimes.',
+                  'The host found no shell it knows. Install Git Bash or PowerShell from the Store, under Programs.',
                   key: Key('shells-none'),
                 ),
               ),

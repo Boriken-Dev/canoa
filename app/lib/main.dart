@@ -1024,7 +1024,7 @@ class _CanoaAppState extends State<CanoaApp> {
     agents: _profileAgents,
     programs: _programs,
     extensionTypes: _storeTypes(),
-    runtimes: _programs == null ? null : _extensionsHeld?.runtimes,
+    runtimes: _programs == null ? null : _extensionsHeld?.programs,
     // The host reads catalogs and looks programs up, for a page and the desktop alike.
     findProgram: _control == null ? null : controlFindProgram(_control!),
     overlayNeeds: _control == null ? null : controlOverlayNeeds(_control!),
@@ -1033,7 +1033,7 @@ class _CanoaAppState extends State<CanoaApp> {
     readCatalog: controlCatalogRead(_control),
   );
 
-  /// The store types after the built-in ones: Runtimes and what extensions add, where the host grants installing programs.
+  /// The store types after the built-in ones: Programs, Models and Extensions, where the host grants installing programs.
   List<ExtensionStoreType> _storeTypes() {
     final held = _programs == null ? null : _extensionsHeld;
     if (held == null) return const [];
@@ -2516,7 +2516,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onInstallRuntime: _programs == null
               ? null
               : (providers) async {
-                  final runtimes = _extensionsHeld?.runtimes;
+                  final runtimes = _extensionsHeld?.programs;
                   if (runtimes == null) return;
                   for (final provider in providers) {
                     if (!above.mounted || !await installRuntime(above, runtimes, provider)) break;

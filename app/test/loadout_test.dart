@@ -209,7 +209,7 @@ void main() {
       store.copies = [copyOf('3.13.1')];
       found = true;
     };
-    final runtimes = host.programs(kind: 'runtimes');
+    final runtimes = host.programs(kind: 'programs');
     addTearDown(runtimes.dispose);
     await tester.runAsync(runtimes.refresh);
     await open(tester, runtimes: runtimes, overlayNeeds: (name) async => name != 'review'

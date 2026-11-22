@@ -70,6 +70,7 @@ final class FakeStore {
     this.latestNote,
     this.runtime = false,
     this.extensionType,
+    this.library,
     this.summary,
     this.icon,
     this.commands = const [],
@@ -81,12 +82,15 @@ final class FakeStore {
   final String? summary, icon, homepage;
   final List<String> commands, endpoints;
 
-  /// The id of the type an extension adds that the store belongs to, which `store/list` gives only for that type.
+  /// The id of the type a library adds that the store belongs to, which `store/list` gives with the programs.
   final String? extensionType;
+
+  /// The library that offers the store, which `store/list` gives with the programs.
+  final String? library;
 
   final String provider, title;
 
-  /// Whether the store is of the Runtimes type, which `store/list` gives only when asked for `runtimes`.
+  /// Whether the store is a program no type claims (a runtime), which `store/list` gives only when asked for `programs`.
   final bool runtime;
   List<Map<String, Object?>> serves;
   List<Map<String, Object?>> copies;
@@ -255,15 +259,14 @@ final class FakeStoreHost {
       return {'section': given['section'], 'restart': true};
     }
     if (method == 'store/list') {
-      final extension = given['kind'] == 'extension';
+      final programs = given['kind'] == 'programs';
       return {
         'stores': [
           for (final each in stores.where(
-            (each) => extension
-                ? each.extensionType == given['type']
-                : each.extensionType == null && each.runtime == (given['kind'] == 'runtimes'),
+            (each) => programs ? each.runtime || each.extensionType != null : !each.runtime && each.extensionType == null,
           ))
             {
+              if (programs) ...{'library': ?each.library, 'type': ?each.extensionType},
               'provider': each.provider,
               'program': each.provider.replaceAll('_store', ''),
               'title': each.title,

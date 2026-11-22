@@ -207,7 +207,7 @@ final class HostSpeechCatalog extends ChangeNotifier {
   /// What the host lets this key do; the offers say what is missing. Null when the app knows no grants (everything is tried).
   final HostGrants? grants;
 
-  /// The host's Runtimes stores, which a local engine is installed through.
+  /// The host's programs, which a local engine is installed through.
   final ProgramStores? programs;
 
   /// Where audio comes from; null while this build has no way to record, which a dictation says in words.

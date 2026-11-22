@@ -44,11 +44,19 @@ final class ProgramStoreInfo {
     this.endpoints = const [],
     this.serves = const [],
     this.channels = const [],
+    this.library,
+    this.type,
   });
 
   /// The store's id, which the other `store/*` methods name.
   final String provider;
   final String program, title, publisher;
+
+  /// The library that offers the store, which groups the Programs list; none when the host does not say.
+  final String? library;
+
+  /// The id of the Store type the library adds that claims this program, when one does: what its models and its setup are filed under.
+  final String? type;
   final String? homepage;
 
   /// What the program is, in a sentence, as the store says it.
@@ -81,6 +89,8 @@ final class ProgramStoreInfo {
       endpoints: [if (map['endpoints'] is List) for (final each in map['endpoints'] as List) ?_text(each)],
       serves: [for (final each in _maps(map['serves'])) ProgramServes(_text(each['provider']) ?? '', _map(each['when']))],
       channels: [if (map['channels'] is List) for (final each in map['channels'] as List) ?_text(each)],
+      library: _text(map['library']),
+      type: _text(map['type']),
     );
   }
 
@@ -469,7 +479,6 @@ class ProgramStores extends ChangeNotifier {
     this.latestLife = const Duration(hours: 1),
     this.afterChange,
     this.kind,
-    this.type,
   }) : _control = control,
        _open = open,
        _now = now ?? DateTime.now;
@@ -485,11 +494,8 @@ class ProgramStores extends ChangeNotifier {
   /// it start again here.
   final Future<void> Function()? afterChange;
 
-  /// Which stores the host lists: `runtimes` for the Runtimes type; none lists the agents' programs.
+  /// Which stores the host lists: `programs` for every program a library offers other than an agent's; none lists the agents'.
   final String? kind;
-
-  /// With kind `extension`, the type an extension adds whose stores are listed.
-  final String? type;
 
   final _status = <String, ProgramStatus>{};
   List<String> _order = const [];
@@ -542,7 +548,7 @@ class ProgramStores extends ChangeNotifier {
     notifyListeners();
     try {
       final client = await _control();
-      final listed = _map(await client.call('store/list', {'kind': ?kind, 'type': ?type}));
+      final listed = _map(await client.call('store/list', {'kind': ?kind}));
       final infos = [for (final each in listed['stores'] is List ? listed['stores'] as List : const []) ?ProgramStoreInfo.parse(each)];
       _order = [for (final each in infos) each.provider];
       _listed = true;

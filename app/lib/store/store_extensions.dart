@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -14,8 +13,7 @@ import 'store_models.dart';
 import 'store_runtimes.dart';
 import 'store_selection.dart' show StoreMarkImage;
 
-/// The icons an extension may name for its type; any other name draws the default. An extension may also ship a small picture of
-/// its own as its icon ([extensionImage]).
+/// The icons an extension may name for a type or a page it adds; any other name draws the default.
 const Map<String, IconData> extensionIcons = {
   'extension': Icons.extension_outlined,
   'palette': Icons.palette_outlined,
@@ -53,23 +51,8 @@ const Map<String, IconData> extensionIcons = {
   'info': Icons.info_outline,
 };
 
-/// The picture an extension ships as its type's icon, from the `data:image/png;base64,` or `data:image/webp;base64,` address the
-/// host gives; null for a name, or for an address that is not one of those. What it draws is checked again when it is shown.
-StoreMarkImage? extensionImage(Object? icon) {
-  if (icon is! String) return null;
-  for (final (prefix, path) in const [('data:image/png;base64,', 'icon.png'), ('data:image/webp;base64,', 'icon.webp')]) {
-    if (!icon.startsWith(prefix)) continue;
-    try {
-      return StoreMarkImage(path: path, bytes: base64Decode(icon.substring(prefix.length)));
-    } on FormatException {
-      return null;
-    }
-  }
-  return null;
-}
-
-/// The store type made of the programs the host lists in [programs]: each store is an item, and + plans its install (or its
-/// update, when the host's own copy is there), shows the plan for the person to confirm and runs it.
+/// The store type made of the programs the host lists in [programs]: each store is an item, grouped under the library that offers
+/// it, and + plans its install (or its update, when the host's own copy is there), shows the plan for the person to confirm and runs it.
 ExtensionStoreType programsStoreType({
   required String id,
   required String label,
@@ -77,7 +60,7 @@ ExtensionStoreType programsStoreType({
   StoreMarkImage? image,
   required ProgramStores programs,
   required String catalog,
-  Future<void> Function(BuildContext context)? afterInstall,
+  Future<void> Function(BuildContext context, String type)? afterInstall,
 }) => ExtensionStoreType(
   id: id,
   label: label,
@@ -88,7 +71,7 @@ ExtensionStoreType programsStoreType({
   items: () => [
     for (final status in programs.statuses)
       ExtensionStoreItem(
-        catalog: catalog,
+        catalog: status.info.library ?? catalog,
         name: status.info.title,
         by: status.info.publisher,
         leading: RuntimeMark(icon: status.info.icon),
@@ -100,16 +83,17 @@ ExtensionStoreType programsStoreType({
         install: (context) async {
           final done = await runProgramAction(context, programs, status, status.hasManaged ? 'update' : 'install');
           // What a program was installed for may need setting up next, as a secret provider's does.
-          if (done && afterInstall != null && context.mounted) await afterInstall(context);
+          final type = status.info.type;
+          if (done && afterInstall != null && type != null && context.mounted) await afterInstall(context, type);
         },
         remove: status.hasManaged ? (context) => runProgramAction(context, programs, status, 'uninstall') : null,
       ),
   ],
 );
 
-/// The store types beyond the built-in four: Runtimes, the Extensions the catalogs list, each type an extension named in the host's
-/// canoa.cfg adds and each a library the host carries adds. The host lists the types and does every install; this only holds what it
-/// said. A type whose library lists models has a page of them after its own.
+/// The store types beyond the built-in four: Programs (every program a library offers, runtimes and a type's alike), Models (what
+/// the libraries that list models list), and the Extensions the catalogs list. The host lists the programs and the models and does
+/// every install; this only holds what it said.
 class StoreExtensions extends ChangeNotifier {
   StoreExtensions({
     required Future<ControlClient> Function() control,
@@ -120,7 +104,7 @@ class StoreExtensions extends ChangeNotifier {
     this.afterInstall,
   }) : _control = control,
        _open = open {
-    _runtimes = ProgramStores(control: control, open: open, kind: 'runtimes');
+    _programs = ProgramStores(control: control, open: open, kind: 'programs');
     _catalogs = ExtensionCatalogs(control: control, mayInstall: mayInstall, restart: restart, saved: saved);
     _types = _built(const []);
   }
@@ -128,37 +112,38 @@ class StoreExtensions extends ChangeNotifier {
   final Future<ControlClient> Function() _control;
   final Future<ControlClient> Function() _open;
 
-  /// What is done once a program of the type [id] was installed: the Secret providers type opens the provider's setup.
+  /// What is done once a program a type claims was installed: the Secret providers type opens the provider's setup.
   final Future<void> Function(BuildContext context, String type)? afterInstall;
-  late final ProgramStores _runtimes;
+  late final ProgramStores _programs;
   late final ExtensionCatalogs _catalogs;
   late List<ExtensionStoreType> _types;
   Future<void>? _asking;
-  final _held = <ProgramStores>[];
   final _heldModels = <TypeModels>[];
 
-  /// The runtimes the host's Store keeps, which the Runtimes type lists and an overlay's unmet need is installed from.
-  ProgramStores get runtimes => _runtimes;
+  /// The programs the host's Store keeps, which the Programs type lists and an overlay's unmet need is installed from.
+  ProgramStores get programs => _programs;
 
-  /// Runtimes first, then the Extensions the catalogs list, then what extensions add, in the host's order, each type followed by the
-  /// page of its models when its library lists any.
+  /// Programs first, then the models the libraries list (when any does), then the Extensions the catalogs list.
   List<ExtensionStoreType> get types => _types;
 
   /// The titles of the types each extension adds, by the extension's name in canoa.cfg, as the host listed them.
   Map<String, List<String>> get addedBy => _addedBy;
   var _addedBy = <String, List<String>>{};
 
-  List<ExtensionStoreType> _built(List<ExtensionStoreType> added) => [_runtimesType(), extensionsStoreType(_catalogs), ...added];
+  List<ExtensionStoreType> _built(List<TypeModels> models) => [
+    programsStoreType(
+      id: programsTypeId,
+      label: programsTypeLabel,
+      icon: Icons.memory,
+      programs: _programs,
+      catalog: programsCatalog,
+      afterInstall: afterInstall,
+    ),
+    if (models.isNotEmpty) modelsStoreType(models: models),
+    extensionsStoreType(_catalogs),
+  ];
 
-  ExtensionStoreType _runtimesType() => programsStoreType(
-    id: runtimesTypeId,
-    label: runtimesTypeLabel,
-    icon: Icons.memory,
-    programs: _runtimes,
-    catalog: runtimesCatalog,
-  );
-
-  /// Asks the host which types extensions add, once. A host that refuses leaves Runtimes alone.
+  /// Asks the host which types extensions add, once. A host that refuses leaves Programs alone.
   Future<void> ensure() => _asking ??= _ask();
 
   /// Asks again, as after the host started with other extensions.
@@ -169,38 +154,22 @@ class StoreExtensions extends ChangeNotifier {
       final client = await _control();
       final answer = await client.call('store/extensions', const {});
       final list = answer is Map && answer['types'] is List ? answer['types'] as List : const [];
-      final added = <ExtensionStoreType>[];
+      final models = <TypeModels>[];
       final by = <String, List<String>>{};
-      final listing = <Future<void>>[];
       for (final each in list) {
         if (each is! Map || each['id'] is! String || each['title'] is! String) continue;
         final id = each['id'] as String;
-        if (id == runtimesTypeId || id == extensionsTypeId) continue;
-        final programs = ProgramStores(control: _control, open: _open, kind: 'extension', type: id);
-        final icon = extensionIcons[each['icon']] ?? Icons.extension_outlined;
-        final image = extensionImage(each['icon']);
-        added.add(programsStoreType(
-          id: id,
-          label: each['title'] as String,
-          icon: icon,
-          image: image,
-          programs: programs,
-          catalog: each['extension_title'] is String ? each['extension_title'] as String : 'An extension',
-          afterInstall: afterInstall == null ? null : (context) => afterInstall!(context, id),
-        ));
+        if (id == programsTypeId || id == modelsTypeId || id == extensionsTypeId) continue;
         if (each['models'] case {'title': final String title}) {
-          final models = TypeModels(type: id, title: title, control: _control, open: _open);
-          _heldModels.add(models);
-          added.add(modelsStoreType(id: id, models: models, icon: icon, image: image));
+          models.add(TypeModels(type: id, title: title, control: _control, open: _open));
         }
         if (each['extension'] is String) (by[each['extension'] as String] ??= []).add(each['title'] as String);
-        _held.add(programs);
-        listing.add(programs.ensure());
       }
-      _types = _built(added);
+      _heldModels.addAll(models);
+      _types = _built(models);
       _addedBy = by;
       notifyListeners();
-      await Future.wait([_runtimes.ensure(), ...listing]);
+      await _programs.ensure();
     } on Object {
       // The host offers no extensions: its Store has the types it has.
       _asking = null;
@@ -209,14 +178,11 @@ class StoreExtensions extends ChangeNotifier {
 
   @override
   void dispose() {
-    _runtimes.dispose();
+    _programs.dispose();
     for (final models in _heldModels) {
       models.dispose();
     }
     _catalogs.dispose();
-    for (final programs in _held) {
-      programs.dispose();
-    }
     super.dispose();
   }
 }

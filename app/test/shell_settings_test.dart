@@ -245,7 +245,7 @@ void main() {
     testWidgets('a host that found no shell points to the Store', (tester) async {
       await open(tester, report: {'shells': <Object?>[], 'agents': <Object?>[]});
       expect(find.byKey(const Key('shells-none')), findsOneWidget);
-      expect(find.textContaining('Runtimes'), findsOneWidget);
+      expect(find.textContaining('Programs'), findsOneWidget);
     });
 
     testWidgets('the page as the person sees it', (tester) async {

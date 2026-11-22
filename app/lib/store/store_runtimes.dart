@@ -2,16 +2,16 @@ import '../config/canoa_config.dart';
 import '../profile/profile.dart';
 import 'programs.dart';
 
-// The Runtimes type of the Store: the programs other programs need (Node, Python), which the host installs and keeps like an
-// agent's. This is its data: what the page lists and what its buttons do, over a [ProgramStores] made with `kind: 'runtimes'`.
-// The app holds no runtime name or address: every row is a store the host lists.
+// The Programs type of the Store: every program a library offers (the runtimes other programs need, a speech engine, a local model
+// service), which the host installs and keeps like an agent's. This is its data: what the page lists and what its buttons do, over a
+// [ProgramStores] made with `kind: 'programs'`. The app holds no program name or address: every row is a store the host lists.
 
-/// The catalog name the Runtimes rows come from: the host itself, which is the only place a runtime is installed from.
-const String runtimesCatalog = 'This host';
+/// The group a program is listed under when the host names no library for it: the host itself.
+const String programsCatalog = 'This host';
 
-/// The id and plural title of the Runtimes type in the Store's index.
-const String runtimesTypeId = 'runtimes';
-const String runtimesTypeLabel = 'Runtimes';
+/// The id and plural title of the Programs type in the Store's index.
+const String programsTypeId = 'programs';
+const String programsTypeLabel = 'Programs';
 
 /// Something in canoa.cfg that starts a runtime's command from the `PATH`: an agent the host serves or the person added, or an MCP
 /// server's command.
@@ -34,7 +34,7 @@ String? bareCommand(String command) {
   return text.toLowerCase().replaceFirst(RegExp(r'\.(exe|cmd|bat)$'), '');
 }
 
-/// One runtime as a row of the Runtimes page.
+/// One program as a row of the Programs page.
 final class RuntimeItem {
   const RuntimeItem._(this._programs, this.status);
 
@@ -106,5 +106,5 @@ final class RuntimeItem {
   Future<void> remove() => _programs.remove(provider);
 }
 
-/// The rows of the Runtimes page: every store the host listed for the type, in its order.
+/// The rows of the Programs page: every store the host listed, in its order.
 List<RuntimeItem> runtimeItems(ProgramStores programs) => [for (final each in programs.statuses) RuntimeItem._(programs, each)];

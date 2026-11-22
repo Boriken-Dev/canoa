@@ -1,7 +1,7 @@
-// The store types beyond the built-in four, over a scripted host (test/fixtures/store_link.dart): Runtimes is always there, and
-// each type an extension adds is asked of the host and listed from the stores the host says it is made of.
+// The store types beyond the built-in four, over a scripted host (test/fixtures/store_link.dart): Programs is always there and lists
+// every program the host does, Models lists what the libraries that list models do, and Extensions the catalogs'.
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
-import 'package:canoa/store/store_extension.dart' show ExtensionBody, ExtensionStoreType;
+import 'package:canoa/store/store_extension.dart' show ExtensionBody;
 import 'package:canoa/store/store_extension_catalog.dart';
 import 'package:canoa/store/store_extensions.dart';
 import 'package:canoa/store/store_models.dart';
@@ -13,58 +13,54 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/store_link.dart';
 
 void main() {
-  test('Runtimes is a type before the host is asked, and an extension\'s type follows it once it is', () async {
+  test('Programs is a type before the host is asked, and lists every program the host does, runtimes and a library\'s alike', () async {
     final host = FakeStoreHost([
-      FakeStore('node_store', title: 'Node.js', runtime: true, latest: '24.2.0'),
-      FakeStore('echo_archive_store', title: 'Echo archive', extensionType: 'echoes', copies: [copyOf('1.0.0')]),
+      FakeStore('node_store', title: 'Node.js', runtime: true, latest: '24.2.0', library: 'canoa-node'),
+      FakeStore('echo_archive_store', title: 'Echo archive', extensionType: 'echoes', library: 'sample', copies: [copyOf('1.0.0')]),
+      FakeStore('claude_like_store', title: 'An agent'),
     ])..extensionTypes = [
         {'id': 'echoes', 'title': 'Echoes', 'icon': 'palette', 'stores': ['echo_archive_store'], 'extension': 'sample', 'extension_title': 'Sample'},
-        {'id': 'runtimes', 'title': 'Impostor', 'stores': <String>[]},
+        {'id': 'programs', 'title': 'Impostor', 'stores': <String>[]},
       ];
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId], reason: 'no type of a library is listed before the host says so');
+    expect(extensions.types.map((type) => type.id), [programsTypeId, extensionsTypeId], reason: 'no type of a library is listed before the host says so');
     var heard = 0;
     extensions.addListener(() => heard++);
 
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId, 'echoes'], reason: 'a type may not take a built-in one\'s id');
-    expect(extensions.types.map((type) => type.label), [runtimesTypeLabel, extensionsTypeLabel, 'Echoes']);
+    expect(extensions.types.map((type) => type.id), [programsTypeId, extensionsTypeId], reason: 'a type is no page of its own, and may not take a built-in one\'s id');
+    expect(extensions.types.map((type) => type.label), [programsTypeLabel, extensionsTypeLabel]);
     expect(heard, 1);
 
-    final echoes = extensions.types.last;
-    await echoes.load!();
-    final item = echoes.items().single;
-    expect(item.name, 'Echo archive');
-    expect(item.catalog, 'Sample');
-    expect(item.installed, isTrue);
-    expect(host.params['store/list']!.any((given) => given['kind'] == 'extension' && given['type'] == 'echoes'), isTrue);
-
-    final runtimes = extensions.types.first;
-    await runtimes.load!();
-    expect(runtimes.items().map((each) => each.name), ['Node.js']);
-    expect(runtimes.items().single.installed, isFalse);
-    expect(runtimes.items().single.summary, 'Not installed');
+    final programs = extensions.types.first;
+    await programs.load!();
+    expect(programs.items().map((each) => each.name), ['Node.js', 'Echo archive'], reason: 'one list: the runtimes, then each library\'s programs, no agent');
+    expect(programs.items().map((each) => each.catalog), ['canoa-node', 'sample'], reason: 'each row is grouped by the library that offers it');
+    expect(programs.items().map((each) => each.installed), [false, true]);
+    expect(programs.items().first.summary, 'Not installed');
+    expect(host.params['store/list']!.where((given) => given['kind'] == 'programs'), isNotEmpty);
+    expect(host.params['store/list']!.any((given) => given['kind'] == 'extension' || given['kind'] == 'runtimes'), isFalse);
     extensions.dispose();
   });
 
-  test('a host that cannot list extensions leaves Runtimes alone and is asked again next time', () async {
+  test('a host that cannot list extensions leaves Programs alone and is asked again next time', () async {
     final host = FakeStoreHost([])..failures['store/extensions'] = ControlFailed(-32601, 'no such method');
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId]);
+    expect(extensions.types.map((type) => type.id), [programsTypeId, extensionsTypeId]);
     host.failures.clear();
     host.extensionTypes = [
-      {'id': 'echoes', 'title': 'Echoes', 'stores': <String>[]},
+      {'id': 'echoes', 'title': 'Echoes', 'stores': <String>[], 'models': {'provider': 'echo_models', 'title': 'Echo models'}},
     ];
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId, 'echoes']);
+    expect(extensions.types.map((type) => type.id), [programsTypeId, modelsTypeId, extensionsTypeId]);
     extensions.dispose();
   });
 
-  test('a type whose library lists models has a page of them after its own, and a type that lists none has not', () async {
-    final host = FakeStoreHost([FakeStore('runner_store', title: 'Runner', extensionType: 'runner', copies: [copyOf('0.14.0')])])
+  test('the models of every type are one page after Programs, and a type that lists none adds none', () async {
+    final host = FakeStoreHost([FakeStore('runner_store', title: 'Runner', extensionType: 'runner', library: 'canoa-runner', copies: [copyOf('0.14.0')])])
       ..extensionTypes = [
         {
           'id': 'runner',
@@ -75,60 +71,53 @@ void main() {
           'extension_title': 'Runner',
           'models': {'provider': 'runner_models', 'title': 'Runner models'},
         },
+        {
+          'id': 'speaker',
+          'title': 'Speaker',
+          'stores': <String>[],
+          'extension': 'built-in',
+          'extension_title': 'Speaker',
+          'models': {'provider': 'speaker_voices', 'title': 'Speaker voices'},
+        },
         {'id': 'plain', 'title': 'Plain', 'stores': <String>[], 'models': null},
       ];
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId, 'runner', modelsTypeId('runner'), 'plain']);
-    expect(extensions.types.map((type) => type.label), ['Runtimes', 'Extensions', 'Runner', 'Runner models', 'Plain']);
-    final program = extensions.types[2];
-    await program.load!();
-    expect(program.items().single.name, 'Runner');
+    expect(extensions.types.map((type) => type.id), [programsTypeId, modelsTypeId, extensionsTypeId]);
+    expect(extensions.types.map((type) => type.label), ['Programs', 'Models', 'Extensions']);
+    final programs = extensions.types.first;
+    await programs.load!();
+    expect(programs.items().single.name, 'Runner');
+    expect(programs.items().single.catalog, 'canoa-runner');
+    final models = extensions.types[1];
+    await models.load!();
+    expect(host.params['store/models']!.map((given) => given['type']).toSet(), {'runner', 'speaker'}, reason: 'each type that lists models is asked, and no other');
     extensions.dispose();
 
     final without = FakeStoreHost([])..extensionTypes = [];
     final sharedWithout = without.client();
     final bare = StoreExtensions(control: () async => sharedWithout, open: () async => without.client());
     await bare.ensure();
-    expect(bare.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId]);
+    expect(bare.types.map((type) => type.id), [programsTypeId, extensionsTypeId]);
     bare.dispose();
   });
 
-  test('a type\'s icon is one of the app\'s names, or a small picture the extension ships', () async {
-    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==';
-    Map<String, Object?> type(String id, String icon, String by) =>
-        {'id': id, 'title': id, 'icon': icon, 'stores': <String>[], 'extension': by, 'extension_title': by};
-    final host = FakeStoreHost([])
-      ..extensionTypes = [
-        type('named', 'science', 'a'),
-        type('unknown', 'nothing-like-it', 'a'),
-        type('pictured', 'data:image/png;base64,$png', 'b'),
-        type('webp', 'data:image/webp;base64,UklGRg==', 'b'),
-        type('broken', 'data:image/png;base64,@@@', 'b'),
-        type('svg', 'data:image/svg+xml;base64,PHN2Zz4=', 'b'),
-      ];
+  test('the titles of the types each extension adds are kept by the extension, though a type is no page of its own', () async {
+    Map<String, Object?> type(String id, String by) => {'id': id, 'title': id, 'stores': <String>[], 'extension': by, 'extension_title': by};
+    final host = FakeStoreHost([])..extensionTypes = [type('named', 'a'), type('unknown', 'a'), type('pictured', 'b')];
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    ExtensionStoreType added(String id) => extensions.types.firstWhere((each) => each.id == id);
-    expect(added('named').icon, Icons.science_outlined);
-    expect(added('named').image, isNull);
-    expect(added('unknown').icon, Icons.extension_outlined, reason: 'a name the app does not know draws the default');
-    expect(added('pictured').image!.path, 'icon.png');
-    expect(added('pictured').image!.bytes.take(4), [0x89, 0x50, 0x4e, 0x47]);
-    expect(added('webp').image!.path, 'icon.webp');
-    expect(added('broken').image, isNull, reason: 'not base64: the default icon');
-    expect(added('svg').image, isNull, reason: 'only PNG and WebP are drawn');
-    expect(extensions.addedBy, {'a': ['named', 'unknown'], 'b': ['pictured', 'webp', 'broken', 'svg']});
+    expect(extensions.addedBy, {'a': ['named', 'unknown'], 'b': ['pictured']});
     extensions.dispose();
   });
 
-  testWidgets('an installed item of an extension\'s type has Remove, which shows the host\'s plan and removes once it is confirmed', (tester) async {
+  testWidgets('an installed item of a library\'s program has Remove, which shows the host\'s plan and removes once it is confirmed', (tester) async {
     final host = FakeStoreHost([
-      FakeStore('echo_archive_store', title: 'Echo archive', extensionType: 'echoes', copies: [copyOf('1.0.0')]),
-      FakeStore('plain_store', title: 'Found only', extensionType: 'echoes', copies: [copyOf('2.0.0', managed: false)]),
-      FakeStore('absent_store', title: 'Absent', extensionType: 'echoes'),
+      FakeStore('echo_archive_store', title: 'Echo archive', extensionType: 'echoes', library: 'Sample', copies: [copyOf('1.0.0')]),
+      FakeStore('plain_store', title: 'Found only', extensionType: 'echoes', library: 'Sample', copies: [copyOf('2.0.0', managed: false)]),
+      FakeStore('absent_store', title: 'Absent', extensionType: 'echoes', library: 'Sample'),
     ])
       ..extensionTypes = [
         {'id': 'echoes', 'title': 'Echoes', 'stores': ['echo_archive_store', 'plain_store', 'absent_store'], 'extension': 'sample', 'extension_title': 'Sample'},
@@ -139,10 +128,10 @@ void main() {
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    final view = StoreView('echoes');
+    final view = StoreView(programsTypeId);
     await tester.binding.setSurfaceSize(const Size(900, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: extensions.types.last, view: view))));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: view))));
     await _settle(tester);
 
     expect(find.byKey(const Key('store-entry-remove-Sample-Echo archive')), findsOneWidget, reason: 'the host holds its own copy');
@@ -164,9 +153,9 @@ void main() {
     await _settle(tester);
     extensions.dispose();
   });
-  testWidgets('a program installed in a type that asks for it is followed by that type\'s setup', (tester) async {
+  testWidgets('a program a type claims is followed by that type\'s setup once it is installed', (tester) async {
     final host = FakeStoreHost([
-      FakeStore('bitwarden_store', title: 'Bitwarden', extensionType: 'secrets'),
+      FakeStore('bitwarden_store', title: 'Bitwarden', extensionType: 'secrets', library: 'Canoa'),
     ])
       ..extensionTypes = [
         {'id': 'secrets', 'title': 'Secret providers', 'icon': 'lock', 'stores': ['bitwarden_store'], 'extension': 'built-in', 'extension_title': 'Canoa'},
@@ -179,12 +168,11 @@ void main() {
       afterInstall: (context, type) async => setUp.add(type),
     );
     await extensions.ensure();
-    final view = StoreView('secrets');
+    final view = StoreView(programsTypeId);
     await tester.binding.setSurfaceSize(const Size(900, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: extensions.types.last, view: view))));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: view))));
     await _settle(tester);
-    expect(extensions.types.last.label, 'Secret providers');
 
     await tester.tap(find.byKey(const Key('store-entry-install-Canoa-Bitwarden')));
     await _settle(tester);

@@ -19,7 +19,7 @@ import 'store_banner.dart';
 import 'store_cards.dart';
 import 'store_catalogs.dart';
 import 'store_icon.dart';
-import 'store_runtimes.dart' show runtimesTypeId;
+import 'store_runtimes.dart' show programsTypeId;
 import 'store_view.dart';
 
 /// The Overlays type: the overlays canoa.cfg names, and the overlays the catalogs list.
@@ -222,11 +222,11 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
   }
 
   /// Shows the host's plan for the runtime [offer] and installs it on the yes, then asks the host what the overlays need again. With
-  /// no runtimes to install from, shows the Runtimes type.
+  /// no programs to install from, shows the Programs type.
   Future<void> _installRuntime(String offer) async {
     final runtimes = widget.runtimes;
     if (runtimes == null) {
-      widget.showType?.call(runtimesTypeId);
+      widget.showType?.call(programsTypeId);
       return;
     }
     if (!await installRuntime(context, runtimes, offer)) return;

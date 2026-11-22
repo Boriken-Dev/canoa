@@ -7,7 +7,6 @@ import '../forms/schema_fields.dart';
 import '../selectable.dart';
 import 'entry_details.dart';
 import 'store_extension.dart';
-import 'store_selection.dart' show StoreMarkImage;
 
 // The models of a Store type, as its library lists them: what the host's `store/models` answers (rows with a line, tags, what + does,
 // the page's sections and the form of a model's settings), moved by `store/model` and kept by `store/model_setting`. The host runs
@@ -16,8 +15,9 @@ import 'store_selection.dart' show StoreMarkImage;
 /// How long a download may take before the app stops waiting; the host ends it sooner than this.
 const Duration modelWait = Duration(hours: 4, minutes: 10);
 
-/// The id of the page that lists the models of the Store type [typeId], in the Store's index; a colon keeps it from any type's own.
-String modelsTypeId(String typeId) => '$typeId:models';
+/// The id and plural title of the page that lists the models of every Store type, in the Store's index.
+const String modelsTypeId = 'models';
+const String modelsTypeLabel = 'Models';
 
 Map<String, Object?> _map(Object? value) => value is Map ? value.cast<String, Object?>() : const {};
 
@@ -251,35 +251,38 @@ class TypeModels extends ChangeNotifier {
   }
 }
 
-/// The page of the models of a Store type, listed after the type's own.
-ExtensionStoreType modelsStoreType({required String id, required TypeModels models, required IconData icon, StoreMarkImage? image}) => ExtensionStoreType(
-  id: modelsTypeId(id),
-  label: models.title,
+/// The one page of the models every Store type's library lists, each grouped under the catalog its library names.
+ExtensionStoreType modelsStoreType({required List<TypeModels> models, IconData icon = Icons.memory}) => ExtensionStoreType(
+  id: modelsTypeId,
+  label: modelsTypeLabel,
   icon: icon,
-  image: image,
-  changes: models,
-  load: models.refresh,
-  items: () {
-    if (!models.loaded) return const [];
-    final why = models.problem ?? models.unavailable;
-    if (why != null) {
-      return [ExtensionStoreItem(catalog: models.catalog, name: models.catalog, by: models.publisher, summary: why)];
-    }
-    return [
-      for (final model in models.models)
-        ExtensionStoreItem(
-          catalog: models.catalog,
-          name: model.id,
-          by: model.by ?? models.publisher,
-          summary: model.summary,
-          tags: model.tags,
-          installed: model.on,
-          install: model.actions.isEmpty ? null : (context) => _choose(context, models, model),
-          details: (context, config) => ModelPage(models: models, id: model.id),
-        ),
-    ];
-  },
+  changes: Listenable.merge(models),
+  load: () => Future.wait([for (final each in models) each.refresh()]),
+  items: () => [
+    for (final of in models)
+      if (of.loaded) ..._itemsOf(of),
+  ],
 );
+
+List<ExtensionStoreItem> _itemsOf(TypeModels models) {
+  final why = models.problem ?? models.unavailable;
+  if (why != null) {
+    return [ExtensionStoreItem(catalog: models.catalog, name: models.catalog, by: models.publisher, summary: why)];
+  }
+  return [
+    for (final model in models.models)
+      ExtensionStoreItem(
+        catalog: models.catalog,
+        name: model.id,
+        by: model.by ?? models.publisher,
+        summary: model.summary,
+        tags: model.tags,
+        installed: model.on,
+        install: model.actions.isEmpty ? null : (context) => _choose(context, models, model),
+        details: (context, config) => ModelPage(models: models, id: model.id),
+      ),
+  ];
+}
 
 Future<bool> _confirm(BuildContext context, {required String title, required String text, required String action}) async {
   final answer = await showSelectableDialog<bool>(
