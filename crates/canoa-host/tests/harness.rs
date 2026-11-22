@@ -644,6 +644,53 @@ fn codex_runs_in_the_host_and_asks_its_approval_through_acp() {
     );
 }
 
+/// Starts of the program for one session over five prompts, by the records the stand-in writes: Claude Code's one record with
+/// `args` per process, Codex's one `initialize` per process.
+fn starts_over_five_prompts(harness: &str, started: impl Fn(&Value) -> bool) -> usize {
+    let scratch = Scratch::new();
+    let program = standin(&scratch, harness);
+    let (record, env) = env_of(&scratch);
+    let config = format!(
+        "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {}\n",
+        quoted(&program.to_string_lossy())
+    );
+    let host = Host::start_in(scratch, &config, 1, &env);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("Agent"), &client, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        let opened = rpc
+            .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+        let session = opened["sessionId"].as_str().expect("an id").to_owned();
+        for number in 0..5 {
+            let (answer, updates, _) =
+                prompt_answering(rpc, &session, &format!("prompt {number}"), "allow_once");
+            assert_eq!(answer["result"]["stopReason"], "end_turn", "{answer}");
+            assert_eq!(said(&updates), format!("Done: prompt {number}"));
+        }
+    })
+    .expect("a paired key is served");
+    records(&record)
+        .iter()
+        .filter(|entry| started(entry))
+        .count()
+}
+
+#[test]
+fn a_session_starts_its_program_once_however_many_prompts_it_is_given() {
+    assert_eq!(
+        starts_over_five_prompts("claude", |entry| entry.get("args").is_some()),
+        1,
+        "Claude Code"
+    );
+    assert_eq!(
+        starts_over_five_prompts("codex", |entry| entry["method"] == "initialize"),
+        1,
+        "Codex"
+    );
+}
 fn ends_within(pid: u32, wait: Duration) -> bool {
     let until = Instant::now() + wait;
     while Instant::now() < until {

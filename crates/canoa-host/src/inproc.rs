@@ -202,6 +202,8 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
             return End::AgentFailed;
         }
     };
+    // One program per connection, which is one per session: a second line for a session would be a restart.
+    tracing::info!("the harness provider started a connection");
     // The harness has placed the account's login by now, which the watch reads from its first look.
     let watching = watch.map(Watcher::begin);
     let finished = AtomicBool::new(false);
