@@ -108,12 +108,13 @@ ParsedMarkdownDocument parseMarkdownSections(String source) {
   String? fence;
 
   void flush() {
-    if (level == null || title == null) return;
-    final base = slugifyHeading(title!);
+    final (heading, words) = (level, title);
+    if (heading == null || words == null) return;
+    final base = slugifyHeading(words);
     final key = base.isEmpty ? 'section' : base;
     final count = (seen[key] ?? 0) + 1;
     seen[key] = count;
-    sections.add(MarkdownSection(level: level!, title: title!, slug: count == 1 ? key : '$key-$count', body: body.join('\n').trim()));
+    sections.add(MarkdownSection(level: heading, title: words, slug: count == 1 ? key : '$key-$count', body: body.join('\n').trim()));
     body = [];
   }
 
