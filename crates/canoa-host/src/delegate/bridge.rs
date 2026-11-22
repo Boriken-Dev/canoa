@@ -15,9 +15,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 /// The variable that holds the tool server's URL.
-pub(crate) const URL_VAR: &str = "CANOA_DELEGATE_URL";
+pub(crate) const URL_VAR: &str = canoa::brand::DELEGATE_URL;
 /// The variable that holds the session's bearer.
-pub(crate) const TOKEN_VAR: &str = "CANOA_DELEGATE_TOKEN";
+pub(crate) const TOKEN_VAR: &str = canoa::brand::DELEGATE_TOKEN;
 /// Requests under way at once: what the tool server takes from one bearer.
 const IN_FLIGHT: usize = 8;
 /// How long to wait for a connection to the tool server.
@@ -48,13 +48,13 @@ pub(crate) enum Refused {
 
 impl core::fmt::Display for Refused {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            Self::NoUrl => "CANOA_DELEGATE_URL is not set",
-            Self::NoToken => "CANOA_DELEGATE_TOKEN is not set",
-            Self::BadToken => "CANOA_DELEGATE_TOKEN holds a character a header cannot carry",
-            Self::BadUrl => "CANOA_DELEGATE_URL is not an http:// address",
-            Self::NotLoopback => "CANOA_DELEGATE_URL is not on this computer's loopback",
-        })
+        match self {
+            Self::NoUrl => write!(f, "{URL_VAR} is not set"),
+            Self::NoToken => write!(f, "{TOKEN_VAR} is not set"),
+            Self::BadToken => write!(f, "{TOKEN_VAR} holds a character a header cannot carry"),
+            Self::BadUrl => write!(f, "{URL_VAR} is not an http:// address"),
+            Self::NotLoopback => write!(f, "{URL_VAR} is not on this computer's loopback"),
+        }
     }
 }
 

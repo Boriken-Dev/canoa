@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:toml/toml.dart';
 import 'package:yaml/yaml.dart';
+import '../brand.dart';
 
 /// The formats canoa.cfg may be written in, chosen as anycfg chooses: by a file's extension when it names one (`.toml`,
 /// `.yaml`, `.yml`, `.json`), and for `.cfg` or no name by the first line (`#!yaml`, `#!json`, `#!toml`), none meaning TOML.
@@ -364,8 +365,8 @@ final class ConfigFiles {
     final system = windows
         ? join(join(var_('PROGRAMDATA') ?? r'C:\ProgramData', 'Canoa'), 'canoa.cfg')
         : '/etc/Canoa/canoa.cfg';
-    final installedDir = var_('CANOA_INSTALLED_DIR') ?? programDir;
-    final spec = (explicit ?? var_('CANOA_CONFIG'));
+    final installedDir = var_(Brand.env('INSTALLED_DIR')) ?? programDir;
+    final spec = (explicit ?? var_(Brand.env('CONFIG')));
     final lower = <ConfigFile>[
       (origin: ConfigOrigin.installed, path: join(installedDir, 'canoa.cfg')),
       (origin: ConfigOrigin.system, path: system),
@@ -373,7 +374,7 @@ final class ConfigFiles {
     final files = <ConfigFile>[];
     String own;
     if (spec == null || spec.isEmpty) {
-      if (user == null) throw const FormatException('no canoa.cfg: give CANOA_CONFIG');
+      if (user == null) throw FormatException('no canoa.cfg: give ${Brand.env('CONFIG')}');
       files
         ..addAll(lower)
         ..add((origin: ConfigOrigin.own, path: user));

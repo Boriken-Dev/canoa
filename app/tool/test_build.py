@@ -175,9 +175,9 @@ class DesktopTests(unittest.TestCase):
     @patch("build.subprocess.run")
     def test_build_and_run_commands(self, run, _t, _f, _e, _x, restore):
         build.build_desktop("windows", False, False)
-        self.assertEqual(run.call_args.args[0], ["flutter", "build", "windows", "--release"])
+        self.assertEqual(run.call_args.args[0], ["flutter", "build", "windows", "--release", *build.BRAND.defines()])
         build.build_desktop("windows", True, True)
-        self.assertEqual(run.call_args.args[0], ["flutter", "run", "-d", "windows", "--debug"])
+        self.assertEqual(run.call_args.args[0], ["flutter", "run", "-d", "windows", "--debug", *build.BRAND.defines()])
         self.assertEqual(restore.call_count, 2)
 
     @patch("build.restore_lock", return_value=False)
@@ -191,7 +191,7 @@ class DesktopTests(unittest.TestCase):
     def test_portable_builds_the_web_app_in_and_packages_the_release_folder(self, run, _t, _f, _e, _x, web, package, _r):
         build.build_desktop("windows", False, False, portable=True)
         web.assert_called_once()
-        self.assertEqual(run.call_args.args[0], ["flutter", "build", "windows", "--release"])
+        self.assertEqual(run.call_args.args[0], ["flutter", "build", "windows", "--release", *build.BRAND.defines()])
         self.assertEqual(run.call_args.kwargs["env"]["CANOA_WEB_DIST"], str(Path("app/build/web")))
         package.assert_called_once_with("windows", Path("CanoaUI.exe"))
 
@@ -223,7 +223,7 @@ class PubModeTests(unittest.TestCase):
         ensure.side_effect = lambda *a, **k: seen.append("runner")
         build.build_desktop("windows", False, False, mode="auto")
         self.assertEqual(self.commands(run), [
-            ["flutter", "pub", "get", "--offline"], ["flutter", "build", "windows", "--release", "--no-pub"],
+            ["flutter", "pub", "get", "--offline"], ["flutter", "build", "windows", "--release", "--no-pub", *build.BRAND.defines()],
         ])
         seen = ["cache" if s == str(Path("/seeded")) else s for s in seen]
         self.assertEqual(seen, ["runner", "cache", "cache"], "the runner exists before pub get writes its plugin files")
@@ -254,7 +254,7 @@ class PubModeTests(unittest.TestCase):
     def test_a_missing_dependency_falls_back_online_and_says_why(self, plan, run, *_):
         with patch("builtins.print") as out:
             build.build_desktop("windows", False, False, mode="auto")
-        self.assertEqual(self.commands(run), [["flutter", "build", "windows", "--release"]])
+        self.assertEqual(self.commands(run), [["flutter", "build", "windows", "--release", *build.BRAND.defines()]])
         said = " ".join(str(call.args[0]) for call in out.call_args_list)
         self.assertIn("online", said)
         self.assertIn("git dependencies are not in the pub cache", said)
@@ -274,7 +274,7 @@ class PubModeTests(unittest.TestCase):
         run.side_effect = fail_offline
         with patch("builtins.print"):
             build.build_desktop("windows", False, False, mode="auto")
-        self.assertEqual(self.commands(run)[-1], ["flutter", "build", "windows", "--release"])
+        self.assertEqual(self.commands(run)[-1], ["flutter", "build", "windows", "--release", *build.BRAND.defines()])
         with self.assertRaisesRegex(RuntimeError, "offline"):
             build.build_desktop("windows", False, False, mode="offline")
 
@@ -282,7 +282,7 @@ class PubModeTests(unittest.TestCase):
     def test_online_skips_deps(self, plan, run, *_):
         build.build_desktop("windows", False, False, mode="online")
         plan.assert_not_called()
-        self.assertEqual(self.commands(run), [["flutter", "build", "windows", "--release"]])
+        self.assertEqual(self.commands(run), [["flutter", "build", "windows", "--release", *build.BRAND.defines()]])
 
 
 class PackagingTests(unittest.TestCase):

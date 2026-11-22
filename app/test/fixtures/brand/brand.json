@@ -1,0 +1,9 @@
+{
+  "name": "Pirogue",
+  "short_name": "Pirogue",
+  "executable": "PirogueUI",
+  "id": "org.example.pirogue",
+  "env_prefix": "PIROGUE",
+  "icon": "mark.svg",
+  "accent": "#C0392B"
+}

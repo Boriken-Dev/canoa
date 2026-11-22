@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 
+import brand as brand_file
 import offline_pub
 
 # tools/ is not a package: the fallback-font list and its checks live there, beside the step that mirrors the fonts.
@@ -20,6 +21,10 @@ import fallback_fonts
 # Not resolve(): a drive made with `subst` (how a long checkout path stays under MSBuild's limit) must stay as typed.
 APP = Path(os.path.abspath(__file__)).parents[1]
 ROOT = APP.parent
+
+
+# The brand this build carries: app/brand.json unless `--brand` or BRAND_FILE names another (set in main).
+BRAND = brand_file.load()
 
 
 # The repo's .env and the process environment (which wins): the SDK, the pub cache and the deps checkout.
@@ -76,13 +81,30 @@ def sh_program() -> str:
     return sh
 
 
+def brand_icon(app: Path = APP, brand: brand_file.Brand | None = None) -> Path:
+    """The Windows icon for the brand: the committed one for the default brand, else rendered from its mark.
+
+    Rendering needs Pillow (tools/canoa_mark.py); the files go under app/build/brand, never into the tracked icons.
+    """
+    brand = brand or BRAND
+    committed = app / "assets" / "icons" / "canoa.ico"
+    if brand.source == brand_file.DEFAULT_FILE:
+        return committed
+    out = app / "build" / "brand" / brand.executable
+    subprocess.run(
+        [sys.executable, str(app.parent / "tools" / "canoa_mark.py"), str(app.parent), "--brand", str(brand.source), "--out", str(out)],
+        check=True, stdout=subprocess.DEVNULL,
+    )
+    return out / "app" / "assets" / "icons" / "canoa.ico"
+
+
 def ensure_runner(platform: str, app: Path = APP, offline: bool = False) -> None:
     """Generate the platform's runner when missing, then name it as tool/name_runner.sh does (safe to repeat)."""
     if runner_missing(platform, app):
         widget_test = app / "test" / "widget_test.dart"
         had_widget_test = widget_test.exists()
         subprocess.run(
-            [flutter_program(), "create", "--org", "dev.boriken", f"--platforms={platform}",
+            [flutter_program(), "create", "--org", BRAND.org, f"--platforms={platform}",
              "--project-name", "canoa", *(["--offline"] if offline else []), "."],
             check=True, cwd=app,
         )
@@ -90,9 +112,9 @@ def ensure_runner(platform: str, app: Path = APP, offline: bool = False) -> None
             widget_test.unlink(missing_ok=True)
     sh = sh_program()
     # The script's sed sits beside sh in Git for Windows.
-    env = dict(os.environ, PATH=str(Path(sh).parent) + os.pathsep + os.environ.get("PATH", ""))
+    env = dict(os.environ, PATH=str(Path(sh).parent) + os.pathsep + os.environ.get("PATH", ""), BRAND_FILE=str(BRAND.source))
     subprocess.run([sh, str(app / "tool" / "name_runner.sh"), str(app)], check=True, env=env)
-    icon = app / "assets" / "icons" / "canoa.ico"
+    icon = brand_icon(app)
     target = app / "windows" / "runner" / "resources" / "app_icon.ico"
     if platform == "windows" and (not target.is_file() or target.read_bytes() != icon.read_bytes()):
         shutil.copyfile(icon, target)
@@ -135,9 +157,9 @@ def restore_lock(before: bytes | None, root: Path = ROOT) -> bool:
 def built_executable(platform: str, debug: bool, app: Path = APP) -> Path | None:
     mode = "Debug" if debug else "Release"
     patterns = {
-        "windows": f"build/windows/*/runner/{mode}/CanoaUI.exe",
-        "linux": f"build/linux/*/{mode.lower()}/bundle/CanoaUI",
-        "macos": f"build/macos/Build/Products/{mode}/Canoa.app/Contents/MacOS/CanoaUI",
+        "windows": f"build/windows/*/runner/{mode}/{BRAND.executable}.exe",
+        "linux": f"build/linux/*/{mode.lower()}/bundle/{BRAND.executable}",
+        "macos": f"build/macos/Build/Products/{mode}/{BRAND.name}.app/Contents/MacOS/{BRAND.executable}",
     }
     found = sorted(app.glob(patterns[platform]))
     return found[0] if found else None
@@ -193,7 +215,7 @@ def build_web_for_host(offline: bool = False) -> Path:
     if not offline:
         subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(
-        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn",
+        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn", *BRAND.defines(),
          *(["--no-pub"] if offline else [])],
         check=True, cwd=APP,
     )
@@ -242,11 +264,17 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
                   office_js: str = "bundled") -> None:
     require_tools()
     if portable and platform == "macos":
-        raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
+        raise RuntimeError(f"{BRAND.name}.app is already one bundle: ship build/macos/Build/Products/Release/{BRAND.name}.app")
+    if portable and BRAND.executable != "CanoaUI":
+        raise RuntimeError("--portable packs CanoaUI: the launcher and the AppImage do not follow a brand's executable name yet")
     env = None
     lock = ROOT / LOCK
     before = lock.read_bytes() if lock.is_file() else None
     flag = "--debug" if debug else "--release"
+    # The host's build reads the brand's environment-variable prefix; the app gets the rest as dart definitions.
+    brand_env = BRAND.environment()
+    brand_saved = {key: os.environ.get(key) for key in brand_env}
+    os.environ.update(brand_env)
     saved = {key: os.environ.get(key) for key in OFFLINE_ENV}
     office = office_js_environment(office_js)
     office_saved = {key: os.environ.get(key) for key in office}
@@ -272,10 +300,12 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
         if platform != "macos" and clear_stale_build(platform):
             print(f"Removed app/build/{platform}, configured before the runner was named")
         if run:
-            subprocess.run([flutter_program(), "run", "-d", platform, flag, *no_pub], check=True, cwd=APP)
+            subprocess.run([flutter_program(), "run", "-d", platform, flag, *no_pub, *BRAND.defines()], check=True, cwd=APP)
             return
-        subprocess.run([flutter_program(), "build", platform, flag, *no_pub], check=True, cwd=APP, env=env)
+        subprocess.run([flutter_program(), "build", platform, flag, *no_pub, *BRAND.defines()], check=True, cwd=APP, env=env)
     finally:
+        for key, value in brand_saved.items():
+            restore_env(key, value)
         for key, value in saved.items():
             restore_env(key, value)
         for key, value in office_saved.items():
@@ -284,7 +314,7 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
             print("Restored app/pubspec.lock")
     exe = built_executable(platform, debug)
     if exe is None:
-        raise RuntimeError(f"flutter build {platform} left no CanoaUI under app/build")
+        raise RuntimeError(f"flutter build {platform} left no {BRAND.executable} under app/build")
     print(f"Built {exe}")
     if portable:
         print(f"Packaged {package_portable(platform, exe)}")
@@ -361,7 +391,7 @@ def build_office() -> Path:
 
 
 def flutter_args(kind: str, wasm: bool) -> list[str]:
-    args = [flutter_program(), "build", "web", "--release", "--no-web-resources-cdn"]
+    args = [flutter_program(), "build", "web", "--release", "--no-web-resources-cdn", *BRAND.defines()]
     if wasm:
         args.append("--wasm")
     if kind == "chromium":
@@ -408,6 +438,8 @@ def package_debug_extension(source: Path, destination: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kind", choices=("pwa", "chromium", "desktop", "office"))
+    parser.add_argument("--brand", type=Path, help="the brand file: name, identifiers, environment-variable prefix, mark "
+        "(default: app/brand.json, or the file BRAND_FILE names)")
     parser.add_argument(
         "--wasm", action="store_true",
         help="Build Flutter web with --wasm (extension compatibility must be checked)",
@@ -430,6 +462,11 @@ def main() -> None:
     parser.add_argument("--platform", choices=tuple(RUNNER_MARKERS),
         help="desktop: the platform (default: this machine's; Flutter cannot cross-build)")
     opts = parser.parse_args()
+    global BRAND
+    try:
+        BRAND = brand_file.load(opts.brand)
+    except brand_file.BrandError as error:
+        parser.error(str(error))
     configure_environment()
     if opts.debug and opts.kind not in ("chromium", "desktop"):
         parser.error("--debug is only valid for chromium and desktop")

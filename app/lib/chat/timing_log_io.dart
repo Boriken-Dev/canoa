@@ -1,8 +1,9 @@
 import 'dart:io';
+import '../brand.dart';
 
 /// The file `CANOA_TIMING_LOG` names, read when asked so a test can set it; null or empty means timing is off.
 String? _target() {
-  final path = Platform.environment['CANOA_TIMING_LOG'];
+  final path = Platform.environment[Brand.env('TIMING_LOG')];
   return path == null || path.isEmpty ? null : path;
 }
 

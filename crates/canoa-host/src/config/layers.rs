@@ -15,7 +15,7 @@ pub const NAME: &str = "Canoa/canoa.cfg";
 pub const INSTALLED_NAME: &str = "canoa.cfg";
 /// The variable that says which folder is "beside the program", when it is not the executable's own: the portable launcher
 /// sets it to its own folder, since the app it starts runs from an unpacked copy.
-pub const INSTALLED_DIR_VARIABLE: &str = "CANOA_INSTALLED_DIR";
+pub const INSTALLED_DIR_VARIABLE: &str = canoa::brand::INSTALLED_DIR;
 
 /// The files canoa.cfg is read from, lowest layer first. A layer that does not exist is skipped.
 #[derive(Clone, Debug, PartialEq, Eq)]

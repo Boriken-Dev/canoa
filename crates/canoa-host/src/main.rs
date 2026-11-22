@@ -90,7 +90,7 @@ fn main() -> ExitCode {
     let parsed = Cli::parse_from(arguments);
     let ansi = std::io::stderr().is_terminal()
         && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
-    let filter = tracing_subscriber::EnvFilter::try_from_env("CANOA_LOG")
+    let filter = tracing_subscriber::EnvFilter::try_from_env(canoa::brand::LOG)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)

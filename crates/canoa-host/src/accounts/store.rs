@@ -178,7 +178,7 @@ fn patiently<T>(mut call: impl FnMut() -> Result<T, KeyError>) -> Result<T, KeyE
 /// The environment variable that keeps every credential this process stores in its memory and out of the operating system's store.
 /// Only `memory` means anything. A process started with it forgets what it was given when it ends, so it is for tests, which
 /// set it, and for nothing a person runs.
-pub(crate) const STORE_VARIABLE: &str = "CANOA_CREDENTIAL_STORE";
+pub(crate) const STORE_VARIABLE: &str = canoa::brand::CREDENTIAL_STORE;
 
 /// The credential store a [`KeyringStore`] talks to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

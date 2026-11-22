@@ -21,7 +21,7 @@ const MAX_LINE: u64 = 16 * 1024;
 
 static FOLLOWERS: Mutex<Vec<Weak<Job>>> = Mutex::new(Vec::new());
 static FILE: LazyLock<Option<Mutex<File>>> = LazyLock::new(|| {
-    let path = std::env::var_os("CANOA_HOST_LOG").filter(|path| !path.is_empty())?;
+    let path = std::env::var_os(canoa::brand::HOST_LOG).filter(|path| !path.is_empty())?;
     File::options()
         .create(true)
         .append(true)
@@ -86,7 +86,7 @@ impl<'a> MakeWriter<'a> for RouteWriter {
 }
 
 fn filter() -> tracing_subscriber::EnvFilter {
-    tracing_subscriber::EnvFilter::try_from_env("CANOA_LOG")
+    tracing_subscriber::EnvFilter::try_from_env(canoa::brand::LOG)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
 }
 

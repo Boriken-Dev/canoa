@@ -21,6 +21,7 @@ default = []
 web = ["canoa-host/web"]
 
 [dependencies]
+canoa.workspace = true
 canoa-host.workspace = true
 # The script engine the host carries: linked into this library, not into canoa-host.
 guatiao-source-js.workspace = true

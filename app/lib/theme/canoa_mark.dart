@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import '../brand.dart';
+
 /// Canoa's mark: a Taíno dugout canoe with a paddle crossing it, drawn from the paths of
 /// `assets/icons/canoa.svg` (a 64 by 64 box). Below [paddleFrom] logical pixels it is the hull alone, stroked
 /// [CanoaMarkPainter.smallWeight] units wide so its long, low shape keeps some depth, and the spiral carved
@@ -23,9 +25,10 @@ class CanoaMark extends StatelessWidget {
 
 /// Paints [CanoaMark] into whatever square it is given.
 class CanoaMarkPainter extends CustomPainter {
-  CanoaMarkPainter(this.color);
+  CanoaMarkPainter(this.color, {MarkPaths? paths}) : paths = paths ?? current;
 
   final Color color;
+  final MarkPaths paths;
 
   // The `d` and `stroke-width` attributes of canoa.svg, by id; canoa_mark_test.dart checks they match.
   static const hull = 'M 2 23 C 5 27 9 30 15 30 L 49 30 C 55 30 59 27 60.5 17 L 63.5 17 '
@@ -39,7 +42,8 @@ class CanoaMarkPainter extends CustomPainter {
   static const paddle = 'M 43.3 0.2 L 21.8 44.5 C 20 48.4 16.6 46.8 14.8 50.6 C 12.1 56.1 14.7 61.3 15 63 '
       'C 16.5 62.2 22.2 61 24.8 55.5 C 26.7 51.6 23.4 50 25.3 46.2 L 46.7 1.8 Z';
 
-  static final Path _hull = parse(hull), _cut = parse(cut), _spiral = parse(spiral), _paddle = parse(paddle);
+  /// The paths this build draws: the brand's own mark when the build gave one, else Canoa's above.
+  static final MarkPaths current = MarkPaths.fromBrand(Brand.mark);
 
   /// A path from absolute M, L, C and Z commands, the only ones canoa.svg uses.
   static Path parse(String d) {
@@ -77,28 +81,60 @@ class CanoaMarkPainter extends CustomPainter {
     // The hull and its cuts in a layer of their own, so clearing them leaves whatever is behind the mark.
     canvas
       ..saveLayer(const Rect.fromLTWH(0, 0, 64, 64), Paint())
-      ..drawPath(_hull, fill);
+      ..drawPath(paths.hull, fill);
     if (paddled) {
-      canvas.drawPath(_cut, clear);
+      canvas.drawPath(paths.cut, clear);
     } else {
-      canvas.drawPath(_hull, Paint()
+      canvas.drawPath(paths.hull, Paint()
         ..color = color
         ..style = PaintingStyle.stroke
-        ..strokeWidth = smallWeight
+        ..strokeWidth = paths.smallWeight
         ..strokeJoin = StrokeJoin.round);
     }
     if (side >= CanoaMark.spiralFrom) {
-      canvas.drawPath(_spiral, Paint()
+      canvas.drawPath(paths.spiral, Paint()
         ..blendMode = BlendMode.clear
         ..style = PaintingStyle.stroke
-        ..strokeWidth = spiralWidth
+        ..strokeWidth = paths.spiralWidth
         ..strokeCap = StrokeCap.round);
     }
     canvas.restore();
-    if (paddled) canvas.drawPath(_paddle, fill);
+    if (paddled) canvas.drawPath(paths.paddle, fill);
     canvas.restore();
   }
 
   @override
-  bool shouldRepaint(CanoaMarkPainter oldDelegate) => oldDelegate.color != color;
+  bool shouldRepaint(CanoaMarkPainter oldDelegate) => oldDelegate.color != color || oldDelegate.paths != paths;
+}
+
+/// The four paths of a mark and the two stroke widths, in a 64 by 64 box.
+final class MarkPaths {
+  MarkPaths({
+    required String hull,
+    required this.smallWeight,
+    required String cut,
+    required String spiral,
+    required this.spiralWidth,
+    required String paddle,
+  }) : hull = CanoaMarkPainter.parse(hull),
+       cut = CanoaMarkPainter.parse(cut),
+       spiral = CanoaMarkPainter.parse(spiral),
+       paddle = CanoaMarkPainter.parse(paddle);
+
+  /// [brand] as the build wrote it (`Brand.mark`); Canoa's own paths where it is null or incomplete.
+  factory MarkPaths.fromBrand(Map<String, Object?>? brand) {
+    String text(String key, String fallback) => brand?[key] is String ? brand![key]! as String : fallback;
+    double number(String key, double fallback) => brand?[key] is num ? (brand![key]! as num).toDouble() : fallback;
+    return MarkPaths(
+      hull: text('hull', CanoaMarkPainter.hull),
+      smallWeight: number('smallWeight', CanoaMarkPainter.smallWeight),
+      cut: text('cut', CanoaMarkPainter.cut),
+      spiral: text('spiral', CanoaMarkPainter.spiral),
+      spiralWidth: number('spiralWidth', CanoaMarkPainter.spiralWidth),
+      paddle: text('paddle', CanoaMarkPainter.paddle),
+    );
+  }
+
+  final Path hull, cut, spiral, paddle;
+  final double smallWeight, spiralWidth;
 }

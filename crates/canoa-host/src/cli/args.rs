@@ -20,19 +20,29 @@ use crate::home::{Home, LockError};
 #[cfg(all(unix, feature = "portal"))]
 use super::portal::PortalArgs;
 
-const AFTER_HELP: &str = "\
+/// The help's closing section; the variables carry the build's brand prefix.
+fn after_help() -> String {
+    format!(
+        "\
 Environment:
-  CANOA_CONFIG             canoa.cfg to read, below --config and above the platform's default
-  CANOA_INSTALLED_DIR      the folder whose canoa.cfg is the installed copy (default: beside the program)
-  CANOA_LOG                what to log on standard error, as a tracing filter (default: info)
-  COQUI_AGENTIC_PEER_HOME  the directory of this host's identity and trust store (default: .canoa in the user's home folder)
-  NO_COLOR                 no colour in the log
+  {config:<24} canoa.cfg to read, below --config and above the platform's default
+  {installed:<24} the folder whose canoa.cfg is the installed copy (default: beside the program)
+  {log:<24} what to log on standard error, as a tracing filter (default: info)
+  {home:<24} the directory of this host's identity and trust store (default: .canoa in the user's home folder)
+  {color:<24} no colour in the log
 
-Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong, 3 another host holds this home.";
+Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong, 3 another host holds this home.",
+        config = canoa::brand::CONFIG,
+        installed = canoa::brand::INSTALLED_DIR,
+        log = canoa::brand::LOG,
+        home = "COQUI_AGENTIC_PEER_HOME",
+        color = "NO_COLOR",
+    )
+}
 
 /// Serves stdio ACP agents and Guatiao agent providers from canoa.cfg to paired keys, on loopback.
 #[derive(Debug, Parser)]
-#[command(name = "canoa", version, after_help = AFTER_HELP)]
+#[command(name = "canoa", version, after_help = after_help())]
 pub struct Cli {
     #[command(subcommand)]
     pub(super) command: Command,
@@ -741,7 +751,7 @@ pub(super) struct ConfigArgs {
     /// canoa.cfg files, a list split at `;` on Windows and `:` elsewhere, the last one highest. A leading `+` puts them on
     /// top of the installed, system and user files; without it they are the only ones read. By default those three layers,
     /// the user's at %APPDATA%\Canoa\canoa.cfg or $XDG_CONFIG_HOME/Canoa/canoa.cfg (~/.config without it).
-    #[arg(long, env = "CANOA_CONFIG")]
+    #[arg(long, env = canoa::brand::CONFIG)]
     pub(super) config: Option<String>,
     /// How `check` prints entries and `options` its choices.
     #[arg(long, value_enum, default_value_t = Format::Text)]

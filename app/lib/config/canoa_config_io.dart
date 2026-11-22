@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'config_layers.dart';
+import '../brand.dart';
 
 /// Where canoa.cfg is read from and written, as the host finds it: the installed copy beside the program, the system's file
 /// and the person's own, or the files `CANOA_CONFIG` lists. Throws [FormatException] for an empty entry or a listed file
@@ -85,7 +86,7 @@ String hostCheckSpec(String path, String candidate) {
 
 // Only the default place is adopted: a file CANOA_CONFIG names is the person's own choice of name.
 void _adoptLegacyName(String path) {
-  final named = Platform.environment['CANOA_CONFIG'];
+  final named = Platform.environment[Brand.env('CONFIG')];
   if (named == null || named.isEmpty) adoptLegacyConfigName(path, log: stderr.writeln);
 }
 

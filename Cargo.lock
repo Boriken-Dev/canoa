@@ -817,6 +817,7 @@ dependencies = [
 name = "canoa-ffi"
 version = "0.0.0-alpha.0"
 dependencies = [
+ "canoa",
  "canoa-host",
  "clap",
  "coqui-acp",

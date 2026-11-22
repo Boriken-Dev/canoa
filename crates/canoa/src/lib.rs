@@ -11,6 +11,7 @@ pub mod address;
 #[cfg(feature = "api-gateway")]
 #[cfg_attr(docsrs, doc(cfg(feature = "api-gateway")))]
 pub mod api_gateway;
+pub mod brand;
 #[cfg(feature = "gateway")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gateway")))]
 pub mod gateway;

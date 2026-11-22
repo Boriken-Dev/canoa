@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:canoa_native/canoa_native.dart';
 
 import 'host_tool.dart';
+import '../brand.dart';
 
 /// What another host is told holds their home.
 const String _holder = 'CanoaUI';
@@ -23,7 +24,7 @@ HostTool? findHostToolIn({
   required CanoaNative Function() open,
   required void Function(String line) log,
 }) {
-  final named = environment['CANOA_HOST'];
+  final named = environment[Brand.env('HOST')];
   if (named != null && named.isNotEmpty) return ProcessHostTool(named);
   try {
     return LibraryHostTool(open());
