@@ -1572,6 +1572,12 @@ export interface AgentVendor {
    */
   hookSupport?(request: g.Ref): unknown;
   /**
+   * How the agent's own file and shell tools are taken over by a [`HookKind::PreTool`] hook, so that they act in the
+   * environment a session's tools are served from; `None` for an agent whose tools cannot be taken over. The default: they
+   * cannot.
+   */
+  toolHook?(): unknown;
+  /**
    * How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
    * the account kind of its own that takes them. The default: it cannot.
    */
@@ -1672,6 +1678,14 @@ export interface AgentVendorRemote extends k.RemoteBase<typeof AgentVendor> {
    * Throws `Unsupported` when the table lacks it: `has()` asks first.
    */
   hookSupport(request: unknown): g.Value;
+  /**
+   * How the agent's own file and shell tools are taken over by a [`HookKind::PreTool`] hook, so that they act in the
+   * environment a session's tools are served from; `None` for an agent whose tools cannot be taken over. The default: they
+   * cannot.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  toolHook(): g.Value;
   /**
    * How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
    * the account kind of its own that takes them. The default: it cannot.

@@ -654,12 +654,14 @@
         "enum": [
           "start",
           "pre-compact",
-          "batch"
+          "batch",
+          "pre-tool"
         ],
         "x-enum-labels": {
           "start": "A session started again or was compacted into or cleared.",
           "pre-compact": "A compaction is about to run, which the command's failure stops.",
-          "batch": "A batch of tool calls ended."
+          "batch": "A batch of tool calls ended.",
+          "pre-tool": "One of the agent's own tools is about to run (a tool [`ToolHook::tools`] names): the command reads the agent's payload on standard input and prints the answer the agent reads on standard output. A command that fails, or exits with any status but 0, refuses the call."
         },
         "description": "What it reports: `start` (a session started again or was compacted into or cleared), `pre-compact` (a compaction is about to run, which the command's failure stops), or `batch` (a batch of tool calls ended)."
       },
@@ -688,12 +690,14 @@
               "enum": [
                 "start",
                 "pre-compact",
-                "batch"
+                "batch",
+                "pre-tool"
               ],
               "x-enum-labels": {
                 "start": "A session started again or was compacted into or cleared.",
                 "pre-compact": "A compaction is about to run, which the command's failure stops.",
-                "batch": "A batch of tool calls ended."
+                "batch": "A batch of tool calls ended.",
+                "pre-tool": "One of the agent's own tools is about to run (a tool [`ToolHook::tools`] names): the command reads the agent's payload on standard input and prints the answer the agent reads on standard output. A command that fails, or exits with any status but 0, refuses the call."
               },
               "description": "What it reports: `start` (a session started again or was compacted into or cleared), `pre-compact` (a compaction is about to run, which the command's failure stops), or `batch` (a batch of tool calls ended)."
             },
@@ -812,6 +816,216 @@
     "required": [
       "fires",
       "text"
+    ]
+  },
+  "HookTool": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name, as the agent's payload gives it."
+      },
+      "role": {
+        "type": "string",
+        "enum": [
+          "shell",
+          "files"
+        ],
+        "x-enum-labels": {
+          "shell": "Runs a shell command, which [`HookTool::command`] names in its input.",
+          "files": "Reads, writes, edits, searches or lists files."
+        },
+        "description": "What it does."
+      },
+      "command": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "For a shell: the key of its input that holds the command."
+      },
+      "shell": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "bash",
+              "zsh",
+              "powershell",
+              "cmd",
+              "other"
+            ],
+            "x-enum-labels": {
+              "bash": "POSIX Bourne-Again shell (`bash`).",
+              "zsh": "Z shell (`zsh`).",
+              "powershell": "PowerShell (`powershell` or `pwsh`).",
+              "cmd": "Windows Command Prompt (`cmd`).",
+              "other": "Any other shell."
+            }
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "For a shell: the shell the command is written for."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "role"
+    ]
+  },
+  "ModeWord": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "word": {
+        "type": "string",
+        "description": "The word the agent's payload carries (`dontAsk`)."
+      },
+      "mode": {
+        "type": "string",
+        "description": "The mode: `manual` (asks), `accept_edits`, `auto`, `plan`, `bypass`, or `dont_ask` (refuses what no rule allows)."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "word",
+      "mode"
+    ]
+  },
+  "ToolHook": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "tools": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name, as the agent's payload gives it."
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "shell",
+                "files"
+              ],
+              "x-enum-labels": {
+                "shell": "Runs a shell command, which [`HookTool::command`] names in its input.",
+                "files": "Reads, writes, edits, searches or lists files."
+              },
+              "description": "What it does."
+            },
+            "command": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "For a shell: the key of its input that holds the command."
+            },
+            "shell": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "bash",
+                    "zsh",
+                    "powershell",
+                    "cmd",
+                    "other"
+                  ],
+                  "x-enum-labels": {
+                    "bash": "POSIX Bourne-Again shell (`bash`).",
+                    "zsh": "Z shell (`zsh`).",
+                    "powershell": "PowerShell (`powershell` or `pwsh`).",
+                    "cmd": "Windows Command Prompt (`cmd`).",
+                    "other": "Any other shell."
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a shell: the shell the command is written for."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "role"
+          ]
+        },
+        "description": "The tools the hook runs before; no other tool of the agent's is taken over."
+      },
+      "name_at": {
+        "type": "string",
+        "description": "Where the payload names the tool."
+      },
+      "input_at": {
+        "type": "string",
+        "description": "Where the payload holds the tool's input, an object."
+      },
+      "mode_at": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Where the payload says the agent's permission mode, when it does."
+      },
+      "modes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "word": {
+              "type": "string",
+              "description": "The word the agent's payload carries (`dontAsk`)."
+            },
+            "mode": {
+              "type": "string",
+              "description": "The mode: `manual` (asks), `accept_edits`, `auto`, `plan`, `bypass`, or `dont_ask` (refuses what no rule allows)."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "word",
+            "mode"
+          ]
+        },
+        "description": "The agent's words for its modes."
+      },
+      "deny": {
+        "type": "string",
+        "description": "The answer that refuses the call, as JSON text."
+      },
+      "deny_reason_at": {
+        "type": "string",
+        "description": "Where the reason goes in [`Self::deny`]."
+      },
+      "rewrite": {
+        "type": "string",
+        "description": "The answer that changes the call's input and decides nothing, so the agent's own rules and mode still decide whether it runs, as JSON text."
+      },
+      "rewrite_input_at": {
+        "type": "string",
+        "description": "Where the new input goes in [`Self::rewrite`]."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "tools",
+      "name_at",
+      "input_at",
+      "modes",
+      "deny",
+      "deny_reason_at",
+      "rewrite",
+      "rewrite_input_at"
     ]
   },
   "AccessTarget": {

@@ -997,7 +997,7 @@ class UsageReader(KindProtocol, Protocol, kind="usage_reader", floor_hash=179363
         ...
 
 
-class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=3784573487):
+class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=1770805046):
     """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
     nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
     """
@@ -1071,6 +1071,14 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=378457
     def hook_support(self, request: Ref) -> ValueAnswer:
         """What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host
         reports as an event no hook of the agent's reaches. The default: nothing.
+        """
+        ...
+
+    @fallible
+    def tool_hook(self) -> ValueAnswer:
+        """How the agent's own file and shell tools are taken over by a [`HookKind::PreTool`] hook, so that they act in the
+        environment a session's tools are served from; `None` for an agent whose tools cannot be taken over. The default: they
+        cannot.
         """
         ...
 

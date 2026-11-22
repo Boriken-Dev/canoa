@@ -1517,7 +1517,7 @@ const described = kindsOf({
     },
     {
       "name": "agent_vendor",
-      "floor_hash": 3784573487,
+      "floor_hash": 1770805046,
       "object": false,
       "slots": [
         {
@@ -1651,6 +1651,15 @@ const described = kindsOf({
               "pass": "borrowed"
             }
           ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "tool_hook",
+          "required": false,
+          "fallible": true,
+          "args": [],
           "answer": {
             "type": "value"
           }

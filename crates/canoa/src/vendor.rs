@@ -574,6 +574,134 @@ pub enum HookKind {
     /// A batch of tool calls ended.
     #[map(rename = "batch")]
     Batch,
+    /// One of the agent's own tools is about to run (a tool [`ToolHook::tools`] names): the command reads the agent's payload on
+    /// standard input and prints the answer the agent reads on standard output. A command that fails, or exits with any status but
+    /// 0, refuses the call.
+    #[map(rename = "pre-tool")]
+    PreTool,
+}
+
+/// What one of an agent's own tools does on the computer the agent runs on.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ToolRole {
+    /// Runs a shell command, which [`HookTool::command`] names in its input.
+    Shell,
+    /// Reads, writes, edits, searches or lists files.
+    Files,
+}
+
+/// One of an agent's own tools that the host takes over when the session's tools are served from an environment.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct HookTool {
+    /// Its name, as the agent's payload gives it.
+    pub name: String,
+    /// What it does.
+    pub role: ToolRole,
+    /// For a shell: the key of its input that holds the command.
+    pub command: Option<String>,
+    /// For a shell: the shell the command is written for.
+    pub shell: Option<ShellFamily>,
+}
+
+impl HookTool {
+    /// A tool that runs commands written for `shell`, held at `command` in its input.
+    #[must_use]
+    pub fn shell(name: impl Into<String>, command: impl Into<String>, shell: ShellFamily) -> Self {
+        Self {
+            name: name.into(),
+            role: ToolRole::Shell,
+            command: Some(command.into()),
+            shell: Some(shell),
+        }
+    }
+
+    /// A tool that works on files.
+    #[must_use]
+    pub fn files(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            role: ToolRole::Files,
+            command: None,
+            shell: None,
+        }
+    }
+}
+
+/// One of the agent's own words for a permission mode, and the mode it is.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct ModeWord {
+    /// The word the agent's payload carries (`dontAsk`).
+    pub word: String,
+    /// The mode: `manual` (asks), `accept_edits`, `auto`, `plan`, `bypass`, or `dont_ask` (refuses what no rule allows).
+    pub mode: String,
+}
+
+impl ModeWord {
+    /// `word` means `mode`.
+    #[must_use]
+    pub fn new(word: impl Into<String>, mode: impl Into<String>) -> Self {
+        Self {
+            word: word.into(),
+            mode: mode.into(),
+        }
+    }
+}
+
+/// How the host reads the payload of a [`HookKind::PreTool`] hook and answers it in the agent's own terms. Pointers are JSON
+/// pointers; the answers are JSON documents into which the host puts a reason or a rewritten input.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct ToolHook {
+    /// The tools the hook runs before; no other tool of the agent's is taken over.
+    pub tools: Vec<HookTool>,
+    /// Where the payload names the tool.
+    pub name_at: String,
+    /// Where the payload holds the tool's input, an object.
+    pub input_at: String,
+    /// Where the payload says the agent's permission mode, when it does.
+    pub mode_at: Option<String>,
+    /// The agent's words for its modes.
+    pub modes: Vec<ModeWord>,
+    /// The answer that refuses the call, as JSON text.
+    pub deny: String,
+    /// Where the reason goes in [`Self::deny`].
+    pub deny_reason_at: String,
+    /// The answer that changes the call's input and decides nothing, so the agent's own rules and mode still decide whether it
+    /// runs, as JSON text.
+    pub rewrite: String,
+    /// Where the new input goes in [`Self::rewrite`].
+    pub rewrite_input_at: String,
+}
+
+impl ToolHook {
+    /// A hook before `tools`, whose payload names the tool and holds its input at the two pointers of `payload`, answered with
+    /// `deny` and `rewrite` (each its JSON text and where the reason, or the input, goes); no mode is read.
+    #[must_use]
+    pub fn new(
+        tools: Vec<HookTool>,
+        payload: (&str, &str),
+        deny: (String, &str),
+        rewrite: (String, &str),
+    ) -> Self {
+        Self {
+            tools,
+            name_at: payload.0.to_owned(),
+            input_at: payload.1.to_owned(),
+            mode_at: None,
+            modes: Vec::new(),
+            deny: deny.0,
+            deny_reason_at: deny.1.to_owned(),
+            rewrite: rewrite.0,
+            rewrite_input_at: rewrite.1.to_owned(),
+        }
+    }
 }
 
 /// One command an agent's hook runs.
@@ -860,6 +988,13 @@ pub trait AgentVendor: Send + Sync {
         request: HookSupportRequest,
     ) -> Result<Option<HookSupport>, ProviderError> {
         drop(request);
+        Ok(None)
+    }
+
+    /// How the agent's own file and shell tools are taken over by a [`HookKind::PreTool`] hook, so that they act in the
+    /// environment a session's tools are served from; `None` for an agent whose tools cannot be taken over. The default: they
+    /// cannot.
+    fn tool_hook(&self) -> Result<Option<ToolHook>, ProviderError> {
         Ok(None)
     }
 

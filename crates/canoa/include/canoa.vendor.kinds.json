@@ -2,7 +2,7 @@
   "kinds": [
     {
       "name": "agent_vendor",
-      "floor_hash": 3784573487,
+      "floor_hash": 1770805046,
       "object": false,
       "doc": "Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with\nnothing run and no connection opened; every other method has a default that says the agent has nothing to add.",
       "slots": [
@@ -151,6 +151,16 @@
             "type": "value"
           },
           "doc": "What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host\nreports as an event no hook of the agent's reaches. The default: nothing."
+        },
+        {
+          "name": "tool_hook",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "How the agent's own file and shell tools are taken over by a [`HookKind::PreTool`] hook, so that they act in the\nenvironment a session's tools are served from; `None` for an agent whose tools cannot be taken over. The default: they\ncannot."
         },
         {
           "name": "gateway_route",

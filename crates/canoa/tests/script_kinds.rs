@@ -46,10 +46,10 @@ use canoa::usage_reader::{
 };
 use canoa::vendor::{
     AccessTarget, AgentVendorVtable, DeliveredFile, EntrySettingsRequest, GatewayRoute,
-    HistoryAnswer, HistoryRequest, HookCommand, HookSupport, HookSupportRequest, HooksDelivery,
-    HooksRequest, LoginFile, ModeTitle, PluginDelivery, SessionFile, SessionListing,
-    SessionsRequest, ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle,
-    Variable as VendorVariable, VendorInfo,
+    HistoryAnswer, HistoryRequest, HookCommand, HookSupport, HookSupportRequest, HookTool,
+    HooksDelivery, HooksRequest, LoginFile, ModeTitle, ModeWord, PluginDelivery, SessionFile,
+    SessionListing, SessionsRequest, ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest,
+    StandardTitle, ToolHook, Variable as VendorVariable, VendorInfo,
 };
 use coqui_acp_api::guatiao::Schema;
 use coqui_acp_api::{
@@ -138,6 +138,9 @@ fn the_committed_vendor_schemas_are_what_this_build_describes() {
             ("HooksDelivery", schema_of::<HooksDelivery>()),
             ("HookSupportRequest", schema_of::<HookSupportRequest>()),
             ("HookSupport", schema_of::<HookSupport>()),
+            ("HookTool", schema_of::<HookTool>()),
+            ("ModeWord", schema_of::<ModeWord>()),
+            ("ToolHook", schema_of::<ToolHook>()),
             ("AccessTarget", schema_of::<AccessTarget>()),
             ("GatewayRoute", schema_of::<GatewayRoute>()),
             ("EntrySettingsRequest", schema_of::<EntrySettingsRequest>()),

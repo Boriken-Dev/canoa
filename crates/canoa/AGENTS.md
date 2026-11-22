@@ -56,6 +56,7 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
     fn skills_delivery(&self, request: SkillsRequest) -> Result<Option<SkillsDelivery>, ProviderError>;   // how it is given a profile's skills (a folder, files beside them, a plugin loaded through the request's `_meta`, an additional directory); default: it cannot be
     fn hooks_delivery(&self, request: HooksRequest) -> Result<Option<HooksDelivery>, ProviderError>;      // the files of a plugin whose hooks run the host's forwarder for the moments ACP does not show; default: its own hooks cannot be given
     fn hook_support(&self, request: HookSupportRequest) -> Result<Option<HookSupport>, ProviderError>;    // what its own hooks do for `cd`, `pre-compact` and a `session-start` after a `compact` or `clear`; default: nothing said
+    fn tool_hook(&self) -> Result<Option<ToolHook>, ProviderError>;                              // how a `pre-tool` hook takes its own file and shell tools over, so they act in the environment a session's tools are served from; default: they cannot be
     fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError>;                      // how it is given a gateway the host runs for a session (its own account kind, credential, address setting, suffix, fixed settings); default none
     fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError>;       // the files it reads from its own folder to use a gateway at `address`; default none
     fn entry_settings(&self, request: EntrySettingsRequest) -> Result<Option<Value>, ProviderError>;   // the settings object of its harness provider the host's source for it is started with (a managed copy's launch, the person's protected places); default none
@@ -67,7 +68,9 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 // ShellAdvice { env, notice } (`cannot(why)`, `sets(name, value)`), SessionsRequest { home?, limit, peek }, SessionFile { id, path, bytes, updated_ms, title?, cwd? },
 // SessionListing { home?, max_bytes, files (newest first; the newest `peek` carry title and cwd) }, HistoryRequest { text, session }, HistoryAnswer { history, title? }.
 // SkillsRequest { additional_directories }, SkillsDelivery { folder, files, plugin?, directory, how (`{name}`) }, PluginDelivery { folder, meta (value merged into the request's `_meta`; a string `PLUGIN_PATH` is the folder's path) },
-// DeliveredFile { path, text }, HookKind::{Start, PreCompact, Batch}, HooksRequest { commands: [HookCommand { kind: HookKind, command }], timeout_seconds }, HooksDelivery { files, plugin },
+// DeliveredFile { path, text }, HookKind::{Start, PreCompact, Batch, PreTool}, HooksRequest { commands: [HookCommand { kind: HookKind, command }], timeout_seconds }, HooksDelivery { files, plugin },
+// ToolHook { tools: [HookTool { name, role: ToolRole::{Shell, Files}, command?, shell?: ShellFamily }], name_at, input_at, mode_at?, modes: [ModeWord { word, mode }], deny, deny_reason_at, rewrite, rewrite_input_at }
+//   (`ToolHook::new(tools, (name_at, input_at), (deny, deny_reason_at), (rewrite, rewrite_input_at))`, `HookTool::shell(name, command, shell)`, `HookTool::files(name)`, `ModeWord::new(word, mode)`),
 // HookSupportRequest { event, reason? }, HookSupport { fires, text } (`fires`, `cannot`), AccessTarget { harness, at_launch },
 // GatewayRoute { kind, credential, address?, suffix, fixed: [Variable] } (`GatewayRoute::new(kind, credential)`),
 // EntrySettingsRequest { managed: [Variable] (the launch settings of the Store's copy, as text), protected? } (`EntrySettingsRequest::new()`).
@@ -78,6 +81,13 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 - `title` is the name for people (`Claude`), `program` the program's (`Claude Code`; absent: the title). `vendor` stamps a session (`AGENTS_VENDOR`, `anthropic`); `aos` is the id in the standard registry of harnesses (`claude-code`); `model_variable` is where the running model is read from (`ANTHROPIC_MODEL`); `tool_name` is where the agent puts a tool's own name in a tool call's `_meta`, a JSON pointer below it (`/claudeCode/toolName`); `skills_folder` is the folder below a project where the agent reads skills from (`.claude/skills`), which a scan of a skill source looks in beside `skills/` and `.agents/skills`. Each may be absent. `context_files` (default none) are the files of a project's context the agent loads for itself, as paths below a directory written with `/` (`AGENTS.md`): the host does not feed the agent those again, and `fs/instructions` lists them. `home_variable` is the variable that names the folder the agent keeps its own files in (`CLAUDE_CONFIG_DIR`), `home_folder` that folder below the person's home when the variable is not set (`.claude`), and `home_context_files` the files in it the agent loads as the person's own instructions (`CLAUDE.md`); each may be absent.
 - `standards` are the credential standards that are the vendor's own, each with its name. `names` are the `agentInfo.name` values the agent reports; `markers` are the `initialize` `_meta` keys that are `true` for an agent that reports no name. `modes` are the modes it is known to offer before it has run. `endpoints` are the `https` addresses its program reaches while it runs (its API and login hosts), which the host asks the system's proxy about for the program.
 - `mark` is SVG text: a square `viewBox` and `path` elements with a `d` and an optional `#RRGGBB` `fill` (on the path or the root); a path with none, or `currentColor`, takes the text's colour. `look` is a JSON document with an `id`, a `label`, the agent's `vendor` (its `agent` id) and, for `light` and `dark`, colour tokens, as `looks/list` serves it. Both are at most `MAX_DOCUMENT_TEXT` characters.
+- `tool_hook` and `HookKind::PreTool`: a `pre-tool` command reads the agent's own hook payload on standard input and prints the
+  answer the agent reads; it fails (any status but 0) when the host cannot answer, and the vendor's `hooks_delivery` writes it so
+  that a failure refuses the call. `ToolHook` lists the tools it runs before (`Shell` with the input key of its command and the
+  shell it is written for, or `Files`), where the payload names the tool (`name_at`), holds its input (`input_at`) and says the
+  agent's mode (`mode_at`, read through `modes` into `manual`, `accept_edits`, `auto`, `plan`, `bypass` or `dont_ask`), and the
+  agent's own answers as JSON text with the place of the reason (`deny`) and of the new input (`rewrite`). The rewrite form must
+  decide nothing: the agent's own rules and mode judge the rewritten call. A tool not listed is not taken over.
 
 ## The form a provider asks for
 
@@ -250,7 +260,7 @@ impl EnvironmentInfo { pub fn new(title, os, arch) -> Self; pub fn offering(self
 - `spawner` hands out the `ProcessSpawner` (coqui-acp-api) a harness, an agent program or a shell is started through; the program runs where the environment is, and `SpawnerInfo` says `local: false`.
 - The kind's description and schemas are `include/canoa.environment.kinds.json` and `.schemas.json`, checked by `tests/script_kinds.rs` (`CANOA_WRITE_KINDS=1` regenerates them); the SDKs' kinds are regenerated with `tools/write_kinds.{py,mjs}`.
 
-`SourcePreset::own_tools` says an agent does its own file and shell work and never asks its client for either (Claude Code, Codex and Pi, from their recorded sessions): the host tells such an agent that serving its tools from an environment changes nothing it does.
+`SourcePreset::own_tools` says an agent does its own file and shell work and never asks its client for either (Claude Code, Codex and Pi, from their recorded sessions): the host turns that work to an environment its tools are served from where the agent's vendor answers `tool_hook`, and refuses the connection where it does not.
 
 ## `canoa::address` (feature `network`)
 
