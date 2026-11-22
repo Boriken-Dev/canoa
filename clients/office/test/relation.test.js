@@ -6,9 +6,14 @@ import {
   APP_PATH,
   CONVERSATION,
   DOCUMENT,
+  EXTENSION_PROVIDER_RDNS,
+  OFFICE_TOOLS_SYMBOL,
   appAddress,
+  createExtensionToolsBridge,
+  detectExtensionProvider,
   documentName,
   handoffFrom,
+  hasExtensionProvider,
   hashKey,
   normalizeDocumentUrl,
   parsePaneMessage,
@@ -182,4 +187,25 @@ test('the secret, when the pane has one, goes to the app in its address and nowh
   const address = new URL(appAddress('https://localhost:7800', null, 'word', key));
   assert.equal(address.searchParams.get('office_key'), key);
   assert.ok(!new URL(appAddress('https://localhost:7800', null, 'word')).search.includes('office_key'));
+});
+
+test('extension detection matches Canoa provider RDNS and waits briefly for acp:ready', async () => {
+  assert.equal(hasExtensionProvider({ acp: { providers: [{ rdns: EXTENSION_PROVIDER_RDNS }] } }), true);
+  assert.equal(hasExtensionProvider({ acp: { providers: [{ rdns: 'dev.example.other', uuid: 'other' }] } }), false);
+  assert.equal(await detectExtensionProvider({ document: {} }, { waitMs: 5 }), false);
+
+  const listeners = new Map();
+  const fakeWin = {
+    document: {},
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    removeEventListener: (name) => listeners.delete(name),
+    dispatchEvent() {},
+    [OFFICE_TOOLS_SYMBOL]: { register: async () => ({ ok: true }), unregister: async () => {} },
+  };
+  const pending = detectExtensionProvider(fakeWin, { waitMs: 50 });
+  fakeWin.document.acp = { providers: [{ rdns: EXTENSION_PROVIDER_RDNS }] };
+  listeners.get('acp:ready')?.();
+  assert.equal(await pending, true);
+  assert.ok(createExtensionToolsBridge(fakeWin) !== null);
+  assert.equal(createExtensionToolsBridge({}), null);
 });

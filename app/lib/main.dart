@@ -1164,7 +1164,10 @@ class _CanoaAppState extends State<CanoaApp> {
       // A site's session works in a folder the agent's host makes and names in its answer; the page names none.
       final opened = await client.openSession(cwd: cwd, setup: site == null ? AcpSessionSetup.none : siteSetup(site));
       final made = site == null ? null : madeFolder(opened.raw);
-      if (site != null && made == null) throw StateError('The host did not say which workspace it made for this session');
+      // The extension's own pages are told the folder the host made; a page served from a web origin (an Office task pane's app
+      // frame) never is, since a page is told no path, and its session still runs in the folder the host made for the site.
+      final pageIsWebOrigin = Uri.base.scheme == 'http' || Uri.base.scheme == 'https';
+      if (site != null && made == null && !pageIsWebOrigin) throw StateError('The host did not say which workspace it made for this session');
       if (!mounted) throw StateError('Canoa UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? agent.label : title,

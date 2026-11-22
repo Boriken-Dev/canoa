@@ -500,3 +500,44 @@ test('Excel: the selection and a range are read, and a write must fit its range 
   assert.equal(written.length, 1, 'a write that does not fit is not made');
   await pane.stop();
 });
+
+test('bridge mode runs reads and write prompts through the extension bridge without HTTP', async () => {
+  let registered = null;
+  let unregistered = null;
+  const asked = [];
+  const doc = { text: 'Initial', selection: 'Initial', comments: [] };
+  const word = wordStub(doc);
+  const pane = createPaneTools({
+    app: 'word',
+    tools: wordTools(word),
+    relation: async () => item,
+    ask: async (q) => {
+      asked.push(q);
+      return true;
+    },
+    bridge: {
+      register: async (app, handler) => {
+        registered = { app, handler };
+      },
+      unregister: async (app) => {
+        unregistered = app;
+      },
+    },
+  });
+  void pane.start();
+  await until(() => registered !== null, 'bridge registered');
+  assert.equal(registered.app, 'word');
+  await registered.handler({ type: 'open', stream: STREAM, session: { agent: 'Claude', via: 'app' } });
+  const list = await registered.handler({ type: 'mcp', stream: STREAM, message: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} } });
+  assert.ok(list.result.tools.some((t) => t.name === 'word_insert_text'));
+  const write = await registered.handler({
+    type: 'mcp',
+    stream: STREAM,
+    message: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'word_insert_text', arguments: { text: 'Added', location: 'document_end' } } },
+  });
+  assert.equal(write.result.isError, false);
+  assert.equal(asked.length, 1);
+  assert.deepEqual(word.calls, [['body.insertText', 'Added', 'End']]);
+  await pane.stop();
+  assert.equal(unregistered, 'word');
+});

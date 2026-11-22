@@ -17,11 +17,16 @@ Nothing here is published to a marketplace. You render a manifest for your own h
 | `taskpane/` | The pages the host serves: `taskpane.html` and `taskpane.js` (read the open item through Office.js, frame the chat, carry the sign-in), `relation.js` (the relation of an item and the messages the pane and the app exchange, with no Office.js in it), `dialog.html` and `dialog.js` (the Office dialog that carries a sign-in result back as a string), `launch.js`, `launch.html` and `launch-page.js` (starting a host that is not running, and the secret), `tools.js` with `tools-outlook.js`, `tools-word.js` and `tools-excel.js` (the tools the pane offers) |
 | `sideload.ps1` | Registers or removes a rendered manifest for Word, Excel and PowerPoint on Windows (`add`, `remove`, `status`; `-Key` names another registry key, which is how its test runs) |
 | `e2e/local.mjs` | A real Chromium against a host with `office_local` over HTTPS, resolving no name but localhost: the pages load Office.js from the host alone, under the policy, and the page's key is accepted with no pairing |
+| `e2e/extension.mjs` | A real Chromium with the Canoa extension framing the pane from a static origin with no `[host.web]` loopback server: with the extension, chat and Office write prompts reach the local host via `document.acp`; without it, the pane falls back and says so |
 | `test/` | `npm test` runs `node --test` over `relation.js`, `launch.js`, `tools.js` and the tool modules (against stand-ins for Office.js), `render.mjs` and `sideload.ps1` (the last on a scratch registry key, skipped without PowerShell on Windows) |
 
 The pages are compiled into `canoa-host` and answered under `/office/` only when the configuration says so; the manifests are not
 served by it. The app they frame is the web app the host already serves, under `/office/app/`. Both the standalone host
 (`canoa serve --web`) and the portal (`canoa portal`) serve them.
+
+## On this computer, without a loopback web listener (Office on the web + Canoa extension)
+
+In Outlook, Word and Excel on the web in a Chromium browser with the Canoa extension, no `[host.web]` loopback server or `localhost` certificate is needed. Once the person grants the pane's origin to the extension (`allFrames: true`), `taskpane.js` sees `document.acp` offering `dev.boriken.canoa` when `/canoa.json` is absent, connects the Office tools over the extension's `@tools` bridge (`tool-provider.js`, still asking every write in the pane's `#ask` prompt), and loads `/office/app/?mode=chat` using `document.acp` to reach the local host. Without both `/canoa.json` and the extension, the pane falls back cleanly and says so.
 
 ## Turn it on
 

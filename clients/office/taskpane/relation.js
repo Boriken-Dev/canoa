@@ -11,6 +11,69 @@ export const DOCUMENT = 'document';
 
 /** The page of the chat-only app, under this add-in's own route, and the parameters that ask for the chat alone. */
 export const APP_PATH = '/office/app/';
+/** Reverse-DNS identifier of Canoa's browser provider in `document.acp.providers`. */
+export const EXTENSION_PROVIDER_RDNS = 'dev.boriken.canoa';
+/** Window property carrying the extension's Office tool registration bridge (never attached to `document.acp`). */
+export const OFFICE_TOOLS_SYMBOL = Symbol.for('dev.boriken.canoa.officeTools');
+
+/**
+ * Whether `document.acp` offers Canoa's browser extension provider (by RDNS/UUID, never sniffing extension ids).
+ * @param {{acp?: {providers?: Array<{rdns?: string, uuid?: string}>}}|null|undefined} doc
+ * @returns {boolean}
+ */
+export function hasExtensionProvider(doc) {
+  const providers = doc?.acp?.providers;
+  if (!Array.isArray(providers)) return false;
+  return providers.some((provider) => provider?.rdns === EXTENSION_PROVIDER_RDNS || provider?.uuid === EXTENSION_PROVIDER_RDNS);
+}
+
+/**
+ * Waits briefly for `acp:ready` when `document.acp` is not yet registered at load, then reports whether Canoa is offered.
+ * @param {Window|null|undefined} win
+ * @param {{waitMs?: number}} [options]
+ * @returns {Promise<boolean>}
+ */
+export async function detectExtensionProvider(win, { waitMs = 150 } = {}) {
+  if (!win) return false;
+  if (hasExtensionProvider(win.document)) return true;
+  if (typeof win.addEventListener !== 'function') return false;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      win.removeEventListener?.('acp:ready', check);
+      resolve(hasExtensionProvider(win.document));
+    };
+    const check = () => {
+      if (hasExtensionProvider(win.document)) finish();
+    };
+    const timer = setTimeout(finish, waitMs);
+    win.addEventListener('acp:ready', check);
+    try {
+      if (typeof Event === 'function' && typeof win.dispatchEvent === 'function') {
+        win.dispatchEvent(new Event('acp:request'));
+      }
+    } catch {
+      // Older environments without custom Event constructors simply rely on the timeout.
+    }
+  });
+}
+
+/**
+ * Returns the extension's Office tools registration bridge when `acp-page.js` defined it on `win`, else null.
+ * @param {Window|null|undefined} win
+ * @returns {{register: (app: string, handler: Function) => Promise<unknown>, unregister: (app: string) => Promise<void>}|null}
+ */
+export function createExtensionToolsBridge(win) {
+  const bridge = win?.[OFFICE_TOOLS_SYMBOL];
+  if (!bridge || typeof bridge.register !== 'function' || typeof bridge.unregister !== 'function') return null;
+  return {
+    register: (app, handler) => bridge.register(app, handler),
+    unregister: (app) => bridge.unregister(app),
+  };
+}
 
 const LABEL_MAX = 80;
 const KEY_HEX = 32;

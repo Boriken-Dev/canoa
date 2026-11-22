@@ -58,6 +58,7 @@ const REFUSED = 'The person did not allow this in the Office pane, so nothing wa
  * @param {(ms: number) => Promise<void>} [options.sleep]
  * @param {number} [options.askMs]  how long a write waits for the person
  * @param {(status: string) => void} [options.onStatus]  `connected`, `waiting` or `stopped`
+ * @param {{register: (app: string, handler: Function) => Promise<unknown>, unregister: (app: string) => Promise<void>}} [options.bridge]  optional extension bridge instead of `/office/tools/*` HTTP
  */
 export function createPaneTools({
   app,
@@ -69,6 +70,7 @@ export function createPaneTools({
   sleep = (ms) => new Promise((done) => setTimeout(done, ms)),
   askMs = ASK_MS,
   onStatus = () => {},
+  bridge,
 }) {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   /** @type {Map<string, {id: string, agent: string, where: string, running: number}>} */
@@ -78,6 +80,7 @@ export function createPaneTools({
   let seen = 0;
   let stopped = false;
   let running = null;
+  let bridgeWake = null;
 
   const post = (action, query, body) =>
     fetchImpl(`${TOOLS_PATH}/${action}?${new URLSearchParams(query)}`, {
@@ -174,33 +177,42 @@ export function createPaneTools({
     });
   }
 
-  function heard(message) {
-    if (message === null || typeof message !== 'object') return;
+  async function handleEvent(message) {
+    if (message === null || typeof message !== 'object') return null;
     if (message.type === 'open') {
       open(message);
-    } else if (message.type === 'close') {
-      streams.delete(message.stream);
-    } else if (message.type === 'mcp') {
-      const stream = streams.get(message.stream);
-      if (stream === undefined) return;
-      const body = message.message;
-      if (stream.running >= MAX_RUNNING) {
-        void send({ type: 'mcp', stream: stream.id, message: failure(body?.id, -32000, 'too many calls at once') });
-        return;
-      }
-      stream.running += 1;
-      // Not waited for: asking the person takes minutes, and the agent's pings and other calls go on meanwhile.
-      void (async () => {
-        try {
-          const answer = await serve(stream, body);
-          if (answer !== null && streams.get(stream.id) === stream) await send({ type: 'mcp', stream: stream.id, message: answer });
-        } catch {
-          await send({ type: 'mcp', stream: stream.id, message: failure(body?.id, -32603, 'that failed') });
-        } finally {
-          stream.running -= 1;
-        }
-      })();
+      return null;
     }
+    if (message.type === 'close') {
+      streams.delete(message.stream);
+      return null;
+    }
+    if (message.type !== 'mcp') return null;
+    const stream = streams.get(message.stream);
+    if (stream === undefined) return null;
+    const body = message.message;
+    if (stream.running >= MAX_RUNNING) return failure(body?.id, -32000, 'too many calls at once');
+    stream.running += 1;
+    // Not waited for: asking the person takes minutes, and the agent's pings and other calls go on meanwhile.
+    try {
+      const answer = await serve(stream, body);
+      return answer !== null && streams.get(stream.id) === stream ? answer : null;
+    } catch {
+      return failure(body?.id, -32603, 'that failed');
+    } finally {
+      stream.running -= 1;
+    }
+  }
+
+  function heard(message) {
+    if (message === null || typeof message !== 'object' || message.type !== 'mcp') {
+      void handleEvent(message);
+      return;
+    }
+    const streamId = message.stream;
+    void handleEvent(message).then((answer) => {
+      if (answer !== null) void send({ type: 'mcp', stream: streamId, message: answer });
+    });
   }
 
   /** Registers with the host. Resolves the session id, or rejects with the host's reason. */
@@ -278,16 +290,59 @@ export function createPaneTools({
     onStatus('stopped');
   }
 
+  async function bridgeLoop() {
+    let wait = RETRY_MIN_MS;
+    while (!stopped) {
+      let resetResolve;
+      const resetPromise = new Promise((resolve) => {
+        resetResolve = resolve;
+      });
+      bridgeWake = resetResolve;
+      try {
+        await bridge.register(app, async (event) => {
+          if (event?.type === 'reset') {
+            streams = new Map();
+            resetResolve();
+            return null;
+          }
+          return handleEvent(event);
+        });
+        streams = new Map();
+        onStatus('connected');
+        wait = RETRY_MIN_MS;
+        await resetPromise;
+      } catch {
+        // The extension or local host is not ready yet: try again, a little later each time.
+      }
+      bridgeWake = null;
+      streams = new Map();
+      if (stopped) break;
+      onStatus('waiting');
+      await sleep(wait);
+      wait = Math.min(wait * 2, RETRY_MAX_MS);
+    }
+    onStatus('stopped');
+  }
+
   return {
     /** Starts offering the tools; keeps trying while the host is not there. */
     start() {
-      running ??= loop();
+      running ??= bridge ? bridgeLoop() : loop();
       return running;
     },
 
     /** Stops offering them and tells the host, which takes the tools away from every session. */
     async stop() {
       stopped = true;
+      bridgeWake?.();
+      if (bridge) {
+        try {
+          await bridge.unregister(app);
+        } catch {
+          // The extension port already closed.
+        }
+        return;
+      }
       const ended = session;
       session = null;
       if (ended !== null) {

@@ -8,7 +8,10 @@
 import { keyOf, offerStart, whatAnswers } from './launch.js';
 import {
   appAddress,
+  createExtensionToolsBridge,
+  detectExtensionProvider,
   handoffFrom,
+  hasExtensionProvider,
   parsePaneMessage,
   portalState,
   relationForDocument,
@@ -149,8 +152,10 @@ async function hostIndex() {
   }
 }
 
-/** Whether the host offers to accept this page's key itself, which it does only to a page on its own computer. */
+/** Whether this host offers to accept this page's key itself, which it does only to a page on its own computer. */
 let onThisComputer = false;
+/** Whether the pane talks to the local host through the Canoa browser extension instead of a loopback server. */
+let viaExtension = false;
 const indexAtLoad = hostIndex().then((index) => {
   onThisComputer = typeof index?.admit === 'string';
   return index;
@@ -291,7 +296,7 @@ function askInPane({ agent, where, tool, summary, item, signal }) {
  * Offers this application's tools to the Canoa's sessions while the pane is open: Outlook's open item, Word's document, Excel's
  * workbook. The pane keeps asking the host for what its sessions send; closing the pane takes the tools away.
  */
-function offerTools(app) {
+function offerTools(app, { bridge } = {}) {
   const make = {
     outlook: () => (typeof Office !== 'undefined' ? outlookTools(Office) : null),
     word: () => (typeof Word !== 'undefined' ? wordTools(Word) : null),
@@ -305,9 +310,20 @@ function offerTools(app) {
     relation: () => (app === 'outlook' ? mailRelation() : documentRelation(app)),
     ask: askInPane,
     key,
+    bridge,
   });
   void paneTools.start();
   window.addEventListener('pagehide', () => void paneTools.stop());
+}
+
+async function startViaExtension() {
+  gate = 'open';
+  signIn.hidden = true;
+  startButton.hidden = true;
+  shown = undefined;
+  loaded = false;
+  await refresh();
+  offerTools(client, { bridge: createExtensionToolsBridge(window) });
 }
 
 // Office.js defines `Office` before this module runs; without it (a browser tab, a blocked script) the pane says so.
@@ -315,9 +331,9 @@ if (typeof Office === 'undefined') {
   say('Office.js did not load');
 } else {
   Office.onReady(async (info) => {
-    await indexAtLoad;
+    const [index, extension] = await Promise.all([indexAtLoad, detectExtensionProvider(window)]);
     signIn.addEventListener('click', openSignIn);
-    if (onThisComputer) watchHost();
+    if (index !== null && onThisComputer) watchHost();
     if (info.host === Office.HostType.Outlook) {
       client = 'outlook';
       refresh = async () => show(await mailRelation());
@@ -331,8 +347,32 @@ if (typeof Office === 'undefined') {
       say('This Office application is not known');
       return;
     }
-    await checkGate();
-    if (gate !== 'signed-out') await refresh();
-    if (onThisComputer) offerTools(client);
+    if (index !== null) {
+      await checkGate();
+      if (gate !== 'signed-out') await refresh();
+      if (onThisComputer) offerTools(client);
+      return;
+    }
+    if (!extension) {
+      await checkGate();
+      if (gate === 'signed-out') return;
+      const answering = await whatAnswers();
+      if (answering === 'launcher') {
+        watchHost();
+        showDown('launcher');
+      } else {
+        frame.hidden = true;
+        say('Canoa is not running here, and the Canoa browser extension is not enabled for this site.');
+      }
+      window.addEventListener('acp:ready', () => {
+        if (!viaExtension && !onThisComputer && hasExtensionProvider(document)) {
+          viaExtension = true;
+          void startViaExtension();
+        }
+      });
+      return;
+    }
+    viaExtension = true;
+    await startViaExtension();
   });
 }
