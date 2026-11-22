@@ -159,15 +159,18 @@ class ChildThreadBody extends StatelessWidget {
       Flexible(flex: 2, child: ChildFacts(task: task, parent: parent, full: full)),
       Expanded(
         flex: 3,
-        child: ChatTranscript(
-          key: ValueKey('thread-${task.id}'),
-          entries: thread.entries,
-          terminals: thread.terminals,
-          plan: thread.plan,
-          working: !task.phase.ended,
-          controller: scroll,
-          renderers: renderers,
-          narrow: narrow,
+        // The thread is its own selection area: the one around the screen does not take part in its drag or Select all.
+        child: SelectionContainer.disabled(
+          child: ChatTranscript(
+            key: ValueKey('thread-${task.id}'),
+            entries: thread.entries,
+            terminals: thread.terminals,
+            plan: thread.plan,
+            working: !task.phase.ended,
+            controller: scroll,
+            renderers: renderers,
+            narrow: narrow,
+          ),
         ),
       ),
       if (asking && first?.task?.id == task.id)

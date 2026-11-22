@@ -136,12 +136,15 @@ class _PopoutChatState extends State<PopoutChat> {
             actions: [TextButton(onPressed: widget.onDock, child: const Text('Close'))],
           ),
         Expanded(
-          child: chat.ChatTranscript(
-            entries: [for (final message in session.messages) chat.ModelEntry(message)],
-            terminals: session.terminals,
-            plan: session.plan,
-            working: working,
-            renderers: widget.renderers,
+          // The transcript is its own selection area, apart from any the window sits in.
+          child: SelectionContainer.disabled(
+            child: chat.ChatTranscript(
+              entries: [for (final message in session.messages) chat.ModelEntry(message)],
+              terminals: session.terminals,
+              plan: session.plan,
+              working: working,
+              renderers: widget.renderers,
+            ),
           ),
         ),
         if (session.queue.isNotEmpty)
