@@ -69,8 +69,8 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 // SessionListing { home?, max_bytes, files (newest first; the newest `peek` carry title and cwd) }, HistoryRequest { text, session }, HistoryAnswer { history, title? }.
 // SkillsRequest { additional_directories }, SkillsDelivery { folder, files, plugin?, directory, how (`{name}`) }, PluginDelivery { folder, meta (value merged into the request's `_meta`; a string `PLUGIN_PATH` is the folder's path) },
 // DeliveredFile { path, text }, HookKind::{Start, PreCompact, Batch, PreTool}, HooksRequest { commands: [HookCommand { kind: HookKind, command }], timeout_seconds }, HooksDelivery { files, plugin },
-// ToolHook { tools: [HookTool { name, role: ToolRole::{Shell, Files}, command?, shell?: ShellFamily }], name_at, input_at, mode_at?, modes: [ModeWord { word, mode }], deny, deny_reason_at, rewrite, rewrite_input_at }
-//   (`ToolHook::new(tools, (name_at, input_at), (deny, deny_reason_at), (rewrite, rewrite_input_at))`, `HookTool::shell(name, command, shell)`, `HookTool::files(name)`, `ModeWord::new(word, mode)`),
+// ToolHook { tools: [HookTool { name, role: ToolRole::{Shell, Files, Pass}, command?, shell?: ShellFamily }], pass_prefixes, name_at, input_at, mode_at?, modes: [ModeWord { word, mode }], deny, deny_reason_at, rewrite, rewrite_input_at }
+//   (`ToolHook::new(tools, (name_at, input_at), (deny, deny_reason_at), (rewrite, rewrite_input_at))`, `HookTool::shell(name, command, shell)`, `HookTool::files(name)`, `HookTool::passes(name)`, `ModeWord::new(word, mode)`),
 // HookSupportRequest { event, reason? }, HookSupport { fires, text } (`fires`, `cannot`), AccessTarget { harness, at_launch },
 // GatewayRoute { kind, credential, address?, suffix, fixed: [Variable] } (`GatewayRoute::new(kind, credential)`),
 // EntrySettingsRequest { managed: [Variable] (the launch settings of the Store's copy, as text), protected? } (`EntrySettingsRequest::new()`).
@@ -82,9 +82,11 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 - `standards` are the credential standards that are the vendor's own, each with its name. `names` are the `agentInfo.name` values the agent reports; `markers` are the `initialize` `_meta` keys that are `true` for an agent that reports no name. `modes` are the modes it is known to offer before it has run. `endpoints` are the `https` addresses its program reaches while it runs (its API and login hosts), which the host asks the system's proxy about for the program.
 - `mark` is SVG text: a square `viewBox` and `path` elements with a `d` and an optional `#RRGGBB` `fill` (on the path or the root); a path with none, or `currentColor`, takes the text's colour. `look` is a JSON document with an `id`, a `label`, the agent's `vendor` (its `agent` id) and, for `light` and `dark`, colour tokens, as `looks/list` serves it. Both are at most `MAX_DOCUMENT_TEXT` characters.
 - `tool_hook` and `HookKind::PreTool`: a `pre-tool` command reads the agent's own hook payload on standard input and prints the
-  answer the agent reads; it fails (any status but 0) when the host cannot answer, and the vendor's `hooks_delivery` writes it so
-  that a failure refuses the call. `ToolHook` lists the tools it runs before (`Shell` with the input key of its command and the
-  shell it is written for, or `Files`), where the payload names the tool (`name_at`), holds its input (`input_at`) and says the
+  answer the agent reads (nothing, for a call that goes on as it is); it fails (any status but 0) when the host cannot answer, and
+  the vendor's `hooks_delivery` writes it to run before every tool and so that a failure refuses the call. A `start` command in the
+  same request reports that the agent's session started with the hook in force. `ToolHook` describes the agent's tools by role
+  (`Shell` with the input key of its command and the shell it is written for, `Files`, or `Pass` for a tool that acts on nothing of
+  the computer's, which runs as it is, as does a name starting with one of `pass_prefixes`); every other tool is refused. It says where the payload names the tool (`name_at`), holds its input (`input_at`) and says the
   agent's mode (`mode_at`, read through `modes` into `manual`, `accept_edits`, `auto`, `plan`, `bypass` or `dont_ask`), and the
   agent's own answers as JSON text with the place of the reason (`deny`) and of the new input (`rewrite`). The rewrite form must
   decide nothing: the agent's own rules and mode judge the rewritten call. A tool not listed is not taken over.
@@ -669,7 +671,7 @@ pub fn internal(why: impl AsRef<str>) -> ProviderError;     // status GUATIAO_ER
 `canoa::store::engine::Engine<R: Recipe>` is the store that runs a recipe (`describe`, `program`, `latest`, `plan`, `apply`, with the `Run` of `canoa::store::exec` that
 starts a program for it, keeps the person's cancel and the deadline, and refuses a credential variable), and `canoa::store_provider!(Name, RecipeType, "id")` makes the
 `program_store` provider `Name` of a recipe with `Default`, which a crate offers from its library beside its agent's other providers (the crate names `canoa` and
-`coqui-acp-api` as dependencies). `canoa::store::protect` holds the gitignore-syntax lists of places and variables a store's install may not touch, and `canoa::store::text::hides_text`
+`coqui-acp-api` as dependencies). `canoa::store::protect` holds the gitignore-syntax lists of places and variables a store's install may not touch (`Protected::protects` for a path of this system, `protects_parts` for one of another given as its names, `anchored` for whether a line is anchored at a root or a home), and `canoa::store::text::hides_text`
 says which characters can hide text.
 
 A recipe fetches only through the `InstallTools` it is handed and starts no process of its own: a test in `canoa-host` scans every crate that holds a recipe for `std::process::Command`.
