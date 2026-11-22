@@ -186,17 +186,17 @@ void main() {
     }
 
     _on('a shell that turned bracketed paste on gets the markers, and the text cannot end the paste early', TargetPlatform.linux, (tester, os) async {
-      final clip = _Clip(text: 'a\nb\x1b[201~rm -rf /');
+      final clip = _Clip(text: 'a\nb\tc\x1b[201~rm -rf /\x1b[31mred\x03');
       final rig = await _rig(tester, clip);
       rig.shell.print('\x1b[?2004h');
       await _settle(tester);
       await _chord(tester, os, [_ctrl, _shift], LogicalKeyboardKey.keyV);
-      expect(rig.shell.writes, ['\x1b[200~a\rbrm -rf /\x1b[201~']);
+      expect(rig.shell.writes, ['\x1b[200~a\rb\tcrm -rf /red \x1b[201~']);
 
       rig.shell.print('\x1b[?2004l');
       await _settle(tester);
       await _chord(tester, os, [_ctrl, _shift], LogicalKeyboardKey.keyV);
-      expect(rig.shell.writes.last, 'a\rb\x1b[201~rm -rf /', reason: 'with the mode off it is plain text, as typed');
+      expect(rig.shell.writes.last, 'a\rb\tcrm -rf /red ', reason: 'with the mode off, ordinary text and line breaks arrive as copied and escape sequences do not');
     });
 
     _on('a large multi-line paste is sent whole: nothing here caps or asks', TargetPlatform.linux, (tester, os) async {

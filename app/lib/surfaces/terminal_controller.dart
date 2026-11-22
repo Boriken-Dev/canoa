@@ -354,22 +354,20 @@ class TerminalPane extends ChangeNotifier {
   }
 
   /// Sends [text] to the shell as one paste: line ends become the Enter key's `\r`, and when the shell asked for bracketed paste the
-  /// whole is wrapped in its markers, so it can tell a paste from typing. Before the shell is up it waits, as typing does.
+  /// whole is wrapped in its markers, so it can tell a paste from typing. Escape sequences and control characters other than tab and
+  /// line ends are removed (`Terminal.paste`), since text copied from a page can carry the end marker and run what follows. Before the
+  /// shell is up it waits, as typing does.
   void paste(String text) {
     if (text.isEmpty || (state != PaneState.running && state != PaneState.starting)) return;
-    final bracketed = terminal.bracketedPasteMode && state == PaneState.running;
-    // The end marker inside the text would end the paste early and leave the rest to run as typed.
     final lines = text.replaceAll(RegExp(r'\r\n|\n'), '\r');
-    final clean = bracketed ? lines.replaceAll(_pasteEnd, '') : lines;
     if (state == PaneState.starting) {
-      _pending.write(clean);
+      final plain = StringBuffer();
+      (Terminal()..onOutput = plain.write).paste(lines);
+      _pending.write(plain);
     } else {
-      // Not `Terminal.paste`, which removes the text's control characters and escape sequences: what is pasted is sent as it is.
-      terminal.textInput(bracketed ? '\x1b[200~$clean$_pasteEnd' : clean);
+      terminal.paste(lines);
     }
   }
-
-  static const _pasteEnd = '\x1b[201~';
 
   /// Pastes the clipboard's text; the problem in words when it could not, or null.
   Future<String?> pasteClipboard() async {
