@@ -31,7 +31,9 @@ export function release(...handles) {
  * @returns {{type: 'string', writeOnly: true, 'x-sensitive': true, title?: string, description?: string}}
  */
 export function credentialSchema(title, description) {
-  return dataOf({ type: 'string', writeOnly: true, 'x-sensitive': true, title, description });
+  return /** @type {{type: 'string', writeOnly: true, 'x-sensitive': true, title?: string, description?: string}} */ (
+    dataOf({ type: 'string', writeOnly: true, 'x-sensitive': true, title, description })
+  );
 }
 
 /**

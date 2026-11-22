@@ -112,7 +112,7 @@ export class SettingProfileItem extends ProfileItem {
   /** @type {string | undefined} the member of the values holding it; the setting's key when absent */ static member;
   /** @type {string} what the report says of it */ static note = 'sets a value the session starts with';
 
-  /** @param {{harness: string, values: string}} request */
+  /** @param {{harness: string, values: Record<string, unknown>}} request */
   apply(request) {
     const c = /** @type {typeof SettingProfileItem} */ (this.constructor);
     const value = valuesOf(request)[c.member ?? c.setting];
@@ -132,7 +132,7 @@ export class EnvProfileItem extends ProfileItem {
   /** @type {string} what a line is called in the refusal of one that is not `NAME=value` */ static lineLabel = 'variable';
   /** @type {string} what the report says when any variable is set */ static note = 'gives its programs environment variables';
 
-  /** @param {{harness: string, values: string}} request */
+  /** @param {{harness: string, values: Record<string, unknown>}} request */
   apply(request) {
     const c = /** @type {typeof EnvProfileItem} */ (this.constructor);
     const values = valuesOf(request);
@@ -188,7 +188,7 @@ const NETWORK_NOTES = {
  * and runs.
  */
 export class NetworkProfileItem extends ProfileItem {
-  /** @param {{harness: string, values: string}} request */
+  /** @param {{harness: string, values: Record<string, unknown>}} request */
   apply(request) {
     const values = valuesOf(request);
     const mode = textOf(values, 'mode') ?? 'system';
