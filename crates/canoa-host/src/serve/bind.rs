@@ -1112,6 +1112,9 @@ impl Serving {
             options.state_dir.as_ref().map(|dir| dir.join("history")),
             config.history,
         ));
+        if config.keep_awake {
+            tracing::info!("non-default: settings.power.keep_awake is true");
+        }
         if config.max_message_bytes != crate::config::DEFAULT_MAX_MESSAGE_BYTES {
             tracing::info!(
                 "non-default: host.max_message_bytes is {}, default {}",
@@ -1171,6 +1174,7 @@ impl Serving {
                 hosted,
                 max_line: config.max_message_bytes,
                 mcp_list: config.mcp_list,
+                keep_awake: crate::awake::KeepAwake::new(config.keep_awake),
                 control_grants: config
                     .control
                     .as_ref()

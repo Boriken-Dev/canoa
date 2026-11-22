@@ -63,6 +63,9 @@ pub struct Config {
     /// `[host] max_message_bytes`: the longest ACP message, as one line, either way on a connection (a prompt carrying an
     /// attachment is one message). There is no ceiling here: a message over it is refused with this setting named.
     pub max_message_bytes: usize,
+    /// `[settings.power] keep_awake`: whether the host keeps this computer from idle-sleeping while an agent turn runs; `false`
+    /// unless set. The Power group of Settings writes it.
+    pub keep_awake: bool,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
     /// `[host.network]`: how the host reaches the network; the system's proxy, login, certificate verifier and client
@@ -121,6 +124,7 @@ impl Default for Config {
             shell: Default::default(),
             openers: Default::default(),
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
+            keep_awake: false,
             store: Default::default(),
             network: Default::default(),
             kb: Default::default(),

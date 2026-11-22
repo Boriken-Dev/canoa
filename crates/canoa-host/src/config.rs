@@ -62,6 +62,7 @@ struct TopLevel {
     secrets: Option<serde_json::Value>,
     limit_phrases: Option<Vec<String>>,
     protected_paths: Option<Vec<String>>,
+    keep_awake: bool,
     local_agents: Vec<Entry>,
     remote_agents: Vec<RemoteAgent>,
     local_profiles: LocalProfiles,
@@ -157,6 +158,7 @@ impl Config {
             return Ok(Self {
                 limit_phrases: top.limit_phrases,
                 protected_paths: top.protected_paths,
+                keep_awake: top.keep_awake,
                 local_agents: top.local_agents,
                 remote_agents: top.remote_agents,
                 local_profiles: top.local_profiles,
@@ -202,6 +204,7 @@ impl Config {
             shell: host.shell,
             openers,
             max_message_bytes,
+            keep_awake: top.keep_awake,
             local_agents: top.local_agents,
             remote_agents: top.remote_agents,
             local_profiles: top.local_profiles,
@@ -236,6 +239,12 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
         .take()
         .and_then(|table| serde_json::to_value(table).ok());
     let limit_phrases = raw.usage.take().and_then(|usage| usage.limit_phrases);
+    let keep_awake = raw
+        .settings
+        .take()
+        .and_then(|settings| settings.power)
+        .and_then(|power| power.keep_awake)
+        .unwrap_or(false);
     let protected_paths = raw
         .permissions
         .take()
@@ -273,6 +282,7 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
         secrets,
         limit_phrases,
         protected_paths,
+        keep_awake,
         local_agents,
         remote_agents,
         local_profiles,

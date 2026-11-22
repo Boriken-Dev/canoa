@@ -473,3 +473,48 @@ fn listing_needs_the_grant_that_reads_the_configuration_and_saving_the_one_that_
     );
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn the_power_group_is_a_group_of_general_kept_where_the_host_reads_it() {
+    let tmp = dir("power");
+    let files = files(&tmp);
+    let config = sealed(&tmp);
+    let keeper = Keeper::new(&config, Some(&tmp));
+    let catalog = SectionCatalog::of(&config);
+    let answer = list(&catalog, true);
+    let power = row(&answer, "power");
+    assert_eq!(power["under"], "general");
+    assert_eq!(power["stored"], "config");
+    assert_eq!(
+        power["schema"]["properties"]["keep_awake"]["type"],
+        "boolean"
+    );
+    assert!(
+        row(&list(&catalog, false), "general")["id"] == "general",
+        "General is still the application's own page"
+    );
+    assert!(
+        list(&catalog, false)["sections"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .all(|each| each["id"] != "power"),
+        "a group the host adds is not one of the application's own pages"
+    );
+    set(
+        &catalog,
+        &files,
+        &keeper,
+        &json!({"id": "power", "values": {"keep_awake": true}}),
+    )
+    .expect("saved");
+    let text = fs::read_to_string(tmp.join("canoa.cfg")).expect("the file");
+    assert!(
+        text.contains("[settings.power]") && text.contains("keep_awake = true"),
+        "{text}"
+    );
+    assert!(
+        Config::from_str_in(&text, &tmp).expect("parses").keep_awake,
+        "{text}"
+    );
+}

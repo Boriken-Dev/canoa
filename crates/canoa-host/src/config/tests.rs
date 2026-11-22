@@ -2714,3 +2714,28 @@ fn listing_mcp_servers_is_held_to_settings_with_no_ceiling_of_their_own() {
     }
     assert!(parse(&format!("[host.mcp_list]\nmax_pending = 1\n{program}")).is_err());
 }
+
+#[test]
+fn keep_awake_is_off_unless_the_power_table_of_settings_turns_it_on() {
+    let program = "[host.agents.a]\nprogram = \"x\"\n";
+    assert!(!Config::default().keep_awake);
+    assert!(!parse(program).expect("parses").keep_awake);
+    let with = |table: &str| parse(&format!("{table}\n{program}"));
+    assert!(
+        !with("[settings.power]\nkeep_awake = false\n")
+            .expect("parses")
+            .keep_awake
+    );
+    assert!(
+        with("[settings.power]\nkeep_awake = true\n")
+            .expect("parses")
+            .keep_awake
+    );
+    // Another section's table is not the host's to read.
+    assert!(
+        !with("[settings.region]\nkeep_awake = true\n")
+            .expect("parses")
+            .keep_awake
+    );
+    assert!(with("[settings.power]\nkeep_awake = \"yes\"\n").is_err());
+}

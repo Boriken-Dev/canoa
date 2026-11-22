@@ -5,6 +5,7 @@ extern crate alloc;
 
 mod accounts;
 mod addresses;
+mod awake;
 mod bundled;
 mod cfg_edit;
 mod child;

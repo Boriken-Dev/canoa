@@ -1225,6 +1225,9 @@ something is told instead of refused, it is in the log as `non-default:`, in `ca
 - **Foundry Local.** An account's `answer_seconds` (1800) is how long one answer may take.
 - **Files.** The host answers `fs/list` and `fs/read` a page at a time and says where the next one starts, so a long folder or a large
   file is reachable whole.
+- **Keep awake.** Settings > General > Power (`[settings.power] keep_awake`, off by default) keeps this computer from idle-sleeping while an
+  agent turn runs, for as long as the turn does; it lets go when the turn ends, the connection closes or the host stops, however it
+  stops. Read when the host starts.
 - **Secrets.** A secret provider lists every name it holds; a name or a value has no length limit of Canoa's.
 - **The Store.** A program is offered for any platform its publisher has a build for.
 

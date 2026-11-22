@@ -226,6 +226,8 @@ struct Shared {
     max_line: usize,
     /// What listing a session's MCP servers is held to (`[host.mcp_list]`).
     mcp_list: crate::config::McpListConfig,
+    /// Keeps the computer awake while an agent turn runs, when `[settings.power] keep_awake` is on.
+    keep_awake: Arc<crate::awake::KeepAwake>,
 }
 
 impl Shared {

@@ -502,13 +502,13 @@ fn launch_agent_program<C: Channel>(
                 .agent(agent.pid())
                 .given(given.clone());
             let end = coqui_acp_bridge::relay::relay(
-                &McpListLayer::new(&ToolsLayer::new(
+                &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
                     &KbLayer::new(
                         &StoreLayer::new(&Layer::new(&Delegating::new(&hosted, conn), link), store),
                         kb,
                     ),
                     tools,
-                ), shared.mcp_list, given),
+                ), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
                 &agent,
             );
             drop(hosted);
@@ -519,13 +519,13 @@ fn launch_agent_program<C: Channel>(
                 .agent(agent.pid())
                 .launching(plain_launch_line(identity));
             coqui_acp_bridge::relay::relay(
-                &McpListLayer::new(&ToolsLayer::new(
+                &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
                     &KbLayer::new(
                         &StoreLayer::new(&Layer::new(&Delegating::new(&scoped, conn), link), store),
                         kb,
                     ),
                     tools,
-                ), shared.mcp_list, Given::for_connection(None)),
+                ), Arc::clone(&shared.keep_awake)), shared.mcp_list, Given::for_connection(None)),
                 &agent,
             )
         }
@@ -905,7 +905,7 @@ fn give_harness<C: Channel>(
     let given = Given::for_connection(connection);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &McpListLayer::new(&ToolsLayer::new(
+            &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
                 &KbLayer::new(
                     &StoreLayer::new(
                         &Layer::new(
@@ -925,7 +925,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            ), shared.mcp_list, given),
+            ), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
             &*started.harness,
             to_provider,
             started.watch,
@@ -933,7 +933,7 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &McpListLayer::new(&ToolsLayer::new(
+            &McpListLayer::new(&crate::awake::AwakeChannel::new(&ToolsLayer::new(
                 &KbLayer::new(
                     &StoreLayer::new(
                         &Layer::new(
@@ -953,7 +953,7 @@ fn give_harness<C: Channel>(
                     kb,
                 ),
                 tools,
-            ), shared.mcp_list, given),
+            ), Arc::clone(&shared.keep_awake)), shared.mcp_list, given),
             &*started.harness,
             to_provider,
             started.watch,

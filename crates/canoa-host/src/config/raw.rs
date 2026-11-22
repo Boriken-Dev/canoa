@@ -107,6 +107,9 @@ pub(super) struct RawFile {
     /// `[permissions]`: the app's table, of which the host reads `protected` and lets the rest go by.
     #[serde(default)]
     pub(super) permissions: Option<RawPermissions>,
+    /// `[settings.ID]`: the tables of Settings' sections kept in canoa.cfg, of which the host reads `power`.
+    #[serde(default)]
+    pub(super) settings: Option<RawSettings>,
     /// `[agents.NAME]`: the app's table, of which the host reads `program` and `args` and lets the rest go by.
     #[serde(default)]
     pub(super) agents: IndexMap<String, toml::Value>,
@@ -130,6 +133,19 @@ pub(super) struct RawFile {
     /// `[secrets]`: the secret providers' table, which they read; the host keeps it for who keeps the accounts' credentials.
     #[serde(default)]
     pub(super) secrets: Option<toml::Table>,
+}
+
+/// `[settings]`: each section's table is the section's; the host reads the Power group's.
+#[derive(Deserialize)]
+pub(super) struct RawSettings {
+    #[serde(default)]
+    pub(super) power: Option<RawPower>,
+}
+
+/// `[settings.power]`.
+#[derive(Deserialize)]
+pub(super) struct RawPower {
+    pub(super) keep_awake: Option<bool>,
 }
 
 /// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.

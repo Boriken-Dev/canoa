@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use crate::config::Config;
 
 mod built_in;
+mod power;
 #[cfg(test)]
 pub(crate) mod standin;
 
@@ -199,7 +200,12 @@ impl SectionCatalog {
     /// The sections the application draws itself, the bundled libraries' and those of `config`'s entries and extensions, each library
     /// opened as the host opens it for `providers/list`: an extension whose pin no longer matches is left out.
     pub(crate) fn of(config: &Config) -> Self {
-        Self::from_arcs(&crate::control::providers::loaded(config))
+        let mut registries = crate::control::providers::loaded(config).to_vec();
+        match power::registry() {
+            Ok(registry) => registries.push(("bundled".to_owned(), Arc::new(registry))),
+            Err(why) => tracing::warn!("the host's own settings groups are not offered: {why}"),
+        }
+        Self::from_arcs(&registries)
     }
 
     /// The sections offered, in the order they were found.
