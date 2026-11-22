@@ -10,7 +10,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Each module with an `allow(unsafe_code)` of its own, by the path the documentation gives it.
-const MODULES: [&str; 4] = [
+const MODULES: [&str; 5] = [
+    "awake.rs",
     "replace.rs",
     "spawn/pty.rs",
     "terminal/pty_windows.rs",
