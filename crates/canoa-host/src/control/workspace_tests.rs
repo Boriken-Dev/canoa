@@ -354,3 +354,78 @@ fn open_in_takes_a_folder_on_a_share_written_plain() {
     drop(started);
     let _ = fs::remove_dir_all(local);
 }
+
+#[test]
+fn configured_openers_list_available_editors_and_launch_with_path_substituted() {
+    let tmp = dir("configured");
+    let file = tmp.join("a.txt");
+    fs::write(&file, "x").expect("file");
+    let mut machine = StandIn::new(Os::Linux);
+    machine
+        .vars
+        .insert("PATH".to_owned(), "/usr/local/bin".to_owned());
+    machine.files.insert("/usr/local/bin/cursor".to_owned());
+    let machine = Arc::new(machine);
+    let control = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(
+        Files::new(
+            Some(tmp.clone()),
+            Vec::new(),
+            None,
+            None,
+            UploadLimits::default(),
+        )
+        .with_opener(Opener::on(Arc::new(Shared(machine.clone()))))
+        .with_openers(Some(vec![
+            crate::OpenerConfig::new(
+                "cursor",
+                "Open in Cursor",
+                "cursor",
+                vec!["--reuse-window".to_owned(), "{path}".to_owned()],
+            ),
+            crate::OpenerConfig::new(
+                "zed",
+                "Open in Zed",
+                "/opt/zed/zed",
+                vec!["{path}".to_owned()],
+            ),
+        ])),
+    );
+    let granted = key(&[Grant::WorkspaceOpen]);
+    let listed = ask(&control, &granted, "workspace/openers", json!({}));
+    assert_eq!(
+        listed["result"]["openers"],
+        json!([{"id": "cursor", "label": "Open in Cursor", "target": "any"}]),
+        "absent configured openers are omitted: {listed}"
+    );
+    let started = ask(
+        &control,
+        &granted,
+        "workspace/open",
+        json!({"path": text(&tmp), "opener": "cursor"}),
+    );
+    assert_eq!(started["result"]["started"], true, "{started}");
+    let refused = ask(
+        &control,
+        &granted,
+        "workspace/open",
+        json!({"path": text(&tmp), "opener": "zed"}),
+    );
+    assert_eq!(refused["error"]["code"], -32002, "{refused}");
+    let recorded = machine.started.lock().expect("lock").clone();
+    assert_eq!(
+        recorded,
+        [Plan {
+            program: "/usr/local/bin/cursor".to_owned(),
+            args: vec!["--reuse-window".to_owned(), text(&tmp)],
+        }]
+    );
+    drop(recorded);
+    let _ = fs::remove_dir_all(&tmp);
+}

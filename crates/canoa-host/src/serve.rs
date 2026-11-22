@@ -2167,43 +2167,46 @@ impl Serving {
                                 })
                                 .collect(),
                         ))
-                        .with_files(control::Files::new(
-                            options.home_dir.clone().or_else(home_from_environment),
-                            config
-                                .entries
-                                .iter()
-                                .filter(|entry| !entry.working_roots.is_empty())
-                                .map(|entry| control::EntryRoots {
-                                    peers: entry.peers.as_ref().map(|peers| {
-                                        peers.iter().map(ToString::to_string).collect()
-                                    }),
-                                    roots: entry.working_roots.clone(),
-                                })
-                                .collect(),
-                            options.config_file.clone(),
-                            options
-                                .state_dir
-                                .as_ref()
-                                .map(|dir| dir.join("control").join("uploads")),
-                            control::UploadLimits {
-                                file_bytes: config
-                                    .control
+                        .with_files(
+                            control::Files::new(
+                                options.home_dir.clone().or_else(home_from_environment),
+                                config
+                                    .entries
+                                    .iter()
+                                    .filter(|entry| !entry.working_roots.is_empty())
+                                    .map(|entry| control::EntryRoots {
+                                        peers: entry.peers.as_ref().map(|peers| {
+                                            peers.iter().map(ToString::to_string).collect()
+                                        }),
+                                        roots: entry.working_roots.clone(),
+                                    })
+                                    .collect(),
+                                options.config_file.clone(),
+                                options
+                                    .state_dir
                                     .as_ref()
-                                    .map_or(control::DEFAULT_MAX_UPLOAD_BYTES, |c| {
-                                        c.max_upload_bytes
-                                    }),
-                                total_bytes: config
-                                    .control
-                                    .as_ref()
-                                    .map_or(control::DEFAULT_MAX_UPLOAD_TOTAL, |c| {
-                                        c.max_upload_total_bytes
-                                    }),
-                                files: config
-                                    .control
-                                    .as_ref()
-                                    .map_or(control::DEFAULT_MAX_UPLOADS, |c| c.max_uploads),
-                            },
-                        ));
+                                    .map(|dir| dir.join("control").join("uploads")),
+                                control::UploadLimits {
+                                    file_bytes: config
+                                        .control
+                                        .as_ref()
+                                        .map_or(control::DEFAULT_MAX_UPLOAD_BYTES, |c| {
+                                            c.max_upload_bytes
+                                        }),
+                                    total_bytes: config
+                                        .control
+                                        .as_ref()
+                                        .map_or(control::DEFAULT_MAX_UPLOAD_TOTAL, |c| {
+                                            c.max_upload_total_bytes
+                                        }),
+                                    files: config
+                                        .control
+                                        .as_ref()
+                                        .map_or(control::DEFAULT_MAX_UPLOADS, |c| c.max_uploads),
+                                },
+                            )
+                            .with_openers(config.openers.clone()),
+                        );
                     let kept = kept
                         .with_worktree_limits(config.worktrees)
                         .with_trust(Arc::clone(&trust));

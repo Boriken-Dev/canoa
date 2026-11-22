@@ -2720,4 +2720,41 @@ fn a_config_made_by_default_takes_messages_of_the_default_size() {
         Config::default().max_message_bytes,
         DEFAULT_MAX_MESSAGE_BYTES
     );
+    assert_eq!(Config::default().openers, None);
+}
+
+#[test]
+fn host_openers_accepts_custom_editors_and_refuses_bad_entries() {
+    let cfg = parse(
+        r#"
+[[host.openers]]
+id = "cursor"
+label = "Open in Cursor"
+program = "cursor"
+args = ["--reuse-window", "{path}"]
+
+[[host.openers]]
+id = "reveal"
+label = "Reveal in tree"
+program = "xdg-open"
+args = ["{parent}"]
+item = true
+"#,
+    )
+    .expect("parses");
+    let openers = cfg.openers.expect("configured");
+    assert_eq!(openers.len(), 2);
+    assert_eq!(openers[0].id, "cursor");
+    assert_eq!(openers[0].args, ["--reuse-window", "{path}"]);
+    assert_eq!(openers[0].item, None);
+    assert_eq!(openers[1].item, Some(true));
+
+    for bad in [
+        "[[host.openers]]\nid = \"bad id\"\nlabel = \"X\"\nprogram = \"x\"\n",
+        "[[host.openers]]\nid = \"x\"\nlabel = \"\"\nprogram = \"x\"\n",
+        "[[host.openers]]\nid = \"x\"\nlabel = \"X\"\nprogram = \"x\"\nargs = [\"--no-path\"]\n",
+        "[[host.openers]]\nid = \"a\"\nlabel = \"A\"\nprogram = \"a\"\n[[host.openers]]\nid = \"a\"\nlabel = \"B\"\nprogram = \"b\"\n",
+    ] {
+        assert!(parse(bad).is_err(), "{bad}");
+    }
 }

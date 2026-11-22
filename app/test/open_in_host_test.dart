@@ -3,29 +3,32 @@
 import 'package:canoa/acp/served_host.dart';
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/ledger/session_ledger.dart' show SessionPlace;
-import 'package:canoa/served/host_files.dart' show HostOpeners, HostOpening;
+import 'package:canoa/served/host_files.dart' show HostOpener, HostOpeners, HostOpening;
 import 'package:canoa/served/web_mode.dart';
 import 'package:canoa/workspace/open_in.dart';
 import 'package:canoa/workspace/open_in_host.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final class _Host implements HostOpening {
-  _Host({this.ids = const ['vscode', 'file_manager', 'reveal'], this.os = 'linux', this.refuse});
+  _Host({this.ids = const ['vscode', 'file_manager', 'reveal'], this.openers, this.os = 'linux', this.refuse, this.openError});
 
   final List<String> ids;
+  final List<HostOpener>? openers;
   final String os;
   final ControlFailed? refuse;
+  final ControlFailed? openError;
   final started = <(String, String)>[];
 
   @override
   Future<HostOpeners> workspaceOpeners() async {
     if (refuse case final failure?) throw failure;
-    return HostOpeners(os: os, ids: ids);
+    return HostOpeners(os: os, openers: openers, ids: openers == null ? ids : null);
   }
 
   @override
   Future<void> workspaceOpen(String path, String opener) async {
     if (refuse case final failure?) throw failure;
+    if (openError case final failure?) throw failure;
     started.add((path, opener));
   }
 }
@@ -102,13 +105,27 @@ void main() {
       final none = await _page(WebMode.local, _Host(refuse: ControlFailed(-32001, 'this key lacks the workspace.open grant')));
       expect(_ids(none, WorkspaceContext.header, folder), isEmpty);
 
-      final failing = _Host(refuse: ControlFailed(-32002, 'VS Code was not found on this computer'));
-      final hosted = HostedOpening(mode: WebMode.local, opening: failing, hostPeer: _peer, page: Uri.parse('http://localhost/'));
-      final action = WorkspaceOpener.hosted(hosted).actions.firstWhere((a) => a.id == 'vscode');
+      final failing = _Host(openError: ControlFailed(-32002, 'VS Code was not found on this computer'));
+      final opener = await _page(WebMode.local, failing);
+      final action = opener.actions.firstWhere((a) => a.id == 'vscode');
       await expectLater(
         action.run(folder),
         throwsA(isA<OpenInFailure>().having((e) => e.message, 'message', 'VS Code was not found on this computer')),
       );
+    });
+
+    test('draws custom configured editors the host lists and runs them by id', () async {
+      final host = _Host(
+        openers: const [
+          HostOpener(id: 'cursor', label: 'Open in Cursor'),
+          HostOpener(id: 'zed', label: 'Open in Zed'),
+        ],
+      );
+      final opener = await _page(WebMode.local, host);
+      expect(_ids(opener, WorkspaceContext.header, folder), ['cursor', 'zed']);
+      expect([for (final a in opener.actionsFor(WorkspaceContext.header, folder)) a.label], ['Open in Cursor', 'Open in Zed']);
+      await opener.actions.firstWhere((a) => a.id == 'cursor').run(folder);
+      expect(host.started, [('/home/ana/work', 'cursor')]);
     });
   });
 

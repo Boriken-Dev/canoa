@@ -65,6 +65,9 @@ pub struct Config {
     /// `[host] shell`: the program a terminal starts, with no arguments; `None` leaves it to the person's own (`$SHELL`, else
     /// `pwsh` or `powershell` on Windows).
     pub shell: Option<String>,
+    /// `[host] openers`: editors and file managers `workspace/openers` offers and `workspace/open` starts; `None` seeds VS Code,
+    /// the system's file manager and Reveal.
+    pub openers: Option<Vec<OpenerConfig>>,
     /// `[host] max_message_bytes`: the longest ACP message, as one line, either way on a connection (a prompt carrying an
     /// attachment is one message). There is no ceiling here: a message over it is refused with this setting named.
     pub max_message_bytes: usize,
@@ -120,6 +123,7 @@ impl Default for Config {
             pools: Default::default(),
             secrets: Default::default(),
             shell: Default::default(),
+            openers: Default::default(),
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             store: Default::default(),
             network: Default::default(),
@@ -538,6 +542,48 @@ impl Default for NativeConfig {
             enabled: true,
             control: Self::default_control(),
         }
+    }
+}
+
+/// One entry of `[host] openers`: an editor or file manager `workspace/openers` offers and `workspace/open` starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OpenerConfig {
+    /// Identifier passed to `workspace/open`.
+    pub id: String,
+    /// Display label in Open in menus.
+    pub label: String,
+    /// Program name on `PATH` or file path to start.
+    pub program: String,
+    /// Arguments passed to `program`; `{path}` is replaced with the target path (and `{parent}` with its parent folder).
+    pub args: Vec<String>,
+    /// Restriction to items (`Some(true)`), folders (`Some(false)`), or either (`None`).
+    pub item: Option<bool>,
+}
+
+impl OpenerConfig {
+    /// An opener entry taking `{path}` for both folders and items.
+    #[must_use]
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        program: impl Into<String>,
+        args: Vec<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            program: program.into(),
+            args,
+            item: None,
+        }
+    }
+
+    /// Restricts this opener to items (`true`) or folders (`false`).
+    #[must_use]
+    pub const fn for_item(mut self, item: bool) -> Self {
+        self.item = Some(item);
+        self
     }
 }
 
@@ -1739,6 +1785,7 @@ struct RawHost {
     #[serde(default)]
     pools: IndexMap<String, RawPool>,
     shell: Option<String>,
+    openers: Option<Vec<RawOpener>>,
     max_message_bytes: Option<usize>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
@@ -1751,6 +1798,73 @@ struct RawHost {
     delegate: Option<RawDelegate>,
     kb: Option<RawKb>,
     mail: Option<RawMail>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOpener {
+    id: String,
+    label: String,
+    program: String,
+    #[serde(default = "default_opener_args")]
+    args: Vec<String>,
+    item: Option<bool>,
+}
+
+fn default_opener_args() -> Vec<String> {
+    vec!["{path}".to_owned()]
+}
+
+fn openers_of(raw: Option<Vec<RawOpener>>) -> Result<Option<Vec<OpenerConfig>>, ConfigError> {
+    let Some(entries) = raw else {
+        return Ok(None);
+    };
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("host.openers: {what}"),
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let valid_id = (1..=64).contains(&entry.id.len())
+            && entry
+                .id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'));
+        if !valid_id {
+            return Err(refused(
+                "id must be 1 to 64 lower-case letters, digits, '-' or '_'",
+            ));
+        }
+        if out.iter().any(|seen: &OpenerConfig| seen.id == entry.id) {
+            return Err(refused(&format!("duplicate opener id {:?}", entry.id)));
+        }
+        if entry.label.trim().is_empty() || entry.label.chars().any(char::is_control) {
+            return Err(refused("label must be non-empty text"));
+        }
+        if entry.program.trim().is_empty() || entry.program.chars().any(char::is_control) {
+            return Err(refused("program must be a non-empty program name or path"));
+        }
+        if entry.args.is_empty()
+            || !entry
+                .args
+                .iter()
+                .any(|arg| arg.contains("{path}") || arg.contains("{parent}"))
+            || entry
+                .args
+                .iter()
+                .any(|arg| arg.chars().any(|c| matches!(c, '\0' | '\r' | '\n')))
+        {
+            return Err(refused("args must carry {path} (or {parent})"));
+        }
+        out.push(OpenerConfig {
+            id: entry.id,
+            label: entry.label,
+            program: entry.program,
+            args: entry.args,
+            item: entry.item,
+        });
+    }
+    Ok(Some(out))
 }
 
 /// `[host.network]`.
@@ -2449,6 +2563,7 @@ impl Config {
                 what: "shell is the name or path of a program".to_owned(),
             });
         }
+        let openers = openers_of(host.openers)?;
         let max_message_bytes = host.max_message_bytes.unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
         if max_message_bytes == 0 {
             return Err(ConfigError::Invalid {
@@ -2991,6 +3106,7 @@ impl Config {
             pools,
             secrets,
             shell: host.shell,
+            openers,
             max_message_bytes,
             local_agents,
             remote_agents,

@@ -15,6 +15,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::{Files, Outcome};
+use crate::config::OpenerConfig;
 use crate::control::{Caller, NOT_FOUND, REFUSED, bad, text_param};
 use crate::spawn::{Command, Stdio};
 
@@ -22,6 +23,12 @@ use crate::spawn::{Command, Stdio};
 const VS_CODE_BUNDLE: &str = "com.microsoft.VSCode";
 /// Where Windows records Code.exe, under `HKCU` or `HKLM`.
 const APP_PATHS: &str = r"\Software\Microsoft\Windows\CurrentVersion\App Paths\Code.exe";
+/// Sentinel `program` in a seeded VS Code entry, resolved through system-specific detection.
+const BUILTIN_VSCODE: &str = "vscode";
+/// Sentinel args placeholder replaced with the selected path.
+const ARG_PATH: &str = "{path}";
+/// Sentinel args placeholder replaced with the selected path's parent folder.
+const ARG_PARENT: &str = "{parent}";
 
 /// The system this host runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,13 +53,6 @@ impl Os {
 pub(crate) struct Plan {
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
-}
-
-fn plan(program: impl Into<String>, args: &[&str]) -> Plan {
-    Plan {
-        program: program.into(),
-        args: args.iter().map(|arg| (*arg).to_owned()).collect(),
-    }
 }
 
 /// What detecting the programs needs from the computer, and starting one. Tests replace it with a stand-in that starts nothing.
@@ -254,9 +254,7 @@ impl Opener {
             .find(|candidate| self.machine.is_file(candidate))
     }
 
-    /// What opens a folder in VS Code: `Code.exe` on Windows (never `code.cmd`, which only a shell can run), `open` with the
-    /// bundle's path on a Mac, `code` on Linux. None when VS Code is not found.
-    pub(crate) fn vs_code(&self, path: &str) -> Option<Plan> {
+    fn vs_code_program(&self) -> Option<(String, Vec<String>)> {
         match self.machine.os() {
             Os::Windows => {
                 let mut candidates: Vec<Option<String>> = ["HKCU", "HKLM"]
@@ -285,53 +283,87 @@ impl Opener {
                         candidate.to_ascii_lowercase().ends_with("code.exe")
                             && self.machine.is_file(candidate)
                     })
-                    .map(|found| plan(found, &[path]))
+                    .map(|found| (found, Vec::new()))
             }
             Os::Macos => self
                 .machine
                 .bundle_path(VS_CODE_BUNDLE)
-                .map(|bundle| plan("open", &["-a", &bundle, path])),
-            Os::Linux => self.on_path("code").map(|code| plan(code, &[path])),
+                .map(|bundle| ("open".to_owned(), vec!["-a".to_owned(), bundle])),
+            Os::Linux => self.on_path("code").map(|code| (code, Vec::new())),
         }
+    }
+
+    /// Resolves `entry.program` on this computer, returning `(program, prefix_args)` or `None` when absent.
+    fn resolve_program(&self, entry: &OpenerConfig) -> Option<(String, Vec<String>)> {
+        if entry.program == BUILTIN_VSCODE {
+            return self.vs_code_program();
+        }
+        let os = self.machine.os();
+        if entry.program == "explorer.exe" && os == Os::Windows {
+            let explorer = self.machine.var("SystemRoot").map_or_else(
+                || "explorer.exe".to_owned(),
+                |root| self.join(&root, "explorer.exe"),
+            );
+            return Some((explorer, Vec::new()));
+        }
+        if (entry.program == "open" && os == Os::Macos)
+            || (entry.program == "xdg-open" && os == Os::Linux)
+        {
+            return Some((entry.program.clone(), Vec::new()));
+        }
+        if entry.program.contains(['/', '\\']) {
+            return self
+                .machine
+                .is_file(&entry.program)
+                .then(|| (entry.program.clone(), Vec::new()));
+        }
+        self.on_path(&entry.program)
+            .or_else(|| {
+                (os == Os::Windows && !entry.program.to_ascii_lowercase().ends_with(".exe"))
+                    .then(|| self.on_path(&format!("{}.exe", entry.program)))
+                    .flatten()
+            })
+            .map(|found| (found, Vec::new()))
+    }
+
+    fn plan_for(&self, entry: &OpenerConfig, path: &str) -> Result<Plan, String> {
+        let (program, mut args) = self.resolve_program(entry).ok_or_else(|| {
+            if entry.program == BUILTIN_VSCODE {
+                "VS Code was not found on this computer".to_owned()
+            } else {
+                format!("{} was not found on this computer", entry.label)
+            }
+        })?;
+        let parent = parent_of(path, self.machine.os());
+        for arg in &entry.args {
+            args.push(arg.replace(ARG_PATH, path).replace(ARG_PARENT, &parent));
+        }
+        Ok(Plan { program, args })
+    }
+
+    /// What opens a folder in VS Code: `Code.exe` on Windows (never `code.cmd`, which only a shell can run), `open` with the
+    /// bundle's path on a Mac, `code` on Linux. None when VS Code is not found.
+    #[cfg(test)]
+    pub(crate) fn vs_code(&self, path: &str) -> Option<Plan> {
+        let (program, mut args) = self.vs_code_program()?;
+        args.push(path.to_owned());
+        Some(Plan { program, args })
     }
 
     /// What the file manager runs to show `path`: its folder opened, or with `item` the entry selected in its parent.
+    #[cfg(test)]
     pub(crate) fn file_manager(&self, path: &str, item: bool) -> Plan {
-        match self.machine.os() {
-            Os::Windows => {
-                let explorer = self.machine.var("SystemRoot").map_or_else(
-                    || "explorer.exe".to_owned(),
-                    |root| self.join(&root, "explorer.exe"),
-                );
-                // `/select,` and the path stay two arguments: the path is one argument whatever it holds.
-                if item {
-                    plan(explorer, &["/select,", path])
-                } else {
-                    plan(explorer, &[path])
-                }
-            }
-            Os::Macos => {
-                if item {
-                    plan("open", &["-R", path])
-                } else {
-                    plan("open", &[path])
-                }
-            }
-            Os::Linux => {
-                if !item {
-                    return plan("xdg-open", &[path]);
-                }
-                let parent = match path.rfind('/') {
-                    Some(0) | None => "/",
-                    Some(cut) => &path[..cut],
-                };
-                plan("xdg-open", &[parent])
-            }
-        }
+        let mut entry = default_openers(self.machine.os())
+            .into_iter()
+            .find(|each| each.id == if item { "reveal" } else { "file_manager" })
+            .expect("seeded file manager entry");
+        // Clear item requirement only to build the Plan cleanly.
+        entry.item = Some(item);
+        self.plan_for(&entry, path).expect("system file manager")
     }
 
-    fn manager_name(&self) -> &'static str {
-        match self.machine.os() {
+    fn manager_name(os: Os) -> &'static str {
+        match os {
             Os::Windows => "Explorer",
             Os::Macos => "Finder",
             Os::Linux => "file manager",
@@ -339,18 +371,87 @@ impl Opener {
     }
 }
 
+fn parent_of(path: &str, os: Os) -> String {
+    if os == Os::Windows {
+        let trimmed = path.trim_end_matches(['\\', '/']);
+        return match trimmed.rfind(['\\', '/']) {
+            Some(cut) if cut > 0 => trimmed[..cut].to_owned(),
+            _ => path.to_owned(),
+        };
+    }
+    match path.rfind('/') {
+        Some(0) | None => "/".to_owned(),
+        Some(cut) => path[..cut].to_owned(),
+    }
+}
+
+/// The three openers seeded when `[host] openers` is not set: VS Code (if installed), the system's file manager, and Reveal.
+fn default_openers(os: Os) -> Vec<OpenerConfig> {
+    let manager = Opener::manager_name(os);
+    let (fm_program, fm_args, reveal_args) = match os {
+        Os::Windows => (
+            "explorer.exe",
+            vec![ARG_PATH.to_owned()],
+            vec!["/select,".to_owned(), ARG_PATH.to_owned()],
+        ),
+        Os::Macos => (
+            "open",
+            vec![ARG_PATH.to_owned()],
+            vec!["-R".to_owned(), ARG_PATH.to_owned()],
+        ),
+        Os::Linux => (
+            "xdg-open",
+            vec![ARG_PATH.to_owned()],
+            vec![ARG_PARENT.to_owned()],
+        ),
+    };
+    vec![
+        OpenerConfig::new(
+            "vscode",
+            "Open in VS Code",
+            BUILTIN_VSCODE,
+            vec![ARG_PATH.to_owned()],
+        ),
+        OpenerConfig::new(
+            "file_manager",
+            format!("Open in {manager}"),
+            fm_program,
+            fm_args,
+        )
+        .for_item(false),
+        OpenerConfig::new(
+            "reveal",
+            format!("Reveal in {manager}"),
+            fm_program,
+            reveal_args,
+        )
+        .for_item(true),
+    ]
+}
+
 impl Files {
-    /// `workspace/openers` `{}` -> `{"os", "hostname"?, "openers": [{"id", "label"}]}`: what this computer can start for a folder, by
-    /// `id` (`vscode` only when VS Code is found, `file_manager`, `reveal`). It starts nothing.
+    fn configured_openers(&self) -> Vec<OpenerConfig> {
+        let configured = self.openers.read().ok().and_then(|guard| guard.clone());
+        configured.unwrap_or_else(|| default_openers(self.opener.machine.os()))
+    }
+
+    /// `workspace/openers` `{}` -> `{"os", "hostname"?, "openers": [{"id", "label", "target"}]}`: what this computer can start
+    /// for a folder or item from `[host] openers` (seeded with VS Code, `file_manager` and `reveal`). It starts nothing.
     pub(crate) fn workspace_openers(&self) -> Outcome {
         let opener = &self.opener;
-        let mut openers = Vec::new();
-        if opener.vs_code("").is_some() {
-            openers.push(json!({"id": "vscode", "label": "Open in VS Code"}));
-        }
-        let manager = opener.manager_name();
-        openers.push(json!({"id": "file_manager", "label": format!("Open in {manager}")}));
-        openers.push(json!({"id": "reveal", "label": format!("Reveal in {manager}")}));
+        let openers: Vec<Value> = self
+            .configured_openers()
+            .into_iter()
+            .filter(|entry| opener.resolve_program(entry).is_some())
+            .map(|entry| {
+                let target = match entry.item {
+                    None => "any",
+                    Some(false) => "folder",
+                    Some(true) => "item",
+                };
+                json!({"id": entry.id, "label": entry.label, "target": target})
+            })
+            .collect();
         let hostname = opener
             .machine
             .var("COMPUTERNAME")
@@ -363,28 +464,26 @@ impl Files {
         }))
     }
 
-    /// `workspace/open` `{"path", "opener"}` -> `{"started": true}`: starts the opener (`vscode`, `file_manager` or `reveal`) for the
-    /// folder (for `reveal` a file or folder to select) as this user, detached. The path is as `fs/info` takes it.
+    /// `workspace/open` `{"path", "opener"}` -> `{"started": true}`: starts the named entry of `[host] openers` for `path` as this
+    /// user, detached. The path is as `fs/info` takes it.
     pub(crate) fn workspace_open(&self, caller: &Caller, params: &Value) -> Outcome {
         let path = text_param(params, "path")?.ok_or_else(|| bad("path is needed"))?;
         let which = text_param(params, "opener")?.ok_or_else(|| bad("opener is needed"))?;
-        if !matches!(which, "vscode" | "file_manager" | "reveal") {
-            return Err(bad("opener is vscode, file_manager or reveal"));
-        }
+        let entries = self.configured_openers();
+        let entry = entries
+            .into_iter()
+            .find(|entry| entry.id == which)
+            .ok_or_else(|| bad(&format!("unknown opener {which}")))?;
         let place = self.place(caller, path)?;
         let text = place.to_string_lossy().into_owned();
         let folder = place.is_dir();
-        if which != "reveal" && !folder {
+        if entry.item == Some(false) && !folder {
             return Err((NOT_FOUND, format!("the folder is not there: {path}")));
         }
         let opener = &self.opener;
-        let chosen = match which {
-            "vscode" => opener
-                .vs_code(&text)
-                .ok_or_else(|| (REFUSED, "VS Code was not found on this computer".to_owned()))?,
-            "file_manager" => opener.file_manager(&text, false),
-            _ => opener.file_manager(&text, true),
-        };
+        let chosen = opener
+            .plan_for(&entry, &text)
+            .map_err(|why| (REFUSED, why))?;
         opener
             .machine
             .start(&chosen)

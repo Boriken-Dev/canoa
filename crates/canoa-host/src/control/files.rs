@@ -9,7 +9,7 @@
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError, RwLock};
 
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -130,6 +130,8 @@ pub(crate) struct Files {
     documents: Option<PathBuf>,
     /// What can be started for a folder on this computer.
     opener: workspace::Opener,
+    /// Configured `[host] openers`, or `None` to offer today's seeded three.
+    openers: RwLock<Option<Vec<crate::config::OpenerConfig>>>,
 }
 
 mod folders;
@@ -156,6 +158,7 @@ impl Files {
             uploading: Mutex::new(()),
             documents: None,
             opener: workspace::Opener::default(),
+            openers: RwLock::new(None),
         }
     }
 
@@ -164,6 +167,16 @@ impl Files {
     #[must_use]
     pub(crate) fn with_opener(mut self, opener: workspace::Opener) -> Self {
         self.opener = opener;
+        self
+    }
+
+    /// Uses these configured `[host] openers` (`None` seeds VS Code, the system's file manager and Reveal).
+    #[must_use]
+    pub(crate) fn with_openers(
+        mut self,
+        openers: Option<Vec<crate::config::OpenerConfig>>,
+    ) -> Self {
+        self.openers = RwLock::new(openers);
         self
     }
 
@@ -651,6 +664,12 @@ impl Files {
             self.change_section(HOST, params.get("value").unwrap_or(&Value::Null), write)?;
         if write {
             done["digest"] = Value::String(host_digest(self.hidden_section(HOST)?.as_ref()));
+            if let Ok(path) = self.config_path()
+                && let Ok(cfg) = crate::Config::load(path)
+                && let Ok(mut slot) = self.openers.write()
+            {
+                *slot = cfg.openers;
+            }
         }
         Ok(done)
     }

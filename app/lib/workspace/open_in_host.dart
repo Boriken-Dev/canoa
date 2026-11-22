@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../desktop/control_client.dart' show ControlFailed;
 import '../ledger/session_ledger.dart' show SessionPlace;
-import '../served/host_files.dart' show HostOpening, HostOpeners;
+import '../served/host_files.dart' show HostOpener, HostOpening, HostOpeners, OpenerTarget;
 import '../served/web_mode.dart';
 import '../store/links.dart' as links;
 import 'open_in.dart';
@@ -72,14 +72,6 @@ final class HostedOpening {
     return (target: WorkspaceTarget(cwd), reason: null);
   }
 
-  bool _has(String id) => _openers?.ids.contains(id) ?? false;
-
-  String get _managerName => switch (_openers?.os) {
-    'windows' => 'Explorer',
-    'macos' => 'Finder',
-    _ => 'file manager',
-  };
-
   /// `vscode://vscode-remote/ssh-remote+HOST/PATH`: the folder on the host as VS Code's Remote-SSH opens it. A Windows path
   /// `C:\a\b` is `/C:/a/b`.
   static Uri vsCodeRemote(String host, String path) {
@@ -91,40 +83,46 @@ final class HostedOpening {
 
   static bool _absolute(String path) => path.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path) || path.startsWith(r'\\');
 
-  List<WorkspaceAction> get actions => [
-    WorkspaceAction(
-      id: 'vscode',
-      label: 'Open in VS Code',
-      icon: Icons.code,
-      contexts: const {WorkspaceContext.header, WorkspaceContext.palette, WorkspaceContext.chip, WorkspaceContext.files},
-      available: (target) => _absolute(target.path) && (mode == WebMode.remote ? page.host.isNotEmpty : _has('vscode')),
-      run: (target) async {
-        if (mode == WebMode.remote) {
-          if (page.host.isEmpty) throw OpenInFailure('This page has no host name to connect VS Code to.');
-          final opened = await (_link ?? links.openLink)(vsCodeRemote(page.host, target.path));
-          if (!opened) throw OpenInFailure('The browser did not open VS Code. Install the Remote - SSH extension and allow the link.');
-          return;
-        }
-        await _start(target.path, 'vscode');
-      },
-    ),
-    WorkspaceAction(
-      id: 'file_manager',
-      label: 'Open in $_managerName',
-      icon: Icons.folder_open,
-      contexts: const {WorkspaceContext.header, WorkspaceContext.palette, WorkspaceContext.chip},
-      available: (target) => mode == WebMode.local && _has('file_manager') && !target.item,
-      run: (target) => _start(target.path, 'file_manager'),
-    ),
-    WorkspaceAction(
-      id: 'reveal',
-      label: 'Reveal in $_managerName',
-      icon: Icons.folder_open,
-      contexts: const {WorkspaceContext.files},
-      available: (target) => mode == WebMode.local && _has('reveal') && target.item,
-      run: (target) => _start(target.path, 'reveal'),
-    ),
-  ];
+  List<WorkspaceAction> get actions {
+    if (mode == WebMode.remote) {
+      return [
+        WorkspaceAction(
+          id: 'vscode',
+          label: 'Open in VS Code',
+          icon: Icons.code,
+          contexts: const {WorkspaceContext.header, WorkspaceContext.palette, WorkspaceContext.chip, WorkspaceContext.files},
+          available: (target) => _absolute(target.path) && page.host.isNotEmpty,
+          run: (target) async {
+            if (page.host.isEmpty) throw OpenInFailure('This page has no host name to connect VS Code to.');
+            final opened = await (_link ?? links.openLink)(vsCodeRemote(page.host, target.path));
+            if (!opened) throw OpenInFailure('The browser did not open VS Code. Install the Remote - SSH extension and allow the link.');
+          },
+        ),
+      ];
+    }
+    return [
+      for (final entry in (_openers?.openers ?? const <HostOpener>[])) _actionFor(entry),
+    ];
+  }
+
+  WorkspaceAction _actionFor(HostOpener entry) => WorkspaceAction(
+    id: entry.id,
+    label: entry.label,
+    icon: entry.target == OpenerTarget.any ? Icons.code : Icons.folder_open,
+    contexts: switch (entry.target) {
+      OpenerTarget.any => const {WorkspaceContext.header, WorkspaceContext.palette, WorkspaceContext.chip, WorkspaceContext.files},
+      OpenerTarget.folder => const {WorkspaceContext.header, WorkspaceContext.palette, WorkspaceContext.chip},
+      OpenerTarget.item => const {WorkspaceContext.files},
+    },
+    available: (target) =>
+        _absolute(target.path) &&
+        switch (entry.target) {
+          OpenerTarget.any => true,
+          OpenerTarget.folder => !target.item,
+          OpenerTarget.item => target.item,
+        },
+    run: (target) => _start(target.path, entry.id),
+  );
 
   Future<void> _start(String path, String opener) async {
     try {

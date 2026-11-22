@@ -62,16 +62,47 @@ abstract interface class WorkspaceFiles {
   Future<HostFileRead> readFile(String path, {int? maxBytes});
 }
 
+/// Where a [HostOpener] is offered.
+enum OpenerTarget { any, folder, item }
+
+/// One opener the host offers from `workspace/openers`.
+final class HostOpener {
+  const HostOpener({required this.id, required this.label, this.target = OpenerTarget.any});
+
+  final String id;
+  final String label;
+  final OpenerTarget target;
+}
+
 /// What the host can start for a folder, from `workspace/openers`.
 final class HostOpeners {
-  const HostOpeners({required this.os, required this.ids, this.hostname});
+  HostOpeners({required this.os, List<HostOpener>? openers, List<String>? ids, this.hostname})
+      : openers = openers ?? _fromIds(ids ?? const [], os);
 
   /// `windows`, `macos` or `linux`.
   final String os;
   final String? hostname;
+  final List<HostOpener> openers;
 
-  /// `vscode` when VS Code is found there, `file_manager` and `reveal`.
-  final List<String> ids;
+  /// The ids of [openers], in order.
+  List<String> get ids => [for (final each in openers) each.id];
+
+  static List<HostOpener> _fromIds(List<String> ids, String os) {
+    final manager = switch (os) {
+      'windows' => 'Explorer',
+      'macos' => 'Finder',
+      _ => 'file manager',
+    };
+    return [
+      for (final id in ids)
+        switch (id) {
+          'vscode' => const HostOpener(id: 'vscode', label: 'Open in VS Code'),
+          'file_manager' => HostOpener(id: id, label: 'Open in $manager', target: OpenerTarget.folder),
+          'reveal' => HostOpener(id: id, label: 'Reveal in $manager', target: OpenerTarget.item),
+          _ => HostOpener(id: id, label: 'Open in $id'),
+        },
+    ];
+  }
 }
 
 /// What an Open in needs of a host: what it can start, and starting it.
@@ -226,14 +257,23 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
     return HostOpeners(
       os: answer['os'] as String? ?? '',
       hostname: answer['hostname'] as String?,
-      ids: [
+      openers: [
         for (final each in (answer['openers'] as List<Object?>? ?? const []))
-          if (each is Map<Object?, Object?> && each['id'] is String) each['id']! as String,
+          if (each is Map<Object?, Object?> && each['id'] is String)
+            HostOpener(
+              id: each['id']! as String,
+              label: each['label'] as String? ?? each['id']! as String,
+              target: switch (each['target']) {
+                'folder' => OpenerTarget.folder,
+                'item' => OpenerTarget.item,
+                _ => OpenerTarget.any,
+              },
+            ),
       ],
     );
   }
 
-  /// Starts [opener] (`vscode`, `file_manager` or `reveal`) for [path] on the host; the host's own words when it cannot.
+  /// Starts [opener] (an id from `workspace/openers`) for [path] on the host; the host's own words when it cannot.
   @override
   Future<void> workspaceOpen(String path, String opener) async {
     await _call('workspace/open', {'path': path, 'opener': opener});

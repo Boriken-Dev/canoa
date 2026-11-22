@@ -1,20 +1,21 @@
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
-import 'package:canoa/served/host_files.dart' show HostOpeners, HostOpening;
+import 'package:canoa/served/host_files.dart' show HostOpener, HostOpeners, HostOpening;
 import 'package:canoa/served/web_mode.dart';
 import 'package:canoa/workspace/open_in.dart';
 import 'package:canoa/workspace/open_in_host.dart';
 
 /// The host this app runs, as Open in asks it: what it can start, and what it was asked to start.
 final class OpenHost implements HostOpening {
-  OpenHost({this.ids = const ['vscode', 'file_manager', 'reveal'], this.os = 'linux', this.failWith});
+  OpenHost({this.ids = const ['vscode', 'file_manager', 'reveal'], this.openers, this.os = 'linux', this.failWith});
 
   final List<String> ids;
+  final List<HostOpener>? openers;
   final String os;
   ControlFailed? failWith;
   final started = <(String, String)>[];
 
   @override
-  Future<HostOpeners> workspaceOpeners() async => HostOpeners(os: os, ids: ids);
+  Future<HostOpeners> workspaceOpeners() async => HostOpeners(os: os, openers: openers, ids: openers == null ? ids : null);
 
   @override
   Future<void> workspaceOpen(String path, String opener) async {
