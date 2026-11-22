@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
 import '../chat/session_picker.dart' show machineLoginLabel;
-import '../desktop/control_client.dart' show ControlFailed, hostWords;
+import '../desktop/control_client.dart' show hostWords;
 import '../providers/provider_catalog.dart' show providerCatalog;
 import '../desktop/host_control.dart';
 import 'spend_model.dart';
