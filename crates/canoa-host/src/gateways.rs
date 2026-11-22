@@ -98,6 +98,7 @@ fn bundled_offered() -> &'static [(Offer, &'static str)] {
     })
 }
 
+/// Gateway routes offered by extension agent vendors noted in this process, with the agent id each came from.
 static EXTRA_OFFERS: std::sync::Mutex<Vec<(Offer, &'static str)>> =
     std::sync::Mutex::new(Vec::new());
 

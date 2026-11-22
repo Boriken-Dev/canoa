@@ -49,6 +49,7 @@ fn write(path: &Path, bytes: &[u8], mode: u32, keep_access: bool) -> io::Result<
     }
     // A name no other writer has, in this process or another, and none could have put a link at in advance: it is made only
     // where nothing is.
+    /// Process-wide counter that gives each temporary file a name of its own.
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -905,11 +905,11 @@ fn dispatch_table_grants_and_docs_stay_in_step() {
     }
     assert_eq!(Grant::all().len(), GRANT_SPECS.len());
 
-    let docs = include_str!("../../AGENTS.md");
+    let docs = include_str!("AGENTS.md");
     for spec in GRANT_SPECS {
         assert!(
             docs.contains(spec.name),
-            "crates/canoa-host/AGENTS.md is missing grant {}",
+            "crates/canoa-host/src/control/AGENTS.md is missing grant {}",
             spec.name
         );
     }

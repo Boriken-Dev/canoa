@@ -37,7 +37,10 @@ const ALLOWED: &[(&str, &str)] = &[
     ("format.rs", "static FORMATS:"),
     // Bundled vendor gateways and account makers
     ("gateways.rs", "static OFFERED:"),
+    ("gateways.rs", "static EXTRA_OFFERS:"),
     ("makers.rs", "static OFFERED:"),
+    // Counter that gives each file made beside another a name of its own
+    ("replace.rs", "static NEXT:"),
     // Process tracing stderr ring buffer for control diagnostics
     ("host_log.rs", "static LINES:"),
     // Process-wide network settings snapshot, generation counter & proxy CA authorities
@@ -78,6 +81,7 @@ const ALLOWED: &[(&str, &str)] = &[
     // Bundled agent vendor registry & interned metadata
     ("vendors.rs", "static KEPT:"),
     ("vendors.rs", "static BUNDLED:"),
+    ("vendors.rs", "static KEPT_PROVIDERS:"),
     ("vendors.rs", "static BUNDLED_PROVIDERS:"),
     // Embedded web site assets & file entity-tag cache
     ("web/assets.rs", "pub(super) static BUILT:"),
