@@ -869,7 +869,7 @@ pub trait Mailbox: Send + Sync {
 
 ## `account_speech_output` (`canoa::speech::output::account`, feature `speech`)
 
-Mirroring `account_speech` for text-to-speech: describes the voice services accounts of some kinds can call (`provider`, `standard`, `address`, `url`, `credential`, and optional `models`, `voices`, `styles` for `speech_say_endpoint`). Checked by `tests/account_speech_output.rs` against `include/canoa.account_speech_output.{kinds,schemas}.json`.
+Mirroring `account_speech` for text-to-speech: describes the voice services accounts of some kinds can call (`provider`, `standard`, `address`, `url`, `credential`, `endpoint` for a provider that takes `url`, `models`, `voices` and `styles` as settings, and those lists; `url` lies under `address`, so a key goes only to its own address). Checked by `tests/account_speech_output.rs` against `include/canoa.account_speech_output.{kinds,schemas}.json`.
 
 ```rust
 #[guatiao::kind(name = "account_speech_output")]
@@ -878,5 +878,5 @@ pub trait AccountSpeechOutput: Send + Sync {
 }
 pub const KIND: &str = "account_speech_output";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
 pub struct AccountSpeechOutputInfo { pub services: Vec<AccountSpeechOutputService> }
-pub struct AccountSpeechOutputService { pub id, pub title, pub summary, pub location, pub standard, pub address, pub url, pub credential, pub provider: String, pub models, pub voices, pub styles: Vec<String> }
+pub struct AccountSpeechOutputService { pub id, pub title, pub summary, pub location, pub standard, pub address, pub url, pub credential, pub provider: String, pub endpoint: bool, pub models, pub voices, pub styles: Vec<String> }
 ```

@@ -44,12 +44,17 @@
               "type": "string",
               "description": "The `speech_output` provider id that speaks for this service (such as `speech_say_openai` or `speech_say_endpoint`)."
             },
+            "endpoint": {
+              "type": "boolean",
+              "description": "Whether the provider takes `url`, `models`, `voices` and `styles` as settings (`speech_say_endpoint` does): when set, the host hands them to it; when not, the provider knows its own address and lists.",
+              "default": false
+            },
             "models": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "Models to pass in settings when the provider takes them (`speech_say_endpoint`), recommended one first.",
+              "description": "Models to pass in settings when `endpoint` is set, recommended one first.",
               "default": []
             },
             "voices": {
@@ -57,7 +62,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "Voices to pass in settings when the provider takes them (`speech_say_endpoint`).",
+              "description": "Voices to pass in settings when `endpoint` is set.",
               "default": []
             },
             "styles": {
@@ -65,7 +70,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "Styles to pass in settings when the provider takes them (`speech_say_endpoint`), each `name=instruction`.",
+              "description": "Styles to pass in settings when `endpoint` is set, each `name=instruction`.",
               "default": []
             }
           },
@@ -128,12 +133,17 @@
         "type": "string",
         "description": "The `speech_output` provider id that speaks for this service (such as `speech_say_openai` or `speech_say_endpoint`)."
       },
+      "endpoint": {
+        "type": "boolean",
+        "description": "Whether the provider takes `url`, `models`, `voices` and `styles` as settings (`speech_say_endpoint` does): when set, the host hands them to it; when not, the provider knows its own address and lists.",
+        "default": false
+      },
       "models": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "Models to pass in settings when the provider takes them (`speech_say_endpoint`), recommended one first.",
+        "description": "Models to pass in settings when `endpoint` is set, recommended one first.",
         "default": []
       },
       "voices": {
@@ -141,7 +151,7 @@
         "items": {
           "type": "string"
         },
-        "description": "Voices to pass in settings when the provider takes them (`speech_say_endpoint`).",
+        "description": "Voices to pass in settings when `endpoint` is set.",
         "default": []
       },
       "styles": {
@@ -149,7 +159,7 @@
         "items": {
           "type": "string"
         },
-        "description": "Styles to pass in settings when the provider takes them (`speech_say_endpoint`), each `name=instruction`.",
+        "description": "Styles to pass in settings when `endpoint` is set, each `name=instruction`.",
         "default": []
       }
     },

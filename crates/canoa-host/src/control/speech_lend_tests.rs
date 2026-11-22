@@ -1219,6 +1219,7 @@ fn a_voice_offer_for_an_account_speaks_through_a_loopback_endpoint_with_its_stor
         "token",
         "speech_say_endpoint",
     );
+    service.endpoint = true;
     service.models = vec!["tts-standin".to_owned()];
     service.voices = vec!["sol".to_owned()];
     let control =
@@ -1284,5 +1285,30 @@ fn a_voice_offer_for_an_account_speaks_through_a_loopback_endpoint_with_its_stor
         !cfg.contains("tok-output-secret") && !cfg.contains("[say."),
         "{cfg}"
     );
+    let _ = fs::remove_dir_all(&home.root);
+}
+
+#[test]
+fn an_account_that_cannot_speak_through_a_service_is_told_so_in_words_of_speaking() {
+    use canoa::speech::output::account::AccountSpeechOutputService;
+
+    let home = home("say-account-words", &STAND_IN_ACCOUNTS, None, "");
+    let lend = Lend::from(&home.layers, &home.root, None);
+    lend.with_output_services(OutputServices::from_services(vec![
+        AccountSpeechOutputService::new(
+            "standin",
+            "Stand-in",
+            coqui_acp_api::standard::ANTHROPIC_API,
+            "https://api.anthropic.com",
+            "https://api.anthropic.com/v1/audio/speech",
+            "token",
+            "speech_say_endpoint",
+        ),
+    ]));
+    let why = lend
+        .output_key("login", Some("standin"), "token")
+        .expect_err("a login is not an API key");
+    assert!(why.contains("speak through") && why.contains("voices"), "{why}");
+    assert!(!why.contains("speech-to-text") && !why.contains("audio to"), "{why}");
     let _ = fs::remove_dir_all(&home.root);
 }

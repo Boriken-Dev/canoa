@@ -44,13 +44,17 @@ pub struct AccountSpeechOutputService {
     pub credential: String,
     /// The `speech_output` provider id that speaks for this service (such as `speech_say_openai` or `speech_say_endpoint`).
     pub provider: String,
-    /// Models to pass in settings when the provider takes them (`speech_say_endpoint`), recommended one first.
+    /// Whether the provider takes `url`, `models`, `voices` and `styles` as settings (`speech_say_endpoint` does): when set, the host
+    /// hands them to it; when not, the provider knows its own address and lists.
+    #[map(default)]
+    pub endpoint: bool,
+    /// Models to pass in settings when `endpoint` is set, recommended one first.
     #[map(default)]
     pub models: Vec<String>,
-    /// Voices to pass in settings when the provider takes them (`speech_say_endpoint`).
+    /// Voices to pass in settings when `endpoint` is set.
     #[map(default)]
     pub voices: Vec<String>,
-    /// Styles to pass in settings when the provider takes them (`speech_say_endpoint`), each `name=instruction`.
+    /// Styles to pass in settings when `endpoint` is set, each `name=instruction`.
     #[map(default)]
     pub styles: Vec<String>,
 }
@@ -88,6 +92,7 @@ impl AccountSpeechOutputService {
             url: url.into(),
             credential: credential.into(),
             provider: provider.into(),
+            endpoint: false,
             models: Vec::new(),
             voices: Vec::new(),
             styles: Vec::new(),
@@ -123,6 +128,14 @@ impl AccountSpeechOutputService {
             return Some(format!(
                 "the service {} posts to {:?}, which is not an http or https address",
                 self.id, self.url
+            ));
+        }
+        let address = self.address.trim().trim_end_matches('/');
+        let url = self.url.trim();
+        if url != address && !url.starts_with(&format!("{address}/")) {
+            return Some(format!(
+                "the service {} posts to {:?}, which is not under its address {:?}, so an account's key would leave it",
+                self.id, self.url, self.address
             ));
         }
         if self.models.iter().any(|model| model.trim().is_empty()) {
@@ -213,6 +226,17 @@ mod tests {
                 bad.problem()
             );
         }
+        let mut elsewhere = service();
+        elsewhere.url = "https://evil.test/v1/audio/speech".into();
+        assert!(
+            elsewhere
+                .problem()
+                .is_some_and(|why| why.contains("not under its address")),
+            "{:?}",
+            elsewhere.problem()
+        );
+        elsewhere.url = "https://api.acme.test/v1evil/audio/speech".into();
+        assert!(elsewhere.problem().is_some());
         let two = AccountSpeechOutputInfo::new(vec![service(), service()]);
         assert!(two.problem().is_some_and(|why| why.contains("twice")));
     }

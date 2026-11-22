@@ -184,7 +184,7 @@ impl<'a> Lend<'a> {
                     "title".to_owned(),
                     json!(format!("{}, account {name}", service.title)),
                 );
-                if service.provider == "speech_say_endpoint" {
+                if service.endpoint {
                     map.insert("url".to_owned(), json!(service.url));
                     if !service.models.is_empty() {
                         map.insert("models".to_owned(), json!(service.models));
