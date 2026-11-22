@@ -1,6 +1,6 @@
-# coqui-acp/crates/coqui-acp-harness at 8f1e9cce72d6e930e6fed52c9f578124670d80d6, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-harness at 5c95a3ecb3a44eed1f7fa6d9d883d30300b70bfb, with what it inherits written out.
 example = [{ name = "spawner_host", required-features = ["kind"] }, { name = "fake_stdio_cli", required-features = ["kind"] }, { name = "stdio_provider", crate-type = ["cdylib"], required-features = ["kind"] }]
-test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "opencode", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }]
+test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "opencode", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }, { name = "agy_login", required-features = ["antigravity"] }]
 [package]
 name = "coqui-acp-harness"
 description = "Serve a coding agent's own command line as an Agent Client Protocol agent: process trees, bounded lines, neutral events, and ACP v1 and v2 shapes"
@@ -21,7 +21,7 @@ publish = false
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
-antigravity = ["dep:serde", "dep:time", "dep:ureq", "dep:windows-sys"]
+antigravity = ["dep:serde", "dep:time", "dep:ureq", "dep:windows-sys", "dep:memchr", "dep:keyring-core", "dep:windows-native-keyring-store", "dep:apple-native-keyring-store", "dep:zbus-secret-service-keyring-store"]
 kind = ["dep:guatiao-serde", "dep:coqui-acp-history"]
 [dependencies]
 [dependencies.coqui-acp-api]
@@ -63,6 +63,12 @@ features = ["std"]
 version = "1"
 default-features = false
 features = ["v4"]
+[dependencies.memchr]
+version = "2"
+optional = true
+[dependencies.keyring-core]
+version = "1"
+optional = true
 [target]
 [target."cfg(unix)"]
 [target."cfg(unix)".dependencies]
@@ -70,6 +76,18 @@ features = ["v4"]
 version = "1.1"
 default-features = false
 features = ["std", "process"]
+[target."cfg(all(unix, not(any(target_os = \"macos\", target_os = \"ios\", target_os = \"android\"))))"]
+[target."cfg(all(unix, not(any(target_os = \"macos\", target_os = \"ios\", target_os = \"android\"))))".dependencies]
+[target."cfg(all(unix, not(any(target_os = \"macos\", target_os = \"ios\", target_os = \"android\"))))".dependencies.zbus-secret-service-keyring-store]
+version = "1"
+optional = true
+features = ["crypto-rust"]
+[target."cfg(target_os = \"macos\")"]
+[target."cfg(target_os = \"macos\")".dependencies]
+[target."cfg(target_os = \"macos\")".dependencies.apple-native-keyring-store]
+version = "1"
+optional = true
+features = ["keychain"]
 [target."cfg(windows)"]
 [target."cfg(windows)".dependencies]
 [target."cfg(windows)".dependencies.win32job]
@@ -79,6 +97,10 @@ version = "0.61.2"
 optional = true
 default-features = false
 features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"]
+[target."cfg(windows)".dependencies.windows-native-keyring-store]
+version = "1"
+optional = true
+default-features = false
 [dev-dependencies]
 [dev-dependencies.coqui-acp]
 path = "../coqui-acp"

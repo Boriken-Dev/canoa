@@ -68,8 +68,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: "8f1e9cce72d6e930e6fed52c9f578124670d80d6"
-      resolved-ref: "8f1e9cce72d6e930e6fed52c9f578124670d80d6"
+      ref: "5c95a3ecb3a44eed1f7fa6d9d883d30300b70bfb"
+      resolved-ref: "5c95a3ecb3a44eed1f7fa6d9d883d30300b70bfb"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: "8f1e9cce72d6e930e6fed52c9f578124670d80d6"
-      resolved-ref: "8f1e9cce72d6e930e6fed52c9f578124670d80d6"
+      ref: "5c95a3ecb3a44eed1f7fa6d9d883d30300b70bfb"
+      resolved-ref: "5c95a3ecb3a44eed1f7fa6d9d883d30300b70bfb"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -86,8 +86,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: "8f1e9cce72d6e930e6fed52c9f578124670d80d6"
-      resolved-ref: "8f1e9cce72d6e930e6fed52c9f578124670d80d6"
+      ref: "5c95a3ecb3a44eed1f7fa6d9d883d30300b70bfb"
+      resolved-ref: "5c95a3ecb3a44eed1f7fa6d9d883d30300b70bfb"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -104,8 +104,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_transport_web"
-      ref: "1e19611126472e8dc47c0e640bae2b86a7e6d713"
-      resolved-ref: "1e19611126472e8dc47c0e640bae2b86a7e6d713"
+      ref: 1e19611126472e8dc47c0e640bae2b86a7e6d713
+      resolved-ref: 1e19611126472e8dc47c0e640bae2b86a7e6d713
       url: "https://github.com/Boriken-Dev/coqui-transport-web.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -842,7 +842,7 @@ packages:
     dependency: "direct main"
     description:
       name: xterm2
-      sha256: da8f15c6ecd0a0e06ca11f8d9fe55d6f1e686823ff084ad82fccf9a5fd1f8c00
+      sha256: "da8f15c6ecd0a0e06ca11f8d9fe55d6f1e686823ff084ad82fccf9a5fd1f8c00"
       url: "https://pub.dev"
     source: hosted
     version: "5.4.0"
