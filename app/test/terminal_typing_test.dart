@@ -13,13 +13,12 @@ import 'package:canoa/shell/shell.dart';
 import 'package:canoa/shell/surface.dart';
 import 'package:canoa/shell/work_panel.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
-import 'package:canoa/surfaces/terminal_keys.dart' show terminalReadsKeysDirectly;
 import 'package:canoa/surfaces/terminal_surface.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:xterm/xterm.dart';
+import 'package:xterm2/xterm.dart';
 
 final class _Shell implements RemoteTerminal {
   _Shell(this.folder);
@@ -120,19 +119,10 @@ Future<({SessionSurfaces open, TerminalSurface surface, ChatSession session})> _
   return (open: open, surface: terminal, session: session);
 }
 
-/// Types as a person does on this platform: key events that carry their character where the terminal reads keys itself, the
-/// platform's text input elsewhere.
+/// Types as a person does: through the platform's text input, which the terminal has once it has the keyboard.
 Future<void> _typeText(WidgetTester tester, String text) async {
-  if (terminalReadsKeysDirectly()) {
-    for (final unit in text.runes) {
-      final key = LogicalKeyboardKey.findKeyByKeyId(unit);
-      expect(key, isNotNull, reason: 'no key for ${String.fromCharCode(unit)}');
-      await tester.sendKeyEvent(key!, character: String.fromCharCode(unit));
-    }
-  } else {
-    expect(tester.testTextInput.isRegistered, isTrue, reason: 'no text input is connected: the terminal does not have the keyboard');
-    tester.testTextInput.enterText(text);
-  }
+  expect(tester.testTextInput.isRegistered, isTrue, reason: 'no text input is connected: the terminal does not have the keyboard');
+  tester.testTextInput.enterText(text);
   await tester.pump();
 }
 
@@ -161,18 +151,40 @@ void _tests() {
     expect(host.opened.single.writes.join(), 'ls\r');
   });
 
-  testWidgets('Windows: letters typed as key events and Enter reach the host, and no text input is needed', (tester) async {
+  testWidgets('Windows: letters arrive through the platform text input, and Enter as a key', (tester) async {
     final host = _Host();
     final store = SessionStore();
     addTearDown(store.dispose);
     await _panel(tester, host, store);
+    expect(tester.testTextInput.isRegistered, isTrue);
+    expect(tester.testTextInput.setClientArgs?['viewId'], isNotNull, reason: 'the text input carries the view id, which Windows needs');
 
-    for (final letter in ['a', 'b', 'c']) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.findKeyByKeyId(letter.codeUnitAt(0))!, character: letter);
-    }
+    tester.testTextInput.enterText('abc');
+    await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await _settle(tester);
     expect(host.opened.single.writes.join(), 'abc\r');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets("an input method's composition reaches the host once it is committed, and Enter during it is the input method's", (tester) async {
+    final host = _Host();
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    await _panel(tester, host, store);
+    expect(tester.testTextInput.isRegistered, isTrue);
+
+    tester.testTextInput.updateEditingValue(const TextEditingValue(text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2)));
+    await tester.pump();
+    expect(host.opened.single.writes, isEmpty, reason: 'a composition in progress is not sent');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(host.opened.single.writes, isEmpty, reason: 'Enter while composing belongs to the input method');
+
+    tester.testTextInput.updateEditingValue(const TextEditingValue(text: '\u4f60', selection: TextSelection.collapsed(offset: 1)));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await _settle(tester);
+    expect(host.opened.single.writes.join(), '\u4f60\r');
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('Linux: letters arrive through the platform text input, and Enter as a key', (tester) async {

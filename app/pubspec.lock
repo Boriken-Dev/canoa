@@ -838,14 +838,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.1"
-  xterm:
+  xterm2:
     dependency: "direct main"
     description:
-      name: xterm
-      sha256: "168dfedca77cba33fdb6f52e2cd001e9fde216e398e89335c19b524bb22da3a2"
+      name: xterm2
+      sha256: "da8f15c6ecd0a0e06ca11f8d9fe55d6f1e686823ff084ad82fccf9a5fd1f8c00"
       url: "https://pub.dev"
     source: hosted
-    version: "4.0.0"
+    version: "5.4.0"
+  xterm2_core:
+    dependency: transitive
+    description:
+      name: xterm2_core
+      sha256: "36bb8b0db005ec9e187a5e9f79bb82a8159343579a6b4dea734cabe7c0eeecea"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   yaml:
     dependency: "direct main"
     description:

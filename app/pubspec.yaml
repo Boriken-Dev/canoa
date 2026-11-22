@@ -59,7 +59,7 @@ dependencies:
   # The browser's WebCrypto and IndexedDB, for the web peer bridge.
   web: ^1.1.1
   # The terminal surface's emulator and view (pure Dart, no dart:io or dart:html, so the web build has it too).
-  xterm: ^4.0.0
+  xterm2: 5.4.0
   # Dictation through the operating system's own speech service (Windows, macOS); no model or cloud service ships with the app.
   speech_to_text: ^7.5.0
   record: ^7.2.0

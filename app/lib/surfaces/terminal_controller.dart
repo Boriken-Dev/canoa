@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show FocusNode;
-import 'package:xterm/xterm.dart';
+import 'package:xterm2/xterm.dart';
 
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
@@ -364,7 +364,8 @@ class TerminalPane extends ChangeNotifier {
     if (state == PaneState.starting) {
       _pending.write(clean);
     } else {
-      terminal.paste(clean);
+      // Not `Terminal.paste`, which removes the text's control characters and escape sequences: what is pasted is sent as it is.
+      terminal.textInput(bracketed ? '\x1b[200~$clean$_pasteEnd' : clean);
     }
   }
 

@@ -1,15 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:xterm2/xterm.dart' show TerminalKey;
 
 import 'terminal_clipboard.dart' show ClipboardRefused;
 import 'terminal_controller.dart';
-
-/// Whether a terminal takes its letters from the keyboard's own events (each key's `character`) instead of the platform's text
-/// input. xterm 4 attaches its text input without a view id, and Flutter's Windows engine then sends that input no text: letters
-/// never arrive, while the keys the terminal maps itself (Enter, the arrows) do. An input method's composition is not offered
-/// where this is true; a browser, a phone and the other desktops keep the text input.
-bool terminalReadsKeysDirectly([TargetPlatform? platform]) => !kIsWeb && (platform ?? defaultTargetPlatform) == TargetPlatform.windows;
 
 /// What a terminal's clipboard keys do, as the terminals people know do it:
 ///
@@ -39,6 +34,7 @@ KeyEventResult terminalClipboardKey(
   final bool paste;
   final bool all;
   var interrupt = false;
+  var sendsInterrupt = false;
   if (apple) {
     final command = meta && !ctrl && !shift;
     copy = command && key == LogicalKeyboardKey.keyC;
@@ -52,10 +48,16 @@ KeyEventResult terminalClipboardKey(
     all = chord && key == LogicalKeyboardKey.keyA;
     // Windows Terminal: Ctrl+C copies what is selected, so a selection is what tells a copy from an interrupt.
     interrupt = target == TargetPlatform.windows && plain && key == LogicalKeyboardKey.keyC && pane.selection != null;
+    // Elsewhere Ctrl+C is the interrupt even with a selection; the terminal view would copy it, so the key is sent from here.
+    sendsInterrupt = target != TargetPlatform.windows && plain && key == LogicalKeyboardKey.keyC && pane.selection != null;
   }
 
   if (copy || interrupt) {
     if (event is KeyDownEvent) _copy(pane, say, clear: interrupt);
+    return KeyEventResult.handled;
+  }
+  if (sendsInterrupt) {
+    pane.terminal.keyInput(TerminalKey.keyC, ctrl: true);
     return KeyEventResult.handled;
   }
   if (all) {

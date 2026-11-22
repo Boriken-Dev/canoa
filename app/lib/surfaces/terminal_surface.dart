@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
-import 'package:xterm/xterm.dart';
+import 'package:xterm2/xterm.dart';
 
 import '../session_store.dart';
 import '../shell/surface.dart';
@@ -508,7 +508,6 @@ class _ScreenState extends State<_Screen> {
                 padding: const EdgeInsets.all(6),
                 theme: _theme,
                 textStyle: terminalTextStyle,
-                hardwareKeyboardOnly: terminalReadsKeysDirectly(),
                 // The clipboard keys are `terminalClipboardKey`'s; the terminal's own shortcuts, which use the system clipboard
                 // directly and take Ctrl+A from the shell, are left out.
                 shortcuts: const {},
