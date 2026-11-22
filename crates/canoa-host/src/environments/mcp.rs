@@ -891,6 +891,17 @@ fn without_lists_of(meta: &mut Value, gained: &Value) {
     for (key, value) in gained {
         match value {
             Value::Array(_) => {
+/// Whether `meta` holds everything `gained` adds: each list's entries, at the same place.
+fn holds(meta: &Value, gained: &Value) -> bool {
+    match (meta, gained) {
+        (Value::Object(meta), Value::Object(gained)) => gained
+            .iter()
+            .all(|(key, value)| meta.get(key).is_some_and(|held| holds(held, value))),
+        (Value::Array(meta), Value::Array(gained)) => gained.iter().all(|each| meta.contains(each)),
+        (held, gained) => held == gained,
+    }
+}
+
                 meta.remove(key);
             }
             Value::Object(_) => {
@@ -1164,6 +1175,14 @@ impl Link {
     fn end(&self, session: &str) {
         if let Some(interception) = &self.interception {
             interception.closed(session);
+        }
+        // A merge keeps a value of the client's where the host's object or list would go, and the agent would then load no
+        // plugin: the request is refused rather than opened without the hook.
+        if !holds(meta, &gained) {
+            interception.answered(id, None);
+            return Err(
+                "the request's _meta holds a value where the agent reads the host's plugin, so the hook that runs this session's tools in its environment cannot be given".to_owned(),
+            );
         }
         self.modes.forget(session);
         let mut state = lock(&self.state);

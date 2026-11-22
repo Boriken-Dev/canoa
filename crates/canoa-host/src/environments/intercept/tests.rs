@@ -747,6 +747,30 @@ fn a_session_request_carries_the_hook_plugin_and_only_the_hosts_and_one_that_can
 }
 
 #[test]
+fn a_session_request_whose_meta_would_keep_the_plugin_out_is_refused() {
+    use super::super::mcp::Said;
+    for client in [
+        json!("x"),
+        Value::Null,
+        json!({"options": []}),
+        json!({"options": 1}),
+        json!({"options": {"plugins": "mine"}}),
+    ] {
+        let link = hub("canoa")
+            .for_connection(None, &serve("box"), Some("claude"))
+            .expect("made")
+            .expect("a link");
+        let request = json!({"jsonrpc": "2.0", "id": 5, "method": "session/new",
+            "params": {"cwd": "/w", "mcpServers": [], "_meta": {"claudeCode": client}}});
+        let Said::Answered(answer) = said(&link, &request) else {
+            panic!("refused: {client}")
+        };
+        let answer: Value = serde_json::from_slice(&answer).expect("JSON");
+        assert_eq!(answer["error"]["code"], -32602, "{client}");
+    }
+}
+
+#[test]
 fn an_agent_whose_vendor_cannot_say_how_its_tools_are_taken_over_is_refused_and_this_computer_needs_no_take_over()
  {
     for id in ["codex", "pi"] {
