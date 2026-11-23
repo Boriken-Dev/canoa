@@ -4,3 +4,4 @@ analyzer:
   exclude:
     - build/**
     - tool/web_link/**
+    - web/**
