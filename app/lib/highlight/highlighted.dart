@@ -74,6 +74,14 @@ TextSpan lineSpan(String line, List<Span> spans, Map<Tok, TextStyle> styles) {
   return TextSpan(style: styles[Tok.plain], children: children);
 }
 
+/// The package's code-line hook for [look]: a line of a changed file, a permission's diff or a tool's patch is coloured as the
+/// language of [path] says, and left plain with no path, an unknown language or a line past [eagerLimit] (or the theme's cap).
+CodeSpans codeSpansFor(ChatLook look) => (line, path, style) {
+  final language = languageForPath(path);
+  if (language == null || line.length > eagerLimit.clamp(0, SyntaxTheme.defaultMaxChars)) return TextSpan(text: line, style: style);
+  return lineSpan(line, lexLine(language, line).$1, const SyntaxTheme().styles(look, style));
+};
+
 final Map<String, List<List<Span>>> _recent = {};
 
 /// The spans of every line of [code] in [language], kept for the last few blocks so a rebuild does not lex them again.

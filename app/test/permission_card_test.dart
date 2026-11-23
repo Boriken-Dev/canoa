@@ -146,6 +146,22 @@ void main() {
     expect(find.descendant(of: diff, matching: find.textContaining('return a - b;')), findsOneWidget);
     final card = find.byKey(const Key('permission-card'));
     expect(tester.getSize(diff).width, greaterThan(tester.getSize(card).width - 60), reason: 'full width, not a narrow box');
+    final look = Theme.of(tester.element(diff)).extension<ChatLook>()!;
+    Color? colorOf(String text) {
+      Color? found;
+      for (final rich in tester.widgetList<RichText>(find.descendant(of: diff, matching: find.byType(RichText)))) {
+        rich.text.visitChildren((span) {
+          if (span is TextSpan && span.text == text && found == null) {
+            found = span.style?.color;
+            return false;
+          }
+          return true;
+        });
+      }
+      return found;
+    }
+
+    expect(colorOf('return'), look.accent, reason: 'the file is JavaScript, so its keywords are coloured');
   });
 
   testWidgets('a command shows inline, across the card\'s width', (tester) async {

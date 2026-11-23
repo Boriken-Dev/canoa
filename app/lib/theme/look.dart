@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/text_pack.dart';
+import '../highlight/highlighted.dart' show codeSpansFor;
 import 'vendor_looks.dart';
 
 /// The id of a look family. Canoa's own look and the terminal's are built in; every other is a family the host lists (`looks/list`,
@@ -200,7 +201,7 @@ ChatLook chatLookFor(LookId id, Brightness brightness, ColorScheme scheme, {Chat
       ? terminalTokens
       : vendorLooks.chat(id, brightness, canoa);
   final terminal = id == LookId.terminal;
-  return ChatLook(
+  final look = ChatLook(
     bg: shell.page,
     surface: shell.page,
     raised: shell.raised,
@@ -230,6 +231,8 @@ ChatLook chatLookFor(LookId id, Brightness brightness, ColorScheme scheme, {Chat
     monospace: terminal,
     userPrefix: terminal ? '> ' : null,
   );
+  // The colours come from the look itself, so each look and brightness draws code in its own.
+  return look.copyWith(codeSpans: codeSpansFor(look));
 }
 
 /// The colour scheme the tokens make, so a widget reading `colorScheme` draws in the look and not in a seeded palette.
