@@ -125,12 +125,14 @@ authenticators = [
   provider gives the user id, the matcher asks the system's accounts only. Only a certificate that arrived on the proxy's
   socket reaches the matcher at all. Pin certificates (`trust = "pinned"`) to skip it.
 
-`GET /portal/methods` (no cookie needed) answers `{"methods": ["password", "certificate"]}`: the ways in the sign-in policy
-(below) allows this connection, among the ones this portal has. The certificate method is listed only on the proxy's socket.
-The sign-in page is built from the same list:
-a password form, and a **Sign in with your certificate** button when the certificate method is on, each with its own error. A
-`429` carries `Retry-After` and the page counts it down and holds the buttons; the page's one script, `/portal/login.js`, does
-only that, and the page's policy allows scripts and styles from the portal itself and nothing inline.
+`GET /portal/methods` (no cookie needed) answers `{"methods": ["password", "certificate", "passkey"]}`: the ways in the sign-in
+policy (below) allows this connection, among the ones this portal has. The certificate method is listed only on the proxy's
+socket. The sign-in page is built from the same list: a password form, a **Sign in with your certificate** button when the
+certificate method is on and a **Sign in with a passkey** button when the passkey method is, each with its own error. A `429`
+carries `Retry-After` and the page counts it down and holds the buttons. The page's one script, `/portal/login.js`, counts that
+down and runs the passkey ceremonies (it reveals the passkey button, which the page holds hidden until it runs, so every other
+way in is an ordinary form without it); the page's policy allows scripts and styles from the portal itself, requests to the
+portal itself (`connect-src 'self'`) and nothing inline.
 
 ### Signing in by certificate
 
@@ -236,6 +238,82 @@ portal's machine forwards to the portal's socket:
 The portal believes the header only because it arrived on `socket`. Anything that can write to that socket (the proxy's group)
 can sign in as anyone whose certificate is pinned, by sending the header itself.
 
+### Signing in by passkey
+
+A passkey (WebAuthn) is a key pair the person's device holds for one site: the browser signs a challenge the portal made, the
+device asks the person to unlock it (a fingerprint, a face, a PIN), and the portal checks the signature against the public key it
+kept when the passkey was added. Nothing that signs in leaves the device, and a passkey made for this site answers no other, so a
+look-alike page gets nothing to replay. `coqui_access_passkey` is the provider; it keeps the public keys and the challenges in
+files, and the portal builds one instance of it for each thing it does (the challenge, the answer, the accounts and the
+directory), which share nothing but those files, so it needs a `source` file:
+
+```toml
+authenticators = [
+  { provider = "coqui_access_system" },
+  { provider = "coqui_access_passkey", library = "/opt/canoa/libcoqui_access_passkey_plugin.so",
+    config = { rp_id = "canoa.example", origins = ["https://canoa.example"],
+               source = { file = { path = "/var/lib/canoa-portal/passkeys.toml", format = "toml" } } } },
+]
+```
+
+- **The relying party is the portal's own host.** `rp_id` is the name the page is served at, never a parent domain: a passkey
+  made for `canoa.example` cannot be asked for by `www.example` or any sibling of it, and `example` would let every site under it
+  ask for the same passkeys. `origins` is the one origin a browser signs in from (scheme, host and port). A browser offers
+  WebAuthn only over HTTPS or on `http://localhost`, so the address the person types must be the name in `origins`: another
+  name, such as the proxy's own address, signs no one in by passkey. For a development run on a loopback port,
+  `allow_any_port = true` lets any port of `localhost` be the origin; the provider lists that among its non-default settings.
+- **No name is typed.** The page's **Sign in with a passkey** asks the portal for a challenge with no account named and the
+  browser offers the passkeys it holds for the site (a discoverable passkey: `resident_key` is `required` by default). There is
+  no username-first form, because one would tell anyone which names hold passkeys. A passkey that follows a password in a chain
+  (`["password", "passkey"]`) is asked for the account the password named, and only that account's passkeys are offered.
+- **The device verifies the person.** `user_verification` is `required` by default, so a passkey alone is two factors: the device
+  and the person's unlock. A device that does not verify the person is refused. Passkeys the platform syncs between devices are
+  accepted unless the provider's `reject_synced` is set; the Passkeys page says which each one is.
+- **A challenge is held for one browser and answered once.** `POST /portal/passkey` makes it and sets the cookie
+  `__Host-canoa-passkey` (`HttpOnly`, `Secure`, `SameSite=Strict`, as long as the challenge lives, 300 seconds by default); the
+  sign-in form posts `method=passkey` and the answer, which the portal checks only with the challenge that cookie names, taken
+  as it is used. An answer with no cookie, another browser's cookie, a challenge made for another account or one already used
+  is a failed try. The portal holds at most `max_passkey_ceremonies` (1024) challenges at once and the provider at most eight for
+  one address (an IPv6 /64 counts as one), so a client that asks for many is answered `429` with `Retry-After`; a browser that
+  asks again gives up the one it held. A challenge is asked only for a method the policy offers from where the browser is: from
+  where it is not offered the answer is `403`, no challenge is made, and no provider is asked.
+- **A failed try is counted like a wrong password**, by the address (the provider does not throttle), and the portal's usual
+  limits, floor and `429` apply; a passkey names no account until it is right, so what is counted against an account's name is
+  not touched by it. An account the passkey names but the system does not admit (`min_uid`, `groups`) is refused like any other.
+- **A passkey is the account's by its user id.** It is kept with `uid:<id>` among its groups, so an account deleted and made
+  again under the same name does not inherit the passkeys of the one before: they sign no one in, and adding a passkey takes
+  them away.
+- **Sessions end with the passkey.** A session a passkey opened records which one. Removing it, from the Passkeys page or with
+  `canoa portal passkeys remove`, ends the sessions it opened at their next use (a channel within a few seconds), and no other.
+
+**Adding one** is on `/portal/passkeys`, which lists the account's passkeys (name, the day each was added and last used, whether
+it syncs, whether it is disabled), names and removes them, and adds a new one. A passkey is a way in that works from anywhere
+the policy accepts one, so adding one is held to **the strictest sign-in the policy accepts**: the policy is asked for the
+purpose `enrol`, as for a one-time code, and the person shows again, on the page, what its rule asks for before the **Add a
+passkey** button appears. A session opened by a cookie, by a password typed inside the network, or by anything else the `enrol`
+rule does not name adds nothing; with no `enrol` rule nobody can add a passkey and the page says so. The steps shown are kept
+in a pending state bound to that session for `enrol_seconds` and are used up by one registration. Naming and removing a passkey
+need only the session: a stolen cookie can take a way in out, and never put one in.
+
+The first passkey has no passkey to show, so it is added after the other things the `enrol` rule names, a certificate or a
+password with a one-time code, say. An `enrol` rule that allows a password alone lets anyone who knows the password, from where
+the rule allows, add a passkey that then signs in from wherever a passkey is accepted: write the rule as strict as the way in
+you want to protect, and loosen it for the first passkey only for as long as that takes.
+
+`canoa portal --config FILE passkeys ...`, run as the portal's account, is the administrator's way, and there is no way to add
+one from the command line, since a passkey is made by the person's device:
+
+```sh
+canoa portal --config /etc/canoa/portal.toml passkeys list                  # one JSON line per passkey: user, id, label, added, last_used, synced, disabled; never a key
+canoa portal --config /etc/canoa/portal.toml passkeys remove alice ID       # one passkey of alice
+canoa portal --config /etc/canoa/portal.toml passkeys remove alice          # every passkey of alice
+```
+
+The command refuses to run as an account that does not own the provider's files (`source`, `pending`, `ceremonies`, and their
+locks) and the folder they are in. The files hold public keys and challenges, nothing that signs in, but they say who can; keep
+them where only the portal's account can read them, as the state directory does. Every passkey added or removed on the page is
+logged at `warn` with the account, the credential's id and the browser's address, never an answer.
+
 ### Which ways in a connection may use
 
 `sign_in_policy` decides which of the ways in above a connection may use, and whether the steps a sign-in has passed are enough.
@@ -251,6 +329,22 @@ allow = [["password"], ["certificate"]]
 
 [[sign_in_policy.config.rule]]
 allow = [["certificate"]]
+```
+
+A passkey wherever a certificate is accepted, and a passkey added only after a certificate, a passkey or a password with a
+one-time code is shown again (`purposes` names what a rule is for: without it a rule is for signing in and for using a session):
+
+```toml
+[[sign_in_policy.config.rule]]
+purposes = ["enrol"]
+allow = [["certificate"], ["passkey"], ["password", "totp"]]
+
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+allow = [["password"], ["certificate"], ["passkey"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["certificate"], ["passkey"], ["password", "totp"]]
 ```
 
 The rules are tried in order; the first whose conditions hold decides. An address outside 10.0.0.0/8, an IPv6 address and an
@@ -488,6 +582,7 @@ max_pending_tries = 5                  # tries it allows at the next steps
 max_factor_failures_per_person = 5     # failed second-step tries for one account, from anywhere, in the window
 max_factor_failures_per_day = 20       # and in factor_day_seconds
 factor_day_seconds = 86400
+max_passkey_ceremonies = 1024          # passkey challenges waiting for their answers at once, from every browser
 ```
 
 `listen = "127.0.0.1:7890"` opens a loopback TCP address as well, for development: any local user can connect to it, or bind
@@ -669,8 +764,10 @@ server {
 
 | Request | Answer |
 | --- | --- |
-| `GET /portal/login`, `POST /portal/login` (`method` = `password` with `user` and `password`, or `certificate`, as a form) | the sign-in page; a right credential is `303 /` with the cookie (`303 /portal/certificate` for a password sign-in that carries a certificate to enrol), a wrong one `401`, a method this connection does not offer `400`, too many failures `429` |
+| `GET /portal/login`, `POST /portal/login` (`method` = `password` with `user` and `password`, `certificate`, or `passkey` with `answer`, as a form) | the sign-in page; a right credential is `303 /` with the cookie (`303 /portal/certificate` for a password sign-in that carries a certificate to enrol), a wrong one `401`, a method this connection does not offer `400`, too many failures `429` |
 | `GET /portal/methods` | the ways in this connection may use, as JSON; no cookie |
+| `POST /portal/passkey` (the page's own origin; `for=enrol` for a signed-in person showing a passkey again) | the options for `navigator.credentials.get` as `{"options": ...}` and the cookie that names the challenge; `403` where no passkey is offered, `429` with `Retry-After` when too many challenges wait |
+| `GET /portal/passkeys`, `POST /portal/passkeys` (`action` = `step`, `begin`, `confirm`, `remove`, `label` or `cancel`) | the account's passkeys and what adding one takes; show a factor again, begin (the creation options as JSON) and confirm an addition, remove or name one (signed in) |
 | `GET /portal/certificate`, `POST /portal/certificate` (`action` = `enrol` or `remove`) | the certificate the browser offers and the one pinned to the account; pin or remove (signed in) |
 | `POST /portal/logout` | ends the session and every channel it holds |
 | `GET /canoa.json` | the person's host: `peer`, `method`, `os`, `user` and each entry with a `url` through the portal (`/portal/ws/entry/NAME`, `/portal/ws/control`), starting the host if it is not running |
