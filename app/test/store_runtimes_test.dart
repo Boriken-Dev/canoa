@@ -15,11 +15,11 @@ void main() {
     final runtimes = host.programs(kind: programsTypeId);
     await runtimes.refresh();
     expect(runtimeItems(runtimes).map((each) => each.provider), ['node_store']);
-    expect(host.params['store/list']!.single, {'kind': 'programs'});
+    expect(host.params['store/overview']!.single, {'kind': 'programs'});
     final agents = host.programs();
     await agents.refresh();
     expect(agents.statuses.map((each) => each.info.provider), ['one_store']);
-    expect(host.params['store/list']!.last, isEmpty, reason: 'an agents page asks as it always did');
+    expect(host.params['store/overview']!.last, isEmpty, reason: 'an agents page asks as it always did');
   });
 
   test('a row says what is installed, and what a plan fetches is read before anything runs', () async {

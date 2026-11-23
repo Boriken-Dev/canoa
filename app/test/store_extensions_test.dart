@@ -39,8 +39,8 @@ void main() {
     expect(programs.items().map((each) => each.catalog), ['canoa-node', 'sample'], reason: 'each row is grouped by the library that offers it');
     expect(programs.items().map((each) => each.installed), [false, true]);
     expect(programs.items().first.summary, 'Not installed');
-    expect(host.params['store/list']!.where((given) => given['kind'] == 'programs'), isNotEmpty);
-    expect(host.params['store/list']!.any((given) => given['kind'] == 'extension' || given['kind'] == 'runtimes'), isFalse);
+    expect(host.params['store/overview']!.where((given) => given['kind'] == 'programs'), isNotEmpty);
+    expect(host.params['store/overview']!.any((given) => given['kind'] == 'extension' || given['kind'] == 'runtimes'), isFalse);
     extensions.dispose();
   });
 

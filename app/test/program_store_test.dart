@@ -90,6 +90,36 @@ void main() {
     });
   });
 
+  group('opening the Store', () {
+    test('is one round trip when the host keeps the newest versions, and asks only what it does not keep', () async {
+      final host = FakeStoreHost([
+        claudeLike(copies: [copyOf('1.0.0')], latest: '2.0.0'),
+        whenLike(copies: [copyOf('4.0.0')], latest: '5.0.0'),
+      ]);
+      host.kept['one_store'] = {'known': true, 'version': '2.0.0', 'checked': DateTime.now().millisecondsSinceEpoch, 'stale': false};
+      final programs = host.programs();
+      await programs.refresh(latest: true);
+      expect(host.calls, ['store/overview', 'store/latest two_store'], reason: 'nothing for the one the host keeps');
+      expect(programs.status('one_store')!.latest?.version, '2.0.0');
+      expect(programs.status('two_store')!.latest?.version, '5.0.0');
+      expect(programs.status('one_store')!.copies.single.version, '1.0.0');
+
+      host.calls.clear();
+      final another = host.programs();
+      await another.refresh(latest: true);
+      expect(host.calls, ['store/overview'], reason: 'the host kept both by now');
+      expect(host.params['store/latest']!.single['refresh'], false);
+    });
+
+    test('the refresh button has the host ask the publishers again', () async {
+      final host = FakeStoreHost([claudeLike(copies: [copyOf('1.0.0')], latest: '2.0.0')]);
+      final programs = host.programs();
+      await programs.refresh(latest: true);
+      await programs.refresh(latest: true, force: true);
+      expect(host.params['store/latest']!.map((each) => each['refresh']), [false, true]);
+    });
+  });
+
   group('a change of programs', () {
     ProgramStores over(FakeStoreHost host, List<String> changes) {
       final shared = host.client();
@@ -182,8 +212,7 @@ void main() {
       final programs = host.programs();
       await storeReadiness(programs, _one);
       await storeReadiness(programs, _two);
-      expect(host.calls.toSet(), {'store/list', 'store/report one_store', 'store/report two_store'});
-      expect(host.params['store/report']!.every((each) => !each.containsKey('probe')), isTrue);
+      expect(host.calls.toSet(), {'store/overview'}, reason: 'one round trip, and no publisher');
     });
 
     testWidgets('a page asks the publishers when it opens, but installs nothing until a button and a confirmation', (tester) async {

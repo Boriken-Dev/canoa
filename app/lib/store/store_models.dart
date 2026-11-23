@@ -219,13 +219,19 @@ class TypeModels extends ChangeNotifier {
   /// Whether a model of the type may be the person's speech-to-text.
   bool get speech => _speech;
 
-  /// Asks the host for the models, once; [refresh] asks again.
-  Future<void> ensure() => _asking ??= refresh();
+  /// Asks the host for the models, once; the host answers from what it kept of its last listing while that is recent. [refresh]
+  /// has it list them again.
+  Future<void> ensure() => _asking ??= _ask(refresh: false);
 
-  Future<void> refresh() async {
+  Future<void> refresh() => _ask(refresh: true);
+
+  /// Asks the host again, which answers from what it kept while that is recent: what a page does each time it opens.
+  Future<void> load() => _ask(refresh: false);
+
+  Future<void> _ask({required bool refresh}) async {
     try {
       final client = await _control();
-      final answer = await client.call('store/models', {'type': type}, null, const Duration(minutes: 3));
+      final answer = await client.call('store/models', {'type': type, if (refresh) 'refresh': true}, null, const Duration(minutes: 3));
       final map = answer is Map ? answer : const {};
       _catalog = _text(map['catalog']);
       _publisher = _text(map['publisher']);
@@ -294,7 +300,7 @@ ExtensionStoreType modelsStoreType({required List<TypeModels> models, IconData i
   label: modelsTypeLabel,
   icon: icon,
   changes: Listenable.merge(models),
-  load: () => Future.wait([for (final each in models) each.refresh()]),
+  load: () => Future.wait([for (final each in models) each.load()]),
   items: () => [
     for (final of in models)
       if (of.loaded) ..._itemsOf(of),

@@ -193,6 +193,34 @@ final class FakeStoreHost {
 
   FakeStore store(String provider) => stores.firstWhere((each) => each.provider == provider);
 
+  Map<String, Object?> _list(Map<String, Object?> given) {
+    final programs = given['kind'] == 'programs';
+    return {
+      'stores': [
+        for (final each in stores.where(
+          (each) => programs ? each.runtime || each.extensionType != null : !each.runtime && each.extensionType == null,
+        ))
+          {
+            if (programs) ...{'library': ?each.library, 'library_title': ?each.libraryTitle, 'type': ?each.extensionType},
+            'provider': each.provider,
+            'program': each.provider.replaceAll('_store', ''),
+            'title': each.title,
+            'publisher': 'A Publisher',
+            'serves': each.serves,
+            'channels': <String>[],
+            'summary': ?each.summary,
+            'icon': ?each.icon,
+            'homepage': ?each.homepage,
+            'commands': each.commands,
+            'endpoints': each.endpoints,
+          },
+      ],
+    };
+  }
+
+  /// What the host kept of each store's newest version, as `store/overview` gives it: the answer with `checked` and `stale`.
+  final kept = <String, Map<String, Object?>>{};
+
   Object? _answer(String method, Map<String, Object?> given) {
     // What the host grants this key is not a store request, so it is not in [calls].
     if (method == 'host/grants') return {'grants': grants};
@@ -266,26 +294,20 @@ final class FakeStoreHost {
       hostTable = given['value'] is Map ? {for (final MapEntry(:key, :value) in (given['value'] as Map).entries) '$key': value} : null;
       return {'section': given['section'], 'restart': true};
     }
-    if (method == 'store/list') {
-      final programs = given['kind'] == 'programs';
+    if (method == 'store/list') return _list(given);
+    if (method == 'store/overview') {
+      if (failures['store/overview'] ?? failures['store/list'] case final failure?) throw failure;
+      final rows = (_list(given)['stores'] as List).cast<Map<String, Object?>>();
       return {
         'stores': [
-          for (final each in stores.where(
-            (each) => programs ? each.runtime || each.extensionType != null : !each.runtime && each.extensionType == null,
-          ))
+          for (final row in rows)
             {
-              if (programs) ...{'library': ?each.library, 'library_title': ?each.libraryTitle, 'type': ?each.extensionType},
-              'provider': each.provider,
-              'program': each.provider.replaceAll('_store', ''),
-              'title': each.title,
-              'publisher': 'A Publisher',
-              'serves': each.serves,
-              'channels': <String>[],
-              'summary': ?each.summary,
-              'icon': ?each.icon,
-              'homepage': ?each.homepage,
-              'commands': each.commands,
-              'endpoints': each.endpoints,
+              ...row,
+              if (failures['store/report'] ?? failures['store/report ${row['provider']}'] case final failure?)
+                'problem': failure.message
+              else
+                'report': {'copies': stores.firstWhere((each) => each.provider == row['provider']).copies},
+              'latest': ?kept[row['provider']],
             },
         ],
       };
@@ -297,7 +319,13 @@ final class FakeStoreHost {
         return {'copies': store.copies};
       case 'store/latest':
         if (store.latest == null) return {'known': false, 'unknown_because': store.latestFails ?? 'the publisher did not answer'};
-        return {'known': true, 'version': store.latest, if (store.latestNote != null) 'note': store.latestNote};
+        return kept[store.provider] = {
+          'known': true,
+          'version': store.latest,
+          if (store.latestNote != null) 'note': store.latestNote,
+          'checked': DateTime.now().millisecondsSinceEpoch,
+          'stale': false,
+        };
       case 'store/plan':
         final action = given['action'] as String;
         final made = store.plan?[action] ?? {'action': action, 'version': store.latest, 'downloads': <Object?>[], 'changes': <Object?>[]};
