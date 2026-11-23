@@ -15,6 +15,11 @@ use super::{Caller, Outcome, Overlays, PoisonError, Trust, bad, refused, text_pa
 /// The most entries one call reads, so one answer and one request stay a size a link carries.
 const MAX_ENTRIES: usize = 32;
 
+/// The most view files one overlay's answer carries, and the most bytes one of them may hold: a view is a small document, and a
+/// larger file is left out rather than relayed.
+const MAX_VIEW_FILES: usize = 16;
+const MAX_VIEW_BYTES: usize = 128 * 1024;
+
 const SCRIPT_EXTENSIONS: [&str; 7] = [".py", ".js", ".mjs", ".cjs", ".ps1", ".bash", ".sh"];
 
 impl Overlays {
@@ -134,6 +139,26 @@ fn decoded(answer: Value) -> Result<BTreeMap<String, Vec<u8>>, (i32, String)> {
                 .ok_or_else(|| refused("a file came back that is not base64"))?;
             Ok((path.clone(), bytes))
         })
+        .collect()
+}
+
+/// The files of the overlay's views and their catalogs, `surfaces/NAME.json` and `catalogs/NAME.json`, as `{path, text}`. The app
+/// reads them; nothing here does.
+fn views_of(files: &BTreeMap<String, Vec<u8>>) -> Vec<Value> {
+    files
+        .iter()
+        .filter(|(path, bytes)| {
+            let folder = path.split_once('/').map(|(folder, _)| folder);
+            matches!(folder, Some("surfaces" | "catalogs"))
+                && path.matches('/').count() == 1
+                && path.ends_with(".json")
+                && bytes.len() <= MAX_VIEW_BYTES
+        })
+        .filter_map(|(path, bytes)| {
+            let text = std::str::from_utf8(bytes).ok()?;
+            Some(json!({"path": path, "text": text}))
+        })
+        .take(MAX_VIEW_FILES)
         .collect()
 }
 
@@ -364,6 +389,7 @@ fn contents_of(
         "mcp_servers": mcp,
         "bin": bin,
         "requirements": requirements,
+        "views": views_of(files),
         "generated": !has_manifest,
         "digest": digest,
         "issues": issues,
@@ -381,4 +407,31 @@ fn contents_of(
         }
     }
     Ok(contents)
+}
+
+#[cfg(test)]
+mod views_tests {
+    use super::*;
+
+    #[test]
+    fn views_are_json_files_of_two_folders_within_the_size_and_count_limits() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "surfaces/big.json".to_owned(),
+            vec![b' '; MAX_VIEW_BYTES + 1],
+        );
+        files.insert("surfaces/binary.json".to_owned(), vec![0xff, 0xfe]);
+        files.insert("surfaces/ok.json".to_owned(), b"{}".to_vec());
+        files.insert("other/ok.json".to_owned(), b"{}".to_vec());
+        let listed = views_of(&files);
+        assert_eq!(
+            listed,
+            vec![json!({"path": "surfaces/ok.json", "text": "{}"})]
+        );
+
+        let many: BTreeMap<String, Vec<u8>> = (0..MAX_VIEW_FILES + 5)
+            .map(|i| (format!("surfaces/v{i:02}.json"), b"{}".to_vec()))
+            .collect();
+        assert_eq!(views_of(&many).len(), MAX_VIEW_FILES);
+    }
 }

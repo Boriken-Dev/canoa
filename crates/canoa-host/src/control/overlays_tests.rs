@@ -782,6 +782,10 @@ fn a_batch_of_entries_is_read_here_and_one_that_cannot_be_read_is_noted_against_
             ),
             ("bin/tool.sh", "#!/bin/sh\n"),
             ("env.sh", "echo\n"),
+            ("surfaces/panel.json", "{\"messages\": []}"),
+            ("catalogs/mine.json", "{\"catalogId\": \"urn:ov\"}"),
+            ("surfaces/notes.txt", "not a view"),
+            ("surfaces/deep/inner.json", "{}"),
         ],
     );
     let plain = repo(
@@ -825,6 +829,16 @@ fn a_batch_of_entries_is_read_here_and_one_that_cannot_be_read_is_noted_against_
     assert_eq!(got["a"]["contents"]["skills"][0]["description"], "Does one");
     assert_eq!(got["a"]["contents"]["bin"], json!(["tool.sh"]));
     assert_eq!(got["a"]["contents"]["env_scripts"], json!(["env.sh"]));
+    // Its views and their catalogs are relayed for the app to read: top-level JSON files of the two folders, nothing else.
+    assert_eq!(
+        got["a"]["contents"]["views"],
+        json!([
+            {"path": "catalogs/mine.json", "text": "{\"catalogId\": \"urn:ov\"}"},
+            {"path": "surfaces/panel.json", "text": "{\"messages\": []}"},
+        ]),
+        "{answer}"
+    );
+    assert_eq!(got["b"]["contents"]["views"], json!([]), "{answer}");
     assert_eq!(got["a"]["contents"]["generated"], false);
     assert_eq!(got["a"]["contents"]["rules"], json!(["rules/style.md"]));
     assert_eq!(
