@@ -367,21 +367,31 @@ fn environments_offered_as_tools_are_one_server_each_with_a_tool_for_each_capabi
     host.stop();
 }
 
-/// The output the terminal `id` of `link` pushed, until `wanted` is in it.
-fn output_until(link: &Link, wanted: &str) -> String {
-    let until = Instant::now() + Duration::from_secs(20);
-    let mut seen = String::new();
-    while Instant::now() < until && !seen.contains(wanted) {
-        let Ok(message) = next(link) else { break };
+/// The text of the `terminal/output` notices among `messages`.
+fn output_of(messages: &[Value]) -> String {
+    let mut text = String::new();
+    for message in messages {
         if message["method"] == "terminal/output"
             && let Some(data) = message["params"]["data"].as_str()
         {
-            seen.push_str(&String::from_utf8_lossy(
+            text.push_str(&String::from_utf8_lossy(
                 &data_encoding::BASE64
                     .decode(data.as_bytes())
                     .expect("base64"),
             ));
         }
+    }
+    text
+}
+
+/// The output a terminal pushed, until `wanted` is in it. `before` is what `ask` kept while it waited for an answer: a shell's
+/// output may reach the link ahead of the answer to the request that caused it, so it is part of what was pushed.
+fn output_until(link: &Link, before: &[Value], wanted: &str) -> String {
+    let until = Instant::now() + Duration::from_secs(20);
+    let mut seen = output_of(before);
+    while Instant::now() < until && !seen.contains(wanted) {
+        let Ok(message) = next(link) else { break };
+        seen.push_str(&output_of(&[message]));
     }
     seen
 }
@@ -392,7 +402,7 @@ fn a_terminal_opens_in_an_environment_that_offers_one_and_is_refused_by_one_that
     let path = host.scratch.0.clone();
     let control = host.local.open("@control").expect("a link");
 
-    let (opened, _) = ask(
+    let (opened, mut pushed) = ask(
         &control,
         1,
         "terminal/open",
@@ -408,14 +418,15 @@ fn a_terminal_opens_in_an_environment_that_offers_one_and_is_refused_by_one_that
         log(&path, "alpha")
     );
     let typed = data_encoding::BASE64.encode(b"echo typed-in-alpha\r\n");
-    ask(
+    let (_, typed_updates) = ask(
         &control,
         2,
         "terminal/write",
         json!({"id": id, "data": typed}),
     )
     .expect("typed");
-    let seen = output_until(&control, "typed-in-alpha");
+    pushed.extend(typed_updates);
+    let seen = output_until(&control, &pushed, "typed-in-alpha");
     assert!(seen.contains("typed-in-alpha"), "{seen}");
     ask(&control, 3, "terminal/close", json!({"id": id})).expect("closed");
 
