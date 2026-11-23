@@ -9,7 +9,7 @@ import 'package:canoa/chat/git_changes_pane.dart';
 import 'package:canoa/highlight/highlighted.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget _scene(Widget child, Brightness brightness, [LookId look = LookId.canoa]) => MaterialApp(

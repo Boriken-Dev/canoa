@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../chat/child_thread.dart';
 import '../chat/delegate_dialog.dart';

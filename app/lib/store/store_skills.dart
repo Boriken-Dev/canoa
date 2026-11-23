@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../loadout/loadout_controller.dart';
 import '../profile/overlays.dart' show ScannedSkill, SkillHit, SkillScan;

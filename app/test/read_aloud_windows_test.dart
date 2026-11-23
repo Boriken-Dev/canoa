@@ -15,7 +15,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/voice/reply_reader.dart';
 import 'package:canoa/voice/speech_output.dart' show SpeakChoices;
 import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView, MemoryViewLink;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_voice.dart';

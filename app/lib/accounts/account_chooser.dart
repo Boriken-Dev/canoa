@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ComposerPill;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../chat/composer.dart' show ComposerKit;
 import '../chat/session_picker.dart';

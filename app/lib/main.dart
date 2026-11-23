@@ -50,7 +50,7 @@ import 'package:coqui_acp/page.dart';
 import 'connect_dialog.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'accounts/account_models.dart' show AccountEntry, LimitHint, TurnAdvice, accountMeta, machineLogin, modelMeta;
 import 'accounts/accounts_controller.dart';

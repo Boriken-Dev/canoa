@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as model;
 import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../chat/reply_voice.dart' show VoiceModeMenuItem, VoiceModeStatus;
 import '../chat/session_views.dart' show appName;

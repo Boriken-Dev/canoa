@@ -1,5 +1,5 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart' show Icons;
+import 'package:material_ui/material_ui.dart' show Icons;
 
 import '../acp/local_agent.dart' show InsideFile;
 import '../session_store.dart';

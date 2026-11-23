@@ -8,7 +8,7 @@ import 'package:canoa/surfaces/a2ui/messages.dart';
 import 'package:canoa/surfaces/a2ui/model.dart';
 import 'package:canoa/surfaces/a2ui/view.dart';
 import 'package:canoa/theme/look.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, Object?> msg(String key, Map<String, Object?> body) => {'version': '1.0', key: body};

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../session_store.dart';
 import '../usage/spend_model.dart' show SpendRow;

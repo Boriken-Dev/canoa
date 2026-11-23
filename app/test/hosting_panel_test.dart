@@ -7,7 +7,7 @@ import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/desktop/hosting_panel.dart';
 import 'package:canoa/providers/provider_catalog.dart' show providerCatalog;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_host.dart';

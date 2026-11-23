@@ -7,7 +7,7 @@ import 'package:canoa/rail/session_rail.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/shell/section_rail.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 

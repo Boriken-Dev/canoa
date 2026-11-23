@@ -4,7 +4,7 @@ import 'dart:convert' show utf8;
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'package:desktop_drop/desktop_drop.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../acp/client.dart' show AcpSessionInfo;
 import '../desktop/control_client.dart' show hostWords;

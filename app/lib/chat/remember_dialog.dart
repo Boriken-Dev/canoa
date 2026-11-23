@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../permissions/permission_rules.dart';
 import '../session_store.dart';

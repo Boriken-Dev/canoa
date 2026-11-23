@@ -8,7 +8,7 @@ import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/usage/usage_model.dart';
 import 'package:canoa/usage/usage_section.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_accounts.dart';

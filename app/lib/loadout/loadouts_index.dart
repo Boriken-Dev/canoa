@@ -2,7 +2,7 @@
 /// many. Choosing one shows it in the main view; the choice is kept with the shell's layout.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../config/canoa_config.dart';
 import '../shell/index_pane.dart';

@@ -2,7 +2,7 @@
 /// skills and MCP servers it holds, and the setup a new session gets from it; with edit, copy, use, make default and delete.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../config/canoa_config.dart';
 import 'loadouts_index.dart' show loadoutCounts;

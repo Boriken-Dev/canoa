@@ -6,7 +6,7 @@ import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/theme/canoa_mark.dart';
 import 'package:canoa/theme/look.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

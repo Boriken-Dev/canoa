@@ -11,7 +11,7 @@ import 'package:canoa/config/catalog_specs.dart';
 import 'package:canoa/loadout/loadout_controller.dart';
 import 'package:canoa/store/catalog_types.dart';
 import 'package:canoa/store/store_catalogs.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;

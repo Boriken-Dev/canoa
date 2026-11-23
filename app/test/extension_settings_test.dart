@@ -6,7 +6,7 @@ import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/served/host_files.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/settings/extension_settings.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';

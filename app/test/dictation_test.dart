@@ -13,7 +13,7 @@ import 'package:canoa/session_store.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:canoa/voice/host_speech.dart';
 import 'package:canoa/voice/speech_backend.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A service the test drives: it starts, hears what [say] gives it and ends on [stop] with what [finalText] holds.

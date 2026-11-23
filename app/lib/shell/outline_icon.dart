@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The part of the window an outline icon stands for.
 enum WindowRegion { left, bottom, right }

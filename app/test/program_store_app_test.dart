@@ -2,7 +2,7 @@
 // reports (the version found, an update, Install), the app asks the host nothing but the copies when it starts, and an install
 // from Settings changes the source's readiness at once.
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';

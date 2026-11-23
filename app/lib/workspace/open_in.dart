@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../ledger/session_ledger.dart' show SessionPlace;
 import '../served/web_mode.dart' show WebMode;

@@ -5,7 +5,7 @@ import 'package:canoa/shell/section_rail.dart';
 import 'package:canoa/shell/sections.dart';
 import 'package:canoa/shell/shell.dart';
 import 'package:canoa/theme/look.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 

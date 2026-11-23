@@ -4,7 +4,7 @@
 /// are not part of one.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../chat/cache_lifetime.dart';
 import '../config/canoa_config.dart';

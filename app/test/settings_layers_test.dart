@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/config/config_layers.dart';
 import 'package:canoa/settings/settings_row.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/settings_fixture.dart';

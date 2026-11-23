@@ -7,7 +7,7 @@ import 'package:canoa/store/store_section.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/store/store.dart';
 import 'package:canoa/store/store_index.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_fixtures.dart';

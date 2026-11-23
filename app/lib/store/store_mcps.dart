@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../loadout/loadout_controller.dart';
 import '../loadout/mcp_registry.dart';

@@ -7,7 +7,7 @@ import 'package:canoa/chat/agent_events.dart' show AgentCommandInfo;
 import 'package:canoa/chat/mentions.dart' show rankMentions;
 import 'package:canoa/profile/report.dart' show ItemState, ProfileItem, ProfileReport;
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';

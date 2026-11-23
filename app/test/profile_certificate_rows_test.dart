@@ -5,7 +5,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/forms/schema_fields.dart';
 import 'package:canoa/profile/profile_editor.dart';
 import 'package:canoa/profile/profile_items.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The proxy item as the host lists it (`profile_items/list`), written by canoa-host's own test from what the build answers.

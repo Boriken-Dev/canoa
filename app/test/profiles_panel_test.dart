@@ -13,7 +13,7 @@ import 'package:canoa/profile/profiles_panel.dart';
 import 'package:canoa/profile/project_trust.dart';
 import 'package:canoa/profile/skill_copies.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const teamManifest = '''

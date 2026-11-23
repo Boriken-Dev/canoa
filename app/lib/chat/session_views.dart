@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp/coqui_acp.dart' show AcpPermissionOption, AcpSessionInfo, AcpSessionPage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../highlight/highlighted.dart';
 import '../selectable.dart';

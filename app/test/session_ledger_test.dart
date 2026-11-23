@@ -14,7 +14,7 @@ import 'package:canoa/ledger/ledger_backend_io.dart' show FileLedgerBackend;
 import 'package:canoa/ledger/ledger_list.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// An agent answering `initialize` with [initialized], keeping sessions it can list and load.

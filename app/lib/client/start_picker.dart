@@ -1,7 +1,7 @@
 // What a session started from the chat-only app starts with: the loadout and the profile, chosen beside the New session button. The
 // full app chooses them on a draft in its composer; here a session starts at once, so the choice is held until it does.
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ComposerPill;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../chat/composer_controls.dart' show loadoutChoices, profileChoices;
 import '../config/canoa_config.dart';

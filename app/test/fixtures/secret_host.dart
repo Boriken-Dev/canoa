@@ -9,7 +9,7 @@ import 'package:coqui_acp/secret.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UpdateRecorder;
 import 'package:coqui_acp/secret_unprotected.dart';
 import 'package:coqui_transport_web/coqui_transport_web.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;

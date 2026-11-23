@@ -4,7 +4,7 @@
 /// choice, and no control here reaches an item inside an overlay: an overlay's options are set on the overlay.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../config/canoa_config.dart';
 import '../profile/profile.dart' show isEntryName;

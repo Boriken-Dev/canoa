@@ -9,7 +9,7 @@ import 'package:canoa/sources/readiness.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/programs.dart';
 import 'package:canoa/store/programs_view.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_link.dart';

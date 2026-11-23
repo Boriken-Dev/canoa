@@ -3,7 +3,7 @@
 // under it, when it is not. An installed model is removed from its tile. The type here is `runner`: the app names no vendor's.
 import 'package:canoa/store/store_extensions.dart';
 import 'package:canoa/store/store_models.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_link.dart';

@@ -9,7 +9,7 @@ import 'package:canoa/profile/profile_home_io.dart' show IoProfileHome;
 import 'package:canoa/profile/profile.dart' show ProfileAccess;
 import 'package:canoa/profile/profiles_panel.dart';
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';

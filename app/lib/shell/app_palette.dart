@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../acp/client.dart' show AcpSessionInfo;
 import '../chat/agent_events.dart' show AgentCommandInfo;

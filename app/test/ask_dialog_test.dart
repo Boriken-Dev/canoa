@@ -2,7 +2,7 @@
 // x-order, an x-advanced one is folded, a number is checked as JSON Schema reads it, and what is asked for and not given stops the answer.
 import 'package:canoa/store/programs.dart' show ProgramAsk;
 import 'package:canoa/store/programs_view.dart' show AskDialog;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 typedef _Answer = ({Map<String, Object?> values, Map<String, Object?> secrets});

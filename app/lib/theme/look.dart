@@ -1,7 +1,7 @@
 import 'dart:ui' show lerpDouble;
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../l10n/text_pack.dart';
 import '../highlight/highlighted.dart' show codeSpansFor;

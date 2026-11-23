@@ -17,7 +17,7 @@ import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/served/host_config.dart';
 import 'package:canoa/served/host_files.dart';
 import 'package:canoa/served/served_app.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final _host = 'sha256:${'a' * 64}';

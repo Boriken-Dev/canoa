@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:coqui_acp/page.dart' show AcpPage;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../config/connection.dart';
 import '../../connect_dialog.dart' show showAddConnectionDialog;

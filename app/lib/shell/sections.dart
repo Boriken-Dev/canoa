@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// One area of the app: what the selector shows for it, the index beside the main view, and the main view.
 ///

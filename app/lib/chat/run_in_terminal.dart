@@ -1,6 +1,6 @@
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show ToolCall;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The command card of an agent's `execute` tool call with "Run in terminal" under it, which types the command into the person's
 /// terminal without pressing Enter. [offered] says whether a terminal is there to type into; [run] types the command.

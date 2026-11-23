@@ -7,7 +7,7 @@ import 'package:canoa/extension/local_host.dart';
 import 'package:canoa/extension/local_host_banner.dart';
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _peer = 'sha256:aa';

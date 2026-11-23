@@ -2,7 +2,7 @@
 // dragged over, copied with Ctrl+C (Cmd+C on a Mac) and the context menu, and selected whole with Ctrl+A.
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// [child] as one selection area. Areas nested inside it (the conversation, the plan, the changes pane) stay apart from it:
 /// a drag never runs from one into another, and each one's Select all is its own.

@@ -1,5 +1,5 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../rail/session_groups.dart' show subagentsNeedingYou;
 import '../session_store.dart';

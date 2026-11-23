@@ -16,7 +16,7 @@ import 'package:canoa/session_store.dart';
 import 'package:canoa/workspace/site_meta.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:canoa/client/related_rail.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 

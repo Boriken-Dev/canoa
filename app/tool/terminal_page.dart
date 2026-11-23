@@ -12,7 +12,7 @@ import 'package:canoa/settings/shell_settings.dart' show HostShell;
 import 'package:canoa/surfaces/terminal_clipboard.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
 import 'package:canoa/surfaces/terminal_surface.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 final class _Shell implements RemoteTerminal {
   final output$ = StreamController<List<int>>();

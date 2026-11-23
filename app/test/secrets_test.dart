@@ -7,7 +7,7 @@ import 'package:canoa/secrets/secrets_host.dart';
 import 'package:canoa/secrets/secrets_index.dart';
 import 'package:canoa/secrets/secrets_section.dart';
 import 'package:canoa/forms/schema_fields.dart' show SecretSource;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _value = 'zq9-not-a-real-secret-7f3a';

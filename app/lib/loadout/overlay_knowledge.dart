@@ -2,7 +2,7 @@
 /// (`[overlays.NAME] kb`). Left alone, the overlay's own hint decides.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The three choices of one overlay: [choice] is `index`, `files` or null for the overlay's own hint, which [hinted] says is
 /// to search.

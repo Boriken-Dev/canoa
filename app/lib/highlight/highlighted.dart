@@ -1,6 +1,6 @@
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show ToolCall, ToolDiff, ToolPatch, ToolText;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;

@@ -10,7 +10,7 @@ import 'package:canoa/session_store.dart';
 import 'package:canoa/settings/agent_sections.dart';
 import 'package:canoa/settings/settings_controller.dart';
 import 'package:canoa/sources/sources.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';

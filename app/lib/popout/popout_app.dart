@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView, ChatViewLink;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../extension/tab_bridge.dart';
 import '../extension/tab_owner_banner.dart';

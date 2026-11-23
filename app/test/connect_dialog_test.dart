@@ -6,7 +6,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/config/connection.dart';
 import 'package:canoa/connect_dialog.dart';
 import 'package:canoa/shell/hosts/hosts_controller.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;

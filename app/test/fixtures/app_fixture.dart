@@ -28,7 +28,7 @@ import 'package:canoa/workspace/open_in.dart' show workspaceOpener;
 import 'package:canoa/sources/source_choices.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:canoa/config/connection.dart' show Connection;
 import 'package:canoa/profile/profile_home.dart' show ProfileHome;
 import 'package:canoa/workspace/host_folders.dart' show HostFolders;

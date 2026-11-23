@@ -13,7 +13,7 @@ import 'package:canoa/main.dart';
 import 'package:canoa/permissions/host_paths.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/settings_fixture.dart';
 

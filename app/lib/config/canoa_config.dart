@@ -1,7 +1,7 @@
 import 'dart:convert' show jsonEncode;
 
 import 'package:coqui_aos/coqui_aos.dart' show normalizeName, validOverlayName;
-import 'package:flutter/material.dart' show ThemeMode;
+import 'package:material_ui/material_ui.dart' show ThemeMode;
 import 'package:toml/toml.dart';
 
 import '../accounts/account_models.dart' show AccountEntry;

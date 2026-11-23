@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:canoa/client/pane_message.dart';
 import 'package:canoa/client/pane_pairing.dart';
 import 'package:canoa/client/relation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final _host = 'sha256:${'ab' * 32}';

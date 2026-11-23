@@ -10,7 +10,7 @@ import 'package:canoa/desktop/hosting_panel.dart';
 import 'package:canoa/loadout/loadout_controller.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/store_catalogs.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_host.dart';

@@ -6,7 +6,7 @@ import 'package:canoa/popout/popout_hub.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show Settlement;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show PermissionCard;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart' show pumpApp;

@@ -2,7 +2,7 @@
 /// report each part under `_meta["dev.boriken.canoa/profile"]`. `docs/configuration.md`, "Applying a profile", has the table.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../providers/provider_catalog.dart';
 import 'profiles_panel.dart' show visible;

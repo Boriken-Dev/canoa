@@ -1,5 +1,5 @@
 // The permission card's answers as a test reaches them: Deny and the primary on the card, the rest in the primary's menu.
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final _card = find.byKey(const Key('permission-card'));

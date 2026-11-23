@@ -11,7 +11,7 @@ import 'package:canoa/served/host_files.dart';
 import 'package:canoa/surfaces/files_surface.dart';
 import 'package:canoa/surfaces/markdown_section_viewer.dart';
 import 'package:canoa/theme/look.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final class _Disk implements WorkspaceFiles {

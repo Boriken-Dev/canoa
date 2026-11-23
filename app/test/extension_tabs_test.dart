@@ -7,7 +7,7 @@ import 'package:canoa/extension/tab_bridge.dart';
 import 'package:canoa/extension/tab_shares.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/theme/look.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_tab_bridge.dart';

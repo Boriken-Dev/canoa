@@ -7,7 +7,7 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../session_store.dart';
 import '../settings/host_sections.dart' show SectionCall;

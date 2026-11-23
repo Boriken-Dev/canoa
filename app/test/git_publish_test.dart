@@ -7,7 +7,7 @@ import 'package:canoa/chat/git_publish.dart';
 import 'package:canoa/store/links.dart' as links;
 import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/task_agent.dart';

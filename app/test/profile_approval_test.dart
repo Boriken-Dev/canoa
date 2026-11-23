@@ -4,7 +4,7 @@ import 'dart:convert';
 
 import 'package:canoa/acp/usage_wire.dart';
 import 'package:canoa/profile/approval_dialog.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 String _ask(Object id) => jsonEncode({

@@ -1,6 +1,6 @@
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageBucket, UsageReport;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// How much of [bucket] is left, as Claude's and Codex's usage pages say it: `38% left`. Null when the bucket gives no fraction,
 /// and for a window that has ended, whose figures are of the window before.

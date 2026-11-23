@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show ChatMessage, MessageRole;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../highlight/highlighted.dart';
 import '../voice/reply_reader.dart';

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../auth/peer_proof.dart' show PeerMethod;
 import '../../config/connection.dart';

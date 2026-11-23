@@ -2,7 +2,7 @@
 // person can do. The agents the extension has of its own work in every state.
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'local_host.dart';
 

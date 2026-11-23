@@ -12,7 +12,7 @@ import 'package:canoa/voice/outputs.dart';
 import 'package:canoa/voice/reply_reader.dart';
 import 'package:canoa/voice/speech_output.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_speech.dart';

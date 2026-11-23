@@ -6,7 +6,7 @@ import 'package:canoa/history/session_import.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:canoa/welcome/welcome_view.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;

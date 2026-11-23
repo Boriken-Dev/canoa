@@ -13,7 +13,7 @@ import 'package:canoa/ledger/ledger_list.dart';
 import 'package:canoa/ledger/running_sessions.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _hub = 'dev.boriken.coqui.acp/hub';

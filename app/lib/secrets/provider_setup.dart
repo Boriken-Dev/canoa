@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../forms/schema_fields.dart';
 import 'secrets_controller.dart';

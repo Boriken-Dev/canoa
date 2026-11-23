@@ -7,7 +7,7 @@ import 'package:canoa/chat/run_in_terminal.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show ChatLimits, ToolCall;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ToolCall _call(String kind, String title) => ToolCall('t-$kind')..apply({'title': title, 'kind': kind, 'status': 'completed'}, const ChatLimits());

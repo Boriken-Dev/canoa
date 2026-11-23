@@ -14,7 +14,7 @@ import 'package:canoa/theme/look.dart';
 import 'package:canoa/settings/settings_row.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/ledger/session_ledger.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:toml/toml.dart';

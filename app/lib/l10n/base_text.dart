@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The language every text exists in; a key with no text in another language reads in this one.
 const String baseLanguage = 'en';

@@ -6,7 +6,7 @@ import 'package:canoa/chat/new_session_view.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/rail/session_rail.dart';
 import 'package:canoa/session_store.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';

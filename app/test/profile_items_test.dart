@@ -2,7 +2,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/forms/schema_fields.dart';
 import 'package:canoa/profile/profile_editor.dart';
 import 'package:canoa/profile/profile_items.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A guatiao schema of an object, as the host answers it.

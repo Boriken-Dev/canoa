@@ -14,7 +14,7 @@ import 'package:canoa/theme/look.dart';
 import 'package:canoa/usage/usage_model.dart';
 import 'package:canoa/usage/usage_section.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_accounts.dart';

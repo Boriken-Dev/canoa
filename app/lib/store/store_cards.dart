@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'overlay_page.dart' show oneLine;
 import 'store_icon.dart';

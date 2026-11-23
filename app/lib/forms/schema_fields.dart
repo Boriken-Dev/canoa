@@ -5,7 +5,7 @@
 /// nothing of the provider behind it.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../settings/settings_row.dart';
 

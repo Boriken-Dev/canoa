@@ -1,6 +1,6 @@
 // Pairing this browser's key with the host that served the page, by the PIN the host shows, from the chat-only app. A task pane has
 // no Hosts section and cannot open a window of its own, so the pairing is a card in the pane itself.
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../acp/browser_connect.dart' show pairBrowserAcp;
 import '../connect_dialog.dart' show PairByPin;

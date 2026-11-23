@@ -8,7 +8,7 @@ import 'package:canoa/acp/delegate.dart';
 import 'package:canoa/chat/delegation_view.dart';
 import 'package:canoa/rail/session_groups.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatTranscript;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/delegate_host.dart';

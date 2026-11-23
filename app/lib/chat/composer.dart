@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../l10n/app_text.dart';
 import '../accounts/account_chooser.dart';

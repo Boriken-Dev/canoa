@@ -6,7 +6,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../desktop/control_client.dart' show ControlFailed;
 import '../forms/schema_fields.dart';

@@ -6,7 +6,7 @@ import 'dart:io';
 import 'package:canoa/sources/svg_path.dart';
 import 'package:canoa/store/runtime_glyphs.dart';
 import 'package:canoa/store/runtime_mark.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 

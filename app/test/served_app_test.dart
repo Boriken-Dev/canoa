@@ -21,7 +21,7 @@ import 'package:canoa/served/host_files.dart';
 import 'package:canoa/served/served_app.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show PickedFile;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final _peer = 'sha256:${'a' * 64}';

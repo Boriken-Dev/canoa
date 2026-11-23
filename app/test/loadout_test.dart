@@ -11,7 +11,7 @@ import 'package:canoa/store/programs.dart' show ProgramStores;
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/loadout/mcp_registry.dart' show RegistryRefusal;
 import 'package:canoa/loadout/loadout_controller.dart' show knownCatalogs;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/catalog_standin.dart';

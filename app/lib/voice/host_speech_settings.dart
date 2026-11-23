@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../settings/settings_row.dart';
 import '../store/store_catalogs.dart' show confirmRemoval;

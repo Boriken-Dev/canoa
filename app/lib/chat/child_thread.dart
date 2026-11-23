@@ -1,7 +1,7 @@
 import 'package:coqui_acp/coqui_acp.dart' show AcpSessionUpdate;
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as pkg;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../session_store.dart';
 import '../sources/source_icons.dart';

@@ -21,7 +21,7 @@ import 'package:canoa/store/store_section.dart';
 import 'package:canoa/store/store_settings.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/catalog_standin.dart';

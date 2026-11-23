@@ -11,7 +11,7 @@ import 'package:canoa/history/session_move.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp/coqui_acp.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A host's control channel that answers each method from [answers] and records what it was asked, in order.

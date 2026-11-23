@@ -2,7 +2,7 @@ import 'dart:async' show unawaited;
 
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../session_store.dart';

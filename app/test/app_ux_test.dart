@@ -20,7 +20,7 @@ import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/shell/surface.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 

@@ -2,7 +2,7 @@ import 'package:canoa/chat/agent_events.dart';
 import 'package:canoa/chat/file_links.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 

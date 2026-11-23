@@ -9,7 +9,7 @@ import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:flutter/foundation.dart' show Uint8List;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A golden that tolerates the antialiasing between machines, and nothing more.
