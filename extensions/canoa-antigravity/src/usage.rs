@@ -240,8 +240,8 @@ mod tests {
     /// A loopback stand-in for Google's token endpoint and the Cloud Code service: answers the userinfo, the plan and the
     /// quota summary of one account, and refuses everything else. It ends when the test drops it.
     struct Google {
-        address: std::net::SocketAddr,
-        stop: std::sync::Arc<AtomicBool>,
+        address: core::net::SocketAddr,
+        stop: alloc::sync::Arc<AtomicBool>,
         thread: Option<std::thread::JoinHandle<()>>,
     }
 
@@ -266,8 +266,8 @@ mod tests {
             use std::io::{Read, Write};
             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
             let address = listener.local_addr().expect("its address");
-            let stop = std::sync::Arc::new(AtomicBool::new(false));
-            let stopping = std::sync::Arc::clone(&stop);
+            let stop = alloc::sync::Arc::new(AtomicBool::new(false));
+            let stopping = alloc::sync::Arc::clone(&stop);
             let thread = std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     if stopping.load(Ordering::SeqCst) {
