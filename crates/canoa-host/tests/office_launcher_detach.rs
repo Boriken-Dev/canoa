@@ -94,8 +94,9 @@ fn detach_ends_at_once_and_the_launcher_it_started_holds_the_address_and_logs() 
     let log = PathBuf::from(said["log"].as_str().expect("a log"));
     assert!(log.starts_with(&home), "{log:?}");
 
-    // It keeps running after its starter ended: it takes the address once no host has held the home for a while.
-    let until = Instant::now() + Duration::from_secs(30);
+    // It keeps running after its starter ended: it takes the address once no host has held the home for a while. A loaded
+    // machine (a whole workspace's tests at once) takes far longer than an idle one, hence the long wait.
+    let until = Instant::now() + Duration::from_secs(90);
     let mut holds = false;
     while Instant::now() < until {
         if TcpStream::connect_timeout(&address, Duration::from_secs(1)).is_ok() {
@@ -104,7 +105,13 @@ fn detach_ends_at_once_and_the_launcher_it_started_holds_the_address_and_logs() 
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let logged = std::fs::read_to_string(&log).unwrap_or_default();
+    // The address can answer before the line saying so is written: wait for the line too.
+    let mut logged = std::fs::read_to_string(&log).unwrap_or_default();
+    while holds && !logged.contains("no Canoa runs: offering to start it") && Instant::now() < until
+    {
+        std::thread::sleep(Duration::from_millis(50));
+        logged = std::fs::read_to_string(&log).unwrap_or_default();
+    }
     stop(id);
     assert!(holds, "the launcher holds {address}: {logged}");
     assert!(
