@@ -3533,6 +3533,7 @@ class _CanoaAppState extends State<CanoaApp> {
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(), storeIndex: StoreIndex(selection: _storeSelection),
           loadoutsIndex: LoadoutsIndex(selection: _loadoutsSelection, config: config),
           usageIndex: _usageIndex(), usagePage: _usagePage(), secretsIndex: _secretsIndex(), secretsPage: _secretsPage(), sessionSpend: _usage?.sessionSpend,
+          sessionWatches: _grants?.may(HostGrants.sessionsWatch) ?? false ? _services.watches : null,
           terminalIndex: TerminalIndex(controller: _terminalSection), terminalMain: TerminalMain(controller: _terminalSection),
           conversation: _conversation,
           localHost: _localHost,

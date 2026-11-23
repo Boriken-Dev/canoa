@@ -5,6 +5,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../acp/pipe_channel.dart' show isPipeUrl;
+import '../l10n/app_text.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
 import '../shell/surface.dart' show SurfaceEnvironment;
@@ -22,6 +23,7 @@ import 'modes.dart';
 import 'outputs.dart';
 import 'outputs_view.dart';
 import 'session_views.dart';
+import 'session_watch.dart';
 
 /// The `+N −M` a session's changes add up to: git's, when its folder is read, else what the agent reported.
 (int, int)? changeTotals(ChatSession session) {
@@ -152,6 +154,7 @@ class _SessionInspectorPanelState extends State<SessionInspectorPanel> {
         scopes: scopes,
         scope: scope,
         sessionSpend: SurfaceEnvironment.maybeOf(context)?.sessionSpend,
+        watches: SurfaceEnvironment.maybeOf(context)?.sessionWatches,
         onScope: (chosen) => setState(() => _scope = chosen),
         onOpenDiff: () => setState(() => _diff = scope),
         onClose: widget.onClose,
@@ -191,6 +194,7 @@ class SessionInspector extends StatelessWidget {
     this.onOpenSubagents,
     this.opener,
     this.sessionSpend,
+    this.watches,
     this.embedded = false,
   });
 
@@ -201,6 +205,9 @@ class SessionInspector extends StatelessWidget {
 
   /// What the host recorded this session spending; null where the host keeps no usage for this person.
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
+
+  /// The watches of the host's shared sessions; null where this key may not arm one.
+  final SessionWatches? watches;
   final SessionStore store;
   final ChatSession session;
   final List<ChangeScope> scopes;
@@ -344,6 +351,13 @@ class SessionInspector extends StatelessWidget {
               Text('Tokens spent', style: heading),
               const SizedBox(height: 6),
               _SessionTokens(sessionId: session.remoteSessionId!, load: sessionSpend!, revision: session.usage.used),
+            ],
+            // Only a session the host keeps (a shared entry's, which has a cursor) can be watched.
+            if (watches != null && session.cursor != null && session.remoteSessionId != null) ...[
+              const SizedBox(height: 16),
+              Text(context.t('watch.heading'), style: heading),
+              const SizedBox(height: 6),
+              SessionWatchCard(sessionId: session.remoteSessionId!, watches: watches!),
             ],
             if (hasBackground && running > 0) backgroundSection(),
             if (outputs.isNotEmpty) outputsSection(),

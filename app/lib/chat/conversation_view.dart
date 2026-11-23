@@ -45,6 +45,7 @@ import 'presence.dart';
 import 'reply_voice.dart';
 import 'run_in_terminal.dart';
 import 'session_views.dart';
+import 'session_watch.dart' show SessionWatches;
 
 /// The conversation view: header, transcript, permission/question/secret prompts, composer, and optional work panels.
 class ConversationView extends StatefulWidget {
@@ -60,6 +61,7 @@ class ConversationView extends StatefulWidget {
     required this.welcome,
     this.noAgent = false,
     this.sessionSpend,
+    this.sessionWatches,
     this.chatOnly = false,
     this.onOpenFullApp,
   });
@@ -69,6 +71,9 @@ class ConversationView extends StatefulWidget {
   final Widget welcome;
   final bool noAgent;
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
+
+  /// The watches of the host's shared sessions; null where this key may not arm one.
+  final SessionWatches? sessionWatches;
   final ConversationHandle handle;
   final ComposerKit kit;
   final chat.ChatRenderers renderers;
@@ -519,6 +524,7 @@ class _ConversationViewState extends State<ConversationView> {
           Widget env() => SurfaceEnvironment(
             store: widget.store,
             sessionSpend: widget.sessionSpend,
+            sessionWatches: widget.sessionWatches,
             onComment: _addToComposer,
             onAttachText: widget.store.canAttach(session) ? (name, text) => _attachText(session, name, text) : null,
             onOpenInFiles: _filesSurface(session) == null ? null : (path) => _openInFiles(session, path),

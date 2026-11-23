@@ -7,6 +7,7 @@ import 'package:flutter/services.dart' show KeyUpEvent;
 import '../chat/composer.dart' show ComposerKit;
 import '../l10n/app_text.dart';
 import '../chat/conversation_view.dart';
+import '../chat/session_watch.dart' show SessionWatches;
 import '../client/related_rail.dart';
 import '../client/relation.dart';
 import '../client/relation_source.dart';
@@ -64,6 +65,7 @@ class CanoaHome extends StatelessWidget {
     this.secretsIndex,
     this.secretsPage,
     this.sessionSpend,
+    this.sessionWatches,
     required this.terminalIndex,
     required this.terminalMain,
     this.chatOnly = false,
@@ -91,6 +93,9 @@ class CanoaHome extends StatelessWidget {
   final VoidCallback? onOpenFullApp;
   final Widget? startOptions;
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
+
+  /// The watches of the host's shared sessions; null where this key may not arm one.
+  final SessionWatches? sessionWatches;
   final SessionStore store;
   final Widget welcome;
   final bool noAgent;
@@ -203,6 +208,7 @@ class CanoaHome extends StatelessWidget {
                   welcome: welcome,
                   noAgent: noAgent,
                   sessionSpend: sessionSpend,
+                  sessionWatches: sessionWatches,
                   chatOnly: chatOnly,
                   onOpenFullApp: onOpenFullApp,
                 ),

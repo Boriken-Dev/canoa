@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart' show BuildContext, VoidCallback;
 
 import '../accounts/accounts_controller.dart';
+import '../chat/session_watch.dart' show SessionWatches;
 import '../history/agent_switch.dart';
 import '../ledger/running_sessions.dart';
 import '../mail/mail_accounts.dart';
@@ -117,6 +118,11 @@ final class HostServices {
   final AccountsController? Function()? _accountsController;
   late final HostGrants? grants;
   late final RunningSessions? running;
+
+  /// The watches of the host's shared sessions.
+  late final SessionWatches? watches = control == null
+      ? null
+      : SessionWatches((method, params) async => (await control!.ready(wait: false)).call(method, params));
   late final HostSpeechCatalog? hostSpeech;
   late final HostVoiceCatalog? hostVoices;
   final HostFiles? hostFiles;

@@ -45,6 +45,9 @@ final class HostGrants extends ChangeNotifier {
   /// The grant that adds, changes and removes the host's speech providers.
   static const voiceSetup = 'voice.setup';
 
+  /// The grant that arms a watch that prompts a shared session again.
+  static const sessionsWatch = 'sessions.watch';
+
   /// Whether the host said this key holds [grant]; false until it has said.
   bool may(String grant) => _held?.contains(grant) ?? false;
 

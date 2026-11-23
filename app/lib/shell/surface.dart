@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../popout/item_windows.dart' show ItemWindows;
+import '../chat/session_watch.dart' show SessionWatches;
 import '../session_store.dart';
 import '../usage/spend_model.dart' show SpendRow;
 import 'layout_state.dart' show ShellLayout;
@@ -258,6 +259,7 @@ class SurfaceEnvironment extends InheritedWidget {
     required this.onComment,
     required this.onOpenChild,
     this.sessionSpend,
+    this.sessionWatches,
     this.onAttachText,
     this.onOpenInFiles,
     this.onOpenSurface,
@@ -286,6 +288,9 @@ class SurfaceEnvironment extends InheritedWidget {
 
   /// What the host recorded a session spending, by the session's id; null where the host keeps no usage for this person.
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
+
+  /// The watches of the host's shared sessions; null where this key may not arm one.
+  final SessionWatches? sessionWatches;
 
   /// Adds text to the message being written.
   final ValueChanged<String> onComment;
