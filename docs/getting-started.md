@@ -4,7 +4,7 @@
 
 - Rust 1.89 or later to build the crates.
 - Node.js 22 or later to run Chromium extension policy tests.
-- Flutter SDK with Dart 3.9 or newer for the standalone application.
+- Flutter from its `main` branch at commit `c0205700e0` (`flutter --version`: 3.51.0-1.0.pre-291, Dart 3.15.0-173.0.dev) for the standalone application, with the windowing feature on (`flutter config --enable-windowing`). The app is built and tested on that commit; the stable channel is too old, and a later `main` may need changes.
 
 ## Rust crates
 
