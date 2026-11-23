@@ -132,10 +132,8 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
   VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
-      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, McpListWire? mcp, this.linkSecrets, this.noiseSecrets, this.provedByNoise = false, HubWire? hub})
-      : _delegate = delegate,
-        _mcp = mcp,
-        hub = hub ?? HubWire() {
+      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, this._delegate, this._mcp, this.linkSecrets, this.noiseSecrets, this.provedByNoise = false, HubWire? hub})
+      : hub = hub ?? HubWire() {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
       elicitor == null ? null : (request) => elicitor(request, this),

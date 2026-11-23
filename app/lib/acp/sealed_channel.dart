@@ -10,14 +10,11 @@ import 'package:coqui_transport_web/coqui_transport_web.dart';
 final class SealedChannel implements WebChannel {
   SealedChannel(
     this._source, {
-    required Future<Uint8List> Function(Uint8List) seal,
-    required Future<Uint8List?> Function(Uint8List) open,
-    required Future<Uint8List> Function() closeRecord,
-    required void Function() release,
-  }) : _seal = seal,
-       _open = open,
-       _closeRecord = closeRecord,
-       _release = release;
+    required this._seal,
+    required this._open,
+    required this._closeRecord,
+    required this._release,
+  });
 
   final ByteWebChannel _source;
   final Future<Uint8List> Function(Uint8List) _seal;

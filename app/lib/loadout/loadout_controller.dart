@@ -102,7 +102,7 @@ final class InstalledMcp {
 
 class LoadoutController extends ChangeNotifier {
   LoadoutController({
-    required CanoaConfig config,
+    required this._config,
     required this.home,
     required this.save,
     this.agents = const [],
@@ -116,7 +116,7 @@ class LoadoutController extends ChangeNotifier {
     this.onOpenView,
     DateTime Function()? now,
     bool readAhead = true,
-  }) : _config = config {
+  }) {
     final home = this.home;
     if (home != null && index != null && readAhead && contentsReader != null) {
       contents = ContentsStore(reader: contentsReader, storage: contentsStorage, now: now)..addListener(notifyListeners);

@@ -50,7 +50,7 @@ enum PanelFocus { none, main, right, bottom }
 /// The shell's layout: the section shown and, for each section, its index. Kept per device in `layout.json` beside canoa.cfg's
 /// `drafts/`, since it is how this window looks and not configuration the host reads.
 class ShellLayout extends ChangeNotifier {
-  ShellLayout({LayoutBackend? backend}) : _backend = backend;
+  ShellLayout({this._backend});
 
   final LayoutBackend? _backend;
 

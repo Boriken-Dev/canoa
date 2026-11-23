@@ -146,11 +146,11 @@ const extensionsTypeLabel = 'Extensions';
 /// keeps an install and writes `[host.extensions.NAME]` (which takes the grant that guards `[host]`); this only asks and shows.
 class ExtensionCatalogs extends ChangeNotifier {
   ExtensionCatalogs({
-    required Future<ControlClient> Function() control,
+    required this._control,
     this.mayInstall,
     this.restart,
     this.saved,
-  }) : _control = control;
+  });
 
   final Future<ControlClient> Function() _control;
 

@@ -33,12 +33,10 @@ enum TrustState {
 /// The directories whose project profiles the person trusts, per directory, kept by the app and revocable.
 /// A trust holds the profile as it was: a profile changed later is ignored until the person trusts it again.
 final class ProjectTrust {
-  /// [read] and [write] hold the whole record, as a file does. A host that keeps the record itself passes [trustOn] and [revokeOn]
-  /// instead: it checks the profile against what was shown, and [read] then gives it back.
-  ProjectTrust({required Future<String?> Function() read, required Future<void> Function(String) write,
-      bool caseInsensitive = false, Future<void> Function(String directory, List<int> profile)? trustOn,
-      Future<void> Function(String directory)? revokeOn})
-      : _read = read, _write = write, _fold = caseInsensitive, _trustOn = trustOn, _revokeOn = revokeOn;
+  /// [_read] and [_write] hold the whole record, as a file does. A host that keeps the record itself passes [_trustOn] and [_revokeOn]
+  /// instead: it checks the profile against what was shown, and [_read] then gives it back.
+  ProjectTrust({required this._read, required this._write, bool caseInsensitive = false, this._trustOn, this._revokeOn})
+      : _fold = caseInsensitive;
 
   final Future<String?> Function() _read;
   final Future<void> Function(String) _write;

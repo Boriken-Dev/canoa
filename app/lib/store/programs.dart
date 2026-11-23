@@ -478,15 +478,13 @@ const Duration applyWait = Duration(minutes: 30);
 /// page that shows programs opens ([refresh]), and an install runs only when the person confirms a plan ([apply]).
 class ProgramStores extends ChangeNotifier {
   ProgramStores({
-    required Future<ControlClient> Function() control,
-    required Future<ControlClient> Function() open,
+    required this._control,
+    required this._open,
     DateTime Function()? now,
     this.latestLife = const Duration(hours: 1),
     this.afterChange,
     this.kind,
-  }) : _control = control,
-       _open = open,
-       _now = now ?? DateTime.now;
+  }) : _now = now ?? DateTime.now;
 
   final Future<ControlClient> Function() _control;
   final Future<ControlClient> Function() _open;

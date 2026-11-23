@@ -51,11 +51,9 @@ final class WorkspaceAction {
 /// The workspace actions: the host this app reaches starts the program (or the page links to it), by its mode.
 final class WorkspaceOpener {
   /// An app that reaches no host: it offers only what needs none.
-  const WorkspaceOpener.none({Future<bool> Function(Uri uri)? launch})
-      : hosted = null,
-        _launch = launch;
+  const WorkspaceOpener.none({this._launch}) : hosted = null;
 
-  WorkspaceOpener.hosted(HostedOpening this.hosted, {Future<bool> Function(Uri uri)? launch}) : _launch = launch;
+  WorkspaceOpener.hosted(HostedOpening this.hosted, {this._launch});
 
   /// Hands an address to the system's browser; [links.openLink] unless a test gave another.
   final Future<bool> Function(Uri uri)? _launch;

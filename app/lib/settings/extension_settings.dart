@@ -31,7 +31,7 @@ final class ExtensionEntry {
 /// checks what canoa.cfg would then hold before it writes it, and reads the table only when it starts, so [restartPending] is
 /// true once something changed. Needs the grant that guards `[host]`, which is as much as the programs the host runs.
 class ExtensionSettings extends ChangeNotifier {
-  ExtensionSettings({required HostFiles files, this.types, this.restart, this.saved}) : _files = files;
+  ExtensionSettings({required this._files, this.types, this.restart, this.saved});
 
   final HostFiles _files;
 

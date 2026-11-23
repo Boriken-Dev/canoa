@@ -37,7 +37,7 @@ final class HostServices {
     AudioCapture? speechCapture,
     MailHost? mailHostOverride,
     AgentMoves? agentMovesOverride,
-    AccountsController? Function()? accountsController,
+    this._accountsController,
     VoidCallback? onGrantsChanged,
     VoidCallback? onFoldersChanged,
     VoidCallback? onProgramsChanged,
@@ -47,8 +47,7 @@ final class HostServices {
     Future<void> Function()? onExtensionsSaved,
     Future<void> Function(BuildContext, String)? onAfterExtensionInstall,
   }) : hostFiles = hostFilesOverride ?? (control == null ? null : HostFiles(control)),
-       hostFolders = hostFoldersOverride ?? (control == null ? null : HostFolders(control)),
-       _accountsController = accountsController {
+       hostFolders = hostFoldersOverride ?? (control == null ? null : HostFolders(control)) {
     final c = control;
     grants = c == null ? null : (HostGrants(() => c.ready(wait: false))..addListener(onGrantsChanged ?? () {}));
     running = c == null

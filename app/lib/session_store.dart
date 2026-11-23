@@ -92,12 +92,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     this.ledger,
     this.rules,
     this.defaultMode,
-    bool bypassOnceOnly = false,
+    this._bypassOnceOnly = false,
     this.drafts,
     this.embedLimit = maxAttachedText,
     Future<List<int>> Function(String path, {int? maxBytes})? readFile,
-  }) : _bypassOnceOnly = bypassOnceOnly,
-       readFile = readFile ?? readLocalFile;
+  }) : readFile = readFile ?? readLocalFile;
 
   /// Told the kind and shape of each update this store applies, for a test or the `CANOA_EVENT_LOG` setting.
   final UpdateRecorder? recorder;

@@ -103,8 +103,8 @@ final class SourceChoices {
     this.cacheLifetimeSetting,
     this.cacheChoices = const [],
     this.members = const [],
-    DateTime? fetchedAt,
-  }) : _fetchedAt = fetchedAt;
+    this._fetchedAt,
+  });
 
   final bool known;
   final String? unknownBecause;

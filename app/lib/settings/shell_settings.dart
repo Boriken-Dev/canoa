@@ -128,8 +128,7 @@ final class ShellReport {
 /// when it starts, so [restartPending] is true once something changed. Choosing writes only canoa.cfg: no program's own settings are
 /// touched. Needs the grant that guards `[host]`.
 class ShellSettings extends ChangeNotifier {
-  ShellSettings({required HostFiles files, this.restart, this.saved})
-    : _files = files;
+  ShellSettings({required this._files, this.restart, this.saved});
 
   final HostFiles _files;
 

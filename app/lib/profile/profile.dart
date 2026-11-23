@@ -653,7 +653,7 @@ final class EffectiveProfile {
       'skills': entries(skills, (skill) => skill.toJson()),
       'mcp': entries(mcp, (server) => server.toJson()),
       'removed': [
-        for (final removed in this.removed) {'key': removed.key, 'layer': '${removed.layer}', 'was': '${removed.was}'},
+        for (final entry in removed) {'key': entry.key, 'layer': '${entry.layer}', 'was': '${entry.was}'},
       ],
       if (contexts.isNotEmpty)
         'contexts': [for (final context in contexts) one(context.value.toJson(), context.layer)],

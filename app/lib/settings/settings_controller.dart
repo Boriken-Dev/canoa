@@ -14,7 +14,7 @@ typedef ApplyConfig = Future<CanoaConfig> Function(CanoaConfig changed);
 /// A change is an edit of the newest configuration, never a replacement of an older copy, so two quick changes (a switch and
 /// a field) cannot undo each other, and changes are applied one after another.
 class SettingsController extends ChangeNotifier {
-  SettingsController({required CanoaConfig config, required this.apply}) : _config = config;
+  SettingsController({required this._config, required this.apply});
 
   final ApplyConfig apply;
   CanoaConfig _config;

@@ -34,9 +34,9 @@ const String secretWithdrawMethod = '_coqui_acp/secret_withdraw';
 /// An answer holds only what the extension's types allow: the plain answers as text and each secret sealed to a key only the host
 /// holds, so the agent, which the shared client serves, is handed none of it.
 final class SecretWire {
-  /// [offer], when given, is what this connection offers the host in place of the one [_secrets] has: the link in this process offers
+  /// [_offer], when given, is what this connection offers the host in place of the one [_secrets] has: the link in this process offers
   /// its own binding only.
-  SecretWire(this._send, this._secrets, {AcpSecretsCapability? offer}) : _offer = offer;
+  SecretWire(this._send, this._secrets, {this._offer});
 
   final Future<void> Function(String) _send;
   final AgentSecrets _secrets;

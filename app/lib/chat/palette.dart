@@ -21,9 +21,9 @@ final class ShortcutSpec {
   const ShortcutSpec({
     required this.id,
     required this.what,
-    required String Function(String mod) defaultKeys,
+    required this._defaultKeys,
     this.defaultActivator,
-  }) : _defaultKeys = defaultKeys;
+  });
 
   final String id;
   final String what;

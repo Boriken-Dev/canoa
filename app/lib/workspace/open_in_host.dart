@@ -18,8 +18,8 @@ final class HostedOpening {
     required this.hostPeer,
     required this.page,
     this.onThisComputer = false,
-    Future<bool> Function(Uri)? link,
-  }) : _link = link;
+    this._link,
+  });
 
   final WebMode mode;
   final HostOpening opening;

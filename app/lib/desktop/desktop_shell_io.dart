@@ -34,13 +34,12 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell, TrayA
     @visibleForTesting Future<bool> Function()? trayAvailable,
     @visibleForTesting bool? desktop,
     @visibleForTesting DateTime Function()? clock,
-    @visibleForTesting LoginStart? loginStart,
+    @visibleForTesting this._loginStart,
     @visibleForTesting Future<String> Function(Color accent)? iconFile,
   }) : _iconFile = iconFile ?? ((accent) => writeTrayIcon(accent, ico: Platform.isWindows)),
        _trayAvailable = trayAvailable ?? (() async => !Platform.isLinux || await linuxShowsTrayIcons()),
        _desktop = desktop ?? (Platform.isWindows || Platform.isMacOS || Platform.isLinux),
-       _clock = clock ?? DateTime.now,
-       _loginStart = loginStart;
+       _clock = clock ?? DateTime.now;
 
   /// Two clicks this close together are a double click: Windows' own default.
   static const Duration doubleClick = Duration(milliseconds: 500);

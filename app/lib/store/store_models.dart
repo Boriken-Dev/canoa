@@ -171,11 +171,10 @@ class TypeModels extends ChangeNotifier {
   TypeModels({
     required this.type,
     required this.title,
-    required Future<ControlClient> Function() control,
-    required Future<ControlClient> Function() open,
+    required this._control,
+    required this._open,
     this.programs,
-  }) : _control = control,
-       _open = open;
+  });
 
   /// The host's programs, which a model whose program is not there installs first.
   final ProgramStores? programs;
