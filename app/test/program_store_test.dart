@@ -41,6 +41,55 @@ Future<void> _until(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
+  group('a publisher that does not answer', () {
+    test('ends only its own row: the others show their newest versions and the page is told as each answer arrives', () async {
+      final host = FakeStoreHost([
+        claudeLike(copies: [copyOf('1.0.0')], latest: '2.0.0'),
+        whenLike(copies: [copyOf('4.0.0')], latest: '5.0.0'),
+      ]);
+      host.store('one_store').latestHolds = Completer<void>();
+      final programs = host.programs(timeout: const Duration(milliseconds: 300));
+      final seen = <String>[];
+      programs.addListener(() => seen.add(programs.statuses.map((each) => '${each.info.provider}:${each.reported}:${each.latest?.version}').join(' ')));
+      final refreshing = programs.refresh(latest: true);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(programs.loading, isTrue, reason: 'one publisher is still being asked');
+      expect(programs.status('one_store')!.copies.single.version, '1.0.0', reason: 'its report is shown before its newest version is known');
+      expect(programs.status('one_store')!.latest, isNull);
+      expect(programs.status('two_store')!.latest?.version, '5.0.0', reason: 'the other row does not wait for it');
+      await refreshing;
+      expect(programs.problem, isNull, reason: 'a timeout is not the end of the page');
+      expect(programs.loading, isFalse);
+      final held = programs.status('one_store')!;
+      expect(held.latest!.known, isFalse);
+      expect(held.latest!.unknownBecause, contains('did not answer'));
+      expect(held.latestAt, isNull, reason: 'not remembered as asked, so the next page asks again');
+      expect(programs.status('two_store')!.latest?.version, '5.0.0');
+      expect(seen.length, greaterThan(3), reason: 'the page was told per store, not at the start and the end only');
+    });
+
+    testWidgets('a row shows from its report at once and gains its newest version when that comes', (tester) async {
+      final host = FakeStoreHost([
+        claudeLike(copies: [copyOf('1.0.0')], latest: '2.0.0'),
+        whenLike(copies: [copyOf('4.0.0')], latest: '4.0.0'),
+      ]);
+      final hold = host.store('one_store').latestHolds = Completer<void>();
+      tester.view.physicalSize = const Size(1000, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      // The page keeps a progress bar while a publisher is asked, so it never settles: it is pumped instead.
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: ProgramsSection(programs: host.programs())))));
+      final one = find.byKey(const Key('program-one_store'));
+      final two = find.byKey(const Key('program-two_store'));
+      await _until(tester, find.descendant(of: two, matching: find.text('Up to date (4.0.0)')));
+      expect(find.descendant(of: one, matching: find.textContaining('Version 1.0.0')), findsOneWidget);
+      expect(find.descendant(of: one, matching: find.textContaining('Update available')), findsNothing);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget, reason: 'one publisher is still being asked');
+      hold.complete();
+      await _until(tester, find.descendant(of: one, matching: find.text('Update available: 2.0.0')));
+    });
+  });
+
   group('a change of programs', () {
     ProgramStores over(FakeStoreHost host, List<String> changes) {
       final shared = host.client();

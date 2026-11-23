@@ -103,6 +103,9 @@ final class FakeStore {
   String? latest;
   String? latestFails;
 
+  /// While set and not completed, the publisher does not answer: `store/latest` for this store waits for it.
+  Completer<void>? latestHolds;
+
   /// A caveat the host sends beside the newest version.
   String? latestNote;
 
@@ -179,11 +182,12 @@ final class FakeStoreHost {
   }
 
   /// A client over a link of this host.
-  ControlClient client() => ControlClient(open());
+  ControlClient client({Duration? timeout}) => timeout == null ? ControlClient(open()) : ControlClient(open(), timeout: timeout);
 
   /// A [ProgramStores] over this host, as the app makes one: the shared link for questions, a link of its own for each apply.
-  ProgramStores programs({String? kind}) {
-    final shared = client();
+  /// [timeout] is how long the shared link waits for an answer.
+  ProgramStores programs({String? kind, Duration? timeout}) {
+    final shared = client(timeout: timeout);
     return ProgramStores(control: () async => shared, open: () async => client(), kind: kind);
   }
 
@@ -347,6 +351,7 @@ final class _FakeLink implements HostLink, HostLinkBinding {
         if (method == 'store/apply') {
           result = await _apply(id as int, given);
         } else {
+          if (method == 'store/latest') await _host.stores.where((each) => each.provider == given['provider']).firstOrNull?.latestHolds?.future;
           result = _host._answer(method as String, given);
         }
         _emit({'jsonrpc': '2.0', 'id': id, 'result': result});

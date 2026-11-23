@@ -560,23 +560,18 @@ class ProgramStores extends ChangeNotifier {
       _problem = null;
       for (final info in infos) {
         final before = _status[info.provider];
-        var next = ProgramStatus(info: info, latest: before?.latest, latestAt: before?.latestAt);
-        try {
-          final report = _map(await client.call('store/report', {'provider': info.provider}));
-          next = next.copyWith(
-            copies: [if (report['copies'] is List) for (final each in report['copies'] as List) ?ProgramCopy.parse(each)],
-            reported: true,
-            clearProblem: true,
-          );
-          final fresh = before?.latestAt != null && _now().difference(before!.latestAt!) < latestLife;
-          if (latest && (force || !fresh)) {
-            next = next.copyWith(latest: ProgramLatest.parse(await client.call('store/latest', {'provider': info.provider})), latestAt: _now());
-          }
-        } on ControlFailed catch (error) {
-          next = next.copyWith(problem: error.message, reported: true);
-        }
-        _status[info.provider] = next;
+        _status[info.provider] = ProgramStatus(
+          info: info,
+          copies: before?.copies ?? const [],
+          latest: before?.latest,
+          latestAt: before?.latestAt,
+          problem: before?.problem,
+          reported: before?.reported ?? false,
+        );
       }
+      // The rows are there to read now; each fills in as its own answers arrive, and one that never does ends only its own row.
+      notifyListeners();
+      await Future.wait([for (final info in infos) _fill(client, info.provider, latest: latest, force: force)]);
     } on Object catch (error) {
       _problem = error is ControlFailed ? error.message : '$error';
     } finally {
@@ -584,6 +579,38 @@ class ProgramStores extends ChangeNotifier {
 
       notifyListeners();
     }
+  }
+
+  /// One store's report and, when asked, the publisher's newest version, each shown as soon as it is answered.
+  Future<void> _fill(ControlClient client, String provider, {required bool latest, required bool force}) async {
+    final before = _status[provider]!;
+    try {
+      final report = _map(await client.call('store/report', {'provider': provider}));
+      _status[provider] = before.copyWith(
+        copies: [if (report['copies'] is List) for (final each in report['copies'] as List) ?ProgramCopy.parse(each)],
+        reported: true,
+        clearProblem: true,
+      );
+    } on ControlFailed catch (error) {
+      _status[provider] = before.copyWith(problem: error.message, reported: true);
+    } on TimeoutException {
+      _status[provider] = before.copyWith(problem: 'the host did not answer in time', reported: true);
+    }
+    notifyListeners();
+    final fresh = before.latestAt != null && _now().difference(before.latestAt!) < latestLife;
+    if (!latest || (!force && fresh) || _status[provider]!.problem != null) return;
+    try {
+      final newest = ProgramLatest.parse(await client.call('store/latest', {'provider': provider}));
+      _status[provider] = _status[provider]!.copyWith(latest: newest, latestAt: _now());
+    } on ControlFailed catch (error) {
+      _status[provider] = _status[provider]!.copyWith(problem: error.message);
+    } on TimeoutException {
+      // Not remembered as asked, so the next page asks again.
+      _status[provider] = _status[provider]!.copyWith(
+        latest: const ProgramLatest(unknownBecause: 'the publisher did not answer in time'),
+      );
+    }
+    notifyListeners();
   }
 
   /// What [action] (`install`, `update` or `uninstall`) of [provider] would do, to [version] where the publisher serves more
