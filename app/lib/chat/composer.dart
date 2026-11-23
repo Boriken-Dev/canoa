@@ -438,10 +438,10 @@ class SessionComposer extends StatelessWidget {
 
   /// Up and Down, and Page Up and Page Down, in the field are the field's: the selection area around the screen has actions for
   /// the same intents, and a field that defers to it can be handed an action that is not its own. Each is answered by handing the
-  /// intent back to the field's default.
+  /// intent back to the field's default, which for both is one action typed by their common [DirectionalCaretMovementIntent].
   static final Map<Type, Action<Intent>> _fieldOwnsVerticalMoves = {
-    ExtendSelectionVerticallyToAdjacentLineIntent: _FieldMove<ExtendSelectionVerticallyToAdjacentLineIntent>(),
-    ExtendSelectionVerticallyToAdjacentPageIntent: _FieldMove<ExtendSelectionVerticallyToAdjacentPageIntent>(),
+    ExtendSelectionVerticallyToAdjacentLineIntent: _FieldMove<DirectionalCaretMovementIntent>(),
+    ExtendSelectionVerticallyToAdjacentPageIntent: _FieldMove<DirectionalCaretMovementIntent>(),
   };
 
   /// [narrow] is a phone's width, where the placeholder is one line and so takes its short forms.
