@@ -608,3 +608,52 @@ fn a_copy_of_many_files_is_checked_and_the_first_changed_one_named() {
     };
     assert!(why.starts_with("f120.bin "), "named {why}");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_copy_checked_whole_is_not_read_again_until_a_file_is_written_whatever_time_it_is_given() {
+    let dir = Dir::new("verify-stamp");
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
+    let program = shelf.program("stamped").expect("p");
+    let lock = program.lock().expect("lock");
+    let staging = lock.stage("1.0.0").expect("stage");
+    let exe = staging.join("run.bin");
+    fs::write(&exe, b"the bytes that were checked").expect("file");
+    let digest = {
+        use sha2::{Digest, Sha256};
+        data_encoding::HEXLOWER.encode(&Sha256::digest(b"the bytes that were checked"))
+    };
+    let record = canoa_host::store::shelf::FileRecord {
+        path: "run.bin".to_owned(),
+        url: "https://example.test/run".to_owned(),
+        sha256: digest,
+        verified: true,
+    };
+    let launch = Launch::new(exe.to_string_lossy());
+    let current = lock
+        .commit(&staging, "1.0.0", &launch, vec![record], by())
+        .expect("commit");
+    drop(lock);
+    program.verify(&current).expect("untouched");
+    let kept = dir
+        .0
+        .join("programs")
+        .join(".digests")
+        .join("stamped.checked");
+    assert!(kept.is_file(), "a complete check leaves its stamp");
+    program.verify(&current).expect("untouched, from the stamp");
+    // The same size and the time of change put back: the inode's own change time still says it was written.
+    let before = fs::metadata(&exe).expect("meta").modified().expect("time");
+    fs::write(&exe, b"the bytes that were swapped").expect("tamper");
+    let file = fs::File::options().write(true).open(&exe).expect("open");
+    file.set_modified(before).expect("time put back");
+    drop(file);
+    assert_eq!(
+        fs::metadata(&exe).expect("meta").len(),
+        b"the bytes that were checked".len() as u64
+    );
+    assert!(
+        matches!(program.verify(&current), Err(ShelfError::Refused(_))),
+        "a file rewritten with its time put back passed"
+    );
+}

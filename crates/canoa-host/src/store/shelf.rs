@@ -371,6 +371,12 @@ impl ProgramDir {
     /// [`ShelfError::Refused`] naming the first file that no longer matches, is gone, or was added.
     pub fn verify(&self, current: &Current) -> Result<(), ShelfError> {
         let root = Path::new(&current.dir);
+        let stamp = tree_stamp(root, current);
+        if let Some(stamp) = &stamp
+            && fs::read_to_string(self.checked_path()).is_ok_and(|kept| kept.trim() == stamp)
+        {
+            return Ok(());
+        }
         let mut present = BTreeSet::new();
         list_files(root, root, &mut present)?;
         let recorded: BTreeMap<String, &FileRecord> = current
@@ -393,7 +399,20 @@ impl ProgramDir {
             }
             to_hash.push((path, record));
         }
-        hash_all(root, &to_hash)
+        hash_all(root, &to_hash)?;
+        // What was just read is kept by the stamp it had before: a later check that finds every file's size, times of change and
+        // identity as they were does not read the copy again.
+        if let Some(stamp) = stamp {
+            let _ = fs::write(self.checked_path(), stamp);
+        }
+        Ok(())
+    }
+
+    /// Where the stamp of the copy's last complete check is kept: `<programs>/.digests/<program>.checked`.
+    fn checked_path(&self) -> PathBuf {
+        let mut path = self.digest_path().into_os_string();
+        path.push(".checked");
+        PathBuf::from(path)
     }
 
     /// Takes the program's lock, making its folder (private to the user) as needed, and removes the folders left by a
@@ -558,6 +577,7 @@ impl Locked<'_> {
             Err(error) => return Err(error.into()),
         }
         let _ = fs::remove_file(self.program.digest_path());
+        let _ = fs::remove_file(self.program.checked_path());
         self.sweep()
     }
 
@@ -693,6 +713,60 @@ fn list_files(root: &Path, dir: &Path, into: &mut BTreeSet<String>) -> Result<()
         }
     }
     Ok(())
+}
+
+/// What a check of the copy at `root` leaves of it, to know the copy again without reading its files: the digests it was recorded
+/// with, and for every file and folder its size, time of change, change of its inode and its identity. The change of an inode
+/// moves with any write, and no program can set it back, so a file written since, whatever time it was given, is another stamp.
+/// `None` where the system keeps no such time.
+#[cfg(unix)]
+fn tree_stamp(root: &Path, current: &Current) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    fn walk(dir: &Path, root: &Path, hash: &mut sha2::Sha256) -> io::Result<()> {
+        let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<Result<_, _>>()?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for entry in entries {
+            let meta = entry.metadata()?;
+            let path = entry.path();
+            let relative = path.strip_prefix(root).unwrap_or(&path);
+            hash.update(
+                format!(
+                    "{}\0{}\0{}.{}\0{}.{}\0{}\0{}\n",
+                    relative.to_string_lossy(),
+                    meta.len(),
+                    meta.mtime(),
+                    meta.mtime_nsec(),
+                    meta.ctime(),
+                    meta.ctime_nsec(),
+                    meta.ino(),
+                    meta.mode(),
+                )
+                .as_bytes(),
+            );
+            if meta.is_dir() {
+                walk(&path, root, hash)?;
+            }
+        }
+        Ok(())
+    }
+    let mut hash = sha2::Sha256::new();
+    let mut records: Vec<_> = current
+        .files
+        .iter()
+        .map(|record| (&record.path, &record.sha256))
+        .collect();
+    records.sort();
+    for (path, digest) in records {
+        hash.update(format!("{path}\0{digest}\n").as_bytes());
+    }
+    walk(root, root, &mut hash).ok()?;
+    Some(data_encoding::HEXLOWER.encode(&hash.finalize()))
+}
+
+/// Where the system keeps no time of an inode's change, no stamp is made and every check reads the copy.
+#[cfg(not(unix))]
+fn tree_stamp(_root: &Path, _current: &Current) -> Option<String> {
+    None
 }
 
 /// Checks `files` against their recorded digests on as many threads as the machine has, so a copy of tens of thousands of files
