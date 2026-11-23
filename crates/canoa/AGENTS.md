@@ -289,7 +289,7 @@ pub enum ProxyChoice { System, None, Proxy(String), Pac(String) }               
 pub enum ClientCertificate { System, None, File(PathBuf) }                              // default System; File is a PEM chain and its unencrypted key
 pub enum GitTls { System, Git }                                                         // default System
 pub use coqui_syshttp::{ChildEnvironment, Connection, OriginAuth, Secret};
-pub use coqui_syshttp::client::OriginAgent as LoginAgent;
+pub use coqui_syshttp::ureq::OriginAgent as LoginAgent;
 pub struct ServerIdentity { pub name: String, pub subject: Option<String>, pub sha256: Option<String> }   // non_exhaustive, Clone, Debug, Eq: what a verified server proved to be (subject RFC 4514; sha256 of its certificate, lower-case hex)
 pub struct SecureConnection;                                                                            // Read + Write over the TLS; server() -> &ServerIdentity; socket() -> &TcpStream; close_notify()
 impl Network {
