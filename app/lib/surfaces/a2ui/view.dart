@@ -11,6 +11,23 @@ import '../../theme/look.dart';
 import 'messages.dart';
 import 'model.dart';
 
+/// The words the renderer says of its own, which the app gives in the person's language; an agent's own text is drawn as sent.
+final class A2uiWords {
+  const A2uiWords({
+    this.problems = defaultProblems,
+    this.waiting = defaultWaiting,
+    this.moreRows = defaultMoreRows,
+  });
+
+  static const defaultProblems = 'This view has problems';
+  static const defaultWaiting = 'Waiting for the view to arrive.';
+  static String defaultMoreRows(int n) => '$n more rows are not shown.';
+
+  /// The title over what is wrong with a view, the line while its root has not arrived, and how many rows a list left out.
+  final String problems, waiting;
+  final String Function(int count) moreRows;
+}
+
 /// What a button did, as the protocol's `action` message.
 typedef A2uiActionSink = void Function(Map<String, Object?> action);
 
@@ -53,7 +70,10 @@ const Map<String, IconData> a2uiIcons = {
 
 /// A surface, scrolled, with what was cut or wrong said above it.
 class A2uiSurfaceView extends StatelessWidget {
-  const A2uiSurfaceView({super.key, required this.surface, this.onAction, this.onOpenUrl, this.padding = const EdgeInsets.all(12)});
+  const A2uiSurfaceView({super.key, required this.surface, this.onAction, this.onOpenUrl, this.words = const A2uiWords(), this.padding = const EdgeInsets.all(12)});
+
+  /// What the renderer says of its own.
+  final A2uiWords words;
 
   final A2uiSurface surface;
 
@@ -84,15 +104,15 @@ class A2uiSurfaceView extends StatelessWidget {
                   key: const ValueKey('a2ui problems'),
                   lines: [for (final each in surface.problems.take(5)) '${each.message}${each.path.isEmpty ? '' : ' (${each.path})'}'],
                   colour: look.danger,
-                  title: 'This view has problems',
+                  title: words.problems,
                 ),
               if (!surface.hasRoot)
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text('Waiting for the view to arrive.', key: const ValueKey('a2ui waiting'), style: text.bodyMedium?.copyWith(color: look.muted)),
+                  child: Text(words.waiting, key: const ValueKey('a2ui waiting'), style: text.bodyMedium?.copyWith(color: look.muted)),
                 )
               else
-                _Draw(context, surface, onAction, onOpenUrl).node('root', const _Scope(), 0, const {}),
+                _Draw(context, surface, onAction, onOpenUrl, words).node('root', const _Scope(), 0, const {}),
             ],
           ),
         ),
@@ -138,7 +158,9 @@ final class _Scope {
 
 /// One drawing of a surface: it counts what it draws against the limits.
 final class _Draw {
-  _Draw(this.context, this.surface, this.onAction, this.onOpenUrl);
+  _Draw(this.context, this.surface, this.onAction, this.onOpenUrl, this.words);
+
+  final A2uiWords words;
 
   final BuildContext context;
   final A2uiSurface surface;
@@ -273,7 +295,7 @@ final class _Draw {
         if (found.length > rows)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text('${found.length - rows} more rows are not shown.', key: const ValueKey('a2ui rows cut'), style: text.bodySmall?.copyWith(color: look.muted)),
+            child: Text(words.moreRows(found.length - rows), key: const ValueKey('a2ui rows cut'), style: text.bodySmall?.copyWith(color: look.muted)),
           ),
       ];
     }
@@ -565,7 +587,7 @@ final class _Draw {
           ],
         ),
       ),
-      if (rows.length > shown) Padding(padding: const EdgeInsets.only(top: 4), child: Text('${rows.length - shown} more rows are not shown.', key: const ValueKey('a2ui rows cut'), style: text.bodySmall?.copyWith(color: look.muted))),
+      if (rows.length > shown) Padding(padding: const EdgeInsets.only(top: 4), child: Text(words.moreRows(rows.length - shown), key: const ValueKey('a2ui rows cut'), style: text.bodySmall?.copyWith(color: look.muted))),
     ]);
   }
 }

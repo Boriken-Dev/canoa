@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../profile/profiles_panel.dart' show visible;
 import '../surfaces/a2ui/overlay_views.dart';
 import 'links.dart';
@@ -194,7 +195,7 @@ class EntryFactsView extends StatelessWidget {
       key: const Key('details-views'),
       padding: const EdgeInsets.only(top: 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Views (drawn with your look; structure is all they bring)', style: text.titleSmall),
+        Text(context.t('store.views'), style: text.titleSmall),
         for (final problem in shipped.problems) Text(oneLine(problem), style: TextStyle(color: scheme.error)),
         for (final view in shipped.views)
           Padding(
@@ -215,7 +216,7 @@ class EntryFactsView extends StatelessWidget {
                       ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(oneLine(why.first))));
                     }
                   },
-                  child: const Text('Open'),
+                  child: Text(context.t('store.view_open')),
                 ),
             ]),
           ),

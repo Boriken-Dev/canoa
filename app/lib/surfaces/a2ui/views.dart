@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_text.dart';
 import '../../session_store.dart';
 import '../../shell/layout_state.dart' show ShellLayout;
 import '../../shell/surface.dart';
@@ -156,8 +157,17 @@ class A2uiViewBody extends StatelessWidget {
     listenable: views,
     builder: (context, _) {
       final surface = views.processor.surfaces[surfaceId];
-      if (surface == null) return const Center(child: Text('This view has been closed.', key: ValueKey('a2ui closed')));
-      return A2uiSurfaceView(surface: surface, onAction: views.outbound == null ? null : views.act, onOpenUrl: onOpenUrl ?? links.openLink);
+      if (surface == null) return Center(child: Text(context.t('a2ui.closed'), key: const ValueKey('a2ui closed')));
+      return A2uiSurfaceView(
+        surface: surface,
+        onAction: views.outbound == null ? null : views.act,
+        onOpenUrl: onOpenUrl ?? links.openLink,
+        words: A2uiWords(
+          problems: context.t('a2ui.problems'),
+          waiting: context.t('a2ui.waiting'),
+          moreRows: (n) => context.t('a2ui.more_rows', {'n': n}),
+        ),
+      );
     },
   );
 }
@@ -187,7 +197,7 @@ void placeA2uiView({
                 padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
                 child: Row(children: [
                   Expanded(child: Text(view.title, style: Theme.of(dialog).textTheme.titleMedium)),
-                  IconButton(key: const ValueKey('a2ui window close'), tooltip: 'Close', icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialog).pop()),
+                  IconButton(key: const ValueKey('a2ui window close'), tooltip: dialog.t('a2ui.close'), icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialog).pop()),
                 ]),
               ),
               Flexible(child: A2uiViewBody(views: surface.views, surfaceId: view.surfaceId)),
