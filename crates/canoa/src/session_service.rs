@@ -8,7 +8,7 @@
 //!
 //! - an MCP server of `tools` the session is given, named `server`, with an optional skill that says when to use them;
 //!
-//! A change a tool would make that the person must allow is not asked by the provider: the call answers [`Outcome::Ask`] with what
+//! A change a tool would make that the person must allow is not asked by the provider: the call answers [`Outcome::asking`] with what
 //! the person is shown, the host puts it to the person on the client the session belongs to, and answers the provider with
 //! [`SessionService::resume`].
 //!
