@@ -863,6 +863,15 @@ pub(crate) fn account_instance(
                 map.insert(key.clone(), value.clone());
             }
         }
+        // A provider that declares a `search_path` is told where the host looks a program up by name.
+        if declares(canoa::search::SETTING) && !map.contains_key(canoa::search::SETTING) {
+            map.insert(
+                canoa::search::SETTING.to_owned(),
+                serde_json::Value::String(
+                    crate::sources::search_path().to_string_lossy().into_owned(),
+                ),
+            );
+        }
         let config = Value::from(
             map_of(&Settings::new(map)).map_err(|why| accounts(ProviderError::Settings(why)))?,
         );

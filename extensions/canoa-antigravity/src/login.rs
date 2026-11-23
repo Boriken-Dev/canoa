@@ -20,6 +20,9 @@ pub struct AgySettings {
     /// The program it signs in and renews with, and whose strings hold the OAuth client a refresh uses: a path, or a name
     /// looked up on the `PATH`. `agy` when absent.
     pub executable: Option<String>,
+    /// Where `agy` is looked for by name when `executable` names none: a `PATH`, which the host fills in with the person's own
+    /// followed by the folders of the programs its Store installed. The process's own `PATH` when absent.
+    pub search_path: Option<String>,
     /// How often, in milliseconds, a watch looks at the file an account keeps its login in.
     #[map(default = 30_000)]
     pub renew_poll_ms: u64,
@@ -106,6 +109,7 @@ impl Default for AgySettings {
     fn default() -> Self {
         Self {
             executable: None,
+            search_path: None,
             renew_poll_ms: 30_000,
             command_timeout_ms: 60_000,
             login_args: login_args(),
@@ -129,12 +133,27 @@ impl Default for AgySettings {
 }
 
 impl AgySettings {
-    /// The program the sign-in runs.
+    /// The program the sign-in runs: `executable`, else `agy` where the search path finds it, else its bare name for the system
+    /// to look up.
     pub(crate) fn program(&self) -> String {
         self.executable
             .clone()
             .filter(|program| !program.is_empty())
+            .or_else(|| self.found().map(|path| path.to_string_lossy().into_owned()))
             .unwrap_or_else(|| crate::PRESET.program.into())
+    }
+
+    /// `agy` as the search path the host gave finds it, when it gave one.
+    fn found(&self) -> Option<PathBuf> {
+        let search = self
+            .search_path
+            .as_deref()
+            .filter(|path| !path.is_empty())?;
+        canoa::search::find_in(
+            search.as_ref(),
+            &std::env::var("PATHEXT").unwrap_or_default(),
+            crate::PRESET.program,
+        )
     }
 
     /// How the stored login is read with these settings.
@@ -167,9 +186,12 @@ impl AgySettings {
             .as_ref()
             .or(self.executable.as_ref())
             .filter(|program| !program.is_empty());
-        settings.client(client.map_or(ClientSource::Find, |program| {
-            ClientSource::Program(PathBuf::from(program))
-        }))
+        settings.client(match client {
+            Some(program) => ClientSource::Program(PathBuf::from(program)),
+            None => self
+                .found()
+                .map_or(ClientSource::Find, ClientSource::Program),
+        })
     }
 
     /// What tells one reader's settings from another's: every field the reading uses.
@@ -177,7 +199,7 @@ impl AgySettings {
         alloc::format!(
             "{:?}",
             (
-                &self.executable,
+                (&self.executable, &self.search_path),
                 &self.home,
                 &self.gemini_dir,
                 self.keyring,
@@ -223,6 +245,35 @@ mod tests {
         assert_eq!(parsed.login_args, ["acp", "--login"]);
         assert!(parsed.keyring);
         assert_eq!(parsed.token_url, antigravity::TOKEN_URL);
+    }
+
+    #[test]
+    fn agy_is_found_on_the_search_path_the_host_gave_and_an_explicit_program_wins() {
+        let folder =
+            std::env::temp_dir().join(alloc::format!("canoa-agy-search-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let stand_in = folder.join(alloc::format!("agy{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&stand_in, b"stand-in").expect("written");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755))
+                .expect("runnable");
+        }
+        let searched = AgySettings {
+            search_path: Some(folder.to_string_lossy().into_owned()),
+            ..AgySettings::default()
+        };
+        // The control: no search path, and nothing in this process's own is `agy` here.
+        assert_eq!(AgySettings::default().found(), None);
+        assert_eq!(searched.found().as_deref(), Some(stand_in.as_path()));
+        assert_eq!(searched.program(), stand_in.to_string_lossy());
+        let explicit = AgySettings {
+            executable: Some("/opt/agy".into()),
+            ..searched
+        };
+        assert_eq!(explicit.program(), "/opt/agy");
+        std::fs::remove_dir_all(&folder).expect("removed");
     }
 
     #[test]

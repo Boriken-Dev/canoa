@@ -135,19 +135,52 @@ fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
     Some((meta.len(), meta.modified().ok()?))
 }
 
-/// The folders of the runtimes the Store installed on `shelf` (Node, Python): where each one's launch file is, for a copy that
-/// is as it was installed. A copy that changed since adds nothing, so nothing unchecked reaches a search path.
-pub(crate) fn runtime_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
-    crate::store::runtimes::runtime_programs()
-        .iter()
-        .filter_map(|program| managed_program_in(shelf, program))
-        .filter_map(|(path, _)| path.parent().map(Path::to_path_buf))
-        .collect()
+/// The folders of the programs the Store installed on `shelf` (runtimes, agents, tools): where each one's launch file is, for a
+/// copy that is as it was installed, each once and in the order of the programs' names. A copy that changed since adds nothing,
+/// so nothing unchecked reaches a search path.
+pub(crate) fn program_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
+    let mut names: Vec<String> = std::fs::read_dir(shelf.root())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    names.sort_unstable();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for name in names {
+        if let Some(dir) = managed_program_in(shelf, &name)
+            .and_then(|(path, _)| path.parent().map(Path::to_path_buf))
+            && !dirs.contains(&dir)
+        {
+            dirs.push(dir);
+        }
+    }
+    dirs
 }
 
-/// [`runtime_dirs_in`] over this user's programs folder.
-pub(crate) fn runtime_dirs() -> Vec<PathBuf> {
-    Shelf::default_root().map_or_else(Vec::new, |root| runtime_dirs_in(&Shelf::unchecked(root)))
+/// `base` (a `PATH`), then each folder of the programs on `shelf` it does not already hold: where a name is looked up when the
+/// host hands a library a search path. The person's own folders come first, so a program they installed is never shadowed.
+pub(crate) fn search_path_in(shelf: &Shelf, base: &std::ffi::OsStr) -> std::ffi::OsString {
+    let held: Vec<PathBuf> = std::env::split_paths(base).collect();
+    let extra: Vec<PathBuf> = program_dirs_in(shelf)
+        .into_iter()
+        .filter(|dir| !held.contains(dir))
+        .collect();
+    std::env::join_paths(held.into_iter().chain(extra)).unwrap_or_else(|_| base.to_owned())
+}
+
+/// [`search_path_in`] over this process's `PATH` and this user's programs folder.
+pub(crate) fn search_path() -> std::ffi::OsString {
+    let base = std::env::var_os("PATH").unwrap_or_default();
+    Shelf::default_root().map_or(base.clone(), |root| {
+        search_path_in(&Shelf::unchecked(root), &base)
+    })
+}
+
+/// [`program_dirs_in`] over this user's programs folder.
+pub(crate) fn program_dirs() -> Vec<PathBuf> {
+    Shelf::default_root().map_or_else(Vec::new, |root| program_dirs_in(&Shelf::unchecked(root)))
 }
 
 /// The version of the copy [`managed_program`] runs, when there is one.
@@ -735,8 +768,14 @@ mod tests {
         let program = shelf.program(name).expect("a name");
         let locked = program.lock().expect("locked");
         let staging = locked.stage("2.0.0").expect("staged");
-        let binary = staging.join(name);
+        let binary = staging.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&binary, b"binary").expect("written");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
+                .expect("runnable");
+        }
         let mut launch = canoa::store::Launch::new(binary.to_string_lossy().into_owned());
         launch
             .environment
@@ -775,19 +814,43 @@ mod tests {
     }
 
     #[test]
-    fn the_folders_of_installed_runtimes_come_from_checked_copies_only() {
-        let root = scratch("runtime-dirs");
-        assert!(runtime_dirs_in(&Shelf::unchecked(&root)).is_empty());
+    fn the_folders_of_installed_programs_come_from_checked_copies_only() {
+        let root = scratch("program-dirs");
+        assert!(program_dirs_in(&Shelf::unchecked(&root)).is_empty());
         let (shelf, binary) = shelf_with_binary(&root, "node");
         assert_eq!(
-            runtime_dirs_in(&shelf),
+            program_dirs_in(&shelf),
             vec![binary.parent().expect("a folder").to_path_buf()]
         );
-        // A program that is not a runtime adds nothing, and a copy changed since the install adds nothing.
-        let (other, _) = shelf_with_binary(&scratch("runtime-dirs-other"), "claude");
-        assert!(runtime_dirs_in(&other).is_empty());
+        // An agent's copy is as much a program as a runtime, and a copy changed since the install adds nothing.
+        let (other, agy) = shelf_with_binary(&root, "agy");
+        assert_eq!(program_dirs_in(&other).len(), 2);
+        std::fs::write(&agy, b"changed since the install").expect("written");
+        assert_eq!(
+            program_dirs_in(&other),
+            vec![binary.parent().expect("a folder").to_path_buf()]
+        );
         std::fs::write(&binary, b"changed since the install").expect("written");
-        assert!(runtime_dirs_in(&shelf).is_empty());
+        assert!(program_dirs_in(&shelf).is_empty());
+    }
+
+    #[test]
+    fn a_program_the_store_installed_is_found_on_the_search_path_and_the_persons_folders_come_first()
+     {
+        let root = scratch("search-path");
+        let name = "canoa-stand-in-agy";
+        let (shelf, binary) = shelf_with_binary(&root, name);
+        let own = std::env::join_paths([scratch("search-path-own")]).expect("joined");
+        let find = |path: &std::ffi::OsStr| canoa::search::find_in(path, "", name);
+        // The control: the person's own path has no such program.
+        assert_eq!(find(&own), None);
+        let searched = search_path_in(&shelf, &own);
+        assert_eq!(find(&searched).as_deref(), Some(binary.as_path()));
+        let folders: Vec<_> = std::env::split_paths(&searched).collect();
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0], std::env::split_paths(&own).next().expect("one"));
+        // A folder the person already has is not added again.
+        assert_eq!(search_path_in(&shelf, &searched), searched);
     }
 
     #[test]

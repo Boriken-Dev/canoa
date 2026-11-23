@@ -2498,7 +2498,7 @@ fn the_commands_an_overlay_exposes_are_launchers_on_the_agents_path_and_two_of_o
         "{hello}"
     );
     // `bash` is on neither the test's path nor, unless this computer's Store has Git Bash, the Store's runtimes.
-    let store_has_bash = crate::sources::runtime_dirs()
+    let store_has_bash = crate::sources::program_dirs()
         .iter()
         .any(|dir| dir.join("bash.exe").exists() || dir.join("bash").exists());
     if !store_has_bash {

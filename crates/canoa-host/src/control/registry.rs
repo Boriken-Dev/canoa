@@ -10,7 +10,7 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Read as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -241,54 +241,7 @@ fn program_name(name: &str) -> bool {
 /// The first runnable file called `name` in an absolute directory of `path`. On Windows a name takes each of `pathext`'s
 /// extensions (the usual four when it is empty) unless it has one; elsewhere the file must be executable.
 pub(crate) fn which_in(path: &OsStr, pathext: &str, name: &str) -> Option<PathBuf> {
-    let suffixes: Vec<String> = if cfg!(windows) {
-        let listed: Vec<String> = pathext
-            .split(';')
-            .filter(|ext| ext.starts_with('.') && ext.len() > 1)
-            .map(str::to_ascii_lowercase)
-            .collect();
-        let listed = if listed.is_empty() {
-            vec![".com".into(), ".exe".into(), ".bat".into(), ".cmd".into()]
-        } else {
-            listed
-        };
-        if listed
-            .iter()
-            .any(|ext| name.to_ascii_lowercase().ends_with(ext))
-        {
-            vec![String::new()]
-        } else {
-            listed
-        }
-    } else {
-        vec![String::new()]
-    };
-    std::env::split_paths(path)
-        .filter(|directory| directory.is_absolute())
-        .flat_map(|directory| {
-            suffixes
-                .iter()
-                .map(move |suffix| directory.join(format!("{name}{suffix}")))
-        })
-        .find(|candidate| runnable(candidate))
-}
-
-fn runnable(file: &Path) -> bool {
-    let Ok(meta) = fs::metadata(file) else {
-        return false;
-    };
-    if !meta.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        meta.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    canoa::search::find_in(path, pathext, name)
 }
 
 /// A catalog label as a file name: the app's own rule, so what it kept before is found again.

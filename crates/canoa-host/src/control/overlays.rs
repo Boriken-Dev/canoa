@@ -232,7 +232,7 @@ impl Overlays {
         let root = self.root()?;
         let finder = crate::profile::Finder::new(
             &|variable| std::env::var(variable).ok(),
-            &crate::sources::runtime_dirs(),
+            &crate::sources::program_dirs(),
         );
         let lines = crate::profile::of_installed(root, name, coqui_aos::current_os(), &finder)
             .map_err(|why| refused(format!("{name}: {why}")))?;
@@ -262,7 +262,7 @@ impl Overlays {
         let home = prepare::Home::new(root);
         let finder = crate::profile::Finder::new(
             &|variable| std::env::var(variable).ok(),
-            &crate::sources::runtime_dirs(),
+            &crate::sources::program_dirs(),
         );
         let change = if home.record(name).is_some() {
             coqui_aos::Change::Sync
@@ -614,7 +614,7 @@ impl Overlays {
         {
             let finder = crate::profile::Finder::new(
                 &|variable| std::env::var(variable).ok(),
-                &crate::sources::runtime_dirs(),
+                &crate::sources::program_dirs(),
             );
             let _ = prepare::run(&plan, coqui_aos::Change::Remove, &home, &finder, &[]);
         }

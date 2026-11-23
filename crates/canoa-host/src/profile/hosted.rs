@@ -624,7 +624,7 @@ impl Connection {
                 .map(|(_, value)| value.clone())
                 .or_else(|| lookup(name))
         };
-        let pre_finder = needs::Finder::new(&pre_lookup, &crate::sources::runtime_dirs());
+        let pre_finder = needs::Finder::new(&pre_lookup, &crate::sources::program_dirs());
         let python = needs::program_for(&pre_finder, "python", None)
             .ok()
             .map(|path| path.to_string_lossy().into_owned());
@@ -674,7 +674,7 @@ impl Connection {
             notes.extend(resolved.hook_reports.iter().map(hooks::report_item));
             notes.extend(pre_env.reported.iter().cloned());
             notes.extend(scripts.items.iter().cloned());
-            let finder = needs::Finder::new(lookup, &crate::sources::runtime_dirs());
+            let finder = needs::Finder::new(lookup, &crate::sources::program_dirs());
             let command_dirs = overlay_items(
                 &effective.aos,
                 &super::prepare::Home::new(host.directory.join("overlays")),

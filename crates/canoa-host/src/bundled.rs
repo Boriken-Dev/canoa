@@ -135,11 +135,13 @@ pub(crate) fn harness_sources() -> impl Iterator<Item = (&'static str, &'static 
     })
 }
 
-/// Whether the program of harness `id` is one the Store installs under the harness's own name (not as a launch of another
-/// program's, as Pi's is), so a host with a copy runs it when nothing names the program.
-pub(crate) fn runs_managed_by_own_name(id: &str) -> bool {
+/// The name of the program the Store installs for harness `id` (its folder in the programs folder, which the library's own source
+/// preset names and which need not be the harness's id), when the program is one of its own and not a launch of another
+/// program's, as Pi's is: a host with a copy runs it when nothing names the program.
+pub(crate) fn managed_program_name(id: &str) -> Option<&'static str> {
     ALL.iter()
-        .any(|bundle| bundle.preset.harness == Some(id) && bundle.preset.managed.is_none())
+        .find(|bundle| bundle.preset.harness == Some(id) && bundle.preset.managed.is_none())
+        .map(|bundle| bundle.preset.program)
 }
 
 /// What a library runs in a process of its own: the arguments after its name on the command line.
@@ -274,5 +276,39 @@ mod tests {
             );
         }
         assert!(run_helper("no-such-library", &[]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod managed_name_tests {
+    use super::managed_program_name;
+
+    #[test]
+    fn the_stores_program_is_named_by_the_libraries_preset_not_by_the_harness_id() {
+        for bundle in super::ALL {
+            let Some(harness) = bundle.preset.harness else {
+                continue;
+            };
+            let expected = bundle
+                .preset
+                .managed
+                .is_none()
+                .then_some(bundle.preset.program);
+            assert_eq!(managed_program_name(harness), expected, "{harness}");
+        }
+        // A harness whose program is called something else, and a launch of another program's, which has no copy of its own.
+        assert!(
+            super::ALL
+                .iter()
+                .any(|bundle| bundle.preset.harness.is_some_and(|harness| {
+                    harness != bundle.preset.program && bundle.preset.managed.is_none()
+                }))
+        );
+        assert!(
+            super::ALL
+                .iter()
+                .any(|bundle| bundle.preset.managed.is_some())
+        );
+        assert_eq!(managed_program_name("no-such-harness"), None);
     }
 }

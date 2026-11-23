@@ -297,7 +297,7 @@ impl Control {
         _: &str,
         params: &Value,
     ) -> Result<Value, (i32, String)> {
-        registry::which(params, &crate::sources::runtime_dirs())
+        registry::which(params, &crate::sources::program_dirs())
     }
 
     pub(super) fn r_restart(&self, _: &Caller, _: &str, _: &Value) -> Result<Value, (i32, String)> {

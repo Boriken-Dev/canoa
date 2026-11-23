@@ -138,6 +138,34 @@ impl Reader {
         Err("the reader is no longer offered".to_owned())
     }
 
+    /// Whether the reader's settings declare `key`.
+    pub(crate) fn declares(&self, key: &str) -> bool {
+        let registry = match &self.registry {
+            Some(registry) => registry.as_ref(),
+            None => match crate::vendors::bundled_providers() {
+                Some(registry) => registry,
+                None => return false,
+            },
+        };
+        for offer in registry.offers::<dyn UsageReader>() {
+            let ours = offer
+                .default_instance()
+                .and_then(|reader| reader.describe().ok())
+                .is_some_and(|info| info.id == self.info.id);
+            if !ours {
+                continue;
+            }
+            return offer
+                .config_schema()
+                .and_then(|schema| coqui_acp_api::guatiao::schema::inline_refs(schema).ok())
+                .is_some_and(|schema| {
+                    coqui_acp_api::guatiao::schema::SchemaRef::new(&schema)
+                        .is_some_and(|schema| schema.find(key).is_some())
+                });
+        }
+        false
+    }
+
     /// A reading of what the agent stores, from the reader configured with `config` (the entry's account settings); a reader
     /// that takes no configuration is opened as it is.
     pub(crate) fn open_configured(&self, config: &Value) -> Result<Configured, String> {

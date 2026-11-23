@@ -589,10 +589,10 @@ pub(crate) fn harness_identity(provider: Option<&str>, entry: &str) -> Option<&'
 /// The version of the program the Store installed for the provider an entry runs in this process.
 pub(crate) fn harness_version(provider: Option<&str>) -> Option<String> {
     match provider {
-        Some(program) if crate::bundled::runs_managed_by_own_name(program) => {
-            crate::sources::managed_version(program)
+        Some(harness) => {
+            crate::bundled::managed_program_name(harness).and_then(crate::sources::managed_version)
         }
-        _ => None,
+        None => None,
     }
 }
 
@@ -601,12 +601,11 @@ pub(crate) fn harness_version(provider: Option<&str>) -> Option<String> {
 /// state directory) are applied inside the provider, after the request's environment, and are not these.
 pub(crate) fn host_variables(provider: Option<&str>) -> Vec<(String, String)> {
     match provider {
-        Some(program) if crate::bundled::runs_managed_by_own_name(program) => {
-            crate::sources::managed_program(program)
-                .map(|(_, environment)| environment)
-                .unwrap_or_default()
-        }
-        _ => Vec::new(),
+        Some(harness) => crate::bundled::managed_program_name(harness)
+            .and_then(crate::sources::managed_program)
+            .map(|(_, environment)| environment)
+            .unwrap_or_default(),
+        None => Vec::new(),
     }
 }
 

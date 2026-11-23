@@ -865,12 +865,10 @@ fn usage_via_reader(
                 .filter(|value| !value.is_empty())
         })
         .or_else(|| {
-            preset.and_then(|preset| {
-                crate::bundled::runs_managed_by_own_name(preset.program)
-                    .then(|| crate::sources::managed_program(preset.program))
-                    .flatten()
-                    .map(|(path, _)| path.into_os_string())
-            })
+            preset
+                .and_then(|preset| crate::bundled::managed_program_name(preset.harness?))
+                .and_then(crate::sources::managed_program)
+                .map(|(path, _)| path.into_os_string())
         })
         .or_else(|| {
             preset
@@ -921,6 +919,13 @@ fn usage_stored(
         && !config.contains_key("executable")
     {
         config.insert("executable".to_owned(), executable.clone());
+    }
+    // A reader that declares a `search_path` is told where the host looks a program up by name.
+    if reader.declares(canoa::search::SETTING) && !config.contains_key(canoa::search::SETTING) {
+        config.insert(
+            canoa::search::SETTING.to_owned(),
+            Value::String(crate::sources::search_path().to_string_lossy().into_owned()),
+        );
     }
     let read = reader
         .open_configured(&Value::Object(config))

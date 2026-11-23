@@ -31,6 +31,7 @@ pub mod preset;
 #[cfg(feature = "profile-item")]
 #[cfg_attr(docsrs, doc(cfg(feature = "profile-item")))]
 pub mod profile_item;
+pub mod search;
 #[cfg(feature = "session-service")]
 #[cfg_attr(docsrs, doc(cfg(feature = "session-service")))]
 #[allow(

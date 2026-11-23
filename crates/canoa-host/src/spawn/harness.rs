@@ -30,7 +30,7 @@ impl Starter for Harness {
         // A profile's `PATH` is the one the agent's own commands use: the agent itself is found on the host's.
         let found = if crate::profile::sets_path(launch.env.keys().map(OsString::as_os_str)) {
             let own = std::env::var_os("PATH").unwrap_or_default();
-            let runtimes = crate::sources::runtime_dirs();
+            let runtimes = crate::sources::program_dirs();
             let own =
                 std::env::join_paths(std::env::split_paths(&own).chain(runtimes)).unwrap_or(own);
             crate::profile::found_on_own_path(

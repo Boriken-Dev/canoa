@@ -200,7 +200,7 @@ impl Command {
     ///
     /// The operating system could not start it, or the host's own process starter could not.
     pub fn spawn(&mut self) -> io::Result<Child> {
-        self.put_runtimes_on_path(&crate::sources::runtime_dirs());
+        self.put_runtimes_on_path(&crate::sources::program_dirs());
         self.put_proxy_variables();
         #[cfg(unix)]
         if let Some(link) = apart::link()? {

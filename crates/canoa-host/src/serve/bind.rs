@@ -1016,7 +1016,7 @@ impl Serving {
             what: error.to_string(),
         })?;
         // The agents the harness starts in this process are found on this process's PATH and in the Store's runtimes.
-        coqui_acp_harness::set_program_dirs(crate::sources::runtime_dirs);
+        coqui_acp_harness::set_program_dirs(crate::sources::program_dirs);
         let adapted;
         let config = match &options.portal {
             Some(sockets) => {
