@@ -997,7 +997,7 @@ dependencies = [
  "serde",
  "serde-saphyr 2.2.0",
  "serde_json",
- "sha1",
+ "sha1 0.11.0",
  "sha2 0.11.1",
  "subtle",
  "tar",
@@ -1561,7 +1561,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hmac 0.13.0",
  "percent-encoding",
- "sha1",
+ "sha1 0.11.0",
  "sha2 0.11.1",
  "subtle",
 ]
@@ -1828,7 +1828,7 @@ dependencies = [
  "hkdf 0.13.0",
  "hmac 0.13.0",
  "rand_core 0.6.4",
- "sha1",
+ "sha1 0.11.0",
  "sha2 0.11.1",
  "spake2",
  "subtle",
@@ -1885,31 +1885,60 @@ dependencies = [
 ]
 
 [[package]]
-name = "coqui-syshttp"
-version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-syshttp?rev=5d1e1e3bad78b30f4edf7c4c22478a5bdfe481bd#5d1e1e3bad78b30f4edf7c4c22478a5bdfe481bd"
+name = "coqui-proxy"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-proxy?rev=ff844043be1f895022aef5ac24e97512cf723346#ff844043be1f895022aef5ac24e97512cf723346"
 dependencies = [
  "base64 0.22.1",
  "boa_engine",
+ "boa_gc",
  "coqui-net-acl",
- "cryptoki",
  "gethostname",
  "http",
  "if-addrs",
  "libgssapi",
  "percent-encoding",
  "rustls",
+ "rustls-platform-verifier",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "coqui-sslcontext"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-sslcontext?rev=955cd9a455a288a523418daad7e846008c2bf291#955cd9a455a288a523418daad7e846008c2bf291"
+dependencies = [
+ "base64 0.22.1",
+ "cryptoki",
+ "plist",
+ "rustls",
  "rustls-cng",
+ "rustls-native-certs",
  "rustls-platform-verifier",
  "security-framework",
  "serde_json",
+ "sha1 0.10.7",
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "tracing",
- "ureq",
  "windows-registry",
  "windows-sys 0.61.2",
  "x509-cert",
+ "zeroize",
+]
+
+[[package]]
+name = "coqui-syshttp"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-syshttp?rev=8c23a6af97be812dcee8a953a629c4d80eea0a2e#8c23a6af97be812dcee8a953a629c4d80eea0a2e"
+dependencies = [
+ "coqui-proxy",
+ "coqui-sslcontext",
+ "rustls",
+ "thiserror 2.0.21",
+ "ureq",
 ]
 
 [[package]]
@@ -4750,6 +4779,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "plist"
+version = "1.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d86a77b7d9cdebd9643c180c158748db7d894b24a3935ed4b5843e698ae086eb"
+dependencies = [
+ "base64 0.23.1",
+ "indexmap 2.14.2",
+ "quick-xml",
+ "serde",
+ "time",
+]
+
+[[package]]
 name = "polling"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4916,6 +4958,15 @@ name = "qrcode"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace1a365f55004297f2cf24acfd96d02966246ca423385273b58a7dc873ee14d"
+
+[[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "quinn"
@@ -5751,6 +5802,17 @@ dependencies = [
 
 [[package]]
 name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "sha1"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
@@ -6503,7 +6565,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.10.4",
- "sha1",
+ "sha1 0.11.0",
  "thiserror 2.0.21",
 ]
 
@@ -7525,7 +7587,7 @@ dependencies = [
  "nix",
  "pbkdf2",
  "ppmd-rust",
- "sha1",
+ "sha1 0.11.0",
  "time",
  "typed-path",
  "windows-sys 0.61.2",
