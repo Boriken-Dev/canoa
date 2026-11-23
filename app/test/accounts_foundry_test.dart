@@ -52,7 +52,8 @@ void main() {
     await tester.tap(find.byKey(const Key('ask-submit')));
     await tester.pump();
     await tester.pump();
-    expect(host.inputsGiven.single, {'model': 'qwen3-14b-generic-gpu:2'});
+    // The engine the schema defaults to is sent as the form shows it.
+    expect(host.inputsGiven.single, {'model': 'qwen3-14b-generic-gpu:2', 'engine': 'service'});
     expect(host.signIns.single.method, 'foundry-local');
     expect(host.signIns.single.name, 'qwen');
   });

@@ -6,6 +6,7 @@
       "title": "Foundry Local",
       "description": "A model run by Foundry Local on this computer, served to the agent through a gateway the host runs for each session. No credential is kept: the model's name and where the service is are the account.",
       "settings": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "model": {
@@ -14,10 +15,21 @@
             "description": "The model variant to serve, as `foundry model list` shows it (`qwen3-14b-generic-gpu:2`). Load it in Foundry Local first: this never loads one."
           },
           "endpoint": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uri",
             "title": "Service address",
             "description": "The Foundry Local service, `http://127.0.0.1:PORT`. The running service is used when this is empty."
+          },
+          "library": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "title": "Native library",
+            "description": "For the `sdk` engine: the folder or file of Foundry Local's native library, a copy made outside the installed package, which a program cannot load from."
           },
           "engine": {
             "type": "string",
@@ -25,25 +37,29 @@
               "service",
               "sdk"
             ],
+            "x-enum-labels": {
+              "service": "The Foundry Local service the person runs, which holds the model.",
+              "sdk": "Foundry Local's SDK, in the host's own process, which then holds the model."
+            },
             "title": "Engine",
-            "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory."
+            "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory.",
+            "default": "service"
           },
           "answer_seconds": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 1,
+            "maximum": 18446744073709551615,
             "title": "Longest answer (seconds)",
             "description": "How long one answer may take before the request to the service is ended, for the `service` engine. A large prompt on a slow model needs a long time; the default is 1800 (30 minutes), and there is no ceiling."
-          },
-          "library": {
-            "type": "string",
-            "title": "Native library",
-            "description": "For the `sdk` engine: the folder or file of Foundry Local's native library, a copy made outside the installed package, which a program cannot load from."
           }
         },
+        "additionalProperties": false,
         "required": [
           "model"
-        ],
-        "additionalProperties": false
+        ]
       },
       "endpoints": [
         {
@@ -72,6 +88,7 @@
       "description": "Names a model Foundry Local serves. It is not loaded or checked here: load it in Foundry Local before a session.",
       "produces": "foundry-local",
       "inputs": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "model": {
@@ -80,10 +97,21 @@
             "description": "The model variant to serve, as `foundry model list` shows it (`qwen3-14b-generic-gpu:2`). Load it in Foundry Local first: this never loads one."
           },
           "endpoint": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uri",
             "title": "Service address",
             "description": "The Foundry Local service, `http://127.0.0.1:PORT`. The running service is used when this is empty."
+          },
+          "library": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "title": "Native library",
+            "description": "For the `sdk` engine: the folder or file of Foundry Local's native library, a copy made outside the installed package, which a program cannot load from."
           },
           "engine": {
             "type": "string",
@@ -91,25 +119,29 @@
               "service",
               "sdk"
             ],
+            "x-enum-labels": {
+              "service": "The Foundry Local service the person runs, which holds the model.",
+              "sdk": "Foundry Local's SDK, in the host's own process, which then holds the model."
+            },
             "title": "Engine",
-            "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory."
+            "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory.",
+            "default": "service"
           },
           "answer_seconds": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 1,
+            "maximum": 18446744073709551615,
             "title": "Longest answer (seconds)",
             "description": "How long one answer may take before the request to the service is ended, for the `service` engine. A large prompt on a slow model needs a long time; the default is 1800 (30 minutes), and there is no ceiling."
-          },
-          "library": {
-            "type": "string",
-            "title": "Native library",
-            "description": "For the `sdk` engine: the folder or file of Foundry Local's native library, a copy made outside the installed package, which a program cannot load from."
           }
         },
+        "additionalProperties": false,
         "required": [
           "model"
-        ],
-        "additionalProperties": false
+        ]
       },
       "steps": [],
       "remote": false
