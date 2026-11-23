@@ -28,6 +28,13 @@ void main() {
     expect(leftText(const UsageBucket(id: 'x'), _noon), isNull);
   });
 
+  test('a little left is not none and a little used is not none used', () {
+    // 0.78% left reads 1%, as Antigravity's own `/usage` says it; 99.6% left reads 99%.
+    expect(leftText(_weekly(usedPermille: 992, resetsInSeconds: 3600), _noon), '1% left');
+    expect(leftText(_weekly(usedPermille: 4, resetsInSeconds: 3600), _noon), '99% left');
+    expect(leftText(_weekly(usedPermille: 1000, resetsInSeconds: 3600), _noon), '0% left');
+  });
+
   test('the figures of a key say where they came from, and a plan window says nothing of it', () {
     UsageBucket from(String source, {String unit = 'tokens'}) => UsageBucket(id: 'x', unit: UsageUnit(unit), used: 5, limit: 10, source: source);
     expect(sourceText(from('response_headers')), "From the provider's rate-limit headers");
@@ -78,6 +85,76 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsNWidgets(2));
     await tester.pumpWidget(const MaterialApp(home: Scaffold(body: AccountUsageView(report: null))));
     expect(find.byKey(const Key('account-usage-empty')), findsOneWidget);
+  });
+
+  // Antigravity's three groups as `agy` lists them: each a set of models with its own weekly and five-hour window, one of which
+  // does not apply while the weekly one is used up.
+  UsageBucket window(String id, String group, String label, List<String> names, {int? left, bool disabled = false, int days = 0, int hours = 0}) => UsageBucket(
+    id: id,
+    label: label,
+    group: group,
+    modelNames: names,
+    limit: disabled ? null : 1000,
+    remaining: disabled ? null : left,
+    status: disabled ? 'disabled' : (left == 0 ? 'exhausted' : 'ok'),
+    refill: UsageRefill('fixed_window', length: Duration(days: days, hours: hours), resetsAt: _noon + (days * 24 + hours) * 3600 - 600),
+  );
+
+  testWidgets('the view lists each group once with its models and the windows of it, one that does not apply said so', (tester) async {
+    const gemini = ['Gemini 4 Neon', 'Gemini 3.8 Flash'];
+    const claude = ['Claude Opus 5.5', 'GPT-OSS 120B'];
+    final report = UsageReport(supported: true, buckets: [
+      window('gemini-weekly', 'Gemini Models', 'Weekly Limit Remaining', gemini, left: 8, days: 7),
+      window('gemini-5h', 'Gemini Models', 'Five Hour Limit Remaining', gemini, left: 1000, hours: 5),
+      window('3p-weekly', 'Claude and GPT models', 'Weekly Limit Remaining', claude, left: 0, days: 7),
+      window('3p-5h', 'Claude and GPT models', 'Five Hour Limit Remaining', claude, disabled: true, hours: 5),
+      window('argon-weekly', 'Gemini 4 Argon', 'Gemini 4 Argon Weekly Limit', ['Gemini 4 Argon'], left: 0, days: 7),
+    ]);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: AccountUsageView(report: report, now: _noon)))));
+
+    for (final group in ['Gemini Models', 'Claude and GPT models', 'Gemini 4 Argon']) {
+      expect(find.byKey(Key('account-group $group')), findsOneWidget);
+      expect(find.text(group), findsOneWidget);
+    }
+    // The group's models are said once under its name, not under each of its windows.
+    expect(find.text('Models: Gemini 4 Neon, Gemini 3.8 Flash'), findsOneWidget);
+    expect(find.text('Models: Claude Opus 5.5, GPT-OSS 120B'), findsOneWidget);
+    expect(find.text('Models: Gemini 4 Argon'), findsOneWidget);
+    expect(find.byKey(const Key('account-models gemini-5h')), findsNothing);
+    // A group is above its windows, and the windows keep the report's order, not the one by what is used.
+    double y(String key) => tester.getTopLeft(find.byKey(Key(key))).dy;
+    expect(y('account-group Gemini Models'), lessThan(y('account-usage gemini-weekly')));
+    expect(y('account-usage gemini-weekly'), lessThan(y('account-usage gemini-5h')));
+    expect(y('account-usage gemini-5h'), lessThan(y('account-group Claude and GPT models')));
+    expect(y('account-group Claude and GPT models'), lessThan(y('account-usage 3p-weekly')));
+    expect(y('account-usage 3p-weekly'), lessThan(y('account-usage 3p-5h')));
+    expect(y('account-usage 3p-5h'), lessThan(y('account-group Gemini 4 Argon')));
+
+    expect(find.text('1% left'), findsOneWidget);
+    expect(find.text('100% left'), findsOneWidget);
+    expect(find.text('Disabled'), findsOneWidget);
+    expect(find.byKey(const Key('account-left 3p-5h')), findsOneWidget);
+    // A window that does not apply has no time of its own to reset at.
+    expect(find.byKey(const Key('account-reset 3p-5h')), findsNothing);
+    expect(find.text('0% left'), findsNWidgets(2));
+    // The disabled window has no bar: four of the five windows have one.
+    expect(find.byType(LinearProgressIndicator), findsNWidgets(4));
+  });
+
+  testWidgets('a bucket that is in no group says which models it covers under it', (tester) async {
+    final report = UsageReport(supported: true, buckets: [
+      UsageBucket(id: 'five_hour', label: 'Session (5 hours)', models: UsageCoverage.all, used: 120, limit: 1000, refill: UsageRefill('fixed_window', length: const Duration(hours: 5), resetsAt: _noon + 3600)),
+      UsageBucket(id: 'seven_day_opus', label: 'Weekly, Opus', models: const UsageCoverage('only', ['opus']), modelNames: const ['Opus'], used: 300, limit: 1000, refill: UsageRefill('fixed_window', length: const Duration(days: 7), resetsAt: _noon + 86400)),
+      UsageBucket(id: 'oauth_apps', label: 'Weekly, OAuth apps', used: 10, limit: 1000, refill: UsageRefill('fixed_window', length: const Duration(days: 7), resetsAt: _noon + 86400)),
+    ]);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: AccountUsageView(report: report, now: _noon)))));
+
+    expect(find.text('Models: All models'), findsOneWidget);
+    expect(find.text('Models: Opus'), findsOneWidget);
+    // A bucket that says nothing of its models gets no line.
+    expect(find.byKey(const Key('account-models oauth_apps')), findsNothing);
+    expect(find.byKey(const Key('account-models five_hour')), findsOneWidget);
+    expect(find.byKey(const Key('account-models seven_day_opus')), findsOneWidget);
   });
 
   testWidgets('Settings shows the usage the sessions on an account last heard, by the account\'s id', (tester) async {

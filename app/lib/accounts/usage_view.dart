@@ -2,12 +2,47 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageBucket, UsageRepor
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// How much of [bucket] is left, as Claude's and Codex's usage pages say it: `38% left`. Null when the bucket gives no fraction,
-/// and for a window that has ended, whose figures are of the window before.
+/// How much of [bucket] is left, as Claude's and Codex's usage pages say it: `38% left`, to the nearest percent. Some is never said
+/// as none and some used is never said as none used. Null when the bucket gives no fraction, and for a window that has ended,
+/// whose figures are of the window before.
 String? leftText(UsageBucket bucket, int now) {
   final used = bucket.fractionPermille;
   if (used == null || bucket.pastReset(now)) return null;
-  return '${(1000 - used) ~/ 10}% left';
+  final left = 1000 - used;
+  var percent = (left + 5) ~/ 10;
+  if (left > 0 && percent == 0) percent = 1;
+  if (left < 1000 && percent == 100) percent = 99;
+  return '$percent% left';
+}
+
+/// The models [bucket] covers, in words: the names the harness gave, else the ids it covers, else `All models`. Null when it says
+/// nothing of them, so no line is shown.
+String? modelsText(UsageBucket bucket) {
+  if (bucket.modelNames.isNotEmpty) return bucket.modelNames.join(', ');
+  return switch (bucket.models.kind) {
+    'all' => 'All models',
+    'only' when bucket.models.models.isNotEmpty => bucket.models.models.join(', '),
+    _ => null,
+  };
+}
+
+/// The buckets as the view lists them: when the harness sorts them into groups, each group once, at the place its first bucket
+/// has in the report, with its windows in the report's order; otherwise one section for each bucket, in the order of [ordered].
+List<(String?, List<UsageBucket>)> usageSections(UsageReport report, int now) {
+  if (!report.buckets.any((bucket) => bucket.group != null)) {
+    return [for (final bucket in ordered(report, now)) (null, [bucket])];
+  }
+  final sections = <(String?, List<UsageBucket>)>[];
+  for (final bucket in report.buckets) {
+    final group = bucket.group;
+    final at = group == null ? -1 : sections.indexWhere((section) => section.$1 == group);
+    if (at >= 0) {
+      sections[at].$2.add(bucket);
+    } else {
+      sections.add((group, [bucket]));
+    }
+  }
+  return sections;
 }
 
 /// Where an API key's figure came from, in words: the provider's rate-limit headers, a gateway's key information, or the tokens this
@@ -114,27 +149,64 @@ class AccountUsageView extends StatelessWidget {
     final at = now ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final scheme = Theme.of(context).colorScheme;
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
-    final buckets = report == null ? const <UsageBucket>[] : ordered(report!, at);
-    if (buckets.isEmpty) {
+    final sections = report == null ? const <(String?, List<UsageBucket>)>[] : usageSections(report!, at);
+    if (sections.isEmpty) {
       return Text(
         report == null ? 'No usage heard yet: it shows once a session has run on this account.' : 'Nothing reported yet',
         key: const Key('account-usage-empty'),
         style: small,
       );
     }
+    final text = Theme.of(context).textTheme;
+    Widget bucketOf(UsageBucket bucket, {required bool models}) => Padding(
+      key: Key('account-usage ${bucket.id}'),
+      padding: const EdgeInsets.only(bottom: 12),
+      child: _Bucket(
+        bucket: bucket,
+        now: at,
+        warnPermille: warnPermille,
+        large: large,
+        readAt: bucket.observedAt > 0 ? bucket.observedAt : (readAt ?? report?.observedAt ?? 0),
+        models: models,
+      ),
+    );
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      for (final bucket in buckets)
-        Padding(
-          key: Key('account-usage ${bucket.id}'),
-          padding: const EdgeInsets.only(bottom: 12),
-          child: _Bucket(bucket: bucket, now: at, warnPermille: warnPermille, large: large, readAt: bucket.observedAt > 0 ? bucket.observedAt : (readAt ?? report?.observedAt ?? 0)),
-        ),
+      for (final (group, buckets) in sections)
+        if (group == null)
+          for (final bucket in buckets) bucketOf(bucket, models: true)
+        else
+          Padding(
+            key: Key('account-group $group'),
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(group, style: text.titleSmall),
+              // A group's windows share its models: they are said once, under its name.
+              if (_sharedModels(buckets) case final models?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('Models: $models', key: Key('account-models $group'), style: small),
+                ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  for (final bucket in buckets) bucketOf(bucket, models: _sharedModels(buckets) == null),
+                ]),
+              ),
+            ]),
+          ),
     ]);
   }
 }
 
+/// What every bucket of a group says of its models, when they all say the same; null when one differs or none says.
+String? _sharedModels(List<UsageBucket> buckets) {
+  final said = {for (final bucket in buckets) modelsText(bucket)};
+  return said.length == 1 ? said.first : null;
+}
+
 class _Bucket extends StatelessWidget {
-  const _Bucket({required this.bucket, required this.now, required this.warnPermille, required this.large, required this.readAt});
+  const _Bucket({required this.bucket, required this.now, required this.warnPermille, required this.large, required this.readAt, required this.models});
 
   final UsageBucket bucket;
   final int now;
@@ -142,12 +214,15 @@ class _Bucket extends StatelessWidget {
   final bool large;
   final int readAt;
 
+  /// Whether the models the bucket covers are said under it, as they are not once for a group.
+  final bool models;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final small = text.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
-    final left = leftText(bucket, now) ?? (bucket.isExhausted ? 'Limit reached' : figureOf(bucket));
+    final left = bucket.isDisabled ? 'Disabled' : leftText(bucket, now) ?? (bucket.isExhausted ? 'Limit reached' : figureOf(bucket));
     final level = levelOf(bucket, now, warnPermille: warnPermille);
     final colour = switch (level) {
       UsageLevel.danger => scheme.error,
@@ -155,7 +230,7 @@ class _Bucket extends StatelessWidget {
       UsageLevel.calm => scheme.primary,
     };
     final used = bucket.pastReset(now) ? null : bucket.fractionPermille;
-    final reset = resetText(bucket, now), pace = forecastText(bucket, now);
+    final reset = bucket.isDisabled ? null : resetText(bucket, now), pace = forecastText(bucket, now);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         Expanded(child: Text(bucket.name, style: text.bodyMedium)),
@@ -176,6 +251,8 @@ class _Bucket extends StatelessWidget {
           const SizedBox(width: 4),
           Text(bucket.isExhausted ? 'Limit reached' : level == UsageLevel.danger ? 'Almost used up' : 'Running low', style: small?.copyWith(color: colour)),
         ]),
+      if (models)
+        if (modelsText(bucket) case final covered?) Text('Models: $covered', key: Key('account-models ${bucket.id}'), style: small),
       if (reset != null) Text(reset, key: Key('account-reset ${bucket.id}'), style: small),
       if (sourceText(bucket) case final source?) Text(source, key: Key('account-source ${bucket.id}'), style: small),
       if (pace != null) Text(pace, key: Key('account-pace ${bucket.id}'), style: small?.copyWith(color: level == UsageLevel.calm ? null : colour)),
