@@ -1,6 +1,6 @@
 //! The Store answers from what it keeps: a stand-in publisher counts its requests, so a second list that reaches it would show.
 
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -20,6 +20,24 @@ use crate::store::shelf::Shelf;
 static ASKED: AtomicUsize = AtomicUsize::new(0);
 /// The tests share the one publisher, so they run one after another.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+/// While set, the publisher holds its answer, so a refresh in the background cannot finish before the test lets it.
+static HOLD: AtomicBool = AtomicBool::new(false);
+
+/// Holds the publisher's answers until dropped, also when the test fails.
+struct Held;
+
+impl Held {
+    fn new() -> Self {
+        HOLD.store(true, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        HOLD.store(false, Ordering::SeqCst);
+    }
+}
 
 fn asked() -> usize {
     ASKED.load(Ordering::SeqCst)
@@ -65,6 +83,10 @@ impl Recipe for Counts {
     /// Says a version that is the number of this request, so which answer a client got shows.
     fn latest(&self, _channel: Option<&str>, _tools: &Object<dyn InstallTools>) -> LatestReport {
         let n = ASKED.fetch_add(1, Ordering::SeqCst) + 1;
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while HOLD.load(Ordering::SeqCst) && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         LatestReport::known(format!("{n}.0.0"))
     }
 
@@ -209,10 +231,13 @@ fn a_stale_version_is_served_at_once_and_the_publisher_is_asked_once() {
     let control = control_over(&dir, caches(Duration::from_millis(80), Duration::ZERO));
     assert_eq!(latest(&control, false)["version"], "1.0.0");
     std::thread::sleep(Duration::from_millis(160));
+    // The refresh the first stale answer starts is held, so every answer meanwhile has to come from what is kept.
+    let held = Held::new();
     for _ in 0..3 {
         let stale = latest(&control, false);
         assert_eq!(stale["version"], "1.0.0", "the old one, at once: {stale}");
     }
+    drop(held);
     wait_for("the publisher is asked again", || {
         control
             .caches
