@@ -398,17 +398,25 @@ fn plain(path: &Path) -> String {
 /// are on the `PATH`.
 const STORE_ALIASES: &str = "/windowsapps/";
 
+/// Git for Windows' own bash, which its `bin/bash.exe` starts after setting up the environment; Git's shells put this folder on
+/// the `PATH`.
+const GIT_USR_BASH: &str = "/usr/bin/bash.exe";
+
 /// What `path` is a program of, so the same one found twice is listed once: the Store's alias `WindowsApps/pwsh.exe` and the
-/// package's `WindowsApps/Microsoft.PowerShell_x/pwsh.exe` name one program; any other path names itself.
+/// package's `WindowsApps/Microsoft.PowerShell_x/pwsh.exe` name one program, as do Git for Windows' `bin/bash.exe` and the
+/// `usr/bin/bash.exe` it starts; any other path names itself.
 fn program_key(path: &Path) -> String {
     let text = plain(path);
-    match text.find(STORE_ALIASES) {
-        Some(at) => {
-            let file = text.rsplit('/').next().unwrap_or_default();
-            format!("{}{STORE_ALIASES}{file}", &text[..at])
-        }
-        None => text,
+    if let Some(at) = text.find(STORE_ALIASES) {
+        let file = text.rsplit('/').next().unwrap_or_default();
+        return format!("{}{STORE_ALIASES}{file}", &text[..at]);
     }
+    if Origin::of_bash(path) == Origin::GitForWindows
+        && let Some(root) = text.strip_suffix(GIT_USR_BASH)
+    {
+        return format!("{root}/bin/bash.exe");
+    }
+    text
 }
 
 /// Whether `path` is the Store's alias itself, which a person can run from anywhere, not a copy inside the package's folder.
@@ -857,6 +865,34 @@ mod tests {
                 "{harness}"
             );
         }
+    }
+
+    #[test]
+    fn git_bash_and_the_bash_it_starts_on_the_path_are_listed_once_by_the_launcher() {
+        let root = scratch("git-usr");
+        let git = root.join("Program Files/Git");
+        // A host started from Git Bash has Git's own `usr/bin` (and `mingw64/bin`, with its git) on the PATH.
+        let lookup = Lookup {
+            path: vec![git.join("mingw64/bin"), git.join("usr/bin")],
+            ..windows(&root)
+        };
+        for file in [
+            "bin/bash.exe",
+            "usr/bin/bash.exe",
+            "mingw64/bin/git.exe",
+            "usr/bin/git.exe",
+        ] {
+            touch(&git.join(file));
+        }
+        touch(&root.join("msys64/usr/bin/bash.exe"));
+        let found = detect(&lookup);
+        assert_eq!(ids(&found), ["git-bash", "msys2"], "{found:#?}");
+        assert!(
+            found[0].path.ends_with("Git/bin/bash.exe"),
+            "{:?}",
+            found[0].path
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
