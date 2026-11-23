@@ -1,0 +1,109 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## 0.1.2 (2026-10-31)
+### Added
+- `c_tilde` getter on `Signature` ([#1362])
+
+### Changed
+- Place heavy bits of the signature on the heap when available ([#1419])
+- Return an error when signing exhausts rejection sampling ([#1481])
+- Bump `module-lattice` to v0.2.4 ([#1494])
+
+### Fixed
+- Construct and clone expanded matrices one row at a time ([#1444])
+- Reuse public key during key generation ([#1461])
+- Zeroize the SHAKE state when the `zeroize` feature is enabled, by wiring
+  `shake/zeroize` into it ([#1473])
+- Return an error instead of panicking from the fallible signing APIs when rejection
+  sampling exhausts its attempts ([#1481])
+- Reject `AlgorithmIdentifier` parameters in PKCS#8 and SPKI keys ([#1482])
+- Reject oversized contexts in `compute_mu` ([#1489])
+
+### Security
+- Fixed constant time issues ([#1386])
+- Bump `crypto-bigint` to v0.7.7; MSRV 1.87 ([#1475])
+
+[#1362]: https://github.com/RustCrypto/signatures/issues/1362
+[#1386]: https://github.com/RustCrypto/signatures/issues/1386
+[#1419]: https://github.com/RustCrypto/signatures/issues/1419
+[#1444]: https://github.com/RustCrypto/signatures/issues/1444
+[#1461]: https://github.com/RustCrypto/signatures/issues/1461
+[#1473]: https://github.com/RustCrypto/signatures/issues/1473
+[#1475]: https://github.com/RustCrypto/signatures/issues/1475
+[#1481]: https://github.com/RustCrypto/signatures/issues/1481
+[#1482]: https://github.com/RustCrypto/signatures/issues/1482
+[#1489]: https://github.com/RustCrypto/signatures/issues/1489
+[#1494]: https://github.com/RustCrypto/signatures/issues/1494
+
+## 0.1.1 (2026-06-05)
+### Fixed
+- Enable `module-lattice/alloc` when `alloc` feature is enabled ([#1365])
+
+[#1365]: https://github.com/RustCrypto/signatures/pull/1365
+
+## 0.1.0 (2026-05-17)
+### Added
+- Implement `MultipartSigner/Verifier` ([#982])
+- Implement the `signature::Keypair` trait for `SigningKey` ([#1008])
+- Support for external mu ([#1023], [#1074])
+- Seed support i.e. `SigningKey::{from_seed, to_seed}` ([#1054], [#1094], [#1341])
+- Implement `Hash` on `Signature` and `VerifyingKey` types ([#1309])
+- Heap offload support for large values when `alloc` is enabled ([#1320], [#1344], [#1345])
+- Implement `KeyInit`, `KeyExport`, `KeySizeUser`, and `Generate` for `SigningKey` ([#1342])
+
+### Changed
+- Bump `signature` dependency to v3 ([#954], [#1321])
+- Update PKCS#8 support ([#1093])
+- Rename and deprecate `ExpandedSigningKey` ([#1145])
+- Use the `module-lattice` crate ([#1189])
+- Use `ctutils` for constant-time selection; avoid branches ([#1245])
+- Make `PartialEq` impl for `ExpandedSigningKey` constant time ([#1286])
+- Bump `pkcs8` dependency to v0.11 ([#1316])
+- Migrate from `sha3` to `shake` ([#1355])
+
+### Fixed
+- `no_std` support ([#989])
+- Use Barrett reduction instead of integer division to prevent side-channels ([#1144])
+- Wycheproof verification test failures ([#1187])
+- Fix `use_hint` when 𝓇₀ = 0 ([#1194])
+- Lower stack usage ([#1259], [#1261])
+
+### Removed
+- `KeyGen` trait has been removed and replaced by `KeyInit` and `Generate` ([#1349])
+
+[#954]: https://github.com/RustCrypto/signatures/pull/954
+[#982]: https://github.com/RustCrypto/signatures/pull/982
+[#989]: https://github.com/RustCrypto/signatures/pull/989
+[#1008]: https://github.com/RustCrypto/signatures/pull/1008
+[#1023]: https://github.com/RustCrypto/signatures/pull/1023
+[#1074]: https://github.com/RustCrypto/signatures/pull/1074
+[#1054]: https://github.com/RustCrypto/signatures/pull/1054
+[#1093]: https://github.com/RustCrypto/signatures/pull/1093
+[#1094]: https://github.com/RustCrypto/signatures/pull/1094
+[#1144]: https://github.com/RustCrypto/signatures/pull/1144
+[#1145]: https://github.com/RustCrypto/signatures/pull/1145
+[#1187]: https://github.com/RustCrypto/signatures/pull/1187
+[#1189]: https://github.com/RustCrypto/signatures/pull/1189
+[#1194]: https://github.com/RustCrypto/signatures/pull/1194
+[#1245]: https://github.com/RustCrypto/signatures/pull/1245
+[#1259]: https://github.com/RustCrypto/signatures/pull/1259
+[#1261]: https://github.com/RustCrypto/signatures/pull/1261
+[#1286]: https://github.com/RustCrypto/signatures/pull/1286
+[#1309]: https://github.com/RustCrypto/signatures/pull/1309
+[#1316]: https://github.com/RustCrypto/signatures/pull/1316
+[#1320]: https://github.com/RustCrypto/signatures/pull/1320
+[#1321]: https://github.com/RustCrypto/signatures/pull/1321
+[#1341]: https://github.com/RustCrypto/signatures/pull/1341
+[#1344]: https://github.com/RustCrypto/signatures/pull/1344
+[#1342]: https://github.com/RustCrypto/signatures/pull/1342
+[#1345]: https://github.com/RustCrypto/signatures/pull/1345
+[#1349]: https://github.com/RustCrypto/signatures/pull/1349
+[#1355]: https://github.com/RustCrypto/signatures/pull/1355
+
+## 0.0.4 (2025-04-10)
+- Initial release

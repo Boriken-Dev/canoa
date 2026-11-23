@@ -1,0 +1,64 @@
+# coqui-access/providers/access/passkey at 0c73889f7e38310f8bea4614e7a77657520b628a, with what it inherits written out.
+[package]
+name = "coqui-access-passkey"
+description = "Passkeys (WebAuthn) as a sign-in: registration through the Accounts kind, the challenge through the Challenger kind and the signed answer through the Authenticator kind"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"
+[dependencies.coqui-access-kit]
+path = "crates/coqui-access-kit"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive"]
+[dependencies.coqui-peer]
+git = "https://github.com/Boriken-Dev/coqui-peer"
+rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
+[dependencies.guatiao-serde]
+git = "https://github.com/Boriken-Dev/guatiao"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
+default-features = false
+[dependencies.serde_json]
+version = "1"
+[dependencies.url]
+version = "2"
+[dependencies.data-encoding]
+version = "2.11"
+[dependencies.webauthn-rs-core]
+version = "=0.6.2"
+[dependencies.webauthn-attestation-ca]
+version = "=0.6.2"
+[dev-dependencies]
+[dev-dependencies.passkey-authenticator]
+version = "0.6"
+features = ["testable"]
+[dev-dependencies.passkey-crypto]
+version = "0.1"
+[dev-dependencies.public-suffix]
+version = "0.1"
+[dev-dependencies.async-trait]
+version = "0.1"
+[dev-dependencies.passkey-client]
+version = "0.6"
+[dev-dependencies.passkey-types]
+version = "0.6"
+features = ["serialize_bytes_as_base64_string"]
+[dev-dependencies.tokio]
+version = "1"
+default-features = false
+features = ["rt", "macros"]
+[dev-dependencies.tempfile]
+version = "3"
+[dev-dependencies.rcgen]
+version = "0.14"
+[dev-dependencies.sha2]
+version = "0.11.1"
+default-features = false

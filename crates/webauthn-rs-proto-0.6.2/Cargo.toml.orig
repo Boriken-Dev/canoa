@@ -1,0 +1,55 @@
+[package]
+name = "webauthn-rs-proto"
+description = "Webauthn Specification Bindings"
+readme = "README.md"
+keywords = ["webauthn", "authentication"]
+categories = ["authentication", "web-programming"]
+
+version = { workspace = true }
+authors = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+repository = { workspace = true }
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+
+# Origin-checking, this is an internal implementation detail
+origin = []
+
+# WASM bindings
+wasm = ["wasm-bindgen", "web-sys", "js-sys", "serde-wasm-bindgen"]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_with.workspace = true
+url = { workspace = true, features = ["serde"] }
+
+# Webauthn Components
+wasm-bindgen = { version = "0.2", features = [
+    "serde-serialize",
+], optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[dependencies.web-sys]
+version = "0.3"
+optional = true
+features = [
+    "CredentialCreationOptions",
+    "CredentialRequestOptions",
+    "PublicKeyCredential",
+    "PublicKeyCredentialCreationOptions",
+    "AuthenticationExtensionsClientInputs",
+    "AuthenticationExtensionsClientOutputs",
+    "console",
+]
