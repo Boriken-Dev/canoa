@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whisper"]
+members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whisper"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -163,6 +163,7 @@ canoa-git-bash = { path = "extensions/canoa-git-bash" }
 canoa-grok = { path = "extensions/canoa-grok" }
 canoa-litellm = { path = "extensions/canoa-litellm" }
 canoa-node = { path = "extensions/canoa-node" }
+canoa-mail = { path = "extensions/canoa-mail" }
 canoa-microsoft-mail = { path = "extensions/canoa-microsoft-mail" }
 canoa-office = { path = "extensions/canoa-office" }
 canoa-openai = { path = "extensions/canoa-openai" }

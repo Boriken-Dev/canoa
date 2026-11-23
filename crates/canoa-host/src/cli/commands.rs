@@ -1,4 +1,4 @@
-//! Implementations of `canoa` subcommands (`serve`, `native`, `pair`, `accounts`, `mail`, `check`, `options`, etc.).
+//! Implementations of `canoa` subcommands (`serve`, `native`, `pair`, `accounts`, `service`, `check`, `options`, etc.).
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::args::{
-    AccountsCommand, ConfigArgs, ForceArg, Format, MailAddArgs, MailCommand, MethodArg,
-    NativeAction, NativeBrowser, OptionsArgs, ServeArgs,
+    AccountsCommand, ConfigArgs, ForceArg, Format, MethodArg, NativeAction, NativeBrowser,
+    OptionsArgs, ServeArgs, ServiceArgs,
 };
 use super::{Failed, Front, STATUS_HELD, STATUS_RESTART, bridge, home_of, store};
 use crate::accounts::commands::Env as AccountsEnv;
@@ -515,54 +515,45 @@ pub(super) fn accounts(command: AccountsCommand, front: &dyn Front) -> Result<()
     }
 }
 
-pub(super) fn mail(command: MailCommand, front: &dyn Front) -> Result<(), Failed> {
-    use crate::mail::commands as run;
-    match command {
-        MailCommand::List { config } => run::list(&account_env(&config, front)?, config.format),
-        MailCommand::Add(args) => {
-            let MailAddArgs {
-                name,
-                backend,
-                settings,
-                email,
-                server,
-                autodiscover,
-                user,
-                profile,
-                password_env,
-                timeout_secs,
-                config,
-            } = *args;
-            let mut map = serde_json::Map::new();
-            for (k, v) in settings {
-                map.insert(k, v);
+pub(super) fn service(args: ServiceArgs, front: &dyn Front) -> Result<(), Failed> {
+    let ServiceArgs {
+        id,
+        method,
+        params,
+        config,
+    } = args;
+    let env = account_env(&config, front)?;
+    let text = if params == "-" {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
+            .map_err(|error| Failed::run(error.to_string()))?;
+        text
+    } else {
+        params
+    };
+    let params: serde_json::Value = if text.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(&text).map_err(|_| Failed::usage("the parameters are not JSON"))?
+    };
+    let layers = layers_of(&config, front, false)?;
+    let host = Arc::new(crate::services::HostServices::new(
+        &env.config,
+        Some(layers),
+        Some(env.home.dir().to_path_buf()),
+    ));
+    let services = crate::services::Services::new(host);
+    let answer = services
+        .control(&format!("{id}/{method}"), &params)
+        .map_err(|(why, message)| match why {
+            crate::services::Failure::NoMethod | crate::services::Failure::BadParams => {
+                Failed::usage(message)
             }
-            for (k, v) in [
-                ("email", email),
-                ("server", server),
-                ("autodiscover", autodiscover),
-                ("user", user),
-                ("profile", profile),
-            ] {
-                if let Some(v) = v {
-                    map.insert(k.to_owned(), serde_json::Value::String(v));
-                }
+            crate::services::Failure::NotFound | crate::services::Failure::Refused => {
+                Failed::run(message)
             }
-            run::add(
-                &account_env(&config, front)?,
-                &name,
-                &run::NewAccount {
-                    backend,
-                    id: None,
-                    password_env,
-                    timeout_secs,
-                    settings: map,
-                },
-                config.format,
-            )
-        }
-        MailCommand::Remove { name, config } => run::remove(&account_env(&config, front)?, &name),
-    }
+        })?;
+    print(front, &answer.to_string())
 }
 
 pub(super) fn layers(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {

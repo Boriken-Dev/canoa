@@ -10,10 +10,7 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 use super::entries_parse::TransportSpec;
-use super::profiles::settings_of;
-use super::{
-    ConfigError, DelegateConfig, KbConfig, MailAccount, MailConfig, NetworkConfig, OpenerConfig,
-};
+use super::{ConfigError, DelegateConfig, KbConfig, NetworkConfig, OpenerConfig};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -194,7 +191,9 @@ pub(super) struct RawHost {
     pub(super) network: Option<RawNetwork>,
     pub(super) delegate: Option<RawDelegate>,
     pub(super) kb: Option<RawKb>,
-    pub(super) mail: Option<RawMail>,
+    /// `[host.services.ID]`: the table of each session service, which the service reads.
+    #[serde(default)]
+    pub(super) services: IndexMap<String, toml::Table>,
     pub(super) mcp_list: Option<RawMcpList>,
     #[serde(default)]
     pub(super) environments: IndexMap<String, RawEnvironment>,
@@ -394,96 +393,6 @@ impl RawKb {
             llm_api_key_env: self.llm_api_key_env,
             llm_candidates: self.llm_candidates,
             llm_timeout_secs: self.llm_timeout_secs,
-        })
-    }
-}
-
-/// `[host.mail]`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RawMail {
-    pub(super) tools: Option<bool>,
-    #[serde(default)]
-    pub(super) accounts: IndexMap<String, RawMailAccount>,
-}
-
-/// `[host.mail.accounts.NAME]`.
-#[derive(Deserialize)]
-pub(super) struct RawMailAccount {
-    pub(super) backend: Option<String>,
-    pub(super) password_env: Option<String>,
-    pub(super) id: Option<String>,
-    pub(super) timeout_secs: Option<u64>,
-    #[serde(flatten)]
-    pub(super) rest: toml::Table,
-}
-
-impl RawMail {
-    pub(super) fn into_config(self) -> Result<MailConfig, ConfigError> {
-        let trim = |value: Option<String>| -> Option<String> {
-            value.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
-        };
-        let mut accounts = IndexMap::new();
-        for (name, raw) in self.accounts {
-            let invalid = |what: &str| ConfigError::Invalid {
-                entry: None,
-                what: format!("[host.mail.accounts.{name}] {what}"),
-            };
-            if name.is_empty()
-                || name.len() > 32
-                || !name
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
-            {
-                return Err(invalid(
-                    "the name is 1 to 32 lower-case letters, digits, - and _",
-                ));
-            }
-            let backend = raw
-                .backend
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| canoa::mail_backend::is_valid_id(s))
-                .ok_or_else(|| invalid("backend must be 1 to 32 lower-case letters, digits or _"))?
-                .to_owned();
-            if raw.rest.contains_key("password") {
-                return Err(invalid(
-                    "password is a setting this host does not keep in canoa.cfg; use password_env or canoa mail add",
-                ));
-            }
-            let timeout_secs = raw.timeout_secs.unwrap_or(60);
-            if timeout_secs == 0 {
-                return Err(invalid(
-                    "timeout_secs is a whole number of seconds, at least 1",
-                ));
-            }
-            let id = match raw.id {
-                Some(id) if id.trim().is_empty() => {
-                    return Err(invalid("id is empty; set it or run `canoa mail add`"));
-                }
-                other => trim(other),
-            };
-            let password_env = match raw.password_env {
-                Some(env) if env.trim().is_empty() => {
-                    return Err(invalid("password_env is empty"));
-                }
-                other => trim(other),
-            };
-            let settings = settings_of(&format!("host.mail.accounts.{name}"), raw.rest)?;
-            accounts.insert(
-                name,
-                MailAccount {
-                    backend,
-                    password_env,
-                    id,
-                    timeout_secs,
-                    settings,
-                },
-            );
-        }
-        Ok(MailConfig {
-            tools: self.tools,
-            accounts,
         })
     }
 }

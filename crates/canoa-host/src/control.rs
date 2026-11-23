@@ -121,8 +121,8 @@ pub(crate) struct Control {
     history: Option<Moves>,
     /// The owner's accounts, once the host knows where canoa.cfg is.
     accounts: Option<accounts::Accounts>,
-    /// The mail accounts, once the host knows where canoa.cfg is.
-    mail: Option<mail_setup::MailSetup>,
+    /// The session services the loaded libraries offer, which answer the control methods of their own namespaces.
+    services: Option<Arc<crate::services::Services>>,
     /// What the agents spent, once the host has a home to keep it in.
     usage: Option<Arc<crate::usage_log::UsageLog>>,
     /// Per-host `usage/read` allowance cache.
@@ -254,7 +254,7 @@ impl Control {
             stores: OnceLock::new(),
             history: None,
             accounts: None,
-            mail: None,
+            services: None,
             usage: None,
             usage_cache: usage_read::Cache::default(),
             trust: None,
@@ -488,10 +488,10 @@ impl Control {
         self
     }
 
-    /// Answers `mail/*` for a key that holds `mail.setup`.
+    /// Answers the control methods of each service's namespace (`mail/accounts`) for a key that holds `services.setup`.
     #[must_use]
-    pub(crate) fn with_mail(mut self, mail: mail_setup::MailSetup) -> Self {
-        self.mail = Some(mail);
+    pub(crate) fn with_services(mut self, services: Arc<crate::services::Services>) -> Self {
+        self.services = Some(services);
         self
     }
 
@@ -611,13 +611,6 @@ impl Control {
             .as_ref()
             .map(|sealer| Arc::clone(sealer.0.vault()))
             .ok_or((REFUSED, "this host keeps no secrets".to_owned()))
-    }
-
-    fn mail_setup(&self) -> Result<&mail_setup::MailSetup, (i32, String)> {
-        self.mail.as_ref().ok_or((
-            REFUSED,
-            "this host does not manage mail accounts".to_owned(),
-        ))
     }
 
     fn stores(&self) -> Result<&Stores, (i32, String)> {
@@ -971,9 +964,6 @@ mod ledger;
 mod looks;
 #[cfg(test)]
 mod looks_tests;
-pub(crate) mod mail_setup;
-#[cfg(test)]
-mod mail_setup_tests;
 pub(crate) mod panel_tabs;
 mod params;
 mod pools;
@@ -988,6 +978,8 @@ mod say_tests;
 mod secrets;
 #[cfg(test)]
 mod secrets_tests;
+#[cfg(test)]
+mod services_tests;
 pub(crate) mod settings_sections;
 mod speech;
 mod speech_accounts;

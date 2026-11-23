@@ -1,6 +1,5 @@
-//! `canoa mail list|add|remove`: the mail accounts of `canoa.cfg` and the passwords that rest in the host's account store. A
-//! password is typed without echo (or read from standard input when that is not a terminal) and never taken from the command
-//! line; `canoa.cfg` keeps the id it rests under and never the password.
+//! The mail accounts of `canoa.cfg` and the passwords that rest in the host's secrets: listing them, adding one, removing one.
+//! A password arrives with the account and goes to the host's store; `canoa.cfg` keeps the id it rests under and never the password.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -8,23 +7,40 @@
 )]
 
 use canoa::mail_backend::{BackendInfo, ValidateRequest};
+use canoa::session_service::ServiceHost;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use zeroize::Zeroize as _;
 
-use super::{BackendCatalog, PASSWORD_KEY, non_secret_settings};
-use crate::accounts::commands::{
-    Cfg, Env, accounts_of, append_table, check_cfg, new_id, read_cfg, remove_table, with_table,
-    write_cfg,
-};
-use crate::accounts::{Accounts, Record};
-use crate::cli::{Failed, Format};
-use crate::config::MailAccount;
+use crate::config::{MailAccount, MailConfig, SERVICE};
+use crate::forms;
+use crate::mailboxes::{BackendCatalog, PASSWORD_KEY, non_secret_settings};
 
-/// Where the accounts are in `canoa.cfg`.
-const SECTION: &[&str] = &["host", "mail", "accounts"];
+/// Why an account could not be added, listed or removed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Failed {
+    /// Whether the request itself was wrong (a name taken, a setting missing), rather than the host failing to carry it out.
+    pub(crate) usage: bool,
+    pub(crate) why: String,
+}
 
-/// What `canoa mail add` or `mail/add` is told about the account; sensitive fields are extracted before writing `canoa.cfg`.
+impl Failed {
+    pub(crate) fn usage(why: impl Into<String>) -> Self {
+        Self {
+            usage: true,
+            why: why.into(),
+        }
+    }
+
+    pub(crate) fn run(why: impl Into<String>) -> Self {
+        Self {
+            usage: false,
+            why: why.into(),
+        }
+    }
+}
+
+/// What `mail/add` is told about the account; sensitive fields are extracted before writing `canoa.cfg`.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct NewAccount {
     pub(crate) backend: String,
@@ -32,20 +48,6 @@ pub(crate) struct NewAccount {
     pub(crate) password_env: Option<String>,
     pub(crate) timeout_secs: Option<u64>,
     pub(crate) settings: Map<String, Value>,
-}
-
-/// What an account added is: for the line that says so.
-#[derive(Clone, Debug)]
-pub(crate) struct Added {
-    pub(crate) name: String,
-    pub(crate) backend: String,
-    pub(crate) id: Option<String>,
-}
-
-impl Added {
-    pub(crate) fn json(&self) -> Value {
-        json!({"mail": {"name": self.name, "backend": self.backend, "id": self.id}})
-    }
 }
 
 struct ExtractedSecret {
@@ -76,121 +78,97 @@ fn extract_secret(info: &BackendInfo, raw: &Map<String, Value>) -> Result<Extrac
     })
 }
 
-fn json_to_toml(value: &Value) -> Result<Option<toml::Value>, String> {
+/// A setting as canoa.cfg can hold it: text, a number, a flag or a list of those. `null` is not written.
+fn setting_value(value: &Value) -> Result<Option<Value>, String> {
     match value {
         Value::Null => Ok(None),
-        Value::Bool(b) => Ok(Some(toml::Value::Boolean(*b))),
+        Value::Bool(_) | Value::String(_) => Ok(Some(value.clone())),
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Ok(Some(toml::Value::Integer(i)))
-            } else if let Some(f) = n.as_f64() {
-                Ok(Some(toml::Value::Float(f)))
+            if n.is_i64() || n.is_u64() || n.is_f64() {
+                Ok(Some(value.clone()))
             } else {
                 Err("number out of range".to_owned())
             }
         }
-        Value::String(s) => Ok(Some(toml::Value::String(s.clone()))),
         Value::Array(items) => {
-            let mut arr = Vec::with_capacity(items.len());
             for item in items {
                 match item {
-                    Value::String(s) => arr.push(toml::Value::String(s.clone())),
-                    Value::Bool(b) => arr.push(toml::Value::Boolean(*b)),
-                    Value::Number(n) => {
-                        if let Some(i) = n.as_i64() {
-                            arr.push(toml::Value::Integer(i));
-                        } else {
-                            return Err("unsupported number in array setting".to_owned());
-                        }
+                    Value::String(_) | Value::Bool(_) => {}
+                    Value::Number(n) if n.is_i64() => {}
+                    Value::Number(_) => {
+                        return Err("unsupported number in array setting".to_owned());
                     }
                     _ => return Err("unsupported nested item in array setting".to_owned()),
                 }
             }
-            Ok(Some(toml::Value::Array(arr)))
+            Ok(Some(value.clone()))
         }
         Value::Object(_) => Err("nested objects are not supported in mail settings".to_owned()),
     }
 }
 
+/// `account` as the table of canoa.cfg that holds it.
 fn block_of(
-    new: &NewAccount,
-    settings: &Map<String, Value>,
+    backend: &str,
     id: Option<&str>,
-) -> Result<toml::Table, Failed> {
-    let mut table = toml::Table::new();
-    table.insert(
-        "backend".to_owned(),
-        toml::Value::String(new.backend.clone()),
-    );
+    password_env: Option<&str>,
+    timeout_secs: Option<u64>,
+    settings: &Map<String, Value>,
+) -> Result<Value, Failed> {
+    let mut table = Map::new();
+    table.insert("backend".to_owned(), json!(backend));
     if let Some(id) = id {
-        table.insert("id".to_owned(), toml::Value::String(id.to_owned()));
+        table.insert("id".to_owned(), json!(id));
     }
-    if let Some(env) = &new.password_env {
-        table.insert("password_env".to_owned(), toml::Value::String(env.clone()));
+    if let Some(env) = password_env {
+        table.insert("password_env".to_owned(), json!(env));
     }
-    if let Some(secs) = new.timeout_secs {
-        table.insert(
-            "timeout_secs".to_owned(),
-            toml::Value::Integer(i64::try_from(secs).unwrap_or(i64::MAX)),
-        );
+    if let Some(secs) = timeout_secs {
+        table.insert("timeout_secs".to_owned(), json!(secs));
     }
     for (k, v) in settings {
-        if let Some(val) = json_to_toml(v).map_err(Failed::usage)? {
+        if let Some(val) = setting_value(v).map_err(Failed::usage)? {
             table.insert(k.clone(), val);
         }
     }
-    Ok(table)
+    Ok(Value::Object(table))
 }
 
-/// `canoa mail add NAME`: asks for the password through `front` when the backend asks for a secret.
+fn block_of_account(account: &MailAccount) -> Result<Value, Failed> {
+    block_of(
+        &account.backend,
+        account.id.as_deref(),
+        account.password_env.as_deref(),
+        Some(account.timeout_secs),
+        &account.settings,
+    )
+}
+
+fn set_account(host: &dyn ServiceHost, name: &str, block: Option<&Value>) -> Result<(), Failed> {
+    let text = block.map(Value::to_string);
+    host.set_config(SERVICE, &["accounts", name], text.as_deref())
+        .map_err(Failed::run)
+}
+
+/// Adds the account `name`: validates through the backend provider, saves the password in the host's secrets, and writes
+/// `[host.services.mail.accounts.NAME]`. The id the password rests under, when it does.
 pub(crate) fn add(
-    env: &Env<'_>,
+    host: &dyn ServiceHost,
+    config: &MailConfig,
+    catalog: &BackendCatalog,
     name: &str,
     new: &NewAccount,
-    format: Format,
-) -> Result<(), Failed> {
-    let mut ask = || -> Result<String, Failed> {
-        let user = new
-            .settings
-            .get("user")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let prompt = format!("password of {user} for {name}: ");
-        env.front
-            .ask(&prompt, true)
-            .map_err(Failed::run)?
-            .ok_or_else(|| Failed::usage("this front cannot ask for a password"))
-    };
-    let added = add_with(env.cfg(), name, new, &mut ask)?;
-    let line = match format {
-        Format::Json => added.json().to_string(),
-        Format::Text => format!("added {name} ({})", added.backend),
-    };
-    env.front.print(&line).map_err(Failed::run)?;
-    if added.id.is_some()
-        && format == Format::Text
-        && let Ok(accounts) = accounts_of(env.cfg())
-        && let Some(note) = accounts.note()
-    {
-        env.front.print(note).map_err(Failed::run)?;
+) -> Result<Option<String>, Failed> {
+    if !crate::config::valid_name(name) {
+        return Err(Failed::usage(
+            "the name is 1 to 32 lower-case letters, digits, - and _",
+        ));
     }
-    Ok(())
-}
-
-/// Adds the account `name`: validates through the backend provider, checks `canoa.cfg`, prompts for a password if needed,
-/// saves it in the account store, and writes `[host.mail.accounts.NAME]`.
-pub(crate) fn add_with(
-    cfg: Cfg<'_>,
-    name: &str,
-    new: &NewAccount,
-    ask: &mut dyn FnMut() -> Result<String, Failed>,
-) -> Result<Added, Failed> {
-    if cfg.config.mail.accounts.contains_key(name) {
+    if config.accounts.contains_key(name) {
         return Err(Failed::usage(format!(
             "a mail account called {name} exists"
         )));
     }
-    let catalog = BackendCatalog::of(cfg.config);
     let backend = catalog.get(&new.backend).ok_or_else(|| {
         Failed::usage(format!("no mail backend is offered for {:?}", new.backend))
     })?;
@@ -232,38 +210,32 @@ pub(crate) fn add_with(
     let provisional_id = if let Some(existing) = &new.id {
         Some(existing.clone())
     } else if prepared.needs_secret && !has_env {
-        Some(new_id()?)
+        Some(host.new_id().map_err(Failed::run)?)
     } else {
         None
     };
 
-    // Check canoa.cfg with the tentative table before prompting or writing anything to disk.
-    let block = block_of(new, &clean_settings, provisional_id.as_deref())?;
-    let before = read_cfg(cfg.config_path)?;
-    check_cfg(
-        cfg.config_path,
-        &with_table(cfg.config_path, &before, SECTION, name, &block)?,
+    let block = block_of(
+        &new.backend,
+        provisional_id.as_deref(),
+        new.password_env.as_deref(),
+        new.timeout_secs,
+        &clean_settings,
     )?;
 
     let mut stored = None;
     let id = if prepared.needs_secret && !has_env && new.id.is_none() {
-        let mut secret = match inline_secret.take() {
-            Some(s) => s,
-            None => ask()?,
+        let Some(mut secret) = inline_secret.take() else {
+            return Err(Failed::usage("a user name needs a password"));
         };
-        if secret.is_empty() {
-            secret.zeroize();
-            return Err(Failed::usage("no password was given"));
-        }
         backend
             .validate(ValidateRequest::new(settings_json, true))
             .map_err(|error| Failed::run(error.to_string()))?;
         let id = provisional_id.expect("id generated above");
-        let accounts = accounts_of(cfg)?;
-        let saved = store_password(&accounts, &id, &secret_key, &secret);
+        let saved = host.put_secret(&id, &secret_key, &secret);
         secret.zeroize();
-        saved?;
-        stored = Some(accounts);
+        saved.map_err(Failed::run)?;
+        stored = Some(id.clone());
         Some(id)
     } else {
         backend
@@ -275,65 +247,33 @@ pub(crate) fn add_with(
         provisional_id
     };
 
-    if let Err(failed) = append_table(cfg.config_path, SECTION, name, &block) {
-        if let (Some(accounts), Some(id)) = (&stored, &id) {
-            let _ = accounts.forget_credentials(id);
+    if let Err(failed) = set_account(host, name, Some(&block)) {
+        if let Some(id) = &stored {
+            let _ = host.forget_secrets(id);
         }
         return Err(failed);
     }
 
-    Ok(Added {
-        name: name.to_owned(),
-        backend: new.backend.clone(),
-        id,
-    })
-}
-
-/// Keeps `secret` under `secret_key` in the account store under `id`.
-pub(crate) fn store_password(
-    accounts: &Accounts,
-    id: &str,
-    secret_key: &str,
-    secret: &str,
-) -> Result<(), Failed> {
-    let mut record = Record::default();
-    record.revision = 1;
-    record
-        .credentials
-        .insert(secret_key.to_owned(), secret.to_owned());
-    accounts
-        .save(id, &record)
-        .map_err(|error| Failed::run(error.to_string()))
-}
-
-/// `canoa mail remove NAME`.
-pub(crate) fn remove(env: &Env<'_>, name: &str) -> Result<(), Failed> {
-    remove_with(env.cfg(), name)?;
-    env.front
-        .print(&format!("removed {name}"))
-        .map_err(Failed::run)
+    Ok(id)
 }
 
 /// Removes the account `name` from `canoa.cfg` and forgets any stored credentials for it.
-pub(crate) fn remove_with(cfg: Cfg<'_>, name: &str) -> Result<(), Failed> {
-    let account = cfg
-        .config
-        .mail
+pub(crate) fn remove(
+    host: &dyn ServiceHost,
+    config: &MailConfig,
+    name: &str,
+) -> Result<(), Failed> {
+    let account = config
         .accounts
         .get(name)
         .ok_or_else(|| Failed::usage(format!("no mail account is called {name}")))?;
-    let before = read_cfg(cfg.config_path)?;
-    remove_table(cfg.config_path, SECTION, name, "canoa mail add")?;
-    if let Some(id) = &account.id {
-        let forgotten = accounts_of(cfg).and_then(|accounts| {
-            accounts
-                .forget_credentials(id)
-                .map_err(|error| Failed::run(error.to_string()))
-        });
-        if let Err(failed) = forgotten {
-            let _ = write_cfg(cfg.config_path, &before);
-            return Err(failed);
-        }
+    let before = block_of_account(account)?;
+    set_account(host, name, None)?;
+    if let Some(id) = &account.id
+        && let Err(why) = host.forget_secrets(id)
+    {
+        let _ = set_account(host, name, Some(&before));
+        return Err(Failed::run(why));
     }
     Ok(())
 }
@@ -342,7 +282,7 @@ pub(crate) fn remove_with(cfg: Cfg<'_>, name: &str) -> Result<(), Failed> {
 pub(crate) fn state_of(
     account: &MailAccount,
     catalog: &BackendCatalog,
-    store: Option<&Accounts>,
+    host: &dyn ServiceHost,
 ) -> String {
     if let Some(variable) = account.password_env.as_deref().filter(|v| !v.is_empty()) {
         let set = std::env::var(variable).is_ok_and(|value| !value.is_empty());
@@ -358,7 +298,7 @@ pub(crate) fn state_of(
         .unwrap_or_else(|| PASSWORD_KEY.to_owned());
     let has_secret = account.id.is_some() || account.password_env.is_some();
     if let Some(entry) = entry {
-        let settings_json = Value::Object(account.settings.as_map().clone()).to_string();
+        let settings_json = Value::Object(account.settings.clone()).to_string();
         if let Ok(prepared) = entry.validate(ValidateRequest::new(settings_json, has_secret)) {
             if let Some(state) = prepared.state {
                 return state;
@@ -372,24 +312,25 @@ pub(crate) fn state_of(
             }
         }
     }
-    let (Some(id), Some(store)) = (account.id.as_deref(), store) else {
+    let Some(id) = account.id.as_deref() else {
         return entry
             .and_then(|e| e.info.no_secret_state.clone())
             .unwrap_or_else(|| "needs a password".to_owned());
     };
-    match store.load(id) {
-        Ok(Some(record))
-            if record.credentials.contains_key(&secret_key)
-                || record.credentials.contains_key(PASSWORD_KEY) =>
-        {
-            "password stored".to_owned()
-        }
-        Ok(_) => "needs a password".to_owned(),
+    let kept = |key: &str| host.secret(id, key);
+    match kept(&secret_key) {
+        Ok(Some(_)) => "password stored".to_owned(),
+        Ok(None) if secret_key != PASSWORD_KEY => match kept(PASSWORD_KEY) {
+            Ok(Some(_)) => "password stored".to_owned(),
+            Ok(None) => "needs a password".to_owned(),
+            Err(_) => "the account store could not be read".to_owned(),
+        },
+        Ok(None) => "needs a password".to_owned(),
         Err(_) => "the account store could not be read".to_owned(),
     }
 }
 
-/// One account as `canoa mail list` and `mail/accounts` show it.
+/// One account as `mail/accounts` shows it.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct Row {
     pub(crate) name: String,
@@ -414,19 +355,13 @@ impl Row {
     }
 }
 
-pub(crate) fn rows(cfg: Cfg<'_>) -> Vec<Row> {
-    let catalog = BackendCatalog::of(cfg.config);
-    let store = accounts_of(cfg).ok();
-    rows_with(cfg, &catalog, store.as_deref())
-}
-
-pub(crate) fn rows_with(
-    cfg: Cfg<'_>,
+/// The accounts of `config`, each as it is listed.
+pub(crate) fn rows(
+    config: &MailConfig,
     catalog: &BackendCatalog,
-    store: Option<&Accounts>,
+    host: &dyn ServiceHost,
 ) -> Vec<Row> {
-    cfg.config
-        .mail
+    config
         .accounts
         .iter()
         .map(|(name, account)| {
@@ -435,12 +370,12 @@ pub(crate) fn rows_with(
             let backend_title = info
                 .map(|i| i.title.clone())
                 .unwrap_or_else(|| account.backend.clone());
-            let clean = non_secret_settings(info, account.settings.as_map());
+            let clean = non_secret_settings(info, &account.settings);
             let has_secret = account.id.is_some() || account.password_env.is_some();
             let details = entry
                 .and_then(|e| {
                     e.validate(ValidateRequest::new(
-                        Value::Object(account.settings.as_map().clone()).to_string(),
+                        Value::Object(account.settings.clone()).to_string(),
                         has_secret,
                     ))
                     .ok()
@@ -458,7 +393,7 @@ pub(crate) fn rows_with(
                 name: name.clone(),
                 backend: account.backend.clone(),
                 backend_title,
-                state: state_of(account, catalog, store),
+                state: state_of(account, catalog, host),
                 details,
                 server: clean
                     .get("server")
@@ -478,7 +413,7 @@ pub(crate) fn rows_with(
 /// JSON descriptions of all available `mail_backend` providers.
 pub(crate) fn backends_json(catalog: &BackendCatalog) -> Vec<Value> {
     let described = |value: &Option<_>| match value {
-        Some(value) => crate::forms::json_of(value).unwrap_or(Value::Null),
+        Some(value) => forms::json_of(value).unwrap_or(Value::Null),
         None => Value::Null,
     };
     catalog
@@ -495,28 +430,4 @@ pub(crate) fn backends_json(catalog: &BackendCatalog) -> Vec<Value> {
             })
         })
         .collect()
-}
-
-/// `canoa mail list`.
-pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
-    for row in rows(env.cfg()) {
-        let line = match format {
-            Format::Json => row.json().to_string(),
-            Format::Text => {
-                if row.details.is_empty() {
-                    format!("{:<12} {:<16} {}", row.name, row.backend_title, row.state)
-                } else {
-                    format!(
-                        "{:<12} {:<16} {}  ({})",
-                        row.name,
-                        row.backend_title,
-                        row.details.join(" · "),
-                        row.state
-                    )
-                }
-            }
-        };
-        env.front.print(&line).map_err(Failed::run)?;
-    }
-    Ok(())
 }

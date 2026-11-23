@@ -63,32 +63,30 @@ fn the_admitted_keys_that_are_kept_are_those_the_store_still_accepts_and_the_sec
 }
 
 #[test]
-fn an_admitted_page_is_given_the_mail_tools_only_when_a_mail_account_is_there_and_its_tools_are_on()
-{
-    use crate::store::mcp::Extra as _;
+fn an_admitted_page_is_given_the_services_only_when_one_has_something_to_give() {
     let grants = |text: &str| {
         let config = Config::from_str_in(text, std::path::Path::new("/canoa")).expect("parses");
-        let tools =
-            crate::mail::tools::MailTools::new(crate::mail::Mailboxes::from_config(&config, None));
-        let given = page_grants(&config);
-        let offered = tools.offered(&given);
+        let services =
+            crate::services::Services::new(crate::services::standin::TestHost::over(text, &[]));
+        let given = page_grants(&config, &services);
+        let offered = services.extras().iter().any(|extra| extra.offered(&given));
         (given, offered)
     };
-    let account = "[host.mail.accounts.desktop]\nbackend = \"outlook\"\n";
+    let account = "[host.services.mail.accounts.desktop]\nbackend = \"outlook\"\n";
     let (given, offered) = grants(account);
-    assert!(given.contains(&control::Grant::Mail) && offered);
+    assert!(given.contains(&control::Grant::Services) && offered);
     assert!(
         config_default().is_subset(&given),
         "what a browser key holds, it still holds"
     );
     let (given, offered) = grants("");
-    assert!(!given.contains(&control::Grant::Mail) && !offered);
-    let (given, offered) = grants(&format!("[host.mail]\ntools = false\n{account}"));
-    assert!(!given.contains(&control::Grant::Mail) && !offered);
+    assert!(!given.contains(&control::Grant::Services) && !offered);
+    let (given, offered) = grants(&format!("[host.services.mail]\ntools = false\n{account}"));
+    assert!(!given.contains(&control::Grant::Services) && !offered);
     let (given, _) = grants(&format!(
         "[host.native]\ncontrol = [\"ledger.read\"]\n{account}"
     ));
-    assert!(given.contains(&control::Grant::Mail));
+    assert!(given.contains(&control::Grant::Services));
 }
 
 fn config_default() -> BTreeSet<control::Grant> {

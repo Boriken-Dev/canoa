@@ -499,13 +499,28 @@ impl Control {
         self.accounts()?.call(method, params)
     }
 
-    pub(super) fn r_mail(
+    /// A control method of a service's namespace, once the key's grant is checked.
+    pub(super) fn services_call(
         &self,
-        _: &Caller,
         method: &str,
         params: &Value,
     ) -> Result<Value, (i32, String)> {
-        self.mail_setup()?.call(method, params)
+        use crate::services::Failure;
+        let services = self
+            .services
+            .as_ref()
+            .ok_or((super::NO_METHOD, "this host has no such method".to_owned()))?;
+        services.control(method, params).map_err(|(why, message)| {
+            (
+                match why {
+                    Failure::NoMethod => super::NO_METHOD,
+                    Failure::BadParams => super::BAD_PARAMS,
+                    Failure::NotFound => super::NOT_FOUND,
+                    Failure::Refused => super::REFUSED,
+                },
+                message,
+            )
+        })
     }
 
     pub(super) fn r_usage(

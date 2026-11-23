@@ -45,7 +45,7 @@ use profiles::{
 };
 use raw::{
     RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawEnvironment, RawExtension, RawFile,
-    RawHost, RawKb, RawLines, RawMail, RawPool, RawProvider, network_of,
+    RawHost, RawKb, RawLines, RawPool, RawProvider, network_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
@@ -55,9 +55,9 @@ pub(crate) use sections::{check_label, check_name, plain_absolute};
 pub use types::{
     AgentProfile, Config, ControlConfig, DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS,
     DEFAULT_MAX_SESSIONS, DEFAULT_PRESET, DelegateConfig, Extension, ExtensionCheck, HistoryConfig,
-    KbConfig, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, MailAccount, MailConfig, McpChoice,
-    McpListConfig, NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout,
-    StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
+    KbConfig, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig, NativeConfig,
+    NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, StoreConfig, UnknownLoadout,
+    UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
@@ -83,7 +83,7 @@ struct Subsystems {
     network: NetworkConfig,
     kb: KbConfig,
     mcp_list: McpListConfig,
-    mail: MailConfig,
+    services: IndexMap<String, String>,
     delegate: DelegateConfig,
     control: Option<ControlConfig>,
     native: NativeConfig,
@@ -247,7 +247,7 @@ impl Config {
             network: sub.network,
             kb: sub.kb,
             mcp_list: sub.mcp_list,
-            mail: sub.mail,
+            services: sub.services,
             delegate: sub.delegate,
             skill_pins: top.skill_pins,
             extensions,
@@ -1053,12 +1053,23 @@ fn build_subsystems(
             max_reply_bytes,
         }
     };
-    let mail = host
-        .mail
-        .take()
-        .map(RawMail::into_config)
-        .transpose()?
-        .unwrap_or_default();
+    let tables = core::mem::take(&mut host.services);
+    let mut services = IndexMap::new();
+    for (id, table) in tables {
+        if !canoa::session_service::is_id(&id) {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: format!(
+                    "[host.services.{id}] the id is 1 to 32 lower-case letters, digits and _"
+                ),
+            });
+        }
+        let text = serde_json::to_string(&table).map_err(|error| ConfigError::Invalid {
+            entry: None,
+            what: format!("[host.services.{id}] {error}"),
+        })?;
+        services.insert(id, text);
+    }
     let delegate = host
         .delegate
         .take()
@@ -1133,7 +1144,7 @@ fn build_subsystems(
         network,
         kb,
         mcp_list,
-        mail,
+        services,
         delegate,
         control,
         native,

@@ -237,12 +237,10 @@ pub(super) enum Command {
         #[command(subcommand)]
         command: AccountsCommand,
     },
-    /// Make, list and remove the mail accounts the host's mail tools read: a password rests in the account store and never in
-    /// canoa.cfg, which holds the id it rests under.
-    Mail {
-        #[command(subcommand)]
-        command: MailCommand,
-    },
+    /// Call a control method of a session service of this host's libraries, as the application does: `canoa service mail accounts`
+    /// lists the mail accounts, `canoa service mail add --params -` adds one from the JSON on standard input (a password goes
+    /// there, never on the command line). The answer is the method's JSON.
+    Service(Box<ServiceArgs>),
     /// Run an agent with the environment the first line of standard input gives: what `serve` runs for an agent entry
     /// with profiles. The rest of standard input goes to the agent.
     Launch {
@@ -446,59 +444,16 @@ pub(super) enum AccountsCommand {
     },
 }
 
-/// What `canoa mail` does.
-#[derive(Debug, Subcommand)]
-pub(super) enum MailCommand {
-    /// List the mail accounts of canoa.cfg with their state; never a password.
-    List {
-        #[command(flatten)]
-        config: ConfigArgs,
-    },
-    /// Add a mail account: a password it needs is typed without echo, or read from standard input when that is not a terminal,
-    /// and never taken from the command line. It rests in the account store; canoa.cfg gets `[host.mail.accounts.NAME]`.
-    Add(Box<MailAddArgs>),
-    /// Forget a mail account: its stored password and its table in canoa.cfg. Nothing changes in the mailbox.
-    Remove {
-        /// The account's name.
-        name: String,
-        #[command(flatten)]
-        config: ConfigArgs,
-    },
-}
-
-/// Options accepted by `canoa mail add`.
+/// What `canoa service` takes.
 #[derive(Debug, Args)]
-pub(super) struct MailAddArgs {
-    /// The account's name: 1 to 32 lower-case letters, digits, `-` and `_`.
-    pub(super) name: String,
-    /// The id of a `mail_backend` provider (for example `ews`, `graph`, `outlook`, or an extension's).
-    #[arg(long)]
-    pub(super) backend: String,
-    /// A setting of the backend, KEY=VALUE (for example `server=https://...`, `client_id=...`), given as JSON when it is
-    /// valid JSON and as text otherwise; repeat for several.
-    #[arg(long = "setting", value_name = "KEY=VALUE", value_parser = parse_setting)]
-    pub(super) settings: Vec<(String, serde_json::Value)>,
-    /// The mailbox's address, when the backend takes `email`.
-    #[arg(long)]
-    pub(super) email: Option<String>,
-    /// The service address, when the backend takes `server`.
-    #[arg(long)]
-    pub(super) server: Option<String>,
-    /// The Autodiscover address, when the backend takes `autodiscover`.
-    #[arg(long)]
-    pub(super) autodiscover: Option<String>,
-    /// The user name, when the backend takes `user`.
-    #[arg(long)]
-    pub(super) user: Option<String>,
-    /// The Outlook profile to log on to, when the backend takes `profile`.
-    #[arg(long)]
-    pub(super) profile: Option<String>,
-    /// The variable that holds the secret when kept in the environment instead of the account store.
-    #[arg(long)]
-    pub(super) password_env: Option<String>,
-    /// How long one call may take, in seconds.
-    #[arg(long)]
-    pub(super) timeout_secs: Option<u64>,
+pub(super) struct ServiceArgs {
+    /// The service's id (`mail`).
+    pub(super) id: String,
+    /// The method, without the service's namespace (`accounts`, `add`, `test`, `remove` for the mail service).
+    pub(super) method: String,
+    /// The method's parameters as a JSON object, or `-` to read it from standard input.
+    #[arg(long, default_value = "{}")]
+    pub(super) params: String,
     #[command(flatten)]
     pub(super) config: ConfigArgs,
 }

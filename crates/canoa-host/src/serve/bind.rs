@@ -340,14 +340,8 @@ fn bind_proof(
 fn bind_accounts_and_boxes(
     config: &Config,
     options: &ServeOptions,
-) -> Result<(Option<Arc<Accounts>>, Arc<crate::mail::Mailboxes>), ServeError> {
-    let mail_passwords = config
-        .mail
-        .accounts
-        .values()
-        .any(|account| account.id.is_some())
-        && options.state_dir.is_some();
-    let accounts = if config.accounts.is_empty() && !mail_passwords {
+) -> Result<Option<Arc<Accounts>>, ServeError> {
+    let accounts = if config.accounts.is_empty() {
         None
     } else {
         let Some(home) = &options.state_dir else {
@@ -361,10 +355,6 @@ fn bind_accounts_and_boxes(
             })?,
         )
     };
-    let mail_boxes = Arc::new(crate::mail::Mailboxes::from_config(
-        config,
-        accounts.clone(),
-    ));
     if let (Some(accounts), Some(file)) = (&accounts, &options.config_file) {
         accounts.config_from(file.clone());
     }
@@ -374,7 +364,7 @@ fn bind_accounts_and_boxes(
             options.program_args.clone(),
         ));
     }
-    Ok((accounts, mail_boxes))
+    Ok(accounts)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -826,7 +816,7 @@ fn build_control_hub(
     secrets: Arc<secrets::Hub>,
     recorded: Arc<history::Store>,
     movers: BTreeMap<String, Arc<kind::Harness>>,
-    mail_boxes: Arc<crate::mail::Mailboxes>,
+    services: Arc<crate::services::Services>,
     environments: &Arc<crate::environments::Environments>,
 ) -> Result<control::Control, ServeError> {
     let kept = control::Control::open(
@@ -994,14 +984,7 @@ fn build_control_hub(
         )),
         _ => kept,
     };
-    let kept = match (&options.account_layers, &options.state_dir) {
-        (Some(layers), Some(home)) => kept.with_mail(control::mail_setup::MailSetup::new(
-            layers.clone(),
-            home.clone(),
-            mail_boxes,
-        )),
-        _ => kept,
-    };
+    let kept = kept.with_services(services);
     Ok(match &options.programs {
         Some((programs, providers)) => kept.with_stores(
             control::Stores::new(Arc::clone(programs), providers.clone())
@@ -1084,7 +1067,14 @@ impl Serving {
             secrets.vault().set_home(home);
         }
         let method = bind_proof(identity, &store, options)?;
-        let (accounts, mail_boxes) = bind_accounts_and_boxes(config, options)?;
+        let accounts = bind_accounts_and_boxes(config, options)?;
+        let services = Arc::new(crate::services::Services::new(Arc::new(
+            crate::services::HostServices::new(
+                config,
+                options.account_layers.clone(),
+                options.state_dir.clone(),
+            ),
+        )));
         let usage_log = options.state_dir.as_ref().map(|home| {
             Arc::new(crate::usage_log::UsageLog::open(
                 crate::usage_log::dir_of(home),
@@ -1169,11 +1159,12 @@ impl Serving {
             Arc::clone(&secrets),
             recorded.clone(),
             state.movers,
-            Arc::clone(&mail_boxes),
+            Arc::clone(&services),
             &environments,
         )?;
         let mut serving = Self {
             shared: Arc::new(Shared {
+                services: Arc::clone(&services),
                 history: recorded,
                 secrets,
                 store_tools: store_mcp::Hub::new(
@@ -1210,8 +1201,8 @@ impl Serving {
                             !matches!(
                                 grant,
                                 control::Grant::Discover
-                                    | control::Grant::Mail
-                                    | control::Grant::MailSetup
+                                    | control::Grant::Services
+                                    | control::Grant::ServicesSetup
                             )
                         })
                         .collect()
@@ -1222,7 +1213,7 @@ impl Serving {
                     }
                     _ => BTreeSet::new(),
                 })),
-                page_grants: page_grants(config),
+                page_grants: page_grants(config, &services),
                 office_dir,
                 method,
                 store,
@@ -1248,11 +1239,8 @@ impl Serving {
             .serve_with(Arc::new(control::ToolsBackend(Arc::clone(
                 &serving.shared.control,
             ))));
-        if config.mail.tools != Some(false) {
-            serving
-                .shared
-                .store_tools
-                .serve_extra(Arc::new(crate::mail::tools::MailTools::new(mail_boxes)));
+        for extra in services.extras() {
+            serving.shared.store_tools.serve_extra(extra);
         }
         serving.door = serving.open_door(config, options);
         serving.attach_delegation(config, dialer, usage_log);

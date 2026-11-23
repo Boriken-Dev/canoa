@@ -333,7 +333,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             })
         }
         Command::Accounts { command } => commands::accounts(command, front),
-        Command::Mail { command } => commands::mail(command, front),
+        Command::Service(args) => commands::service(*args, front),
         Command::Native { action } => commands::native(action, front),
         Command::NativeHost { origin, .. } => commands::native_host(&origin, front),
         Command::McpBridge => commands::mcp_bridge(),

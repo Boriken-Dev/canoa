@@ -22,11 +22,15 @@ use crate::delegate::{self, Principal};
 use crate::local::{self, Link};
 
 /// What a page this host's own web server admitted holds besides what its key was given: what `[host.native] control` gives a
-/// browser key, and the `mail` grant when `[host.mail]` names an account and has its tools on.
-pub(super) fn page_grants(config: &Config) -> BTreeSet<control::Grant> {
+/// browser key, and the `services` grant when a session service has something to give its sessions (the mail service, once an
+/// account is named and its tools are on).
+pub(super) fn page_grants(
+    config: &Config,
+    services: &crate::services::Services,
+) -> BTreeSet<control::Grant> {
     let mut grants = config.native.control.clone();
-    if config.mail.tools != Some(false) && !config.mail.accounts.is_empty() {
-        grants.insert(control::Grant::Mail);
+    if services.offered_any() {
+        grants.insert(control::Grant::Services);
     }
     grants
 }

@@ -106,14 +106,17 @@ pub enum Grant {
     /// Opening `@tools` to offer a program's tools (a browser extension's, an Office add-in's) to the sessions of this host. What
     /// such a provider answers goes to an agent as its tools' own results, so it is as much as access to the agent's context.
     ToolsProvide,
-    /// The sessions of a connection whose key holds it are given the `canoa-mail` tools: search, read, draft and organize the
-    /// mail of the accounts `[host.mail]` names. The mail is the person's own and what an agent reads of it enters its context, so
-    /// a key gets it only when canoa.cfg says so; the application in this process holds it. Not a control method.
-    Mail,
-    /// `mail/accounts`, `mail/add`, `mail/test` and `mail/remove`: list, add, sign in to and remove the mail accounts of canoa.cfg,
-    /// which keeps a password in the host's account store and has the host connect to the server the account names with it. The
-    /// accounts are what a key holding `mail` then reads, so it is as much as access to the person's mail.
-    MailSetup,
+    /// The sessions of a connection whose key holds it are given the MCP servers of the session services (`canoa::session_service`)
+    /// the host's libraries offer, each when it has something to give: the person's mail (`canoa-mail`: search, read, draft and
+    /// organize the mail of the accounts the service's table names), for one. What a service gives is the person's own and what an
+    /// agent reads of it enters its context, so a key gets it only when canoa.cfg says so; the application in this process holds
+    /// it. Not a control method.
+    Services,
+    /// The control methods of the session services, each under the namespace of its service (`mail/accounts`, `mail/add`,
+    /// `mail/test`, `mail/remove` for the mail service): what a service lets the person set up, such as the mail accounts of
+    /// canoa.cfg, whose passwords the host keeps and whose servers the host connects to with them. What it sets up is what a key
+    /// holding `services` then reads, so it is as much as access to the person's mail.
+    ServicesSetup,
     /// `secrets/providers`, `secrets/list`, `secrets/reveal`, `secrets/forget` and `secrets/set`: the list of the secrets this host holds
     /// (where each is kept, its name, how long it has left), showing the value of one on request, forgetting one and setting one by a
     /// form sealed to the key that asked. A secret is whatever an agent may be given a handle to use, so this is as much as access to
@@ -263,14 +266,14 @@ pub(super) const GRANT_SPECS: [GrantSpec; 29] = [
         control: false,
     },
     GrantSpec {
-        grant: Grant::Mail,
-        name: "mail",
+        grant: Grant::Services,
+        name: "services",
         control: false,
     },
     GrantSpec {
-        grant: Grant::MailSetup,
-        name: "mail.setup",
-        control: true,
+        grant: Grant::ServicesSetup,
+        name: "services.setup",
+        control: false,
     },
     GrantSpec {
         grant: Grant::Secrets,

@@ -1,5 +1,4 @@
-//! Mail as a source of information, like the knowledge an overlay ships: the person's own mailbox searched, read, related to a
-//! message, organized and drafted into, never sent.
+//! The mailboxes of `[host.services.mail]`, opened through the `mail_backend` providers the host loaded.
 //!
 //! Canoa carries no mail protocol of its own here: every backend is a provider of the `mail_backend` kind (`canoa::mail_backend`),
 //! loaded from the bundled `canoa-microsoft-mail` library (`ews`, `graph`, `outlook`) and any extension libraries configured in
@@ -16,20 +15,16 @@ use canoa::mail_backend::{
     BackendInfo, Change, Draft, Folder, MailBackend, MailError, Mailbox, Message, OpenMailbox,
     Page, PreparedAccount, Query, Summary, ValidateRequest,
 };
+use canoa::network::Secret as AccountSecret;
+use canoa::session_service::ServiceHost;
 use coqui_acp_api::guatiao::Secret;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use serde_json::{Map, Value};
 
-use crate::accounts::Accounts;
-use crate::config::{Config, MailAccount, MailConfig};
-use canoa::network::Secret as AccountSecret;
+use crate::config::{MailAccount, MailConfig};
+use crate::forms;
 
-pub(crate) mod commands;
-#[cfg(test)]
-mod commands_tests;
-pub(crate) mod tools;
-
-/// The secret key a mail account keeps in the host's account store (`Accounts`).
+/// The secret key a mail account keeps in the host's account store.
 pub(crate) const PASSWORD_KEY: &str = "password";
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -122,7 +117,7 @@ impl BackendEntry {
 
 /// Catalog of `mail_backend` providers loaded from the bundled library and configured extension libraries.
 pub(crate) struct BackendCatalog {
-    entries: Vec<BackendEntry>,
+    pub(crate) entries: Vec<BackendEntry>,
 }
 
 impl core::fmt::Debug for BackendCatalog {
@@ -134,9 +129,9 @@ impl core::fmt::Debug for BackendCatalog {
 }
 
 impl BackendCatalog {
-    /// Providers from `config` (carried libraries plus configured extensions).
-    pub(crate) fn of(config: &Config) -> Self {
-        Self::from_registries(crate::control::providers::registries_of(Some(config)))
+    /// Providers of the host's loaded libraries (carried libraries plus configured extensions).
+    pub(crate) fn of(host: &dyn ServiceHost) -> Self {
+        Self::from_registries(host.registries())
     }
 
     /// Collects valid, unique `mail_backend` offers from `registries` in order.
@@ -203,7 +198,7 @@ impl BackendCatalog {
                 account.backend
             ))
         })?;
-        let settings = Value::Object(account.settings.as_map().clone()).to_string();
+        let settings = Value::Object(account.settings.clone()).to_string();
         let prepared = entry.validate(ValidateRequest::new(settings, has_secret))?;
         if !prepared.needs_secret && (account.id.is_some() || account.password_env.is_some()) {
             let why = prepared
@@ -215,69 +210,70 @@ impl BackendCatalog {
         Ok((entry, prepared))
     }
 
-    /// Name of the sensitive schema member used to store a password/token in `Accounts`, defaulting to `PASSWORD_KEY`.
+    /// Name of the sensitive schema member used to store a password/token in the host's secrets, defaulting to `PASSWORD_KEY`.
     pub(crate) fn secret_field(info: &BackendInfo) -> String {
         info.schema
             .as_ref()
-            .and_then(|schema| crate::forms::json_of(schema).ok())
-            .and_then(|schema| crate::forms::secrets_of(&schema).into_iter().next())
+            .and_then(|schema| forms::json_of(schema).ok())
+            .and_then(|schema| forms::secrets_of(&schema).into_iter().next())
             .unwrap_or_else(|| PASSWORD_KEY.to_owned())
     }
 }
 
-/// How an entry is kept: a live instance for a test, or opened on demand from `[host.mail]`.
-enum Source {
-    #[cfg(test)]
-    Ready {
-        backend: String,
-        instance: Arc<dyn Mailbox>,
-    },
-    Configured(MailAccount),
+/// The mailboxes already opened, kept so a backend that holds a token or a connection is not made again for each call. A mailbox is
+/// reused only while its account is as it was when it was opened.
+/// A mailbox kept under the host and account it was opened for, with the account as it was.
+type Kept = (String, MailAccount, Arc<dyn Mailbox>);
+
+#[derive(Default)]
+pub(crate) struct Opened {
+    boxes: Mutex<Vec<Kept>>,
+}
+
+impl core::fmt::Debug for Opened {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Opened").finish_non_exhaustive()
+    }
+}
+
+impl Opened {
+    fn get(&self, key: &str, account: &MailAccount) -> Option<Arc<dyn Mailbox>> {
+        lock(&self.boxes)
+            .iter()
+            .find(|(each, kept, _)| each == key && kept == account)
+            .map(|(_, _, mailbox)| Arc::clone(mailbox))
+    }
+
+    fn keep(&self, key: &str, account: &MailAccount, mailbox: &Arc<dyn Mailbox>) {
+        let mut boxes = lock(&self.boxes);
+        boxes.retain(|(each, _, _)| each != key);
+        boxes.push((key.to_owned(), account.clone(), Arc::clone(mailbox)));
+    }
+
+    /// Forgets the mailboxes of `host`, so the next call opens them again.
+    pub(crate) fn forget(&self, host: &str) {
+        let prefix = format!("{host}/");
+        lock(&self.boxes).retain(|(key, _, _)| !key.starts_with(&prefix));
+    }
 }
 
 struct Entry {
     name: String,
-    source: Source,
-    opened: Mutex<Option<Arc<dyn Mailbox>>>,
+    account: MailAccount,
 }
 
-impl Entry {
-    fn backend_id(&self) -> &str {
-        match &self.source {
-            #[cfg(test)]
-            Source::Ready { backend, .. } => backend,
-            Source::Configured(account) => &account.backend,
-        }
-    }
-}
-
-struct MailboxesInner {
-    tools: Option<bool>,
-    entries: Vec<Entry>,
+/// What opening a mailbox reads of its host.
+struct Open {
+    host: Arc<dyn ServiceHost>,
+    handle: String,
     catalog: Arc<BackendCatalog>,
-    store: Option<Arc<Accounts>>,
+    opened: Arc<Opened>,
 }
 
-/// The mailboxes of `[host.mail]`. They are reloaded when the accounts change ([`Mailboxes::reload`]), so a mailbox added from
-/// the Settings dialog works without restarting the host.
-#[derive(Clone)]
+/// The mailboxes of `[host.services.mail]`, as the file names them now.
 pub(crate) struct Mailboxes {
-    inner: Arc<Mutex<MailboxesInner>>,
-}
-
-impl Default for Mailboxes {
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(MailboxesInner {
-                tools: None,
-                entries: Vec::new(),
-                catalog: Arc::new(BackendCatalog {
-                    entries: Vec::new(),
-                }),
-                store: None,
-            })),
-        }
-    }
+    entries: Vec<Entry>,
+    open: Option<Open>,
 }
 
 impl core::fmt::Debug for Mailboxes {
@@ -289,137 +285,55 @@ impl core::fmt::Debug for Mailboxes {
 }
 
 impl Mailboxes {
-    /// Accounts built from `config` using bundled and configured `mail_backend` providers.
-    pub(crate) fn from_config(config: &Config, store: Option<Arc<Accounts>>) -> Self {
-        let catalog = Arc::new(BackendCatalog::of(config));
-        let entries = entries_from(&config.mail);
+    /// The accounts of `config` over `host`'s providers, whose opened mailboxes `opened` keeps for `handle`.
+    pub(crate) fn from_config(
+        config: &MailConfig,
+        host: Arc<dyn ServiceHost>,
+        handle: &str,
+        opened: Arc<Opened>,
+    ) -> Self {
+        let catalog = Arc::new(BackendCatalog::of(&*host));
         Self {
-            inner: Arc::new(Mutex::new(MailboxesInner {
-                tools: config.mail.tools,
-                entries,
+            entries: entries_from(config),
+            open: Some(Open {
+                host,
+                handle: handle.to_owned(),
                 catalog,
-                store,
-            })),
+                opened,
+            }),
         }
-    }
-
-    /// Fixed backends injected by tests.
-    #[cfg(test)]
-    pub(crate) fn with(backends: Vec<(&str, &str, Arc<dyn Mailbox>)>) -> Self {
-        let entries = backends
-            .into_iter()
-            .map(|(name, backend, instance)| Entry {
-                name: name.to_owned(),
-                source: Source::Ready {
-                    backend: backend.to_owned(),
-                    instance,
-                },
-                opened: Mutex::new(None),
-            })
-            .collect();
-        Self {
-            inner: Arc::new(Mutex::new(MailboxesInner {
-                tools: None,
-                entries,
-                catalog: Arc::new(BackendCatalog {
-                    entries: Vec::new(),
-                }),
-                store: None,
-            })),
-        }
-    }
-
-    /// Replaces the mailboxes, provider catalog, and store handle from updated `config`.
-    pub(crate) fn reload(&self, config: &Config, store: Option<Arc<Accounts>>) {
-        let catalog = Arc::new(BackendCatalog::of(config));
-        let entries = entries_from(&config.mail);
-        let mut inner = lock(&self.inner);
-        inner.tools = config.mail.tools;
-        inner.catalog = catalog;
-        inner.entries = entries;
-        inner.store = store;
-    }
-
-    /// Whether the host offers mail tools at all.
-    #[allow(dead_code, reason = "checked by callers inspecting mail setup")]
-    pub(crate) fn tools_enabled(&self) -> bool {
-        let inner = lock(&self.inner);
-        inner.tools != Some(false) && !inner.entries.is_empty()
     }
 
     /// Configured accounts as `(name, backend_id)` pairs in `canoa.cfg` order.
     pub(crate) fn list(&self) -> Vec<(String, String)> {
-        let inner = lock(&self.inner);
-        inner
-            .entries
+        self.entries
             .iter()
-            .map(|e| (e.name.clone(), e.backend_id().to_owned()))
+            .map(|e| (e.name.clone(), e.account.backend.clone()))
             .collect()
     }
 
     /// Account names in order.
     pub(crate) fn names(&self) -> Vec<String> {
-        let inner = lock(&self.inner);
-        inner.entries.iter().map(|e| e.name.clone()).collect()
+        self.entries.iter().map(|e| e.name.clone()).collect()
     }
 
-    /// True when no mail account is configured.
-    pub(crate) fn is_empty(&self) -> bool {
-        let inner = lock(&self.inner);
-        inner.entries.is_empty()
-    }
-
-    /// The named mailbox handle, opening it lazily on first use.
+    /// The named mailbox handle, opening it on first use.
     pub(crate) fn backend(&self, name: &str) -> Result<Arc<dyn Mailbox>, MailError> {
-        enum Resolved {
-            Ready(Arc<dyn Mailbox>),
-            NeedOpen {
-                account: MailAccount,
-                catalog: Arc<BackendCatalog>,
-                store: Option<Arc<Accounts>>,
-            },
-        }
-        let resolved = {
-            let inner = lock(&self.inner);
-            let entry = inner
-                .entries
-                .iter()
-                .find(|e| e.name == name)
-                .ok_or_else(|| MailError::Bad(format!("no mail account is named {name}")))?;
-            match &entry.source {
-                #[cfg(test)]
-                Source::Ready { instance, .. } => Resolved::Ready(Arc::clone(instance)),
-                Source::Configured(account) => {
-                    if let Some(opened) = lock(&entry.opened).as_ref() {
-                        Resolved::Ready(Arc::clone(opened))
-                    } else {
-                        Resolved::NeedOpen {
-                            account: account.clone(),
-                            catalog: Arc::clone(&inner.catalog),
-                            store: inner.store.clone(),
-                        }
-                    }
-                }
-            }
-        };
-        let (account, catalog, store) = match resolved {
-            Resolved::Ready(instance) => return Ok(instance),
-            Resolved::NeedOpen {
-                account,
-                catalog,
-                store,
-            } => (account, catalog, store),
-        };
-        let instance = open_account(&catalog, &account, store.as_deref())?;
-        let inner = lock(&self.inner);
-        if let Some(entry) = inner
+        let entry = self
             .entries
             .iter()
-            .find(|e| e.name == name && matches!(e.source, Source::Configured(_)))
-        {
-            let mut slot = lock(&entry.opened);
-            return Ok(Arc::clone(slot.get_or_insert(instance)));
+            .find(|e| e.name == name)
+            .ok_or_else(|| MailError::Bad(format!("no mail account is named {name}")))?;
+        let open = self
+            .open
+            .as_ref()
+            .ok_or_else(|| MailError::Bad("no host to open the mailbox through".into()))?;
+        let key = format!("{}/{name}", open.handle);
+        if let Some(opened) = open.opened.get(&key, &entry.account) {
+            return Ok(opened);
         }
+        let instance = open_account(&open.catalog, &entry.account, &*open.host)?;
+        open.opened.keep(&key, &entry.account, &instance);
         Ok(instance)
     }
 
@@ -451,8 +365,7 @@ fn entries_from(config: &MailConfig) -> Vec<Entry> {
         .iter()
         .map(|(name, account)| Entry {
             name: name.clone(),
-            source: Source::Configured(account.clone()),
-            opened: Mutex::new(None),
+            account: account.clone(),
         })
         .collect()
 }
@@ -461,58 +374,25 @@ fn entries_from(config: &MailConfig) -> Vec<Entry> {
 pub(crate) fn open_account(
     catalog: &BackendCatalog,
     account: &MailAccount,
-    store: Option<&Accounts>,
+    host: &dyn ServiceHost,
 ) -> Result<Arc<dyn Mailbox>, MailError> {
     let has_secret = account.id.is_some() || account.password_env.is_some();
     let (entry, prepared) = catalog.validate_account(account, has_secret)?;
     let secret = if prepared.needs_secret {
         let key = BackendCatalog::secret_field(&entry.info);
-        let raw = secret_of(account, &key, store)?;
+        let raw = secret_of(account, &key, host)?;
         Some(Secret::new(raw.expose().to_owned()))
     } else {
         None
     };
-    let settings = Value::Object(account.settings.as_map().clone()).to_string();
+    let settings = Value::Object(account.settings.clone()).to_string();
     entry.open(OpenMailbox::new(settings, secret, account.timeout_secs))
-}
-
-/// An EWS test handle pointed at a loopback stand-in, for tool tests.
-#[cfg(test)]
-pub(crate) fn ews_for_tests(
-    standin: &canoa_microsoft_mail::standin::Standin,
-    password: &str,
-) -> canoa_microsoft_mail::ews::Ews {
-    use coqui_syshttp::tls::TlsBuilder;
-    use coqui_syshttp::{Environment, Resolver};
-    use core::time::Duration;
-
-    let resolver = Resolver::builder()
-        .environment(Environment::from_pairs([("PATH", "x")]))
-        .system(false)
-        .build();
-    let network = Arc::new(canoa::network::Network::with(
-        resolver,
-        TlsBuilder::default(),
-    ));
-    canoa_microsoft_mail::ews::Ews::new(
-        canoa_microsoft_mail::ews::EwsSettings {
-            email: Some("me@example.test".to_owned()),
-            server: Some(standin.server()),
-            autodiscover: None,
-            auth: canoa_microsoft_mail::ews::Auth::Basic {
-                user: "EXAMPLE\\me".to_owned(),
-                password: canoa::network::Secret::new(password),
-            },
-            timeout: Duration::from_secs(10),
-        },
-        network,
-    )
 }
 
 pub(crate) fn secret_of(
     account: &MailAccount,
     secret_key: &str,
-    store: Option<&Accounts>,
+    host: &dyn ServiceHost,
 ) -> Result<AccountSecret, MailError> {
     if let Some(var) = account.password_env.as_deref().filter(|v| !v.is_empty()) {
         let value = std::env::var(var).map_err(|_| {
@@ -532,23 +412,22 @@ pub(crate) fn secret_of(
             "the mail account has no id or password_env for its password".to_owned(),
         ));
     };
-    let Some(store) = store else {
-        return Err(MailError::Auth(
-            "the host has no account store to read the password from".to_owned(),
-        ));
+    let kept = match host.secret(id, secret_key) {
+        Ok(Some(value)) => Some(value),
+        Ok(None) if secret_key != PASSWORD_KEY => host.secret(id, PASSWORD_KEY).map_err(|_| {
+            MailError::Auth("the host's account store could not be read".to_owned())
+        })?,
+        Ok(None) => None,
+        Err(_) => {
+            return Err(MailError::Auth(
+                "the host's account store could not be read".to_owned(),
+            ));
+        }
     };
-    let record = store
-        .load(id)
-        .map_err(|_| MailError::Auth("the host's account store could not be read".to_owned()))?;
-    let secret = record.as_ref().and_then(|rec| {
-        rec.credentials
-            .get(secret_key)
-            .or_else(|| rec.credentials.get(PASSWORD_KEY))
-    });
-    match secret {
-        Some(value) if !value.is_empty() => Ok(AccountSecret::new(value)),
+    match kept {
+        Some(value) if !value.is_empty() => Ok(AccountSecret::new(&value)),
         _ => Err(MailError::Auth(format!(
-            "no stored password is saved for mail account id {id}: run `canoa mail add` or remove and add it again"
+            "no stored password is saved for mail account id {id}: add the account again or remove it"
         ))),
     }
 }
@@ -560,8 +439,8 @@ pub(crate) fn non_secret_settings(
 ) -> Map<String, Value> {
     let secrets = info
         .and_then(|info| info.schema.as_ref())
-        .and_then(|schema| crate::forms::json_of(schema).ok())
-        .map(|schema| crate::forms::secrets_of(&schema))
+        .and_then(|schema| forms::json_of(schema).ok())
+        .map(|schema| forms::secrets_of(&schema))
         .unwrap_or_default();
     settings
         .iter()

@@ -189,6 +189,8 @@ struct Served {
 /// What every connection shares.
 struct Shared {
     method: Proof,
+    /// The session services the loaded libraries offer.
+    services: Arc<crate::services::Services>,
     store: Arc<TrustStore>,
     registry: Registry,
     unproven: Gate,

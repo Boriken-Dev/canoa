@@ -96,7 +96,7 @@ fn peer(grants: &[Grant]) -> Caller {
 #[test]
 fn a_key_with_no_secrets_grant_reaches_none_of_the_methods_and_the_owner_all_of_them() {
     let rig = rig("grant");
-    let denied = peer(&[Grant::ConfigRead, Grant::Accounts, Grant::MailSetup]);
+    let denied = peer(&[Grant::ConfigRead, Grant::Accounts, Grant::ServicesSetup]);
     for method in [
         "secrets/providers",
         "secrets/list",

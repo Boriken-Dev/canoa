@@ -358,6 +358,29 @@ pub(crate) fn set_pool(
     )
 }
 
+/// Replaces the table at `at` with `table`, made when the file has none, or takes it out for `None`, in the file's own format. The
+/// rest of the file, its comments included, stays as it is.
+pub(crate) fn set_table(
+    path: &Path,
+    at: &[&str],
+    table: Option<&toml::Table>,
+) -> Result<(), Failed> {
+    let _one = config_writes();
+    let text = read_cfg(path)?;
+    let change = match table {
+        Some(table) => Change::Replace(at, table),
+        None => Change::RemoveTable(at),
+    };
+    let (edited, found) = edit_cfg(path, &text, &[change])?;
+    if table.is_none() && !found {
+        return Err(Failed::usage(format!(
+            "canoa.cfg does not hold [{}] as a table of its own: change it by hand",
+            at.join(".")
+        )));
+    }
+    write_cfg(path, &edited)
+}
+
 /// Takes the block `add` wrote for `name` out of the file. An account written some other way is for its writer to remove.
 pub(super) fn remove_account(path: &Path, name: &str) -> Result<(), Failed> {
     remove_table(path, &["host", "accounts"], name, "canoa accounts add")

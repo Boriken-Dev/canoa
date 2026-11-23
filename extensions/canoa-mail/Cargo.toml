@@ -1,0 +1,41 @@
+[package]
+name = "canoa-mail"
+description = "The person's own mail as a Canoa session service: tools for an agent, accounts, and the Mail page of Settings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["canoa", "mail", "mcp"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# Canoa itself is not published yet.
+publish = false
+
+[dependencies]
+canoa = { workspace = true, features = ["mail-backend", "session-service", "settings-section", "store", "network"] }
+coqui-acp-api.workspace = true
+data-encoding.workspace = true
+guatiao.workspace = true
+guatiao-intake.workspace = true
+guatiao-serde.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+canoa-microsoft-mail = { workspace = true, features = ["standin"] }
+coqui-syshttp.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

@@ -672,26 +672,6 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_accounts,
     ),
     rpc(
-        "mail/accounts",
-        Access::Require(Grant::MailSetup),
-        Control::r_mail,
-    ),
-    rpc(
-        "mail/add",
-        Access::Require(Grant::MailSetup),
-        Control::r_mail,
-    ),
-    rpc(
-        "mail/test",
-        Access::Require(Grant::MailSetup),
-        Control::r_mail,
-    ),
-    rpc(
-        "mail/remove",
-        Access::Require(Grant::MailSetup),
-        Control::r_mail,
-    ),
-    rpc(
         "usage/summary",
         Access::Require(Grant::Usage),
         Control::r_usage,
@@ -876,6 +856,14 @@ impl Control {
                             "this needs a link that can carry its output".to_owned(),
                         ))
                     })
+                }
+                None if self
+                    .services
+                    .as_ref()
+                    .is_some_and(|services| services.has_namespace(method)) =>
+                {
+                    allow(caller, Grant::ServicesSetup)
+                        .and_then(|()| self.services_call(method, &params))
                 }
                 None => Err((NO_METHOD, "this host has no such method".to_owned())),
             },

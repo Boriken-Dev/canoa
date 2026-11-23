@@ -308,7 +308,7 @@ impl MailBackend for EwsBackend {
                 }
                 if !has_secret {
                     return Err(MailError::Bad(
-                        "basic sign-in needs password_env or an id stored by `canoa mail add`"
+                        "basic sign-in needs password_env or an id the host stored when the account was added"
                             .to_owned(),
                     )
                     .into());

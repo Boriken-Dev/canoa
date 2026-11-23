@@ -40,11 +40,12 @@ impl<'a> From<&'a Listed> for Signing<'a> {
 }
 
 #[cfg(test)]
+pub(crate) use cfg::append_table;
+#[cfg(test)]
 pub(crate) use cfg::remove_entry;
 use cfg::{append_account, remove_account};
 pub(crate) use cfg::{
-    append_table, check_cfg, config_writes, read_cfg, remove_table, set_offered, set_pool,
-    with_table, write_cfg,
+    config_writes, read_cfg, remove_table, set_offered, set_pool, set_table, write_cfg,
 };
 pub(crate) use interact::{Event, Relay};
 use interact::{cancel_on_input_closing, sign_in};

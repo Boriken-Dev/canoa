@@ -421,14 +421,15 @@ fn attach_connection_tools(
         }
     });
     let connection = connection.map(|connection| {
-        if store.is_some_and(|link| link.offers(crate::mail::tools::SERVER_NAME)) {
-            connection.with_skill(
-                crate::mail::tools::SKILL_NAME,
-                crate::mail::tools::skill_files(),
-            )
-        } else {
-            connection
+        let mut connection = connection;
+        for server in shared.services.servers() {
+            if store.is_some_and(|link| link.offers(&server))
+                && let Some((name, files)) = shared.services.skill_of(&server)
+            {
+                connection = connection.with_skill(&name, files);
+            }
         }
+        connection
     });
     let kb = connection.as_ref().and_then(|connection| {
         shared.kb_tools.for_connection(

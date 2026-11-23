@@ -46,11 +46,9 @@ fn allowing(base: &Path, dir: &Path, found: &mut Vec<String>) {
     }
 }
 
-/// The module a file with an `allow(unsafe_code)` belongs to: `mail.rs` allows it for its `sspi_server` module,
-/// and `usage_splice/members.rs` for `members/win32.rs`.
+/// The module a file with an `allow(unsafe_code)` belongs to: `usage_splice/members.rs` allows it for `members/win32.rs`.
 fn module_of(file: &str) -> &str {
     match file {
-        "mail.rs" => "mail/sspi_server.rs",
         "usage_splice/members.rs" => "usage_splice/members/win32.rs",
         other => other,
     }

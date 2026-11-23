@@ -1,5 +1,5 @@
-//! Mail accounts in the built `canoa`: a password read from standard input rests in the account store and in no file of canoa.cfg's,
-//! `canoa mail list` never prints it, and `canoa mail remove` forgets it. The store is the file store, in a directory of the test's.
+//! The mail service through the built `canoa`: a password read from standard input rests in the account store and in no file of canoa.cfg's,
+//! `canoa service mail accounts` never prints it, and `canoa service mail remove` forgets it. The store is the file store, in a directory of the test's.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -54,20 +54,15 @@ impl Fixture {
         child.wait_with_output().expect("canoa ends")
     }
 
-    fn add(&self, name: &str, input: &str) -> Output {
+    /// `canoa service mail add --params -` with the account as the JSON on standard input, the password in it.
+    fn add(&self, name: &str, password: &str) -> Output {
+        let account = serde_json::json!({
+            "name": name, "backend": "ews", "server": "https://mail.example.test/EWS/Exchange.asmx",
+            "user": "EXAMPLE\\ana", "password": password,
+        });
         self.canoa(
-            &[
-                "mail",
-                "add",
-                name,
-                "--backend",
-                "ews",
-                "--server",
-                "https://mail.example.test/EWS/Exchange.asmx",
-                "--user",
-                "EXAMPLE\\ana",
-            ],
-            input,
+            &["service", "mail", "add", "--params", "-"],
+            &account.to_string(),
         )
     }
 
@@ -105,13 +100,14 @@ fn contains(haystack: &[u8], needle: &str) -> bool {
 #[test]
 fn a_password_read_from_input_rests_in_the_store_and_is_forgotten_with_the_account() {
     let fixture = Fixture::new();
-    let added = fixture.add("work", &format!("{PASSWORD}\n"));
+    let added = fixture.add("work", PASSWORD);
     assert!(added.status.success(), "{}", text(&added.stderr));
-    assert_eq!(text(&added.stdout).lines().next(), Some("added work (ews)"));
+    let answer: Value = serde_json::from_str(text(&added.stdout).trim()).expect("JSON");
+    assert_eq!(answer["account"]["name"], "work", "{answer}");
 
     let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
     assert!(
-        cfg.contains("[host.mail.accounts.work]") && cfg.contains("id = \""),
+        cfg.contains("[host.services.mail.accounts.work]") && cfg.contains("id = \""),
         "{cfg}"
     );
     assert!(
@@ -123,25 +119,37 @@ fn a_password_read_from_input_rests_in_the_store_and_is_forgotten_with_the_accou
         "and in nothing it said"
     );
 
-    let listed = fixture.canoa(&["mail", "list", "--format", "json"], "");
+    let listed = fixture.canoa(&["service", "mail", "accounts"], "");
     assert!(listed.status.success(), "{}", text(&listed.stderr));
-    let rows: Vec<Value> = text(&listed.stdout)
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("one JSON object per line"))
-        .collect();
+    let answer: Value = serde_json::from_str(text(&listed.stdout).trim()).expect("JSON");
+    let rows = answer["accounts"].as_array().expect("accounts");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["name"], "work");
     assert_eq!(rows[0]["backend"], "ews");
     assert_eq!(rows[0]["state"], "password stored");
     assert!(!text(&listed.stdout).contains(PASSWORD));
 
-    let removed = fixture.canoa(&["mail", "remove", "work"], "");
+    let removed = fixture.canoa(
+        &[
+            "service",
+            "mail",
+            "remove",
+            "--params",
+            "{\"name\": \"work\"}",
+        ],
+        "",
+    );
     assert!(removed.status.success(), "{}", text(&removed.stderr));
     let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
     assert!(!cfg.contains("work"), "{cfg}");
-    let listed = fixture.canoa(&["mail", "list"], "");
+    let listed = fixture.canoa(&["service", "mail", "accounts"], "");
     assert!(listed.status.success());
-    assert_eq!(text(&listed.stdout).trim(), "", "no account is left");
+    let answer: Value = serde_json::from_str(text(&listed.stdout).trim()).expect("JSON");
+    assert_eq!(
+        answer["accounts"],
+        serde_json::json!([]),
+        "no account is left"
+    );
     let sealed = std::fs::read_dir(fixture.home().join("accounts"))
         .map(|entries| {
             entries
@@ -157,27 +165,21 @@ fn a_password_read_from_input_rests_in_the_store_and_is_forgotten_with_the_accou
 fn an_empty_password_and_a_refused_address_leave_nothing_behind() {
     let fixture = Fixture::new();
     let before = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
-    let empty = fixture.add("work", "\n");
+    let empty = fixture.add("work", "");
     assert!(!empty.status.success());
     assert!(
-        text(&empty.stderr).contains("no password"),
+        text(&empty.stderr).contains("needs a password"),
         "{}",
         text(&empty.stderr)
     );
 
     let clear = fixture.canoa(
-        &[
-            "mail",
-            "add",
-            "work",
-            "--backend",
-            "ews",
-            "--server",
-            "ftp://mail.example.com/EWS/Exchange.asmx",
-            "--user",
-            "u",
-        ],
-        &format!("{PASSWORD}\n"),
+        &["service", "mail", "add", "--params", "-"],
+        &serde_json::json!({
+            "name": "work", "backend": "ews", "server": "ftp://mail.example.com/EWS/Exchange.asmx",
+            "user": "u", "password": PASSWORD,
+        })
+        .to_string(),
     );
     assert_eq!(clear.status.code(), Some(1));
     assert!(
@@ -199,18 +201,17 @@ fn an_empty_password_and_a_refused_address_leave_nothing_behind() {
 fn a_password_kept_while_the_credential_store_is_in_memory_ends_with_the_process() {
     let fixture = Fixture::new();
     std::fs::write(&fixture.config, "").expect("canoa.cfg");
-    let added = fixture.add("work", &format!("{PASSWORD}\n"));
+    let added = fixture.add("work", PASSWORD);
     assert!(added.status.success(), "{}", text(&added.stderr));
     assert!(
         !contains(&fixture.everything(), PASSWORD),
         "the password is in no file"
     );
-    let listed = fixture.canoa(&["mail", "list", "--format", "json"], "");
+    let listed = fixture.canoa(&["service", "mail", "accounts"], "");
     assert!(listed.status.success(), "{}", text(&listed.stderr));
-    let row: Value = serde_json::from_str(text(&listed.stdout).lines().next().expect("a row"))
-        .expect("one JSON object per line");
+    let answer: Value = serde_json::from_str(text(&listed.stdout).trim()).expect("JSON");
     assert_ne!(
-        row["state"], "password stored",
+        answer["accounts"][0]["state"], "password stored",
         "the password outlived the process that was given it"
     );
 }

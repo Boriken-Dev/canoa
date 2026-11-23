@@ -22,22 +22,12 @@ pub(crate) fn warnings(config: &Config) -> Vec<String> {
     notes
 }
 
-/// The notes for the addresses of the mailboxes and the knowledge index, which need no account catalog.
+/// The notes for the addresses of the session services' tables and the knowledge index, which need no account catalog.
 pub(crate) fn mail_and_kb_warnings(config: &Config) -> Vec<String> {
     let mut notes = Vec::new();
-    for (name, mailbox) in &config.mail.accounts {
-        for (key, value) in mailbox.settings.as_map() {
-            if let Some(address) = value.as_str()
-                && address
-                    .trim_start()
-                    .to_ascii_lowercase()
-                    .starts_with("http://")
-            {
-                notes.extend(canoa::address::plain_http_note(
-                    &format!("[host.mail.accounts.{name}] {key}"),
-                    address,
-                ));
-            }
+    for (service, text) in &config.services {
+        if let Ok(table) = serde_json::from_str::<serde_json::Value>(text) {
+            plain_http_in(&format!("host.services.{service}"), &table, &mut notes);
         }
     }
     for (key, address) in [
@@ -52,6 +42,30 @@ pub(crate) fn mail_and_kb_warnings(config: &Config) -> Vec<String> {
         }
     }
     notes
+}
+
+/// Notes each text value of `value`, at any depth, that is a plain http address, under the name of the table that holds it.
+fn plain_http_in(path: &str, value: &serde_json::Value, notes: &mut Vec<String>) {
+    let Some(table) = value.as_object() else {
+        return;
+    };
+    for (key, value) in table {
+        match value {
+            serde_json::Value::String(address)
+                if address
+                    .trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with("http://") =>
+            {
+                notes.extend(canoa::address::plain_http_note(
+                    &format!("[{path}] {key}"),
+                    address,
+                ));
+            }
+            serde_json::Value::Object(_) => plain_http_in(&format!("{path}.{key}"), value, notes),
+            _ => {}
+        }
+    }
 }
 
 /// Logs each note at `info` as a non-default setting.
@@ -72,19 +86,20 @@ mod tests {
     #[test]
     fn plain_http_beyond_this_computer_is_noted_in_mail_and_the_index_and_nowhere_else() {
         let quiet = config_of(
-            "[host.mail.accounts.a]\nbackend = \"ews\"\nserver = \"https://mail.example/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
-             [host.mail.accounts.b]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://127.0.0.1:9/v1.0\"\n\
+            "[host.services.mail.accounts.a]\nbackend = \"ews\"\nserver = \"https://mail.example/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
+             [host.services.mail.accounts.b]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://127.0.0.1:9/v1.0\"\n\
              [host.kb]\nembeddings = \"http://localhost:60570\"\nmodel = \"m\"\n",
         );
         assert!(warnings(&quiet).is_empty(), "{:?}", warnings(&quiet));
         let loud = config_of(
-            "[host.mail.accounts.a]\nbackend = \"ews\"\nserver = \"http://192.0.2.9/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
+            "[host.services.mail.accounts.a]\nbackend = \"ews\"\nserver = \"http://192.0.2.9/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
              [host.kb]\nembeddings = \"http://192.0.2.9:60570\"\nmodel = \"m\"\n",
         );
         let notes = warnings(&loud);
         assert_eq!(notes.len(), 2, "{notes:?}");
         assert!(
-            notes[0].starts_with("[host.mail.accounts.a] server is plain http to 192.0.2.9"),
+            notes[0]
+                .starts_with("[host.services.mail.accounts.a] server is plain http to 192.0.2.9"),
             "{notes:?}"
         );
         assert!(

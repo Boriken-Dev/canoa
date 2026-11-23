@@ -78,8 +78,9 @@ pub struct Config {
     pub kb: KbConfig,
     /// `[host.mcp_list]`: how long and how much listing a session's MCP servers takes.
     pub mcp_list: McpListConfig,
-    /// `[host.mail]`: the mailboxes the `canoa-mail` tools reach.
-    pub mail: MailConfig,
+    /// `[host.services.ID]`: the table of each session service as the text of a JSON object whose members keep the file's order,
+    /// which the service reads and writes (`canoa::session_service`). The host checks only that an id is a service id.
+    pub services: IndexMap<String, String>,
     /// `[host.delegate]`: what an agent may hand to another one.
     pub delegate: DelegateConfig,
     /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
@@ -133,7 +134,7 @@ impl Default for Config {
             network: Default::default(),
             kb: Default::default(),
             mcp_list: Default::default(),
-            mail: Default::default(),
+            services: IndexMap::new(),
             delegate: Default::default(),
             control: Default::default(),
             native: Default::default(),
@@ -915,35 +916,6 @@ pub struct KbConfig {
     pub llm_candidates: Option<usize>,
     /// `llm_timeout_secs`: how long one ordering may take before the search answers without it (default 30).
     pub llm_timeout_secs: Option<u64>,
-}
-
-/// `[host.mail]`: the `canoa-mail` tools, which let an agent search, read, draft and organize the person's mail. Nothing is
-/// offered until an account is named; the tools then reach every session of a key that holds the `mail` grant.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct MailConfig {
-    /// `tools`: whether the host offers the mail tools at all (default true).
-    pub tools: Option<bool>,
-    /// `[host.mail.accounts.NAME]`, in the file's order.
-    pub accounts: IndexMap<String, MailAccount>,
-}
-
-/// One `[host.mail.accounts.NAME]`. It holds no secret: `password_env` names the variable that does, and `id` names the entry
-/// of the host's account store that does.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct MailAccount {
-    /// Which `mail_backend` provider opens this mailbox (for example `ews`, `graph`, `outlook`, or an extension's).
-    pub backend: String,
-    /// The variable that holds the secret; it is used before a stored secret.
-    pub password_env: Option<String>,
-    /// The id the secret rests under in the host's account store, which `canoa mail add` or the settings dialog writes.
-    pub id: Option<String>,
-    /// How long one call may take, in seconds (default 60).
-    pub timeout_secs: u64,
-    /// Settings of the backend (`server`, `email`, `user`, `profile`, `client_id`, `tenant`, etc.), flattened in `canoa.cfg` and
-    /// checked by the `mail_backend` provider.
-    pub settings: Settings,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a

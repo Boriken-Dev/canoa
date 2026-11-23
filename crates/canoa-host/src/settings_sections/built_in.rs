@@ -55,7 +55,6 @@ built_in_sections! {
     Mcp("mcp", "MCP servers", "Agents", "extension", "tools servers mcp allowed per agent");
     Permissions("permissions", "Permissions", "Agents", "security", "bypass mode allow once remembered rules protected paths log revoke full access");
     Accounts("accounts", "Accounts", "Agents", "accounts", "login sign in api key subscription credentials add remove several");
-    Mail("mail", "Mail", "Agents", "mail", "email exchange outlook ews mailbox inbox messages password account add remove test sign in");
     Shells("shells", "Shells", "Agents", "terminal", "bash git bash powershell pwsh wsl msys2 terminal shell command windows");
     Usage("usage", "Usage", "Agents", "speed", "limit warn percent quota");
     Store("store", "Store", "Store", "storefront", "catalog catalogs sources registries overlays skills mcp servers types limits icons size");

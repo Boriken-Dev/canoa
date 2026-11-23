@@ -16,15 +16,6 @@ pub(super) fn text<'a>(params: &'a Value, key: &str) -> Result<&'a str, Refusal>
         .ok_or_else(|| (BAD_PARAMS, format!("{key} is missing or not text")))
 }
 
-/// Reads required non-empty string parameter `key`.
-pub(super) fn non_empty_text<'a>(params: &'a Value, key: &str) -> Result<&'a str, Refusal> {
-    params
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| (BAD_PARAMS, format!("{key} is a string")))
-}
-
 /// Reads required array-of-strings parameter `key`.
 pub(super) fn string_list(params: &Value, key: &str) -> Result<Vec<String>, Refusal> {
     match params.get(key) {

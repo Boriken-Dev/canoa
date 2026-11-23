@@ -97,7 +97,7 @@ pub(crate) trait Backend: Send + Sync {
 /// asked for the store tools.
 pub(crate) trait Extra: Send + Sync {
     /// The name of the MCP server the host adds to a session.
-    fn server(&self) -> &'static str;
+    fn server(&self) -> &str;
     /// Whether a connection whose key holds `grants` is given the server.
     fn offered(&self, grants: &BTreeSet<Grant>) -> bool;
     /// The tools and their input, as `tools/list` answers.
@@ -525,7 +525,7 @@ impl Link {
             let state = lock(&self.state);
             (state.asked, state.http, state.stdio, state.digests.len())
         };
-        let mut wanted: Vec<(&'static str, Option<Arc<dyn Extra>>)> = Vec::new();
+        let mut wanted: Vec<(&str, Option<Arc<dyn Extra>>)> = Vec::new();
         if self.store && asked {
             wanted.push((SERVER_NAME, None));
         }

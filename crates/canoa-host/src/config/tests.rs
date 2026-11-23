@@ -2107,72 +2107,24 @@ fn the_store_tools_are_on_unless_the_file_says_false() {
 }
 
 #[test]
-fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_one_in_the_clear() {
+fn host_services_keep_each_services_table_as_json_in_the_files_order_and_refuse_an_id_that_is_no_word()
+ {
     let none = parse("").expect("parses");
-    assert!(none.mail.accounts.is_empty() && none.mail.tools.is_none());
+    assert!(none.services.is_empty());
     let both = parse(
-        "[host.mail]\ntools = true\n\
-         [host.mail.accounts.work]\nbackend = \"ews\"\nemail = \"ana@example.com\"\nuser = \"EXAMPLE\\\\ana\"\npassword_env = \"WORK_PW\"\n\
-         [host.mail.accounts.desktop]\nbackend = \"outlook\"\nprofile = \"Work\"\ntimeout_secs = 90\n",
+        "[host.services.mail]\ntools = true\n[host.services.mail.accounts.work]\nbackend = \"ews\"\n[host.services.mail.accounts.desktop]\nbackend = \"outlook\"\n",
     )
     .expect("parses");
-    let names: Vec<&str> = both.mail.accounts.keys().map(String::as_str).collect();
-    assert_eq!(names, ["work", "desktop"], "the file's order");
-    let work = &both.mail.accounts["work"];
-    assert_eq!(work.backend, "ews");
-    assert_eq!(work.password_env.as_deref(), Some("WORK_PW"));
-    assert_eq!(work.timeout_secs, 60);
-    assert_eq!(work.settings.as_map()["email"], "ana@example.com");
-    let desktop = &both.mail.accounts["desktop"];
     assert_eq!(
-        (desktop.backend.as_str(), desktop.timeout_secs),
-        ("outlook", 90)
+        both.services["mail"],
+        r#"{"tools":true,"accounts":{"work":{"backend":"ews"},"desktop":{"backend":"outlook"}}}"#,
+        "the service reads the table as the file wrote it, in the file's order"
     );
-    let stored = parse(
-        "[host.mail.accounts.s]\nbackend = \"ews\"\nserver = \"https://mail.example.com/EWS/Exchange.asmx\"\nuser = \"u\"\nid = \"0b8d-1\"\n",
-    )
-    .expect("a stored password is named by its id");
-    let stored = &stored.mail.accounts["s"];
-    assert_eq!(
-        (stored.id.as_deref(), stored.password_env.as_deref()),
-        (Some("0b8d-1"), None)
+    assert!(parse("[host.services.Bad_Name]\ntools = true\n").is_err());
+    assert!(
+        parse("[host.mail]\ntools = true\n").is_err(),
+        "the old table is no longer read"
     );
-    let custom = parse(
-        "[host.mail.accounts.fastmail]\nbackend = \"imap\"\nhost = \"imap.fastmail.com\"\nuser = \"ana@fastmail.com\"\nid = \"fm-1\"\n",
-    )
-    .expect("any custom mail_backend id can be configured in canoa.cfg");
-    assert_eq!(custom.mail.accounts["fastmail"].backend, "imap");
-    let slow = parse(
-        "[host.mail.accounts.slow]
-backend = \"outlook\"
-timeout_secs = 86400
-",
-    )
-    .expect("a timeout has no ceiling of the host's own");
-    assert_eq!(slow.mail.accounts["slow"].timeout_secs, 86400);
-
-    for (bad, why) in [
-        (
-            "backend = \"ews\"\nemail = \"a@b\"\nuser = \"u\"\nid = \"\"",
-            "canoa mail add",
-        ),
-        (
-            "backend = \"ews\"\nemail = \"a@b\"\nuser = \"u\"\npassword = \"hunter2\"",
-            "a setting this host does not",
-        ),
-        ("", "backend must be"),
-        ("backend = \"My Backend\"", "backend must be"),
-        ("backend = \"outlook\"\ntimeout_secs = 0", "timeout_secs"),
-        (
-            "backend = \"outlook\"\npassword = \"x\"",
-            "a setting this host does not",
-        ),
-    ] {
-        let error = parse(&format!("[host.mail.accounts.a]\n{bad}\n")).expect_err(bad);
-        assert!(error.to_string().contains(why), "{bad}: {error}");
-    }
-    assert!(parse("[host.mail.accounts.Bad_Name]\nbackend = \"outlook\"\n").is_err());
-    assert!(parse("[host.mail]\ntools = \"no\"\n").is_err());
 }
 
 #[test]
