@@ -19,9 +19,9 @@ pub mod account {
     pub const API_KEY: &str = "api_key";  pub const REFRESH_TOKEN: &str = "refresh_token";  pub const CLIENT_ID: &str = "client_id";   // the keys of the account's credentials
     pub const BASE_URL: &str = "base_url";                                // the one setting
     #[non_exhaustive] pub struct Settings { pub base_url: String }        // Debug, Clone, Eq
-    #[non_exhaustive] pub enum Error { UnknownSetting(String), MissingBaseUrl, InvalidAddress(canoa::api_gateway::Error) }
-    impl Settings { pub fn from_map(&Map<String, Value>) -> Result<Self, Error>; pub fn to_value(&self) -> Value; }   // any http or https address (plain http beyond this computer is told of by the host, not refused), no login in it; a trailing `/` and a final `/v1` are dropped; any other key is refused
-    pub fn settings_schema() -> Value;  pub fn inputs_schema() -> Value;  pub fn provides() -> Vec<String>;   // the account's settings and key; what a sign-in asks first; [`openai-api`, `anthropic-api`]
+    #[non_exhaustive] pub enum Error { Shape(String), MissingBaseUrl, InvalidAddress(canoa::api_gateway::Error) }
+    impl Settings { pub fn from_value(&guatiao::Value) -> Result<Self, Error>; }   // derives `ToValue`, `FromValue` and `Schema`   // any http or https address (plain http beyond this computer is told of by the host, not refused), no login in it; a trailing `/` and a final `/v1` are dropped; any other key is refused
+    pub fn settings_schema() -> guatiao::Value;  pub fn inputs_schema() -> guatiao::Value;  pub fn provides() -> Vec<String>;   // the account's settings and key; what a sign-in asks first; [`openai-api`, `anthropic-api`]
     pub fn offer() -> AccountOffer;                                       // the kind (provides both, renews, no state directory, not rotating; endpoints `model_api` and `auth` at `base_url`), two sign-in methods, and `usage` for the kind
 }
 pub mod sso {
@@ -34,9 +34,7 @@ pub mod sso {
     pub fn expires_at(seconds: u64) -> String;  pub fn rfc3339(unix: u64) -> String;   // RFC 3339 in UTC
 }
 pub mod usage {
-    pub const BUDGET: &str = "budget"; pub const RPM: &str = "rpm"; pub const TPM: &str = "tpm";
-    pub fn buckets_of(info: &Value, observed: i64) -> Vec<Bucket>;       // from a key's `info` object: `coqui_acp_api::key_usage::gateway_buckets`
-    pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, ProviderError>;   // GET /key/info
+    pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, ProviderError>;   // GET `key_usage::gateway_key_info_url(base)` through the host's client, the buckets from `key_usage::gateway_buckets` (ids `GATEWAY_BUDGET`, `GATEWAY_RPM`, `GATEWAY_TPM`)
 }
 ```
 

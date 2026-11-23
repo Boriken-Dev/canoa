@@ -14,16 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use canoa::api_gateway::http;
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::key_usage::{SOURCE_GATEWAY, gateway_buckets};
-use coqui_acp_api::{AccountUsage, Bucket, Source};
-use serde_json::Value;
-
-/// The id of the budget bucket.
-pub const BUDGET: &str = "budget";
-/// The id of the request limit bucket.
-pub const RPM: &str = "rpm";
-/// The id of the token limit bucket.
-pub const TPM: &str = "tpm";
+use coqui_acp_api::key_usage::{SOURCE_GATEWAY, gateway_buckets, gateway_key_info_url};
+use coqui_acp_api::{AccountUsage, Source};
 
 /// Seconds since the Unix epoch.
 fn now() -> i64 {
@@ -34,12 +26,6 @@ fn now() -> i64 {
         })
 }
 
-/// The buckets a key's `info` object says, as of `observed` (Unix seconds).
-#[must_use]
-pub fn buckets_of(info: &Value, observed: i64) -> Vec<Bucket> {
-    gateway_buckets(info, observed)
-}
-
 /// What the key `key` has used at the proxy `base`: its `/key/info`.
 ///
 /// # Errors
@@ -48,16 +34,11 @@ pub fn buckets_of(info: &Value, observed: i64) -> Vec<Bucket> {
 /// the proxy does not answer or answers what is not a key's information. A proxy that has no such route, or does not let the key read
 /// its own, is the answer "not offered", not an error.
 pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, ProviderError> {
-    let reply = http::get_json(&format!("{base}/key/info"), Some(key))
+    let reply = http::get_json(&gateway_key_info_url(base), Some(key))
         .map_err(|why| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &why.to_string()))?;
     let mut usage = match reply.status {
         200..=299 => {
-            let info = reply
-                .body
-                .get("info")
-                .filter(|info| info.is_object())
-                .unwrap_or(&reply.body);
-            if !info.is_object() {
+            if !reply.body.is_object() {
                 return Err(ProviderError::new(
                     Status::GUATIAO_ERR_INTERNAL,
                     "the proxy's /key/info is not a key's information",
@@ -67,7 +48,7 @@ pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, Provid
             let mut usage = AccountUsage::new();
             usage.sources = vec![Source::Other(SOURCE_GATEWAY.to_owned())];
             usage.observed_at = observed;
-            usage.buckets = buckets_of(info, observed);
+            usage.buckets = gateway_buckets(&reply.body, observed);
             usage
         }
         401 => {
@@ -95,6 +76,9 @@ pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, Provid
 mod tests {
     use core::time::Duration;
 
+    use coqui_acp_api::key_usage::{
+        GATEWAY_BUDGET as BUDGET, GATEWAY_RPM as RPM, GATEWAY_TPM as TPM,
+    };
     use coqui_acp_api::{Coverage, Refill, Status as BucketStatus, Unit};
     use serde_json::json;
 
@@ -108,7 +92,7 @@ mod tests {
             "spend": 12.5, "max_budget": 50.0, "budget_duration": "30d",
             "budget_reset_at": "2027-02-01T00:00:00Z",
         });
-        let buckets = buckets_of(&json!({ "info": info }), AT);
+        let buckets = gateway_buckets(&json!({ "info": info }), AT);
         assert_eq!(buckets.len(), 1);
         let budget = &buckets[0];
         assert_eq!(budget.id, BUDGET);
@@ -127,7 +111,7 @@ mod tests {
             }
         );
         // Spent to the budget is exhausted until it resets.
-        let spent = buckets_of(&json!({"spend": 50.0, "max_budget": 50.0}), AT);
+        let spent = gateway_buckets(&json!({"spend": 50.0, "max_budget": 50.0}), AT);
         assert_eq!(spent[0].status, BucketStatus::Exhausted);
         assert_eq!(spent[0].refill, Refill::Never);
         assert_eq!(spent[0].remaining, Some(0));
@@ -135,7 +119,7 @@ mod tests {
 
     #[test]
     fn request_and_token_limits_are_buckets_of_their_own_when_set() {
-        let buckets = buckets_of(
+        let buckets = gateway_buckets(
             &json!({"spend": 1.0, "rpm_limit": 60, "tpm_limit": null}),
             AT,
         );
@@ -151,15 +135,15 @@ mod tests {
             BucketStatus::Unknown,
             "the proxy says the limit, not what is left"
         );
-        let tpm = buckets_of(&json!({"tpm_limit": 100_000}), AT);
+        let tpm = gateway_buckets(&json!({"tpm_limit": 100_000}), AT);
         assert_eq!(tpm[0].id, TPM);
         assert_eq!(tpm[0].unit, Unit::Tokens);
-        assert!(buckets_of(&json!({"models": ["m"]}), AT).is_empty());
+        assert!(gateway_buckets(&json!({"models": ["m"]}), AT).is_empty());
     }
 
     #[test]
     fn a_key_with_no_budget_reports_its_spend_and_no_limit() {
-        let buckets = buckets_of(&json!({"spend": 0.0001065, "max_budget": null}), AT);
+        let buckets = gateway_buckets(&json!({"spend": 0.0001065, "max_budget": null}), AT);
         assert_eq!(buckets.len(), 1);
         assert_eq!((buckets[0].used, buckets[0].limit), (Some(107), None));
     }

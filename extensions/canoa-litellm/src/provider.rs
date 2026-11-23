@@ -7,7 +7,8 @@
 
 use std::time::{Duration, Instant};
 
-use canoa::api_gateway::{key_form, key_of, openai_models, value};
+use canoa::api_gateway::{key_form, key_of, openai_models};
+use coqui_acp_api::guatiao::ToValue as _;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status};
 use coqui_acp_api::{
@@ -16,7 +17,6 @@ use coqui_acp_api::{
     LoginOutcome, LoginPrompter, LoginRequest, ModelListing, ProcessSpawner, RenewReport,
     RenewRequest, WatchRequest,
 };
-use serde_json::{Map, Value};
 
 use crate::account::{self, API_KEY, CLIENT_ID, KIND, REFRESH_TOKEN, SET_KEY, SIGN_IN, Settings};
 use crate::{sso, usage};
@@ -35,9 +35,7 @@ fn proxy_of(grant: &AccountGrant) -> Result<(String, String), ProviderError> {
     if grant.kind != KIND {
         return Err(refused("this provider keeps no account of that kind"));
     }
-    let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&grant.settings)
-        .map_err(|_| refused("the account's settings are not a table"))?;
-    let base = Settings::from_map(&settings)
+    let base = Settings::from_value(&grant.settings)
         .map_err(|why| refused(why.to_string()))?
         .base_url;
     let key = grant
@@ -84,9 +82,8 @@ impl AccountProvider for LiteLlmAccounts {
         if request.method != SIGN_IN && request.method != SET_KEY {
             return Err(refused("LiteLLM has no such way to sign in"));
         }
-        let inputs = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.inputs)
-            .map_err(|_| refused("the inputs are not a table"))?;
-        let settings = Settings::from_map(&inputs).map_err(|why| refused(why.to_string()))?;
+        let settings =
+            Settings::from_value(&request.inputs).map_err(|why| refused(why.to_string()))?;
         let host = settings
             .base_url
             .split("://")
@@ -121,7 +118,7 @@ impl AccountProvider for LiteLlmAccounts {
             }
         }
         let mut outcome = LoginOutcome::new(KIND, credentials);
-        outcome.settings = value(&settings.to_value());
+        outcome.settings = settings.to_value()?;
         outcome.label = label;
         outcome.expires_at = expires_at;
         Ok(outcome)
