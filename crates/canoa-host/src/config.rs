@@ -1006,6 +1006,10 @@ fn build_subsystems(
             skill_folders: raw.skill_folders.map(RawLines::lines),
             index_ttl: raw.index_ttl,
             index_cache_bytes: raw.index_cache_bytes,
+            latest_ttl: raw.latest_ttl,
+            models_ttl: raw.models_ttl,
+            catalog_ttl: raw.catalog_ttl,
+            refresh_every: raw.refresh_every,
             tools: raw.tools,
         });
     let network = host

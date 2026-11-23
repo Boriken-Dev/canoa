@@ -2076,6 +2076,29 @@ fn the_store_index_takes_a_ttl_in_seconds_and_a_byte_budget() {
 }
 
 #[test]
+fn the_store_takes_a_time_for_each_thing_it_keeps_and_one_for_renewing_them() {
+    let none = parse("[host.store]\nprotected = []\n").expect("parses");
+    assert_eq!(
+        [
+            none.store.latest_ttl,
+            none.store.models_ttl,
+            none.store.catalog_ttl,
+            none.store.refresh_every
+        ],
+        [None; 4]
+    );
+    let set = parse(
+        "[host.store]\nlatest_ttl = 7200\nmodels_ttl = 0\ncatalog_ttl = 60\nrefresh_every = 0\n",
+    )
+    .expect("parses");
+    assert_eq!(set.store.latest_ttl, Some(7200));
+    assert_eq!(set.store.models_ttl, Some(0));
+    assert_eq!(set.store.catalog_ttl, Some(60));
+    assert_eq!(set.store.refresh_every, Some(0));
+    assert!(parse("[host.store]\nlatest_ttl = \"1h\"\n").is_err());
+}
+
+#[test]
 fn host_usage_keeps_four_hundred_days_unless_told_and_refuses_zero_and_the_unknown() {
     let none = Config::from_str_in("", &base()).expect("parses");
     assert_eq!(none.usage, UsageConfig::default());

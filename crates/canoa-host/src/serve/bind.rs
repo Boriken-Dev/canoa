@@ -804,6 +804,25 @@ fn bind_control_entry(state: &mut BindState<'_>) -> Result<(), ServeError> {
     Ok(())
 }
 
+/// What the Store keeps, with the times `[host.store]` names.
+fn store_caches(
+    config: &Config,
+    state_dir: Option<&std::path::Path>,
+) -> crate::store::caches::StoreCaches {
+    use crate::store::caches::{
+        DEFAULT_CATALOG_TTL, DEFAULT_LATEST_TTL, DEFAULT_MODELS_TTL, DEFAULT_REFRESH_EVERY,
+    };
+    let seconds =
+        |given: Option<u64>, default| given.map_or(default, core::time::Duration::from_secs);
+    crate::store::caches::StoreCaches::new(
+        state_dir.map(|dir| dir.join("cache").join("store")),
+        seconds(config.store.latest_ttl, DEFAULT_LATEST_TTL),
+        seconds(config.store.models_ttl, DEFAULT_MODELS_TTL),
+        seconds(config.store.catalog_ttl, DEFAULT_CATALOG_TTL),
+        seconds(config.store.refresh_every, DEFAULT_REFRESH_EVERY),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_control_hub(
     config: &Config,
@@ -847,6 +866,8 @@ fn build_control_hub(
             .collect(),
     )
     .map_err(ServeError::Control)?;
+    let caches = Arc::new(store_caches(config, options.state_dir.as_deref()));
+    let kept = kept.with_caches(Arc::clone(&caches));
     let kept = if options.supervised {
         kept.with_stop(Arc::clone(stopped))
     } else {
@@ -988,10 +1009,11 @@ fn build_control_hub(
     Ok(match &options.programs {
         Some((programs, providers)) => kept.with_stores(
             control::Stores::new(Arc::clone(programs), providers.clone())
+                .with_caches(caches)
                 .extended(&config.extensions),
         ),
         None if !config.extensions.is_empty() => match control::Stores::built_in() {
-            Ok(stores) => kept.with_stores(stores.extended(&config.extensions)),
+            Ok(stores) => kept.with_stores(stores.with_caches(caches).extended(&config.extensions)),
             Err(_) => kept,
         },
         None => kept,
@@ -1242,6 +1264,8 @@ impl Serving {
         for extra in services.extras() {
             serving.shared.store_tools.serve_extra(extra);
         }
+        // It ends by itself when the host drops its control.
+        let _ = serving.shared.control.keep_fresh();
         serving.door = serving.open_door(config, options);
         serving.attach_delegation(config, dialer, usage_log);
 
@@ -1436,5 +1460,34 @@ impl Serving {
             identity,
             usage,
         }));
+    }
+}
+
+#[cfg(test)]
+mod store_caches_tests {
+    use core::time::Duration;
+
+    use super::*;
+
+    fn times(text: &str) -> [Duration; 4] {
+        let config = Config::from_str_in(text, std::path::Path::new(".")).expect("parses");
+        store_caches(&config, None).times()
+    }
+
+    #[test]
+    fn the_times_are_canoa_cfgs_and_the_defaults_are_an_hour_and_five_minutes() {
+        let minutes = |each: u64| Duration::from_secs(each * 60);
+        assert_eq!(times(""), [minutes(60), minutes(5), minutes(5), minutes(5)]);
+        assert_eq!(
+            times(
+                "[host.store]\nlatest_ttl = 7200\nmodels_ttl = 10\ncatalog_ttl = 20\nrefresh_every = 0\n"
+            ),
+            [
+                Duration::from_secs(7200),
+                Duration::from_secs(10),
+                Duration::from_secs(20),
+                Duration::ZERO
+            ]
+        );
     }
 }

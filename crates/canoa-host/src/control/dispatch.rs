@@ -533,6 +533,11 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_stores_read,
     ),
     rpc(
+        "store/overview",
+        Access::Require(Grant::StoreRead),
+        Control::r_stores_read,
+    ),
+    rpc(
         "store/extensions",
         Access::Require(Grant::StoreRead),
         Control::r_stores_read,

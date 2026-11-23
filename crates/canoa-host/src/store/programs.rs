@@ -748,6 +748,17 @@ impl Programs {
         Ok(self.managed(&info)?.map(|managed| managed.version))
     }
 
+    /// The start of the managed copy as `current.json` names it, with nothing checked and nothing hashed: what a listing needs to
+    /// know where the program is. Whatever runs the copy goes through [`launch`](Self::launch).
+    ///
+    /// # Errors
+    ///
+    /// What the store or the shelf refuses.
+    pub fn managed_launch(&self, store: &dyn ProgramStore) -> Result<Option<String>, StoreError> {
+        let info = store.describe()?;
+        Ok(self.managed(&info)?.map(|managed| managed.launch.path))
+    }
+
     /// The start of the managed copy, after `current.json` is checked against the digest kept outside the program's folder, the launch
     /// is found to lie inside the copy and the copy inside the programs folder, and every file of the copy is checked against what was
     /// recorded when it was installed (a file added since, one gone, one changed). Reading every file costs time in proportion to the

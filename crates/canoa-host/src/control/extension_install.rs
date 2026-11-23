@@ -162,7 +162,7 @@ fn file_name_of(url: &str) -> Result<String, (i32, String)> {
 
 impl Control {
     /// The extension catalogs `[store.extensions.catalogs]` names, each answered from the index: none until the table names one.
-    fn extension_rows(&self) -> Vec<Row> {
+    pub(super) fn extension_rows(&self) -> Vec<Row> {
         let store = self.store_section();
         parse_extension_sources(crate::store::catalogs::table_of(&store, "extensions"))
     }

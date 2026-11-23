@@ -45,6 +45,8 @@ pub(crate) struct Stores {
     models: models::ModelStores,
     /// The person's home folder, which a program of a type keeps its own files in.
     home: Option<std::path::PathBuf>,
+    /// What the Store keeps so that opening it asks nobody: the newest versions, the models and the catalogs' entries.
+    caches: Arc<crate::store::caches::StoreCaches>,
 }
 
 /// Checks the bytes of an extension the Store installed against the digest it recorded, before any of it is loaded, so a file that
@@ -122,7 +124,14 @@ impl Stores {
             sources: crate::store::sources::Sources::built_in(),
             models: models::ModelStores::default(),
             home: std::env::home_dir(),
+            caches: Arc::new(crate::store::caches::StoreCaches::in_memory()),
         }
+    }
+
+    /// These stores keeping what they learn in `caches`, which the host that serves them also reads and renews.
+    pub(crate) fn with_caches(mut self, caches: Arc<crate::store::caches::StoreCaches>) -> Self {
+        self.caches = caches;
+        self
     }
 
     /// These stores keeping the person's home at `home`, as a test that must not touch the real one does.
@@ -344,6 +353,114 @@ impl Stores {
     }
 }
 
+impl Stores {
+    /// The rows of `store/list`: the Agents type's stores, or with `{"kind": "programs"}` every other program a library offers.
+    fn list_rows(&self, params: &Value) -> Result<Vec<Value>, Failed> {
+        // The Agents type's stores, or with `{"kind": "programs"}` every other program a library offers: the runtimes and
+        // the programs of each type a library adds, each row naming its library and, when a type claims it, the type and
+        // the library's title.
+        let kind = params.get("kind").and_then(Value::as_str);
+        let programs = match kind {
+            None | Some("agents") => false,
+            Some("programs") => true,
+            Some(_) => {
+                return Err((BAD_PARAMS, "kind is agents or programs".to_owned()));
+            }
+        };
+        let mut rows: Vec<(&str, Option<&str>)> = Vec::new();
+        if programs {
+            rows.extend(self.runtimes.iter().map(|id| (id.as_str(), None)));
+            for added in &self.types {
+                rows.extend(
+                    added
+                        .info
+                        .stores
+                        .iter()
+                        .map(|id| (id.as_str(), Some(added.info.id.as_str()))),
+                );
+            }
+        } else {
+            rows.extend(self.providers.iter().map(|id| (id.as_str(), None)));
+        }
+        let ids: Vec<&str> = rows.iter().map(|(id, _)| *id).collect();
+        let listed = self.programs.list(&ids).map_err(|error| refusal(&error))?;
+        let mut stores = Vec::new();
+        for (each, (_, of_type)) in listed.iter().zip(&rows) {
+            let mut info = json_of(&each.info)?;
+            info["provider"] = Value::String(each.provider.clone());
+            if programs {
+                if let Some(library) = self.programs.library_of(&each.provider) {
+                    info["library"] = Value::String(library);
+                }
+                if let Some(of_type) = of_type {
+                    info["type"] = Value::String((*of_type).to_owned());
+                    // The library's own name for itself: the title of the extension that adds the type.
+                    if let Some(added) = self.types.iter().find(|added| added.info.id == *of_type) {
+                        info["library_title"] = Value::String(added.extension_title.clone());
+                    }
+                }
+            }
+            stores.push(info);
+        }
+        Ok(stores)
+    }
+
+    /// The request that asks `store`'s publisher for its newest version, as the cache runs it.
+    fn asker(
+        &self,
+        store: Arc<dyn canoa::store::ProgramStore>,
+        channel: Option<String>,
+    ) -> crate::store::caches::Fetch {
+        let programs = Arc::clone(&self.programs);
+        Arc::new(move || {
+            let latest = programs
+                .latest(&*store, channel.clone())
+                .map_err(|error| refusal(&error))?;
+            json_of(&latest)
+        })
+    }
+
+    /// `store/overview` `{"kind"?}` -> `{"stores": [row]}`: each row of `store/list` with its `report` (the copies found, as
+    /// `store/report` answers with no probe) or, when that cannot be had, a `problem`, and the newest version the cache keeps
+    /// as `latest` with `checked` (milliseconds since the epoch) and `stale`. Nothing asks a publisher, so one round trip shows
+    /// the Store; a program with no `latest` is asked about with `store/latest`.
+    fn overview(&self, params: &Value) -> Result<Value, Failed> {
+        let mut stores = self.list_rows(params)?;
+        for info in &mut stores {
+            let provider = info["provider"].as_str().unwrap_or_default().to_owned();
+            let report = self
+                .store(&json!({"provider": provider}))
+                .and_then(|(_, store)| {
+                    self.programs
+                        .report(&*store, false, None)
+                        .map_err(|error| refusal(&error))
+                        .and_then(|report| json_of(&report))
+                });
+            match report {
+                Ok(report) => info["report"] = report,
+                Err((_, why)) => info["problem"] = Value::String(why),
+            }
+            if let Some(latest) = self.caches.latest.peek(&provider, None) {
+                info["latest"] = latest;
+            }
+        }
+        Ok(json!({"stores": stores}))
+    }
+
+    /// Asks again, on this thread, the publishers whose kept version has gone stale.
+    pub(crate) fn refresh_latest(&self) {
+        for (provider, channel) in self.caches.latest.stale() {
+            let Ok((_, store)) = self.store(&json!({"provider": provider})) else {
+                continue;
+            };
+            let fetch = self.asker(store, channel.clone());
+            self.caches
+                .latest
+                .renew(&provider, channel.as_deref(), &fetch);
+        }
+    }
+}
+
 mod models;
 
 type Failed = (i32, String);
@@ -424,55 +541,10 @@ impl Stores {
             return Ok(json!({"types": types}));
         }
         if method == "store/list" {
-            // The Agents type's stores, or with `{"kind": "programs"}` every other program a library offers: the runtimes and
-            // the programs of each type a library adds, each row naming its library and, when a type claims it, the type and
-            // the library's title.
-            let kind = params.get("kind").and_then(Value::as_str);
-            let programs = match kind {
-                None | Some("agents") => false,
-                Some("programs") => true,
-                Some(_) => {
-                    return Err((BAD_PARAMS, "kind is agents or programs".to_owned()));
-                }
-            };
-            let mut rows: Vec<(&str, Option<&str>)> = Vec::new();
-            if programs {
-                rows.extend(self.runtimes.iter().map(|id| (id.as_str(), None)));
-                for added in &self.types {
-                    rows.extend(
-                        added
-                            .info
-                            .stores
-                            .iter()
-                            .map(|id| (id.as_str(), Some(added.info.id.as_str()))),
-                    );
-                }
-            } else {
-                rows.extend(self.providers.iter().map(|id| (id.as_str(), None)));
-            }
-            let ids: Vec<&str> = rows.iter().map(|(id, _)| *id).collect();
-            let listed = self.programs.list(&ids).map_err(|error| refusal(&error))?;
-            let mut stores = Vec::new();
-            for (each, (_, of_type)) in listed.iter().zip(&rows) {
-                let mut info = json_of(&each.info)?;
-                info["provider"] = Value::String(each.provider.clone());
-                if programs {
-                    if let Some(library) = self.programs.library_of(&each.provider) {
-                        info["library"] = Value::String(library);
-                    }
-                    if let Some(of_type) = of_type {
-                        info["type"] = Value::String((*of_type).to_owned());
-                        // The library's own name for itself: the title of the extension that adds the type.
-                        if let Some(added) =
-                            self.types.iter().find(|added| added.info.id == *of_type)
-                        {
-                            info["library_title"] = Value::String(added.extension_title.clone());
-                        }
-                    }
-                }
-                stores.push(info);
-            }
-            return Ok(json!({"stores": stores}));
+            return Ok(json!({"stores": self.list_rows(params)?}));
+        }
+        if method == "store/overview" {
+            return self.overview(params);
         }
         let (provider, store) = self.store(params)?;
         match method {
@@ -493,11 +565,16 @@ impl Stores {
                     .get("channel")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
-                let latest = self
-                    .programs
-                    .latest(&*store, channel)
-                    .map_err(|error| refusal(&error))?;
-                json_of(&latest)
+                let refresh = params
+                    .get("refresh")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                self.caches.latest.get(
+                    &provider,
+                    channel.as_deref(),
+                    refresh,
+                    self.asker(store, channel.clone()),
+                )
             }
             "store/plan" => {
                 let action: Action = from_json(
@@ -542,6 +619,7 @@ impl Stores {
     /// `store/rollback` and `store/remove`.
     pub(crate) fn change(&self, method: &str, params: &Value) -> Result<Value, Failed> {
         let (provider, store) = self.store(params)?;
+        let _forget = models::Forget(&self.caches.models);
         match method {
             "store/rollback" => {
                 let current = self
@@ -766,11 +844,14 @@ impl Stores {
             out: Mutex::new(out.clone()),
         });
         let programs = Arc::clone(&self.programs);
+        let caches = Arc::clone(&self.caches);
         let stop = Arc::clone(&cancel);
         let owner = owner.to_owned();
         let session = format!("store:{provider}");
         let worker = thread::spawn(move || {
             let done = programs.apply_store_for(&owner, store, &provider, &plan, sink, stop);
+            // An install, update or removal changes what a Store type's models say.
+            caches.models.clear();
             let _ = out.send(Out::Done(Box::new(done)));
         });
         let mut asking: Option<Pending> = None;

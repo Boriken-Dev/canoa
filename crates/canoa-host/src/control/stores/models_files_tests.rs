@@ -654,3 +654,37 @@ fn a_name_that_leaves_the_models_folder_is_refused() {
     assert!(!host.root.join("shelf/whisper/escaped.bin").exists());
     assert!(host.transport.requests().is_empty());
 }
+
+#[test]
+fn a_listing_is_kept_until_something_changes_it_or_it_is_read_again() {
+    let host = fixture("kept", world());
+    host.program("whisper-cli");
+    assert_eq!(host.row("whisper", "base")["on"], false);
+    // The model appears outside the host: the kept listing does not know yet.
+    std::fs::create_dir_all(host.folder("whisper")).expect("a folder");
+    std::fs::write(host.folder("whisper").join("ggml-base.bin"), WEIGHTS).expect("the model");
+    assert_eq!(host.row("whisper", "base")["on"], false, "kept");
+    let read_again = host
+        .stores
+        .models_read(&json!({"type": "whisper", "refresh": true}), &host.files)
+        .expect("listed");
+    let base = read_again["models"]
+        .as_array()
+        .and_then(|all| all.iter().find(|row| row["id"] == "base"))
+        .expect("the model");
+    assert_eq!(base["on"], true, "a refresh lists them again");
+    assert_eq!(host.row("whisper", "base")["on"], true, "and keeps that");
+    // What the host itself does empties it, so the person sees their own change at once.
+    host.act("whisper", "tiny.en", "fetch_files")
+        .expect("installed");
+    assert_eq!(host.row("whisper", "tiny.en")["on"], true);
+    std::fs::remove_file(host.folder("whisper").join("ggml-base.bin")).expect("removed outside");
+    assert_eq!(host.row("whisper", "base")["on"], true, "kept again");
+    host.act("whisper", "tiny.en", "delete_files")
+        .expect("removed");
+    assert_eq!(
+        host.row("whisper", "base")["on"],
+        false,
+        "the action emptied it"
+    );
+}

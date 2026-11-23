@@ -68,7 +68,16 @@ fn fixture(name: &str, installed: bool) -> Fixture {
     let registry = crate::store::registry::built_in().expect("the built-in stores");
     let programs =
         Programs::new(Shelf::unchecked(root.join("shelf")), Arc::clone(&registry)).options(options);
+    // A model loaded or fetched outside the host shows at once here, so no listing is kept.
+    let kept = crate::store::caches::StoreCaches::new(
+        None,
+        crate::store::caches::DEFAULT_LATEST_TTL,
+        Duration::ZERO,
+        crate::store::caches::DEFAULT_CATALOG_TTL,
+        Duration::ZERO,
+    );
     let stores = Stores::new(Arc::new(programs), Vec::new())
+        .with_caches(Arc::new(kept))
         .with_included_extensions(&registry)
         .with_home(Some(home.clone()));
     let files = Files::new(

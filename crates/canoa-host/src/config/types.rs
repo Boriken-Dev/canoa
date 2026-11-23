@@ -786,6 +786,16 @@ pub struct StoreConfig {
     pub index_ttl: Option<u64>,
     /// `index_cache_bytes`: what the index's cached icons may take in all (default 64 MiB).
     pub index_cache_bytes: Option<u64>,
+    /// `latest_ttl`: seconds a publisher's newest version of a program answers with no network (default 3600); past it the
+    /// kept version is served at once and asked again in the background. 0 asks on every request.
+    pub latest_ttl: Option<u64>,
+    /// `models_ttl`: seconds a Store type's list of models answers without running its program (default 300; 0 every time).
+    pub models_ttl: Option<u64>,
+    /// `catalog_ttl`: seconds the entries of a skills or MCP servers catalog answer with no network (default 300; 0 every time).
+    pub catalog_ttl: Option<u64>,
+    /// `refresh_every`: seconds between the host asking again what the Store keeps that has gone stale (the newest versions and
+    /// the catalogs' index), while at least one client is connected (default 300; 0 never).
+    pub refresh_every: Option<u64>,
     /// `tools`: whether the host offers the `canoa-store` tools (search and inspect) to a session whose client asks for them and
     /// whose key reads the index (default true).
     pub tools: Option<bool>,
@@ -803,6 +813,10 @@ struct StoreSectionSchema {
     credential_variables: Option<Vec<String>>,
     index_ttl: Option<u64>,
     index_cache_bytes: Option<u64>,
+    latest_ttl: Option<u64>,
+    models_ttl: Option<u64>,
+    catalog_ttl: Option<u64>,
+    refresh_every: Option<u64>,
     tools: Option<bool>,
 }
 

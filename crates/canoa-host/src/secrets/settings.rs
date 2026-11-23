@@ -554,6 +554,10 @@ mod tests {
             "credential_variables",
             "index_ttl",
             "index_cache_bytes",
+            "latest_ttl",
+            "models_ttl",
+            "catalog_ttl",
+            "refresh_every",
             "tools",
         ] {
             assert!(

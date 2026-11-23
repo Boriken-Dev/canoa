@@ -57,7 +57,13 @@ impl Rig {
         }
     }
 
+    /// A host that asks the source every time, so a test that changes a source reads the change.
     fn control(&self, cfg: &str) -> Control {
+        self.control_keeping(cfg, Duration::ZERO)
+    }
+
+    /// A host that keeps a catalog's entries for `kept`.
+    fn control_keeping(&self, cfg: &str, kept: Duration) -> Control {
         std::fs::write(&self.config, cfg).expect("config");
         let programs = Programs::new(
             Shelf::unchecked(self.tmp.join("programs")),
@@ -70,6 +76,13 @@ impl Rig {
             Vec::new(),
         )
         .expect("opens")
+        .with_caches(Arc::new(crate::store::caches::StoreCaches::new(
+            None,
+            crate::store::caches::DEFAULT_LATEST_TTL,
+            crate::store::caches::DEFAULT_MODELS_TTL,
+            kept,
+            Duration::ZERO,
+        )))
         .with_files(Files::new(
             None,
             Vec::new(),
@@ -335,6 +348,33 @@ fn the_read_source_reads_a_registry_by_address_with_the_search_and_cursor_and_a_
     );
     let again = rig.catalog(&control, "mcps", "local", json!({}));
     assert_eq!(names(&again, "servers"), ["io.example/new"], "{again}");
+}
+
+#[test]
+fn a_catalog_is_kept_for_its_time_and_read_again_when_asked_to() {
+    let rig = Rig::new("read-kept");
+    let control = rig.control_keeping(
+        "[store.mcps.catalogs]\ncorp = \"https://registry.example/\"\n",
+        Duration::from_secs(300),
+    );
+    let first = rig.catalog(&control, "mcps", "corp", json!({}));
+    assert_eq!(names(&first, "servers").len(), 2, "{first}");
+    let second = rig.catalog(&control, "mcps", "corp", json!({}));
+    assert_eq!(second, first);
+    assert_eq!(
+        rig.transport.asked.lock().expect("lock").len(),
+        1,
+        "the second read reached no registry"
+    );
+    // Another search is another question.
+    rig.catalog(&control, "mcps", "corp", json!({"search": "mail"}));
+    assert_eq!(rig.transport.asked.lock().expect("lock").len(), 2);
+    rig.catalog(&control, "mcps", "corp", json!({"refresh": true}));
+    assert_eq!(
+        rig.transport.asked.lock().expect("lock").len(),
+        3,
+        "a refresh asks the registry again"
+    );
 }
 
 #[test]

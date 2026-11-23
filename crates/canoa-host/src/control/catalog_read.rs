@@ -47,21 +47,35 @@ impl Control {
                 ));
             }
         };
+        let refresh = match params.get("refresh") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(bad("refresh is true or false")),
+        };
         let store = self.store_section();
         let entry = catalogs::find(&kind, table_of(&store, &kind.id), label)
             .map_err(|why| (NOT_FOUND, why))?;
-        let mut answer = if entry.provider == READ {
-            match id {
-                "skills" => self.read_skills(caller, &entry)?,
-                _ => self.read_mcps(caller, &entry, search, cursor)?,
-            }
-        } else {
-            self.read_provided(&kind, &entry, search)?
-        };
-        answer["type"] = json!(id);
-        answer["label"] = json!(entry.label);
-        answer["provider"] = json!(entry.provider);
-        Ok(answer)
+        // What a catalog lists is kept for `[host.store] catalog_ttl`, per caller, since what a caller may read differs.
+        let key = format!(
+            "{}\n{id}\n{label}\n{search}\n{}\n{}",
+            caller.owner(),
+            cursor.unwrap_or_default(),
+            entry.source().unwrap_or_default()
+        );
+        self.caches.catalog.get(&key, refresh, || {
+            let mut answer = if entry.provider == READ {
+                match id {
+                    "skills" => self.read_skills(caller, &entry)?,
+                    _ => self.read_mcps(caller, &entry, search, cursor)?,
+                }
+            } else {
+                self.read_provided(&kind, &entry, search)?
+            };
+            answer["type"] = json!(id);
+            answer["label"] = json!(entry.label);
+            answer["provider"] = json!(entry.provider);
+            Ok(answer)
+        })
     }
 
     /// The skills a source holds, found as `npx skills` finds them. A source the person typed is fetched with their own git

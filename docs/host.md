@@ -356,6 +356,12 @@ shell = "git-bash"              # the shell a terminal starts and every agent is
 [host.store]
 protected = ["~/.ssh", "~/.gnupg", "~/.config/autostart"]   # places a declared change may not be at, under or hold
 credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an install is never given
+# What the Store keeps so that opening it asks nobody, each in seconds (0 asks every time). The newest versions are kept on disk and a stale one is answered at once and asked again in the background.
+# index_ttl = 300       # the catalog index
+# latest_ttl = 3600     # a publisher's newest version of a program
+# models_ttl = 300      # a Store type's list of models (an install, update or removal empties it)
+# catalog_ttl = 300     # the entries of a skills or MCP servers catalog
+# refresh_every = 300   # while a client is connected, how often what has gone stale is asked again; 0 never
 
 # The tools that search the knowledge an overlay ships (`canoa-kb`). Without `embeddings` they match words; with it, meaning too, by the
 # server you name. `[overlays.NAME] kb = "index"` serves that overlay's rules and context as a search instead of in the agent's context.

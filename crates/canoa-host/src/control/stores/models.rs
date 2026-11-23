@@ -151,6 +151,16 @@ impl Stores {
     /// The program the type's stores found: the host's own verified copy of the first store that has one, else the first copy
     /// found on the computer. None when no store of the type found one.
     fn type_program(&self, type_id: &str) -> Option<String> {
+        self.program_of(type_id, true)
+    }
+
+    /// As [`type_program`](Self::type_program) for a listing: the managed copy is the one `current.json` names, read without
+    /// checking its files, which costs time in proportion to the copy. What is run with it still goes through `type_program`.
+    fn type_program_found(&self, type_id: &str) -> Option<String> {
+        self.program_of(type_id, false)
+    }
+
+    fn program_of(&self, type_id: &str, verified: bool) -> Option<String> {
         let stores = self.types.iter().find(|each| each.info.id == type_id)?;
         for provider in &stores.info.stores {
             let Ok((_, store)) = self.store(&json!({"provider": provider})) else {
@@ -162,9 +172,15 @@ impl Stores {
                 .ok()
                 .flatten()
                 .is_some()
-                && let Ok(launch) = self.programs.launch(&*store)
             {
-                return Some(launch.path);
+                let launch = if verified {
+                    self.programs.launch(&*store).ok().map(|launch| launch.path)
+                } else {
+                    self.programs.managed_launch(&*store).ok().flatten()
+                };
+                if launch.is_some() {
+                    return launch;
+                }
             }
             if let Ok(report) = self.programs.report(&*store, false, None)
                 && let Some(copy) = report.copies.first()
@@ -191,16 +207,24 @@ impl Stores {
             .map(|folder| folder.to_string_lossy().into_owned())
     }
 
-    /// The rows of the type as the provider lists them now.
+    /// The rows of the type as the provider lists them, from what the host kept of its last listing while that is within
+    /// `[host.store] models_ttl`.
     fn model_rows(&self, held: &Held) -> Result<ModelList, Failed> {
-        held.ask(|store, spawner| {
-            let mut query = ModelQuery::default();
-            query.program = self.type_program(&held.type_id);
-            query.home = self.home_text();
-            query.folder = self.models_folder(&held.type_id);
-            store.list(query, spawner)
+        self.model_rows_asked(held, false)
+    }
+
+    /// As [`model_rows`](Self::model_rows); `refresh` lists them again whatever is kept.
+    fn model_rows_asked(&self, held: &Held, refresh: bool) -> Result<ModelList, Failed> {
+        self.caches.models.get(&held.type_id, refresh, || {
+            held.ask(|store, spawner| {
+                let mut query = ModelQuery::default();
+                query.program = self.type_program_found(&held.type_id);
+                query.home = self.home_text();
+                query.folder = self.models_folder(&held.type_id);
+                store.list(query, spawner)
+            })
+            .map_err(|error| failure(&error))
         })
-        .map_err(|error| failure(&error))
     }
 
     /// What a note on the removal of the program of `provider` says of the models of its type: those installed on their own stay,
@@ -241,7 +265,11 @@ impl Stores {
     /// with `"values"`, what canoa.cfg keeps for it. Runs the type's program as this user, and nothing else.
     pub(crate) fn models_read(&self, params: &Value, files: &Files) -> Result<Value, Failed> {
         let held = self.model_type(params)?;
-        let list: ModelList = self.model_rows(held)?;
+        let refresh = params
+            .get("refresh")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let list: ModelList = self.model_rows_asked(held, refresh)?;
         let table = held.info.settings.as_ref().map(|each| each.table.as_str());
         let kept = table.map(|table| files.model_settings(table));
         let mut rows = Vec::new();
@@ -277,7 +305,7 @@ impl Stores {
                 Some(json!({
                     "provider": provider,
                     "title": title,
-                    "installed": self.type_program(&held.type_id).is_some(),
+                    "installed": self.type_program_found(&held.type_id).is_some(),
                 }))
             }),
             "models": rows,
@@ -291,6 +319,8 @@ impl Stores {
         let held = self.model_type(params)?;
         let model = text(params, "model")?;
         let action = text(params, "action")?;
+        // What the action changes is what a listing says, so none is kept past it, done or not.
+        let _forget = Forget(&self.caches.models);
         if action == STEP_FETCH_FILES || action == STEP_DELETE_FILES {
             return self.move_files(held, model, action);
         }
@@ -502,3 +532,12 @@ mod tests;
 #[cfg(test)]
 #[path = "models_files_tests.rs"]
 mod files_tests;
+
+/// Empties a cache when dropped.
+pub(super) struct Forget<'a, V: Clone>(pub(super) &'a crate::store::caches::TtlCache<V>);
+
+impl<V: Clone> Drop for Forget<'_, V> {
+    fn drop(&mut self) {
+        self.0.clear();
+    }
+}

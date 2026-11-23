@@ -92,6 +92,10 @@ pub(super) struct RawStore {
     pub(super) skill_folders: Option<RawLines>,
     pub(super) index_ttl: Option<u64>,
     pub(super) index_cache_bytes: Option<u64>,
+    pub(super) latest_ttl: Option<u64>,
+    pub(super) models_ttl: Option<u64>,
+    pub(super) catalog_ttl: Option<u64>,
+    pub(super) refresh_every: Option<u64>,
     pub(super) tools: Option<bool>,
 }
 

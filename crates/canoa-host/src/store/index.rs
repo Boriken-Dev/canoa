@@ -353,6 +353,31 @@ impl StoreIndex {
         }
     }
 
+    /// Refreshes, on this thread, each of `rows` that is already kept and whose last attempt is at least the time to live old:
+    /// what the background renewal does, which never fetches a source nobody asked for.
+    pub(crate) fn keep_fresh(self: &Arc<Self>, overlays: &Arc<Overlays>, rows: &[Row]) {
+        if self.ttl.is_zero() {
+            return;
+        }
+        let ttl = u64::try_from(self.ttl.as_millis()).unwrap_or(u64::MAX);
+        for source in rows.iter().flatten() {
+            let slot = self.slot(&source.kept());
+            let mut held = lock(&slot.state).clone();
+            if held.is_none() {
+                held = self.read_disk(source);
+                if let Some(cached) = &held {
+                    *lock(&slot.state) = Some(cached.clone());
+                }
+            }
+            let Some(cached) = held.filter(|cached| cached.spec == source.spec) else {
+                continue;
+            };
+            if now_millis().saturating_sub(cached.attempted) >= ttl {
+                let _ = self.refresh(&slot, overlays, source);
+            }
+        }
+    }
+
     /// Starts a refresh on its own thread unless one is running. Whether this call started it.
     fn refresh_in_background(
         self: &Arc<Self>,

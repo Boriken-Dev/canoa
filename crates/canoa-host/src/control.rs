@@ -159,6 +159,10 @@ pub(crate) struct Control {
     client_certificates: client_certificates::ClientCertificates,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
+    /// What the Store keeps so that opening it asks nobody, and how often it is renewed while a client is connected.
+    caches: Arc<crate::store::caches::StoreCaches>,
+    /// How many links are being served now.
+    clients: AtomicUsize,
     /// Where an extension a catalog lists is kept, and how it is fetched.
     extensions: extension_install::ExtensionInstall,
     /// Set by `host/restart`, with `stop` raised so the host ends and its supervisor starts it again.
@@ -276,6 +280,8 @@ impl Control {
             tunnel: tunnel::Tunnel::default(),
             client_certificates: client_certificates::ClientCertificates::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
+            caches: Arc::new(crate::store::caches::StoreCaches::in_memory()),
+            clients: AtomicUsize::new(0),
             extensions: extension_install::ExtensionInstall::default(),
             restart: Arc::new(AtomicBool::new(false)),
             stop: None,
@@ -415,6 +421,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_index(mut self, index: crate::store::index::StoreIndex) -> Self {
         self.index = Arc::new(index);
+        self
+    }
+
+    /// Keeps what the Store learns in `caches`, which the stores handed to [`Control::with_stores`] must share.
+    #[must_use]
+    pub(crate) fn with_caches(mut self, caches: Arc<crate::store::caches::StoreCaches>) -> Self {
+        self.caches = caches;
         self
     }
 
@@ -619,7 +632,9 @@ impl Control {
 
     fn stores(&self) -> Result<&Stores, (i32, String)> {
         self.stores
-            .get_or_init(Stores::built_in)
+            .get_or_init(|| {
+                Stores::built_in().map(|stores| stores.with_caches(Arc::clone(&self.caches)))
+            })
             .as_ref()
             .map_err(|why| (REFUSED, format!("this host keeps no programs: {why}")))
     }
@@ -847,8 +862,82 @@ impl Control {
     }
 }
 
+/// A link being served: counted while it lasts, which is what the background renewal waits for.
+struct Connected<'a>(&'a AtomicUsize);
+
+impl<'a> Connected<'a> {
+    fn new(count: &'a AtomicUsize) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(count)
+    }
+}
+
+impl Drop for Connected<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl Control {
+    /// Starts the thread that, every `[host.store] refresh_every` while a link is being served, asks again what the Store keeps
+    /// that has gone stale: the publishers' newest versions and the catalogs' index. Nothing is asked that was never asked
+    /// before, and nothing while no client is connected. The thread ends with the host. Zero starts none.
+    pub(crate) fn keep_fresh(self: &Arc<Self>) -> Option<std::thread::JoinHandle<()>> {
+        let every = self.caches.refresh_every;
+        if every.is_zero() {
+            return None;
+        }
+        let weak = Arc::downgrade(self);
+        std::thread::Builder::new()
+            .name("store-refresh".to_owned())
+            .spawn(move || {
+                let step = every.min(Duration::from_millis(50));
+                let mut last = std::time::Instant::now();
+                loop {
+                    std::thread::sleep(step);
+                    let Some(control) = weak.upgrade() else {
+                        return;
+                    };
+                    if control
+                        .stop
+                        .as_ref()
+                        .is_some_and(|stop| stop.load(Ordering::SeqCst))
+                    {
+                        return;
+                    }
+                    if last.elapsed() < every {
+                        continue;
+                    }
+                    last = std::time::Instant::now();
+                    if control.clients.load(Ordering::SeqCst) > 0 {
+                        control.renew_stale();
+                    }
+                }
+            })
+            .ok()
+    }
+
+    /// Asks again, on this thread, what the Store keeps that is past its time.
+    pub(crate) fn renew_stale(&self) {
+        if let Some(Ok(stores)) = self.stores.get() {
+            stores.refresh_latest();
+        }
+        self.index.use_sources(self.catalog_sources());
+        let section = self.store_section();
+        self.index.keep_fresh(
+            &self.overlays,
+            &crate::store::index::catalog_rows(crate::store::catalogs::table_of(
+                &section, "overlays",
+            )),
+        );
+        self.index
+            .keep_fresh(&self.overlays, &self.extension_rows());
+    }
+}
+
 /// Answers `channel`'s requests as `caller` until it closes or the host stops it.
 pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C) {
+    let _connected = Connected::new(&control.clients);
     // The shells this link opens run on threads of this scope, and end with the link.
     std::thread::scope(|scope| {
         let terminals = terminal::Link::new(scope, channel, &control.terminals);
@@ -1057,6 +1146,9 @@ mod tunnel_tests;
 
 #[cfg(test)]
 mod concurrent_tests;
+
+#[cfg(test)]
+mod store_cache_tests;
 
 #[cfg(test)]
 mod tests;
