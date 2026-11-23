@@ -963,3 +963,89 @@ fn serve_a_passkey_portal_for_a_browser() {
         thread::sleep(Duration::from_millis(200));
     }
 }
+
+/// The rules as the portal's settings file writes them for a portal that takes a password, a certificate or a passkey inside
+/// 10.0.0.0/8, a certificate or a passkey alone elsewhere, and a password only with a one-time code there.
+const OWNER_TOML: &str = r#"
+[[sign_in_policy.config.rule]]
+purposes = ["enrol"]
+allow = [["certificate"], ["passkey"], ["password", "totp"]]
+
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+allow = [["password"], ["certificate"], ["passkey"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["certificate"], ["passkey"], ["password", "totp"]]
+"#;
+
+#[test]
+fn the_rules_a_portal_settings_file_writes_for_passkeys_decide_as_the_guide_says() {
+    let settings = Settings::from_toml(OWNER_TOML).unwrap();
+    let policy = policy::Policy::new(
+        &settings,
+        &[
+            Method::Password,
+            Method::Certificate,
+            Method::Totp,
+            Method::RecoveryCode,
+            Method::Passkey,
+        ],
+    )
+    .unwrap();
+    assert_eq!(policy.describe(), "3 rules");
+    let me = || Some(policy::person("alice", 1000, &[]));
+    let step = |method, provider: &str| policy::factor(method, provider, 1000);
+    let decide = |purpose: &str, from: &str, done: Vec<coqui_access::Factor>| {
+        let address: Option<IpAddr> = from.parse().ok();
+        let person = if done.is_empty() { None } else { me() };
+        policy
+            .decide(policy::context(purpose, address, person, done))
+            .unwrap()
+    };
+    use coqui_access::purposes::{ENROL, SIGN_IN};
+    // What the page offers first: a passkey from anywhere a certificate is, a password alone only from inside.
+    assert_eq!(
+        decide(SIGN_IN, "10.6.20.5", vec![]).methods(),
+        [Method::Password, Method::Certificate, Method::Passkey]
+    );
+    for outside in ["203.0.113.7", "2001:db8::1", "unknown"] {
+        assert_eq!(
+            decide(SIGN_IN, outside, vec![]).methods(),
+            [Method::Certificate, Method::Passkey, Method::Password],
+            "{outside}: the password that leads to a code"
+        );
+    }
+    // A passkey is enough alone, from inside and from outside; a password is enough alone only inside.
+    for from in ["10.6.20.5", "203.0.113.7"] {
+        assert!(decide(SIGN_IN, from, vec![step(Method::Passkey, "p")]).complete);
+    }
+    assert!(decide(SIGN_IN, "10.6.20.5", vec![step(Method::Password, "p")]).complete);
+    let outside = decide(SIGN_IN, "203.0.113.7", vec![step(Method::Password, "p")]);
+    assert!(!outside.complete && outside.methods() == [Method::Totp]);
+    assert!(
+        decide(
+            SIGN_IN,
+            "203.0.113.7",
+            vec![step(Method::Password, "p"), step(Method::Totp, "t")]
+        )
+        .complete
+    );
+    // Adding a passkey needs a certificate, a passkey, or a password and a code, from inside as from outside: a password alone,
+    // the one thing inside the network accepts, is not enough.
+    for from in ["10.6.20.5", "203.0.113.7"] {
+        let password = decide(ENROL, from, vec![step(Method::Password, "p")]);
+        assert!(!password.complete, "{from}");
+        assert_eq!(password.methods(), [Method::Totp], "{from}");
+        assert!(decide(ENROL, from, vec![step(Method::Passkey, "p")]).complete);
+        assert!(decide(ENROL, from, vec![step(Method::Certificate, "c")]).complete);
+        assert!(
+            decide(
+                ENROL,
+                from,
+                vec![step(Method::Password, "p"), step(Method::Totp, "t")]
+            )
+            .complete
+        );
+    }
+}
