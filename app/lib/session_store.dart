@@ -43,6 +43,10 @@ import 'profile/report.dart';
 import 'sources/source_choices.dart';
 import 'sources/source_options.dart';
 import 'sources/sources.dart';
+import 'surfaces/a2ui/limits.dart';
+import 'surfaces/a2ui/messages.dart' show a2uiCarried;
+import 'surfaces/a2ui/overlay_views.dart';
+import 'surfaces/a2ui/views.dart';
 import 'voice/front_matter.dart';
 import 'workspace/site_meta.dart' show siteSetup;
 import 'workspace/workspace_template.dart' show newSessionUuid;
@@ -78,6 +82,7 @@ part 'session_store/session_updates.dart';
 part 'session_store/session_switching.dart';
 part 'session_store/session_sending.dart';
 part 'session_store/session_history.dart';
+part 'session_store/session_a2ui.dart';
 
 /// Shared UI state for desktop, PWA and packaged Chromium extension: Canoa's conversations, each a `coqui_acp_chat` conversation
 /// with what is Canoa's own beside it. Transport, verified peers and persistence are intentionally outside it.
@@ -466,6 +471,17 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   static String _named(String name) => shortLine(name) ?? 'an unnamed one';
 
   final List<ChatSession> _sessions = [];
+
+  /// What an agent's A2UI views may cost; read when a session's first view arrives.
+  A2uiLimits a2uiLimits = const A2uiLimits();
+  final Map<String, A2uiSessionViews> _a2ui = {};
+
+  /// Told when any session's views come, change or go, which is what the shell lists its view surfaces by.
+  final ValueNotifier<int> a2uiChanged = ValueNotifier(0);
+  final _a2uiOpened = StreamController<(ChatSession, A2uiView)>.broadcast(sync: true);
+
+  /// A view an agent just drew, with the session it belongs to, for the app to open where its target says.
+  Stream<(ChatSession, A2uiView)> get a2uiOpened => _a2uiOpened.stream;
   final Map<String, VerifiedAgent> _clients = {};
   final Map<String, Future<McpInventory?>> _mcpLoading = {};
   final Expando<VerifiedChatConnection> _connections = Expando();
@@ -818,6 +834,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   @override
   void dispose() {
     _disposed = true;
+    for (final views in _a2ui.values) {
+      views.dispose();
+    }
+    _a2ui.clear();
+    a2uiChanged.dispose();
+    unawaited(_a2uiOpened.close());
     for (final subscription in [
       ..._eventSubscriptions.values,
       ..._taskSubscriptions.values,

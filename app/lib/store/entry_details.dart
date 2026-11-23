@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../profile/profiles_panel.dart' show visible;
+import '../surfaces/a2ui/overlay_views.dart';
 import 'links.dart';
 import 'contents_store.dart';
 import 'overlay_contents.dart';
@@ -11,7 +12,22 @@ import 'store.dart' show EntryFacts;
 /// environment scripts it carries, and the technical details with their digests. All of it is what the entry's catalog or
 /// manifest says; nothing here ran.
 class EntryFactsView extends StatelessWidget {
-  const EntryFactsView({super.key, required this.facts, this.requirements = const [], this.technical = const {}, this.read, this.reading = false});
+  const EntryFactsView({
+    super.key,
+    required this.facts,
+    this.requirements = const [],
+    this.technical = const {},
+    this.read,
+    this.reading = false,
+    this.overlay,
+    this.onOpenView,
+  });
+
+  /// The overlay's name, which its views are drawn under.
+  final String? overlay;
+
+  /// Draws one of the overlay's views in the open conversation; null where there is none to draw in.
+  final OpenOverlayView? onOpenView;
 
   /// What reading the entry ahead found of what it provides; null before anything has been read.
   final EntryContents? read;
@@ -128,6 +144,7 @@ class EntryFactsView extends StatelessWidget {
       ], const Key('details-env-scripts')),
       section('MCP servers (off until allowed)', [for (final server in provided.mcpServers) line(server)], const Key('details-mcp-servers')),
       section('Commands on its PATH', [for (final command in provided.bin) line(command)], const Key('details-bin')),
+      _views(context, provided),
       const SizedBox(height: 12),
       Text('Requirements', style: text.titleSmall),
       if (needs.isEmpty)
@@ -165,6 +182,45 @@ class EntryFactsView extends StatelessWidget {
           ),
         ),
     ]);
+  }
+
+  /// The views the overlay ships: each with why it cannot be drawn, or a button that draws it in the open conversation.
+  Widget _views(BuildContext context, OverlayContents provided) {
+    final shipped = readOverlayViews(provided.views);
+    if (shipped.isEmpty) return const SizedBox.shrink();
+    final text = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      key: const Key('details-views'),
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Views (drawn with your look; structure is all they bring)', style: text.titleSmall),
+        for (final problem in shipped.problems) Text(oneLine(problem), style: TextStyle(color: scheme.error)),
+        for (final view in shipped.views)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(children: [
+              Expanded(
+                child: view.drawable
+                    ? SelectableText(oneLine(view.title))
+                    : SelectableText(oneLine('${view.title}: ${view.problems.take(3).join('; ')}'),
+                        key: Key('details-view-problem-${view.name}'), style: TextStyle(color: scheme.error)),
+              ),
+              if (view.drawable && onOpenView != null && overlay != null)
+                TextButton(
+                  key: Key('details-view-open-${view.name}'),
+                  onPressed: () {
+                    final why = onOpenView!(overlay!, view, shipped);
+                    if (why.isNotEmpty) {
+                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(oneLine(why.first))));
+                    }
+                  },
+                  child: const Text('Open'),
+                ),
+            ]),
+          ),
+      ]),
+    );
   }
 
   static Widget _list(String label, List<String> names, Key key) => names.isEmpty

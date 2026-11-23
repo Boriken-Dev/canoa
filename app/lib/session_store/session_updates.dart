@@ -174,6 +174,9 @@ extension SessionUpdates on SessionStore {
     unawaited(_contextSubscriptions.remove(session.id)?.cancel());
     _contextSubscriptions[session.id] = client.updates.listen((update) {
       if (update.sessionId != session.remoteSessionId) return;
+      if (a2uiCarried(update.raw['_meta']) case final carried?) {
+        a2uiOf(session).carry(carried);
+      }
       if (update.kind == 'terminal_update' ||
           update.kind == 'terminal_output_chunk') {
         final id = update.raw['terminalId'];

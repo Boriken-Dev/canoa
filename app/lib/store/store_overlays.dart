@@ -448,6 +448,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         onSave: c.apply,
         catalogs: skillCatalogs(c.loaded),
         contents: c.contents,
+        onOpenView: c.onOpenView,
       ),
     ));
     if (saved != null) await c.adopt(saved);

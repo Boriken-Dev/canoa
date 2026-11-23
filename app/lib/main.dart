@@ -68,6 +68,8 @@ import 'chat/timing_log.dart';
 import 'chat/inspector_surfaces.dart';
 import 'files/viewers/file_viewer.dart' show ViewerChoices, ViewerRegistry;
 import 'files/viewers/standard_viewers.dart';
+import 'surfaces/a2ui/overlay_views.dart' show OverlayView, OverlayViews;
+import 'surfaces/a2ui/views.dart' show A2uiViewSurface, placeA2uiView;
 import 'surfaces/files_surface.dart';
 import 'surfaces/terminal_controller.dart' show ControlTerminals;
 import 'surfaces/terminal_remote.dart';
@@ -620,6 +622,8 @@ class _CanoaAppState extends State<CanoaApp> {
   late final ViewerRegistry _fileViewers = standardViewerRegistry(
     choices: ViewerChoices(backend: platformLayoutBackend(configPath: widget.served == null ? desktopConfigPath() : null, name: 'viewers.json')),
   );
+  StreamSubscription<Object?>? _a2uiOpened;
+
   late final WorkSurfaces _surfaces = widget.surfaces == null
       ? WorkSurfaces(
           [...builtInSurfaces(), FilesSurface(_filesOf, canWrite: () => _grants?.may(HostGrants.filesWrite) ?? (widget.served == null), viewers: _fileViewers), TerminalSurface(_terminalOf, kinds: () => _panelTabs?.terminals ?? const [])],
@@ -631,13 +635,22 @@ class _CanoaAppState extends State<CanoaApp> {
             // another computer's host offers none.
             if (_panelTabs case final kinds? when widget.served == null)
               for (final kind in kinds.pages) PageSurface(kind),
+            // The views an agent drew, each of the session it was drawn in.
+            for (final (session, views, view) in store.a2uiViews()) A2uiViewSurface(session.id, views, view),
           ],
-          addedChanged: _panelTabs,
+          addedChanged: Listenable.merge([?_panelTabs, store.a2uiChanged]),
         )
       : WorkSurfaces(widget.surfaces!);
 
   /// The kinds of tab the host's providers offer the panel: a shell, a log, and what an extension adds.
   PanelTabKinds? get _panelTabs => _services.panelTabs;
+
+  /// Draws a view an overlay ships in the conversation that is open; the answer is why it was not, empty when it was.
+  List<String> _openOverlayView(String overlay, OverlayView view, OverlayViews brought) {
+    final session = store.selected;
+    if (session == null) return const ['Open a conversation first: a view is drawn in one.'];
+    return store.showOverlayView(session, overlay, view, brought);
+  }
 
   /// Hosting is part of Local's overview, in the Hosts section.
   Future<void> _showHosting() async {
@@ -1016,6 +1029,7 @@ class _CanoaAppState extends State<CanoaApp> {
     key: _loadoutKey,
     embedded: true,
     selection: _storeSelection,
+    onOpenView: _openOverlayView,
     contentsStorage: _control == null ? null : ControlContentsStorage(_control!),
     contentsReader: _control == null ? null : ControlContentsReader(_control!, os: _home?.os ?? 'linux'),
     config: config,
@@ -3031,6 +3045,15 @@ class _CanoaAppState extends State<CanoaApp> {
     store.queueDelivery = config.sessions.queueDelivery;
     scheduleMicrotask(() => unawaited(_decideStartAtLogin()));
     store.starter = _startDraft;
+    // A view an agent draws, or one the Store opens, appears where it asks: the side panel, a tab of the bottom panel or a window.
+    _a2uiOpened = store.a2uiOpened.listen((event) {
+      if (_mode.chatOnly) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _layout.select(ShellLayout.conversations);
+        placeA2uiView(context: context, surfaces: _surfaces, layout: _layout, session: event.$1, view: event.$2);
+      });
+    });
     store.defaultPresetOf = () => config.presets[presetDefault];
     store.choicesLoader = _askChoices;
     store.accountChoicesLoader = _askChoicesAs;
@@ -3131,6 +3154,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   void dispose() {
+    unawaited(_a2uiOpened?.cancel());
     store.removeListener(_keepSelection);
     if (widget.layout == null) _layout.dispose();
     _surfaces.dispose();

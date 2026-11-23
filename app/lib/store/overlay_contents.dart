@@ -22,6 +22,12 @@ final class KnowledgeInfo {
   final bool served;
 }
 
+/// A file of an overlay that holds a view or a catalog of one (`surfaces/*.json`, `catalogs/*.json`), as the host read it.
+final class ViewFile {
+  const ViewFile(this.path, this.text);
+  final String path, text;
+}
+
 final class OverlayContents {
   const OverlayContents({
     this.skills = const [],
@@ -34,6 +40,7 @@ final class OverlayContents {
     this.mcpServers = const [],
     this.bin = const [],
     this.requirements = const [],
+    this.views = const [],
     this.generated = false,
     this.manifest,
     this.digest,
@@ -53,6 +60,9 @@ final class OverlayContents {
   final List<String> bin;
   final List<String> requirements;
 
+  /// The files of its views and their catalogs.
+  final List<ViewFile> views;
+
   /// Whether the source had no overlay.cfg and [manifest] is the one Canoa made for it.
   final bool generated;
 
@@ -65,7 +75,7 @@ final class OverlayContents {
 
   bool get isEmpty =>
       skills.isEmpty && rules.isEmpty && context.isEmpty && knowledge.isEmpty && hooks.isEmpty && envScripts.isEmpty &&
-      setup.isEmpty && mcpServers.isEmpty && bin.isEmpty && requirements.isEmpty;
+      setup.isEmpty && mcpServers.isEmpty && bin.isEmpty && requirements.isEmpty && views.isEmpty;
 
   Map<String, Object?> toJson() => {
     'skills': [for (final skill in skills) skill.toJson()],
@@ -78,6 +88,7 @@ final class OverlayContents {
     'mcp_servers': mcpServers,
     'bin': bin,
     'requirements': requirements,
+    'views': [for (final file in views) {'path': file.path, 'text': file.text}],
     'generated': generated,
     'manifest': ?manifest,
     'digest': ?digest,
@@ -105,6 +116,11 @@ final class OverlayContents {
       mcpServers: texts(json['mcp_servers']),
       bin: texts(json['bin']),
       requirements: texts(json['requirements']),
+      views: [
+        if (json['views'] case final List<Object?> list)
+          for (final each in list)
+            if (each is Map<Object?, Object?> && each['path'] is String && each['text'] is String) ViewFile(each['path']! as String, each['text']! as String),
+      ],
       generated: json['generated'] == true,
       manifest: json['manifest'] is String ? json['manifest']! as String : null,
       digest: json['digest'] is String ? json['digest']! as String : null,

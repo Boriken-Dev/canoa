@@ -4,6 +4,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
+import '../surfaces/a2ui/overlay_views.dart' show OpenOverlayView;
 import '../profile/overlay_layer.dart';
 import '../profile/overlays.dart' show OverlayException;
 import '../profile/profile.dart';
@@ -33,7 +34,7 @@ const shownTags = 40;
 /// overlay itself says and would do, from its own manifest and files; then install, update or remove.
 class OverlayPage extends StatefulWidget {
   const OverlayPage({super.key, required this.listed, required this.catalog, required this.config,
-      required this.home, required this.onSave, this.catalogs = const [], this.contents});
+      required this.home, required this.onSave, this.catalogs = const [], this.contents, this.onOpenView});
 
   final ListedEntry listed;
   final LoadedCatalog catalog;
@@ -46,6 +47,9 @@ class OverlayPage extends StatefulWidget {
 
   /// What reading the catalogs ahead found of each entry; the page shows what the overlay provides from it, and fetches nothing.
   final ContentsStore? contents;
+
+  /// Draws a view the overlay ships in the open conversation; none where there is no conversation to draw in.
+  final OpenOverlayView? onOpenView;
 
   @override
   State<OverlayPage> createState() => OverlayPageState();
@@ -225,6 +229,8 @@ class OverlayPageState extends State<OverlayPage> {
               builder: (context, _) {
                 final id = contentsId(widget.listed.label, 'overlay', entry.name);
                 return EntryFactsView(
+                  overlay: entry.name,
+                  onOpenView: widget.onOpenView,
                   facts: widget.catalog.facts['overlay:${entry.name}'],
                   read: widget.contents?.of(id),
                   reading: widget.contents?.isReading(id) ?? false,

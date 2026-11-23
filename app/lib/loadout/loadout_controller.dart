@@ -9,6 +9,8 @@ import 'dart:convert';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/foundation.dart';
 
+import '../surfaces/a2ui/overlay_views.dart' show OpenOverlayView;
+
 import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
@@ -111,6 +113,7 @@ class LoadoutController extends ChangeNotifier {
     this.readCatalog,
     ContentsStorage? contentsStorage,
     ContentsReader? contentsReader,
+    this.onOpenView,
     DateTime Function()? now,
     bool readAhead = true,
   }) : _config = config {
@@ -122,6 +125,9 @@ class LoadoutController extends ChangeNotifier {
 
   final ProfileHome? home;
   final SaveConfig save;
+
+  /// Draws a view an overlay ships in the open conversation.
+  final OpenOverlayView? onOpenView;
 
   /// The host's catalog index, which every catalog the store lists is read from; none where the app has no host.
   final CatalogIndex? index;

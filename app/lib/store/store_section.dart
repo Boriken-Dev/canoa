@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../surfaces/a2ui/overlay_views.dart' show OpenOverlayView;
 import 'package:flutter/scheduler.dart';
 
 import '../config/canoa_config.dart';
@@ -48,6 +50,7 @@ class StoreSection extends StatefulWidget {
     this.selection,
     this.contentsStorage,
     this.contentsReader,
+    this.onOpenView,
     this.readAhead = true,
     this.extensionTypes = const [],
     this.runtimes,
@@ -94,6 +97,9 @@ class StoreSection extends StatefulWidget {
   /// Reads what the entries provide, which the host does; none leaves entries unread.
   final ContentsReader? contentsReader;
 
+  /// Draws a view an overlay ships in the open conversation; none where there is no conversation to draw in.
+  final OpenOverlayView? onOpenView;
+
   /// Whether the catalogs' entries are read for what they provide when the catalogs are read.
   final bool readAhead;
 
@@ -121,6 +127,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     readCatalog: widget.readCatalog,
     contentsStorage: widget.contentsStorage,
     contentsReader: widget.contentsReader,
+    onOpenView: widget.onOpenView,
     now: widget.now,
     readAhead: widget.readAhead,
   )..addListener(_changed);
