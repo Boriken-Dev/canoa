@@ -59,13 +59,13 @@ pub struct TotpConfig {
     /// Digits of a code, 6 to 8.
     #[map(default = DEFAULT_DIGITS)]
     pub digits: u32,
-    /// Seconds a code lasts.
+    /// Seconds a code lasts, at least 1.
     #[map(default = DEFAULT_PERIOD)]
     pub period: u32,
-    /// Steps either side of the present one a code is accepted in, at most 10.
+    /// Steps either side of the present one a code is accepted in; each step is one more code computed per attempt.
     #[map(default = DEFAULT_SKEW)]
     pub skew: u32,
-    /// Recovery codes made at enrolment, at most 64.
+    /// Recovery codes made at enrolment.
     #[map(default = DEFAULT_RECOVERY_CODES)]
     pub recovery_codes: u32,
     /// Seconds an enrolment waits for its first code.
