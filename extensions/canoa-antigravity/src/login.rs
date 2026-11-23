@@ -102,7 +102,7 @@ fn gcp_service() -> String {
 }
 
 fn user_agent() -> String {
-    "antigravity".into()
+    antigravity::USER_AGENT.into()
 }
 
 impl Default for AgySettings {
