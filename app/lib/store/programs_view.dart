@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart';
 import '../forms/schema_fields.dart';
+import '../l10n/app_text.dart';
 import '../selectable.dart';
 import '../sources/source_icons.dart';
 import 'programs.dart';
@@ -307,7 +308,7 @@ class PlanDialog extends StatelessWidget {
             if (plan.bytes != null) Text('Download: ${sizeText(plan.bytes!)}', key: const Key('plan-size')),
             if (also != null) ...[
               const SizedBox(height: 12),
-              Text('Then', style: text.titleSmall),
+              Text(context.t('store.plan_then'), style: text.titleSmall),
               Text(also!, key: const Key('plan-also')),
             ],
             if (plan.downloads.isNotEmpty) ...[
