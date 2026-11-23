@@ -196,6 +196,20 @@ pub(crate) fn managed_version(program: &str) -> Option<String> {
         .into()
 }
 
+/// The program the Store installed for harness `id` on `shelf`: the launch it recorded, whatever the launch file is called.
+pub(crate) fn managed_program_of_harness_in(
+    shelf: &Shelf,
+    id: &str,
+) -> Option<(PathBuf, Vec<(String, String)>)> {
+    managed_program_in(shelf, crate::bundled::managed_program_name(id)?)
+}
+
+/// [`managed_program_of_harness_in`] over this user's programs folder.
+pub(crate) fn managed_program_of_harness(id: &str) -> Option<(PathBuf, Vec<(String, String)>)> {
+    Shelf::default_root()
+        .and_then(|root| managed_program_of_harness_in(&Shelf::unchecked(root), id))
+}
+
 /// [`managed_program_in`] over this user's programs folder.
 pub(crate) fn managed_program(program: &str) -> Option<(PathBuf, Vec<(String, String)>)> {
     Shelf::default_root().and_then(|root| managed_program_in(&Shelf::unchecked(root), program))
@@ -763,12 +777,22 @@ mod tests {
 
     /// A shelf holding `name` as one file, launched by its path, as the Store's single-binary extensions record it.
     fn shelf_with_binary(root: &Path, name: &str) -> (Shelf, PathBuf) {
+        shelf_with_launch(
+            root,
+            name,
+            &format!("{name}{}", std::env::consts::EXE_SUFFIX),
+        )
+    }
+
+    /// A shelf holding `name` whose launch file is `file` inside the copy, which need not be called as the program is.
+    fn shelf_with_launch(root: &Path, name: &str, file: &str) -> (Shelf, PathBuf) {
         use crate::store::shelf::MadeBy;
         let shelf = Shelf::unchecked(root);
         let program = shelf.program(name).expect("a name");
         let locked = program.lock().expect("locked");
         let staging = locked.stage("2.0.0").expect("staged");
-        let binary = staging.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        let binary = staging.join(file);
+        std::fs::create_dir_all(binary.parent().expect("a folder")).expect("made");
         std::fs::write(&binary, b"binary").expect("written");
         #[cfg(unix)]
         {
@@ -832,6 +856,28 @@ mod tests {
         );
         std::fs::write(&binary, b"changed since the install").expect("written");
         assert!(program_dirs_in(&shelf).is_empty());
+    }
+
+    #[test]
+    fn a_harnesss_program_is_the_launch_the_store_recorded_whatever_the_launch_file_is_called() {
+        let root = scratch("launch-name");
+        let (harness, program) = crate::bundled::ALL
+            .iter()
+            .find_map(|bundle| {
+                let harness = bundle.preset.harness?;
+                (harness != bundle.preset.program && bundle.preset.managed.is_none())
+                    .then_some((harness, bundle.preset.program))
+            })
+            .expect("a harness whose program is called something else");
+        let (shelf, launch) = shelf_with_launch(&root, program, "bin/launcher");
+        assert_eq!(
+            managed_program_of_harness_in(&shelf, harness).map(|(path, _)| path),
+            Some(launch)
+        );
+        // The program's own name is no harness, and the launch file's name is no lookup: a search by `program` finds nothing.
+        assert_eq!(managed_program_of_harness_in(&shelf, program), None);
+        let search = search_path_in(&shelf, std::ffi::OsStr::new(""));
+        assert_eq!(canoa::search::find_in(&search, "", program), None);
     }
 
     #[test]

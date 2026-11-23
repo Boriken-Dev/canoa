@@ -795,11 +795,13 @@ pub(crate) fn usage_report_for(
                     .clone(),
             )
         }
-        _ => (
-            Arc::new(kind::registry(None).map_err(|error| error.to_string())?),
-            Settings::new(Map::new()),
-            Map::new(),
-        ),
+        _ => {
+            // No entry runs it: the built-in provider as the host runs it, with the Store's copy of its program when it has one.
+            let registry = Arc::new(kind::registry(None).map_err(|error| error.to_string())?);
+            let configured =
+                crate::serve::builtin_provider_settings(&registry, harness, None, None);
+            (registry, configured, Map::new())
+        }
     };
     let own = account_settings.clone();
     // A stand-in for the provider's usage endpoint is the account provider's own setting.

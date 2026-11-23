@@ -29,8 +29,7 @@ pub(crate) fn builtin_provider_settings(
             serde_json::Value::String(executable.to_string_lossy().into_owned()),
         );
     } else if !map.contains_key("executable")
-        && let Some(program) = crate::bundled::managed_program_name(harness)
-        && let Some((path, _)) = sources::managed_program(program)
+        && let Some((path, _)) = sources::managed_program_of_harness(harness)
     {
         // Nothing names the program: the one the Store installed runs, found as it is now.
         map.insert(
