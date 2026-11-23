@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use canoa::preset::SourcePreset as Preset;
 
 use crate::config::{Config, Entry};
-use crate::store::shelf::Shelf;
+use crate::store::shelf::{Current, ProgramDir, Shelf};
 
 /// One source the host serves, and what it needs that this computer lacks.
 pub(crate) struct Source {
@@ -54,7 +54,7 @@ pub(crate) fn entries(config: &Config) -> Vec<Source> {
 fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedCopy> {
     let dir = shelf.program(program).ok()?;
     let current = dir.current_checked().ok()??;
-    dir.verify(&current).ok()?;
+    verified(shelf, &dir, program, &current).then_some(())?;
     let held = &current.launch.settings;
     let inside = |path: &Path| {
         path.is_file()
@@ -85,23 +85,7 @@ pub(crate) fn managed_program_in(
     let current = dir.current_checked().ok()??;
     // Every file of the copy is read to verify it, which is not done again while the copy's launch file and its record are as they
     // were: they are stamped by size and time of change, for as long as this host runs.
-    let stamp = (
-        stamp_of(Path::new(&current.dir)),
-        stamp_of(Path::new(&current.launch.path)),
-        shelf.root().to_path_buf(),
-        program.to_owned(),
-    );
-    let verified = VERIFIED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .contains(&stamp);
-    if !verified {
-        dir.verify(&current).ok()?;
-        VERIFIED
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(stamp);
-    }
+    verified(shelf, &dir, program, &current).then_some(())?;
     let path = PathBuf::from(&current.launch.path);
     let inside = path.is_absolute()
         && path.is_file()
@@ -129,6 +113,44 @@ type Stamp = (
 
 /// Process-wide cache of managed runtime copies already integrity-verified for a `(dir_stamp, bin_stamp, path, program)`.
 static VERIFIED: std::sync::Mutex<Vec<Stamp>> = std::sync::Mutex::new(Vec::new());
+
+/// Whether every file of `program`'s copy `current` is as it was installed: read once for as long as the copy's folder and launch
+/// file keep the stamp they had, so the host's several readings of one copy at start cost one.
+fn verified(shelf: &Shelf, dir: &ProgramDir, program: &str, current: &Current) -> bool {
+    let stamp = stamp_for(shelf, program, current);
+    let held = VERIFIED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(&stamp);
+    if held {
+        return true;
+    }
+    if dir.verify(current).is_err() {
+        return false;
+    }
+    remember(stamp);
+    true
+}
+
+/// The stamp of `program`'s copy `current` on `shelf`.
+fn stamp_for(shelf: &Shelf, program: &str, current: &Current) -> Stamp {
+    (
+        stamp_of(Path::new(&current.dir)),
+        stamp_of(Path::new(&current.launch.path)),
+        shelf.root().to_path_buf(),
+        program.to_owned(),
+    )
+}
+
+/// Records that the copy with `stamp` was verified.
+fn remember(stamp: Stamp) {
+    let mut held = VERIFIED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !held.contains(&stamp) {
+        held.push(stamp);
+    }
+}
 
 fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
     let meta = std::fs::metadata(path).ok()?;
@@ -917,7 +939,24 @@ mod tests {
             None,
             "no copy of another program"
         );
-        // A file changed since the install is no copy to run.
+        // A launch file changed since the install is no copy to run.
+        let node = std::path::PathBuf::from(
+            &copy
+                .settings
+                .iter()
+                .find(|(name, _)| name == "node")
+                .expect("a node")
+                .1,
+        );
+        std::fs::write(&node, b"changed since the install").expect("written");
+        assert_eq!(managed_in(&shelf, "pi"), None);
+        std::fs::remove_dir_all(&root).expect("removed");
+    }
+
+    #[test]
+    fn a_file_changed_before_the_first_reading_of_the_copy_is_no_copy_to_run() {
+        let root = scratch("managed-pi-changed");
+        let (shelf, script) = shelf_with_pi(&root);
         std::fs::write(&script, b"changed").expect("written");
         assert_eq!(managed_in(&shelf, "pi"), None);
         std::fs::remove_dir_all(&root).expect("removed");

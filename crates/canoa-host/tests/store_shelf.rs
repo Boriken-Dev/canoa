@@ -575,3 +575,36 @@ fn a_value_the_person_changed_since_the_install_is_not_put_back() {
     );
     key.remove_value(&name).expect("clean up");
 }
+
+#[test]
+fn a_copy_of_many_files_is_checked_and_the_first_changed_one_named() {
+    use sha2::{Digest, Sha256};
+    let dir = Dir::new("verify-many");
+    let shelf = Shelf::unchecked(dir.0.join("programs"));
+    let program = shelf.program("many").expect("p");
+    let lock = program.lock().expect("lock");
+    let staging = lock.stage("1.0.0").expect("stage");
+    let mut records = Vec::new();
+    for index in 0..300 {
+        let name = format!("f{index:03}.bin");
+        let bytes = format!("the bytes of {name}");
+        fs::write(staging.join(&name), &bytes).expect("file");
+        records.push(canoa_host::store::shelf::FileRecord {
+            path: name,
+            url: "https://example.test/many".to_owned(),
+            sha256: data_encoding::HEXLOWER.encode(&Sha256::digest(bytes.as_bytes())),
+            verified: true,
+        });
+    }
+    let launch = Launch::new(staging.join("f000.bin").to_string_lossy());
+    let current = lock
+        .commit(&staging, "1.0.0", &launch, records, by())
+        .expect("commit");
+    program.verify(&current).expect("untouched");
+    fs::write(staging.join("f250.bin"), b"changed").expect("tamper");
+    fs::write(staging.join("f120.bin"), b"changed").expect("tamper");
+    let Err(ShelfError::Refused(why)) = program.verify(&current) else {
+        panic!("a changed file passed");
+    };
+    assert!(why.starts_with("f120.bin "), "named {why}");
+}

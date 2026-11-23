@@ -383,6 +383,7 @@ impl ProgramDir {
                 "{extra} was added to the copy after it was installed"
             )));
         }
+        let mut to_hash: Vec<(&String, &FileRecord)> = Vec::new();
         for (path, record) in &recorded {
             if !present.contains(path) {
                 if record.url.is_empty() {
@@ -390,14 +391,9 @@ impl ProgramDir {
                 }
                 continue;
             }
-            let digest = digest_of(&root.join(path))?;
-            if !digest.eq_ignore_ascii_case(&record.sha256) {
-                return Err(ShelfError::Refused(format!(
-                    "{path} no longer matches the digest recorded when it was installed"
-                )));
-            }
+            to_hash.push((path, record));
         }
-        Ok(())
+        hash_all(root, &to_hash)
     }
 
     /// Takes the program's lock, making its folder (private to the user) as needed, and removes the folders left by a
@@ -697,6 +693,51 @@ fn list_files(root: &Path, dir: &Path, into: &mut BTreeSet<String>) -> Result<()
         }
     }
     Ok(())
+}
+
+/// Checks `files` against their recorded digests on as many threads as the machine has, so a copy of tens of thousands of files
+/// costs the time of its largest share and not of the sum. The error names the first file in `files`' order that does not match.
+fn hash_all(root: &Path, files: &[(&String, &FileRecord)]) -> Result<(), ShelfError> {
+    use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let threads = std::thread::available_parallelism()
+        .map_or(1, core::num::NonZero::get)
+        .clamp(1, 8)
+        .min(files.len().max(1));
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let failures = std::sync::Mutex::new(Vec::<(usize, ShelfError)>::new());
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                while !stop.load(Ordering::Relaxed) {
+                    let at = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((path, record)) = files.get(at) else {
+                        break;
+                    };
+                    let failure = match digest_of(&root.join(path)) {
+                        Ok(digest) if digest.eq_ignore_ascii_case(&record.sha256) => continue,
+                        Ok(_) => ShelfError::Refused(format!(
+                            "{path} no longer matches the digest recorded when it was installed"
+                        )),
+                        Err(error) => error,
+                    };
+                    stop.store(true, Ordering::Relaxed);
+                    failures
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push((at, failure));
+                }
+            });
+        }
+    });
+    let mut failures = failures
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    failures.sort_by_key(|(at, _)| *at);
+    failures
+        .into_iter()
+        .next()
+        .map_or(Ok(()), |(_, error)| Err(error))
 }
 
 /// The SHA-256 of a file, or of the text of a link (links are not followed).
