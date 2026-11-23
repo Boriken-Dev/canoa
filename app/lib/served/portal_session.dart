@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../auth/browser_peer.dart';
 import 'navigate.dart';
+import 'portal_account.dart';
 
 /// The browser is not signed in to the portal (any more); it has been sent to the sign-in page.
 final class PortalSignedOut implements Exception {
@@ -110,6 +111,25 @@ final class PortalSession {
       return dial();
     }
   }
+
+  /// Which of the portal's own pages this person may open now, or null where the portal did not say. A `401` sends the browser to
+  /// the sign-in page.
+  Future<PortalAccount?> account() async {
+    try {
+      final response = await _client.get(base.resolve('/portal/account'));
+      if (response.statusCode == 401) {
+        signedOut();
+        return null;
+      }
+      if (response.statusCode != 200) return null;
+      return PortalAccount.from(jsonDecode(response.body));
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Opens the portal's page at [path] in this tab: the portal's pages are its own, not the app's.
+  void open(String path) => _navigate(base.resolve(path));
 
   /// Ends the session on the portal and returns the browser to the sign-in page.
   Future<void> signOut() async {

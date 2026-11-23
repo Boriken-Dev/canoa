@@ -1,3 +1,4 @@
+import 'package:canoa/served/portal_session.dart';
 import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
@@ -52,6 +53,7 @@ Future<SettingsHarness> openSettings(
   VoiceOutputs? voiceOutputs,
   ReplyReader? reader,
   HostSections? hostSections,
+  PortalSession? portal,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -85,6 +87,7 @@ Future<SettingsHarness> openSettings(
       voiceOutputs: voiceOutputs,
       reader: reader,
       hostSections: hostSections ?? builtInSections(),
+      portal: portal,
     ),
   ));
   await tester.pumpAndSettle();

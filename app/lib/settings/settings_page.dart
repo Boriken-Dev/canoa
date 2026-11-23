@@ -23,7 +23,9 @@ import '../voice/voice_settings.dart';
 import 'agent_sections.dart';
 import 'app_sections.dart';
 import '../shell/shell.dart' show ShellScope;
+import '../served/portal_session.dart';
 import 'overlay_sections.dart';
+import 'sign_in_section.dart';
 import 'extension_settings.dart';
 import 'host_sections.dart';
 import 'shell_settings.dart';
@@ -88,6 +90,7 @@ class SettingsPage extends StatefulWidget {
     this.reader,
     this.version = '',
     this.hostSections,
+    this.portal,
   });
 
   final CanoaConfig config;
@@ -165,6 +168,9 @@ class SettingsPage extends StatefulWidget {
   /// The sections the host's providers offer: each is a section of its own, or a group inside one of the sections here.
   final HostSections? hostSections;
 
+  /// The portal that served this page, whose own pages the Sign-in section opens; none for a page served by anything else.
+  final PortalSession? portal;
+
   @override
   State<SettingsPage> createState() => SettingsPageState();
 }
@@ -216,6 +222,7 @@ class SettingsPageState extends State<SettingsPage> {
     'usage': (ready: !widget.usageSection, build: () => UsageWarning(controller: controller)),
     'store': (ready: true, build: () => StoreSection(key: const Key('settings-store'), onStore: widget.onLoadout)),
     'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),
+    'signin': (ready: widget.portal != null, build: () => SignInSection(key: const Key('settings-signin'), portal: widget.portal!)),
     'about': (ready: true, build: () => AboutSection(version: widget.version)),
   };
 
@@ -233,8 +240,18 @@ class SettingsPageState extends State<SettingsPage> {
       if (own != null && (!own.ready || (section.origin != 'built-in' && section.origin != 'bundled'))) continue;
       if (taken.add(section.id)) pages.add(SettingsSection.of(section));
     }
+    // The page of the portal that served this one: only that portal knows what it keeps, so the host does not list it.
+    if (widget.portal != null && taken.add('signin')) pages.add(_signIn);
     return [...pages.where((section) => section.id != 'about'), ...pages.where((section) => section.id == 'about')];
   }
+
+  static const _signIn = SettingsSection(
+    id: 'signin',
+    group: 'App',
+    title: '', // named by the text 'settings.section.signin'
+    icon: Icons.password,
+    keywords: 'one-time code otp authenticator totp passkey certificate sign out password portal account',
+  );
 
   /// The groups providers put inside the section [id].
   List<HostSection> _groups(String id) => _held.groupsIn(id);

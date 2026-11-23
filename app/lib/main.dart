@@ -840,6 +840,7 @@ class _CanoaAppState extends State<CanoaApp> {
       mail: _mail,
       extensions: _extensionSettings,
       hostSections: _hostSections,
+      portal: widget.served?.portal,
       shells: _shellSettings,
       usageSection: _usage != null,
       voiceBackends: _speech,
