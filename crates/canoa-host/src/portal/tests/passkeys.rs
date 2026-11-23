@@ -41,6 +41,15 @@ impl Drop for Keys {
 }
 
 fn keys(rules: &serde_json::Value, change: impl FnOnce(&mut Settings)) -> Keys {
+    keys_with(rules, &serde_json::json!({}), change)
+}
+
+/// [`keys`] with `extra` among the passkey provider's settings.
+fn keys_with(
+    rules: &serde_json::Value,
+    extra: &serde_json::Value,
+    change: impl FnOnce(&mut Settings),
+) -> Keys {
     static COUNT: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "canoa-passkeys-{}-{}",
@@ -53,6 +62,9 @@ fn keys(rules: &serde_json::Value, change: impl FnOnce(&mut Settings)) -> Keys {
     let mut passkey = file_source(&dir.join("passkeys.toml"));
     passkey["rp_id"] = RP.into();
     passkey["origins"] = serde_json::json!([ORIGIN]);
+    for (key, value) in extra.as_object().unwrap() {
+        passkey[key] = value.clone();
+    }
     let own = Settings {
         min_uid: mine().max(1),
         authenticators: vec![
@@ -912,4 +924,42 @@ fn a_registration_nobody_began_is_refused_with_a_reason_and_a_change_needs_the_p
         assert_eq!(answer.status, status, "{headers:?}");
     }
     assert_eq!(keys.held().len(), 1);
+}
+
+/// Serves the portal over the real password and passkey providers on a loopback port, for the browser run
+/// `clients/browser/chromium/e2e/passkey.mjs`, until the file named by `CANOA_TEST_SERVE_UNTIL` exists:
+/// `CANOA_TEST_SERVE_UNTIL=/tmp/stop cargo test -p canoa-host --features portal --lib serve_for_a_browser -- --ignored --nocapture`.
+/// The loopback network stands where 10.0.0.0/8 does, a browser's port is any port, and a password shown again may add the first
+/// passkey, which no passkey can yet.
+#[test]
+#[ignore = "serves until a file exists, for a browser run"]
+fn serve_a_passkey_portal_for_a_browser() {
+    let until =
+        PathBuf::from(std::env::var("CANOA_TEST_SERVE_UNTIL").expect("the file that ends the run"));
+    let rules = serde_json::json!({"rule": [
+        {"purposes": ["enrol"], "allow": [["password"], ["passkey"]]},
+        {"networks": ["127.0.0.0/8"], "allow": [["password"], ["passkey"]]},
+        {"allow": [["passkey"]]},
+    ]});
+    let keys = keys_with(
+        &rules,
+        &serde_json::json!({"allow_any_port": true}),
+        |settings| {
+            settings.max_failures_per_pair = 50;
+            settings.max_failures_per_address = 500;
+        },
+    );
+    println!(
+        "{}",
+        serde_json::json!({
+            "serving": {
+                "url": format!("http://localhost:{}", keys.rig.addr.port()),
+                "user": keys.name,
+                "password": PASSWORD,
+            }
+        })
+    );
+    while !until.exists() {
+        thread::sleep(Duration::from_millis(200));
+    }
 }
