@@ -357,7 +357,15 @@ final class HostFiles implements WorkspaceFiles, WorkspaceFileWriter, WorkspaceI
 
   /// Ends the host so that its supervisor starts it again with canoa.cfg as it is now; this link ends with it.
   Future<void> restart() async {
-    await _call('host/restart');
+    // The link ends with the host, and the host takes longer to come back than one dial waits: requests made meanwhile wait for it.
+    _control.expectRestart();
+    try {
+      await _call('host/restart');
+    } on ControlFailed {
+      // Refused: the host is not restarting.
+      _control.expectRestart(Duration.zero);
+      rethrow;
+    }
   }
 
   /// Waits until the host answers again after [restart], for at most [within].

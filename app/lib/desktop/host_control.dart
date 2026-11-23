@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'control_client.dart';
 import 'host_supervisor.dart';
 import 'host_tool.dart';
@@ -64,10 +66,35 @@ final class HostControl {
     });
   }
 
+  /// Says that the host was just asked to restart, so that a link a request needs is dialled again, for [within], while the host
+  /// starts, rather than failing the request at the first dial that times out. A host that listens through a portal takes longer to
+  /// answer than one dial waits for: the portal holds the connection until the host it starts is up.
+  void expectRestart([Duration within = const Duration(seconds: 90)]) {
+    _restartUntil = DateTime.now().add(within);
+  }
+
+  DateTime? _restartUntil;
+
+  /// How long to pause between dials while a restart is expected.
+  @visibleForTesting
+  static Duration dialPause = const Duration(seconds: 1);
+
   /// A link of its own, which the caller closes: closing it ends what the host is doing for it, such as an install.
   Future<ControlClient> open({bool wait = true}) async {
     final dial = _dial;
-    if (dial != null) return ControlClient(await dial().timeout(this.wait));
+    if (dial != null) {
+      while (true) {
+        try {
+          final link = await dial().timeout(this.wait);
+          _restartUntil = null;
+          return ControlClient(link);
+        } on Object {
+          final until = _restartUntil;
+          if (until == null || !DateTime.now().isBefore(until)) rethrow;
+          await Future<void>.delayed(dialPause);
+        }
+      }
+    }
     final host = _host!;
     if (!wait && host.phase != HostPhase.running && host.phase != HostPhase.idle) {
       throw StateError(host.problem ?? 'the host is not running');
