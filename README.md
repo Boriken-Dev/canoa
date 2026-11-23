@@ -33,11 +33,11 @@
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
 | `crates/canoa-host/` | `canoa-host`: the `canoa` program, which serves the agents and providers canoa.cfg names to paired keys (loopback by default, or a pipe or socket), the web app, and `canoa portal` |
-| `crates/canoa-{claude,codex,grok,pi,antigravity,opencode}/` | One agent each: its source preset and Store recipe (and its coqui-acp provider where it has one) |
-| `crates/canoa-foundry/` | Foundry Local gateway (OpenAI and Anthropic APIs over a local model) and `foundry-local` account provider |
-| `crates/canoa-litellm/` | LiteLLM proxy account provider (one virtual key for OpenAI and Anthropic APIs, SSO or key, budget reporting) |
-| `crates/canoa-openai/` | OpenAI `account_speech` provider for accounts that hold an OpenAI API key |
-| `crates/canoa-whisper/` | whisper.cpp Store program, models, and `speech_provider` offer |
+| `extensions/canoa-{claude,codex,grok,pi,antigravity,opencode}/` | One agent each: its source preset and Store recipe (and its coqui-acp provider where it has one) |
+| `extensions/canoa-foundry/` | Foundry Local gateway (OpenAI and Anthropic APIs over a local model) and `foundry-local` account provider |
+| `extensions/canoa-litellm/` | LiteLLM proxy account provider (one virtual key for OpenAI and Anthropic APIs, SSO or key, budget reporting) |
+| `extensions/canoa-openai/` | OpenAI `account_speech` provider for accounts that hold an OpenAI API key |
+| `extensions/canoa-whisper/` | whisper.cpp Store program, models, and `speech_provider` offer |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI |
 | `crates/canoa-launch/` | The portable `CanoaUI.exe` launcher and `canoa-pack` |
 | `bindings/python/canoa-sdk/`, `bindings/js/canoa-sdk/` | Python and JavaScript SDKs for writing Canoa providers (`UsageReader`, `ProfileItem`, `ProgramStore`, etc.) |

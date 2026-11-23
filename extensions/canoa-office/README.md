@@ -19,9 +19,9 @@ desktop Office alone.
 `HKCU`, so no administrator rights are needed. Run it with the Office applications closed:
 
 ```powershell
-pwsh crates/canoa-office/tools/office_addin.ps1 add -Dll <path>\canoa_office.dll -Apps Word
-pwsh crates/canoa-office/tools/office_addin.ps1 status -Dll <path>\canoa_office.dll -Apps Word
-pwsh crates/canoa-office/tools/office_addin.ps1 remove -Dll <path>\canoa_office.dll -Apps Word
+pwsh extensions/canoa-office/tools/office_addin.ps1 add -Dll <path>\canoa_office.dll -Apps Word
+pwsh extensions/canoa-office/tools/office_addin.ps1 status -Dll <path>\canoa_office.dll -Apps Word
+pwsh extensions/canoa-office/tools/office_addin.ps1 remove -Dll <path>\canoa_office.dll -Apps Word
 ```
 
 The DLL must match the application: a 64-bit Office loads an x64 or ARM64EC DLL (an ARM64 one only on a 64-bit ARM Office), a
