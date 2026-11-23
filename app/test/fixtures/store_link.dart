@@ -71,6 +71,7 @@ final class FakeStore {
     this.runtime = false,
     this.extensionType,
     this.library,
+    this.libraryTitle,
     this.summary,
     this.icon,
     this.commands = const [],
@@ -87,6 +88,9 @@ final class FakeStore {
 
   /// The library that offers the store, which `store/list` gives with the programs.
   final String? library;
+
+  /// The library's own name for itself, which `store/list` gives beside its id for a type's program.
+  final String? libraryTitle;
 
   final String provider, title;
 
@@ -266,7 +270,7 @@ final class FakeStoreHost {
             (each) => programs ? each.runtime || each.extensionType != null : !each.runtime && each.extensionType == null,
           ))
             {
-              if (programs) ...{'library': ?each.library, 'type': ?each.extensionType},
+              if (programs) ...{'library': ?each.library, 'library_title': ?each.libraryTitle, 'type': ?each.extensionType},
               'provider': each.provider,
               'program': each.provider.replaceAll('_store', ''),
               'title': each.title,

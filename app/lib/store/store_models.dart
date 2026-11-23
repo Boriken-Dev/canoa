@@ -6,6 +6,8 @@ import '../desktop/control_client.dart';
 import '../forms/schema_fields.dart';
 import '../selectable.dart';
 import 'entry_details.dart';
+import 'programs.dart';
+import 'programs_view.dart';
 import 'store_extension.dart';
 
 // The models of a Store type, as its library lists them: what the host's `store/models` answers (rows with a line, tags, what + does,
@@ -53,6 +55,19 @@ final class ModelAction {
   /// The confirmation's title and text, what its button says, and the actions the host is asked for in order.
   final String title, confirm, label;
   final List<String> steps;
+}
+
+/// The steps of an action the host does itself: it downloads the files the model is made of, which needs the type's program, and
+/// takes them away.
+const String fetchFilesStep = 'fetch_files';
+const String deleteFilesStep = 'delete_files';
+
+/// The program a type's models run on, as the host says it: the store that installs it, its name and whether it is there.
+final class ModelProgram {
+  const ModelProgram({required this.provider, required this.title, required this.installed});
+
+  final String provider, title;
+  final bool installed;
 }
 
 /// How a model may be the person's speech-to-text.
@@ -126,8 +141,14 @@ final class StoreModel {
   final String? state;
   final List<ModelFact> facts;
 
-  /// What it can do; + does the first.
+  /// What it can do; + does the first that is not a removal.
   final List<ModelAction> actions;
+
+  /// What + does: the first action that does not take the model away, if there is one.
+  ModelAction? get installAction => actions.where((action) => !action.steps.contains(deleteFilesStep)).firstOrNull;
+
+  /// What the tile's remove does: the action that takes the model away, if there is one.
+  ModelAction? get removeAction => actions.where((action) => action.steps.contains(deleteFilesStep)).firstOrNull;
   final List<ModelSection> sections;
 
   /// Present when it may be used as the person's speech-to-text.
@@ -147,9 +168,17 @@ final class ModelSettings {
 
 /// The models of one Store type and what the person asks the host to do with one.
 class TypeModels extends ChangeNotifier {
-  TypeModels({required this.type, required this.title, required Future<ControlClient> Function() control, required Future<ControlClient> Function() open})
-    : _control = control,
-      _open = open;
+  TypeModels({
+    required this.type,
+    required this.title,
+    required Future<ControlClient> Function() control,
+    required Future<ControlClient> Function() open,
+    this.programs,
+  }) : _control = control,
+       _open = open;
+
+  /// The host's programs, which a model whose program is not there installs first.
+  final ProgramStores? programs;
 
   /// The id of the Store type whose models these are, and the page's name in the plural.
   final String type;
@@ -161,6 +190,7 @@ class TypeModels extends ChangeNotifier {
   List<StoreModel> _models = const [];
   String? _problem, _unavailable, _catalog, _publisher, _missing;
   ModelSettings? _settings;
+  ModelProgram? _program;
   bool _speech = false;
 
   /// Whether the host has answered yet.
@@ -183,6 +213,9 @@ class TypeModels extends ChangeNotifier {
   /// The settings a model keeps, when the type keeps any.
   ModelSettings? get settings => _settings;
 
+  /// The program the models run on, when the type has one.
+  ModelProgram? get program => _program;
+
   /// Whether a model of the type may be the person's speech-to-text.
   bool get speech => _speech;
 
@@ -199,6 +232,10 @@ class TypeModels extends ChangeNotifier {
       _missing = _text(map['missing']);
       _unavailable = _text(map['unavailable']);
       _speech = map['speech'] == true;
+      final program = _map(map['program']);
+      _program = program['provider'] is String
+          ? ModelProgram(provider: program['provider']! as String, title: _text(program['title']) ?? program['provider']! as String, installed: program['installed'] == true)
+          : null;
       final settings = _map(map['settings']);
       _settings = settings['schema'] is Map ? ModelSettings(schema: _map(settings['schema']), form: _map(settings['form']), help: _text(settings['help'])) : null;
       _models = [
@@ -278,7 +315,8 @@ List<ExtensionStoreItem> _itemsOf(TypeModels models) {
         summary: model.summary,
         tags: model.tags,
         installed: model.on,
-        install: model.actions.isEmpty ? null : (context) => _choose(context, models, model),
+        install: model.installAction == null ? null : (context) => _choose(context, models, model, model.installAction!),
+        remove: model.removeAction == null ? null : (context) => _choose(context, models, model, model.removeAction!),
         details: (context, config) => ModelPage(models: models, id: model.id),
       ),
   ];
@@ -310,11 +348,35 @@ Future<void> _failed(BuildContext context, String title, Object error) => showSe
   ),
 );
 
-/// What + does for [model]: its first action, once the person has read what it takes, one step at a time.
-Future<void> _choose(BuildContext context, TypeModels models, StoreModel model) async {
-  final action = model.actions.first;
+/// What + does for [model]: [action], once the person has read what it takes, one step at a time. A model that is downloaded
+/// for a program that is not on the host asks for that program first, in the one confirmation that shows the program's plan.
+Future<void> _choose(BuildContext context, TypeModels models, StoreModel model, ModelAction action) async {
+  final program = models.program;
+  final programs = models.programs;
+  final needs = program != null && !program.installed && action.steps.contains(fetchFilesStep);
+  if (needs && programs != null) {
+    try {
+      await programs.ensure();
+    } on Object catch (error) {
+      if (context.mounted) await _failed(context, action.title, error);
+      return;
+    }
+    final status = programs.status(program.provider);
+    if (status != null) {
+      if (!context.mounted) return;
+      final installed = await runProgramAction(context, programs, status, 'install', also: '${action.title}. ${action.confirm}');
+      if (!installed || !context.mounted) return;
+      await _run(context, models, model, action);
+      return;
+    }
+  }
+  if (!context.mounted) return;
   if (!await _confirm(context, title: action.title, text: action.confirm, action: action.label)) return;
   if (!context.mounted) return;
+  await _run(context, models, model, action);
+}
+
+Future<void> _run(BuildContext context, TypeModels models, StoreModel model, ModelAction action) async {
   try {
     for (final step in action.steps) {
       await models.run(model.id, step);

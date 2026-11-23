@@ -45,6 +45,7 @@ final class ProgramStoreInfo {
     this.serves = const [],
     this.channels = const [],
     this.library,
+    this.libraryTitle,
     this.type,
   });
 
@@ -54,6 +55,9 @@ final class ProgramStoreInfo {
 
   /// The library that offers the store, which groups the Programs list; none when the host does not say.
   final String? library;
+
+  /// The library's own name for itself, when the host says it: what the badge shows in place of [library].
+  final String? libraryTitle;
 
   /// The id of the Store type the library adds that claims this program, when one does: what its models and its setup are filed under.
   final String? type;
@@ -90,6 +94,7 @@ final class ProgramStoreInfo {
       serves: [for (final each in _maps(map['serves'])) ProgramServes(_text(each['provider']) ?? '', _map(each['when']))],
       channels: [if (map['channels'] is List) for (final each in map['channels'] as List) ?_text(each)],
       library: _text(map['library']),
+      libraryTitle: _text(map['library_title']),
       type: _text(map['type']),
     );
   }

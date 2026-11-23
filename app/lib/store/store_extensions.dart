@@ -71,7 +71,7 @@ ExtensionStoreType programsStoreType({
   items: () => [
     for (final status in programs.statuses)
       ExtensionStoreItem(
-        catalog: status.info.library ?? catalog,
+        catalog: status.info.libraryTitle ?? status.info.library ?? catalog,
         name: status.info.title,
         by: status.info.publisher,
         leading: RuntimeMark(icon: status.info.icon),
@@ -161,7 +161,7 @@ class StoreExtensions extends ChangeNotifier {
         final id = each['id'] as String;
         if (id == programsTypeId || id == modelsTypeId || id == extensionsTypeId) continue;
         if (each['models'] case {'title': final String title}) {
-          models.add(TypeModels(type: id, title: title, control: _control, open: _open));
+          models.add(TypeModels(type: id, title: title, control: _control, open: _open, programs: _programs));
         }
         if (each['extension'] is String) (by[each['extension'] as String] ??= []).add(each['title'] as String);
       }

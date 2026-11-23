@@ -181,9 +181,9 @@ class ProgramButtons extends StatelessWidget {
 /// Plans [action] (`install`, `update` or `uninstall`), shows the plan for the person to confirm, runs it with its progress
 /// shown, and shows how it ended. A refusal is shown as the host words it.
 ///
-/// [channel] names the release channel the plan is made for, and the result says whether the person confirmed and the program was
+/// [also] is what the person is told is done once the program is: the plan's one confirmation covers it. [channel] names the release channel the plan is made for, and the result says whether the person confirmed and the program was
 /// applied without failing, so a caller that goes on to use the program knows it is there.
-Future<bool> runProgramAction(BuildContext context, ProgramStores programs, ProgramStatus status, String action, {String? channel}) async {
+Future<bool> runProgramAction(BuildContext context, ProgramStores programs, ProgramStatus status, String action, {String? channel, String? also}) async {
   final title = status.info.title;
   final ProgramPlan plan;
   try {
@@ -195,7 +195,7 @@ Future<bool> runProgramAction(BuildContext context, ProgramStores programs, Prog
   if (!context.mounted) return false;
   final confirmed = await showSelectableDialog<bool>(
     context: context,
-    builder: (_) => PlanDialog(plan: plan, title: title),
+    builder: (_) => PlanDialog(plan: plan, title: title, also: also),
   );
   if (confirmed != true || !context.mounted) return false;
   final run = programs.apply(plan);
@@ -277,10 +277,13 @@ Future<void> _showError(BuildContext context, String title, String message) => s
 /// What a plan will do, before it is confirmed: the version, the size, each file it fetches (one the publisher gives nothing to
 /// check marked), the programs it runs, and everything it changes outside Canoa's folder. Pops true when the person confirms.
 class PlanDialog extends StatelessWidget {
-  const PlanDialog({super.key, required this.plan, required this.title});
+  const PlanDialog({super.key, required this.plan, required this.title, this.also});
 
   final ProgramPlan plan;
   final String title;
+
+  /// What is done once the program is, which confirming also says yes to.
+  final String? also;
 
   @override
   Widget build(BuildContext context) {
@@ -302,6 +305,11 @@ class PlanDialog extends StatelessWidget {
                 key: const Key('plan-version'),
               ),
             if (plan.bytes != null) Text('Download: ${sizeText(plan.bytes!)}', key: const Key('plan-size')),
+            if (also != null) ...[
+              const SizedBox(height: 12),
+              Text('Then', style: text.titleSmall),
+              Text(also!, key: const Key('plan-also')),
+            ],
             if (plan.downloads.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text('It downloads', style: text.titleSmall),
