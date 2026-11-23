@@ -1390,7 +1390,7 @@ fn administrator_sets_up(real: &Real, ahead: i64) -> String {
     accounts
         .confirm_factor(&real.name, real.uid(), &code_in(&begun.uri, ahead))
         .unwrap();
-    accounts.clear_reset(&real.name, real.uid()).unwrap();
+    accounts.clear_reset(real.uid()).unwrap();
     begun.uri
 }
 
@@ -1677,7 +1677,6 @@ fn an_unlock_clears_a_persons_counts_in_a_running_portal_once_and_failures_count
     );
     assert_eq!(refused.status, 401, "the person is locked out by the count");
     // The administrator's unlock, as `canoa portal factor unlock NAME` writes it.
-    thread::sleep(Duration::from_millis(5));
     real.rig.accounts.unlock(&real.name, real.uid()).unwrap();
     let pending = pending_cookie_of(&real.password_step("10.1.2.3"));
     let signed = real.form(

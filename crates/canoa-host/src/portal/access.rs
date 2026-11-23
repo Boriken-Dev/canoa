@@ -30,8 +30,8 @@ use coqui_access_system::SystemAccounts;
 use certs::{
     PinStore, UID_MARKER, build_matcher, forwarded_chain, leaf_fields, outside_validity, pin_store,
 };
-use codes::{CodeStore, KeyError, beside, code_accounts};
-pub use codes::{FactorEntry, check_code_files_owned};
+pub use codes::FactorEntry;
+use codes::{CodeStore, KeyError, code_accounts, code_files};
 
 use super::settings::{Entry, Settings};
 use super::signin::{
@@ -284,8 +284,7 @@ impl Access {
                     codes = Some(CodeStore {
                         accounts: code_accounts(&registry, &entry.provider, &config)?,
                         link,
-                        resets: beside(&entry.config, ".reset"),
-                        unlocks: beside(&entry.config, ".unlock"),
+                        files: code_files(&entry.config),
                     });
                 }
                 // A provider that says nothing of what it takes is asked for a name and a password.
@@ -363,20 +362,30 @@ impl Access {
             .reset_key(key)
     }
 
-    /// Lifts the reset mark of an account an administrator has just set a code up for, and the marks of the same user id under
-    /// other names, which were the accounts it was before.
+    /// Lifts the reset marks of the user id under other names, which were the accounts it was before, once an administrator has
+    /// set a code up for the account: the provider lifts the mark of that account itself when its first code is confirmed.
     ///
     /// # Errors
     ///
-    /// A message when the marks cannot be written.
-    pub fn clear_reset(&self, user: &str, uid: u32) -> Result<(), String> {
+    /// A message when the marks cannot be removed.
+    pub fn clear_reset(&self, uid: u32) -> Result<(), String> {
         let Some(store) = &self.codes else {
             return Ok(());
         };
-        let _ = user;
-        store.update_marks(|marks| {
-            marks.retain(|mark| codes::split_key(mark).is_none_or(|(id, _)| id != uid))
-        })
+        store.clear_reset(uid)
+    }
+
+    /// Whether the files the one-time codes are kept in, and the folder they are made in, belong to the account this process runs
+    /// as: an administrator's command run as another account would make files the portal's account cannot read. Nothing is made
+    /// by building an `Access`, so this is asked before the command changes anything.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the path and whose it is.
+    pub fn check_code_files_owned(&self) -> Result<(), String> {
+        self.codes
+            .as_ref()
+            .map_or(Ok(()), CodeStore::check_files_owned)
     }
 
     /// Clears what the portal counted of an account's failed second-step tries, and the provider's delay of it, for a person who

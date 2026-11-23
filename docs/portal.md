@@ -361,7 +361,7 @@ it (the unit's `StateDirectory=canoa-portal`, mode `0700`). Install the library 
   can keep the code step shut for that person while they keep failing; the window's failures leave it as time passes, so it is
   not for good, but the day's cap holds a day. **Changing the account's password is the remedy for a lock-out**: whoever was
   guessing needed the old one, and the person's counts, which the portal keeps in memory, do not change with it. An
-  administrator clears them with `canoa portal --config FILE factor unlock NAME`: it writes the time to `<source>.unlock`, a
+  administrator clears them with `canoa portal --config FILE factor unlock NAME`: the provider notes the time in its own table (an account with no code has nothing to clear), a
   running portal clears the account's counts at its next try for it (no restart, and once for each unlock), and the provider's
   own delay of the account ends with it. Restarting the portal clears every count. The first refusal in a window is logged at
   `warn`, naming the account, the address and which limit, and the ones after it at `info`. Every failed step is answered no sooner than `failure_floor` after the request began.
@@ -371,7 +371,7 @@ it (the unit's `StateDirectory=canoa-portal`, mode `0700`). Install the library 
   record of when a code was made is in whole seconds, so a code replaced within the second of the one before is not told apart.
 - **A code is the account's, by name and user id.** A code is kept under both (`1000:alice`), so a user id made again for
   another account does not find the code of the one before, and a recovery code of one is no recovery code of the other. An
-  account that has no code but whose user id has a record or a reset mark under **another name** (it was renamed, or another was
+  account that has no code but whose user id has a code or a reset mark under **another name** (it was renamed, or another was
   made in its place) counts as reset: it is not open to setting a first code up for itself, and an administrator's `enrol`
   lifts that. A code table that cannot be read is neither "has" nor "has not": a request answers `503` and a session or channel
   stays until it can be.
@@ -418,8 +418,9 @@ account's password as well**, or the one who held both is back in with the passw
 prints are the factor: treat that output as a secret. No log line, error message or page other than that answer holds a link, a
 code or a recovery code.
 
-The mark is written before the code is removed, under a lock, so a reset that is interrupted leaves the account marked with its
-code, not unmarked without one. The command refuses to run as an account that does not own the one-time code provider's files (`source`, `pending`, `waiting`, and their lock, reset and unlock files) and the folders they are in: it would make files the portal's account cannot read, and every code step would answer `503`. Files of other providers, a password table under a folder root owns, say, are not its concern. The provider is found by `totp` in its id or its library's file name. Run it as the portal's account, for instance
+The provider takes the code away and keeps the mark in one write under its table's lock, so a reset that is interrupted leaves the
+account with its code and no mark, and one that is not leaves the mark and no code. An account the provider holds no code for
+(one whose setup was never confirmed) is not marked. The command refuses to run as an account that does not own the one-time code provider's files (`source`, `pending`, `waiting`, and their locks) and the folders they are in: it would make files the portal's account cannot read, and every code step would answer `503`. Files of other providers, a password table under a folder root owns, say, are not its concern. The provider is the one whose authenticator takes one-time codes. Run it as the portal's account, for instance
 `sudo -u canoa`.
 
 ## The person's host: `canoa serve --portal`

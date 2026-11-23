@@ -91,6 +91,53 @@ fn factor(config: &std::path::Path, args: &[&str]) -> Output {
         .expect("canoa runs")
 }
 
+/// The code an authenticator app shows now for the secret in a setup link.
+fn totp_in(link: &str) -> String {
+    use hmac::{Hmac, KeyInit, Mac as _};
+    let secret = link
+        .split(['?', '&'])
+        .find_map(|part| part.strip_prefix("secret="))
+        .unwrap();
+    let key = data_encoding::BASE32_NOPAD
+        .decode(secret.as_bytes())
+        .unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut mac = <Hmac<sha1::Sha1> as KeyInit>::new_from_slice(&key).unwrap();
+    mac.update(&(now / 30).to_be_bytes());
+    let digest = mac.finalize().into_bytes();
+    let offset = usize::from(digest[19] & 0x0f);
+    let number = u32::from_be_bytes([
+        digest[offset] & 0x7f,
+        digest[offset + 1],
+        digest[offset + 2],
+        digest[offset + 3],
+    ]);
+    format!("{:06}", number % 1_000_000)
+}
+
+/// Sets the account up as an administrator does: the setup link, then its first code.
+fn enrolled(config: &std::path::Path, name: &str) {
+    let begun = factor(config, &["enrol", name]);
+    let uri = lines(&begun)[0]["enrol"]["uri"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    enrolled_with(config, name, &uri);
+}
+
+/// Confirms the setup the link belongs to with its first code.
+fn enrolled_with(config: &std::path::Path, name: &str, uri: &str) {
+    let done = factor(config, &["enrol", name, "--code", &totp_in(uri)]);
+    assert!(
+        done.status.success(),
+        "{}",
+        String::from_utf8_lossy(&done.stderr)
+    );
+}
+
 fn lines(output: &Output) -> Vec<serde_json::Value> {
     String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -138,6 +185,8 @@ fn an_administrator_sets_a_code_up_lists_it_and_resets_it() {
         Some(2)
     );
     assert_eq!(factor(&config, &["reset", "../x"]).status.code(), Some(2));
+    let uri = answer["uri"].as_str().unwrap().to_owned();
+    enrolled_with(&config, &name, &uri);
     let reset = factor(&config, &["reset", &name]);
     assert!(reset.status.success());
     assert_eq!(lines(&reset)[0]["reset"]["account"], name.as_str());
@@ -168,7 +217,7 @@ fn a_portal_that_keeps_no_codes_says_so() {
 fn a_reset_marks_the_account_and_one_by_id_works_for_an_account_that_is_gone() {
     let (_dir, config) = portal_toml(true);
     let name = me();
-    assert!(factor(&config, &["enrol", &name]).status.success());
+    enrolled(&config, &name);
     let listed = lines(&factor(&config, &["list"]));
     let id = listed[0]["id"].as_str().unwrap().to_owned();
     assert_eq!(
@@ -239,9 +288,22 @@ fn the_command_refuses_to_run_as_an_account_that_does_not_own_the_code_files() {
 }
 
 #[test]
-fn an_administrator_unlocks_an_account_and_the_time_is_written_where_a_running_portal_reads_it() {
+fn an_administrator_unlocks_an_account_and_the_time_is_kept_where_a_running_portal_reads_it() {
     let (dir, config) = portal_toml(true);
     let name = me();
+    // An account with no code has nothing to clear.
+    let none = factor(&config, &["unlock", &name]);
+    assert!(
+        none.status.success(),
+        "{}",
+        String::from_utf8_lossy(&none.stderr)
+    );
+    assert!(
+        !std::fs::read_to_string(dir.0.join("totp.toml"))
+            .unwrap_or_default()
+            .contains("unlocked_unix"),
+    );
+    enrolled(&config, &name);
     let unlocked = factor(&config, &["unlock", &name]);
     assert!(
         unlocked.status.success(),
@@ -249,18 +311,18 @@ fn an_administrator_unlocks_an_account_and_the_time_is_written_where_a_running_p
         String::from_utf8_lossy(&unlocked.stderr)
     );
     assert_eq!(lines(&unlocked)[0]["unlock"]["user"], name.as_str());
-    let written = std::fs::read_to_string(dir.0.join("totp.toml.unlock")).unwrap();
+    // The provider keeps the time in its own table, which nobody else may read, and no file is made beside it for the purpose.
+    let table = dir.0.join("totp.toml");
     assert!(
-        written.starts_with(&format!("{}:{name} ", my_uid())),
-        "{written}"
-    );
-    // Nothing secret is in it, and nobody else may read it.
-    let mode = std::os::unix::fs::PermissionsExt::mode(
-        &std::fs::metadata(dir.0.join("totp.toml.unlock"))
+        std::fs::read_to_string(&table)
             .unwrap()
-            .permissions(),
+            .contains("unlocked_unix")
     );
+    let mode =
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&table).unwrap().permissions());
     assert_eq!(mode & 0o077, 0);
+    assert!(!dir.0.join("totp.toml.unlock").exists());
+    assert!(!dir.0.join("totp.toml.reset").exists());
     assert_eq!(
         factor(&config, &["unlock", "nobodyatall"]).status.code(),
         Some(2)

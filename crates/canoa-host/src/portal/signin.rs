@@ -289,7 +289,7 @@ pub trait Accounts: Send + Sync {
         self.factor_record(user, uid).0
     }
 
-    /// When an administrator last cleared the account's failure counts (milliseconds since the epoch): the portal that sees a
+    /// When an administrator last cleared the account's failure counts (seconds since the epoch): the portal that sees a
     /// later time than it last acted on forgets what it counted for the account.
     fn unlock_stamp(&self, user: &str, uid: u32) -> Option<i64> {
         let _ = (user, uid);

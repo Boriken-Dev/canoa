@@ -751,8 +751,18 @@ pub(super) fn form_holding(
 fn every_flow_goes_through_the_portals_request_path_as_the_contract_says() {
     let document: serde_json::Value = serde_json::from_str(FLOWS).unwrap();
     let flows = document["flows"].as_array().unwrap();
-    assert_eq!(flows.len(), 18, "the flows the vectors hold");
-    for flow in flows {
+    assert_eq!(flows.len(), 19, "the flows the vectors hold");
+    // A flow that presents a method the portal has no sign-in for (a passkey) is the library's, not the portal's, to answer.
+    let (offered, apart): (Vec<_>, Vec<_>) = flows.iter().partition(|flow| {
+        flow["steps"].as_array().unwrap().iter().all(|step| {
+            step.get("method")
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(|word| Method::from_id(word).is_some())
+        })
+    });
+    assert_eq!(offered.len(), 18, "the flows of the methods the portal has");
+    assert_eq!(apart.len(), 1, "the flows of a method it has not");
+    for flow in offered {
         let name = flow["name"].as_str().unwrap();
         // The vectors' quiet period is 15 minutes; the portal's window is shortened to a second and a half, and a step's wait
         // by the same factor.

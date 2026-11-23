@@ -106,9 +106,9 @@ fn portal_factor(
     front: &dyn Front,
 ) -> Result<(), Failed> {
     use crate::portal::{Accounts as _, FactorError, FactorStanding};
-    // Before anything is opened: a code file made by another account is one the portal cannot read.
-    crate::portal::check_code_files_owned(settings).map_err(Failed::usage)?;
     let access = crate::portal::Access::new(settings).map_err(Failed::usage)?;
+    // Before anything is written: a code file made by another account is one the portal cannot read.
+    access.check_code_files_owned().map_err(Failed::usage)?;
     if access.factor_standing("", 0) == FactorStanding::Unsupported {
         return Err(Failed::usage(
             "no authenticator keeps one-time codes: name a provider that does (`coqui_access_totp`) in `authenticators`",
@@ -147,7 +147,7 @@ fn portal_factor(
                     .confirm_factor(&user, uid, code.trim())
                     .map_err(failed)?;
                 // An administrator set it up: the account is no longer one that is waiting for them.
-                access.clear_reset(&user, uid).map_err(Failed::run)?;
+                access.clear_reset(uid).map_err(Failed::run)?;
                 return print(
                     front,
                     &serde_json::json!({"enrolled": {"user": user}}).to_string(),

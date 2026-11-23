@@ -34,7 +34,7 @@ use std::time::{Instant, SystemTime};
 use coqui_access::{methods, purposes};
 use coqui_transport_pipe::{PipeName, SocketGroup};
 
-pub use access::{Access, FactorEntry, check_code_files_owned};
+pub use access::{Access, FactorEntry};
 pub use conn::Conn;
 pub use instance::{Controller, Instances, Lease, Systemd};
 pub use session::{Attempt, Session, Sessions, Throttle};

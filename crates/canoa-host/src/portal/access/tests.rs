@@ -899,7 +899,19 @@ fn an_administrators_listing_names_who_has_a_code_and_never_shows_a_secret() {
         access.factor_standing(&me, mine()),
         FactorStanding::NotEnrolled
     );
+    // A setup that was never confirmed is no code: a reset takes the setup away and marks nothing.
+    assert_eq!(access.reset_factor(&me, mine()), Ok(false));
+    assert_eq!(access.list_factors(), Ok(Vec::new()));
+    let begun = access.begin_factor(&me, mine(), false).unwrap();
+    access
+        .confirm_factor(&me, mine(), &totp_in(&begun.uri))
+        .unwrap();
     assert_eq!(access.reset_factor(&me, mine()), Ok(true));
+    assert_eq!(
+        access.reset_factor(&me, mine()),
+        Ok(false),
+        "a code is reset once"
+    );
     // Reset leaves the account marked for an administrator, with nothing else of it.
     let after = access.list_factors().unwrap();
     assert_eq!(
@@ -981,25 +993,41 @@ fn the_proxy_provider_is_refused_and_so_is_a_listing_that_names_it() {
 }
 
 #[test]
-fn code_files_made_by_another_account_are_refused_before_anything_is_opened() {
+fn code_files_made_by_another_account_are_refused_before_anything_is_changed() {
     let dir = scratch("owned");
-    let ours = settings(vec![totp_entry(&dir.join("totp.toml"))]);
-    assert_eq!(check_code_files_owned(&ours), Ok(()));
+    let file = dir.join("accounts.toml");
+    seed_password(&file, &my_name(), "x");
+    let ours = Access::new(&settings(vec![
+        password_entry(&file),
+        totp_entry(&dir.join("totp.toml")),
+    ]))
+    .unwrap();
+    assert_eq!(ours.check_code_files_owned(), Ok(()));
     // `/tmp` belongs to root: files made there as this account would be root's to remove, and root's as the other way round.
     let name = format!("canoa-not-made-{}.toml", std::process::id());
-    let rooted = settings(vec![totp_entry(&PathBuf::from("/tmp").join(&name))]);
-    let error = check_code_files_owned(&rooted).unwrap_err();
+    let rooted = Access::new(&settings(vec![
+        password_entry(&file),
+        totp_entry(&PathBuf::from("/tmp").join(&name)),
+    ]))
+    .unwrap();
+    let error = rooted.check_code_files_owned().unwrap_err();
     assert!(error.contains("belongs to user id 0"), "{error}");
     assert!(!PathBuf::from("/tmp").join(&name).exists());
-    // Under another id, and in a key the provider is given for a second file, it is the same.
-    let other = entry(
-        "codes_under_another_name",
-        Some(PathBuf::from("/opt/libcoqui_access_totp_plugin.so")),
-        &serde_json::json!({"source": {"file": {"path": dir.join("t.toml"), "format": "toml"}},
-            "pending": {"file": {"path": PathBuf::from("/tmp").join(&name), "format": "toml"}}}),
-    );
-    let error = check_code_files_owned(&settings(vec![other])).unwrap_err();
+    // In a key the provider is given for a second file, it is the same.
+    let mut config = file_source(&dir.join("t.toml"));
+    config["pending"] = file_source(&PathBuf::from("/tmp").join(&name))["source"].clone();
+    let other = Access::new(&settings(vec![
+        password_entry(&file),
+        entry(
+            "coqui_access_totp",
+            Some(plugin("coqui_access_totp")),
+            &config,
+        ),
+    ]))
+    .unwrap();
+    let error = other.check_code_files_owned().unwrap_err();
     assert!(error.contains("belongs to user id 0"), "{error}");
+    assert!(!PathBuf::from("/tmp").join(&name).exists());
 }
 
 fn access_with_codes(name: &str) -> (Access, PathBuf, String) {
@@ -1064,13 +1092,16 @@ fn totp_in(link: &str) -> String {
 }
 
 #[test]
-fn marks_are_written_before_the_code_goes_and_two_commands_do_not_lose_each_others() {
+fn a_reset_that_cannot_be_written_leaves_the_code_and_many_at_once_each_stand() {
     let (access, table, me) = access_with_codes("marks");
-    let begun = access.begin_factor(&me, mine(), false).unwrap();
-    access
-        .confirm_factor(&me, mine(), &totp_in(&begun.uri))
-        .unwrap();
-    // A table that cannot be written: the removal fails, and the mark is already there.
+    let enrol = |user: &str, uid: u32| {
+        let begun = access.begin_factor(user, uid, false).unwrap();
+        access
+            .confirm_factor(user, uid, &totp_in(&begun.uri))
+            .unwrap();
+    };
+    enrol(&me, mine());
+    // A table that cannot be written: the reset fails, and the account keeps its code and is not marked.
     let key = format!("{}:{me}", mine());
     let mut lock = table.clone().into_os_string();
     lock.push(".lock");
@@ -1081,20 +1112,28 @@ fn marks_are_written_before_the_code_goes_and_two_commands_do_not_lose_each_othe
     std::fs::set_permissions(&lock, permissions).unwrap();
     let outcome = access.reset_by_id(&key);
     std::fs::set_permissions(&lock, writable).unwrap();
-    assert!(outcome.is_err(), "the removal could not be made");
+    assert!(outcome.is_err(), "the reset could not be made");
     let listed = access.list_factors().unwrap();
     assert!(
-        listed.iter().any(|entry| entry.id == key && entry.reset),
+        listed
+            .iter()
+            .any(|entry| entry.id == key && entry.enrolled && !entry.reset),
         "{listed:?}"
     );
+    for index in 0..16_u32 {
+        enrol(&format!("person{index}"), 5000 + index);
+    }
     // Many commands at once each leave their mark.
     std::thread::scope(|scope| {
-        for index in 0..16_u32 {
+        for (id, _) in access
+            .list_factors()
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.id, ()))
+        {
             let access = &access;
             scope.spawn(move || {
-                access
-                    .reset_by_id(&format!("{}:person{index}", 5000 + index))
-                    .unwrap();
+                assert_eq!(access.reset_by_id(&id), Ok(true));
             });
         }
     });
@@ -1102,7 +1141,7 @@ fn marks_are_written_before_the_code_goes_and_two_commands_do_not_lose_each_othe
         .list_factors()
         .unwrap()
         .into_iter()
-        .filter(|entry| entry.reset && entry.id.starts_with(|c: char| c.is_ascii_digit()))
+        .filter(|entry| entry.reset && !entry.enrolled)
         .count();
     assert_eq!(marked, 17, "a mark was lost to another command's write");
 }
@@ -1125,7 +1164,7 @@ fn an_account_renamed_or_made_again_under_the_same_user_id_is_reset_and_not_open
         access.factor_standing("renamed-account", mine()),
         FactorStanding::Reset
     );
-    access.clear_reset("renamed-account", mine()).unwrap();
+    access.clear_reset(mine()).unwrap();
     assert_eq!(
         access.factor_standing("renamed-account", mine()),
         FactorStanding::NotEnrolled
@@ -1138,12 +1177,19 @@ fn an_account_renamed_or_made_again_under_the_same_user_id_is_reset_and_not_open
 }
 
 #[test]
-fn an_unlock_is_a_time_the_portal_reads_and_does_not_need_a_code_to_exist() {
+fn an_unlock_is_a_time_the_portal_reads_and_an_account_with_no_code_has_none() {
     let (access, _, me) = access_with_codes("unlock");
+    // Nothing is held for an account with no code: nothing to clear, and no time to read.
+    access.unlock(&me, mine()).unwrap();
+    assert_eq!(access.unlock_stamp(&me, mine()), None);
+    let begun = access.begin_factor(&me, mine(), false).unwrap();
+    access
+        .confirm_factor(&me, mine(), &totp_in(&begun.uri))
+        .unwrap();
     assert_eq!(access.unlock_stamp(&me, mine()), None);
     access.unlock(&me, mine()).unwrap();
     let first = access.unlock_stamp(&me, mine()).unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
     access.unlock(&me, mine()).unwrap();
     assert!(access.unlock_stamp(&me, mine()).unwrap() > first);
     assert_eq!(access.unlock_stamp("someone-else", mine()), None);
@@ -1228,14 +1274,21 @@ fn the_owner_check_looks_at_the_code_providers_files_and_no_others() {
     let name = format!("canoa-owner-scope-{}.toml", std::process::id());
     let password = entry(
         "coqui_access_password",
-        None,
-        &serde_json::json!({"source": {"file": {"path": PathBuf::from("/tmp").join(&name), "format": "toml"}}}),
+        Some(plugin("coqui_access_password")),
+        &file_source(&PathBuf::from("/tmp").join(&name)),
     );
-    let ours = settings(vec![password.clone(), totp_entry(&dir.join("totp.toml"))]);
-    assert_eq!(check_code_files_owned(&ours), Ok(()));
-    // A code provider under another id is found by its library's name, and its files are the ones that count.
-    let mut codes = totp_entry(&PathBuf::from("/tmp").join(&name));
-    codes.provider = "second_factor".to_owned();
-    let error = check_code_files_owned(&settings(vec![password, codes])).unwrap_err();
+    let ours = Access::new(&settings(vec![
+        password.clone(),
+        totp_entry(&dir.join("totp.toml")),
+    ]))
+    .unwrap();
+    assert_eq!(ours.check_code_files_owned(), Ok(()));
+    // The code table under root's folder is the one that counts.
+    let codes = Access::new(&settings(vec![
+        password,
+        totp_entry(&PathBuf::from("/tmp").join(&name)),
+    ]))
+    .unwrap();
+    let error = codes.check_code_files_owned().unwrap_err();
     assert!(error.contains("belongs to user id 0"), "{error}");
 }
