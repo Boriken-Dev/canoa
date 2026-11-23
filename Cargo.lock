@@ -1584,7 +1584,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "agent-client-protocol",
  "base64 0.22.1",
@@ -1603,7 +1603,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-api"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "guatiao",
  "guatiao-channel",
@@ -1615,7 +1615,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-bridge"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "clap",
  "coqui-agentic-peer",
@@ -1636,7 +1636,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-claude"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "clap",
  "coqui-acp-api",
@@ -1649,7 +1649,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-codex"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "clap",
  "coqui-acp-api",
@@ -1661,7 +1661,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-harness"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
@@ -1686,7 +1686,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-history"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "agent-client-protocol",
  "data-encoding",
@@ -1701,7 +1701,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-hub"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "serde_json",
 ]
@@ -1709,7 +1709,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-pi"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "clap",
  "coqui-acp-api",
@@ -1722,7 +1722,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-provider"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "agent-client-protocol",
  "coqui-acp-api",
@@ -1737,7 +1737,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-secrets"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e#ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=d602a687c88025989f01683e87f19ddc1cfc3b43#d602a687c88025989f01683e87f19ddc1cfc3b43"
 dependencies = [
  "base64 0.22.1",
  "coqui-acp",
