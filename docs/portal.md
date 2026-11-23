@@ -769,6 +769,7 @@ server {
 | `POST /portal/passkey` (the page's own origin; `for=enrol` for a signed-in person showing a passkey again) | the options for `navigator.credentials.get` as `{"options": ...}` and the cookie that names the challenge; `403` where no passkey is offered, `429` with `Retry-After` when too many challenges wait |
 | `GET /portal/passkeys`, `POST /portal/passkeys` (`action` = `step`, `begin`, `confirm`, `remove`, `label` or `cancel`) | the account's passkeys and what adding one takes; show a factor again, begin (the creation options as JSON) and confirm an addition, remove or name one (signed in) |
 | `GET /portal/certificate`, `POST /portal/certificate` (`action` = `enrol` or `remove`) | the certificate the browser offers and the one pinned to the account; pin or remove (signed in) |
+| `GET /portal/account` | which of the portal's own pages this session may open now, as JSON (a session; else `401`): see "The person's own pages" |
 | `POST /portal/logout` | ends the session and every channel it holds |
 | `GET /canoa.json` | the person's host: `peer`, `method`, `os`, `user` and each entry with a `url` through the portal (`/portal/ws/entry/NAME`, `/portal/ws/control`), starting the host if it is not running |
 | `GET /portal/ws/entry/NAME`, `GET /portal/ws/control` | a WebSocket to that entry or the control channel of the person's own host |
@@ -784,8 +785,42 @@ pairing.
 The bundled web app makes these calls itself. It reads `/canoa.json`, sees `user` and knows it is behind a portal. A `401` from that
 request, from `/portal/session` or from `/portal/pair` sends the browser to `/portal/login`. Its first connection to the control
 channel is turned away, so it checks `GET /portal/session` (still signed in), posts `{"peer": ID}` to `/portal/pair` with its own key
-and connects again. The rail shows the account and a **Sign out**, which posts `/portal/logout` and returns to the sign-in form. No
+and connects again. The rail shows the account and a **Sign out**, which posts `/portal/logout` and returns to the sign-in form, and Settings has a
+**Sign-in** page, which only a page a portal served has (see "The person's own pages"). No
 token is in the page: the cookie is `HttpOnly`, and `fetch` and the WebSocket send it by themselves.
+
+## The person's own pages
+
+A signed-in person sets up their one-time code, adds a passkey, enrols a certificate and signs out on the portal's own pages:
+`/portal/factor`, `/portal/passkeys`, `/portal/certificate` and `POST /portal/logout`. Each of those pages links to the others the
+portal has, and to the app (**Continue to Canoa**); a page for something this portal does not keep (no one-time code provider, no
+passkey provider, no certificate provider with `enrol = true`) is not linked.
+
+The app has a **Sign-in** page in Settings, shown only when a portal served it. It asks `GET /portal/account` and lists what the
+portal says, each page opening in the same tab:
+
+```json
+{"user": "alice",
+ "code": {"path": "/portal/factor", "allowed": false, "set_up": false,
+          "reason": "Setting up a code is not allowed from here: ask an administrator."},
+ "passkeys": {"path": "/portal/passkeys", "allowed": true, "count": 2},
+ "certificate": {"path": "/portal/certificate", "allowed": true, "pinned": false, "disabled": false},
+ "sign_out": {"path": "/portal/logout", "allowed": true}}
+```
+
+- **The answer is the pages' own decision.** It is made with the same sign-in policy, purpose (`enrol`) and account standing the
+  page uses, for the address the request came from now, so it cannot say a page is open that then offers nothing. A page the
+  portal does not keep is left out of the answer.
+- **`allowed: false` comes with a `reason`**, and the app shows the reason where it would show a button. The one-time code is not
+  allowed when the policy has no `enrol` rule that accepts this address, when an administrator reset or disabled the code, and when
+  a code is set up and the `enrol` rule asks for neither a code nor a recovery code to replace it. Passkeys are not allowed when
+  the account holds none and the policy has no `enrol` rule for this address (a person who holds passkeys can always open the page
+  to name or remove them). The certificate page is not allowed when no certificate is pinned and the connection carries none.
+- **`set_up`, `count`, `pinned` and `disabled`** say what stands in each page: whether a code is set up (one an administrator
+  disabled counts as set up), how many passkeys the account holds (`null` when they could not be read) and whether a certificate
+  is pinned to the account.
+- **The route is a session's alone.** With no session, or one that ended, it answers `401` and says nothing of which pages exist;
+  `/portal/methods` stays the answer for a browser that has not signed in. The answer is `Cache-Control: no-store`.
 
 ## The Office add-in
 
