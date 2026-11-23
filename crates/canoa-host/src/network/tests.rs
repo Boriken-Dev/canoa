@@ -253,7 +253,7 @@ fn a_fetch_presents_the_certificate_the_settings_name() {
 pub(crate) struct Keystore(pub(crate) Identity);
 
 impl IdentitySource for Keystore {
-    fn identities(&self) -> Result<Vec<Identity>, coqui_syshttp::Error> {
+    fn identities(&self) -> Result<Vec<Identity>, coqui_syshttp::tls::Error> {
         Ok(vec![self.0.clone()])
     }
 }

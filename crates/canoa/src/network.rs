@@ -18,16 +18,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
-use coqui_syshttp::client::{AgentBuilder, OriginAgent};
 use coqui_syshttp::tls::{
     CertificateInfo, ClientCertificates, Identity, Selector, Tls, TlsBuilder, Trust,
 };
+use coqui_syshttp::ureq::{AgentBuilder, OriginAgent};
 use coqui_syshttp::{Credentials, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver, Route};
 use rustls::pki_types::pem::PemObject as _;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConnection, StreamOwned};
 
-pub use coqui_syshttp::client::OriginAgent as LoginAgent;
+pub use coqui_syshttp::ureq::OriginAgent as LoginAgent;
 pub use coqui_syshttp::{BypassRules, ChildEnvironment, Connection, Dialect, OriginAuth, Secret};
 
 /// How long the variables made for a program stay as they are before the system is asked again.
@@ -122,6 +122,18 @@ impl core::error::Error for NetworkError {}
 
 impl From<coqui_syshttp::Error> for NetworkError {
     fn from(error: coqui_syshttp::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+impl From<coqui_syshttp::proxy::Error> for NetworkError {
+    fn from(error: coqui_syshttp::proxy::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+impl From<coqui_syshttp::tls::Error> for NetworkError {
+    fn from(error: coqui_syshttp::tls::Error) -> Self {
         Self(error.to_string())
     }
 }
