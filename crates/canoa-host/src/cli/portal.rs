@@ -218,7 +218,13 @@ fn portal_passkeys(
     action: &PasskeyAction,
     front: &dyn Front,
 ) -> Result<(), Failed> {
+    use crate::portal::{Accounts as _, Method};
     let access = crate::portal::Access::new(settings).map_err(Failed::usage)?;
+    if !access.methods().contains(&Method::Passkey) {
+        return Err(Failed::usage(
+            "this portal keeps no passkeys: name a provider that does (`coqui_access_passkey`) in `authenticators`",
+        ));
+    }
     // Before anything is written: a file made by another account is one the portal cannot read.
     access.check_passkey_files_owned().map_err(Failed::usage)?;
     match action {

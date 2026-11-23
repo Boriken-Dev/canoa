@@ -7,7 +7,10 @@
 )]
 
 // The software passkey device the portal's own tests sign with.
-#[allow(dead_code, reason = "the portal's own tests use more of the device than this one")]
+#[allow(
+    dead_code,
+    reason = "the portal's own tests use more of the device than this one"
+)]
 #[path = "../src/portal/device.rs"]
 mod device;
 
