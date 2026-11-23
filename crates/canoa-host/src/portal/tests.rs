@@ -175,6 +175,10 @@ impl Accounts for Fixed {
     }
 }
 
+/// The peer id the stand-in hosts name: the shape a page reads, so the app can run against them.
+const STAND_IN_PEER: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
 /// A host for each user that starts when asked: an introduction socket and one entry, `x`, that answers each message with the
 /// user's name and the message. The host of `canoatestslow` takes a request and never answers it.
 struct Hosts {
@@ -237,7 +241,7 @@ impl Controller for Hosts {
                         serde_json::from_slice(&line).unwrap_or_default();
                     let reply = match request["op"].as_str() {
                         Some("index") => {
-                            serde_json::json!({"peer": "sha256:host", "method": "noise", "os": "linux",
+                            serde_json::json!({"peer": STAND_IN_PEER, "method": "noise", "os": "linux",
                             "entries": [{"name": "x", "kind": "agent"}, {"name": "@control", "kind": "control"}]})
                         }
                         Some("accept") if refused < refuse => {
@@ -962,7 +966,7 @@ fn the_index_lists_the_users_own_host_with_channels_through_the_portal_and_start
         );
         assert_eq!(index.status, 200);
         let json: serde_json::Value = serde_json::from_str(&index.body).unwrap();
-        assert_eq!(json["peer"], "sha256:host");
+        assert_eq!(json["peer"], STAND_IN_PEER);
         assert_eq!(json["user"], "canoatesta");
         let urls: Vec<&str> = json["entries"]
             .as_array()
@@ -2361,6 +2365,7 @@ fn the_certificate_sign_in_is_asked_for_the_browsers_address_not_the_proxys() {
     );
 }
 
+mod account;
 mod office;
 mod passkeys;
 mod second_step;

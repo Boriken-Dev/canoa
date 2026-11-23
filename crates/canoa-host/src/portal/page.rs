@@ -240,7 +240,7 @@ pub fn render_certificate(
     status: Option<&CertificateStatus>,
     needs_password: bool,
     notice: Option<CertNotice>,
-    passkeys: bool,
+    links: Links,
 ) -> Vec<u8> {
     let note = match notice {
         Some(CertNotice::Done(text)) => {
@@ -289,13 +289,9 @@ pub fn render_certificate(
             }
         }
     }
-    let more = if passkeys {
-        format!("<p class=\"hint\"><a href=\"{PASSKEYS}\">Your passkeys</a></p>")
-    } else {
-        String::new()
-    };
+    let more = nav(Here::Certificate, links);
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Certificate, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}<p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p></main><footer>Boriken Dev</footer></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Certificate, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}</main><footer>Boriken Dev</footer></body></html>",
         escape(user)
     )
     .into_bytes()
@@ -494,6 +490,48 @@ fn factor_post(action: &str, label: &str, class: &str) -> String {
     )
 }
 
+/// The pages of the portal's own a signed-in person can move between: which of them this portal has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Links {
+    /// The one-time code page.
+    pub code: bool,
+    /// The Passkeys page.
+    pub passkeys: bool,
+    /// The certificate page.
+    pub certificate: bool,
+}
+
+/// The page a [`nav`] list is on, which it leaves out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Here {
+    Code,
+    Passkeys,
+    Certificate,
+}
+
+/// The links at the foot of a signed-in page: the other pages the portal has, and the app.
+fn nav(here: Here, links: Links) -> String {
+    let mut out = String::from("<nav class=\"pages\">");
+    for (page, on, path, text) in [
+        (Here::Code, links.code, FACTOR, "Your one-time code"),
+        (Here::Passkeys, links.passkeys, PASSKEYS, "Your passkeys"),
+        (
+            Here::Certificate,
+            links.certificate,
+            CERTIFICATE,
+            "Your certificate",
+        ),
+    ] {
+        if on && page != here {
+            out.push_str(&format!(
+                "<p class=\"hint\"><a href=\"{path}\">{text}</a></p>"
+            ));
+        }
+    }
+    out.push_str("<p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p></nav>");
+    out
+}
+
 /// The page of `user`'s one-time code. `signing_in` says it is part of a sign-in, which the person returns to afterwards.
 #[must_use]
 pub fn render_factor(
@@ -502,6 +540,7 @@ pub fn render_factor(
     stage: FactorStage<'_>,
     notice: Option<CertNotice>,
     signing_in: bool,
+    links: Links,
 ) -> Vec<u8> {
     let note = match notice {
         Some(CertNotice::Done(text)) => {
@@ -560,7 +599,7 @@ pub fn render_factor(
             "<form class=\"method\" method=\"post\" action=\"{LOGIN}\"><input type=\"hidden\" name=\"method\" value=\"cancel\"><button type=\"submit\" class=\"secondary\">Start over</button></form><p class=\"hint\"><a href=\"{LOGIN}\">Back to the sign-in</a></p>"
         )
     } else {
-        "<p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p>".to_owned()
+        nav(Here::Code, links)
     };
     // The script only runs a passkey ceremony here: a setup link and its drawing need none.
     let script = if body.contains("data-passkey") {
@@ -651,6 +690,7 @@ pub fn render_passkeys(
     passkeys: Option<&[PasskeyInfo]>,
     stage: PasskeyStage<'_>,
     notice: Option<CertNotice>,
+    links: Links,
 ) -> Vec<u8> {
     let note = match notice {
         Some(CertNotice::Done(text)) => {
@@ -699,8 +739,9 @@ pub fn render_passkeys(
         }
     }
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Passkeys, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}<p class=\"hint\"><a href=\"{CERTIFICATE}\">Your certificate</a></p><p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p></main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>",
-        escape(user)
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Passkeys, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}</main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>",
+        escape(user),
+        more = nav(Here::Passkeys, links)
     )
     .into_bytes()
 }

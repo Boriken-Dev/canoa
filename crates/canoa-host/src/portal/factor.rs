@@ -185,6 +185,7 @@ fn stage_of<'a>(gate: &'a Gate) -> FactorStage<'a> {
 }
 
 fn page(
+    inner: &Inner,
     who: &Who,
     standing: FactorStanding,
     stage: FactorStage<'_>,
@@ -195,7 +196,14 @@ fn page(
     Response::text(
         status,
         "text/html; charset=utf-8",
-        page::render_factor(&who.user, standing, stage, notice, signing_in),
+        page::render_factor(
+            &who.user,
+            standing,
+            stage,
+            notice,
+            signing_in,
+            account::links(inner, &who.user, who.uid),
+        ),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
 }
@@ -217,6 +225,7 @@ fn stand(
 ) -> Response {
     match gate(inner, request, conn, actor, who, enrol) {
         Ok((standing, gate)) => page(
+            inner,
             who,
             standing,
             stage_of(&gate),
@@ -276,6 +285,7 @@ pub fn act(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
     // A portal that keeps no codes has nothing to set up, whoever asks.
     if inner.accounts.factor_standing(&who.user, who.uid) == FactorStanding::Unsupported {
         return page(
+            inner,
             &who,
             FactorStanding::Unsupported,
             FactorStage::Unsupported,
@@ -330,6 +340,7 @@ fn step(
     let standing = inner.accounts.factor_standing(&who.user, who.uid);
     let fail = |status: u16, notice: page::Notice, _retry: Option<u64>| {
         page(
+            inner,
             who,
             standing,
             FactorStage::Ask(&ask),
@@ -340,6 +351,7 @@ fn step(
     };
     let ended = || {
         page(
+            inner,
             who,
             standing,
             FactorStage::Ask(&ask),
@@ -422,7 +434,7 @@ fn begin(
             "a one-time code setup from {} was not allowed",
             shown(client_address(inner, request, conn))
         );
-        return page(who, standing, stage_of(&gate), None, signing_in, 403);
+        return page(inner, who, standing, stage_of(&gate), None, signing_in, 403);
     }
     // Only a code or recovery code shown again for this setup is proof of the account's current code; a rule for `enrol` that
     // asks for a password alone leaves an account that has a code without a way to replace it from here.
@@ -448,6 +460,7 @@ fn begin(
                 tracing::info!("{} began setting up a one-time code from {from}", who.user);
             }
             page(
+                inner,
                 who,
                 standing,
                 FactorStage::Setup {
@@ -462,6 +475,7 @@ fn begin(
         Err(why) => {
             tracing::warn!("a one-time code could not be set up: {}", reason(&why));
             page(
+                inner,
                 who,
                 standing,
                 stage_of(&gate),
@@ -498,7 +512,7 @@ fn confirm(
     };
     let signing_in = matches!(actor, Actor::Setup(..));
     if !matches!(gate, Gate::Ready) {
-        return page(who, standing, stage_of(&gate), None, signing_in, 403);
+        return page(inner, who, standing, stage_of(&gate), None, signing_in, 403);
     }
     let Some(code) = form_field(&request.body, "code") else {
         return Response::refusal(400);
@@ -510,6 +524,7 @@ fn confirm(
     // A try is a try wherever it is made: the same counts as a code typed to sign in, and the pending state's tries.
     let fail = |status: u16, notice: page::Notice, _retry: Option<u64>| {
         page(
+            inner,
             who,
             standing,
             FactorStage::Ready,
@@ -520,6 +535,7 @@ fn confirm(
     };
     let ended = || {
         page(
+            inner,
             who,
             standing,
             FactorStage::Blocked("Start again."),
@@ -566,6 +582,7 @@ fn confirm(
                         inner.pendings.close(token);
                     }
                     page(
+                        inner,
                         who,
                         FactorStanding::Enrolled,
                         FactorStage::Blocked("Next time you sign in, use the code from the app."),
@@ -600,6 +617,7 @@ fn confirm(
             after_floor(inner, started, fail(401, page::Notice::CodeFailed, None))
         }
         Err(FactorError::NothingWaiting) => page(
+            inner,
             who,
             standing,
             FactorStage::Ready,
@@ -612,6 +630,7 @@ fn confirm(
         Err(why) => {
             tracing::warn!("a one-time code could not be confirmed: {}", reason(&why));
             page(
+                inner,
                 who,
                 standing,
                 FactorStage::Ready,
@@ -628,4 +647,55 @@ fn actor_token(actor: &Actor) -> String {
         Actor::Setup(token, _) => token.clone(),
         Actor::Session(_) => String::new(),
     }
+}
+
+/// What `GET /portal/account` says of the code page: the account's standing and, when the page offers nothing to do now, why.
+/// `None` for a portal that keeps no one-time codes. It is the decision the page makes, from the same gate.
+pub(super) fn availability(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    session: &Session,
+) -> Result<Option<(FactorStanding, Option<&'static str>)>, Response> {
+    let actor = Actor::Session(session.clone());
+    let who = who_of(inner, &actor)?;
+    let enrol = enrol_pending(inner, request, &actor);
+    let (standing, stage) = gate(
+        inner,
+        request,
+        conn,
+        &actor,
+        &who,
+        enrol.as_ref().map(|(_, pending)| pending),
+    )?;
+    // A code in use is replaced only after showing a code: a rule that asks for the password alone leaves no way from the page.
+    let shown = |step: &coqui_access::Factor| {
+        step.method == Method::Totp.id() || step.method == Method::RecoveryCode.id()
+    };
+    let replaceable = match &stage {
+        Gate::Ask(methods) => methods
+            .iter()
+            .any(|method| matches!(method, Method::Totp | Method::RecoveryCode)),
+        Gate::Ready => enrol
+            .as_ref()
+            .is_some_and(|(_, pending)| pending.done.iter().any(shown)),
+        _ => true,
+    };
+    if standing == FactorStanding::Enrolled && !replaceable {
+        return Ok(Some((
+            standing,
+            Some(
+                "A code is set up already and the rules ask for none to replace it: ask an administrator.",
+            ),
+        )));
+    }
+    Ok(match stage {
+        Gate::Unsupported => None,
+        Gate::Ready | Gate::Ask(_) => Some((standing, None)),
+        Gate::Blocked(why) => Some((standing, Some(why))),
+        Gate::Nobody => Some((
+            standing,
+            Some("Setting up a code is not allowed from here: ask an administrator."),
+        )),
+    })
 }

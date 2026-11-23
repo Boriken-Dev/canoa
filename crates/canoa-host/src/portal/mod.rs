@@ -7,6 +7,7 @@
 //! the host still prove their keys to each other through the relay.
 
 mod access;
+mod account;
 mod conn;
 #[cfg(test)]
 mod device;
@@ -77,6 +78,10 @@ pub const FACTOR: &str = "/portal/factor";
 pub const PASSKEY: &str = "/portal/passkey";
 /// Where a signed-in person sees their passkeys, adds one, names one or removes one.
 pub const PASSKEYS: &str = "/portal/passkeys";
+/// Where a signed-in browser asks which of the portal's own pages the person may open now.
+pub const ACCOUNT: &str = "/portal/account";
+/// Where a signed-in browser posts to end its session.
+pub const LOGOUT: &str = "/portal/logout";
 const MAX_HEAD: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
 /// The largest form a browser may post: a passkey's signed answer is a few kilobytes.
@@ -1123,11 +1128,12 @@ fn route(inner: &Inner, request: &Request, conn: &Conn) -> Response {
         },
         ("POST", LOGIN) => steps::sign_in(inner, request, conn, started),
         ("POST", PASSKEY) => passkeys::challenge(inner, request, conn),
+        ("GET" | "HEAD", ACCOUNT) => account::show(inner, request, conn),
         ("GET" | "HEAD", PASSKEYS) => passkeys::show(inner, request, conn),
         ("POST", PASSKEYS) => passkeys::act(inner, request, conn, started),
         ("GET" | "HEAD", FACTOR) => factor::show(inner, request, conn),
         ("POST", FACTOR) => factor::act(inner, request, conn, started),
-        ("POST", "/portal/logout") => {
+        ("POST", LOGOUT) => {
             if !from_own_page(request, conn) {
                 return Response::refusal(403);
             }
@@ -1254,7 +1260,7 @@ fn certificate_page(
             status.as_ref(),
             needs_password,
             notice,
-            inner.accounts.methods().contains(&Method::Passkey),
+            account::links(inner, &session.user, session.uid),
         ),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())

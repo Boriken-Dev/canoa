@@ -241,7 +241,13 @@ fn page(
     Response::text(
         status,
         "text/html; charset=utf-8",
-        page::render_passkeys(&who.user, held.as_deref(), stage_of(gate), notice),
+        page::render_passkeys(
+            &who.user,
+            held.as_deref(),
+            stage_of(gate),
+            notice,
+            account::links(inner, &who.user, who.uid),
+        ),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
 }
@@ -592,4 +598,48 @@ fn label(
         }
     };
     stand(inner, request, conn, who, found, Some(notice), 200)
+}
+
+/// What the account's Passkeys page offers now.
+pub(super) struct PasskeyPage {
+    /// How many passkeys the account holds; `None` when they could not be read.
+    pub count: Option<usize>,
+    /// Why adding one is not possible now.
+    pub adding: Option<&'static str>,
+}
+
+/// What `GET /portal/account` says of the Passkeys page: how many passkeys the account holds (`None` when they could not be
+/// read) and, when adding one is not possible now, why. `None` for a portal that keeps no passkeys. It is the decision the page
+/// makes, from the same gate.
+pub(super) fn availability(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    session: &Session,
+) -> Result<Option<PasskeyPage>, Response> {
+    let who = who_of(inner, session)?;
+    let enrol = enrol_pending(inner, request, session);
+    let stage = gate(
+        inner,
+        request,
+        conn,
+        &who,
+        enrol.as_ref().map(|(_, pending)| pending),
+    )?;
+    let count = inner
+        .accounts
+        .passkeys(&who.user, who.uid)
+        .ok()
+        .map(|held| held.len());
+    Ok(match stage {
+        Gate::Unsupported => None,
+        Gate::Ready | Gate::Ask(_) => Some(PasskeyPage {
+            count,
+            adding: None,
+        }),
+        Gate::Nobody => Some(PasskeyPage {
+            count,
+            adding: Some("Adding a passkey is not allowed from here: ask an administrator."),
+        }),
+    })
 }

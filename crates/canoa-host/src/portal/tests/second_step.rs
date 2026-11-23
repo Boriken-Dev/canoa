@@ -466,7 +466,7 @@ pub(super) fn my_name() -> String {
 }
 
 /// The code an authenticator app shows `ahead` thirty-second steps from now, for the secret in a setup link.
-fn code_in(link: &str, ahead: i64) -> String {
+pub(super) fn code_in(link: &str, ahead: i64) -> String {
     let secret = link
         .split(['?', '&'])
         .find_map(|part| part.strip_prefix("secret="))
