@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-bitwarden", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-git-bash", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-microsoft-mail", "crates/canoa-office", "crates/canoa-node", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-piper", "crates/canoa-powershell", "crates/canoa-python", "crates/canoa-whisper"]
+members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whisper"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -154,24 +154,24 @@ object = { version = "0.41", default-features = false, features = ["read_core", 
 # The member crates themselves.
 canoa = { path = "crates/canoa" }
 canoa-host = { path = "crates/canoa-host" }
-canoa-antigravity = { path = "crates/canoa-antigravity" }
-canoa-bitwarden = { path = "crates/canoa-bitwarden" }
-canoa-claude = { path = "crates/canoa-claude" }
-canoa-foundry = { path = "crates/canoa-foundry" }
-canoa-codex = { path = "crates/canoa-codex" }
-canoa-git-bash = { path = "crates/canoa-git-bash" }
-canoa-grok = { path = "crates/canoa-grok" }
-canoa-litellm = { path = "crates/canoa-litellm" }
-canoa-node = { path = "crates/canoa-node" }
-canoa-microsoft-mail = { path = "crates/canoa-microsoft-mail" }
-canoa-office = { path = "crates/canoa-office" }
-canoa-openai = { path = "crates/canoa-openai" }
-canoa-opencode = { path = "crates/canoa-opencode" }
-canoa-pi = { path = "crates/canoa-pi" }
-canoa-powershell = { path = "crates/canoa-powershell" }
-canoa-python = { path = "crates/canoa-python" }
-canoa-whisper = { path = "crates/canoa-whisper" }
-canoa-piper = { path = "crates/canoa-piper" }
+canoa-antigravity = { path = "extensions/canoa-antigravity" }
+canoa-bitwarden = { path = "extensions/canoa-bitwarden" }
+canoa-claude = { path = "extensions/canoa-claude" }
+canoa-foundry = { path = "extensions/canoa-foundry" }
+canoa-codex = { path = "extensions/canoa-codex" }
+canoa-git-bash = { path = "extensions/canoa-git-bash" }
+canoa-grok = { path = "extensions/canoa-grok" }
+canoa-litellm = { path = "extensions/canoa-litellm" }
+canoa-node = { path = "extensions/canoa-node" }
+canoa-microsoft-mail = { path = "extensions/canoa-microsoft-mail" }
+canoa-office = { path = "extensions/canoa-office" }
+canoa-openai = { path = "extensions/canoa-openai" }
+canoa-opencode = { path = "extensions/canoa-opencode" }
+canoa-pi = { path = "extensions/canoa-pi" }
+canoa-powershell = { path = "extensions/canoa-powershell" }
+canoa-python = { path = "extensions/canoa-python" }
+canoa-whisper = { path = "extensions/canoa-whisper" }
+canoa-piper = { path = "extensions/canoa-piper" }
 
 # The bridge library (coqui-acp-bridge) takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph
 # needs the one source coqui-acp patches it to.

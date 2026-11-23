@@ -164,7 +164,7 @@ is_elevated.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Console", "Win32_System_Pipes", "Win32_System_Power", "Win32_Security", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-canoa-microsoft-mail = { path = "../canoa-microsoft-mail", features = ["standin"] }
+canoa-microsoft-mail = { path = "../../extensions/canoa-microsoft-mail", features = ["standin"] }
 # The keystore stand-in of the network tests names its identity source.
 coqui-syshttp.workspace = true
 # The peers the web_peer example plays the page of; already in the graph through coqui-acp-bridge.

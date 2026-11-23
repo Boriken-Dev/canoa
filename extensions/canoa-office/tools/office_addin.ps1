@@ -31,7 +31,7 @@ The registry key that stands for HKCU\Software. The default is the real one; a d
 script without Office. A key outside HKCU is refused.
 
 .EXAMPLE
-pwsh crates/canoa-office/tools/office_addin.ps1 add -Dll C:\Canoa\canoa_office.dll -Apps Word
+pwsh extensions/canoa-office/tools/office_addin.ps1 add -Dll C:\Canoa\canoa_office.dll -Apps Word
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -43,7 +43,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Kept equal to crates/canoa-office/src/ids.rs by a test.
+# Kept equal to extensions/canoa-office/src/ids.rs by a test.
 $progId = 'dev.boriken.canoa'
 $clsid = '{F1780EA2-B255-41D0-9014-97A28C29EB01}'
 $paneProgId = 'dev.boriken.canoa.pane'

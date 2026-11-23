@@ -7,7 +7,7 @@
     reason = "tests name what they use from std"
 )]
 
-#[path = "../../canoa-litellm/tests/standin/mod.rs"]
+#[path = "../../../extensions/canoa-litellm/tests/standin/mod.rs"]
 mod standin;
 mod support;
 

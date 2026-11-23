@@ -7,7 +7,7 @@ import 'package:canoa/theme/vendor_looks.dart';
 /// What `looks/list` answers: the documents the vendor crates carry, read from the repository.
 Map<String, Object?> crateLooks() => {
   'looks': [
-    for (final path in ['../crates/canoa-claude/looks/claude.json', '../crates/canoa-codex/looks/chatgpt.json'])
+    for (final path in ['../extensions/canoa-claude/looks/claude.json', '../extensions/canoa-codex/looks/chatgpt.json'])
       jsonDecode(File(path).readAsStringSync()),
   ],
 };
