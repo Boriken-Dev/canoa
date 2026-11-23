@@ -289,7 +289,9 @@ fn environments_offered_as_tools_are_one_server_each_with_a_tool_for_each_capabi
     assert_eq!(
         all,
         [
+            "apply_patch",
             "call_snapshot",
+            "edit",
             "exec",
             "fs_list",
             "fs_read",
