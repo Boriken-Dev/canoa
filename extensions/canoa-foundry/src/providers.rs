@@ -21,7 +21,7 @@ use coqui_acp_api::{
     LoginPrompter, LoginRequest, ModelListing, ProcessSpawner, RenewReport, RenewRequest,
     WatchRequest,
 };
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::account::{self, KIND, Settings};
 use crate::child::Launch;
@@ -359,7 +359,7 @@ mod tests {
     use coqui_acp_api::guatiao::library::Registry;
     use coqui_acp_api::{AccountLoss, AccountRenewal, LoginAnswer, LoginForm, OpenUrl};
     use coqui_acp_harness::LocalSpawner;
-    use serde_json::json;
+    use serde_json::{Map, json};
 
     use super::*;
     use crate::{Cancel, Engine, EngineError, ModelInfo};
