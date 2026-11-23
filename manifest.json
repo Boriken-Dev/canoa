@@ -1,7 +1,7 @@
 {
   "format": 2,
   "source": "Boriken-Dev/canoa",
-  "sourceCommit": "73896cfacf4110f864a2c29da975c07dd5fe5513",
+  "sourceCommit": "f3ec61337c8877904372fb19eab2481a08020464",
   "status": "complete",
   "pubPackages": [
     ".cache",
@@ -8521,8 +8521,8 @@
     ]
   },
   "fallbackFonts": {
-    "count": 724,
-    "bytes": 21739792
+    "count": 727,
+    "bytes": 36040972
   },
   "desktopPackages": [
     "tray_manager",
