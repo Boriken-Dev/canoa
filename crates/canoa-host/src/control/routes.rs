@@ -701,9 +701,13 @@ impl Control {
         let mut asked = request.clone();
         asked["method"] = Value::String(format!("_canoa/{method}"));
         let bytes = serde_json::to_vec(&asked).unwrap_or_default();
-        Worktrees::new(roots, true)
-            .with_limits(self.worktrees)
-            .answer(&bytes)
+        let rule = Worktrees::new(roots, true).with_limits(self.worktrees);
+        let rule = if matches!(caller, Caller::Owner) {
+            rule.for_person()
+        } else {
+            rule
+        };
+        rule.answer(&bytes)
             .unwrap_or_else(|| error_line(id, BAD_PARAMS, "that request cannot be answered"))
     }
 }

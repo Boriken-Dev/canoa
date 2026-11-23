@@ -96,6 +96,7 @@ const fn raw(method: &'static str, access: Access, handler: RawHandler) -> Route
 
 const OWNER_NETWORK_MSG: &str =
     "only the person running this host sends requests through its network";
+const OWNER_PUBLISH_MSG: &str = "only the person running this host commits, pushes or opens a pull request with their own git and gh";
 const OWNER_HISTORY_MSG: &str =
     "only the person running this host reads or moves a recorded session";
 
@@ -509,6 +510,21 @@ pub(super) static ROUTES: &[Route] = &[
     raw(
         "worktree/diff",
         Access::Require(Grant::Worktree),
+        Control::r_worktree,
+    ),
+    raw(
+        "worktree/commit",
+        Access::Owner(OWNER_PUBLISH_MSG),
+        Control::r_worktree,
+    ),
+    raw(
+        "worktree/push",
+        Access::Owner(OWNER_PUBLISH_MSG),
+        Control::r_worktree,
+    ),
+    raw(
+        "worktree/pull_request",
+        Access::Owner(OWNER_PUBLISH_MSG),
         Control::r_worktree,
     ),
     rpc(

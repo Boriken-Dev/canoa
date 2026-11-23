@@ -198,7 +198,7 @@ fn a_repository_on_a_share_under_a_root_passes_the_hosts_checks() {
 }
 
 /// `git -C dir args` for a test, which must succeed.
-fn run_git(dir: &Path, args: &[&str]) -> String {
+pub(super) fn run_git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -263,14 +263,14 @@ fn a_git_file_naming_a_share_is_refused_before_git_runs() {
 }
 
 /// A repository `src/proj` with one commit under a scratch directory, and the worktree rule over `src`.
-struct Fixture {
-    scratch: PathBuf,
-    repo: PathBuf,
-    worktrees: Worktrees,
+pub(super) struct Fixture {
+    pub(super) scratch: PathBuf,
+    pub(super) repo: PathBuf,
+    pub(super) worktrees: Worktrees,
 }
 
 impl Fixture {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let scratch =
             std::env::temp_dir().join(format!("canoa-worktree-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&scratch);

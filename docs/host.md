@@ -324,6 +324,12 @@ The requests, each answered by the host, never the agent:
 A link swapped in, between the host's check and git's work, by someone who can already write inside a root, is not
 guarded against.
 
+Finishing the work, `worktree/commit`, `worktree/push` and `worktree/pull_request`, is not asked of an agent's entry: it is the
+person's, over the host's control link (the app's Changes pane). The host runs the person's own `git` in the folder, with the
+repository's hooks, to commit the files they chose and to push the branch, then `gh pr create` or, where there is no `gh`,
+names the forge's web page that starts a pull request. Git's and `gh`'s own words come back when one refuses (no upstream, a
+rejected push, a failed sign-in). See the control methods in `crates/canoa-host/src/control/AGENTS.md`.
+
 ## Accounts
 
 A harness entry (`harness = "claude"`, `"codex"`, or an outside provider's id) can offer several logins of the same

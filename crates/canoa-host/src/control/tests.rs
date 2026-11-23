@@ -420,6 +420,37 @@ fn a_key_reaches_only_the_roots_of_the_entries_it_may_use() {
 }
 
 #[test]
+fn only_the_person_commits_pushes_or_opens_a_pull_request_through_the_control_link() {
+    let key = "sha256:aa";
+    let control = with_roots(vec![EntryRoots {
+        peers: None,
+        roots: vec![std::env::temp_dir()],
+    }]);
+    let keyed = peer(key, &[Grant::Worktree]);
+    for (method, params) in [
+        (
+            "worktree/commit",
+            json!({"path": missing_path(), "message": "m"}),
+        ),
+        ("worktree/push", json!({"path": missing_path()})),
+        (
+            "worktree/pull_request",
+            json!({"path": missing_path(), "title": "t"}),
+        ),
+    ] {
+        let denied = ask(&control, &keyed, method, params.clone());
+        assert_eq!(denied["error"]["code"], DENIED, "{method}: {denied}");
+        // The person's request reaches the repository checks: a folder that is not there is said so.
+        let owner = ask(&control, &Caller::Owner, method, params);
+        assert_eq!(owner["error"]["code"], BAD_PARAMS, "{method}: {owner}");
+        assert_eq!(
+            owner["error"]["message"], "that directory does not exist",
+            "{method}: {owner}"
+        );
+    }
+}
+
+#[test]
 fn a_key_installs_updates_rolls_back_or_removes_only_with_the_programs_grant() {
     let control = memory();
     let reader = peer("sha256:aa", &[Grant::StoreRead]);

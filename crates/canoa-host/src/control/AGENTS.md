@@ -329,6 +329,14 @@ may name any absolute path on this computer; a key with the `worktree` grant onl
 whose `peers` allow it (all paired keys when an entry has none) and that have `worktrees` on, else `-32602`. The entry-level
 `_canoa/worktree/*` stays for a client that reaches an agent over the network and holds no control grant.
 
+**`worktree/commit`, `worktree/push` and `worktree/pull_request`** finish the work in a folder with the person's own git and `gh`, and are the owner's alone (no grant; a key is `-32001` denied, and the entry-level `_canoa/worktree/*` never answers them). The folder passes the checks `worktree/diff` makes, and git runs in it as at the person's command line but for those checks (no `GIT_*` variable of the host's; `GIT_TERMINAL_PROMPT=0`, so no prompt can wait), with the repository's own hooks run (`pre-commit`, `commit-msg`, `pre-push`: the other `worktree/*` methods run none). Each answers in `[host.worktrees] git_seconds` or ends the program. A refusal is `-32603` carrying git's or `gh`'s own words (`git failed: ...`, `gh failed: ...`, lines kept, 1024 characters at most): no upstream, a rejected push, no remote, a failed sign-in, an empty message, nothing to commit.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `worktree/commit` | `path`, `message`, `paths` (files relative to `path`, taken literally; every change under `path` when absent) | `{"commit", "summary", "branch"}`: stages `paths` (`git add -A`) and commits them with `message`; with `paths` only those files go in, whatever else is staged |
+| `worktree/push` | `path`, `remote` (a name or address, not an option), `setUpstream` (bool, default false) | `{"pushed": true, "remote", "branch"}`: `git push`; with `setUpstream`, `git push --set-upstream REMOTE BRANCH` (`origin` when no remote is named). A detached HEAD is `-32602` |
+| `worktree/pull_request` | `path`, `title`, `body`, `base`, `draft` (bool) | `{"via": "gh", "url", "branch"}` from `gh pr create` run in `path` when a `gh` is on the host's `PATH` (no prompt), else `{"via": "web", "url", "branch"}`, the forge's page that starts one for the branch, from the remote the branch tracks (`origin` when none): `/compare/BASE...BRANCH?expand=1` (GitHub, Gitea, Forgejo), `/-/merge_requests/new` for a host named `gitlab`, `/pull-requests/new` for `bitbucket`; a remote with no web address (a path) is `-32602`, in words. The client opens `url` |
+
 **The program Store** (`canoa_host::store`, `Programs`) is carried the same way. `provider` names a store (`claude_store`, `codex_store`,
 `grok_store`, `agy_store`, `pi_store`, `opencode_store`; `ServeOptions::with_programs` offers others), a program kept under the user's programs folder.
 The params and results are the JSON of `canoa::store`'s models:

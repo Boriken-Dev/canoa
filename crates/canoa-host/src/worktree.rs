@@ -31,6 +31,16 @@ pub(crate) const REMOVE: &str = "_canoa/worktree/remove";
 /// What the work tree under a folder holds against a commit, read only: `{"path", "base"?}` to `{"exists": false}` or
 /// `{"exists": true, "head", "branch", "base", "added", "removed", "files", "more"}`.
 pub(crate) const DIFF: &str = "_canoa/worktree/diff";
+/// Commits what the person chose, or everything under the folder: `{"path", "message", "paths"?}` to
+/// `{"commit", "summary", "branch"}`. Answered only on the person's own link.
+pub(crate) const COMMIT: &str = "_canoa/worktree/commit";
+/// Pushes the folder's branch with the person's own git: `{"path", "remote"?, "setUpstream"?}` to
+/// `{"pushed": true, "remote", "branch"}`. Answered only on the person's own link.
+pub(crate) const PUSH: &str = "_canoa/worktree/push";
+/// Opens a pull request for the folder's branch, with the person's own `gh` or else the forge's web page:
+/// `{"path", "title", "body"?, "base"?, "draft"?}` to `{"via": "gh" | "web", "url", "branch"}`. Answered only on the person's own
+/// link.
+pub(crate) const PULL_REQUEST: &str = "_canoa/worktree/pull_request";
 
 /// Every branch the host makes or removes starts with this.
 pub(crate) const BRANCH_PREFIX: &str = "canoa/";
@@ -67,6 +77,10 @@ pub(crate) struct Worktrees {
     roots: Vec<PathBuf>,
     on: bool,
     limits: WorktreeConfig,
+    /// Whether the person themselves asks: only then are commits, pushes and pull requests made, and git's hooks run for them.
+    person: bool,
+    /// The `PATH` `gh` is looked for on; the host's own when `None`.
+    tools_path: Option<OsString>,
 }
 
 /// Why a request was not done, as a JSON-RPC error.
@@ -108,7 +122,23 @@ impl Worktrees {
             roots,
             on,
             limits: WorktreeConfig::default(),
+            person: false,
+            tools_path: None,
         }
+    }
+
+    /// The person's own requests: commits, pushes and pull requests are answered, and git runs the repository's own hooks for
+    /// them, as it does at the person's command line.
+    pub(crate) const fn for_person(mut self) -> Self {
+        self.person = true;
+        self
+    }
+
+    /// `gh` is looked for on `path` instead of the host's own `PATH`.
+    #[cfg(test)]
+    pub(crate) fn with_tools_path(mut self, path: OsString) -> Self {
+        self.tools_path = Some(path);
+        self
     }
 
     /// The same rule under `[host.worktrees]`' limits.
@@ -122,7 +152,7 @@ impl Worktrees {
         serde_json::from_slice::<Value>(message).is_ok_and(|value| {
             matches!(
                 value.get("method").and_then(Value::as_str),
-                Some(NEW | STATUS | REMOVE | DIFF)
+                Some(NEW | STATUS | REMOVE | DIFF | COMMIT | PUSH | PULL_REQUEST)
             )
         })
     }
@@ -174,6 +204,22 @@ impl Worktrees {
                 };
                 self.diff(text("path")?, base)
             }
+            COMMIT | PUSH | PULL_REQUEST if !self.person => Err(refused(
+                "commits, pushes and pull requests are made only over the host's control link, by the person",
+            )),
+            COMMIT => self.commit(text("path")?, text("message")?, params.get("paths")),
+            PUSH => self.push(
+                text("path")?,
+                optional_text(params, "remote")?,
+                optional_flag(params, "setUpstream")?,
+            ),
+            PULL_REQUEST => self.pull_request(
+                text("path")?,
+                text("title")?,
+                optional_text(params, "body")?.unwrap_or(""),
+                optional_text(params, "base")?,
+                optional_flag(params, "draft")?,
+            ),
             REMOVE => {
                 let discard = match params.get("discard") {
                     None => false,
@@ -693,6 +739,17 @@ fn run_git(
     ceilings: &OsString,
     limit: Duration,
 ) -> Result<(bool, String), Refusal> {
+    run_git_with(dir, args, ceilings, limit, false)
+}
+
+/// As [`run_git`], with the repository's own hooks run when `hooks` is set.
+fn run_git_with(
+    dir: &Path,
+    args: &[&OsStr],
+    ceilings: &OsString,
+    limit: Duration,
+    hooks: bool,
+) -> Result<(bool, String), Refusal> {
     let no_hooks = if cfg!(windows) {
         "core.hooksPath=NUL"
     } else {
@@ -708,19 +765,42 @@ fn run_git(
             command.env_remove(name);
         }
     }
-    let mut child = command
+    command
         .arg("-C")
         .arg(dir)
         .args(share::git_trust(dir))
-        .args(["-c", no_hooks, "-c", "core.fsmonitor=false"])
+        .args(["-c", "core.fsmonitor=false"]);
+    if !hooks {
+        command.args(["-c", no_hooks]);
+    }
+    command
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_CEILING_DIRECTORIES", ceilings)
+        .env("GIT_CEILING_DIRECTORIES", ceilings);
+    run_command(&mut command, limit).map_err(|why| match why {
+        NotRun::Started => failed("git could not be started"),
+        NotRun::Ended => failed("git ran too long and was ended"),
+    })
+}
+
+/// Why a program gave no answer.
+enum NotRun {
+    /// It could not be started.
+    Started,
+    /// It ran past its limit and was ended.
+    Ended,
+}
+
+/// Runs `command` with no input to its end within `limit`: `(true, its output)`, or `(false, its own words)` on a failure,
+/// from its standard error, else its standard output (`git commit` says "nothing to commit" there). Its words keep their
+/// lines and are cut at [`MAX_GIT_TEXT`].
+fn run_command(command: &mut Command, limit: Duration) -> Result<(bool, String), NotRun> {
+    let mut child = command
         .stdin(Stdio::Null)
         .stdout(Stdio::Piped)
         .stderr(Stdio::Piped)
         .spawn()
-        .map_err(|_| failed("git could not be started"))?;
+        .map_err(|_| NotRun::Started)?;
     let readers = [
         child
             .stdout
@@ -748,7 +828,7 @@ fn run_git(
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(failed("git ran too long and was ended"));
+                return Err(NotRun::Ended);
             }
         }
     };
@@ -756,12 +836,18 @@ fn run_git(
     if status.success() {
         return Ok((true, String::from_utf8_lossy(&out).into_owned()));
     }
-    let said: String = String::from_utf8_lossy(&err)
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .take(MAX_GIT_TEXT)
-        .collect();
-    Ok((false, said.trim().to_owned()))
+    let words = |bytes: &[u8]| -> String {
+        String::from_utf8_lossy(bytes)
+            .chars()
+            .filter(|c| *c != '\r')
+            .map(|c| if c.is_control() && c != '\n' { ' ' } else { c })
+            .take(MAX_GIT_TEXT)
+            .collect::<String>()
+            .trim()
+            .to_owned()
+    };
+    let said = words(&err);
+    Ok((false, if said.is_empty() { words(&out) } else { said }))
 }
 
 /// `path` with every link resolved, written plain (not `\\?\`), as git and the roots are. A device is refused.
@@ -776,6 +862,30 @@ fn resolve(path: &Path) -> std::io::Result<PathBuf> {
     Ok(resolved)
 }
 
+/// The text parameter `key`, when there is one.
+fn optional_text<'a>(
+    params: &'a Map<String, Value>,
+    key: &str,
+) -> Result<Option<&'a str>, Refusal> {
+    match params.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.as_str())),
+        Some(_) => Err(refused(&format!("{key} must be text"))),
+    }
+}
+
+/// The true-or-false parameter `key`, false when absent.
+fn optional_flag(params: &Map<String, Value>, key: &str) -> Result<bool, Refusal> {
+    match params.get(key) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(flag)) => Ok(*flag),
+        Some(_) => Err(refused(&format!("{key} must be true or false"))),
+    }
+}
+
 mod diff;
+mod publish;
+#[cfg(test)]
+mod publish_tests;
 #[cfg(test)]
 mod tests;
