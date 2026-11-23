@@ -17,6 +17,7 @@ import 'context_pill.dart' show compactPrompt;
 import 'delegation_view.dart' show lineage;
 import 'git_changes.dart';
 import 'git_changes_pane.dart';
+import 'git_publish.dart';
 import 'modes.dart';
 import 'outputs.dart';
 import 'outputs_view.dart';
@@ -599,6 +600,22 @@ class _DiffView extends StatelessWidget {
   final VoidCallback? onBack;
   final ValueChanged<String> onComment;
 
+  /// Commit, Push and Pull request, where the host does them for the person.
+  Widget? _publishBar() {
+    final publisher = store.gitPublisherOf(session), folder = store.gitFolderOf(session);
+    if (publisher == null || folder == null || !session.git.known) return null;
+    final disk = session.git.uncommitted;
+    return GitPublishBar(
+      publisher: publisher,
+      folder: folder,
+      files: disk?.files ?? const [],
+      more: disk?.more ?? false,
+      canCommit: scope == ChangeScope.uncommitted,
+      branch: session.git.whole?.branch,
+      onChanged: () => store.refreshGit(session),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Material(
     color: context.look.rail,
@@ -626,6 +643,7 @@ class _DiffView extends StatelessWidget {
             ? SessionChangesPane(store: store, session: session, onComment: onComment)
             : GitChangesPane(scope: scope, files: session.git.filesOf(scope), more: session.git.whole?.more ?? false, onComment: onComment),
       ),
+      if (scope != ChangeScope.reported) ?_publishBar(),
     ]),
   );
 }

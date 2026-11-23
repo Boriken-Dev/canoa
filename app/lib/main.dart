@@ -1471,7 +1471,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Reads the repository in [session]'s folder through the host its agent runs on; null where none can.
   GitReader? _gitReaderFor(ChatSession session) {
     if (widget.gitReader != null) return widget.gitReader!(session);
-    if (session.place == SessionPlace.local) return _control == null ? null : HostGit(controlWorktreeCall(_control!));
+    if (session.place == SessionPlace.local) return _control == null ? null : ControlGit(controlWorktreeCall(_control!));
     final worktrees = _worktrees(session.place, endpoint: session.endpoint?.toString(), fallback: session.websocketFallback?.toString(),
         peerId: session.peerId, method: session.method);
     return worktrees is HostWorktrees ? HostGit(worktrees.call) : null;

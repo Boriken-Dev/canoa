@@ -29,6 +29,7 @@ import 'chat/context_kinds.dart';
 import 'chat/image_fit.dart';
 import 'client/relation.dart';
 import 'chat/git_changes.dart';
+import 'chat/git_publish.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
@@ -122,6 +123,15 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Reads the repository in a session's folder through the host its agent runs on; set by the app. Null where none can.
   GitReader? Function(ChatSession session)? gitReader;
+
+  /// What commits, pushes and opens pull requests in [session]'s repository, when the host its agent runs on does for the person.
+  GitPublisher? gitPublisherOf(ChatSession session) {
+    final reader = gitReader?.call(session);
+    return reader is GitPublisher ? reader as GitPublisher : null;
+  }
+
+  /// The folder a session's repository is read from: its worktree, else its folder, once it has started.
+  String? gitFolderOf(ChatSession session) => _gitFolder(session);
 
   /// The folder a session's changes are read from: its worktree, else its folder, once it has started.
   String? _gitFolder(ChatSession session) =>

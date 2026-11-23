@@ -26,7 +26,7 @@ final class TolerantComparator extends LocalFileComparator {
 }
 
 /// Git as a test says it is: [read] answers with whatever [current] holds, per base.
-final class FakeGit implements GitReader {
+class FakeGit implements GitReader {
   /// What the disk holds against the session's first commit.
   GitState? current;
 

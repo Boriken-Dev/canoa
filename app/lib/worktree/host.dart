@@ -9,6 +9,7 @@ import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
 import '../net/system_dial.dart';
 import '../chat/git_changes.dart';
+import '../chat/git_publish.dart';
 import 'worktree.dart';
 
 /// Worktrees this app's own host makes anywhere on this computer, over its control channel: the person is its owner, so no
@@ -167,4 +168,35 @@ final class HostGit implements GitReader {
   @override
   Future<GitState?> read(String folder, {String? base}) async =>
       GitState.fromJson(await call('_canoa/worktree/diff', {'path': folder, 'base': ?base}));
+}
+
+/// [HostGit] on this app's own host over its control channel, which also commits, pushes and opens pull requests for the
+/// person: the host answers those only on that link, never to a host reached over the network.
+final class ControlGit extends HostGit implements GitPublisher {
+  const ControlGit(super.call);
+
+  static String _text(Map<String, Object?> result, String key) => switch (result[key]) {
+    final String text => text,
+    _ => throw WorktreeFailure('The host answered no $key.'),
+  };
+
+  @override
+  Future<GitCommitted> commit(String folder, String message, {List<String>? paths}) async {
+    final made = await call('_canoa/worktree/commit', {'path': folder, 'message': message, 'paths': ?paths});
+    return GitCommitted(commit: _text(made, 'commit'), summary: _text(made, 'summary'), branch: made['branch'] is String ? made['branch']! as String : null);
+  }
+
+  @override
+  Future<void> push(String folder, {String? remote, bool setUpstream = false}) async {
+    final pushed = await call('_canoa/worktree/push', {'path': folder, 'remote': ?remote, if (setUpstream) 'setUpstream': true});
+    if (pushed['pushed'] != true) throw const WorktreeFailure('The host did not say the branch was pushed.');
+  }
+
+  @override
+  Future<PullRequestOpened> pullRequest(String folder, {required String title, String body = '', String? base, bool draft = false}) async {
+    final made = await call('_canoa/worktree/pull_request', {'path': folder, 'title': title, 'body': body, 'base': ?base, if (draft) 'draft': true});
+    final via = _text(made, 'via');
+    if (via != 'gh' && via != 'web') throw const WorktreeFailure('The host answered no pull request.');
+    return PullRequestOpened(viaGh: via == 'gh', url: _text(made, 'url'), branch: _text(made, 'branch'));
+  }
 }
