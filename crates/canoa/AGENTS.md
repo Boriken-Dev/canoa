@@ -14,6 +14,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
+| `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
 | `speech-builtin` | `canoa::speech::builtin` | built-in speech-to-text and speech-output providers (implies `speech`, `network`, `guatiao-intake`, `serde_json`) |
 | `loopback` | `canoa::loopback` | loopback HTTP server for host tools and local model gateways (`httparse`, `serde_json`, `sha2`, `rustix`) |
@@ -916,6 +917,36 @@ pub trait Mailbox: Send + Sync {
 ```
 
 - `BackendInfo` (`new(id, title)`, `.taking::<S: SettingsSchema>()`, `.problem()`, `description`, `no_secret_state`, `schema`, `form`), `ValidateRequest` (`new(settings, has_secret)`), `PreparedAccount` (`needs_secret`, `state`, `details`, `check_urls`, `no_secret_state`), `OpenMailbox` (`new(settings, timeout_secs)`, `secret`, `no_store`), `MailError` (`Bad`, `Auth`, `Unreachable`, `Backend`, converting to and from `ProviderError` without losing variant meaning), `Person`, `Summary`, `Attachment`, `Message`, `Folder`, `Query`, `Page`, `Draft` (`new_message`, `reply`, `kind()`), `Change` (`move_to`, `archive`, `read`, `flag`, `categories`, `kind()`), `FlagState`, `Related`, and shared helpers `WELL_KNOWN_FOLDERS`, `is_valid_id`, `well_known`, `find_folder`, `plain_subject`, `related`, `default_summaries`, `default_thread`.
+
+## `session_service` (`canoa::session_service`, feature `session-service`)
+
+The Guatiao extension kind for what a library runs for the sessions of a host and hands to them, so the person's mail, a knowledge index or the secrets an agent may use are libraries outside `canoa-host`: the host owns the way a service is offered, never a service.
+
+```rust
+pub const KIND: &str = "session_service";
+#[guatiao::kind(name = "session_service")]
+pub trait SessionService: Send + Sync {
+    fn describe(&self) -> Result<ServiceInfo, ProviderError>;
+    fn offered(&self, context: Context) -> Result<bool, ProviderError>;                      // anything to give a session now?
+    fn call(&self, context: Context, call: ToolCall) -> Result<Outcome, ProviderError>;      // a tool of its MCP server
+    fn resume(&self, context: Context, resume: Resume) -> Result<Outcome, ProviderError>;    // after the person answered a question
+    fn control(&self, context: Context, call: ControlCall) -> Result<ControlReply, ProviderError>;  // `ID/METHOD` on the control channel
+}
+pub struct ServiceInfo { pub id: String, pub title: String, pub server: Option<String>, pub tools: Vec<ToolInfo>, pub skill: Option<String>, pub skill_files: Vec<SkillFile> }
+pub struct ToolInfo { pub name: String, pub description: String, pub input_schema: String }   // JSON text of an object
+pub struct Outcome { pub result: Option<String>, pub note: Option<String>, pub ask: Option<Question> }   // `Outcome::done(json)`, `::asking(question)`, `.noting(text)`
+pub struct Question { pub title: String, pub text: String, pub digest: String, pub state: String }
+pub enum Answer { Allowed, Silent, Declined }
+pub enum Refusal { BadParams, NotFound, Refused }
+pub struct ControlReply { pub result: Option<String>, pub refusal: Option<Refusal>, pub message: Option<String> }
+pub fn is_id(text: &str) -> bool;   // 1 to 32 lower-case letters, digits and `_`
+```
+
+`ServiceInfo::problem()` says why a provider cannot be offered (an id that is no word, tools with no server, a repeated tool, an input schema that is no JSON object, a skill with no `SKILL.md` or a path that leaves its folder). `id` is the key of the service's table of canoa.cfg (`[host.services.ID]`) and the namespace of its control methods (`ID/accounts`, answered to a key holding `services.setup`); `server` is the MCP server a session is given when a connection's key holds `services` and `offered` is true; `skill` and its files are delivered with it.
+
+A tool that must not go on without the person answers `Outcome::asking(Question)` (the title and text the person reads, a digest, and the provider's own `state`); the host puts it to the person on the client the session belongs to, one question per session at a time, and calls `resume` with the same `state` and the person's answer (`Silent` when the session is in a mode that asks for nothing; the outcome's `note` is then said in the session). Everything on the wire is plain data and JSON text.
+
+`ServiceHost` is what a provider in the host's own process reaches of its host through the `Context` it was handed: `config(service)` and `set_config(service, path, table)` (the service's table of canoa.cfg as JSON text in the file's order, and a sub-table replaced or removed in place, the file checked to be read again), `secret`, `put_secret`, `forget_secrets` and `secrets_note` (the secrets the host keeps by id), `registries()` (the providers the host loaded, which a mail service opens its `mail_backend`s through) and `new_id()`. The host `register`s its `ServiceHost` and puts the handle in each `Context`, so one process can run several hosts; `host(&context)` finds it, and it is gone with the `Registration` it returned.
 
 ## `account_speech_output` (`canoa::speech::output::account`, feature `speech`)
 

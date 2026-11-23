@@ -34,6 +34,8 @@ settings-section = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 panel-tab = ["dep:coqui-acp-api", "dep:guatiao"]
 # The `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox.
 mail-backend = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:serde_json"]
+# The `session_service` kind: something a library runs for the sessions of a host and hands to them (an MCP server of its tools, its control methods).
+session-service = ["dep:coqui-acp-api", "dep:guatiao", "dep:serde_json"]
 # The `speech_provider` kind: audio streamed in, text and front matter out.
 speech = ["dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.

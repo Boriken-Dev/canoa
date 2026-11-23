@@ -31,6 +31,14 @@ pub mod preset;
 #[cfg(feature = "profile-item")]
 #[cfg_attr(docsrs, doc(cfg(feature = "profile-item")))]
 pub mod profile_item;
+#[cfg(feature = "session-service")]
+#[cfg_attr(docsrs, doc(cfg(feature = "session-service")))]
+#[allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    reason = "the hosts of a process are kept behind a std lock"
+)]
+pub mod session_service;
 #[cfg(any(
     feature = "mail-backend",
     feature = "profile-item",

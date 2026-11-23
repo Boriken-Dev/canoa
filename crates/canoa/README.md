@@ -30,6 +30,7 @@ Not published (`publish = false`). A default build has no dependencies. Cargo fe
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
+| `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
 | `speech-builtin` | `canoa::speech::builtin` | built-in speech-to-text and speech-output providers (implies `speech`, `network`, `guatiao-intake`, `serde_json`) |
 | `loopback` | `canoa::loopback` | loopback HTTP server for host tools and local model gateways (`httparse`, `serde_json`, `sha2`, `rustix`) |
