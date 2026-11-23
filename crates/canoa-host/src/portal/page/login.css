@@ -119,3 +119,14 @@ form + form, p + form { margin-top: 10px; }
 .codes { columns: 2; padding-left: 1.2rem; margin: 8px 0 12px; }
 details.recovery { margin: 14px 0 12px; }
 details.recovery summary { cursor: pointer; color: var(--accent); }
+
+[hidden] { display: none !important; }
+
+.passkeys { list-style: none; margin: 8px 0 12px; padding: 0; }
+.passkeys li { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.passkeys .name { font-weight: 600; overflow-wrap: anywhere; }
+.passkeys .meta { margin: 2px 0 8px; font-size: .85rem; color: var(--muted); }
+.passkeys form { display: flex; gap: 8px; align-items: stretch; }
+.passkeys form + form { margin-top: 8px; }
+.passkeys form input:not([type="hidden"]) { margin: 0; flex: 1; }
+.passkeys form button { width: auto; }

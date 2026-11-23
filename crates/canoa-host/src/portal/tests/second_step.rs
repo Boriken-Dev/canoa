@@ -412,7 +412,7 @@ fn a_session_that_a_code_opened_stands_at_resume_and_a_pending_sign_in_is_no_ses
 
 // ---- the real one-time code provider ----
 
-fn exe_dir() -> PathBuf {
+pub(super) fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .unwrap()
         .parent()
@@ -421,7 +421,7 @@ fn exe_dir() -> PathBuf {
 }
 
 /// The library cargo built beside the test binary for the dev-dependency `name`.
-fn plugin(name: &str) -> PathBuf {
+pub(super) fn plugin(name: &str) -> PathBuf {
     let prefix = format!("lib{name}_plugin-");
     std::fs::read_dir(exe_dir())
         .unwrap()
@@ -435,11 +435,11 @@ fn plugin(name: &str) -> PathBuf {
         .unwrap_or_else(|| panic!("{name}'s plugin is built beside the tests"))
 }
 
-fn file_source(path: &Path) -> serde_json::Value {
+pub(super) fn file_source(path: &Path) -> serde_json::Value {
     serde_json::json!({"source": {"file": {"path": path, "format": "toml"}}})
 }
 
-fn real_entry(provider: &str, config: &serde_json::Value) -> Entry {
+pub(super) fn real_entry(provider: &str, config: &serde_json::Value) -> Entry {
     let mut entry = Entry::new(provider);
     entry.library = Some(plugin(provider));
     entry.config = config.as_object().cloned().unwrap_or_default();
@@ -447,7 +447,7 @@ fn real_entry(provider: &str, config: &serde_json::Value) -> Entry {
 }
 
 /// The name of the account this test process runs as, which is the one the stand-in hosts run.
-fn my_name() -> String {
+pub(super) fn my_name() -> String {
     use coqui_access::Directory as _;
     use coqui_access::Lookup;
     let system = coqui_access_system::SystemAccounts::builder()
@@ -494,32 +494,9 @@ fn code_in(link: &str, ahead: i64) -> String {
     format!("{:06}", number % 1_000_000)
 }
 
-/// The portal over the real password file and one-time code providers, for the account this process runs as.
-struct Real {
-    rig: Rig<Access>,
-    name: String,
-    dir: PathBuf,
-}
-
-impl Drop for Real {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-const PASSWORD: &str = "correct horse";
-
-fn real(rules: &serde_json::Value, change: impl FnOnce(&mut Settings)) -> Real {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "canoa-second-{}-{}",
-        std::process::id(),
-        COUNT.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let name = my_name();
+/// A file of the password provider holding `password` for `name`, put through the provider's own account kind, in `dir`.
+pub(super) fn password_file(dir: &Path, name: &str) -> PathBuf {
     let passwords = dir.join("passwords.toml");
-    // A password for the account, put through the provider's own account kind.
     {
         use coqui_access::guatiao::library::Registry;
         use coqui_access::{AccountPut, Accounts as AccountKind};
@@ -539,12 +516,40 @@ fn real(rules: &serde_json::Value, change: impl FnOnce(&mut Settings)) -> Real {
         );
         accounts
             .put(AccountPut {
-                name: name.clone(),
+                name: name.to_owned(),
                 secret: Some(PASSWORD.to_owned()),
                 ..AccountPut::default()
             })
             .unwrap();
     }
+    passwords
+}
+
+/// The portal over the real password file and one-time code providers, for the account this process runs as.
+struct Real {
+    rig: Rig<Access>,
+    name: String,
+    dir: PathBuf,
+}
+
+impl Drop for Real {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+pub(super) const PASSWORD: &str = "correct horse";
+
+fn real(rules: &serde_json::Value, change: impl FnOnce(&mut Settings)) -> Real {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "canoa-second-{}-{}",
+        std::process::id(),
+        COUNT.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let name = my_name();
+    let passwords = password_file(&dir, &name);
     let mut totp = file_source(&dir.join("totp.toml"));
     totp["skew"] = 10.into();
     totp["issuer"] = "Canoa Test".into();
@@ -575,7 +580,7 @@ fn real(rules: &serde_json::Value, change: impl FnOnce(&mut Settings)) -> Real {
     Real { rig, name, dir }
 }
 
-fn access_value(value: &serde_json::Value) -> coqui_access::guatiao::Value {
+pub(super) fn access_value(value: &serde_json::Value) -> coqui_access::guatiao::Value {
     access::value_of(value.as_object().unwrap()).unwrap()
 }
 

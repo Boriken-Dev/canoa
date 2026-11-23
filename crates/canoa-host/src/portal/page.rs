@@ -1,10 +1,11 @@
 //! The portal's splash and sign-in page: Canoa's mark and colours, light and dark, one card at any width, and a section for each
 //! way in the portal accepts. The page is server-rendered from the same list `GET /portal/methods` answers, and its one
-//! script (`/portal/login.js`, under `script-src 'self'`) only counts a `429`'s wait down.
+//! script (`/portal/login.js`, under `script-src 'self'`) counts a `429`'s wait down and runs the passkey ceremonies a page asks
+//! for; what only it can do stays hidden until it runs.
 
 use super::signin::Method;
-use super::signin::{CertificateStatus, FactorStanding, PinState};
-use super::{CERTIFICATE, FACTOR, LOGIN};
+use super::signin::{CertificateStatus, FactorStanding, PasskeyInfo, PinState};
+use super::{CERTIFICATE, FACTOR, LOGIN, PASSKEY, PASSKEYS};
 
 /// The page's stylesheet, served at [`CSS_PATH`].
 pub const CSS: &str = include_str!("page/login.css");
@@ -36,6 +37,8 @@ pub enum Notice {
     Unavailable,
     /// A one-time or recovery code was not accepted.
     CodeFailed,
+    /// A passkey was not accepted, or the ceremony it answers had ended.
+    Passkey,
     /// A sign-in that had passed a step ran out of time or tries.
     Ended,
 }
@@ -56,16 +59,98 @@ impl Notice {
             Self::Busy => "Busy. Try again in a moment.",
             Self::Unavailable => "Sign-in is not available.",
             Self::CodeFailed => "That code was not accepted.",
+            Self::Passkey => "That passkey was not accepted.",
             Self::Ended => "That sign-in timed out. Start again.",
         }
     }
 }
 
 /// The Content-Security-Policy of the page: nothing inline, nothing from elsewhere.
-pub const POLICY: &str = "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+pub const POLICY: &str = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
 // The paths of `app/assets/icons/canoa.svg`, at the size the page draws them.
 const MARK: &str = r##"<svg class="mark" viewBox="0 0 64 64" width="72" height="72" role="img" aria-label="Canoa"><defs><mask id="carved" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><path fill="#fff" d="M 2 23 C 5 27 9 30 15 30 L 49 30 C 55 30 59 27 60.5 17 L 63.5 17 C 64.5 31 59 41 49 41.5 C 38 42.5 26 42.5 15 41.5 C 6 40.5 1 32 0 24 Z"/><path fill="#000" d="M 34.1 14.8 L 19.2 45.5 L 26.1 48.8 L 40.9 18.2 Z"/><path fill="none" stroke="#000" stroke-width="1.3" stroke-linecap="round" d="M 47.1 35.9 C 47.3 36.2 47.1 36.9 46.5 37.1 C 45.9 37.4 44.8 36.9 44.6 35.9 C 44.4 34.9 45.2 33.5 46.5 33.3 C 47.8 33.1 49.5 34.2 49.8 35.9 C 50 37.6 48.6 39.6 46.5 39.8 C 44.4 40.1 42.1 38.3 41.9 35.9"/></mask></defs><g fill="#3DAFA1"><rect width="64" height="64" mask="url(#carved)"/><path d="M 43.3 0.2 L 21.8 44.5 C 20 48.4 16.6 46.8 14.8 50.6 C 12.1 56.1 14.7 61.3 15 63 C 16.5 62.2 22.2 61 24.8 55.5 C 26.7 51.6 23.4 50 25.3 46.2 L 46.7 1.8 Z"/></g></svg>"##;
+
+/// What opens a section only the page's script shows: without it the section stays hidden.
+const GATED: &str = "<div hidden data-gated>";
+const OR: &str = "<div class=\"or\" role=\"separator\"><span>or</span></div>";
+
+/// `html` as a section the script reveals.
+fn gated(html: &str) -> String {
+    format!("{GATED}{html}</div>")
+}
+
+/// The sections of a page, each after the first set off by "or". A section only the script reveals brings its own separator,
+/// so that a page without the script shows none for it.
+fn join(sections: &[String]) -> String {
+    let mut out = String::new();
+    for (index, section) in sections.iter().enumerate() {
+        match (index, section.strip_prefix(GATED)) {
+            (0, _) => out.push_str(section),
+            (_, Some(inner)) => {
+                out.push_str(GATED);
+                out.push_str(OR);
+                out.push_str(inner);
+            }
+            (_, None) => {
+                out.push_str(OR);
+                out.push_str(section);
+            }
+        }
+    }
+    if !sections.is_empty() && sections.iter().all(|section| section.starts_with(GATED)) {
+        out.push_str(
+            "<noscript><p class=\"notice\" role=\"alert\">This needs a browser with scripts turned on.</p></noscript>",
+        );
+    }
+    out
+}
+
+/// A form the script runs a passkey ceremony for: it asks `PASSKEY` for options with `options_body`, has the browser answer, and
+/// posts the answer to `post_to` with `fields`. `kind` is `get` or `create`.
+fn passkey_form(
+    kind: &str,
+    post_to: &str,
+    fields: &[(&str, &str)],
+    options_url: &str,
+    options_body: &str,
+    extra: &str,
+    button: &str,
+) -> String {
+    let hidden: String = fields
+        .iter()
+        .map(|(name, value)| format!("<input type=\"hidden\" name=\"{name}\" value=\"{value}\">"))
+        .collect();
+    gated(&format!(
+        "<form class=\"method\" method=\"post\" action=\"{post_to}\" data-passkey=\"{kind}\" data-options-url=\"{options_url}\" data-options-body=\"{options_body}\">{hidden}<input type=\"hidden\" name=\"answer\" value=\"\">{extra}<button type=\"submit\" class=\"secondary\">{button}</button><p class=\"hint\" data-passkey-status role=\"status\"></p></form><p class=\"hint\" hidden data-passkey-missing>This browser cannot use a passkey.</p>"
+    ))
+}
+
+/// The passkey step of a sign-in, on the login page.
+fn passkey_login_form() -> String {
+    passkey_form(
+        "get",
+        LOGIN,
+        &[("method", "passkey")],
+        PASSKEY,
+        "",
+        "",
+        "Sign in with a passkey",
+    )
+}
+
+/// The passkey step a signed-in person shows again on the page at `post_to`, before the policy lets them set something up.
+fn passkey_again_form(post_to: &str) -> String {
+    passkey_form(
+        "get",
+        post_to,
+        &[("action", "step"), ("method", "passkey")],
+        PASSKEY,
+        "for=enrol",
+        "",
+        "Use a passkey",
+    )
+}
 
 fn password_form() -> String {
     format!(
@@ -98,6 +183,7 @@ pub fn render(methods: &[Method], notice: Option<Notice>, retry: Option<u64>) ->
         sections.push(match method {
             Method::Password => password_form(),
             Method::Certificate => certificate_form(),
+            Method::Passkey => passkey_login_form(),
             // A code is checked for an account an earlier step named, and so has no place on the first page.
             Method::Totp | Method::RecoveryCode => continue,
         });
@@ -105,7 +191,7 @@ pub fn render(methods: &[Method], notice: Option<Notice>, retry: Option<u64>) ->
     let body = if sections.is_empty() {
         "<p class=\"notice\" role=\"alert\">No way to sign in is available here.</p>".to_owned()
     } else {
-        sections.join("<div class=\"or\" role=\"separator\"><span>or</span></div>")
+        join(&sections)
     };
     let retry = retry.map_or_else(String::new, |seconds| format!(" data-retry=\"{seconds}\""));
     format!(
@@ -154,6 +240,7 @@ pub fn render_certificate(
     status: Option<&CertificateStatus>,
     needs_password: bool,
     notice: Option<CertNotice>,
+    passkeys: bool,
 ) -> Vec<u8> {
     let note = match notice {
         Some(CertNotice::Done(text)) => {
@@ -202,8 +289,13 @@ pub fn render_certificate(
             }
         }
     }
+    let more = if passkeys {
+        format!("<p class=\"hint\"><a href=\"{PASSKEYS}\">Your passkeys</a></p>")
+    } else {
+        String::new()
+    };
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Certificate, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}<p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p></main><footer>Boriken Dev</footer></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Certificate, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}<p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p></main><footer>Boriken Dev</footer></body></html>",
         escape(user)
     )
     .into_bytes()
@@ -302,9 +394,10 @@ pub fn render_step(
             ),
             Method::Password => password_form(),
             Method::Certificate => step_certificate_form(),
+            Method::Passkey => passkey_login_form(),
         });
     }
-    let mut body = sections.join("<div class=\"or\" role=\"separator\"><span>or</span></div>");
+    let mut body = join(&sections);
     match setup {
         SetupOffer::Link => body.push_str(&format!(
             "<p class=\"hint\">No code is set up for your account. <a href=\"{FACTOR}\">Set up a code</a>.</p>"
@@ -366,6 +459,35 @@ fn qr(text: &str) -> Option<String> {
     ))
 }
 
+/// The forms that show a factor again, as a signed-in person would to sign in, posted to `post_to` as `action=step`.
+fn ask_forms(post_to: &str, user: &str, methods: &[Method]) -> String {
+    let mut sections = Vec::new();
+    for method in methods {
+        sections.push(match method {
+            Method::Password => format!(
+                "<form class=\"method\" method=\"post\" action=\"{post_to}\"><input type=\"hidden\" name=\"action\" value=\"step\"><input type=\"hidden\" name=\"method\" value=\"password\"><input type=\"hidden\" name=\"user\" value=\"{}\"><label for=\"password\">Password</label><input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required><button type=\"submit\">Continue</button></form>",
+                escape(user)
+            ),
+            Method::Certificate => format!(
+                "<form class=\"method\" method=\"post\" action=\"{post_to}\"><input type=\"hidden\" name=\"action\" value=\"step\"><input type=\"hidden\" name=\"method\" value=\"certificate\"><p class=\"hint\">Your browser must present your certificate to this site.</p><button type=\"submit\" class=\"secondary\">Use your certificate</button></form>"
+            ),
+            Method::Passkey => passkey_again_form(post_to),
+            Method::Totp | Method::RecoveryCode => {
+                let (id, label, mode, autocomplete) = if *method == Method::Totp {
+                    ("code", "Current code from your authenticator app", "numeric", "one-time-code")
+                } else {
+                    ("recovery", "Recovery code", "text", "off")
+                };
+                format!(
+                    "<form class=\"method\" method=\"post\" action=\"{post_to}\"><input type=\"hidden\" name=\"action\" value=\"step\"><input type=\"hidden\" name=\"method\" value=\"{}\"><label for=\"{id}\">{label}</label><input id=\"{id}\" name=\"code\" autocomplete=\"{autocomplete}\" inputmode=\"{mode}\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"32\" required><button type=\"submit\">Continue</button></form>",
+                    method.id()
+                )
+            }
+        });
+    }
+    join(&sections)
+}
+
 fn factor_post(action: &str, label: &str, class: &str) -> String {
     format!(
         "<form method=\"post\" action=\"{FACTOR}\"><input type=\"hidden\" name=\"action\" value=\"{action}\"><button type=\"submit\" class=\"{class}\">{label}</button></form>"
@@ -407,32 +529,7 @@ pub fn render_factor(
         ),
         FactorStage::Ask(methods) => {
             body.push_str("<p>To set up a code, show who you are again.</p>");
-            let mut sections = Vec::new();
-            for method in methods {
-                sections.push(match method {
-                    Method::Password => format!(
-                        "<form class=\"method\" method=\"post\" action=\"{FACTOR}\"><input type=\"hidden\" name=\"action\" value=\"step\"><input type=\"hidden\" name=\"method\" value=\"password\"><input type=\"hidden\" name=\"user\" value=\"{}\"><label for=\"password\">Password</label><input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required><button type=\"submit\">Continue</button></form>",
-                        escape(user)
-                    ),
-                    Method::Certificate => format!(
-                        "<form class=\"method\" method=\"post\" action=\"{FACTOR}\"><input type=\"hidden\" name=\"action\" value=\"step\"><input type=\"hidden\" name=\"method\" value=\"certificate\"><p class=\"hint\">Your browser must present your certificate to this site.</p><button type=\"submit\" class=\"secondary\">Use your certificate</button></form>"
-                    ),
-                    Method::Totp | Method::RecoveryCode => {
-                        let (id, label, mode, autocomplete) = if *method == Method::Totp {
-                            ("code", "Current code from your authenticator app", "numeric", "one-time-code")
-                        } else {
-                            ("recovery", "Recovery code", "text", "off")
-                        };
-                        format!(
-                            "<form class=\"method\" method=\"post\" action=\"{FACTOR}\"><input type=\"hidden\" name=\"action\" value=\"step\"><input type=\"hidden\" name=\"method\" value=\"{}\"><label for=\"{id}\">{label}</label><input id=\"{id}\" name=\"code\" autocomplete=\"{autocomplete}\" inputmode=\"{mode}\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"32\" required><button type=\"submit\">Continue</button></form>",
-                            method.id()
-                        )
-                    }
-                });
-            }
-            body.push_str(
-                &sections.join("<div class=\"or\" role=\"separator\"><span>or</span></div>"),
-            );
+            body.push_str(&ask_forms(FACTOR, user, methods));
         }
         FactorStage::Ready => {
             body.push_str("<p>You can set up a code now. It replaces any code you have.</p>");
@@ -465,9 +562,144 @@ pub fn render_factor(
     } else {
         "<p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p>".to_owned()
     };
+    // The script only runs a passkey ceremony here: a setup link and its drawing need none.
+    let script = if body.contains("data-passkey") {
+        format!("<script src=\"{JS_PATH}\"></script>")
+    } else {
+        String::new()
+    };
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign-in code, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">{} {}</p></header>{note}{body}{back}</main><footer>Boriken Dev</footer></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign-in code, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">{} {}</p></header>{note}{body}{back}</main><footer>Boriken Dev</footer>{script}</body></html>",
         if signing_in { "Signing in as" } else { "Signed in as" },
+        escape(user)
+    )
+    .into_bytes()
+}
+
+/// Where a person is on the Passkeys page when it comes to adding one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PasskeyStage<'a> {
+    /// This portal keeps no passkeys.
+    Unsupported,
+    /// The policy asks for no sign-in that lets a person add one: nobody can.
+    Nobody,
+    /// The policy asks these methods again, as fresh proof, before a passkey may be added.
+    Ask(&'a [Method]),
+    /// A passkey may be added now.
+    Ready,
+}
+
+/// The day a time in seconds since the epoch falls on, in UTC, as `2026-11-23`.
+fn day(unix: i64) -> String {
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let days = unix.div_euclid(86_400) + 719_468;
+    let era = days.div_euclid(146_097);
+    let of_era = days.rem_euclid(146_097);
+    let year_of_era = (of_era - of_era / 1460 + of_era / 36_524 - of_era / 146_096) / 365;
+    let day_of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_part = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_part + 2) / 5 + 1;
+    let month = if month_part < 10 {
+        month_part + 3
+    } else {
+        month_part - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+fn passkey_item(passkey: &PasskeyInfo) -> String {
+    let name = passkey
+        .label
+        .as_deref()
+        .filter(|label| !label.is_empty())
+        .map_or_else(|| "Unnamed passkey".to_owned(), escape);
+    let mut meta = Vec::new();
+    if let Some(made) = passkey.made_unix {
+        meta.push(format!("added {}", day(made)));
+    }
+    meta.push(passkey.used_unix.map_or_else(
+        || "never used".to_owned(),
+        |used| format!("used {}", day(used)),
+    ));
+    meta.push(
+        match passkey.synced {
+            Some(true) => "synced between your devices",
+            Some(false) => "kept on one device",
+            None => "",
+        }
+        .to_owned(),
+    );
+    if passkey.disabled {
+        meta.push("disabled: ask an administrator".to_owned());
+    }
+    let meta = meta
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let id = escape(&passkey.id);
+    format!(
+        "<li><div class=\"name\">{name}</div><div class=\"meta\">{meta}</div><form method=\"post\" action=\"{PASSKEYS}\"><input type=\"hidden\" name=\"action\" value=\"label\"><input type=\"hidden\" name=\"id\" value=\"{id}\"><input name=\"label\" aria-label=\"Name\" maxlength=\"64\" autocomplete=\"off\" required><button type=\"submit\" class=\"secondary\">Rename</button></form><form method=\"post\" action=\"{PASSKEYS}\"><input type=\"hidden\" name=\"action\" value=\"remove\"><input type=\"hidden\" name=\"id\" value=\"{id}\"><button type=\"submit\" class=\"secondary\">Remove</button></form></li>"
+    )
+}
+
+/// The page of `user`'s passkeys: each one, and what it takes to add another. `passkeys` is `None` when they could not be read.
+#[must_use]
+pub fn render_passkeys(
+    user: &str,
+    passkeys: Option<&[PasskeyInfo]>,
+    stage: PasskeyStage<'_>,
+    notice: Option<CertNotice>,
+) -> Vec<u8> {
+    let note = match notice {
+        Some(CertNotice::Done(text)) => {
+            format!("<p class=\"notice ok\" role=\"status\">{text}</p>")
+        }
+        Some(CertNotice::Problem(text)) => format!("<p class=\"notice\" role=\"alert\">{text}</p>"),
+        None => String::new(),
+    };
+    let mut body = String::from("<h2>Your passkeys</h2>");
+    match passkeys {
+        None => body.push_str("<p class=\"hint\">Your passkeys could not be read.</p>"),
+        Some([]) => body.push_str("<p>No passkey is set up for your account.</p>"),
+        Some(held) => {
+            body.push_str("<ul class=\"passkeys\">");
+            for passkey in held {
+                body.push_str(&passkey_item(passkey));
+            }
+            body.push_str("</ul>");
+        }
+    }
+    body.push_str("<h2>Add a passkey</h2>");
+    match stage {
+        PasskeyStage::Unsupported => {
+            body.push_str("<p class=\"hint\">This portal does not keep passkeys.</p>");
+        }
+        PasskeyStage::Nobody => body.push_str(
+            "<p class=\"hint\">Adding a passkey needs a sign-in this portal does not offer here: ask an administrator.</p>",
+        ),
+        PasskeyStage::Ask(methods) => {
+            body.push_str("<p>To add a passkey, show who you are again.</p>");
+            body.push_str(&ask_forms(PASSKEYS, user, methods));
+        }
+        PasskeyStage::Ready => {
+            body.push_str(&passkey_form(
+                "create",
+                PASSKEYS,
+                &[("action", "confirm")],
+                PASSKEYS,
+                "action=begin",
+                "<label for=\"label\">Name</label><input id=\"label\" name=\"label\" maxlength=\"64\" autocomplete=\"off\" placeholder=\"This device\">",
+                "Add a passkey",
+            ));
+            body.push_str(&format!(
+                "<form method=\"post\" action=\"{PASSKEYS}\"><input type=\"hidden\" name=\"action\" value=\"cancel\"><button type=\"submit\" class=\"secondary\">Cancel</button></form>"
+            ));
+        }
+    }
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Passkeys, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}<p class=\"hint\"><a href=\"{CERTIFICATE}\">Your certificate</a></p><p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p></main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>",
         escape(user)
     )
     .into_bytes()

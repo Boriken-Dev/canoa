@@ -38,6 +38,8 @@ pub struct Session {
     pub done: Vec<Factor>,
     /// When the one-time code that signed it in was set up, if one did: the session ends when the account's code is not that one.
     pub code_made: Option<i64>,
+    /// The id of the passkey that signed it in, if one did: the session ends when the account no longer holds that passkey.
+    pub passkey: Option<String>,
 }
 
 struct Kept {
@@ -50,6 +52,7 @@ struct Kept {
     fingerprint: Option<String>,
     done: Vec<Factor>,
     code_made: Option<i64>,
+    passkey: Option<String>,
 }
 
 /// The sessions of signed-in browsers, by the digest of the token the browser holds: the token itself is never kept.
@@ -99,7 +102,16 @@ impl Sessions {
         done: Vec<Factor>,
     ) -> Option<(String, Session)> {
         let password_at = (method == Some(Method::Password)).then(Instant::now);
-        self.open_after(user, uid, method, password_at, fingerprint, done, None)
+        self.open_after(
+            user,
+            uid,
+            method,
+            password_at,
+            fingerprint,
+            done,
+            None,
+            None,
+        )
     }
 
     /// [`Sessions::open_with`] for a sign-in whose password, if it had one, was typed at `password_at`: a step before the one
@@ -117,6 +129,7 @@ impl Sessions {
         fingerprint: Option<String>,
         done: Vec<Factor>,
         code_made: Option<i64>,
+        passkey: Option<String>,
     ) -> Option<(String, Session)> {
         let mut bytes = [0_u8; TOKEN_BYTES];
         getrandom::fill(&mut bytes).ok()?;
@@ -154,6 +167,7 @@ impl Sessions {
                 fingerprint: fingerprint.clone(),
                 done: done.clone(),
                 code_made,
+                passkey: passkey.clone(),
             },
         );
         Some((
@@ -167,6 +181,7 @@ impl Sessions {
                 fingerprint,
                 done,
                 code_made,
+                passkey,
             },
         ))
     }
@@ -193,6 +208,7 @@ impl Sessions {
             fingerprint: kept.fingerprint.clone(),
             done: kept.done.clone(),
             code_made: kept.code_made,
+            passkey: kept.passkey.clone(),
         })
     }
 
@@ -225,6 +241,19 @@ impl Sessions {
             kept.user != user
                 || !by_certificate
                 || (keep.is_some() && kept.fingerprint.as_deref() == keep)
+        });
+    }
+
+    /// Ends the sessions of `user` that a passkey signed in: the one named by `credential`, or every one when it is `None`. For
+    /// when a passkey is removed, so that what it let in does not outlive it.
+    pub fn close_passkey(&self, user: &str, credential: Option<&str>) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.1.retain(|_, kept| {
+            kept.user != user
+                || kept
+                    .passkey
+                    .as_deref()
+                    .is_none_or(|held| credential.is_some_and(|credential| credential != held))
         });
     }
 
@@ -271,6 +300,8 @@ pub struct Pending {
     pub password_at: Option<Instant>,
     /// The fingerprint of the certificate a step carried: what a pin made from the session it opens may be.
     pub fingerprint: Option<String>,
+    /// The id of the passkey a step was made with, which the session it opens records.
+    pub passkey: Option<String>,
 }
 
 struct KeptPending {
@@ -447,6 +478,8 @@ pub struct Handoff {
     pub done: Vec<Factor>,
     /// When the one-time code that signed it in was set up, if one did.
     pub code_made: Option<i64>,
+    /// The id of the passkey that signed it in, if one did.
+    pub passkey: Option<String>,
 }
 
 struct KeptHandoff {
@@ -531,6 +564,97 @@ impl Handoffs {
     }
 }
 
+/// A passkey challenge a browser holds, waiting for the answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ceremony {
+    /// The challenge's key at the provider, which the answer is checked with.
+    pub challenge: String,
+    /// The account the challenge was made for, when an earlier step named one: the answer must be that account's.
+    pub account: Option<(String, u32)>,
+}
+
+struct KeptCeremony {
+    ceremony: Ceremony,
+    until: Instant,
+}
+
+/// The passkey challenges browsers hold, by the digest of the token the browser keeps in its cookie: single use, short-lived,
+/// bounded and held in memory only, so that an answer is taken only from the browser the challenge was made for.
+pub struct Ceremonies {
+    limit: usize,
+    state: Mutex<HashMap<[u8; 32], KeptCeremony>>,
+}
+
+impl core::fmt::Debug for Ceremonies {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Ceremonies").finish_non_exhaustive()
+    }
+}
+
+impl Ceremonies {
+    /// A store of at most `limit` challenges waiting at once.
+    #[must_use]
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            state: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Keeps `ceremony` for `lifetime` and answers the token its browser holds. The challenge the browser held before, named by
+    /// `replacing`, is dropped: one browser has one at a time. `None` when the store is full of live ones of others.
+    pub fn open(
+        &self,
+        ceremony: Ceremony,
+        lifetime: Duration,
+        replacing: Option<&str>,
+    ) -> Option<String> {
+        let mut bytes = [0_u8; TOKEN_BYTES];
+        getrandom::fill(&mut bytes).ok()?;
+        let token = BASE64URL_NOPAD.encode(&bytes);
+        let now = Instant::now();
+        let mut map = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        map.retain(|_, kept| kept.until > now);
+        if let Some(old) = replacing {
+            map.remove(&digest(old));
+        }
+        if map.len() >= self.limit {
+            return None;
+        }
+        map.insert(
+            digest(&token),
+            KeptCeremony {
+                ceremony,
+                until: now.checked_add(lifetime)?,
+            },
+        );
+        Some(token)
+    }
+
+    /// The challenge `token` names, taken: it is gone whether or not it was still valid, so a challenge is answered once.
+    pub fn take(&self, token: &str) -> Option<Ceremony> {
+        if token.is_empty() || token.len() > 128 {
+            return None;
+        }
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let kept = state.remove(&digest(token))?;
+        (kept.until > now).then_some(kept.ceremony)
+    }
+
+    /// How many challenges wait, for a test to read.
+    #[cfg(test)]
+    pub(super) fn waiting(&self) -> usize {
+        let now = Instant::now();
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .filter(|kept| kept.until > now)
+            .count()
+    }
+}
+
 /// The failed sign-ins inside a window, by address with account, by address and by account.
 pub struct Throttle {
     window: Duration,
@@ -568,6 +692,8 @@ pub enum Subject {
     Account(String),
     /// A certificate sign-in from this address (an IPv6 one by its /64).
     Certificate(IpAddr),
+    /// A passkey sign-in from this address (an IPv6 one by its /64): a passkey names its account only once it is right.
+    Passkey(IpAddr),
 }
 
 /// A try that was let through, and counts as a failure until [`Throttle::succeeded`] says it was not.
@@ -738,6 +864,11 @@ impl Throttle {
         self.begin_for(address, Subject::Certificate(key_of(address)))
     }
 
+    /// [`Throttle::begin`] for a passkey sign-in from `address`.
+    pub fn begin_passkey(&self, address: IpAddr) -> Option<Attempt> {
+        self.begin_for(address, Subject::Passkey(key_of(address)))
+    }
+
     fn begin_for(&self, address: IpAddr, user: Subject) -> Option<Attempt> {
         let now = Instant::now();
         let address = key_of(address);
@@ -848,6 +979,83 @@ mod tests {
     }
 
     #[test]
+    fn closing_passkey_sessions_leaves_the_others_and_the_passkeys_that_stay() {
+        let sessions = Sessions::new(Duration::from_secs(60), 10, 10);
+        let open = |user: &str, passkey: Option<&str>| {
+            sessions
+                .open_after(
+                    user,
+                    1,
+                    Some(Method::Passkey),
+                    None,
+                    None,
+                    Vec::new(),
+                    None,
+                    passkey.map(str::to_owned),
+                )
+                .unwrap()
+                .0
+        };
+        let one = open("a", Some("one"));
+        let two = open("a", Some("two"));
+        let by_password = open("a", None);
+        let other = open("b", Some("one"));
+        sessions.close_passkey("a", Some("one"));
+        assert!(sessions.get(&one).is_none());
+        assert!(sessions.get(&two).is_some() && sessions.get(&by_password).is_some());
+        assert!(
+            sessions.get(&other).is_some(),
+            "another account's is not touched"
+        );
+        sessions.close_passkey("a", None);
+        assert!(sessions.get(&two).is_none() && sessions.get(&by_password).is_some());
+    }
+
+    #[test]
+    fn a_challenge_is_answered_once_by_the_browser_that_holds_its_token_and_the_store_is_bounded() {
+        let ceremonies = Ceremonies::new(2);
+        let made = |challenge: &str| Ceremony {
+            challenge: challenge.to_owned(),
+            account: None,
+        };
+        let life = Duration::from_secs(60);
+        let first = ceremonies.open(made("one"), life, None).unwrap();
+        assert!(ceremonies.take("not-a-token").is_none());
+        assert_eq!(ceremonies.take(&first), Some(made("one")));
+        assert!(ceremonies.take(&first).is_none(), "taken once");
+        let a = ceremonies.open(made("a"), life, None).unwrap();
+        let b = ceremonies.open(made("b"), life, None).unwrap();
+        assert!(ceremonies.open(made("c"), life, None).is_none(), "full");
+        // A browser asking again gives up the challenge it held.
+        let again = ceremonies.open(made("b2"), life, Some(&b)).unwrap();
+        assert!(ceremonies.take(&b).is_none());
+        assert_eq!(ceremonies.take(&again), Some(made("b2")));
+        assert_eq!(ceremonies.take(&a), Some(made("a")));
+        let short = ceremonies
+            .open(made("s"), Duration::from_millis(1), None)
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(ceremonies.take(&short).is_none(), "expired");
+        assert_eq!(ceremonies.waiting(), 0);
+    }
+
+    #[test]
+    fn a_passkeys_failures_never_count_against_an_account_of_any_name() {
+        let throttle = throttle(2, 100, 100);
+        let address: IpAddr = "192.0.2.7".parse().unwrap();
+        for _ in 0..2 {
+            assert!(throttle.begin_passkey(address).is_some());
+        }
+        assert!(
+            throttle.begin_passkey(address).is_none(),
+            "its own count ran out"
+        );
+        for name in ["passkey", "certificate"] {
+            assert!(throttle.begin(address, name).is_some(), "{name:?}");
+        }
+    }
+
+    #[test]
     fn a_certificates_failures_never_count_against_an_account_of_any_name() {
         let throttle = throttle(2, 100, 100);
         let address: IpAddr = "192.0.2.7".parse().unwrap();
@@ -899,6 +1107,7 @@ mod tests {
             fingerprint: None,
             done: Vec::new(),
             code_made: None,
+            passkey: None,
         }
     }
 
@@ -1103,6 +1312,7 @@ mod tests {
             first: Some(Method::Password),
             password_at: None,
             fingerprint: None,
+            passkey: None,
         }
     }
 

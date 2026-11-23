@@ -48,6 +48,8 @@ qrcode = { version = "0.15", default-features = false, features = ["svg"] }
 # The password and certificate providers are libraries the portal loads from a path (its tests build them).
 coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "0c73889f7e38310f8bea4614e7a77657520b628a" }
 coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "0c73889f7e38310f8bea4614e7a77657520b628a" }
+# Passkeys (WebAuthn) are a library the portal loads from a path too (its tests build it), and the software authenticator and client that stand in for a person's device.
+coqui-access-passkey-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "0c73889f7e38310f8bea4614e7a77657520b628a" }
 # Foundry Local's Rust SDK (`canoa-foundry` feature `sdk`).
 foundry-local-sdk = "2.4"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync"] }

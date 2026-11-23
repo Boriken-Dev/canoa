@@ -752,16 +752,22 @@ fn every_flow_goes_through_the_portals_request_path_as_the_contract_says() {
     let document: serde_json::Value = serde_json::from_str(FLOWS).unwrap();
     let flows = document["flows"].as_array().unwrap();
     assert_eq!(flows.len(), 19, "the flows the vectors hold");
-    // A flow that presents a method the portal has no sign-in for (a passkey) is the library's, not the portal's, to answer.
+    // A flow that presents a method these stand-ins have no sign-in for (a passkey, which signs a challenge) is run against the
+    // real provider in tests/passkeys.rs.
+    let stand_in = Flow::new(0).methods();
     let (offered, apart): (Vec<_>, Vec<_>) = flows.iter().partition(|flow| {
         flow["steps"].as_array().unwrap().iter().all(|step| {
             step.get("method")
                 .and_then(serde_json::Value::as_str)
-                .is_none_or(|word| Method::from_id(word).is_some())
+                .is_none_or(|word| Method::from_id(word).is_some_and(|m| stand_in.contains(&m)))
         })
     });
-    assert_eq!(offered.len(), 18, "the flows of the methods the portal has");
-    assert_eq!(apart.len(), 1, "the flows of a method it has not");
+    assert_eq!(
+        offered.len(),
+        18,
+        "the flows of the methods the stand-ins have"
+    );
+    assert_eq!(apart.len(), 1, "the flows of a method they have not");
     for flow in offered {
         let name = flow["name"].as_str().unwrap();
         // The vectors' quiet period is 15 minutes; the portal's window is shortened to a second and a half, and a step's wait

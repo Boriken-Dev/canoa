@@ -378,6 +378,7 @@ fn step(
                 first: None,
                 password_at: None,
                 fingerprint: None,
+                passkey: None,
             },
         ),
     };
@@ -540,7 +541,7 @@ fn confirm(
         ended: &ended,
     };
     let key: String = who.user.to_ascii_lowercase().chars().take(64).collect();
-    let guard = match steps::guard_try(&cx, Some(&key), false) {
+    let guard = match steps::guard_try(&cx, Some(&key), steps::Counted::Account) {
         Ok(guard) => guard,
         Err(response) => return response,
     };
@@ -581,6 +582,7 @@ fn confirm(
                         uid: who.uid,
                         groups: who.groups.clone(),
                         provider,
+                        credential: None,
                         guard,
                     };
                     match steps::advance(&cx, taken, Some((actor_token(actor), state.clone()))) {

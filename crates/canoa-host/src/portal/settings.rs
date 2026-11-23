@@ -175,6 +175,8 @@ pub struct Settings {
     pub max_sign_ins: usize,
     /// `max_sessions`: sign-ins kept at once.
     pub max_sessions: usize,
+    /// `max_passkey_ceremonies`: passkey challenges waiting for their answers at once, from every browser.
+    pub max_passkey_ceremonies: usize,
     /// `max_sessions_per_user`: sign-ins one account keeps; the oldest goes when another comes.
     pub max_sessions_per_user: usize,
     /// `max_hosts`: hosts running at once.
@@ -243,6 +245,7 @@ impl Default for Settings {
             max_connections: 256,
             max_sign_ins: 8,
             max_sessions: 1024,
+            max_passkey_ceremonies: 1024,
             max_sessions_per_user: 8,
             max_hosts: 64,
             max_relays_per_user: 16,
@@ -325,6 +328,7 @@ struct Raw {
     max_connections: Option<usize>,
     max_sign_ins: Option<usize>,
     max_sessions: Option<usize>,
+    max_passkey_ceremonies: Option<usize>,
     max_sessions_per_user: Option<usize>,
     max_hosts: Option<usize>,
     max_relays_per_user: Option<usize>,
@@ -468,6 +472,8 @@ impl Settings {
         settings.max_connections = count(raw.max_connections, settings.max_connections);
         settings.max_sign_ins = count(raw.max_sign_ins, settings.max_sign_ins);
         settings.max_sessions = count(raw.max_sessions, settings.max_sessions);
+        settings.max_passkey_ceremonies =
+            count(raw.max_passkey_ceremonies, settings.max_passkey_ceremonies);
         settings.max_sessions_per_user =
             count(raw.max_sessions_per_user, settings.max_sessions_per_user);
         settings.max_hosts = count(raw.max_hosts, settings.max_hosts);
@@ -570,6 +576,7 @@ impl Settings {
             ("max_connections", self.max_connections == 0),
             ("max_sign_ins", self.max_sign_ins == 0),
             ("max_sessions", self.max_sessions == 0),
+            ("max_passkey_ceremonies", self.max_passkey_ceremonies == 0),
             ("max_sessions_per_user", self.max_sessions_per_user == 0),
             ("max_hosts", self.max_hosts == 0),
             ("max_relays_per_user", self.max_relays_per_user == 0),
@@ -714,6 +721,7 @@ mod tests {
             "listen = \"0.0.0.0:7890\"",
             "pasword = 1",
             "max_sessions = 0",
+            "max_passkey_ceremonies = 0",
             "max_hosts = 0",
             "max_failures_per_pair = 0",
             "unit = \"canoa.service\"",

@@ -8,10 +8,13 @@
 
 mod access;
 mod conn;
+#[cfg(test)]
+mod device;
 mod factor;
 mod instance;
 mod office;
 mod page;
+mod passkeys;
 mod policy;
 mod relay;
 mod session;
@@ -41,7 +44,8 @@ pub use session::{Attempt, Session, Sessions, Throttle};
 pub use settings::{Entry, MatcherRule, Settings};
 pub use signin::{
     Accounts, CertificateStatus, CodeCheck, Enrolment, FactorError, FactorStanding, MAX_PASSWORD,
-    Method, NAME_PATTERN, PinError, PinState, Presented, SignIn, Standing, valid_user,
+    Method, NAME_PATTERN, PasskeyAnswer, PasskeyChallenge, PasskeyError, PasskeyInfo, PinError,
+    PinState, Presented, SignIn, Standing, valid_user,
 };
 
 use crate::pipe::PipeChannel;
@@ -69,9 +73,14 @@ pub const METHODS: &str = "/portal/methods";
 pub const CERTIFICATE: &str = "/portal/certificate";
 /// Where a signed-in person, or a sign-in waiting for a one-time code, sets one up.
 pub const FACTOR: &str = "/portal/factor";
+/// Where a browser asks for the challenge a passkey signs.
+pub const PASSKEY: &str = "/portal/passkey";
+/// Where a signed-in person sees their passkeys, adds one, names one or removes one.
+pub const PASSKEYS: &str = "/portal/passkeys";
 const MAX_HEAD: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
-const MAX_FORM: usize = 4096;
+/// The largest form a browser may post: a passkey's signed answer is a few kilobytes.
+const MAX_FORM: usize = 16 * 1024;
 const REST: Duration = Duration::from_millis(50);
 /// How often a channel of a session made with a one-time code looks at whether the code is still the account's.
 const CODE_LOOK: Duration = Duration::from_secs(3);
@@ -105,6 +114,8 @@ struct Inner {
     root: PathBuf,
     sessions: Sessions,
     pendings: session::Pendings,
+    /// The passkey challenges browsers hold.
+    ceremonies: session::Ceremonies,
     throttle: Throttle,
     /// When the portal last warned of an account's failures tripping a limit, by user id: once for each window.
     warned: Mutex<alloc::collections::BTreeMap<u32, Instant>>,
@@ -241,6 +252,7 @@ impl Portal {
                 settings.max_sessions,
                 settings.max_sessions_per_user,
             ),
+            ceremonies: session::Ceremonies::new(settings.max_passkey_ceremonies),
             throttle: Throttle::new(
                 settings.failure_window,
                 settings.max_failures_per_pair,
@@ -1007,6 +1019,29 @@ fn resume(
             return Err(Response::refusal(401));
         }
     }
+    // A session made with a passkey does not outlive it: one removed, here or by an administrator, ends it at its next use.
+    if let Some(credential) = &session.passkey {
+        match inner.accounts.passkeys(&session.user, session.uid) {
+            Ok(held)
+                if held
+                    .iter()
+                    .any(|each| each.id == *credential && !each.disabled) => {}
+            Ok(_) | Err(PasskeyError::Unsupported) => {
+                inner
+                    .sessions
+                    .close_passkey(&session.user, Some(credential));
+                tracing::info!(
+                    "{}'s passkey is gone: the sessions it opened ended",
+                    session.user
+                );
+                return Err(Response::refusal(401));
+            }
+            Err(_) => {
+                tracing::warn!("the passkeys could not be read: the request is not served");
+                return Err(Response::refusal(503));
+            }
+        }
+    }
     let address = client_address(inner, request, conn);
     let context = policy::context(
         purposes::RESUME,
@@ -1087,6 +1122,9 @@ fn route(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             None => Response::refusal(401),
         },
         ("POST", LOGIN) => steps::sign_in(inner, request, conn, started),
+        ("POST", PASSKEY) => passkeys::challenge(inner, request, conn),
+        ("GET" | "HEAD", PASSKEYS) => passkeys::show(inner, request, conn),
+        ("POST", PASSKEYS) => passkeys::act(inner, request, conn, started),
         ("GET" | "HEAD", FACTOR) => factor::show(inner, request, conn),
         ("POST", FACTOR) => factor::act(inner, request, conn, started),
         ("POST", "/portal/logout") => {
@@ -1211,7 +1249,13 @@ fn certificate_page(
     Response::text(
         code,
         "text/html; charset=utf-8",
-        page::render_certificate(&session.user, status.as_ref(), needs_password, notice),
+        page::render_certificate(
+            &session.user,
+            status.as_ref(),
+            needs_password,
+            notice,
+            inner.accounts.methods().contains(&Method::Passkey),
+        ),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
 }
@@ -1654,22 +1698,38 @@ fn upgrade(inner: &Inner, conn: &mut Conn, request: &Request) {
             if !inner.sessions.alive(id) {
                 return false;
             }
-            if coded(&session) {
+            if coded(&session) || session.passkey.is_some() {
                 let mut at = looked.lock().unwrap_or_else(PoisonError::into_inner);
                 if at.elapsed() >= CODE_LOOK {
                     *at = Instant::now();
                     // One read says both; one that fails keeps the channel, as a request that cannot be served is answered
                     // `503` and keeps its session.
-                    let (standing, made) = inner.accounts.factor_record(&session.user, session.uid);
-                    if matches!(
-                        standing,
-                        FactorStanding::NotEnrolled
-                            | FactorStanding::Disabled
-                            | FactorStanding::Reset
-                    ) || (standing == FactorStanding::Enrolled && made != session.code_made)
-                    {
-                        inner.sessions.close_id(id);
-                        return false;
+                    if coded(&session) {
+                        let (standing, made) =
+                            inner.accounts.factor_record(&session.user, session.uid);
+                        if matches!(
+                            standing,
+                            FactorStanding::NotEnrolled
+                                | FactorStanding::Disabled
+                                | FactorStanding::Reset
+                        ) || (standing == FactorStanding::Enrolled && made != session.code_made)
+                        {
+                            inner.sessions.close_id(id);
+                            return false;
+                        }
+                    }
+                    if let Some(credential) = &session.passkey {
+                        match inner.accounts.passkeys(&session.user, session.uid) {
+                            Ok(held)
+                                if held
+                                    .iter()
+                                    .any(|each| each.id == *credential && !each.disabled) => {}
+                            Ok(_) | Err(PasskeyError::Unsupported) => {
+                                inner.sessions.close_id(id);
+                                return false;
+                            }
+                            Err(_) => {}
+                        }
                     }
                 }
             }

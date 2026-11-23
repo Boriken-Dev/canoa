@@ -148,6 +148,7 @@ fn claim(inner: &Inner, request: &Request, conn: &Conn) -> Response {
         handoff.fingerprint,
         handoff.done,
         handoff.code_made,
+        handoff.passkey,
     ) else {
         return Response::refusal(503);
     };

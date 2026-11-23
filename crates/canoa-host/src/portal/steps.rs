@@ -151,6 +151,8 @@ pub struct Taken {
     pub uid: u32,
     pub groups: Vec<String>,
     pub provider: String,
+    /// The id of the passkey that signed, for a passkey step.
+    pub credential: Option<String>,
     pub guard: Guard,
 }
 
@@ -159,9 +161,21 @@ pub fn refused(cx: &Cx<'_>, notice: page::Notice) -> Response {
     after_floor(cx.inner, cx.started, (cx.fail)(401, notice, None))
 }
 
+/// What a try's failures are counted against besides the address: an account named by what was typed, or a credential that
+/// names its account only once it is right.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Counted {
+    /// The account whose name was typed, or the one an earlier step named.
+    Account,
+    /// A certificate, by the address it came from.
+    Certificate,
+    /// A passkey, by the address it came from.
+    Passkey,
+}
+
 /// Lets a try through the guards, counting it as a failure until it proves otherwise, or answers it: the pending state has used
 /// up its tries, the address and account have failed too often, or the person has.
-pub fn guard_try(cx: &Cx<'_>, key: Option<&str>, certificate: bool) -> Result<Guard, Response> {
+pub fn guard_try(cx: &Cx<'_>, key: Option<&str>, counted: Counted) -> Result<Guard, Response> {
     let inner = cx.inner;
     let address = client_of(inner, cx.request, cx.conn);
     if let Some((token, _)) = cx.pending
@@ -173,10 +187,11 @@ pub fn guard_try(cx: &Cx<'_>, key: Option<&str>, certificate: bool) -> Result<Gu
         );
         return Err((cx.ended)());
     }
-    let begun = match (certificate, key) {
-        (true, _) => inner.throttle.begin_certificate(address),
-        (false, Some(key)) => inner.throttle.begin(address, key),
-        (false, None) => None,
+    let begun = match (counted, key) {
+        (Counted::Certificate, _) => inner.throttle.begin_certificate(address),
+        (Counted::Passkey, _) => inner.throttle.begin_passkey(address),
+        (Counted::Account, Some(key)) => inner.throttle.begin(address, key),
+        (Counted::Account, None) => None,
     };
     let Some(attempt) = begun else {
         tracing::info!("a sign-in from {address} was refused for its failures");
@@ -203,42 +218,44 @@ pub fn guard_try(cx: &Cx<'_>, key: Option<&str>, certificate: bool) -> Result<Gu
         }
     }
     let person = match cx.account {
-        Some((name, uid)) if certificate || key.is_some() => match inner.throttle.begin_person(uid)
-        {
-            Ok(person) => Some(person),
-            Err(which) => {
-                // Left counted: a refused try is a failed one for the address, which the person's count does not add to. The
-                // first in a window is logged where an administrator looks, with the account, for what it may be: someone
-                // guessing at its codes; the ones after it, which a guesser makes in numbers, are not.
-                let span = if which == "in the day" {
-                    inner.settings.factor_day
-                } else {
-                    inner.settings.failure_window
-                };
-                let first = {
-                    let mut warned = inner.warned.lock().unwrap_or_else(PoisonError::into_inner);
-                    let first = warned.get(&uid).is_none_or(|at| at.elapsed() >= span);
+        Some((name, uid)) if counted != Counted::Account || key.is_some() => {
+            match inner.throttle.begin_person(uid) {
+                Ok(person) => Some(person),
+                Err(which) => {
+                    // Left counted: a refused try is a failed one for the address, which the person's count does not add to. The
+                    // first in a window is logged where an administrator looks, with the account, for what it may be: someone
+                    // guessing at its codes; the ones after it, which a guesser makes in numbers, are not.
+                    let span = if which == "in the day" {
+                        inner.settings.factor_day
+                    } else {
+                        inner.settings.failure_window
+                    };
+                    let first = {
+                        let mut warned =
+                            inner.warned.lock().unwrap_or_else(PoisonError::into_inner);
+                        let first = warned.get(&uid).is_none_or(|at| at.elapsed() >= span);
+                        if first {
+                            warned.insert(uid, Instant::now());
+                        }
+                        first
+                    };
                     if first {
-                        warned.insert(uid, Instant::now());
+                        tracing::warn!(
+                            "second-step tries for {name} from {address} are refused for the account's failures {which}: its codes may be guessed at"
+                        );
+                    } else {
+                        tracing::info!(
+                            "a second-step try for {name} from {address} was refused for the account's failures {which}"
+                        );
                     }
-                    first
-                };
-                if first {
-                    tracing::warn!(
-                        "second-step tries for {name} from {address} are refused for the account's failures {which}: its codes may be guessed at"
-                    );
-                } else {
-                    tracing::info!(
-                        "a second-step try for {name} from {address} was refused for the account's failures {which}"
-                    );
+                    return Err(after_floor(
+                        inner,
+                        cx.started,
+                        (cx.fail)(401, page::Notice::CodeFailed, None),
+                    ));
                 }
-                return Err(after_floor(
-                    inner,
-                    cx.started,
-                    (cx.fail)(401, page::Notice::CodeFailed, None),
-                ));
             }
-        },
+        }
         _ => None,
     };
     if !attempt.wait.is_zero() {
@@ -286,6 +303,14 @@ pub fn take_step(
     let providers = offer.providers.clone();
     let (user, secret, key) = match method {
         Method::Certificate => (String::new(), String::new(), None),
+        // The answer is a passkey's own: it names no account, and what is counted is the address it came from.
+        Method::Passkey => {
+            let Some(answer) = form_field(&request.body, "answer").filter(|text| !text.is_empty())
+            else {
+                return Err(Response::refusal(400));
+            };
+            (String::new(), answer, None)
+        }
         Method::Password => {
             let (Some(user), Some(password)) = (
                 form_field(&request.body, "user"),
@@ -312,9 +337,37 @@ pub fn take_step(
     let refused_notice = match method {
         Method::Certificate => page::Notice::Certificate,
         Method::Password => page::Notice::Failed,
+        Method::Passkey => page::Notice::Passkey,
         _ => page::Notice::CodeFailed,
     };
-    let guard = guard_try(cx, key.as_deref(), method == Method::Certificate)?;
+    let counted = match method {
+        Method::Certificate => Counted::Certificate,
+        Method::Passkey => Counted::Passkey,
+        _ => Counted::Account,
+    };
+    let guard = guard_try(cx, key.as_deref(), counted)?;
+    // The challenge this browser was given, taken: an answer is for one challenge, held by one browser, made for the account the
+    // sign-in has (or for none, when it has none). Counted as a failure like a wrong password when there is none.
+    let ceremony = if method == Method::Passkey {
+        let held = request
+            .cookie(passkeys::COOKIE)
+            .and_then(|token| inner.ceremonies.take(&token))
+            .filter(|held| {
+                held.account
+                    .as_ref()
+                    .map(|(name, uid)| (name.as_str(), *uid))
+                    == cx.account
+            });
+        match held {
+            Some(held) => Some(held),
+            None => {
+                tracing::info!("a passkey sign-in from {address} had no challenge of its own");
+                return Err(refused(cx, refused_notice));
+            }
+        }
+    } else {
+        None
+    };
     // Only a check that reaches the operating system's accounts waits for a free place: a code is read from a file.
     let waits_in_line = !method.needs_account();
     if waits_in_line
@@ -325,11 +378,20 @@ pub fn take_step(
         guard.succeeded(inner);
         return Err((cx.fail)(503, page::Notice::Busy, None));
     }
+    let mut credential = None;
     let result = match method {
         Method::Certificate => {
             inner
                 .accounts
                 .sign_in_certificate(&presented(request), address, &providers)
+        }
+        Method::Passkey => {
+            let challenge = ceremony.map(|held| held.challenge).unwrap_or_default();
+            let answered = inner
+                .accounts
+                .sign_in_passkey(&secret, &challenge, address, &providers);
+            credential = answered.credential;
+            answered.result
         }
         Method::Password => inner.accounts.sign_in(user.trim(), &secret, &providers),
         _ => match cx.account {
@@ -377,6 +439,7 @@ pub fn take_step(
                 uid,
                 groups,
                 provider,
+                credential,
                 guard,
             })
         }
@@ -450,6 +513,7 @@ pub fn record_step(
             pending.password_at = Some(Instant::now());
             pending.fingerprint = carried();
         }
+        Method::Passkey => pending.passkey.clone_from(&taken.credential),
         Method::Certificate if pending.password_at.is_none() => pending.fingerprint = carried(),
         _ => {}
     }
@@ -484,6 +548,7 @@ pub fn advance(cx: &Cx<'_>, taken: Taken, pending: Option<(String, Pending)>) ->
                 first: None,
                 password_at: None,
                 fingerprint: None,
+                passkey: None,
             },
         ),
     };
@@ -491,6 +556,7 @@ pub fn advance(cx: &Cx<'_>, taken: Taken, pending: Option<(String, Pending)>) ->
     let refused_notice = match taken.method {
         Method::Certificate => page::Notice::Certificate,
         Method::Password => page::Notice::Failed,
+        Method::Passkey => page::Notice::Passkey,
         _ => page::Notice::CodeFailed,
     };
     let decided = inner.policy.decide(policy::context(
@@ -582,6 +648,7 @@ pub fn advance(cx: &Cx<'_>, taken: Taken, pending: Option<(String, Pending)>) ->
             fingerprint: state.fingerprint.clone(),
             done: state.done.clone(),
             code_made,
+            passkey: state.passkey.clone(),
         });
         taken.guard.succeeded(inner);
         let Some(string) = handed else {
@@ -607,6 +674,7 @@ pub fn advance(cx: &Cx<'_>, taken: Taken, pending: Option<(String, Pending)>) ->
         state.fingerprint.clone(),
         state.done.clone(),
         code_made,
+        state.passkey.clone(),
     ) else {
         taken.guard.succeeded(inner);
         return Advance::Respond((cx.fail)(503, page::Notice::Busy, None));

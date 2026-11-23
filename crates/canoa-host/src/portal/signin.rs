@@ -97,6 +97,9 @@ pub enum Method {
     Totp,
     /// A one-time recovery code made when the code was set up. It is checked for an account an earlier step named.
     RecoveryCode,
+    /// A passkey (WebAuthn): the browser signs a challenge the portal made, with a key held on the person's device. It names its
+    /// own account, so it can be a first step; a later step is asked for that account's passkeys alone.
+    Passkey,
 }
 
 impl Method {
@@ -108,6 +111,7 @@ impl Method {
             Self::Certificate => "certificate",
             Self::Totp => "totp",
             Self::RecoveryCode => "recovery_code",
+            Self::Passkey => "passkey",
         }
     }
 
@@ -119,6 +123,7 @@ impl Method {
             Self::Certificate,
             Self::Totp,
             Self::RecoveryCode,
+            Self::Passkey,
         ]
         .into_iter()
         .find(|method| method.id() == word)
@@ -193,6 +198,73 @@ pub enum FactorError {
     NothingWaiting,
     /// The code did not confirm the setup.
     Wrong,
+    /// The store could not be read or written; the reason is for the log.
+    Failed(String),
+}
+
+/// A challenge for one passkey ceremony: what the browser needs to answer it.
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PasskeyChallenge {
+    /// The key the answer is returned with: kept by the portal, never shown to the browser as such.
+    pub challenge: String,
+    /// WebAuthn's `PublicKeyCredentialRequestOptions` (or creation options) as JSON text, passed on unread.
+    pub options: String,
+    /// When the challenge stops being taken, in seconds since the epoch.
+    pub expires_unix: i64,
+}
+
+impl core::fmt::Debug for PasskeyChallenge {
+    /// Nothing of the challenge: it is the thing an answer is signed over.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PasskeyChallenge")
+            .field("expires_unix", &self.expires_unix)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a passkey sign-in came to: the account, and the credential that signed it in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PasskeyAnswer {
+    /// The sign-in's outcome, as for any method.
+    pub result: SignIn,
+    /// The id of the passkey that signed in, when the result admits an account.
+    pub credential: Option<String>,
+}
+
+/// One passkey of an account, as the Passkeys page and an administrator's listing show it: never a key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PasskeyInfo {
+    /// The credential's id, which `remove` and `label` take.
+    pub id: String,
+    /// What the person calls it.
+    pub label: Option<String>,
+    /// When it was added, in seconds since the epoch.
+    pub made_unix: Option<i64>,
+    /// When it last signed in.
+    pub used_unix: Option<i64>,
+    /// Whether the platform syncs it between devices rather than keeping it on one.
+    pub synced: Option<bool>,
+    /// Whether an administrator or the provider refuses it now.
+    pub disabled: bool,
+}
+
+/// Why a passkey ceremony or change did not go through.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PasskeyError {
+    /// This portal keeps no passkeys.
+    Unsupported,
+    /// Too many ceremonies are waiting from this address, or in all: try again later.
+    Busy,
+    /// The account has no passkey to ask for, or none is this account's.
+    NoPasskey,
+    /// Nothing was waiting for the answer, or it timed out.
+    NothingWaiting,
+    /// The provider refused the answer or the change; the reason is for the log, never for the browser.
+    Refused(String),
     /// The store could not be read or written; the reason is for the log.
     Failed(String),
 }
@@ -334,6 +406,106 @@ pub trait Accounts: Send + Sync {
     fn reset_factor(&self, user: &str, uid: u32) -> Result<bool, FactorError> {
         let _ = (user, uid);
         Err(FactorError::Unsupported)
+    }
+
+    /// Begins a passkey ceremony for a browser at `client`: a challenge whose answer [`Accounts::sign_in_passkey`] checks.
+    /// `account` is the account an earlier step named, whose passkeys alone are asked for; `None` asks for any passkey the
+    /// browser holds for this site (no name typed). Asks only the providers in `providers`, or every one that takes passkeys
+    /// when it is empty. The default refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`PasskeyError`] for a portal that keeps no passkeys, an address that holds too many challenges already, or an account
+    /// with no passkey.
+    fn passkey_challenge(
+        &self,
+        account: Option<(&str, u32)>,
+        client: IpAddr,
+        providers: &[String],
+    ) -> Result<PasskeyChallenge, PasskeyError> {
+        let _ = (account, client, providers);
+        Err(PasskeyError::Unsupported)
+    }
+
+    /// Checks `answer`, the browser's signed answer (`PublicKeyCredential` as JSON text), to the challenge `challenge` made for
+    /// it, for a browser at `client`. The challenge is used up whatever the outcome. The default refuses.
+    fn sign_in_passkey(
+        &self,
+        answer: &str,
+        challenge: &str,
+        client: IpAddr,
+        providers: &[String],
+    ) -> PasskeyAnswer {
+        let _ = (answer, challenge, client, providers);
+        PasskeyAnswer {
+            result: SignIn::Refused,
+            credential: None,
+        }
+    }
+
+    /// The passkeys of the account `user` with user id `uid`; an account made again under the same name has none of the earlier
+    /// one's.
+    ///
+    /// # Errors
+    ///
+    /// [`PasskeyError::Unsupported`] for a portal that keeps none, [`PasskeyError::Failed`] for a store that cannot be read.
+    fn passkeys(&self, user: &str, uid: u32) -> Result<Vec<PasskeyInfo>, PasskeyError> {
+        let _ = (user, uid);
+        Err(PasskeyError::Unsupported)
+    }
+
+    /// Begins adding a passkey to the account: WebAuthn's creation options as JSON text, for the browser to answer. What is kept
+    /// for an account that had this name and another user id is taken away first.
+    ///
+    /// # Errors
+    ///
+    /// [`PasskeyError`] for a portal that keeps no passkeys, an account at its limit, or a store that cannot be written.
+    fn begin_passkey(&self, user: &str, uid: u32) -> Result<String, PasskeyError> {
+        let _ = (user, uid);
+        Err(PasskeyError::Unsupported)
+    }
+
+    /// Confirms the addition begun for the account with the browser's `answer`, calling the passkey `label`; the new passkey's
+    /// id. It is the account's, and a sign-in by it names this user id.
+    ///
+    /// # Errors
+    ///
+    /// [`PasskeyError`] when nothing waits, the provider refuses the answer, or the store fails.
+    fn confirm_passkey(
+        &self,
+        user: &str,
+        uid: u32,
+        answer: &str,
+        label: &str,
+    ) -> Result<String, PasskeyError> {
+        let _ = (user, uid, answer, label);
+        Err(PasskeyError::Unsupported)
+    }
+
+    /// Takes the passkey `id` away from the account; whether it had it.
+    ///
+    /// # Errors
+    ///
+    /// [`PasskeyError`] when the store cannot be written.
+    fn remove_passkey(&self, user: &str, uid: u32, id: &str) -> Result<bool, PasskeyError> {
+        let _ = (user, uid, id);
+        Err(PasskeyError::Unsupported)
+    }
+
+    /// Names the passkey `id` of the account `label`.
+    ///
+    /// # Errors
+    ///
+    /// [`PasskeyError`] when the account has no such passkey or the store cannot be written.
+    fn label_passkey(
+        &self,
+        user: &str,
+        uid: u32,
+        id: &str,
+        label: &str,
+    ) -> Result<(), PasskeyError> {
+        let _ = (user, uid, id, label);
+        Err(PasskeyError::Unsupported)
     }
 
     /// Whether `user` is still the account with user id `uid`, asked again each time a host is wanted, so an account that was

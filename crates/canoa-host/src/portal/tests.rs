@@ -2362,6 +2362,7 @@ fn the_certificate_sign_in_is_asked_for_the_browsers_address_not_the_proxys() {
 }
 
 mod office;
+mod passkeys;
 mod second_step;
 mod sign_in_policy;
 

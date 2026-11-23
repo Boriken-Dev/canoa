@@ -305,24 +305,33 @@ impl CodeStore {
     ///
     /// A message naming the path and whose it is.
     pub(super) fn check_files_owned(&self) -> Result<(), String> {
-        use std::os::unix::fs::MetadataExt as _;
-        let me = rustix::process::geteuid().as_raw();
-        for path in &self.files {
-            match std::fs::metadata(path) {
-                Ok(meta) if meta.uid() != me => {
-                    return Err(format!(
-                        "{} belongs to user id {}, not to the account this command runs as ({me}): run it as the portal's account",
-                        path.display(),
-                        meta.uid()
-                    ));
-                }
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(format!("{}: {error}", path.display())),
-            }
-        }
-        Ok(())
+        check_owned(&self.files)
     }
+}
+
+/// Whether each of `files` that exists belongs to the account this process runs as.
+///
+/// # Errors
+///
+/// A message naming the path and whose it is.
+pub(super) fn check_owned(files: &[PathBuf]) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt as _;
+    let me = rustix::process::geteuid().as_raw();
+    for path in files {
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.uid() != me => {
+                return Err(format!(
+                    "{} belongs to user id {}, not to the account this command runs as ({me}): run it as the portal's account",
+                    path.display(),
+                    meta.uid()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("{}: {error}", path.display())),
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn code_accounts(

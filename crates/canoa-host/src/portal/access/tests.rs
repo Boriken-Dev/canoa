@@ -1292,3 +1292,255 @@ fn the_owner_check_looks_at_the_code_providers_files_and_no_others() {
     let error = codes.check_code_files_owned().unwrap_err();
     assert!(error.contains("belongs to user id 0"), "{error}");
 }
+
+fn passkey_entry(file: &Path) -> Entry {
+    let mut config = file_source(file);
+    config["rp_id"] = super::super::device::RP_ID.into();
+    config["origins"] = serde_json::json!([super::super::device::ORIGIN]);
+    entry(
+        "coqui_access_passkey",
+        Some(plugin("coqui_access_passkey")),
+        &config,
+    )
+}
+
+/// An access with the passkey provider keeping its tables under `dir`, and a password provider so the portal has a first way in.
+fn passkey_access(dir: &Path) -> Access {
+    let file = dir.join("accounts.toml");
+    seed_password(&file, &my_name(), "x");
+    Access::new(&settings(vec![
+        password_entry(&file),
+        passkey_entry(&dir.join("passkeys.toml")),
+    ]))
+    .unwrap()
+}
+
+/// Adds a passkey to the account the way the Passkeys page does: begin, the device answers, confirm.
+fn add_passkey(
+    access: &Access,
+    device: &mut super::super::device::Device,
+    user: &str,
+    uid: u32,
+    label: &str,
+) -> String {
+    let options = access.begin_passkey(user, uid).unwrap();
+    let answer = device
+        .register(super::super::device::ORIGIN, &options)
+        .unwrap();
+    access.confirm_passkey(user, uid, &answer, label).unwrap()
+}
+
+/// A sign-in by passkey the way the login page does it: a challenge (for `account`, or for any passkey), the device's answer,
+/// and the check.
+fn passkey_in(
+    access: &Access,
+    device: &mut super::super::device::Device,
+    account: Option<(&str, u32)>,
+) -> PasskeyAnswer {
+    let made = access.passkey_challenge(account, client(), &[]).unwrap();
+    let answer = device
+        .authenticate(super::super::device::ORIGIN, &made.options)
+        .unwrap();
+    access.sign_in_passkey(&answer, &made.challenge, client(), &[])
+}
+
+#[test]
+fn a_passkey_registered_for_an_account_signs_it_in_with_no_name_typed_and_with_one() {
+    let dir = scratch("passkey-in");
+    let access = passkey_access(&dir);
+    let me = my_name();
+    assert!(access.methods().contains(&Method::Passkey));
+    let mut device = super::super::device::Device::new();
+    let id = add_passkey(&access, &mut device, &me, mine(), "laptop");
+    assert!(!id.is_empty());
+    let listed = access.passkeys(&me, mine()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, id);
+    assert_eq!(listed[0].label.as_deref(), Some("laptop"));
+    assert_eq!(listed[0].used_unix, None);
+    for account in [None, Some((me.as_str(), mine()))] {
+        let signed = passkey_in(&access, &mut device, account);
+        assert!(
+            matches!(&signed.result, SignIn::Admitted { user, uid, .. } if *user == me && *uid == mine()),
+            "{signed:?}"
+        );
+        assert_eq!(signed.credential.as_deref(), Some(id.as_str()));
+    }
+    assert!(access.passkeys(&me, mine()).unwrap()[0].used_unix.is_some());
+}
+
+#[test]
+fn a_passkey_answer_is_taken_once_and_one_for_another_challenge_is_refused() {
+    let dir = scratch("passkey-once");
+    let access = passkey_access(&dir);
+    let me = my_name();
+    let mut device = super::super::device::Device::new();
+    add_passkey(&access, &mut device, &me, mine(), "laptop");
+    let made = access.passkey_challenge(None, client(), &[]).unwrap();
+    let answer = device
+        .authenticate(super::super::device::ORIGIN, &made.options)
+        .unwrap();
+    let other = access.passkey_challenge(None, client(), &[]).unwrap();
+    // The answer was signed over the first challenge: the second one's key does not take it.
+    assert_eq!(
+        access
+            .sign_in_passkey(&answer, &other.challenge, client(), &[])
+            .result,
+        SignIn::Refused
+    );
+    assert!(matches!(
+        access
+            .sign_in_passkey(&answer, &made.challenge, client(), &[])
+            .result,
+        SignIn::Admitted { .. }
+    ));
+    assert_eq!(
+        access
+            .sign_in_passkey(&answer, &made.challenge, client(), &[])
+            .result,
+        SignIn::Refused,
+        "the same answer, again"
+    );
+}
+
+#[test]
+fn a_passkey_of_an_account_the_system_does_not_admit_signs_no_one_in() {
+    let dir = scratch("passkey-groups");
+    let access = passkey_access(&dir);
+    let me = my_name();
+    let mut device = super::super::device::Device::new();
+    add_passkey(&access, &mut device, &me, mine(), "laptop");
+    // The same files, read by a portal that admits only a group the account is not in.
+    let mut narrow = settings(vec![passkey_entry(&dir.join("passkeys.toml"))]);
+    narrow.groups = vec!["no-such-group-here".to_owned()];
+    let narrow = Access::new(&narrow).unwrap();
+    assert_eq!(
+        passkey_in(&narrow, &mut device, None).result,
+        SignIn::Refused
+    );
+}
+
+#[test]
+fn a_passkey_kept_for_another_user_id_under_the_same_name_is_nobodys_and_is_replaced() {
+    let dir = scratch("passkey-uid");
+    let access = passkey_access(&dir);
+    let me = my_name();
+    let mut device = super::super::device::Device::new();
+    // Added when the account had another user id.
+    let old = add_passkey(&access, &mut device, &me, mine() + 1, "before");
+    assert!(access.passkeys(&me, mine()).unwrap().is_empty());
+    assert_eq!(access.passkeys(&me, mine() + 1).unwrap().len(), 1);
+    assert_eq!(
+        access.passkey_challenge(Some((&me, mine())), client(), &[]),
+        Err(PasskeyError::NoPasskey)
+    );
+    // Asked for with no name, the answer is the provider's valid one and the mark says whose it is: not this user id's.
+    assert_eq!(
+        passkey_in(&access, &mut device, None).result,
+        SignIn::Refused
+    );
+    // The account adds one now: what the name held before goes first, so the old one signs no one in afterwards either.
+    let mut fresh = super::super::device::Device::new();
+    let new = add_passkey(&access, &mut fresh, &me, mine(), "now");
+    let held = access.passkeys(&me, mine()).unwrap();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].id, new);
+    assert!(
+        access
+            .passkeys(&me, mine() + 1)
+            .unwrap()
+            .iter()
+            .all(|passkey| passkey.id != old)
+    );
+    assert!(matches!(
+        passkey_in(&access, &mut fresh, None).result,
+        SignIn::Admitted { .. }
+    ));
+}
+
+#[test]
+fn a_passkey_store_needs_a_source_file_and_only_one_provider_keeps_passkeys() {
+    let dir = scratch("passkey-source");
+    let file = dir.join("accounts.toml");
+    seed_password(&file, &my_name(), "x");
+    let mut memory = passkey_entry(&dir.join("a.toml"));
+    memory.config.remove("source");
+    let error = Access::new(&settings(vec![password_entry(&file), memory])).unwrap_err();
+    assert!(
+        error.contains("coqui_access_passkey") && error.contains("source"),
+        "{error}"
+    );
+    let twice = settings(vec![
+        password_entry(&file),
+        passkey_entry(&dir.join("a.toml")),
+        passkey_entry(&dir.join("b.toml")),
+    ]);
+    assert!(Access::new(&twice).is_err());
+    // Without a passkey provider, the portal keeps none.
+    let none = Access::new(&settings(vec![password_entry(&file)])).unwrap();
+    assert!(!none.methods().contains(&Method::Passkey));
+    assert_eq!(
+        none.passkey_challenge(None, client(), &[]),
+        Err(PasskeyError::Unsupported)
+    );
+}
+
+#[test]
+fn a_policy_that_names_other_providers_asks_no_passkey_provider() {
+    let dir = scratch("passkey-providers");
+    let access = passkey_access(&dir);
+    let me = my_name();
+    let mut device = super::super::device::Device::new();
+    add_passkey(&access, &mut device, &me, mine(), "laptop");
+    let other = vec!["somebody_else".to_owned()];
+    assert_eq!(
+        access.passkey_challenge(None, client(), &other),
+        Err(PasskeyError::Unsupported)
+    );
+    let made = access.passkey_challenge(None, client(), &[]).unwrap();
+    let answer = device
+        .authenticate(super::super::device::ORIGIN, &made.options)
+        .unwrap();
+    assert_eq!(
+        access
+            .sign_in_passkey(&answer, &made.challenge, client(), &other)
+            .result,
+        SignIn::Refused
+    );
+}
+
+#[test]
+fn a_removed_passkey_signs_no_one_in_and_the_listing_never_shows_a_key() {
+    let dir = scratch("passkey-remove");
+    let access = passkey_access(&dir);
+    let me = my_name();
+    let mut device = super::super::device::Device::new();
+    let id = add_passkey(&access, &mut device, &me, mine(), "laptop");
+    let listing = access.list_passkeys().unwrap();
+    assert_eq!(listing.len(), 1);
+    assert_eq!(access.remove_passkey(&me, mine(), "nope"), Ok(false));
+    access.label_passkey(&me, mine(), &id, "desk").unwrap();
+    assert_eq!(
+        access.passkeys(&me, mine()).unwrap()[0].label.as_deref(),
+        Some("desk")
+    );
+    assert_eq!(access.remove_passkey(&me, mine(), &id), Ok(true));
+    assert_eq!(access.remove_passkey(&me, mine(), &id), Ok(false));
+    assert!(access.passkeys(&me, mine()).unwrap().is_empty());
+    // The device still holds the credential, and the provider holds no account for it.
+    assert_eq!(device.store.len(), 1);
+    let made = access.passkey_challenge(None, client(), &[]).unwrap();
+    let answer = device
+        .authenticate(super::super::device::ORIGIN, &made.options)
+        .unwrap();
+    assert_eq!(
+        access
+            .sign_in_passkey(&answer, &made.challenge, client(), &[])
+            .result,
+        SignIn::Refused
+    );
+    // An administrator's removal by name takes what is left, and counts it.
+    add_passkey(&access, &mut device, &me, mine(), "again");
+    assert_eq!(access.remove_passkeys_of(&me, None), Ok(1));
+    assert_eq!(access.remove_passkeys_of(&me, None), Ok(0));
+}

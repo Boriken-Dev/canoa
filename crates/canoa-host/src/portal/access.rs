@@ -9,6 +9,7 @@
 
 mod certs;
 mod codes;
+mod passkeys;
 
 #[cfg(test)]
 mod tests;
@@ -32,11 +33,13 @@ use certs::{
 };
 pub use codes::FactorEntry;
 use codes::{CodeStore, KeyError, code_accounts, code_files};
+use passkeys::PasskeyStore;
 
 use super::settings::{Entry, Settings};
 use super::signin::{
     Accounts, CertificateStatus, CodeCheck, Enrolment, FactorError, FactorStanding, MAX_PASSWORD,
-    Method, PinError, SignIn, Standing, valid_user,
+    Method, PasskeyAnswer, PasskeyChallenge, PasskeyError, PasskeyInfo, PinError, SignIn, Standing,
+    valid_user,
 };
 
 /// The provider id of the operating system's accounts.
@@ -60,6 +63,9 @@ struct Link {
     directory: Option<Arc<dyn Directory>>,
     /// Whether it takes the forwarded certificate rather than a password.
     takes_request: bool,
+    /// Whether the accounts it names carry the `uid:<n>` mark and are refused without it, so that an account made again under
+    /// the same name does not inherit what the one before had.
+    marked: bool,
 }
 
 /// The portal's accounts: the authenticators of `Settings::authenticators`, in order, over the operating system's directory.
@@ -78,6 +84,8 @@ pub struct Access {
     matcher_directory: Option<Arc<dyn Directory>>,
     /// The one-time codes, when a provider keeps them.
     codes: Option<CodeStore>,
+    /// The passkeys, when a provider keeps them.
+    passkeys: Option<PasskeyStore>,
     /// Dropped after the links, whose instances point into what it loaded.
     _registry: Arc<Registry>,
 }
@@ -87,6 +95,7 @@ impl fmt::Debug for Access {
         f.debug_struct("Access")
             .field("passwords", &self.passwords.len())
             .field("certificates", &self.certificates.len())
+            .field("passkeys", &self.passkeys.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -229,6 +238,7 @@ impl Access {
         let mut certificates = Vec::new();
         let mut pins = None;
         let mut codes = None;
+        let mut passkeys = None;
         let matcher = build_matcher(settings)?;
         for entry in &settings.authenticators {
             for path in loose_sources(&entry.config) {
@@ -287,6 +297,31 @@ impl Access {
                         files: code_files(&entry.config),
                     });
                 }
+                Some(takes::PASSKEY) => {
+                    if passkeys.is_some() {
+                        return Err(
+                            "authenticators: at most one provider keeps passkeys".to_owned()
+                        );
+                    }
+                    // The challenger, the authenticator and the account kind are three instances of the provider; only the
+                    // files they share make a ceremony begun on one visible to the others.
+                    if !entry.config.contains_key("source") {
+                        return Err(format!(
+                            "authenticators: {} needs a `source` file to keep passkeys in",
+                            entry.provider
+                        ));
+                    }
+                    passkeys = Some(passkeys::store(
+                        &registry,
+                        &entry.provider,
+                        &config,
+                        Link {
+                            marked: true,
+                            ..link
+                        },
+                        passkeys::files_of(&entry.config),
+                    )?);
+                }
                 // A provider that says nothing of what it takes is asked for a name and a password.
                 Some(takes::PASSWORD) | None => passwords.push(link),
                 Some(other) => {
@@ -297,7 +332,7 @@ impl Access {
                 }
             }
         }
-        if passwords.is_empty() && certificates.is_empty() {
+        if passwords.is_empty() && certificates.is_empty() && passkeys.is_none() {
             return Err("authenticators: none signs anyone in".to_owned());
         }
         Ok(Self {
@@ -309,6 +344,7 @@ impl Access {
             matcher,
             matcher_directory: None,
             codes,
+            passkeys,
             _registry: Arc::new(registry),
         })
     }
@@ -388,6 +424,70 @@ impl Access {
             .map_or(Ok(()), CodeStore::check_files_owned)
     }
 
+    /// Who has passkeys, for an administrator's listing: each account's name and its passkeys, never a key.
+    ///
+    /// # Errors
+    ///
+    /// A message when no provider keeps passkeys or its store cannot be read.
+    pub fn list_passkeys(&self) -> Result<Vec<(String, Vec<PasskeyInfo>)>, String> {
+        self.passkeys
+            .as_ref()
+            .ok_or_else(|| "this portal keeps no passkeys".to_owned())?
+            .all()
+            .map_err(|error| format!("{error:?}"))
+    }
+
+    /// Takes the passkey `id`, or every passkey, from the account called `name` (as the provider keeps it, which is the system's
+    /// spelling: an account that is gone still has its name), and returns how many went. The sessions a passkey opened end at
+    /// their next use.
+    ///
+    /// # Errors
+    ///
+    /// A message when no provider keeps passkeys or its store cannot be written.
+    pub fn remove_passkeys_of(&self, name: &str, id: Option<&str>) -> Result<usize, String> {
+        let store = self
+            .passkeys
+            .as_ref()
+            .ok_or_else(|| "this portal keeps no passkeys".to_owned())?;
+        let held = store
+            .all()
+            .map_err(|error| format!("{error:?}"))?
+            .into_iter()
+            .find(|(each, _)| each == name)
+            .map(|(_, passkeys)| passkeys)
+            .unwrap_or_default();
+        match id {
+            Some(id) => {
+                if !held.iter().any(|passkey| passkey.id == id) {
+                    return Ok(0);
+                }
+                store
+                    .drop_credential(name, id)
+                    .map(usize::from)
+                    .map_err(|error| format!("{error:?}"))
+            }
+            None => {
+                let count = held.len();
+                store
+                    .remove_account(name)
+                    .map(|_| count)
+                    .map_err(|error| format!("{error:?}"))
+            }
+        }
+    }
+
+    /// Whether the files the passkeys are kept in, and the folder they are made in, belong to the account this process runs as: an
+    /// administrator's command run as another account would make files the portal's account cannot read.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the path and whose it is.
+    pub fn check_passkey_files_owned(&self) -> Result<(), String> {
+        self.passkeys
+            .as_ref()
+            .map_or(Ok(()), |store| codes::check_owned(&store.files))
+    }
+
     /// Clears what the portal counted of an account's failed second-step tries, and the provider's delay of it, for a person who
     /// was locked out by someone else's guesses and has changed their password. A portal that is running reads the time written
     /// here at the account's next try.
@@ -434,6 +534,12 @@ impl Access {
                             && marker
                                 .as_deref()
                                 .is_some_and(|marker| marker != uid.to_string()) =>
+                    {
+                        SignIn::Refused
+                    }
+                    // A passkey is made with the mark, and one without it is nobody's.
+                    SignIn::Admitted { uid, .. }
+                        if link.marked && marker.as_deref() != Some(uid.to_string().as_str()) =>
                     {
                         SignIn::Refused
                     }
@@ -584,6 +690,7 @@ fn link(registry: &Registry, id: &str, config: &Value) -> Result<Link, String> {
         authenticator,
         directory,
         takes_request: false,
+        marked: false,
     })
 }
 
@@ -598,6 +705,9 @@ impl Accounts for Access {
         }
         if self.codes.is_some() {
             methods.extend([Method::Totp, Method::RecoveryCode]);
+        }
+        if self.passkeys.is_some() {
+            methods.push(Method::Passkey);
         }
         methods
     }
@@ -727,6 +837,97 @@ impl Accounts for Access {
                 KeyError::Unsupported => FactorError::Unsupported,
                 KeyError::Failed(why) => FactorError::Failed(why),
             })
+    }
+
+    fn passkey_challenge(
+        &self,
+        account: Option<(&str, u32)>,
+        client: IpAddr,
+        providers: &[String],
+    ) -> Result<PasskeyChallenge, PasskeyError> {
+        self.passkeys
+            .as_ref()
+            .ok_or(PasskeyError::Unsupported)?
+            .challenge(account, client, providers)
+    }
+
+    fn sign_in_passkey(
+        &self,
+        answer: &str,
+        challenge: &str,
+        client: IpAddr,
+        providers: &[String],
+    ) -> PasskeyAnswer {
+        let refused = |result| PasskeyAnswer {
+            result,
+            credential: None,
+        };
+        let Some(store) = &self.passkeys else {
+            return refused(SignIn::Refused);
+        };
+        match store.authenticate(answer, challenge, client, providers) {
+            Ok(Verdict::Valid(lookup)) => {
+                let credential = lookup
+                    .claims
+                    .as_ref()
+                    .and_then(|claims| claims.get("passkey.credential").first().cloned());
+                let result = self.resolve(&store.link, lookup);
+                let credential = matches!(result, SignIn::Admitted { .. })
+                    .then_some(credential)
+                    .flatten();
+                PasskeyAnswer { result, credential }
+            }
+            Ok(_) => refused(SignIn::Refused),
+            Err(PasskeyError::Failed(why)) => refused(SignIn::Failed(why)),
+            Err(_) => refused(SignIn::Refused),
+        }
+    }
+
+    fn passkeys(&self, user: &str, uid: u32) -> Result<Vec<PasskeyInfo>, PasskeyError> {
+        self.passkeys
+            .as_ref()
+            .ok_or(PasskeyError::Unsupported)?
+            .passkeys(user, uid)
+    }
+
+    fn begin_passkey(&self, user: &str, uid: u32) -> Result<String, PasskeyError> {
+        self.passkeys
+            .as_ref()
+            .ok_or(PasskeyError::Unsupported)?
+            .begin(user, uid)
+    }
+
+    fn confirm_passkey(
+        &self,
+        user: &str,
+        uid: u32,
+        answer: &str,
+        label: &str,
+    ) -> Result<String, PasskeyError> {
+        self.passkeys
+            .as_ref()
+            .ok_or(PasskeyError::Unsupported)?
+            .confirm(user, uid, answer, label)
+    }
+
+    fn remove_passkey(&self, user: &str, uid: u32, id: &str) -> Result<bool, PasskeyError> {
+        self.passkeys
+            .as_ref()
+            .ok_or(PasskeyError::Unsupported)?
+            .remove(user, uid, id)
+    }
+
+    fn label_passkey(
+        &self,
+        user: &str,
+        uid: u32,
+        id: &str,
+        label: &str,
+    ) -> Result<(), PasskeyError> {
+        self.passkeys
+            .as_ref()
+            .ok_or(PasskeyError::Unsupported)?
+            .label(user, uid, id, label)
     }
 
     fn still(&self, user: &str, uid: u32) -> Standing {
