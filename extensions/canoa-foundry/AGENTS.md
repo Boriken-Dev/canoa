@@ -145,11 +145,11 @@ pub mod models {
 // Foundry Local as an account of the host.
 pub mod account {
     pub const KIND: &str = "foundry-local";
-    #[non_exhaustive] pub struct Settings { pub model: String, pub endpoint: Option<String>, pub library: Option<String>, pub engine: EngineKind, pub window: Option<u64> }   // `window` is no key of the account: the host fills it from its own configuration
-    #[non_exhaustive] pub enum Error { NotText(String), UnknownSetting(String), InvalidAnswerSeconds, MissingModel, InvalidEngine }
-    impl Settings { pub fn from_map(map: &Map<String, Value>) -> Result<Self, Error>; }
+    #[non_exhaustive] pub struct Settings { pub model: String, pub endpoint: Option<String>, pub library: Option<String>, pub engine: EngineKind, pub window: Option<u64>, pub answer_seconds: Option<NonZeroU64> }   // derives `FromValue` and `Schema`; `window` is no key of the account: the host fills it from its own configuration
+    #[non_exhaustive] pub enum Error { Shape(String) /* a key the kind lacks, a missing model, an engine or answer_seconds that is not one */, Empty(&'static str) }
+    impl Settings { pub fn from_value(table: &guatiao::Value) -> Result<Self, Error>; }
     #[non_exhaustive] pub enum EngineKind { Service, Sdk }
-    pub fn settings_schema() -> Value;                                   // model (required), endpoint, engine, library
+    pub fn settings_schema() -> guatiao::Value;                          // derived from `Settings`: model (required), endpoint, engine, library, answer_seconds
     pub fn offer() -> AccountOffer;                                      // the kind (state_dir, provides anthropic-api and openai-api) and the one sign-in method that makes it
     pub fn notices() -> Vec<String>;
 }

@@ -85,9 +85,8 @@ impl AccountProvider for FoundryAccounts {
         if request.method != KIND {
             return Err(refused("Foundry Local has no such way to sign in"));
         }
-        let inputs = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.inputs)
-            .map_err(|_| refused("the inputs are not a table"))?;
-        let settings = Settings::from_map(&inputs).map_err(|why| refused(why.to_string()))?;
+        let settings =
+            Settings::from_value(&request.inputs).map_err(|why| refused(why.to_string()))?;
         let mut outcome = LoginOutcome::new(KIND, Credentials::new());
         outcome.settings = request.inputs;
         outcome.label = Some(settings.model);
@@ -267,9 +266,8 @@ impl ModelGateway for FoundryGateway {
         request: GatewayRequest,
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<Object<dyn GatewayLease>, ProviderError> {
-        let map = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.settings)
-            .map_err(|_| refused("the account's settings are not a table"))?;
-        let mut settings = Settings::from_map(&map).map_err(|why| refused(why.to_string()))?;
+        let mut settings =
+            Settings::from_value(&request.settings).map_err(|why| refused(why.to_string()))?;
         let table =
             guatiao_serde::adapt::from_value::<Value>(&request.table).unwrap_or(Value::Null);
         settings.window = window_of(&table, &settings.model);
