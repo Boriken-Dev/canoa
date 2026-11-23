@@ -137,19 +137,6 @@ const builtInSectionsListing = r'''
       "form": null
     },
     {
-      "id": "mail",
-      "title": "Mail",
-      "help": null,
-      "icon": "mail",
-      "group": "Agents",
-      "under": null,
-      "keywords": "email exchange outlook ews mailbox inbox messages password account add remove test sign in",
-      "origin": "built-in",
-      "stored": "config",
-      "schema": null,
-      "form": null
-    },
-    {
       "id": "shells",
       "title": "Shells",
       "help": null,

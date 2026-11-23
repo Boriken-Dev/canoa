@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_mail.dart';
+import 'fixtures/sections_fixture.dart';
 import 'fixtures/settings_fixture.dart';
 import 'fixtures/store_fixtures.dart';
 
@@ -30,7 +31,7 @@ void main() {
       Future<MailAccountsController> open(WidgetTester tester) async {
         final controller = MailAccountsController(host: _host());
         await controller.refresh();
-        await openSettings(tester, size: size, section: 'mail', mail: controller, version: '0.0.1');
+        await openSettings(tester, size: size, section: 'mail', mail: controller, version: '0.0.1', hostSections: sectionsWithMail());
         return controller;
       }
 

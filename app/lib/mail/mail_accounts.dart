@@ -159,7 +159,7 @@ final class MailTest {
   }
 }
 
-/// Where Settings' mail section reads and changes the host's `[host.mail]`.
+/// Where Settings' mail section reads and changes the host's mail accounts (`[host.services.mail]`).
 abstract interface class MailHost {
   Future<MailAccountsSnapshot> list();
   Future<MailAccountInfo> add(NewMailAccount account);

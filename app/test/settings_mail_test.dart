@@ -14,13 +14,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_mail.dart';
+import 'fixtures/sections_fixture.dart';
 import 'fixtures/settings_fixture.dart';
 
 MailAccountsController _controller(FakeMailHost host) => MailAccountsController(host: host);
 
 Future<MailAccountsController> _show(WidgetTester tester, FakeMailHost host) async {
   final controller = _controller(host);
-  await openSettings(tester, section: 'mail', mail: controller);
+  await openSettings(tester, section: 'mail', mail: controller, hostSections: sectionsWithMail());
   await tester.pumpAndSettle();
   return controller;
 }
@@ -32,9 +33,9 @@ Future<void> _fill(WidgetTester tester, String key, String text) async {
 
 void main() {
   testWidgets('Mail is a section only where the host lets this key set mail up', (tester) async {
-    await openSettings(tester);
+    await openSettings(tester, hostSections: sectionsWithMail());
     expect(find.byKey(const Key('settings-nav-mail')), findsNothing);
-    await openSettings(tester, mail: _controller(FakeMailHost()));
+    await openSettings(tester, mail: _controller(FakeMailHost()), hostSections: sectionsWithMail());
     expect(find.byKey(const Key('settings-nav-mail')), findsOneWidget);
   });
 
@@ -201,7 +202,7 @@ void main() {
 
   testWidgets('a host that does not answer is said in the section', (tester) async {
     final controller = MailAccountsController(host: _Unreachable());
-    await openSettings(tester, section: 'mail', mail: controller);
+    await openSettings(tester, section: 'mail', mail: controller, hostSections: sectionsWithMail());
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('mail-problem')), findsOneWidget);
     expect(find.textContaining('did not list the mail accounts'), findsOneWidget);

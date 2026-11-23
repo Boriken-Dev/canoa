@@ -340,7 +340,7 @@ time, until the host answers or says it has forgotten the session.
 | Excel (`ReadWriteDocument`) | `excel_get_selection`, `excel_list_tables`, `excel_get_table`, `excel_read_range` | `excel_write_range` (must fit its range) |
 
 Office.js gives a pane the open item and nothing of the rest of the mailbox, and the conversation as an id only, so there are no
-tools here to search mail or list a thread's other messages: with a mail account in `[host.mail]` the host's `canoa-mail` tools do
+tools here to search mail or list a thread's other messages: with a mail account in `[host.services.mail]` the host's `canoa-mail` tools do
 that, and `outlook_open_item` is how they start from the open message (its Internet message id is `message_id` of `mail_related`).
 The host tells every session that has the Outlook server so when it starts, in its own words; the identifiers come back as data
 when the agent asks, so a header a sender wrote never reaches the model as an instruction. A read answers at once, and says which item it came from (the same kind and

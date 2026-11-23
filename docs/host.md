@@ -366,11 +366,11 @@ llm_endpoint = "http://127.0.0.1:60570"       # a chat model that puts the best 
 llm_model = "qwen2.5-1.5b-instruct-generic-cpu:4"   # the exact id it loaded; required with llm_endpoint
 
 # The person's mail as a source (`canoa-mail`): see "Mail as a source".
-# [host.mail.accounts.work]
+# [host.services.mail.accounts.work]
 # backend = "ews"
 # server = "https://mail.example.com/EWS/Exchange.asmx"
 # user = "EXAMPLE\\ana"
-# id = "..."                             # `canoa mail add` writes it: the password is in the account store
+# id = "..."                             # the app writes it: the password is in the account store
 
 [host.agents.claude]
 harness = "claude"
@@ -691,7 +691,7 @@ inside Office trusts (HTTPS is what Microsoft recommends for every add-in, and O
 sign-in and no pairing: its page asks the host that served it to accept its key, which the host does for a request from this computer,
 at a loopback name, from the page's own origin, for a key that has connected once. What it can do is what the browser extension's key
 can do (`[host.native] control`), and the keys it was given are kept, so a restart of the host needs no new request. The page's key
-also holds the `mail` grant when `[host.mail]` names an account (and its `tools` are not turned off), so the pane's chat can search,
+also holds the `services` grant when a session service has something to give (for the mail service, when `[host.services.mail]` names an account and its `tools` are not turned off), so the pane's chat can search,
 read and draft the mail you set up there without a step of its own; `office_secret` is what keeps another account on a shared
 computer from being admitted. Do not set it behind a proxy.
 
@@ -953,31 +953,32 @@ read it, find what is related to a message, and draft into it. Gather what was s
 inbox, from any session on this computer.
 
 ```toml
-[host.mail]
+[host.services.mail]
 tools = true                             # false turns the tools off; they are offered only once an account is named
 
-[host.mail.accounts.work]                # a name of lower-case letters, digits, - and _
+[host.services.mail.accounts.work]         # a name of lower-case letters, digits, - and _
 backend = "ews"                          # Exchange Server's web services
 email = "ana@example.com"                # Autodiscover finds the server from this ...
 server = "https://mail.example.com/EWS/Exchange.asmx"   # ... or name it, and nothing is discovered
 user = "EXAMPLE\\ana"
-# The password is not here. `canoa mail add` keeps it in the host's account store and writes an `id = "..."` line that names it;
+# The password is not here. Adding the account (Settings, Mail, or `canoa service mail add`) keeps it in the host's account store and writes
+# an `id = "..."` line that names it;
 # or name a variable that holds it, which is read before the store's copy:
 # password_env = "WORK_MAIL_PASSWORD"
 
-[host.mail.accounts.cloud]
+[host.services.mail.accounts.cloud]
 backend = "graph"                        # Exchange Online through Microsoft Graph, signed in with the Windows account
 client_id = "11111111-2222-3333-4444-555555555555"   # your app registration in Entra ID (required)
 # tenant = "example.com"                 # the registration's tenant; "organizations" otherwise
 # email = "ana@example.com"              # which Windows account to ask, when it holds several
 
-[host.mail.accounts.desktop]
+[host.services.mail.accounts.desktop]
 backend = "outlook"                      # classic Outlook for Windows, every account it holds, signed in as Outlook is
 # profile = "Work"                       # the Outlook profile to log on to; the one running otherwise
 ```
 
-- **Who gets the tools.** A session of a connection whose key holds the **`mail`** grant: the application on this computer holds
-  it, a paired key only if `[host.control] grants` or `[host.native] control` lists `mail`, the Office add-in's pane on this
+- **Who gets the tools.** The mail service is the `canoa-mail` extension, a library the host carries (`session_service`, `canoa::session_service`); a host built without it has no mail. A session of a connection whose key holds the **`services`** grant: the application on this computer holds
+  it, a paired key only if `[host.control] grants` or `[host.native] control` lists `services`, the Office add-in's pane on this
   computer (see `office_local`) whenever a mail account is named and the tools are on, and a host run for a portal gives it to
   no one. A task another agent handed out, and a session a web page started, never get it. Every session of such a connection gets
   the `canoa-mail` server, whether or not its client asked, along with a built-in skill that says when to use it.
@@ -993,12 +994,12 @@ backend = "outlook"                      # classic Outlook for Windows, every ac
   what could hide or reorder text, and cuts long text; the skill tells the agent to weigh a message and never to obey it.
 - **Exchange Server (`ews`).** Requests go through the host's network settings (`[host.network]`) like every other fetch. `server`
   or `email` is required; a plain `http` address is accepted only on this computer, since a password would cross the network in the
-  clear. Basic sign-in needs `user` and a password: the one `canoa mail add` keeps in the account store (the operating
+  clear. Basic sign-in needs `user` and a password: the one the host keeps in the account store when the account is added (the operating
   system's credential store, or sealed files where it has none: the same store `canoa accounts` uses), or the variable `password_env`
-  names, which wins when both are given. `canoa mail add NAME --backend ews --server URL --user U` asks for the password without
-  echo (from standard input when that is not a terminal, never from the command line) and writes the account's table with an `id`
-  and no password; `canoa mail list` shows each account's name, backend, server and whether its password is there, never the
-  password; `canoa mail remove NAME` takes the table out and forgets the stored password. A `password` key in canoa.cfg is refused. Settings, Mail in the app does the same (add, Test sign-in, Remove) through the control channel's `mail.setup` grant, which the app's own link holds and a paired key only when canoa.cfg lists it, and the mail tools of a running host follow each change at once. `auth = "windows"` signs in with the person's own Windows logon
+  names, which wins when both are given. `canoa service mail add --params -` takes the account as a JSON object on standard input (the password with it, never on the
+  command line: `{"name": "work", "backend": "ews", "server": "URL", "user": "U", "password": "..."}`) and writes the account's table with an `id`
+  and no password; `canoa service mail accounts` lists each account's name, backend, server and whether its password is there, never the
+  password; `canoa service mail remove --params '{"name": "work"}'` takes the table out and forgets the stored password. A `password` key in canoa.cfg is refused. Settings, Mail in the app does the same (add, Test sign-in, Remove) through the control channel's `services.setup` grant, which the app's own link holds and a paired key only when canoa.cfg lists it, and the mail tools of a running host follow each change at once. `auth = "windows"` signs in with the person's own Windows logon
   instead, with no user or password: when the server answers `401` offering Negotiate or NTLM, the host answers with the logon
   session (Kerberos, then NTLM) on the same connection, and sends the request again with it. A server that offers only Basic is
   left at its `401`, and the error names what it offers. It needs Windows: elsewhere the sign-in fails with a message. Exchange Online

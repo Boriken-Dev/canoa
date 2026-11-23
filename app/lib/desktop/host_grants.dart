@@ -20,8 +20,9 @@ final class HostGrants extends ChangeNotifier {
   /// The grant that lists the secrets the host holds, shows one on request, forgets one and sets one.
   static const secrets = 'secrets';
 
-  /// The grant that lists, adds, tests and removes the host's mail accounts.
-  static const mailSetup = 'mail.setup';
+  /// The grant that reaches the control methods of the host's session services: the mail accounts of the host are listed, added,
+  /// tested and removed through it.
+  static const mailSetup = 'services.setup';
 
   /// The grant that writes the app's own tables of canoa.cfg, the saved connections among them.
   static const configWrite = 'config.write';
