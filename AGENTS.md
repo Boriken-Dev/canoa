@@ -107,6 +107,8 @@ cargo build -p canoa-ffi --lib
 (cd app && flutter test integration_test/embedded_host_test.dart -d windows)   # or -d linux
 # main.dart's own main in the built app, one step a run on a new empty DIR: first (no canoa.cfg), flag, config, hosted
 (cd app && CANOA_TEST_LAUNCH_STEP=first CANOA_CONFIG=DIR/canoa.cfg COQUI_AGENTIC_PEER_HOME=DIR/home flutter test integration_test/launch_test.dart -d windows)
+# typing into a real shell in the built app, in a conversation's panel and in the Terminal section, on a new empty DIR: keys and a click through SendInput (an unlocked desktop, the window brought in front; hands off meanwhile), or CANOA_TEST_INPUT=posted for Windows' messages posted to the engine's window, which runs locked
+(cd app && CANOA_CONFIG=DIR/canoa.cfg flutter test integration_test/terminal_input_test.dart -d windows)
 (cd clients/browser/chromium && npm test)
 (cd clients/office && npm test)
 (cd bindings/js/canoa-sdk && npm test && node tools/write_kinds.mjs --check)   # typecheck, unit tests, and whether the kinds are current
