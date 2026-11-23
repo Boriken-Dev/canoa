@@ -425,7 +425,8 @@ impl Stores {
         }
         if method == "store/list" {
             // The Agents type's stores, or with `{"kind": "programs"}` every other program a library offers: the runtimes and
-            // the programs of each type a library adds, each row naming its library and, when a type claims it, the type.
+            // the programs of each type a library adds, each row naming its library and, when a type claims it, the type and
+            // the library's title.
             let kind = params.get("kind").and_then(Value::as_str);
             let programs = match kind {
                 None | Some("agents") => false,
@@ -461,6 +462,12 @@ impl Stores {
                     }
                     if let Some(of_type) = of_type {
                         info["type"] = Value::String((*of_type).to_owned());
+                        // The library's own name for itself: the title of the extension that adds the type.
+                        if let Some(added) =
+                            self.types.iter().find(|added| added.info.id == *of_type)
+                        {
+                            info["library_title"] = Value::String(added.extension_title.clone());
+                        }
                     }
                 }
                 stores.push(info);
@@ -519,7 +526,14 @@ impl Stores {
                     ),
                 }
                 .map_err(|error| refusal(&error))?;
-                json_of(&plan)
+                let mut shown = json_of(&plan)?;
+                if action == Action::Uninstall
+                    && let Some(note) = self.removal_note(&provider)
+                    && let Some(notices) = shown.get_mut("notices").and_then(Value::as_array_mut)
+                {
+                    notices.push(Value::String(note));
+                }
+                Ok(shown)
             }
             _ => Err((NO_METHOD, "this host has no such method".to_owned())),
         }

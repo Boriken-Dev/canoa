@@ -62,6 +62,14 @@ pub const RESERVED_TABLES: [&str; 29] = [
     "voice",
 ];
 
+/// The step of a [`RowAction`] the host does itself, in place of asking [`ModelStore::act`]: it downloads the row's
+/// [`ModelRow::files`] into the folder the host keeps the type's models in, each checked against its SHA-256, and refuses when the
+/// type's program is not installed.
+pub const STEP_FETCH_FILES: &str = "fetch_files";
+
+/// The step the host does itself that takes the row's [`ModelRow::files`] out of that folder.
+pub const STEP_DELETE_FILES: &str = "delete_files";
+
 /// The most of a program's output that [`run`] keeps from each of its two streams.
 pub const MOST_OUTPUT: usize = 8 * 1024 * 1024;
 
@@ -143,6 +151,24 @@ pub struct ModelQuery {
     pub program: Option<String>,
     /// The person's home folder, where programs keep their own files.
     pub home: Option<String>,
+    /// The folder the host keeps the models the person installed on their own in, which may not exist yet: a row's
+    /// [`ModelFile::file`] is a path in it.
+    pub folder: Option<String>,
+}
+
+/// One file of a model, which the host downloads when a row's [`STEP_FETCH_FILES`] runs.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct ModelFile {
+    /// Where it is served from: an `https` address in one of the endpoints of the type's first program store.
+    pub url: String,
+    /// Where it is kept, relative to the models folder: plain names joined by `/`.
+    pub file: String,
+    /// Its size in bytes, when the publisher says; the download may not pass it.
+    pub bytes: Option<u64>,
+    /// Its SHA-256 in hexadecimal, which the download is checked against.
+    pub sha256: String,
 }
 
 /// One section of a model's page: a title, facts, paragraphs and, when `settings` is set, the form of the model's settings.
@@ -230,6 +256,9 @@ pub struct ModelRow {
     pub sections: Vec<Section>,
     /// Present when it may be used as the person's speech-to-text.
     pub speech: Option<SpeechUse>,
+    /// The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`].
+    #[map(default)]
+    pub files: Vec<ModelFile>,
 }
 
 /// The rows of a page, from [`ModelStore::list`].
@@ -304,6 +333,10 @@ pub struct ServiceQuery {
     pub home: Option<String>,
     /// The absolute path of the host's own copy of the type's program, for a `command` service, when the host has one.
     pub program: Option<String>,
+    /// The folder the host keeps the models the person installed on their own in, as [`ModelQuery::folder`].
+    pub folder: Option<String>,
+    /// The model to run, for a `command` service, when the person chose one of several installed; none is the library's own choice.
+    pub model: Option<String>,
     /// Whether to list the models that can transcribe, which may take a request to the service.
     #[map(default)]
     pub models: bool,
@@ -662,6 +695,25 @@ impl ModelRow {
             actions: Vec::new(),
             sections: Vec::new(),
             speech: None,
+            files: Vec::new(),
+        }
+    }
+}
+
+impl ModelFile {
+    /// The file `file` of the models folder, downloaded from `url` and checked against `sha256`.
+    #[must_use]
+    pub fn new(
+        url: impl Into<String>,
+        file: impl Into<String>,
+        bytes: Option<u64>,
+        sha256: impl Into<String>,
+    ) -> Self {
+        Self {
+            url: url.into(),
+            file: file.into(),
+            bytes,
+            sha256: sha256.into(),
         }
     }
 }

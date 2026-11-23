@@ -15,8 +15,8 @@ use canoa::store::engine::Engine;
 use canoa::store::recipe::Recipe;
 use canoa::store::{
     Action, ApplyOutcome, ApplyRequest, Check, InstallPlan, InstallPrompter, InstallTools,
-    LatestQuery, LatestReport, PlanRequest, Platform, ProgramQuery, ProgramReport, ProgramStore,
-    STORE_GLYPHS, StoreInfo, StoreSettings,
+    LatestQuery, LatestReport, Launch, ManagedCopy, PlanRequest, Platform, ProgramQuery,
+    ProgramReport, ProgramStore, STORE_GLYPHS, StoreInfo, StoreSettings,
 };
 use canoa_bitwarden::{
     BitwardenRecipe, DOWNLOADS as BITWARDEN_DOWNLOADS, RELEASES_API as BITWARDEN_RELEASES_API,
@@ -1323,7 +1323,8 @@ fn the_whisper_store_passes_every_check() {
 }
 
 #[test]
-fn the_whisper_plan_fetches_the_program_of_this_system_and_the_chosen_model_and_checks_both() {
+fn the_whisper_plan_fetches_the_program_of_this_system_alone_and_with_a_channel_also_its_model_and_checks_each()
+ {
     let store = Whisper(Engine::new(whisper_recipe(), StoreSettings::default()));
     let plan = plan_of(&store, &WhisperFixture, None);
     assert_eq!(
@@ -1331,8 +1332,8 @@ fn the_whisper_plan_fetches_the_program_of_this_system_and_the_chosen_model_and_
         Some("1.9.5"),
         "the newest version, whose files are on the build release made before it"
     );
-    let [program, weights] = plan.downloads.as_slice() else {
-        panic!("a program and a model: {plan:#?}");
+    let [program] = plan.downloads.as_slice() else {
+        panic!("the program alone, the models are installed on their own: {plan:#?}");
     };
     assert_eq!(
         program.url,
@@ -1345,13 +1346,6 @@ fn the_whisper_plan_fetches_the_program_of_this_system_and_the_chosen_model_and_
         },
         "the digest GitHub lists for this very file"
     );
-    assert_eq!(weights.url, format!("{MODELS_ORIGIN}ggml-base.bin"));
-    assert_eq!(
-        weights.check,
-        Check::Sha256 {
-            value: sha256(MODEL_BYTES)
-        }
-    );
     assert!(plan.changes.is_empty(), "nothing outside the folder");
 
     let tools = tools_for(&store, WhisperFixture.world(Variant::Normal));
@@ -1361,7 +1355,13 @@ fn the_whisper_plan_fetches_the_program_of_this_system_and_the_chosen_model_and_
     assert_eq!(
         small.downloads[1].url,
         format!("{MODELS_ORIGIN}ggml-tiny.en.bin"),
-        "the channel names the model"
+        "a channel names a model to install with the program"
+    );
+    assert_eq!(
+        small.downloads[1].check,
+        Check::Sha256 {
+            value: sha256(MODEL_BYTES)
+        }
     );
 
     let older = plan_of(&store, &WhisperFixture, Some("1.9.4"));
@@ -1402,8 +1402,52 @@ fn the_whisper_store_names_the_publishers_hosts_and_a_glyph_the_application_draw
     assert!(info.endpoints.iter().any(|e| e == MODELS_ORIGIN));
     assert!(STORE_GLYPHS.contains(&info.icon.as_deref().unwrap_or_default()));
     assert!(info.commands.is_empty(), "its folder is on no search path");
-    assert_eq!(info.channels.first().map(String::as_str), Some("base"));
-    assert_eq!(info.channels.len(), MODELS.len());
+    assert!(
+        info.channels.is_empty(),
+        "no model is chosen with the program: {:?}",
+        info.channels
+    );
+    assert!(MODELS.len() > 1, "the models are the Models page's");
+}
+
+#[test]
+fn an_update_of_a_copy_installed_with_a_model_keeps_that_model() {
+    let root = std::env::temp_dir().join(format!("canoa-whisper-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("models")).expect("models");
+    std::fs::write(root.join("models/ggml-tiny.en.bin"), MODEL_BYTES).expect("a model");
+    let store = Whisper(Engine::new(whisper_recipe(), StoreSettings::default()));
+    let tools = tools_for(&store, WhisperFixture.world(Variant::Normal));
+    let mut request = PlanRequest::new(Action::Update, here());
+    request.managed = Some(ManagedCopy::new(
+        root.to_string_lossy(),
+        "1.9.2",
+        Launch::new("bin/whisper-cli"),
+    ));
+    let plan = store.plan(request, tools).expect("a plan");
+    let urls: Vec<&str> = plan
+        .downloads
+        .iter()
+        .map(|each| each.url.as_str())
+        .collect();
+    assert_eq!(
+        urls.last().copied(),
+        Some(format!("{MODELS_ORIGIN}ggml-tiny.en.bin").as_str()),
+        "the model the copy held comes along: {urls:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+
+    let tools = tools_for(&store, WhisperFixture.world(Variant::Normal));
+    let mut request = PlanRequest::new(Action::Update, here());
+    request.managed = Some(ManagedCopy::new(
+        std::env::temp_dir()
+            .join("canoa-whisper-no-such-copy")
+            .to_string_lossy(),
+        "1.9.2",
+        Launch::new("bin/whisper-cli"),
+    ));
+    let alone = store.plan(request, tools).expect("a plan");
+    assert_eq!(alone.downloads.len(), 1, "a copy with no model gets none");
 }
 
 #[test]

@@ -211,3 +211,42 @@ fn piper_without_its_program_or_voices_says_what_to_do() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn piper_reads_every_folder_of_its_voices_and_a_folder_that_is_not_there_holds_none() {
+    let own = voices_folder(&[("en_US-ljspeech-medium", ENGLISH)]);
+    let copy = own.with_file_name(format!(
+        "{}-copy",
+        own.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = std::fs::remove_dir_all(&copy);
+    std::fs::create_dir_all(&copy).expect("a folder");
+    std::fs::write(copy.join("es_MX-claude-high.onnx"), b"model").expect("model");
+    std::fs::write(copy.join("es_MX-claude-high.onnx.json"), SPANISH).expect("json");
+    std::fs::write(copy.join("en_US-ljspeech-medium.onnx"), b"other").expect("model");
+    let missing = own.with_file_name("canoa-piper-nothing-here");
+    let folders = std::env::join_paths([&missing, &own, &copy]).expect("a search path");
+    let provider = PiperSpeech::from(PiperSettings::new(standin(), folders.to_string_lossy()));
+    let all = provider
+        .voices(VoiceQuery::default(), spawner())
+        .ok()
+        .expect("listed");
+    let ids: Vec<&str> = all.voices.iter().map(|v| v.id.as_str()).collect();
+    assert_eq!(ids, ["en_US-ljspeech-medium", "es_MX-claude-high"]);
+    let mut request = SayRequest::new("Hola.");
+    request.voice = Some("es_MX-claude-high".to_owned());
+    assert!(text_of(drain(&say(&provider, request))).contains("model=es_MX-claude-high"));
+    let none = std::env::join_paths([&missing]).expect("a search path");
+    let nowhere = PiperSpeech::from(PiperSettings::new(standin(), none.to_string_lossy()));
+    assert!(
+        nowhere
+            .voices(VoiceQuery::default(), spawner())
+            .err()
+            .expect("refused")
+            .message
+            .to_string()
+            .contains("cannot be read")
+    );
+    let _ = std::fs::remove_dir_all(own);
+    let _ = std::fs::remove_dir_all(copy);
+}

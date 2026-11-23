@@ -6,8 +6,10 @@
 //! SHA-256 of the published files, measured once and pinned, and each voice is a file of one commit of the voices repository, so
 //! what is downloaded is what was measured. Every voice has the licence of its own data, which the plan names.
 //!
-//! The folder is `piper/` (the program and its libraries) and `voices/` (each `NAME.onnx` with its `NAME.onnx.json`); the
-//! type's `speech_say_piper` provider is given both through `PiperModels::service`. A Linux archive carries its libraries' short names
+//! The program is installed alone, in `piper/`; the voices are installed on their own from the Models page, each `NAME.onnx` with its
+//! `NAME.onnx.json` in the host's models folder. A channel (`standard`, `english` or `spanish`) still installs the voices of its
+//! language with the program, in the copy's own `voices/` folder; the type's `speech_say_piper` provider is given both through
+//! `PiperModels::service`. A Linux archive carries its libraries' short names
 //! as links, which the unpack leaves out, so the install writes them as copies.
 #![allow(
     clippy::std_instead_of_core,
@@ -25,7 +27,8 @@ use canoa::store::recipe::{
     Finish, Part, Recipe, Release, UnpackStep, dotted, measured_platforms, pinned,
 };
 use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
+    Check, Download, InstallPlan, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo,
+    Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
@@ -91,6 +94,19 @@ pub struct VoiceFile {
     pub json: (&'static str, u64),
 }
 
+/// One file of a voice: where it is served from, its name beside the other voices and what it must match.
+#[derive(Debug, Clone)]
+pub struct VoiceDownload {
+    /// The address it is downloaded from.
+    pub url: String,
+    /// Its name in a voices folder.
+    pub file: String,
+    /// Its size.
+    pub bytes: u64,
+    /// Its SHA-256.
+    pub sha256: &'static str,
+}
+
 /// What a Piper release is made of: the archives and the voices it is offered with.
 #[derive(Debug, Clone)]
 pub struct Catalog {
@@ -108,6 +124,29 @@ pub struct Catalog {
     pub engines: Vec<Engine>,
     /// The voices.
     pub voices: Vec<VoiceFile>,
+}
+
+impl Catalog {
+    /// The two files of `voice`: its model and its description.
+    #[must_use]
+    pub fn files_of(&self, voice: &VoiceFile) -> [VoiceDownload; 2] {
+        let base = format!("{}{}{}", self.voices_at, voice.folder, voice.name);
+        let raw = format!("{}{}{}", self.raw_at, voice.folder, voice.name);
+        [
+            VoiceDownload {
+                url: format!("{base}.onnx"),
+                file: format!("{}.onnx", voice.name),
+                bytes: voice.onnx.1,
+                sha256: voice.onnx.0,
+            },
+            VoiceDownload {
+                url: format!("{raw}.onnx.json"),
+                file: format!("{}.onnx.json", voice.name),
+                bytes: voice.json.1,
+                sha256: voice.json.0,
+            },
+        ]
+    }
 }
 
 impl Default for Catalog {
@@ -197,14 +236,11 @@ impl Recipe for PiperRecipe {
         let mut info = StoreInfo::new("piper", "Piper", "Rhasspy");
         info.homepage = Some("https://github.com/rhasspy/piper".to_owned());
         info.summary = Some(
-            "A local neural voice that reads replies aloud on this computer, with an English and a Spanish voice; the text is sent nowhere."
+            "A local neural voice that reads replies aloud on this computer; the text is sent nowhere. Its voices are installed from the Models page."
                 .to_owned(),
         );
         info.icon = Some("speaker".to_owned());
         info.platforms = measured_platforms();
-        info.channels = ["standard", "english", "spanish"]
-            .map(str::to_owned)
-            .to_vec();
         info.endpoints.clone_from(&self.catalog.endpoints);
         info
     }
@@ -241,7 +277,7 @@ impl Recipe for PiperRecipe {
 
     fn latest(&self, channel: Option<&str>, _tools: &Object<dyn InstallTools>) -> LatestReport {
         let mut report = LatestReport::known(self.catalog.version.clone());
-        report.channel = Some(channel.unwrap_or("standard").to_owned());
+        report.channel = channel.map(str::to_owned);
         report
     }
 
@@ -262,11 +298,19 @@ impl Recipe for PiperRecipe {
                 )));
             }
         }
-        let wanted = match channel.unwrap_or("standard") {
-            "standard" => None,
-            "english" => Some("en"),
-            "spanish" => Some("es"),
-            other => {
+        // No channel installs the program alone; one names the language whose voices come with it.
+        let voices: Vec<&VoiceFile> = match channel {
+            None => Vec::new(),
+            Some("standard") => catalog.voices.iter().collect(),
+            Some(named @ ("english" | "spanish")) => {
+                let language = if named == "english" { "en" } else { "es" };
+                catalog
+                    .voices
+                    .iter()
+                    .filter(|voice| voice.language == language)
+                    .collect()
+            }
+            Some(other) => {
                 return Err(bad_value(format!(
                     "Piper has no channel {other:?}: standard, english or spanish"
                 )));
@@ -303,37 +347,29 @@ impl Recipe for PiperRecipe {
                 "Piper has no build for Windows on ARM: it runs the x64 build under the system's emulation.".to_owned(),
             );
         }
-        for voice in catalog
-            .voices
-            .iter()
-            .filter(|voice| wanted.is_none_or(|language| voice.language == language))
-        {
-            let base = format!("{}{}{}", catalog.voices_at, voice.folder, voice.name);
-            let raw = format!("{}{}{}", catalog.raw_at, voice.folder, voice.name);
-            parts.push(Part::new(
-                Download::new(
-                    format!("{base}.onnx"),
-                    Some(voice.onnx.1),
-                    Check::Sha256 {
-                        value: voice.onnx.0.to_owned(),
-                    },
-                ),
-                format!("{VOICES_DIR}/{}.onnx", voice.name),
-            ));
-            parts.push(Part::new(
-                Download::new(
-                    format!("{raw}.onnx.json"),
-                    Some(voice.json.1),
-                    Check::Sha256 {
-                        value: voice.json.0.to_owned(),
-                    },
-                ),
-                format!("{VOICES_DIR}/{}.onnx.json", voice.name),
-            ));
+        for voice in voices {
+            for file in catalog.files_of(voice) {
+                parts.push(Part::new(
+                    Download::new(
+                        file.url,
+                        Some(file.bytes),
+                        Check::Sha256 {
+                            value: file.sha256.to_owned(),
+                        },
+                    ),
+                    format!("{VOICES_DIR}/{}", file.file),
+                ));
+            }
             notices.push(format!(
-                "The voice {} is licensed as {}; a voice carries the licence of the recordings it learned from.",
+                "The voice {} is installed with it and licensed as {}; a voice carries the licence of the recordings it learned from.",
                 voice.name, voice.licence
             ));
+        }
+        if parts.len() == 1 {
+            notices.push(
+                "No voice comes with the program: install one from the Models page, which downloads it on its own."
+                    .to_owned(),
+            );
         }
         let launch = if windows {
             "piper/piper.exe"
@@ -349,6 +385,52 @@ impl Recipe for PiperRecipe {
             );
         }
         Ok(release)
+    }
+
+    fn channel_of(&self, plan: &InstallPlan) -> Option<String> {
+        let present: Vec<&VoiceFile> = self
+            .catalog
+            .voices
+            .iter()
+            .filter(|voice| {
+                let [model, _] = self.catalog.files_of(voice);
+                plan.downloads
+                    .iter()
+                    .any(|download| download.url == model.url)
+            })
+            .collect();
+        let language = |wanted: &str| present.iter().all(|voice| voice.language == wanted);
+        if present.is_empty() {
+            None
+        } else if present.len() < self.catalog.voices.len() && language("en") {
+            Some("english".to_owned())
+        } else if present.len() < self.catalog.voices.len() && language("es") {
+            Some("spanish".to_owned())
+        } else {
+            Some("standard".to_owned())
+        }
+    }
+
+    fn channel_held(&self, dir: &str) -> Option<String> {
+        let held = |language: &str| {
+            self.catalog
+                .voices
+                .iter()
+                .filter(|voice| voice.language == language)
+                .any(|voice| {
+                    Path::new(dir)
+                        .join(VOICES_DIR)
+                        .join(format!("{}.onnx", voice.name))
+                        .is_file()
+                })
+        };
+        match (held("en"), held("es")) {
+            (true, true) => Some("standard"),
+            (true, false) => Some("english"),
+            (false, true) => Some("spanish"),
+            (false, false) => None,
+        }
+        .map(str::to_owned)
     }
 
     fn finish(&self, finish: &Finish<'_>) -> Result<(), ProviderError> {

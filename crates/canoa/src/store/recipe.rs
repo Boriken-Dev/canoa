@@ -276,6 +276,12 @@ pub trait Recipe: Send + Sync + 'static {
         None
     }
 
+    /// The channel the copy installed in the folder `dir` was installed on, read from what it holds, so an update or a reinstall that
+    /// names no channel keeps what the copy came with (a model put in its folder, say). Nothing by default.
+    fn channel_held(&self, _dir: &str) -> Option<String> {
+        None
+    }
+
     /// Environment variable names or patterns (`NAME` or `PREFIX_*`) this recipe's store must never receive.
     fn protected_variables(&self) -> &'static [&'static str] {
         &[]

@@ -466,7 +466,7 @@ fn join_url(base: &str, location: &str) -> String {
 }
 
 /// A relative path with no part that leaves its folder.
-fn relative_path(text: &str) -> Result<PathBuf, ProviderError> {
+pub(crate) fn relative_path(text: &str) -> Result<PathBuf, ProviderError> {
     let bad = || {
         refused(
             Status::GUATIAO_ERR_BAD_VALUE,

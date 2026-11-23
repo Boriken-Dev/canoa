@@ -206,6 +206,13 @@
           "null"
         ],
         "description": "The person's home folder, where programs keep their own files."
+      },
+      "folder": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder the host keeps the models the person installed on their own in, which may not exist yet: a row's [`ModelFile::file`] is a path in it."
       }
     },
     "additionalProperties": false
@@ -390,6 +397,43 @@
                 "text"
               ],
               "description": "Present when it may be used as the person's speech-to-text."
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "Where it is served from: an `https` address in one of the endpoints of the type's first program store."
+                  },
+                  "file": {
+                    "type": "string",
+                    "description": "Where it is kept, relative to the models folder: plain names joined by `/`."
+                  },
+                  "bytes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 18446744073709551615,
+                    "description": "Its size in bytes, when the publisher says; the download may not pass it."
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "description": "Its SHA-256 in hexadecimal, which the download is checked against."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "url",
+                  "file",
+                  "sha256"
+                ]
+              },
+              "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`].",
+              "default": []
             }
           },
           "additionalProperties": false,
@@ -586,6 +630,43 @@
           "text"
         ],
         "description": "Present when it may be used as the person's speech-to-text."
+      },
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Where it is served from: an `https` address in one of the endpoints of the type's first program store."
+            },
+            "file": {
+              "type": "string",
+              "description": "Where it is kept, relative to the models folder: plain names joined by `/`."
+            },
+            "bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Its size in bytes, when the publisher says; the download may not pass it."
+            },
+            "sha256": {
+              "type": "string",
+              "description": "Its SHA-256 in hexadecimal, which the download is checked against."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "url",
+            "file",
+            "sha256"
+          ]
+        },
+        "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`].",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -827,6 +908,20 @@
           "null"
         ],
         "description": "The absolute path of the host's own copy of the type's program, for a `command` service, when the host has one."
+      },
+      "folder": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder the host keeps the models the person installed on their own in, as [`ModelQuery::folder`]."
+      },
+      "model": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The model to run, for a `command` service, when the person chose one of several installed; none is the library's own choice."
       },
       "models": {
         "type": "boolean",

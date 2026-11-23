@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
+use canoa::store::models::ModelFile;
 use canoa::store::{
     Action, ApplyRequest, Change, DEFAULT_APPLY_TIMEOUT_MS, ELEVATION, InstallPlan,
     InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, ManagedCopy, PATH,
@@ -1107,6 +1108,104 @@ impl Programs {
         Ok(lock.rollback()?)
     }
 
+    /// The folder the models of the type whose program `store` installs are kept in, beside the program's versions: a program's own
+    /// install, update or removal never moves what is in it. It may not exist yet.
+    ///
+    /// # Errors
+    ///
+    /// What the shelf refuses.
+    pub fn models_folder(&self, store: &dyn ProgramStore) -> Result<PathBuf, StoreError> {
+        let info = store.describe()?;
+        Ok(self.shelf.program(&info.program)?.dir().join(MODELS_DIR))
+    }
+
+    /// Downloads `files` into the models folder of the type `store`'s program belongs to, each from an endpoint the store names and
+    /// checked against its SHA-256, so that either every file is kept or none is. A file already there is replaced.
+    ///
+    /// # Errors
+    ///
+    /// A name that is not a plain relative path, the shelf's refusals (another install running), and what the download refuses
+    /// (an address outside the store's endpoints, a checksum that does not match, a cancel).
+    pub fn fetch_models(
+        &self,
+        store: &dyn ProgramStore,
+        files: &[ModelFile],
+        cancel: Arc<AtomicBool>,
+    ) -> Result<(), StoreError> {
+        let info = store.describe()?;
+        let folder = self.shelf.program(&info.program)?.dir().join(MODELS_DIR);
+        let names = model_names(files)?;
+        // One at a time with the installs: a program's install measures this folder's tree, and a download in it is not its change.
+        let _one_at_a_time = self.shelf.apply_lock()?;
+        let program = self.shelf.program(&info.program)?;
+        let _lock = program.lock()?;
+        fs::create_dir_all(&folder).map_err(ShelfError::from)?;
+        let tools = self
+            .tools(&info)
+            .granted(&folder)
+            .cancelled_by(cancel)
+            .into_object();
+        let part = |name: &Path| {
+            let mut kept = name.as_os_str().to_owned();
+            kept.push(".part");
+            PathBuf::from(kept)
+        };
+        let mut fetched = Vec::new();
+        let outcome = (|| -> Result<(), StoreError> {
+            for (file, name) in files.iter().zip(&names) {
+                let partial = part(name);
+                let _ = fs::remove_file(folder.join(&partial));
+                fetched.push(partial.clone());
+                let request = canoa::store::FetchRequest::new(
+                    file.url.clone(),
+                    partial.to_string_lossy().replace('\\', "/"),
+                    canoa::store::Check::Sha256 {
+                        value: file.sha256.to_ascii_lowercase(),
+                    },
+                    file.bytes.unwrap_or(1 << 30).max(1),
+                );
+                tools.fetch(request)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = outcome {
+            for partial in &fetched {
+                let _ = fs::remove_file(folder.join(partial));
+            }
+            return Err(error);
+        }
+        for (partial, name) in fetched.iter().zip(&names) {
+            let target = folder.join(name);
+            let _ = fs::remove_file(&target);
+            fs::rename(folder.join(partial), &target).map_err(ShelfError::from)?;
+        }
+        Ok(())
+    }
+
+    /// Takes `files` out of the models folder of the type `store`'s program belongs to; a file that is not there is already gone.
+    ///
+    /// # Errors
+    ///
+    /// A name that is not a plain relative path, and what the shelf or the system refuses.
+    pub fn delete_models(
+        &self,
+        store: &dyn ProgramStore,
+        files: &[ModelFile],
+    ) -> Result<(), StoreError> {
+        let info = store.describe()?;
+        let folder = self.shelf.program(&info.program)?.dir().join(MODELS_DIR);
+        let names = model_names(files)?;
+        let _one_at_a_time = self.shelf.apply_lock()?;
+        for name in names {
+            match fs::remove_file(folder.join(name)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(ShelfError::from(error).into()),
+            }
+        }
+        Ok(())
+    }
+
     /// Removes the managed copy.
     ///
     /// # Errors
@@ -1118,6 +1217,24 @@ impl Programs {
         let lock = program.lock()?;
         Ok(lock.remove()?)
     }
+}
+
+/// The folder beside a program's versions that holds the models installed on their own.
+const MODELS_DIR: &str = "models";
+
+/// The relative paths of `files`, refusing one that leaves the models folder.
+fn model_names(files: &[ModelFile]) -> Result<Vec<PathBuf>, StoreError> {
+    files
+        .iter()
+        .map(|file| {
+            super::tools::relative_path(&file.file).map_err(|_| {
+                StoreError::Contract(format!(
+                    "the model file {:?} is not a plain path in the models folder",
+                    file.file
+                ))
+            })
+        })
+        .collect()
 }
 
 /// The environment an install runs with: the base, with every home and temporary directory inside the staging folder.

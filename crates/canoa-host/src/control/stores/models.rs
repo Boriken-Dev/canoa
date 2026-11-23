@@ -2,8 +2,10 @@
 //! extension names, and what the person's speech-to-text asks of the service that runs those models.
 //!
 //! The host names no model and no program of a library's: it finds the type's program through the type's own `program_store`
-//! providers, hands it to the provider with the person's home, runs nothing itself, and keeps a row's settings in the table of
-//! canoa.cfg the provider names (`[<table>.models."<id>"]`).
+//! providers, hands it to the provider with the person's home and the folder it keeps the type's models in, and keeps a row's
+//! settings in the table of canoa.cfg the provider names (`[<table>.models."<id>"]`). It runs nothing itself, but for the two steps
+//! of a row's action that move files: `fetch_files` downloads the row's files into that folder, checked against their digests, once
+//! the type's program is there, and `delete_files` takes them out.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -13,8 +15,8 @@
 use std::sync::Arc;
 
 use canoa::store::models::{
-    ModelAct, ModelKeep, ModelList, ModelQuery, ModelStore, ModelStoreInfo, ServiceQuery,
-    ServiceReport, SpeechService,
+    ModelAct, ModelKeep, ModelList, ModelQuery, ModelRow, ModelStore, ModelStoreInfo,
+    STEP_DELETE_FILES, STEP_FETCH_FILES, ServiceQuery, ServiceReport, SpeechService,
 };
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::Status;
@@ -173,19 +175,73 @@ impl Stores {
         None
     }
 
+    /// The type's first program store: the one that installs what its models run on.
+    fn type_store(&self, type_id: &str) -> Option<(String, Arc<dyn canoa::store::ProgramStore>)> {
+        let provider = self.speech_store(type_id)?;
+        let (_, store) = self.store(&json!({"provider": provider})).ok()?;
+        Some((provider, store))
+    }
+
+    /// The folder the host keeps the models installed on their own in, for the type: beside its program's versions.
+    fn models_folder(&self, type_id: &str) -> Option<String> {
+        let (_, store) = self.type_store(type_id)?;
+        self.programs
+            .models_folder(&*store)
+            .ok()
+            .map(|folder| folder.to_string_lossy().into_owned())
+    }
+
+    /// The rows of the type as the provider lists them now.
+    fn model_rows(&self, held: &Held) -> Result<ModelList, Failed> {
+        held.ask(|store, spawner| {
+            let mut query = ModelQuery::default();
+            query.program = self.type_program(&held.type_id);
+            query.home = self.home_text();
+            query.folder = self.models_folder(&held.type_id);
+            store.list(query, spawner)
+        })
+        .map_err(|error| failure(&error))
+    }
+
+    /// What a note on the removal of the program of `provider` says of the models of its type: those installed on their own stay,
+    /// and those installed with the program go with it. None when the program has no models.
+    pub(crate) fn removal_note(&self, provider: &str) -> Option<String> {
+        let added = self
+            .types
+            .iter()
+            .find(|each| each.info.stores.iter().any(|store| store == provider))?;
+        let held = self.models.of(&added.info.id)?;
+        let rows = self.model_rows(held).ok()?;
+        let installed = |own: bool| -> Vec<&str> {
+            rows.models
+                .iter()
+                .filter(|row| row.on && can_remove(row) == own)
+                .map(|row| row.id.as_str())
+                .collect()
+        };
+        let (stay, go) = (installed(true), installed(false));
+        let mut note = Vec::new();
+        if !stay.is_empty() {
+            note.push(format!(
+                "The models installed on their own stay on this computer: {}.",
+                stay.join(", ")
+            ));
+        }
+        if !go.is_empty() {
+            note.push(format!(
+                "The models installed with the program go with it: {}.",
+                go.join(", ")
+            ));
+        }
+        (!note.is_empty()).then(|| note.join(" "))
+    }
+
     /// `store/models` `{"type"}` -> `{"type", "provider", "title", "catalog", "publisher", "missing", "unavailable"?,
     /// "settings"?: {"help"?, "schema", "form"?}, "speech": bool, "models": [row, ...]}`, each row as `canoa::store::models::ModelRow`
     /// with `"values"`, what canoa.cfg keeps for it. Runs the type's program as this user, and nothing else.
     pub(crate) fn models_read(&self, params: &Value, files: &Files) -> Result<Value, Failed> {
         let held = self.model_type(params)?;
-        let list: ModelList = held
-            .ask(|store, spawner| {
-                let mut query = ModelQuery::default();
-                query.program = self.type_program(&held.type_id);
-                query.home = self.home_text();
-                store.list(query, spawner)
-            })
-            .map_err(|error| failure(&error))?;
+        let list: ModelList = self.model_rows(held)?;
         let table = held.info.settings.as_ref().map(|each| each.table.as_str());
         let kept = table.map(|table| files.model_settings(table));
         let mut rows = Vec::new();
@@ -216,16 +272,28 @@ impl Stores {
             "unavailable": list.unavailable,
             "settings": settings,
             "speech": held.info.speech.is_some(),
+            "program": self.type_store(&held.type_id).and_then(|(provider, store)| {
+                let title = store.describe().ok()?.title;
+                Some(json!({
+                    "provider": provider,
+                    "title": title,
+                    "installed": self.type_program(&held.type_id).is_some(),
+                }))
+            }),
             "models": rows,
         }))
     }
 
     /// `store/model` `{"type", "model", "action"}` -> `{"ok": true, "model", "action", "note"?}`: the provider runs one action of
-    /// the row's, which may take long (a download), and answers in its program's words when it is refused.
+    /// the row's, which may take long (a download), and answers in its program's words when it is refused. The steps `fetch_files` and
+    /// `delete_files` are the host's: they move the row's files in the type's models folder.
     pub(crate) fn model_act(&self, params: &Value) -> Result<Value, Failed> {
         let held = self.model_type(params)?;
         let model = text(params, "model")?;
         let action = text(params, "action")?;
+        if action == STEP_FETCH_FILES || action == STEP_DELETE_FILES {
+            return self.move_files(held, model, action);
+        }
         let mut request = ModelAct::new(model, action);
         request.program = self.type_program(&held.type_id);
         request.home = self.home_text();
@@ -233,6 +301,55 @@ impl Stores {
             .ask(|store, spawner| store.act(request, spawner))
             .map_err(|error| failure(&error))?;
         Ok(json!({"ok": true, "model": model, "action": action, "note": acted.note}))
+    }
+
+    /// The step `fetch_files` or `delete_files` of the row `model`: its files fetched into the models folder, or taken out of it.
+    fn move_files(&self, held: &Held, model: &str, action: &str) -> Result<Value, Failed> {
+        let rows = self.model_rows(held)?;
+        let row = rows
+            .models
+            .iter()
+            .find(|row| row.id == model)
+            .ok_or_else(|| {
+                (
+                    super::NOT_FOUND,
+                    format!("{} lists no model {model}", held.info.title),
+                )
+            })?;
+        if row.files.is_empty() {
+            return Err((REFUSED, format!("{model} has no files to move")));
+        }
+        let (_, store) = self.type_store(&held.type_id).ok_or_else(|| {
+            (
+                REFUSED,
+                format!("{} has no program to keep {model} beside", held.info.title),
+            )
+        })?;
+        if action == STEP_DELETE_FILES {
+            self.programs
+                .delete_models(&*store, &row.files)
+                .map_err(|error| super::refusal(&error))?;
+            return Ok(json!({"ok": true, "model": model, "action": action, "note": null}));
+        }
+        if self.type_program(&held.type_id).is_none() {
+            let program = store
+                .describe()
+                .map_or_else(|_| held.info.title.clone(), |info| info.title);
+            return Err((
+                REFUSED,
+                format!(
+                    "{model} runs on {program}, which is not installed: install {program} first"
+                ),
+            ));
+        }
+        self.programs
+            .fetch_models(
+                &*store,
+                &row.files,
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .map_err(|error| super::refusal(&error))?;
+        Ok(json!({"ok": true, "model": model, "action": action, "note": null}))
     }
 
     /// `store/model_setting` `{"type", "model", "values"}` -> `{"ok": true, "model", "values", "note"?}`: the values are checked
@@ -303,6 +420,7 @@ impl Stores {
             .filter(|held| held.info.voice.is_some())?;
         let mut query = ServiceQuery::default();
         query.home = self.home_text();
+        query.folder = self.models_folder(type_id);
         query.program = self.type_program(type_id);
         query.program.as_ref()?;
         let report = held
@@ -329,6 +447,16 @@ impl Stores {
         type_id: &str,
         models: bool,
     ) -> Result<ServiceReport, String> {
+        self.speech_report_of(type_id, models, None)
+    }
+
+    /// As [`speech_report`](Self::speech_report), for a program that runs the model `model` when it is installed.
+    pub(crate) fn speech_report_of(
+        &self,
+        type_id: &str,
+        models: bool,
+        model: Option<&str>,
+    ) -> Result<ServiceReport, String> {
         let held = self
             .models
             .of(type_id)
@@ -336,6 +464,8 @@ impl Stores {
             .ok_or_else(|| format!("this host has no service {type_id}"))?;
         let mut query = ServiceQuery::default();
         query.home = self.home_text();
+        query.folder = self.models_folder(type_id);
+        query.model = model.map(str::to_owned);
         query.models = models;
         if held
             .info
@@ -353,6 +483,13 @@ impl Stores {
     }
 }
 
+/// Whether the host can take a row's files away: it offers the `delete_files` step.
+fn can_remove(row: &ModelRow) -> bool {
+    row.actions
+        .iter()
+        .any(|action| action.steps.iter().any(|step| step == STEP_DELETE_FILES))
+}
+
 /// Checks the `type` of an extension names a `model_store` the registry offers.
 pub(super) fn offered(registry: &Registry, provider: &str) -> bool {
     registry.offer::<dyn ModelStore>(provider).is_some()
@@ -361,3 +498,7 @@ pub(super) fn offered(registry: &Registry, provider: &str) -> bool {
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "models_files_tests.rs"]
+mod files_tests;

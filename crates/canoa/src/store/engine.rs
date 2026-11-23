@@ -205,10 +205,15 @@ impl<R: Recipe> Engine<R> {
             .version
             .as_deref()
             .or(self.settings.version.as_deref());
+        let held = request
+            .managed
+            .as_ref()
+            .and_then(|copy| self.recipe.channel_held(&copy.dir));
         let channel = request
             .channel
             .as_deref()
-            .or(self.settings.channel.as_deref());
+            .or(self.settings.channel.as_deref())
+            .or(held.as_deref());
         let release = self
             .recipe
             .release(version, channel, &request.platform, tools)?;

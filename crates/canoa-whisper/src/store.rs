@@ -1,5 +1,6 @@
-//! whisper.cpp as a Store program: the speech-to-text command line (`whisper-cli`) and one model, which the person chooses as the
-//! release channel.
+//! whisper.cpp as a Store program: the speech-to-text command line (`whisper-cli`). The models are installed on their own from the
+//! Models page ([`crate::WhisperModels`]); a release channel that names a model still installs that model with the program, as a copy
+//! installed that way holds it in its own folder.
 //!
 //! ggml-org publishes the program's builds for Windows and Linux as GitHub release assets, each with a SHA-256 in the release
 //! listing. The builds are attached to the `bNNNN` release made when the version's commit was built, and the `vX.Y.Z` release
@@ -290,17 +291,16 @@ fn asset_name(platform: &Platform) -> Result<&'static str, ProviderError> {
 }
 
 impl WhisperRecipe {
-    fn channel(&self, channel: Option<&str>) -> Result<&'static Model, ProviderError> {
-        let id = channel.or_else(|| self.models.first().map(|model| model.id));
-        self.models
-            .iter()
-            .find(|model| Some(model.id) == id)
-            .ok_or_else(|| {
-                bad_value(format!(
-                    "whisper.cpp has no model {:?}",
-                    id.unwrap_or_default()
-                ))
+    /// The model a channel names to install with the program; none installs the program alone.
+    fn channel(&self, channel: Option<&str>) -> Result<Option<&'static Model>, ProviderError> {
+        channel
+            .map(|id| {
+                self.models
+                    .iter()
+                    .find(|model| model.id == id)
+                    .ok_or_else(|| bad_value(format!("whisper.cpp has no model {id:?}")))
             })
+            .transpose()
     }
 }
 
@@ -309,17 +309,12 @@ impl Recipe for WhisperRecipe {
         let mut info = StoreInfo::new("whisper", crate::NAME, "ggml-org");
         info.homepage = Some("https://github.com/ggml-org/whisper.cpp".to_owned());
         info.summary = Some(
-            "Turns speech into text on this computer, for dictation: the audio never leaves the host. The channel is the model.".to_owned(),
+            "Turns speech into text on this computer, for dictation: the audio never leaves the host. Its models are installed from the Models page.".to_owned(),
         );
         info.icon = Some("chip".to_owned());
         info.platforms = ["windows", "linux"]
             .into_iter()
             .flat_map(|os| ["x86_64", "aarch64"].map(|arch| Platform::new(os, arch)))
-            .collect();
-        info.channels = self
-            .models
-            .iter()
-            .map(|model| model.id.to_owned())
             .collect();
         info.endpoints = [
             RELEASES_API.to_owned(),
@@ -409,30 +404,40 @@ impl Recipe for WhisperRecipe {
             None,
             Check::Sha256 { value: digest },
         );
-        let weights = Download::new(
-            format!("{MODELS_ORIGIN}{}", chosen.file),
-            Some(chosen.bytes),
-            Check::Sha256 {
-                value: chosen.sha256.to_owned(),
-            },
-        );
         let step = UnpackStep::new(if windows { "zip" } else { "tar.gz" }, PROGRAM_DIR, 1, true);
         let launch = format!("{PROGRAM_DIR}/{}", program_file(&platform.os));
-        let mut release = Release::new(
-            found.version.clone(),
-            launch,
-            vec![
-                Part::new(program, "whisper-archive").unpacked(step),
-                Part::new(weights, model_path(chosen)),
-            ],
-        );
-        release
-            .facts
-            .insert("model".to_owned(), chosen.id.to_owned());
+        let mut parts = vec![Part::new(program, "whisper-archive").unpacked(step)];
+        if let Some(chosen) = chosen {
+            parts.push(Part::new(
+                Download::new(
+                    format!("{MODELS_ORIGIN}{}", chosen.file),
+                    Some(chosen.bytes),
+                    Check::Sha256 {
+                        value: chosen.sha256.to_owned(),
+                    },
+                ),
+                model_path(chosen),
+            ));
+        }
+        let mut release = Release::new(found.version.clone(), launch, parts);
         release.notices.push(format!(
-            "whisper.cpp {} is checked against the SHA-256 GitHub lists for the release's file, and the model {} against the SHA-256 its publisher's listing gives; neither publisher's signature is checked by this store.",
-            found.version, chosen.id
+            "whisper.cpp {} is checked against the SHA-256 GitHub lists for the release's file; the publisher's signature is not checked by this store.",
+            found.version
         ));
+        if let Some(chosen) = chosen {
+            release
+                .facts
+                .insert("model".to_owned(), chosen.id.to_owned());
+            release.notices.push(format!(
+                "The model {} is installed with it and checked against the SHA-256 its publisher's listing gives; it goes with the program when that is removed.",
+                chosen.id
+            ));
+        } else {
+            release.notices.push(
+                "No model comes with the program: install one from the Models page, which downloads it on its own."
+                    .to_owned(),
+            );
+        }
         release.notices.push(
             "Dictation then runs on this host's processor: the audio is turned into text here and goes nowhere else. A larger model is slower and uses more memory."
                 .to_owned(),
@@ -448,6 +453,13 @@ impl Recipe for WhisperRecipe {
                 .find(|model| model.file == file)
                 .map(|model| model.id.to_owned())
         })
+    }
+
+    fn channel_held(&self, dir: &str) -> Option<String> {
+        self.models
+            .iter()
+            .find(|model| std::path::Path::new(dir).join(model_path(model)).is_file())
+            .map(|model| model.id.to_owned())
     }
 
     fn finish(&self, finish: &Finish<'_>) -> Result<(), ProviderError> {

@@ -578,8 +578,8 @@ fn name_of<'a>(params: &'a Value, fallback: &'a str) -> Result<&'a str, (i32, St
 }
 
 /// `speech/enable` `{offer, name?, model?}`: makes (or remakes) the provider of an offer that needs no form. The id of a Store type
-/// whose library runs a program is made from the copy the Store has installed, whose model is the one the copy holds (another is
-/// installed through the Store, and this is called again). The id of a type whose models run in a service takes the model `model`
+/// whose library runs a program is made from the copy the Store has installed, with the model `model` when it is installed and
+/// else the first the library finds (another is installed from the Models page, and this is called again). The id of a type whose models run in a service takes the model `model`
 /// of that service, which the person loads, and `SERVICE:NAME` the API key of the account `NAME` for the service a library describes.
 fn enable(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
     let offer = text_param(params, "offer")?.ok_or_else(|| bad("offer is needed"))?;
@@ -609,8 +609,9 @@ fn enable(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
 /// The provider that runs the copy of the program of the Store type `service` the host has installed, as its library says.
 fn enable_program(files: &Files, stores: &Stores, service: &str, params: &Value) -> Outcome {
     let name = name_of(params, service)?;
+    let asked = text_param(params, "model")?.filter(|model| !model.is_empty());
     let report = stores
-        .speech_report(service, false)
+        .speech_report_of(service, false, asked)
         .map_err(|why| (REFUSED, why))?;
     let run = report.command.ok_or_else(|| {
         (

@@ -1,6 +1,6 @@
 //! The Piper provider: a local neural voice engine, run as a program, with the voices in a folder.
 //!
-//! A voice is a model file `NAME.onnx` and its `NAME.onnx.json` in the voices folder; the voice's id is `NAME`. The model's
+//! A voice is a model file `NAME.onnx` and its `NAME.onnx.json` in a voices folder; the voice's id is `NAME`. The model's
 //! json says its language, its sample rate and how many speakers it holds, and a speaker of a model with several is asked for
 //! as `NAME#N`. The text is handed to the program a sentence at a time and its raw samples are the audio, so a client hears the
 //! first sentence while the rest is being made. The text never leaves the computer.
@@ -56,8 +56,9 @@ pub struct PiperSettings {
     #[schema(section = "piper", title = "Program")]
     #[form(placeholder = "piper")]
     pub program: String,
-    /// The folder of voices: each `NAME.onnx` with its `NAME.onnx.json`.
-    #[schema(section = "piper", title = "Voices folder")]
+    /// The folders of voices, separated as the system's search path is: each `NAME.onnx` with its `NAME.onnx.json`. A voice found in
+    /// two is the first one's.
+    #[schema(section = "piper", title = "Voices folders")]
     pub voices_dir: String,
     /// The voice used when a request names none; absent is the first voice, in the request's language when it has one.
     #[schema(section = "piper", title = "Default voice")]
@@ -152,24 +153,58 @@ fn valid_id(id: &str) -> bool {
 }
 
 impl PiperSpeech {
-    fn dir(&self) -> Result<PathBuf, ProviderError> {
-        let dir = self.settings.voices_dir.trim();
-        if dir.is_empty() {
+    fn dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
+        let dirs: Vec<PathBuf> = std::env::split_paths(self.settings.voices_dir.trim())
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .collect();
+        if dirs.is_empty() {
             return Err(bad_value("the voices folder is not set"));
         }
-        Ok(PathBuf::from(dir))
+        Ok(dirs)
     }
 
-    /// Every voice in the folder, with what its model says.
+    /// The model file of the voice `id`, in the first folder that holds it.
+    fn model_file(&self, id: &str) -> Result<PathBuf, ProviderError> {
+        let dirs = self.dirs()?;
+        let name = alloc::format!("{id}.onnx");
+        let found = dirs
+            .iter()
+            .map(|dir| dir.join(&name))
+            .find(|path| path.is_file());
+        Ok(found.unwrap_or_else(|| dirs[0].join(name)))
+    }
+
+    /// Every voice in the folders, with what its model says. A folder that does not exist holds none; when none can be read the
+    /// first one's error is the answer.
     fn installed(&self) -> Result<Vec<(Voice, Model)>, ProviderError> {
-        let dir = self.dir()?;
-        let entries = std::fs::read_dir(&dir).map_err(|error| {
-            internal(alloc::format!(
-                "the voices folder {} cannot be read: {error}",
-                dir.display()
-            ))
-        })?;
+        let dirs = self.dirs()?;
         let mut found = Vec::new();
+        let mut unread = None;
+        let mut read = false;
+        for dir in &dirs {
+            match std::fs::read_dir(dir) {
+                Ok(entries) => {
+                    read = true;
+                    self.collect(dir, entries, &mut found);
+                }
+                Err(error) => {
+                    unread.get_or_insert_with(|| {
+                        internal(alloc::format!(
+                            "the voices folder {} cannot be read: {error}",
+                            dir.display()
+                        ))
+                    });
+                }
+            }
+        }
+        if !read && let Some(error) = unread {
+            return Err(error);
+        }
+        found.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+        Ok(found)
+    }
+
+    fn collect(&self, dir: &Path, entries: std::fs::ReadDir, found: &mut Vec<(Voice, Model)>) {
         for entry in entries.flatten() {
             let path = entry.path();
             let Some(stem) = path
@@ -179,7 +214,8 @@ impl PiperSpeech {
             else {
                 continue;
             };
-            if !valid_id(stem) || !path.is_file() {
+            if !valid_id(stem) || !path.is_file() || found.iter().any(|(voice, _)| voice.id == stem)
+            {
                 continue;
             }
             let model = read_model(&dir.join(alloc::format!("{stem}.onnx.json")));
@@ -200,8 +236,6 @@ impl PiperSpeech {
             .filter(|text| !text.is_empty());
             found.push((voice, model));
         }
-        found.sort_by(|a, b| a.0.id.cmp(&b.0.id));
-        Ok(found)
     }
 
     fn program(&self) -> Result<&str, ProviderError> {
@@ -316,11 +350,7 @@ impl SpeechOutput for PiperSpeech {
         }
         let mut spec = SpawnSpec::new(self.program()?)
             .arg("--model")
-            .arg(
-                self.dir()?
-                    .join(alloc::format!("{id}.onnx"))
-                    .to_string_lossy(),
-            )
+            .arg(self.model_file(&id)?.to_string_lossy())
             .arg("--output-raw")
             .arg("--quiet");
         if let Some(speed) = request.speed {

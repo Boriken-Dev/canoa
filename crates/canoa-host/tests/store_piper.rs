@@ -38,7 +38,8 @@ fn tools(recipe: &PiperRecipe, world: World) -> Object<dyn InstallTools> {
 }
 
 #[test]
-fn each_platforms_plan_fetches_the_pinned_archive_and_two_voices_and_checks_every_digest() {
+fn each_platforms_plan_fetches_the_pinned_archive_alone_or_with_the_voices_of_a_channel_and_checks_every_digest()
+ {
     let recipe = PiperRecipe::default();
     let engine = Engine::new(PiperRecipe::default(), StoreSettings::default());
     let info = recipe.info();
@@ -51,11 +52,22 @@ fn each_platforms_plan_fetches_the_pinned_archive_and_two_voices_and_checks_ever
         ("linux", "aarch64", "piper_linux_aarch64.tar.gz"),
     ];
     for (os, arch, file) in expected {
-        let plan = engine
+        let alone = engine
             .plan(
                 &PlanRequest::new(Action::Install, Platform::new(os, arch)),
                 &tools(&recipe, World::new()),
             )
+            .expect("a plan");
+        assert_eq!(
+            alone.downloads.len(),
+            1,
+            "{os} {arch}: the program alone, the voices are installed on their own"
+        );
+        assert!(alone.downloads[0].url.ends_with(file));
+        let mut request = PlanRequest::new(Action::Install, Platform::new(os, arch));
+        request.channel = Some("standard".to_owned());
+        let plan = engine
+            .plan(&request, &tools(&recipe, World::new()))
             .expect("a plan");
         assert_eq!(plan.version.as_deref(), Some(VERSION), "{os} {arch}");
         assert_eq!(
@@ -124,6 +136,17 @@ fn a_channel_chooses_the_voices_and_what_piper_does_not_publish_is_refused() {
     let spanish = plan(Some("spanish"), None, here.clone()).expect("a plan");
     assert_eq!(spanish.downloads.len(), 3);
     assert!(spanish.downloads[1].url.contains("es_MX-claude-high"));
+    // The engine plans the release again at apply from the channel the confirmed plan was made for.
+    assert_eq!(recipe.channel_of(&english).as_deref(), Some("english"));
+    assert_eq!(recipe.channel_of(&spanish).as_deref(), Some("spanish"));
+    let standard = plan(Some("standard"), None, here.clone()).expect("a plan");
+    assert_eq!(recipe.channel_of(&standard).as_deref(), Some("standard"));
+    let alone = plan(None, None, here.clone()).expect("a plan");
+    assert_eq!(
+        recipe.channel_of(&alone),
+        None,
+        "the program alone has no channel"
+    );
     assert!(plan(Some("klingon"), None, here.clone()).is_err());
     assert!(
         plan(None, Some("9.9.9"), here.clone()).is_err(),
@@ -135,6 +158,36 @@ fn a_channel_chooses_the_voices_and_what_piper_does_not_publish_is_refused() {
         "no measured build"
     );
     assert!(plan(None, None, Platform::new("freebsd", "x86_64")).is_err());
+}
+
+#[test]
+fn an_update_of_a_copy_installed_with_voices_keeps_the_language_it_came_with() {
+    use canoa::store::{Launch, ManagedCopy};
+    let recipe = PiperRecipe::default();
+    let engine = Engine::new(PiperRecipe::default(), StoreSettings::default());
+    let root = std::env::temp_dir().join(format!("canoa-piper-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("voices")).expect("voices");
+    std::fs::write(root.join("voices/es_MX-claude-high.onnx"), b"v").expect("a voice");
+    let update = |dir: &std::path::Path| {
+        let mut request = PlanRequest::new(Action::Update, Platform::new("linux", "x86_64"));
+        request.managed = Some(ManagedCopy::new(
+            dir.to_string_lossy(),
+            "0.9.0",
+            Launch::new("piper/piper"),
+        ));
+        engine.plan(&request, &tools(&recipe, World::new()))
+    };
+    let kept = update(&root).expect("a plan");
+    assert_eq!(
+        kept.downloads.len(),
+        3,
+        "the archive and the one voice it held"
+    );
+    assert!(kept.downloads[1].url.contains("es_MX-claude-high"));
+    let none = update(&root.join("not-there")).expect("a plan");
+    assert_eq!(none.downloads.len(), 1, "a copy with no voice gets none");
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 fn standin() -> PathBuf {
@@ -262,12 +315,9 @@ fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_rea
     let tools = LocalTools::new(WorldTransport::new(world), recipe.info().endpoints)
         .granted(&staging)
         .into_object();
-    let plan = engine
-        .plan(
-            &PlanRequest::new(Action::Install, Platform::new(os, arch)),
-            &tools,
-        )
-        .expect("a plan");
+    let mut ask = PlanRequest::new(Action::Install, Platform::new(os, arch));
+    ask.channel = Some("standard".to_owned());
+    let plan = engine.plan(&ask, &tools).expect("a plan");
     assert_eq!(plan.downloads.len(), 3);
     let request = ApplyRequest::new(plan, staging.to_string_lossy());
     let spawner = LocalSpawner::new().files(&staging).into_object();
@@ -326,12 +376,9 @@ fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_rea
     let tools = LocalTools::new(WorldTransport::new(tampered), recipe.info().endpoints)
         .granted(&second)
         .into_object();
-    let plan = engine
-        .plan(
-            &PlanRequest::new(Action::Install, Platform::new(os, arch)),
-            &tools,
-        )
-        .expect("a plan");
+    let mut ask = PlanRequest::new(Action::Install, Platform::new(os, arch));
+    ask.channel = Some("standard".to_owned());
+    let plan = engine.plan(&ask, &tools).expect("a plan");
     let request = ApplyRequest::new(plan, second.to_string_lossy());
     let spawner: Object<dyn ProcessSpawner> = LocalSpawner::new().files(&second).into_object();
     let prompter = Prompter(Mutex::new(Vec::new())).into_object();
@@ -357,9 +404,9 @@ fn the_real_release_installs_and_speaks() {
         .granted(&staging)
         .into_object();
     let platform = Platform::new(std::env::consts::OS, std::env::consts::ARCH);
-    let plan = engine
-        .plan(&PlanRequest::new(Action::Install, platform), &tools)
-        .expect("a plan");
+    let mut ask = PlanRequest::new(Action::Install, platform);
+    ask.channel = Some("standard".to_owned());
+    let plan = engine.plan(&ask, &tools).expect("a plan");
     let request = ApplyRequest::new(plan, staging.to_string_lossy());
     let spawner = LocalSpawner::new().files(&staging).into_object();
     let prompter = Prompter(Mutex::new(Vec::new())).into_object();
