@@ -1016,7 +1016,7 @@ mod tests {
         let base = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut roots = vec![base.join("src"), base.join("../canoa/src/store")];
         for vendor in ["antigravity", "claude", "codex", "grok", "opencode", "pi"] {
-            roots.push(base.join(format!("../canoa-{vendor}/src")));
+            roots.push(base.join(format!("../../extensions/canoa-{vendor}/src")));
         }
         let mut found = Vec::new();
         for root in &roots {

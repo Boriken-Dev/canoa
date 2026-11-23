@@ -29,7 +29,7 @@ void main() {
   test('the marks a host lists are the files of the vendor crates', () {
     expect([for (final each in providerCatalog.providers) if (each.mark != null) each.id], _known);
     for (final id in _known) {
-      final svg = File('../crates/canoa-$id/mark.svg').readAsStringSync();
+      final svg = File('../extensions/canoa-$id/mark.svg').readAsStringSync();
       final root = RegExp('<svg[^>]*>').firstMatch(svg)![0]!;
       final box = RegExp(r'viewBox="0 0 (\d+) (\d+)"').firstMatch(root)!;
       final mark = providerCatalog.byId(id)!.mark!;
