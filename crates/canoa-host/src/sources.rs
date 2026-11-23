@@ -169,12 +169,24 @@ pub(crate) fn program_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
     names.sort_unstable();
+    // Each copy is checked on its own thread: a program's check is bound by its largest file, and the copies are independent.
+    let found: Vec<Option<PathBuf>> = std::thread::scope(|scope| {
+        let each: Vec<_> = names
+            .iter()
+            .map(|name| {
+                scope.spawn(move || {
+                    managed_program_in(shelf, name)
+                        .and_then(|(path, _)| path.parent().map(Path::to_path_buf))
+                })
+            })
+            .collect();
+        each.into_iter()
+            .map(|handle| handle.join().unwrap_or(None))
+            .collect()
+    });
     let mut dirs: Vec<PathBuf> = Vec::new();
-    for name in names {
-        if let Some(dir) = managed_program_in(shelf, &name)
-            .and_then(|(path, _)| path.parent().map(Path::to_path_buf))
-            && !dirs.contains(&dir)
-        {
+    for dir in found.into_iter().flatten() {
+        if !dirs.contains(&dir) {
             dirs.push(dir);
         }
     }
