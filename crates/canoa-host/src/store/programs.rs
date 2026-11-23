@@ -771,6 +771,12 @@ impl Programs {
         Ok(self.managed(&info)?.map(|managed| managed.version))
     }
 
+    /// Whether an install, update or removal holds the shelf now, in this process or another.
+    #[must_use]
+    pub fn installing(&self) -> bool {
+        matches!(self.shelf.apply_lock(), Err(ShelfError::Held))
+    }
+
     /// The start of the managed copy as `current.json` names it, with nothing checked and nothing hashed: what a listing needs to
     /// know where the program is. Whatever runs the copy goes through [`launch`](Self::launch).
     ///

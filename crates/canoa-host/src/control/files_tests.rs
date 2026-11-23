@@ -683,6 +683,40 @@ fn a_restart_raises_the_flag_and_then_stops_the_host() {
     assert_eq!(bare["error"]["code"], REFUSED, "{bare}");
 }
 
+#[test]
+fn a_restart_is_refused_while_a_store_install_holds_the_shelf() {
+    use crate::store::programs::Programs;
+    use crate::store::shelf::Shelf;
+    let root = std::env::temp_dir().join(format!("canoa-restart-install-{}", std::process::id()));
+    let registry = crate::store::registry::built_in().expect("the built-in stores");
+    let shelf = Shelf::unchecked(&root);
+    let programs = Programs::new(Shelf::unchecked(&root), registry);
+    let stop = Arc::new(AtomicBool::new(false));
+    let control = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_stop(Arc::clone(&stop))
+    .with_stores(Stores::new(Arc::new(programs), Vec::new()));
+    let a = key("sha256:aa", &[Grant::HostRestart]);
+    let installing = shelf.apply_lock().expect("an install holds the shelf");
+    let refused = ask(&control, &a, "host/restart", json!({}));
+    assert_eq!(refused["error"]["code"], REFUSED, "{refused}");
+    assert!(!control.restart_flag().load(Ordering::SeqCst));
+    assert!(!stop.load(Ordering::SeqCst));
+    drop(installing);
+    let answered = ask(&control, &a, "host/restart", json!({}));
+    assert_eq!(
+        answered["result"],
+        json!({"restarting": true}),
+        "{answered}"
+    );
+    std::fs::remove_dir_all(&root).expect("removed");
+}
+
 fn memory_control() -> Control {
     Control::open(
         None,

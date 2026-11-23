@@ -1174,6 +1174,15 @@ impl Control {
                 "restart is not available: no supervisor starts this host again".to_owned(),
             ));
         }
+        // An install the host ends half way is lost: the staged copy is swept when the shelf is next used.
+        if let Some(Ok(stores)) = self.stores.get()
+            && stores.installing()
+        {
+            return Err((
+                REFUSED,
+                "a Store install is running and a restart would end it: ask again when it has finished".to_owned(),
+            ));
+        }
         self.restart.store(true, Ordering::SeqCst);
         self.restart_due.store(true, Ordering::SeqCst);
         Ok(json!({"restarting": true}))

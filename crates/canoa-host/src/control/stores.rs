@@ -114,6 +114,11 @@ impl core::fmt::Debug for Stores {
 }
 
 impl Stores {
+    /// Whether a program is being installed, updated or removed now.
+    pub(crate) fn installing(&self) -> bool {
+        self.programs.installing()
+    }
+
     /// The programs `programs` keeps, through the stores named `providers`.
     pub(crate) fn new(programs: Arc<Programs>, providers: Vec<String>) -> Self {
         Self {
