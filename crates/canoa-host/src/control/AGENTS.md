@@ -7,6 +7,12 @@ named `@control` (the `@` is not a name an entry can have), speaking JSON-RPC 2.
 no `initialize`, requests and their answers only. Errors: `-32601` no such method, `-32602` bad params, `-32001` **denied** (the
 caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 
+**Answers come back as they are ready, not in the order of the requests.** A link answers its requests on threads of its own (at most
+64 at once, the next one waits for a free place), so a request that waits on a slow publisher does not hold up the next: a client matches
+an answer to its request by `id`, and relies on what a request did only after its answer. `store/apply`, `host/pair`, the long
+`secrets/set` and `accounts/*` sign-ins and `terminal/*` read or write the link while they run, so each is taken by the link's own
+loop, in order, and the requests behind it wait. A key's connection is not ended for silence while a request is still being answered.
+
 **Who reaches it, and as whom**
 
 - *The app*, in this process: `Local::open("@control")` (`canoa_ffi_link_open` with that entry name). The caller is the **owner**: every

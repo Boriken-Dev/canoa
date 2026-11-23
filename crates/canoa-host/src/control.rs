@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -65,6 +65,10 @@ pub const OWNER_RESERVE: usize = 64 * 1024 * 1024;
 const IDLE: Duration = Duration::from_secs(15 * 60);
 
 const POLL: Duration = Duration::from_millis(50);
+
+/// How many requests of one link are answered at once; past it the link answers the next itself, so a client that asks without
+/// end cannot take the host's threads.
+const IN_FLIGHT: usize = 64;
 
 const NOT_JSON: i32 = -32700;
 const NO_METHOD: i32 = -32601;
@@ -848,20 +852,26 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
     // The shells this link opens run on threads of this scope, and end with the link.
     std::thread::scope(|scope| {
         let terminals = terminal::Link::new(scope, channel, &control.terminals);
-        serve_requests(control, caller, channel, &terminals);
+        serve_requests(scope, control, caller, channel, &terminals);
         // A reader waiting to hand output to a link that nobody reads is let go by closing it.
         terminals.close_all();
         channel.close();
     });
 }
 
-fn serve_requests<C: Channel>(
-    control: &Control,
-    caller: &Caller,
-    channel: &C,
+/// Reads `channel`'s requests and answers them. A request that only needs `handle` is answered on a thread of `scope`, so a slow
+/// one never holds up the rest and answers come back in the order they are ready, each under its request's `id`; a client that
+/// relies on the effect of one request waits for its answer first. `store/apply` and the other requests that talk on the link
+/// while they run, and `terminal/*`, are answered here, in order, since they read or write the link themselves.
+fn serve_requests<'scope, 'env, C: Channel>(
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+    control: &'env Control,
+    caller: &'env Caller,
+    channel: &'env C,
     terminals: &terminal::Link<'_, '_, C>,
 ) {
     let mut last = std::time::Instant::now();
+    let running = Arc::new(AtomicUsize::new(0));
     loop {
         match channel.receive(Some(POLL)) {
             Ok(Some(line)) => {
@@ -873,6 +883,18 @@ fn serve_requests<C: Channel>(
                     Some(control.apply(caller, &line, channel))
                 } else if is_terminal(&line) {
                     Some(control.terminal(caller, terminals, &line))
+                } else if running.load(Ordering::SeqCst) < IN_FLIGHT {
+                    running.fetch_add(1, Ordering::SeqCst);
+                    let running = Arc::clone(&running);
+                    scope.spawn(move || {
+                        if let Some(answer) = control.handle(caller, &line) {
+                            // A link that cannot be written ends the loop's next read.
+                            let _ = channel.send(&answer);
+                        }
+                        control.stop_if_restarting();
+                        running.fetch_sub(1, Ordering::SeqCst);
+                    });
+                    continue;
                 } else {
                     control.handle(caller, &line)
                 };
@@ -884,10 +906,12 @@ fn serve_requests<C: Channel>(
             }
             Err(Failure::Timeout) => {
                 // A key's connection that says nothing is ended; the app's own link lasts as long as the host.
-                // A shell the person left running is not silence: its output is what the link is for.
+                // A shell the person left running is not silence: its output is what the link is for, and a request still
+                // being answered is not silence either.
                 if matches!(caller, Caller::Peer { .. })
                     && last.elapsed() > IDLE
                     && !terminals.any_running()
+                    && running.load(Ordering::SeqCst) == 0
                 {
                     return;
                 }
@@ -1030,6 +1054,9 @@ mod stores;
 pub(crate) mod tunnel;
 #[cfg(test)]
 mod tunnel_tests;
+
+#[cfg(test)]
+mod concurrent_tests;
 
 #[cfg(test)]
 mod tests;

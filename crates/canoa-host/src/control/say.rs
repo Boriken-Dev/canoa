@@ -62,7 +62,7 @@ pub const DEFAULT_CHUNK: usize = 32 * 1024;
 pub const MAX_CHUNK: usize = 256 * 1024;
 /// How long `speech/audio` waits for audio when the call names no time, in milliseconds.
 pub const DEFAULT_WAIT_MS: u64 = 500;
-/// The longest `speech/audio` waits, in milliseconds: a link serves one request at a time, so a stop waits no longer than this.
+/// The longest `speech/audio` waits, in milliseconds: a stop is a request of its own, so this bounds one wait, not the stop.
 pub const MAX_WAIT_MS: u64 = 2000;
 /// The utterances one key may have open at once.
 pub const MAX_PER_KEY: usize = 4;
