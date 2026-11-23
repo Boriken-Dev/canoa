@@ -39,6 +39,7 @@ mod members;
 mod reader;
 mod tap;
 
+pub(crate) use members::{TreeUse, tree_use};
 pub(crate) use reader::{Launch, Quota, Reader, Starter};
 use reader::{Link, Reading};
 use tap::Tap;

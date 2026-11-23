@@ -34,6 +34,104 @@ pub(crate) fn members(root: u32) -> Vec<u32> {
     snapshot().map_or_else(|| alloc::vec![root], |listing| tree(&listing, root))
 }
 
+/// What an agent's processes use together, summed over [`members`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TreeUse {
+    /// How many processes there are, the root included.
+    pub(crate) processes: usize,
+    /// The CPU time they have used, user and system, in milliseconds; `None` when none of them could be read.
+    pub(crate) cpu_ms: Option<u64>,
+    /// Their resident memory (the working set on Windows), in bytes; `None` when none of them could be read.
+    pub(crate) memory_bytes: Option<u64>,
+}
+
+/// What `root` and the processes below it use now. A process that ends or cannot be opened while it is read adds nothing.
+pub(crate) fn tree_use(root: u32) -> TreeUse {
+    let pids = members(root);
+    let (mut cpu, mut memory) = (None::<u64>, None::<u64>);
+    for (cpu_ms, memory_bytes) in usage_of(&pids) {
+        cpu = Some(cpu.unwrap_or(0).saturating_add(cpu_ms));
+        memory = Some(memory.unwrap_or(0).saturating_add(memory_bytes));
+    }
+    TreeUse {
+        processes: pids.len(),
+        cpu_ms: cpu,
+        memory_bytes: memory,
+    }
+}
+
+#[cfg(windows)]
+fn usage_of(pids: &[u32]) -> Vec<(u64, u64)> {
+    pids.iter().filter_map(|&pid| win32::usage(pid)).collect()
+}
+
+/// CPU time from `/proc/PID/stat` (fields 14 and 15, in clock ticks) and resident memory from its field 24 (in pages).
+#[cfg(target_os = "linux")]
+fn usage_of(pids: &[u32]) -> Vec<(u64, u64)> {
+    let ticks = rustix::param::clock_ticks_per_second().max(1);
+    let page = u64::try_from(rustix::param::page_size()).unwrap_or(4096);
+    pids.iter()
+        .filter_map(|pid| {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            // The command name is in parentheses and may hold spaces and parentheses: the fields follow the last one.
+            let (_, rest) = stat.rsplit_once(')')?;
+            let fields: Vec<&str> = rest.split_whitespace().collect();
+            let user: u64 = fields.get(11)?.parse().ok()?;
+            let system: u64 = fields.get(12)?.parse().ok()?;
+            let resident: u64 = fields.get(21)?.parse().ok()?;
+            Some((
+                user.saturating_add(system).saturating_mul(1000) / ticks,
+                resident.saturating_mul(page),
+            ))
+        })
+        .collect()
+}
+
+/// `ps`'s `time` (`[[DD-]HH:]MM:SS[.FF]`) and `rss` (KiB) of each process.
+#[cfg(not(any(windows, target_os = "linux")))]
+fn usage_of(pids: &[u32]) -> Vec<(u64, u64)> {
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    run(Command::new("/bin/ps").args(["-o", "time=,rss=", "-p", &list.join(",")]))
+        .map(|listing| ps_usage(&listing))
+        .unwrap_or_default()
+}
+
+/// The rows of `ps -o time=,rss=`, each `TIME RSS`; a row that is anything else is skipped.
+#[cfg(any(test, not(any(windows, target_os = "linux"))))]
+fn ps_usage(listing: &str) -> Vec<(u64, u64)> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let time = fields.next()?;
+            let kib: u64 = fields.next()?.parse().ok()?;
+            Some((ps_time_ms(time)?, kib.saturating_mul(1024)))
+        })
+        .collect()
+}
+
+/// `[[DD-]HH:]MM:SS[.FF]` in milliseconds.
+#[cfg(any(test, not(any(windows, target_os = "linux"))))]
+fn ps_time_ms(time: &str) -> Option<u64> {
+    let (days, clock) = match time.split_once('-') {
+        Some((days, clock)) => (days.parse::<u64>().ok()?, clock),
+        None => (0, time),
+    };
+    let (whole, fraction) = clock.split_once('.').unwrap_or((clock, ""));
+    let mut seconds = 0_u64;
+    for part in whole.split(':') {
+        seconds = seconds.checked_mul(60)?.checked_add(part.parse().ok()?)?;
+    }
+    let fraction_ms = match fraction.len() {
+        0 => 0,
+        1 => fraction.parse::<u64>().ok()? * 100,
+        2 => fraction.parse::<u64>().ok()? * 10,
+        _ => fraction.get(..3)?.parse().ok()?,
+    };
+    let seconds = seconds.checked_add(days.checked_mul(86_400)?)?;
+    seconds.checked_mul(1000)?.checked_add(fraction_ms)
+}
+
 /// The members among the rows of `listing`, each `PID PPID PGID CREATED` with `-` (or nothing) for a column the system does
 /// not give; a row that is anything else is skipped. A row's parent id may name a process that has since ended and been
 /// given to another, so a child counts only if it was created at or after its parent, which the root's descendants all
@@ -193,6 +291,29 @@ mod tests {
     fn a_process_group_member_is_one_whatever_its_parent() {
         let listing = "10 1 10\n20 1 10\n30 20 10\n40 1 40\n";
         assert_eq!(tree(listing, 10), [10, 20, 30]);
+    }
+
+    #[test]
+    fn ps_times_and_sizes_are_read_in_every_form_it_writes() {
+        assert_eq!(ps_time_ms("00:05"), Some(5_000));
+        assert_eq!(ps_time_ms("1:02:03"), Some(3_723_000));
+        assert_eq!(ps_time_ms("2-00:00:01"), Some(172_801_000));
+        assert_eq!(ps_time_ms("0:01.25"), Some(1_250));
+        assert_eq!(ps_time_ms("0:01.5"), Some(1_500));
+        assert_eq!(ps_time_ms("x:01"), None);
+        assert_eq!(
+            ps_usage("  0:01.25  2048\nnot a row\n 01:00 10\n"),
+            [(1_250, 2 * 1024 * 1024), (60_000, 10 * 1024)]
+        );
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn this_process_uses_memory_and_time_that_are_read() {
+        let used = tree_use(std::process::id());
+        assert!(used.processes >= 1, "{used:?}");
+        assert!(used.memory_bytes.is_some_and(|bytes| bytes > 0), "{used:?}");
+        assert!(used.cpu_ms.is_some(), "{used:?}");
     }
 
     #[test]
