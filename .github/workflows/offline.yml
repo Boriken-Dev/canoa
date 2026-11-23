@@ -14,8 +14,10 @@ jobs:
           path: deps-cache
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          channel: master
+          flutter-version: c0205700e04b127bbfecdeb6c83d1e0c9c564ed6
           cache: true
+      - run: flutter config --enable-windowing
       - name: Verify dependency manifest status
         run: |
           python -c "import json; d=json.load(open('deps-cache/manifest.json')); assert d['status']=='complete' and len(d['pubPackages'])>0"

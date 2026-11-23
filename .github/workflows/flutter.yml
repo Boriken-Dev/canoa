@@ -14,8 +14,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          channel: master
+          flutter-version: c0205700e04b127bbfecdeb6c83d1e0c9c564ed6
           cache: true
+      - run: flutter config --enable-windowing
       - name: Get packages
         run: flutter pub get
         working-directory: app
