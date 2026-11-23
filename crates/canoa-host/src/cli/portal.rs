@@ -40,6 +40,26 @@ enum PortalAction {
         #[command(subcommand)]
         action: FactorAction,
     },
+    /// The passkeys the portal keeps: who has one, and taking one away. A person adds one on the portal's Passkeys page.
+    Passkeys {
+        #[command(subcommand)]
+        action: PasskeyAction,
+    },
+}
+
+/// `canoa portal passkeys`.
+#[derive(clap::Subcommand, Debug)]
+enum PasskeyAction {
+    /// Print one line for each passkey: its account, id, label, the times it was added and last used, and whether it syncs between
+    /// devices. No key is printed.
+    List,
+    /// Take one passkey, or every passkey of an account, away. The sessions a passkey opened end at their next use.
+    Remove {
+        /// The account, by name, as `list` shows it (an account that is gone still has its name).
+        name: String,
+        /// The passkey's id as `list` shows it; every passkey of the account when it is left out.
+        id: Option<String>,
+    },
 }
 
 /// `canoa portal factor`.
@@ -192,11 +212,63 @@ fn portal_factor(
     }
 }
 
+/// `canoa portal passkeys`: an administrator's way to list and remove passkeys, in the files the portal reads.
+fn portal_passkeys(
+    settings: &crate::portal::Settings,
+    action: &PasskeyAction,
+    front: &dyn Front,
+) -> Result<(), Failed> {
+    let access = crate::portal::Access::new(settings).map_err(Failed::usage)?;
+    // Before anything is written: a file made by another account is one the portal cannot read.
+    access.check_passkey_files_owned().map_err(Failed::usage)?;
+    match action {
+        PasskeyAction::List => {
+            for (account, passkeys) in access.list_passkeys().map_err(Failed::usage)? {
+                for passkey in passkeys {
+                    print(
+                        front,
+                        &serde_json::json!({
+                            "user": account,
+                            "id": passkey.id,
+                            "label": passkey.label,
+                            "added": passkey.made_unix,
+                            "last_used": passkey.used_unix,
+                            "synced": passkey.synced,
+                            "disabled": passkey.disabled,
+                        })
+                        .to_string(),
+                    )?;
+                }
+            }
+            Ok(())
+        }
+        PasskeyAction::Remove { name, id } => {
+            let removed = access
+                .remove_passkeys_of(name, id.as_deref())
+                .map_err(Failed::run)?;
+            if removed == 0 {
+                return Err(Failed::run(match id {
+                    Some(_) => format!("{name} has no passkey with that id"),
+                    None => format!("{name} has no passkeys"),
+                }));
+            }
+            print(
+                front,
+                &serde_json::json!({"removed": {"account": name, "passkeys": removed}}).to_string(),
+            )
+        }
+    }
+}
+
 pub(super) fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
     use crate::portal::{Portal, Systemd};
     let settings = portal_settings(args)?;
-    if let Some(PortalAction::Factor { action }) = &args.action {
-        return portal_factor(&settings, action, front);
+    match &args.action {
+        Some(PortalAction::Factor { action }) => return portal_factor(&settings, action, front),
+        Some(PortalAction::Passkeys { action }) => {
+            return portal_passkeys(&settings, action, front);
+        }
+        None => {}
     }
     let (socket, tcp) = (settings.socket.clone(), settings.listen);
     let accounts = crate::portal::Access::new(&settings).map_err(Failed::usage)?;
