@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_text.dart';
 import '../store/links.dart' show openLink;
 import '../theme/look.dart';
 import '../worktree/worktree.dart' show WorktreeFailure;
@@ -121,31 +122,39 @@ class _GitPublishBarState extends State<GitPublishBar> {
     });
   }
 
-  Future<void> _commit() => _run('commit', () async {
+  Future<void> _commit() {
+    final t = context.t;
+    return _run('commit', () async {
     final chosen = _chosen;
     final all = chosen.length == widget.files.length && !widget.more;
     final made = await widget.publisher.commit(widget.folder, _message.text, paths: all ? null : [for (final file in chosen) file.path]);
     _message.clear();
     _unchosen.clear();
     _lastSummary = made.summary;
-    return 'Committed ${made.commit.length > 7 ? made.commit.substring(0, 7) : made.commit} ${made.summary}';
+    return t('publish.committed', {'commit': made.commit.length > 7 ? made.commit.substring(0, 7) : made.commit, 'summary': made.summary});
   });
+  }
 
-  Future<void> _push() => _run('push', () async {
+  Future<void> _push() {
+    final t = context.t;
+    return _run('push', () async {
     final remote = _remote.text.trim();
     await widget.publisher.push(widget.folder, remote: remote.isEmpty ? null : remote, setUpstream: _setUpstream);
-    return _setUpstream ? 'Pushed ${widget.branch ?? 'the branch'} to ${remote.isEmpty ? 'origin' : remote} and set it as the upstream.' : 'Pushed ${widget.branch ?? 'the branch'}.';
+    final branch = widget.branch ?? t('publish.the_branch');
+    return _setUpstream ? t('publish.pushed_upstream', {'branch': branch, 'remote': remote.isEmpty ? 'origin' : remote}) : t('publish.pushed', {'branch': branch});
   });
+  }
 
   Future<void> _pullRequest() async {
+    final t = context.t;
     final asked = await showDialog<_PullRequestForm>(context: context, builder: (_) => _PullRequestDialog(title: _lastSummary));
     if (asked == null || !mounted) return;
     await _run('pull request', () async {
       final made = await widget.publisher.pullRequest(widget.folder, title: asked.title, body: asked.body, base: asked.base, draft: asked.draft);
-      if (made.viaGh) return 'Pull request opened: ${made.url}';
+      if (made.viaGh) return t('publish.pr_opened', {'url': made.url});
       final uri = Uri.tryParse(made.url);
       final opened = uri != null && await openLink(uri);
-      return opened ? 'Opened the forge\'s page for a pull request from ${made.branch}: ${made.url}' : 'gh is not installed. Open this page to start the pull request: ${made.url}';
+      return opened ? t('publish.pr_page_opened', {'branch': made.branch, 'url': made.url}) : t('publish.pr_page', {'url': made.url});
     });
   }
 
@@ -153,6 +162,7 @@ class _GitPublishBarState extends State<GitPublishBar> {
   Widget build(BuildContext context) {
     final look = context.look;
     final muted = TextStyle(color: look.muted, fontSize: 12);
+    final t = context.t;
     final busy = _busy != null;
     final chosen = _chosen.length;
     return Material(
@@ -171,7 +181,7 @@ class _GitPublishBarState extends State<GitPublishBar> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Row(children: [
-                    Expanded(child: Text('$chosen of ${widget.files.length} ${widget.files.length == 1 ? 'file' : 'files'} to commit', key: const ValueKey('publish chosen'), style: const TextStyle(fontSize: 13))),
+                    Expanded(child: Text(t(widget.files.length == 1 ? 'publish.chosen_one' : 'publish.chosen', {'chosen': chosen, 'count': widget.files.length}), key: const ValueKey('publish chosen'), style: const TextStyle(fontSize: 13))),
                     Icon(_filesOpen ? Icons.expand_less : Icons.expand_more, size: 18),
                   ]),
                 ),
@@ -195,7 +205,7 @@ class _GitPublishBarState extends State<GitPublishBar> {
                 maxLines: 4,
                 enabled: !busy,
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(hintText: 'Commit message', isDense: true),
+                decoration: InputDecoration(hintText: t('publish.message'), isDense: true),
               ),
               const SizedBox(height: 6),
               Align(
@@ -203,7 +213,7 @@ class _GitPublishBarState extends State<GitPublishBar> {
                 child: FilledButton(
                   key: const ValueKey('publish commit'),
                   onPressed: busy || chosen == 0 || _message.text.trim().isEmpty ? null : _commit,
-                  child: Text(_busy == 'commit' ? 'Committing…' : 'Commit'),
+                  child: Text(t(_busy == 'commit' ? 'publish.committing' : 'publish.commit')),
                 ),
               ),
               const SizedBox(height: 8),
@@ -212,16 +222,16 @@ class _GitPublishBarState extends State<GitPublishBar> {
               OutlinedButton(
                 key: const ValueKey('publish push'),
                 onPressed: busy ? null : _push,
-                child: Text(_busy == 'push' ? 'Pushing…' : 'Push'),
+                child: Text(t(_busy == 'push' ? 'publish.pushing' : 'publish.push')),
               ),
               OutlinedButton(
                 key: const ValueKey('publish pull request'),
                 onPressed: busy ? null : _pullRequest,
-                child: Text(_busy == 'pull request' ? 'Opening…' : 'Pull request'),
+                child: Text(t(_busy == 'pull request' ? 'publish.opening' : 'publish.pull_request')),
               ),
               Row(mainAxisSize: MainAxisSize.min, children: [
                 Checkbox(key: const ValueKey('publish set upstream'), value: _setUpstream, visualDensity: VisualDensity.compact, onChanged: busy ? null : (on) => setState(() => _setUpstream = on ?? false)),
-                Text('Set upstream', style: muted),
+                Text(t('publish.set_upstream'), style: muted),
               ]),
               SizedBox(
                 width: 110,
@@ -230,7 +240,7 @@ class _GitPublishBarState extends State<GitPublishBar> {
                   controller: _remote,
                   enabled: !busy,
                   style: const TextStyle(fontSize: 12),
-                  decoration: const InputDecoration(hintText: 'origin', isDense: true),
+                  decoration: InputDecoration(hintText: t('publish.remote_hint'), isDense: true),
                 ),
               ),
             ]),
@@ -276,35 +286,38 @@ class _PullRequestDialogState extends State<_PullRequestDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Open a pull request'),
+  Widget build(BuildContext context) {
+    final t = context.t;
+    return AlertDialog(
+    title: Text(t('publish.pr_title')),
     content: SizedBox(
       width: 420,
       child: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          TextField(key: const ValueKey('pr title'), controller: _title, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Title')),
+          TextField(key: const ValueKey('pr title'), controller: _title, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: t('publish.pr_field_title'))),
           const SizedBox(height: 8),
-          TextField(key: const ValueKey('pr body'), controller: _body, minLines: 3, maxLines: 8, decoration: const InputDecoration(labelText: 'Description')),
+          TextField(key: const ValueKey('pr body'), controller: _body, minLines: 3, maxLines: 8, decoration: InputDecoration(labelText: t('publish.pr_field_body'))),
           const SizedBox(height: 8),
-          TextField(key: const ValueKey('pr base'), controller: _base, decoration: const InputDecoration(labelText: 'Base branch', hintText: 'the repository\'s default')),
+          TextField(key: const ValueKey('pr base'), controller: _base, decoration: InputDecoration(labelText: t('publish.pr_field_base'), hintText: t('publish.pr_base_hint'))),
           CheckboxListTile(
             key: const ValueKey('pr draft'),
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
             value: _draft,
-            title: const Text('Draft'),
+            title: Text(t('publish.pr_draft')),
             onChanged: (on) => setState(() => _draft = on ?? false),
           ),
         ]),
       ),
     ),
     actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      TextButton(onPressed: () => Navigator.pop(context), child: Text(t('common.cancel'))),
       FilledButton(
         key: const ValueKey('pr create'),
         onPressed: _title.text.trim().isEmpty ? null : () => Navigator.pop(context, _PullRequestForm(title: _title.text.trim(), body: _body.text, base: _base.text.trim().isEmpty ? null : _base.text.trim(), draft: _draft)),
-        child: const Text('Open'),
+        child: Text(t('publish.pr_open')),
       ),
     ],
   );
+  }
 }
