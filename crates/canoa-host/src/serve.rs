@@ -51,6 +51,7 @@ mod kept;
 mod limit;
 mod options;
 mod sessions;
+mod watch;
 
 #[cfg(test)]
 mod tests;

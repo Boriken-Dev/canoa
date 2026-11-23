@@ -14,8 +14,8 @@
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicUsize};
 use core::time::Duration;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -30,8 +30,9 @@ use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
 use super::kept::{Keeper, Kept};
+use super::watch::{self, Check, Watch};
 use super::{FIRST_MESSAGE, Served, Shared};
-use crate::control::Grant;
+use crate::control::{self, Grant, SharedSessions};
 use crate::local::{self, Link};
 
 /// How often the driver and each client's writer look up to see whether anything ended.
@@ -41,6 +42,8 @@ const POLL: Duration = Duration::from_millis(50);
 const MAX_BACKLOG: usize = 256 * 1024 * 1024;
 /// The request id the host attaches the opening client to the hub with; its answer is not sent on.
 const ATTACH_ID: &str = "canoa-attach";
+/// What the ids of a watch's own requests start with.
+const WATCH_ID: &str = "canoa-watch-";
 
 /// What an entry with `shared = true` keeps.
 #[derive(Debug)]
@@ -75,18 +78,14 @@ impl Hosted {
         }
     }
 
-    /// What each running session `who` may attach to says of itself, newest activity first: `who` is a key's id, or `None` for
-    /// the host's own link. A session the policy would turn the key away from is not listed.
-    pub(super) fn running(&self, who: Option<&str>) -> Vec<Value> {
+    /// `who` as the hub's policy judges it: a key's id, or the host's own key for the host's own link.
+    fn asker(&self, who: Option<&str>) -> Client {
         let id = who.map_or_else(|| self.owner.to_string(), str::to_owned);
-        let asker = Client::new(id).role("operator");
-        let sessions: Vec<Arc<Session>> = self.lock().clone();
-        let mut listed: Vec<(u64, Value)> = sessions
-            .iter()
-            .filter_map(|session| session.describe(&asker))
-            .collect();
-        listed.sort_by_key(|entry| core::cmp::Reverse(entry.0));
-        listed.into_iter().map(|(_, session)| session).collect()
+        let subject = match who {
+            None => "owner".to_owned(),
+            Some(key) => format!("key:{key}"),
+        };
+        Client::new(id).role("operator").subject(subject)
     }
 
     fn lock(&self) -> MutexGuard<'_, Vec<Arc<Session>>> {
@@ -119,6 +118,60 @@ impl Hosted {
     fn remove(&self, session: &Arc<Session>) {
         self.lock().retain(|other| !Arc::ptr_eq(other, session));
     }
+}
+
+impl SharedSessions for Hosted {
+    fn running(&self, who: Option<&str>) -> Vec<Value> {
+        let asker = self.asker(who);
+        let sessions: Vec<Arc<Session>> = self.lock().clone();
+        newest_first(
+            sessions
+                .iter()
+                .filter_map(|session| session.describe(&asker))
+                .collect(),
+        )
+    }
+
+    fn activity(&self, who: Option<&str>, session: Option<&str>) -> Vec<Value> {
+        let asker = self.asker(who);
+        let sessions: Vec<Arc<Session>> = self.lock().clone();
+        newest_first(
+            sessions
+                .iter()
+                .filter(|each| session.is_none_or(|id| each.has_id(id)))
+                .filter_map(|each| each.activity(&asker))
+                .collect(),
+        )
+    }
+
+    fn watch(&self, who: Option<&str>, params: &Value) -> Result<Value, (i32, String)> {
+        let id = params
+            .get("session")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                (
+                    control::BAD_PARAMS,
+                    "session names the session to watch".to_owned(),
+                )
+            })?;
+        let sessions: Vec<Arc<Session>> = self.lock().clone();
+        let session = sessions
+            .into_iter()
+            .find(|each| each.has_id(id))
+            .ok_or_else(|| {
+                (
+                    control::NOT_FOUND,
+                    format!("no shared session {id} is running"),
+                )
+            })?;
+        session.configure_watch(self.asker(who).label("watch"), params)
+    }
+}
+
+/// The values of `listed`, the one with the latest time first.
+fn newest_first(mut listed: Vec<(u64, Value)>) -> Vec<Value> {
+    listed.sort_by_key(|entry| core::cmp::Reverse(entry.0));
+    listed.into_iter().map(|(_, session)| session).collect()
 }
 
 /// What lets an attach: the key is still paired, the entry still lists it, and it is trusted with at least what the key that opened
@@ -265,6 +318,19 @@ struct State {
     initialize: Option<Value>,
     /// The file the session's log is kept in, while it is kept.
     keeper: Option<Keeper>,
+    /// The session's watch, while one is armed.
+    watch: Option<Watching>,
+    /// The requests a watch sent as an attached client, whose answers that client is not sent.
+    watch_asks: BTreeSet<(ClientId, String)>,
+    /// How many prompts watches have sent, for their ids.
+    watch_count: u64,
+}
+
+/// A watch and the identity its prompts are sent as.
+struct Watching {
+    watch: Watch,
+    /// The key that armed it, as the hub's policy judges it.
+    client: Client,
 }
 
 /// One agent session, its agent and the clients attached.
@@ -285,6 +351,9 @@ pub(super) struct Session {
     /// The longest message a client may be sent, `[host] max_message_bytes`.
     max_line: usize,
     access: Arc<dyn Policy>,
+    /// The agent's process id once a program entry's agent has started; 0 before, after, and for an agent that is no process
+    /// of this computer's own (a harness in the host, or one in an environment).
+    agent_pid: Arc<AtomicU32>,
     state: Mutex<State>,
 }
 
@@ -295,6 +364,87 @@ impl Session {
 
     fn now_ms(&self) -> u64 {
         u64::try_from(self.epoch.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// The hub's clock `now` as milliseconds since the Unix epoch.
+    const fn unix_ms(&self, now: u64) -> u64 {
+        self.started_unix_ms.saturating_add(now)
+    }
+
+    /// What [`Self::describe`] says, with how long the session has been quiet, its watch, and what the agent's processes use,
+    /// read once the session's lock is let go.
+    fn activity(&self, asker: &Client) -> Option<(u64, Value)> {
+        let (active, mut out) = self.describe(asker)?;
+        {
+            let state = self.lock();
+            if let Phase::Live(hub) = &state.phase {
+                out["quietMs"] = json!(self.now_ms().saturating_sub(hub.last_activity()));
+            }
+            if let Some(watching) = &state.watch {
+                out["watch"] = watching.watch.status();
+            }
+        }
+        let pid = self.agent_pid.load(Ordering::Relaxed);
+        if pid != 0 {
+            let used = crate::usage_splice::tree_use(pid);
+            out["processes"] = json!({
+                "count": used.processes,
+                "cpuMs": used.cpu_ms,
+                "memoryBytes": used.memory_bytes,
+            });
+        }
+        Some((active, out))
+    }
+
+    /// Arms, changes or takes away the session's watch for `client`, which must be a key the session lets attach and prompt.
+    fn configure_watch(&self, client: Client, params: &Value) -> Result<Value, (i32, String)> {
+        for action in [Action::Attach, Action::Prompt] {
+            if let Verdict::Deny(why) = self.access.check(&client, &action) {
+                return Err((control::DENIED, why));
+            }
+        }
+        let config =
+            watch::Config::from_params(params).map_err(|why| (control::BAD_PARAMS, why))?;
+        let pid = self.agent_pid.load(Ordering::Relaxed);
+        let baseline = match &config {
+            Some(config) if config.measures_processes() => {
+                if pid == 0 {
+                    return Err((
+                        control::REFUSED,
+                        "this session's agent is not a process of this computer's own (it runs inside the host or in an \
+                         environment), so whileChildren, cpuBelowMs and memoryNotShrinking cannot be checked"
+                            .to_owned(),
+                    ));
+                }
+                Some(crate::usage_splice::tree_use(pid))
+            }
+            _ => None,
+        };
+        let now = self.unix_ms(self.now_ms());
+        let mut guard = self.lock();
+        let state = &mut *guard;
+        let Phase::Live(hub) = &state.phase else {
+            return Err((control::NOT_FOUND, "the session is not open".to_owned()));
+        };
+        let session = hub.session_id().to_owned();
+        state.watch = match config {
+            None => None,
+            Some(config) => {
+                let watch = Watch::new(config, client.id.as_str().to_owned(), now, baseline)
+                    .map_err(|why| (control::BAD_PARAMS, why))?;
+                Some(Watching { watch, client })
+            }
+        };
+        tracing::info!(
+            entry = self.entry,
+            session,
+            armed = state.watch.is_some(),
+            "a session's watch was set"
+        );
+        Ok(json!({
+            "session": session,
+            "watch": state.watch.as_ref().map(|watching| watching.watch.status()),
+        }))
     }
 
     /// What this session says of itself to `asker`, with when it was last active, or `None` when it is not open or the policy
@@ -393,6 +543,7 @@ impl Session {
             phase,
             clients,
             id: session_id,
+            watch,
             ..
         } = &mut *state;
         match phase {
@@ -444,6 +595,11 @@ impl Session {
                     tracing::info!(entry = self.entry, client = %id, "a client ended the session");
                     self.agent.close();
                     return;
+                }
+                if message.get("method").and_then(Value::as_str) == Some("session/prompt")
+                    && let Some(watching) = watch
+                {
+                    watching.watch.person_wrote();
                 }
                 match hub.from_client(id, &message) {
                     Ok(outputs) => self.dispatch(&mut state, outputs),
@@ -648,7 +804,16 @@ impl Session {
         while let Some(output) = work.pop_front() {
             match output {
                 Output::ToClient { client, message } => {
-                    if message.get("id").and_then(Value::as_str) == Some(ATTACH_ID) {
+                    let answered = message
+                        .get("method")
+                        .is_none()
+                        .then(|| message.get("id").and_then(Value::as_str))
+                        .flatten();
+                    if answered == Some(ATTACH_ID)
+                        || answered.is_some_and(|id| {
+                            state.watch_asks.remove(&(client.clone(), id.to_owned()))
+                        })
+                    {
                         continue;
                     }
                     let Some(slot) = state.clients.get(&client) else {
@@ -751,27 +916,157 @@ impl Session {
         self.dispatch(&mut state, outputs);
     }
 
-    /// What the driver does between messages: the hub's clock, and the idle rule.
+    /// What the driver does between messages: the hub's clock, the idle rule, and a watch whose check is due.
     fn tick(&self) {
-        let mut state = self.lock();
+        let watch_due = {
+            let mut state = self.lock();
+            let now = self.now_ms();
+            let Phase::Live(hub) = &mut state.phase else {
+                return;
+            };
+            let due = hub.poll(now);
+            let idle = self.idle.is_some_and(|idle| {
+                hub.attached_count() == 0
+                    && now.saturating_sub(hub.last_activity())
+                        >= u64::try_from(idle.as_millis()).unwrap_or(u64::MAX)
+            });
+            self.dispatch(&mut state, due);
+            if idle {
+                tracing::info!(
+                    entry = self.entry,
+                    "a shared session nobody is attached to timed out"
+                );
+                self.agent.close();
+                return;
+            }
+            let at = self.unix_ms(now);
+            state
+                .watch
+                .as_ref()
+                .filter(|watching| watching.watch.due(at))
+                .map(|watching| watching.watch.measures_processes())
+        };
+        if let Some(measure) = watch_due {
+            self.watch_check(measure);
+        }
+    }
+
+    /// A watch's due check. The agent's processes, when its conditions read them, are read before the session's lock is taken.
+    fn watch_check(&self, measure: bool) {
+        let pid = self.agent_pid.load(Ordering::Relaxed);
+        let processes = (measure && pid != 0).then(|| crate::usage_splice::tree_use(pid));
+        let mut guard = self.lock();
+        let state = &mut *guard;
         let now = self.now_ms();
+        let at = self.unix_ms(now);
         let Phase::Live(hub) = &mut state.phase else {
             return;
         };
-        let due = hub.poll(now);
-        let idle = self.idle.is_some_and(|idle| {
-            hub.attached_count() == 0
-                && now.saturating_sub(hub.last_activity())
-                    >= u64::try_from(idle.as_millis()).unwrap_or(u64::MAX)
-        });
-        self.dispatch(&mut state, due);
-        if idle {
-            tracing::info!(
-                entry = self.entry,
-                "a shared session nobody is attached to timed out"
-            );
-            self.agent.close();
+        let mut outputs = hub.poll(now);
+        let sample = watch::Sample {
+            quiet_ms: now.saturating_sub(hub.last_activity()),
+            turn_running: hub.turn_running(),
+            permissions_waiting: hub.pending_permissions().count(),
+            processes,
+        };
+        // Armed again or taken away while the processes were read.
+        let Some(watching) = state
+            .watch
+            .as_mut()
+            .filter(|watching| watching.watch.due(at))
+        else {
+            return self.dispatch(state, outputs);
+        };
+        match watching.watch.check(at, &sample) {
+            Check::Skip(why) => {
+                tracing::debug!(entry = self.entry, "a watch did not prompt: {why}");
+            }
+            Check::Prompt(text) => {
+                let (sent, refused) = Self::watch_prompt(state, &text);
+                outputs.extend(sent);
+                match refused {
+                    Some(why) => {
+                        tracing::info!(entry = self.entry, "a watch's prompt was refused: {why}");
+                        if let Some(watching) = state.watch.as_mut() {
+                            watching
+                                .watch
+                                .stop(format!("its prompt was refused: {why}"));
+                        }
+                    }
+                    None => tracing::info!(entry = self.entry, "a watch prompted the session"),
+                }
+            }
         }
+        self.dispatch(state, outputs);
+    }
+
+    /// Sends a watch's prompt as the key that armed it: through that key's attachment when it is attached, else attached for this
+    /// one message and detached again, so the turn goes on for whoever is there. Returns what the hub has to send and, when the
+    /// hub or the session's policy refused the prompt, why.
+    fn watch_prompt(state: &mut State, text: &str) -> (Vec<Output>, Option<String>) {
+        let Some(client) = state.watch.as_ref().map(|watching| watching.client.clone()) else {
+            return (Vec::new(), None);
+        };
+        let Phase::Live(hub) = &mut state.phase else {
+            return (Vec::new(), None);
+        };
+        state.watch_count = state.watch_count.saturating_add(1);
+        let id = format!("{WATCH_ID}{}", state.watch_count);
+        let session = hub.session_id().to_owned();
+        let prompt = json!({"jsonrpc": "2.0", "id": id, "method": "session/prompt",
+            "params": {"sessionId": session, "prompt": [{"type": "text", "text": text}]}});
+        let mut outputs = Vec::new();
+        if hub.attached().any(|each| each.id == client.id) {
+            state.watch_asks.insert((client.id.clone(), id.clone()));
+            let before = hub.head();
+            match hub.from_client(&client.id, &prompt) {
+                Ok(sent) => outputs = sent,
+                Err(error) => return (outputs, Some(error.to_string())),
+            }
+            // The hub does not echo a prompt to the client that sent it, and this one's person did not type it: it is shown
+            // the prompt as the others are.
+            let echoed: Vec<Value> = hub.log_after(before).cloned().collect();
+            outputs.extend(echoed.into_iter().map(|message| Output::ToClient {
+                client: client.id.clone(),
+                message,
+            }));
+        } else {
+            if let Err(error) = hub.connect(client.clone()) {
+                let why = match error {
+                    HubError::Refused(why) => why,
+                    other => other.to_string(),
+                };
+                return (outputs, Some(why));
+            }
+            let resume = json!({"jsonrpc": "2.0", "id": format!("{id}-attach"),
+                "method": "session/resume", "params": {"sessionId": session}});
+            for sent in [
+                hub.from_client(&client.id, &resume),
+                hub.from_client(&client.id, &prompt),
+                hub.disconnect(&client.id),
+            ] {
+                outputs.extend(sent.unwrap_or_default());
+            }
+        }
+        // A refusal is answered at once, under the prompt's id.
+        let refused = outputs.iter().find_map(|output| match output {
+            Output::ToClient {
+                client: to,
+                message,
+            } if *to == client.id
+                && message.get("id").and_then(Value::as_str) == Some(id.as_str()) =>
+            {
+                message
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            }
+            _ => None,
+        });
+        if refused.is_some() {
+            state.watch_asks.remove(&(client.id, id));
+        }
+        (outputs, refused)
     }
 
     /// The agent's end: the hub says so to whoever is attached, and what they are sent is the last of it.
@@ -1066,6 +1361,7 @@ fn open<C: Channel>(
         log_bounds: (keep.log_entries, keep.log_bytes),
         max_line: shared.max_line,
         access,
+        agent_pid: Arc::new(AtomicU32::new(0)),
         state: Mutex::new(State {
             phase: Phase::Boot(Box::new(Boot {
                 creator: id.clone(),
@@ -1085,6 +1381,9 @@ fn open<C: Channel>(
             title: None,
             initialize: None,
             keeper: None,
+            watch: None,
+            watch_asks: BTreeSet::new(),
+            watch_count: 0,
         }),
     });
     let (outbox, queue) = mailbox();
@@ -1100,6 +1399,7 @@ fn open<C: Channel>(
     let flow = {
         let (shared, served) = (Arc::clone(shared), Arc::clone(served));
         let (first, peer) = (first.to_vec(), *peer);
+        let pid = Arc::clone(&session.agent_pid);
         thread::Builder::new()
             .name("canoa-session-agent".to_owned())
             .spawn(move || {
@@ -1109,8 +1409,9 @@ fn open<C: Channel>(
                     &served,
                     &prefilled,
                     (&first, &peer),
-                    (None, reach),
+                    (None, reach, Some(&pid)),
                 );
+                pid.store(0, Ordering::Relaxed);
                 host.close();
             })
     };

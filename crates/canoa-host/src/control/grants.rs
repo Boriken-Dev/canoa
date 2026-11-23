@@ -22,6 +22,10 @@ pub enum Grant {
     LedgerRead,
     /// `ledger/put`, `ledger/remove` and `ledger/clear`, of the records the key owns.
     LedgerWrite,
+    /// `sessions/watch`: arms a watch that prompts a shared session again, as this key, on a schedule or when it goes quiet. A
+    /// prompt is what the agent acts on next, so this is as much as prompting the session; the key must also be one the session
+    /// admits, and every prompt is judged as the key's own.
+    SessionsWatch,
     /// `worktree/new`, `worktree/status` and `worktree/remove`, under the working roots of the entries the key may use.
     Worktree,
     /// `store/list`, `store/report`, `store/latest` and `store/plan`: what the host finds and would do, and nothing it writes.
@@ -134,7 +138,7 @@ pub(super) struct GrantSpec {
     pub(super) control: bool,
 }
 
-pub(super) const GRANT_SPECS: [GrantSpec; 29] = [
+pub(super) const GRANT_SPECS: [GrantSpec; 30] = [
     GrantSpec {
         grant: Grant::LedgerRead,
         name: "ledger.read",
@@ -143,6 +147,11 @@ pub(super) const GRANT_SPECS: [GrantSpec; 29] = [
     GrantSpec {
         grant: Grant::LedgerWrite,
         name: "ledger.write",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::SessionsWatch,
+        name: "sessions.watch",
         control: true,
     },
     GrantSpec {
@@ -285,7 +294,7 @@ pub(super) const GRANT_SPECS: [GrantSpec; 29] = [
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub const fn all() -> [Self; 29] {
+    pub const fn all() -> [Self; 30] {
         [
             GRANT_SPECS[0].grant,
             GRANT_SPECS[1].grant,
@@ -316,6 +325,7 @@ impl Grant {
             GRANT_SPECS[26].grant,
             GRANT_SPECS[27].grant,
             GRANT_SPECS[28].grant,
+            GRANT_SPECS[29].grant,
         ]
     }
 
@@ -352,6 +362,14 @@ pub(crate) enum Caller {
 }
 
 impl Caller {
+    /// The key's id, or `None` for this process.
+    pub(super) fn key(&self) -> Option<&str> {
+        match self {
+            Self::Owner => None,
+            Self::Peer { id, .. } => Some(id),
+        }
+    }
+
     /// What a record this caller puts is owned by.
     pub(super) fn owner(&self) -> &str {
         match self {

@@ -5,7 +5,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::net::SocketAddr;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicU32, Ordering};
 use core::time::Duration;
 use std::ffi::OsString;
 use std::thread;
@@ -384,7 +384,13 @@ fn give_agent<C: Channel>(
     if let (Some(keep), Run::Agent { .. }, None) = (&served.keep, &served.run, context) {
         return super::sessions::serve(shared, served, keep, channel, (first, peer), reach);
     }
-    give_agent_flow(shared, served, channel, (first, peer), (context, reach));
+    give_agent_flow(
+        shared,
+        served,
+        channel,
+        (first, peer),
+        (context, reach, None),
+    );
 }
 
 fn dispatch_non_agent<C: Channel>(
@@ -508,6 +514,7 @@ fn launch_agent_program<C: Channel>(
     connection: Option<&Connection>,
     identity: &[(String, String)],
     (run_env, links): (Option<&Arc<environments::Env>>, ConnectionLinks<'_>),
+    pid: Option<&AtomicU32>,
 ) {
     let ConnectionLinks {
         conn,
@@ -549,6 +556,9 @@ fn launch_agent_program<C: Channel>(
             return tracing::warn!(entry = served.name, "the agent could not start: {error}");
         }
     };
+    if let Some(pid) = pid {
+        pid.store(agent.pid(), Ordering::Relaxed);
+    }
     let end = match connection {
         Some(connection) => {
             let given = Given::for_connection(Some(connection));
@@ -619,13 +629,14 @@ fn launch_agent_program<C: Channel>(
     let _ = agent.stop();
 }
 
-/// Serves one connection with an agent of its own, until either ends.
+/// Serves one connection with an agent of its own, until either ends. `pid` is told the agent's process id once a program
+/// entry's agent has started (0 in an environment).
 pub(super) fn give_agent_flow<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,
     (first, peer): (&[u8], &PeerId),
-    (context, reach): (Option<&delegate::ChildContext>, Reach),
+    (context, reach, pid): (Option<&delegate::ChildContext>, Reach, Option<&AtomicU32>),
 ) {
     if dispatch_non_agent(shared, served, channel, peer, reach.in_process()) {
         return;
@@ -810,6 +821,7 @@ pub(super) fn give_agent_flow<C: Channel>(
                     envs: envs.as_ref(),
                 },
             ),
+            pid,
         ),
         Agent::Harness(options) => give_harness(
             shared,

@@ -75,9 +75,9 @@ const IN_FLIGHT: usize = 64;
 const NOT_JSON: i32 = -32700;
 const NO_METHOD: i32 = -32601;
 pub(crate) const BAD_PARAMS: i32 = -32602;
-const DENIED: i32 = -32001;
-const REFUSED: i32 = -32002;
-const NOT_FOUND: i32 = -32003;
+pub(crate) const DENIED: i32 = -32001;
+pub(crate) const REFUSED: i32 = -32002;
+pub(crate) const NOT_FOUND: i32 = -32003;
 
 /// The working roots of one entry, and the keys that may use it: what a key's worktrees may be made under.
 #[derive(Clone, Debug)]
@@ -103,12 +103,25 @@ impl core::fmt::Debug for Sealer {
     }
 }
 
-/// The live shared sessions on this host, each one as a JSON object for `sessions/running`.
-#[derive(Clone)]
-pub(crate) struct RunningSessions(pub(crate) Arc<ListRunning>);
+/// The shared sessions running on this host, as the control channel lists, measures and watches them. `who` is a key's id, or
+/// `None` for the host's own link; a session the key could not attach to is not shown to it.
+pub(crate) trait SharedSessions: Send + Sync {
+    /// `sessions/running`: each session as a JSON object, newest activity first.
+    fn running(&self, who: Option<&str>) -> Vec<Value>;
+    /// `sessions/activity`: each session (or the one named `session`) with how long it has been quiet and what its agent's
+    /// processes use.
+    fn activity(&self, who: Option<&str>, session: Option<&str>) -> Vec<Value>;
+    /// `sessions/watch`: arms, changes or takes away the watch of the session `params` names.
+    ///
+    /// # Errors
+    ///
+    /// The control channel's code and why, in words for the person.
+    fn watch(&self, who: Option<&str>, params: &Value) -> Result<Value, (i32, String)>;
+}
 
-/// Answers `sessions/running` for `who` (owner or peer id).
-pub(crate) type ListRunning = dyn Fn(Option<&str>) -> Vec<Value> + Send + Sync;
+/// The shared sessions a host keeps.
+#[derive(Clone)]
+pub(crate) struct RunningSessions(pub(crate) Arc<dyn SharedSessions>);
 
 impl core::fmt::Debug for RunningSessions {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -531,13 +544,29 @@ impl Control {
 
     /// `sessions/running`: the shared sessions running now that this caller may attach to, as the attach itself would admit it.
     fn running_sessions(&self, caller: &Caller) -> Result<Value, (i32, String)> {
+        let list = self
+            .sessions
+            .as_ref()
+            .map_or_else(Vec::new, |sessions| sessions.0.running(caller.key()));
+        Ok(json!({"sessions": list}))
+    }
+
+    /// `sessions/activity {session?}`: the shared sessions this caller may attach to, with what their agents' processes use.
+    fn session_activity(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {
+        let session = text_param(params, "session")?;
         let list = self.sessions.as_ref().map_or_else(Vec::new, |sessions| {
-            (sessions.0)(match caller {
-                Caller::Owner => None,
-                Caller::Peer { id, .. } => Some(id.as_str()),
-            })
+            sessions.0.activity(caller.key(), session)
         });
         Ok(json!({"sessions": list}))
+    }
+
+    /// `sessions/watch {session, ...}`: arms, changes or takes away the watch of a shared session this caller may prompt.
+    fn session_watch(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {
+        let sessions = self
+            .sessions
+            .as_ref()
+            .ok_or_else(|| (NOT_FOUND, "this host keeps no shared sessions".to_owned()))?;
+        sessions.0.watch(caller.key(), params)
     }
 
     /// Answers `usage/*` from this log.

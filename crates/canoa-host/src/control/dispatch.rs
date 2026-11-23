@@ -113,6 +113,16 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_running_sessions,
     ),
     rpc(
+        "sessions/activity",
+        Access::Require(Grant::LedgerRead),
+        Control::r_session_activity,
+    ),
+    rpc(
+        "sessions/watch",
+        Access::Require(Grant::SessionsWatch),
+        Control::r_session_watch,
+    ),
+    rpc(
         "ledger/put",
         Access::Require(Grant::LedgerWrite),
         Control::r_ledger_put,

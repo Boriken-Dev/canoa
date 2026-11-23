@@ -25,7 +25,7 @@ loop, in order, and the requests behind it wait. A key's connection is not ended
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "files", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover", "usage", "terminal", "state", "workspace.open", "hosting"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "sessions.watch", "worktree", "store.read", "folders", "files", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover", "usage", "terminal", "state", "workspace.open", "hosting"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 max_upload_bytes = 8388608                          # one uploaded file, sent in chunks of at most 512 KiB
@@ -35,8 +35,9 @@ max_uploads = 256                                   # files one key may keep upl
 
 | Grant | Methods |
 | --- | --- |
-| `ledger.read` | `ledger/list`, `sessions/running` |
+| `ledger.read` | `ledger/list`, `sessions/running`, `sessions/activity` (see the serve header's Shared sessions) |
 | `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
+| `sessions.watch` | `sessions/watch`: arms, changes or takes away a watch that prompts a shared session again as this key (see the serve header's Shared sessions). A prompt is what the agent acts on next, so it is as much as prompting the session; the session's own rule for attaching applies as well, and every prompt is judged as the key's own. Not implied by `ledger.write` |
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove`, `worktree/diff` |
 | `store.read` | `store/list`, `store/extensions`, `store/report`, `store/latest`, `store/plan`, `host/which`, `shell/list` (or `terminal`) |
 | `overlay.read` / `store.programs` | `store/index`: the first reads the catalog entries, the second the program entries; a key holding either gets that half, none is refused; `refresh` also needs `overlay.write` |

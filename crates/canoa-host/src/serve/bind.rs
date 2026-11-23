@@ -993,10 +993,7 @@ fn build_control_hub(
     let kept = kept
         .with_worktree_limits(config.worktrees)
         .with_trust(Arc::clone(trust))
-        .with_sessions(control::RunningSessions(Arc::new({
-            let hosted = Arc::clone(hosted);
-            move |who| hosted.running(who)
-        })));
+        .with_sessions(control::RunningSessions(Arc::clone(hosted) as _));
     let kept = match &options.state_dir {
         Some(home) => kept.with_pairing(control::hosting::Pairing {
             identity: Arc::clone(pairing_identity),

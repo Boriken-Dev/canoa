@@ -36,6 +36,24 @@ impl Control {
         self.running_sessions(caller)
     }
 
+    pub(super) fn r_session_activity(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.session_activity(caller, params)
+    }
+
+    pub(super) fn r_session_watch(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.session_watch(caller, params)
+    }
+
     pub(super) fn r_ledger_put(
         &self,
         caller: &Caller,

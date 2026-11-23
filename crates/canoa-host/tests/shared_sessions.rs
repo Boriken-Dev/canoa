@@ -695,3 +695,232 @@ fn without_a_kept_log_a_cursor_from_before_the_restart_is_refused_not_replayed_f
     })
     .expect("a link");
 }
+
+fn control_call(
+    url: &str,
+    key: &coqui_link::auth::Identity,
+    host: &Host,
+    method: &str,
+    params: Value,
+) -> Result<Value, Value> {
+    with_link(url, key, host.peer, |rpc| rpc.request(method, params)).expect("a link")
+}
+
+/// A user message the hub fanned out with `text`, and the key it says sent it.
+fn user_says(text: &'static str) -> impl Fn(&Value) -> bool {
+    move |message| {
+        message["method"] == "session/update"
+            && message["params"]["update"]["sessionUpdate"] == "user_message_chunk"
+            && message["params"]["update"]["content"]["text"] == text
+    }
+}
+
+fn watch_entry(grants: &[(&coqui_link::auth::Identity, &str)]) -> String {
+    let listed: Vec<String> = grants
+        .iter()
+        .map(|(key, names)| format!("\"{}\" = [{names}]", key.peer_id()))
+        .collect();
+    format!(
+        "{}[host.control]\nlisten = \"127.0.0.1:0\"\ngrants = {{ {} }}\n",
+        shared_entry("shared", ""),
+        listed.join(", ")
+    )
+}
+
+#[test]
+fn a_watch_prompts_one_interval_after_it_is_armed_as_the_key_that_armed_it() {
+    let (opener, watcher, reader) = (support::key(), support::key(), support::key());
+    let config = watch_entry(&[
+        (&watcher, "\"ledger.read\", \"sessions.watch\""),
+        (&reader, "\"ledger.read\""),
+    ]);
+    let host = Host::start(&config, 2);
+    for key in [&opener, &watcher, &reader] {
+        host.pair(key);
+    }
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    let control = host.url("@control").to_owned();
+    with_link(&url, &opener, host.peer, |a| {
+        let session = open_session(a, &dir);
+
+        // Reading the session's activity is not arming a watch, which takes a grant of its own.
+        let denied = control_call(
+            &control,
+            &reader,
+            &host,
+            "sessions/watch",
+            json!({"session": session, "everyMs": 200}),
+        )
+        .expect_err("denied");
+        assert_eq!(denied["code"], -32001, "{denied}");
+        let missing = control_call(
+            &control,
+            &watcher,
+            &host,
+            "sessions/watch",
+            json!({"session": "no-such-session"}),
+        )
+        .expect_err("not found");
+        assert_eq!(missing["code"], -32003, "{missing}");
+
+        // The watcher is not attached: its prompt goes in under its own key all the same.
+        let armed = control_call(
+            &control,
+            &watcher,
+            &host,
+            "sessions/watch",
+            json!({"session": session, "everyMs": 300, "maxPrompts": 1}),
+        )
+        .expect("armed");
+        let watch = &armed["watch"];
+        assert_eq!(watch["armedBy"], watcher.peer_id().to_string(), "{armed}");
+        assert_eq!(
+            watch["nextCheckAt"].as_u64(),
+            watch["armedAt"].as_u64().map(|at| at + 300),
+            "the first check is one interval after arming, not at once: {armed}"
+        );
+        let (said, _) = read_until(a, user_says("Continue"));
+        assert_eq!(
+            said["params"]["_meta"][META]["client"],
+            watcher.peer_id().to_string(),
+            "{said}"
+        );
+        read_until(a, says("echo: Continue"));
+
+        let activity = control_call(
+            &control,
+            &watcher,
+            &host,
+            "sessions/activity",
+            json!({"session": session}),
+        )
+        .expect("answers");
+        let [row] = activity["sessions"].as_array().expect("a list").as_slice() else {
+            panic!("one session: {activity}");
+        };
+        assert_eq!(row["watch"]["promptsSent"], 1, "{row}");
+        assert!(row["quietMs"].is_u64(), "{row}");
+        assert!(
+            row["processes"]["count"]
+                .as_u64()
+                .is_some_and(|count| count >= 1),
+            "{row}"
+        );
+        if cfg!(any(windows, target_os = "linux")) {
+            assert!(
+                row["processes"]["memoryBytes"]
+                    .as_u64()
+                    .is_some_and(|bytes| bytes > 0),
+                "{row}"
+            );
+        }
+
+        let off = control_call(
+            &control,
+            &watcher,
+            &host,
+            "sessions/watch",
+            json!({"session": session, "enabled": false}),
+        )
+        .expect("taken away");
+        assert_eq!(off["watch"], Value::Null, "{off}");
+    })
+    .expect("the opener's link");
+}
+
+#[test]
+fn an_attached_key_is_not_sent_the_answer_to_its_watchs_prompt_and_a_waiting_permission_holds_it() {
+    let opener = support::key();
+    let config = watch_entry(&[(&opener, "\"ledger.read\", \"sessions.watch\"")]);
+    let host = Host::start(&config, 2);
+    host.pair(&opener);
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    let control = host.url("@control").to_owned();
+    with_link(&url, &opener, host.peer, |a| {
+        let session = open_session(a, &dir);
+        control_call(
+            &control,
+            &opener,
+            &host,
+            "sessions/watch",
+            json!({"session": session, "everyMs": 200, "maxPrompts": 1, "prompt": "Status"}),
+        )
+        .expect("armed");
+        let (said, _) = read_until(a, user_says("Status"));
+        assert_eq!(
+            said["params"]["_meta"][META]["client"],
+            opener.peer_id().to_string()
+        );
+        read_until(a, says("echo: Status"));
+        control_call(
+            &control,
+            &opener,
+            &host,
+            "sessions/watch",
+            json!({"session": session, "enabled": false}),
+        )
+        .expect("taken away");
+        // The watch's turn ends before this one starts; its answer is not among what arrives.
+        a.send(
+            &json!({"jsonrpc": "2.0", "id": 800, "method": "session/prompt",
+            "params": {"sessionId": session, "prompt": [{"type": "text", "text": "two"}]}}),
+        )
+        .expect("sends");
+        let (ended, seen) = read_until(a, |message| message["id"] == 800);
+        assert_eq!(ended["result"]["stopReason"], "end_turn", "{ended}");
+        let stray: Vec<&Value> = seen
+            .iter()
+            .filter(|message| {
+                message["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("canoa-watch-"))
+            })
+            .collect();
+        assert!(stray.is_empty(), "{stray:?}");
+
+        // A permission waits: the next check says so and sends nothing.
+        a.send(
+            &json!({"jsonrpc": "2.0", "id": 801, "method": "session/prompt",
+            "params": {"sessionId": session, "prompt": [{"type": "text", "text": "ask first"}]}}),
+        )
+        .expect("sends");
+        read_until(a, |message| {
+            message["method"] == "session/request_permission"
+        });
+        control_call(
+            &control,
+            &opener,
+            &host,
+            "sessions/watch",
+            json!({"session": session, "everyMs": 100, "whenIdle": false}),
+        )
+        .expect("armed again");
+        let until = Instant::now() + Duration::from_secs(20);
+        let held = loop {
+            let activity = control_call(
+                &control,
+                &opener,
+                &host,
+                "sessions/activity",
+                json!({"session": session}),
+            )
+            .expect("answers");
+            let watch = activity["sessions"][0]["watch"].clone();
+            if watch["lastCheck"].is_object() || Instant::now() >= until {
+                break watch;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(held["lastCheck"]["prompted"], false, "{held}");
+        assert!(
+            held["lastCheck"]["why"]
+                .as_str()
+                .is_some_and(|why| why.contains("permission")),
+            "{held}"
+        );
+        assert_eq!(held["promptsSent"], 0, "{held}");
+    })
+    .expect("the opener's link");
+}

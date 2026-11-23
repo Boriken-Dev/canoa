@@ -99,6 +99,34 @@ An agent or harness entry with `shared = true` keeps each session's agent runnin
 - **Who may attach.** The hub's policy is the host's own, asked again at each action: the key must still be paired (`peers` store) and listed by the entry (`peers`), and, to attach, trusted with at least the control grants of the key that opened the session, since the session's tools, secrets and delegation are the opener's. Every key an entry admits and that passes these may read, prompt, answer permissions in and end every session of that entry. A task another agent handed out is never kept.
 - **Ending.** `session/close` `{ sessionId }` from an attached client answers `{}` and ends the session. `shared_idle_seconds` (86400; `0` never) ends one nobody is attached to for that long, counted from the hub's `last_activity` (an agent's update, a client's message, an attach or detach); the hub itself never reaps. The agent exiting, or the host stopping, ends it, and the attached clients are told (`_dev.boriken.coqui.acp/hub_ended`); the log of one ended by the host's stopping goes on being kept (see Surviving a restart), that of any other ending is removed. At most `max_peers` sessions of an entry are kept at once (the same bound as connections); a client that stops reading is detached once 256 MiB wait for it.
 - **Listing.** `sessions/running` `{}` on the control channel (`ledger.read`) -> `{"sessions": [{"entry", "session", "clients": [{"id", "label", "role"}], "lastActivity", "cursor", "turnRunning", "permissionsWaiting", "title"?, "cwd"?}]}`, newest activity first: the sessions of every shared entry that are open now and that the asking key could attach to under the rules above (an unpaired or unlisted key, or one trusted with less than the opener, sees none of them). `lastActivity` is the host's clock in milliseconds since the Unix epoch, `cursor` the log's head (an attach from it replays nothing), `title` the last `session_info_update` the agent sent and `cwd` the folder its opener named; the app's own link is listed as the host's own key.
+- **Activity.** `sessions/activity` `{"session"?}` (`ledger.read`) -> `{"sessions": [row]}`: each session `sessions/running` would
+  list (or the one named), with `quietMs` (how long nothing has happened in it: the agent said nothing and no client sent
+  anything), `processes` `{"count", "cpuMs", "memoryBytes"}` when the agent is a program the host started on this computer (the
+  agent and everything below it, `usage_splice::tree_use`: CPU time and working set from Windows' process calls, `/proc` on
+  Linux, `ps` elsewhere; `cpuMs` and `memoryBytes` are null when no process could be read; absent for a harness that runs in the
+  host or an agent in an environment) and `watch` when one is armed. The processes are read after the session's lock is let go.
+- **Watching.** `sessions/watch` `{"session", "enabled"?, "everyMs"? | "cron"?, "utcOffsetMinutes"?, "prompt"?, "whenIdle"?,
+  "quietMs"?, "whileChildren"?, "cpuBelowMs"?, "memoryNotShrinking"?, "maxPrompts"?, "stopOnInput"?}` (`sessions.watch`; the key
+  must also be one the session lets attach and prompt, `-32001` otherwise) arms a watch, replacing the session's last one, and
+  answers `{"session", "watch"}`; `"enabled": false` takes it away (`"watch": null`). It checks every `everyMs` (60000 when
+  neither is named; the first check one interval after it is armed) or at each minute of a five-field `cron` line read on a clock
+  `utcOffsetMinutes` from UTC (0 by default; the app sends its own), where, as in Vixie cron, a day matching either day field is
+  taken when both are restricted and `7` is Sunday; a line that names no minute in the next nine years is refused. At each due
+  time the conditions are checked once, and a time whose conditions do not hold is skipped: no permission request waits; with
+  `whenIdle` (true by default) no turn runs; nothing happened for `quietMs`; with `whileChildren` the agent runs a process
+  besides itself; the agent's processes used less than `cpuBelowMs` of CPU time since the last check; with `memoryNotShrinking`
+  they hold at least nine tenths of the memory they held then. The process conditions are refused when the agent is no process
+  of this computer's own. When they hold, `prompt` (`Continue` by default) is sent as `session/prompt` as the key that armed it:
+  through that key's attachment when it is attached (it is shown the prompt as the others are, and not its answer), else attached for that one message
+  and detached again (shown to the others as `watch`), so the turn goes on and every client sees it stamped with that key.
+  `maxPrompts` (5 by default; 0 is no stop) is how many prompts it sends between two prompts of any attached client before it
+  holds off, so a prompt that keeps the agent going does not run for ever; a client's prompt lets it go on, or ends it with
+  `stopOnInput`. A prompt the hub or the policy refuses (the key unpaired or no longer listed) ends the watch with the reason.
+  The watch, as both methods answer it: `{"armedBy", "armedAt", "schedule": {"everyMs"} | {"cron", "utcOffsetMinutes"}, "prompt",
+  "maxPrompts", "promptsSent", "whenIdle", "quietMs", "whileChildren", "cpuBelowMs", "memoryNotShrinking", "stopOnInput",
+  "nextCheckAt" (null once it stopped), "lastCheck"?: {"at", "prompted", "why"}, "stopped"?}`, times in milliseconds since the
+  Unix epoch. A due check runs when the driver has waited 50 ms for the agent, so it is never earlier than its time and is held
+  while the agent streams. Watches are not kept across a restart of the host.
 - `shared_permission_window_seconds` is the hub's `permission_window_ms`: once a permission request has waited that long with nobody answering, the host logs it at `info` (`has waited for an answer past the entry's window`) and leaves it open for whoever attaches next.
 - The hub's notes (a refused action, a permission answered, an unanswered one) are logged at `info` with the entry; nothing is auto-denied. Two sessions of one entry whose agent gave the same id are both kept, but only the older can be attached to.
 
