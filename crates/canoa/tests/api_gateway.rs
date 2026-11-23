@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use canoa::api_gateway::{
     self, ACCOUNT_KIND, ApiGatewayAccounts, CREDENTIAL, Settings, models_url, parse_standards,
 };
-use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::{Status, ToValue as _};
 use coqui_acp_api::standard::{ANTHROPIC_API, OPENAI_API};
 use coqui_acp_api::{
     AccountGrant, AccountKeeper, AccountLoss, AccountModelsQuery, AccountProvider, AccountRenewal,
@@ -23,6 +23,11 @@ use coqui_acp_api::{
 };
 use coqui_acp_harness::LocalSpawner;
 use serde_json::{Map, Value, json};
+
+/// A Guatiao value as JSON, to read what a schema says.
+fn json_of(value: &coqui_acp_api::guatiao::Value) -> Value {
+    serde_json::to_value(guatiao_serde::Serializable::from(value)).expect("JSON")
+}
 
 /// The key of every test: nothing may show it but the request that is meant to carry it.
 const CANARY: &str = "CANARY-gateway-key";
@@ -191,23 +196,33 @@ fn the_kind_names_the_property_that_holds_the_standards_and_asks_the_address_a_h
     assert_eq!(kind.endpoints[0].key.as_deref(), Some("base_url"));
     assert_eq!(offer.logins.len(), 1);
     assert_eq!(offer.logins[0].produces, ACCOUNT_KIND);
-    let schema = api_gateway::settings_schema();
+    let schema = json_of(&api_gateway::settings_schema());
     assert_eq!(schema["properties"]["standards"]["x-provides"], json!(true));
     assert_eq!(schema["properties"][CREDENTIAL]["x-sensitive"], json!(true));
+    assert_eq!(schema["properties"][CREDENTIAL]["writeOnly"], json!(true));
+    assert_eq!(schema["additionalProperties"], json!(false));
+    assert_eq!(
+        schema["required"],
+        json!(["base_url", "standards", "api_key"])
+    );
+    assert!(
+        schema["properties"]["base_url"]["description"]
+            .as_str()
+            .is_some_and(|text| text.contains("llm.example.com")),
+        "a doc comment is the description"
+    );
     assert!(offer.usage.is_empty(), "no plan limits are reported");
 }
 
 #[test]
 fn settings_name_an_address_and_standards_and_nothing_else() {
-    let table =
-        |value: Value| -> Map<String, Value> { value.as_object().cloned().expect("a table") };
-    let ok = Settings::from_map(&table(
-        json!({"base_url": "https://llm.example.com/", "standards": "openai-api, anthropic-api"}),
+    let ok = Settings::from_value(&api_gateway::value(
+        &json!({"base_url": "https://llm.example.com/", "standards": "openai-api, anthropic-api"}),
     ))
     .expect("reads");
     assert_eq!(ok.base_url, "https://llm.example.com");
     assert_eq!(ok.standards, [OPENAI_API, ANTHROPIC_API]);
-    let listed = Settings::from_map(&table(
+    let listed = Settings::from_value(&api_gateway::value(&
         json!({"base_url": "http://127.0.0.1:4000", "standards": ["openai-api", "openai-api", "x-api"]}),
     ))
     .expect("a list reads");
@@ -220,7 +235,10 @@ fn settings_name_an_address_and_standards_and_nothing_else() {
         json!({"standards": "openai-api"}),
         json!({"base_url": "https://llm.example.com", "standards": "openai-api", "key": "x"}),
     ] {
-        assert!(Settings::from_map(&table(bad.clone())).is_err(), "{bad}");
+        assert!(
+            Settings::from_value(&api_gateway::value(&bad.clone())).is_err(),
+            "{bad}"
+        );
     }
     assert_eq!(
         parse_standards("a-api b-api,c-api").expect("three").len(),
@@ -279,14 +297,12 @@ fn a_sign_in_that_gives_no_key_or_an_address_with_a_login_makes_nothing_and_says
 
 #[test]
 fn a_far_plain_address_is_the_persons_choice() {
-    let table =
-        |value: Value| -> Map<String, Value> { value.as_object().cloned().expect("a table") };
     for address in [
         "http://llm.example.com",
         "http://192.0.2.11:4000",
         "http://127.0.0.2:4000",
     ] {
-        let read = Settings::from_map(&table(
+        let read = Settings::from_value(&api_gateway::value(&
             json!({"base_url": address, "standards": "openai-api", "addresses": format!("openai-api={address}/v1")}),
         ))
         .unwrap_or_else(|why| panic!("{address} is refused: {why}"));
@@ -420,15 +436,13 @@ fn usage_is_not_offered_and_that_is_the_answer() {
 #[test]
 fn an_account_names_an_address_and_a_key_form_for_each_standard_and_nothing_a_standard_does_not_take()
  {
-    let table =
-        |value: Value| -> Map<String, Value> { value.as_object().cloned().expect("a table") };
     let both = json!({
         "base_url": "https://llm.example.com/",
         "standards": "openai-api, anthropic-api",
         "addresses": "openai-api=https://llm.example.com/v1/",
         "credentials": "anthropic-api=auth_token",
     });
-    let read = Settings::from_map(&table(both)).expect("reads");
+    let read = Settings::from_value(&api_gateway::value(&both)).expect("reads");
     assert_eq!(read.address_for(OPENAI_API), "https://llm.example.com/v1");
     assert_eq!(
         read.address_for(ANTHROPIC_API),
@@ -440,7 +454,8 @@ fn an_account_names_an_address_and_a_key_form_for_each_standard_and_nothing_a_st
         Some("auth_token")
     );
     // The settings a sign-in makes hold the table, which reads back the same as one written by hand.
-    let value = read.to_value();
+    let given = read.to_value().expect("written");
+    let value = json_of(&given);
     assert_eq!(
         value["by_standard"],
         json!({
@@ -448,8 +463,8 @@ fn an_account_names_an_address_and_a_key_form_for_each_standard_and_nothing_a_st
             "anthropic-api": {"credential": "auth_token"},
         })
     );
-    assert_eq!(Settings::from_map(&table(value)).expect("again"), read);
-    let schema = api_gateway::settings_schema();
+    assert_eq!(Settings::from_value(&given).expect("again"), read);
+    let schema = json_of(&api_gateway::settings_schema());
     assert_eq!(
         schema["properties"]["by_standard"]["x-by-standard"],
         json!(true)
@@ -464,10 +479,13 @@ fn an_account_names_an_address_and_a_key_form_for_each_standard_and_nothing_a_st
         json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "openai-api"}),
         json!({"base_url": "https://g.example", "standards": "openai-api", "by_standard": {"openai-api": {"key": "x"}}}),
     ] {
-        assert!(Settings::from_map(&table(bad.clone())).is_err(), "{bad}");
+        assert!(
+            Settings::from_value(&api_gateway::value(&bad.clone())).is_err(),
+            "{bad}"
+        );
     }
     // A standard no one has listed takes a key written as a name.
-    let own = Settings::from_map(&table(json!({
+    let own = Settings::from_value(&api_gateway::value(&json!({
         "base_url": "https://g.example", "standards": "x-api", "credentials": "x-api=token_two",
     })))
     .expect("a name");

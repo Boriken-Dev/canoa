@@ -21,8 +21,9 @@ use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 use core::fmt;
 
-use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::schema::{FieldBuilder, KindBuilder, SchemaBuilder};
+use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue, Value as GValue};
 use coqui_acp_api::standard::{ANTHROPIC_API, OPENAI_API, is_standard, well_known};
 use coqui_acp_api::{
     AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer, AccountProvider,
@@ -31,7 +32,7 @@ use coqui_acp_api::{
     LoginRequest, MODEL_API, ModelInfo, ModelListing, ProcessSpawner, RenewReport, RenewRequest,
     UnknownKind, WatchRequest,
 };
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 pub mod http;
 
@@ -89,38 +90,12 @@ pub enum Error {
     InvalidCredentialKey(String),
     /// An address is not a valid `http` or `https` URL.
     Address(crate::address::Error),
-    /// A settings map contains an unexpected key.
-    UnknownSetting(String),
+    /// The settings or inputs are not the shape the kind takes: a key it lacks, a value of another kind, a missing table.
+    Shape(String),
     /// The required `base_url` setting is missing or empty.
     MissingBaseUrl,
-    /// The required `standards` setting is missing or not text/array.
+    /// The required `standards` setting is missing or empty.
     MissingStandards,
-    /// The `by_standard` setting is not a table.
-    ByStandardNotObject,
-    /// An entry under `by_standard` is not a table.
-    ByStandardEntryNotObject {
-        /// The standard identifier whose entry was not a table.
-        standard: String,
-    },
-    /// A per-standard entry in `by_standard` contains an unexpected key.
-    UnknownStandardSetting {
-        /// The standard identifier.
-        standard: String,
-        /// The unexpected key name.
-        key: String,
-    },
-    /// A per-standard setting in `by_standard` is not text.
-    StandardSettingNotText {
-        /// The standard identifier.
-        standard: String,
-        /// The setting key name.
-        field: String,
-    },
-    /// An `addresses` or `credentials` sign-in input is not text.
-    PairsNotText {
-        /// The input field name (`addresses` or `credentials`).
-        input: String,
-    },
     /// A `standard=value` pair inside `addresses` or `credentials` is malformed.
     InvalidPair {
         /// The input field name (`addresses` or `credentials`).
@@ -163,24 +138,9 @@ impl fmt::Display for Error {
                 "`{key}` is not a credential key (lower-case letters, digits and underscores, starting with a letter)"
             ),
             Self::Address(error) => error.fmt(f),
-            Self::UnknownSetting(extra) => write!(f, "{extra} is not a setting of this kind"),
+            Self::Shape(why) => write!(f, "the settings are refused: {why}"),
             Self::MissingBaseUrl => f.write_str("base_url is the address of the gateway"),
             Self::MissingStandards => f.write_str("standards lists what the address speaks"),
-            Self::ByStandardNotObject => {
-                write!(f, "{BY_STANDARD} is a table of the standards' ids")
-            }
-            Self::ByStandardEntryNotObject { standard } => {
-                write!(f, "{BY_STANDARD}.{standard} is a table")
-            }
-            Self::UnknownStandardSetting { standard, key } => {
-                write!(f, "{key} is not a setting of {standard} in {BY_STANDARD}")
-            }
-            Self::StandardSettingNotText { standard, field } => {
-                write!(f, "{BY_STANDARD}.{standard}.{field} is text")
-            }
-            Self::PairsNotText { input } => {
-                write!(f, "{input} is `standard=value` pairs, as text")
-            }
             Self::InvalidPair { input, part } => {
                 write!(f, "{input}: `{part}` is not `standard=value`")
             }
@@ -207,29 +167,25 @@ pub fn value(json: &Value) -> coqui_acp_api::guatiao::Value {
     guatiao_serde::from_serde(json.clone()).expect("JSON is a value")
 }
 
-/// The schema of a property that is a credential: text, marked `writeOnly` and `x-sensitive`, with no default.
-#[must_use]
-pub fn credential_schema(title: &str, description: &str) -> Value {
-    json!({
-        "type": "string",
-        "title": title,
-        "description": description,
-        "writeOnly": true,
-        "x-sensitive": true,
-    })
-}
-
-/// The form a sign-in asks the person to fill for a key: one secret field named [`CREDENTIAL`]. The answer comes back sealed in
-/// [`LoginAnswer::secrets`].
+/// The form a sign-in asks the person to fill for a key: one secret field named [`CREDENTIAL`], titled "Key" and described by `what`.
+/// The answer comes back sealed in [`LoginAnswer::secrets`].
+///
+/// # Panics
+///
+/// Never: the schema is one field.
 #[must_use]
 pub fn key_form(title: &str, what: &str) -> LoginForm {
+    let field = FieldBuilder::new(CREDENTIAL, KindBuilder::string())
+        .title("Key")
+        .description(what)
+        .sensitive()
+        .required();
     LoginForm::new(
         title,
-        value(&json!({
-            "type": "object",
-            "properties": {CREDENTIAL: credential_schema("Key", what)},
-            "required": [CREDENTIAL],
-        })),
+        SchemaBuilder::new()
+            .field(field)
+            .finish()
+            .expect("a schema of one field builds"),
     )
 }
 
@@ -449,26 +405,89 @@ pub fn anthropic_models(base: &str, key: &str, bearer: bool) -> ModelListing {
 }
 
 /// The settings of an account of this kind, as its table holds them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(ToValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
 pub struct Settings {
-    /// The address, as the person wrote it: the one a program is given for a standard that names none of its own.
+    /// Where the gateway is, as each program that runs on the account takes it: `https://llm.example.com`. A program adds its own path to it, and some expect it to end in `/v1` where others do not: name the address of a standard that differs in `by_standard`.
+    #[schema(title = "Address", format = "uri")]
     pub base_url: String,
-    /// The standards it speaks.
+    /// The credential standards the address accepts a key for, such as `openai-api` and `anthropic-api`. Every program that takes one of them runs on this account.
+    #[schema(title = "Standards it speaks")]
     pub standards: Vec<String>,
-    /// What an account says of a standard it speaks, by the standard's id.
+    /// For a standard the address speaks: `base_url`, where a program that applies the account as that standard is sent in place of the address above (`https://llm.example.com/v1`), and `credential`, the key the account's key is given under for it (`auth_token` sends it as a bearer token where the standard takes one, `api_key` as a key).
+    #[map(default, skip_serializing_if = BTreeMap::is_empty)]
+    #[schema(title = "Address and key form for each standard")]
     pub by_standard: BTreeMap<String, StandardSettings>,
 }
 
 /// What an account says of one standard it speaks: where a program that applies the account as that standard is sent, and the
 /// credential key its key is given under there.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct StandardSettings {
     /// The address for this standard, in place of the account's own.
+    #[schema(format = "uri")]
     pub base_url: Option<String>,
     /// The key the account's credential is given under for this standard (`auth_token` for a bearer token).
     pub credential: Option<String>,
+}
+
+/// The standards as written: text of ids separated by commas or white space, or a list of ids.
+#[derive(FromValue)]
+#[map(crate = ::coqui_acp_api::guatiao, untagged)]
+enum Listed {
+    Text(String),
+    List(Vec<String>),
+}
+
+/// Everything a table of settings or the inputs of a sign-in may say, as written.
+#[derive(FromValue)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+struct Written {
+    base_url: Option<String>,
+    standards: Option<Listed>,
+    by_standard: Option<BTreeMap<String, StandardSettings>>,
+    addresses: Option<String>,
+    credentials: Option<String>,
+}
+
+/// What a sign-in asks before it runs: the address and the standards, as text.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct Inputs {
+    /// Where the gateway is: `https://llm.example.com`.
+    #[schema(title = "Address", format = "uri")]
+    base_url: String,
+    /// Ids separated by commas, such as `openai-api, anthropic-api`. Every program that takes one of them runs on this account.
+    #[schema(title = "Standards it speaks")]
+    standards: String,
+    /// `standard=address` pairs, separated by commas, for a standard the address above does not serve: `openai-api=https://llm.example.com/v1`. Optional.
+    #[schema(title = "Address for a standard")]
+    addresses: Option<String>,
+    /// `standard=credential` pairs, separated by commas, for a standard that takes its key another way than `api_key`: `anthropic-api=auth_token` sends it as a bearer token. Optional.
+    #[schema(title = "How the key is sent for a standard")]
+    credentials: Option<String>,
+}
+
+/// The settings of the kind and the key the sign-in asks: the table an account holds, and its credential.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct Form {
+    #[map(flatten)]
+    settings: Settings,
+    /// The key the gateway gave you.
+    #[schema(title = "Key", sensitive)]
+    api_key: String,
 }
 
 impl Settings {
@@ -478,77 +497,41 @@ impl Settings {
     ///
     /// # Errors
     ///
-    /// A missing or wrong address or standard, a standard the address does not speak named for an address or a key, or a key the
-    /// kind lacks.
-    pub fn from_map(map: &Map<String, Value>) -> Result<Self, Error> {
-        if let Some(extra) = map.keys().find(|key| {
-            ![BASE_URL, STANDARDS, BY_STANDARD, ADDRESSES, CREDENTIALS].contains(&key.as_str())
-        }) {
-            return Err(Error::UnknownSetting(extra.clone()));
-        }
-        let base_url = map
-            .get(BASE_URL)
-            .and_then(Value::as_str)
+    /// A missing or wrong address or standard, a standard the address does not speak named for an address or a key, a key the
+    /// kind lacks, or a table that is not the shape the kind takes.
+    pub fn from_value(table: &GValue) -> Result<Self, Error> {
+        Self::from_value_or(table, &[])
+    }
+
+    /// [`from_value`](Self::from_value), where a table that names no `standards` speaks `spoken`: what a host that holds the
+    /// account says it provides.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_value`](Self::from_value).
+    pub fn from_value_or(table: &GValue, spoken: &[String]) -> Result<Self, Error> {
+        let written =
+            Written::from_value(table).map_err(|error| Error::Shape(error.to_string()))?;
+        let base_url = written
+            .base_url
+            .as_deref()
             .map(str::trim)
             .filter(|url| !url.is_empty())
             .ok_or(Error::MissingBaseUrl)?;
         check_address(base_url)?;
-        let standards = match map.get(STANDARDS) {
-            Some(Value::String(text)) => parse_standards(text)?,
-            Some(Value::Array(listed)) => parse_standards(
-                &listed
-                    .iter()
-                    .map(|each| each.as_str().unwrap_or("?"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )?,
-            _ => return Err(Error::MissingStandards),
+        let standards = match written.standards {
+            Some(Listed::Text(text)) => parse_standards(&text)?,
+            Some(Listed::List(listed)) => parse_standards(&listed.join(" "))?,
+            None if spoken.is_empty() => return Err(Error::MissingStandards),
+            None => parse_standards(&spoken.join(" "))?,
         };
-        let mut by_standard: BTreeMap<String, StandardSettings> = BTreeMap::new();
-        match map.get(BY_STANDARD) {
-            None | Some(Value::Null) => {}
-            Some(Value::Object(table)) => {
-                for (standard, entry) in table {
-                    let Value::Object(entry) = entry else {
-                        return Err(Error::ByStandardEntryNotObject {
-                            standard: standard.clone(),
-                        });
-                    };
-                    if let Some(extra) = entry
-                        .keys()
-                        .find(|key| ![BASE_URL, "credential"].contains(&key.as_str()))
-                    {
-                        return Err(Error::UnknownStandardSetting {
-                            standard: standard.clone(),
-                            key: extra.clone(),
-                        });
-                    }
-                    let text = |field: &str| {
-                        entry
-                            .get(field)
-                            .map(|value| {
-                                value.as_str().map(str::to_owned).ok_or_else(|| {
-                                    Error::StandardSettingNotText {
-                                        standard: standard.clone(),
-                                        field: field.to_owned(),
-                                    }
-                                })
-                            })
-                            .transpose()
-                    };
-                    let slot = by_standard.entry(standard.clone()).or_default();
-                    slot.base_url = text(BASE_URL)?;
-                    slot.credential = text("credential")?;
-                }
-            }
-            Some(_) => return Err(Error::ByStandardNotObject),
-        }
-        for (input, address) in [(ADDRESSES, true), (CREDENTIALS, false)] {
-            let Some(text) = map.get(input) else { continue };
-            let text = text.as_str().ok_or_else(|| Error::PairsNotText {
-                input: input.to_owned(),
-            })?;
-            let pairs = parse_pairs(text).map_err(|error| match error {
+        let mut by_standard = written.by_standard.unwrap_or_default();
+        for (input, text, address) in [
+            (ADDRESSES, written.addresses, true),
+            (CREDENTIALS, written.credentials, false),
+        ] {
+            let Some(text) = text else { continue };
+            let pairs = parse_pairs(&text).map_err(|error| match error {
                 Error::MalformedPair(part) => Error::InvalidPair {
                     input: input.to_owned(),
                     part,
@@ -587,30 +570,6 @@ impl Settings {
         })
     }
 
-    /// The settings as the account's table holds them.
-    #[must_use]
-    pub fn to_value(&self) -> Value {
-        let mut value = json!({BASE_URL: self.base_url, STANDARDS: self.standards});
-        if !self.by_standard.is_empty() {
-            let table: Map<String, Value> = self
-                .by_standard
-                .iter()
-                .map(|(standard, slot)| {
-                    let mut entry = Map::new();
-                    if let Some(url) = &slot.base_url {
-                        entry.insert(BASE_URL.to_owned(), json!(url));
-                    }
-                    if let Some(key) = &slot.credential {
-                        entry.insert("credential".to_owned(), json!(key));
-                    }
-                    (standard.clone(), Value::Object(entry))
-                })
-                .collect();
-            value[BY_STANDARD] = Value::Object(table);
-        }
-        value
-    }
-
     /// The address a program that applies the account as `standard` is given: the one the account names for it, else its own.
     #[must_use]
     pub fn address_for(&self, standard: &str) -> &str {
@@ -621,76 +580,35 @@ impl Settings {
     }
 }
 
-/// The JSON schema of the account's settings, and of its key.
+/// `schema` with the property `property` marked by the annotation `note`, which a host reads.
+fn annotated(schema: &GValue, property: &str, note: &str) -> GValue {
+    let mut json =
+        serde_json::to_value(guatiao_serde::Serializable::from(schema)).expect("a schema is JSON");
+    json["properties"][property][note] = Value::Bool(true);
+    guatiao_serde::from_serde(json).expect("JSON is a value")
+}
+
+/// The schema of the account's settings, and of its key: the standards property is marked `"x-provides": true`, the table of
+/// addresses and key forms `"x-by-standard": true`, and the key `writeOnly` and `x-sensitive`.
+///
+/// # Panics
+///
+/// Never: the schema of a derived type builds.
 #[must_use]
-pub fn settings_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            BASE_URL: {
-                "type": "string",
-                "format": "uri",
-                "title": "Address",
-                "description": "Where the gateway is, as each program that runs on the account takes it: `https://llm.example.com`. A program adds its own path to it, and some expect it to end in `/v1` where others do not: name the address of a standard that differs in `by_standard`.",
-            },
-            STANDARDS: {
-                "type": "array",
-                "items": {"type": "string"},
-                "title": "Standards it speaks",
-                "description": "The credential standards the address accepts a key for, such as `openai-api` and `anthropic-api`. Every program that takes one of them runs on this account.",
-                PROVIDES_NOTE: true,
-            },
-            BY_STANDARD: {
-                "type": "object",
-                "title": "Address and key form for each standard",
-                "description": "For a standard the address speaks: `base_url`, where a program that applies the account as that standard is sent in place of the address above (`https://llm.example.com/v1`), and `credential`, the key the account's key is given under for it (`auth_token` sends it as a bearer token where the standard takes one, `api_key` as a key).",
-                "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                        BASE_URL: {"type": "string", "format": "uri"},
-                        "credential": {"type": "string"},
-                    },
-                    "additionalProperties": false,
-                },
-                BY_STANDARD_NOTE: true,
-            },
-            CREDENTIAL: credential_schema("Key", "The key the gateway gave you."),
-        },
-        "required": [BASE_URL, STANDARDS, CREDENTIAL],
-        "additionalProperties": false,
-    })
+pub fn settings_schema() -> GValue {
+    let schema = Form::schema().expect("a derived schema builds");
+    let schema = annotated(&schema, STANDARDS, PROVIDES_NOTE);
+    annotated(&schema, BY_STANDARD, BY_STANDARD_NOTE)
 }
 
 /// What the sign-in asks before it runs: the address and the standards, as text.
+///
+/// # Panics
+///
+/// Never: the schema of a derived type builds.
 #[must_use]
-pub fn inputs_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            BASE_URL: {
-                "type": "string",
-                "format": "uri",
-                "title": "Address",
-                "description": "Where the gateway is: `https://llm.example.com`.",
-            },
-            STANDARDS: {
-                "type": "string",
-                "title": "Standards it speaks",
-                "description": "Ids separated by commas, such as `openai-api, anthropic-api`. Every program that takes one of them runs on this account.",
-            },
-            ADDRESSES: {
-                "type": "string",
-                "title": "Address for a standard",
-                "description": "`standard=address` pairs, separated by commas, for a standard the address above does not serve: `openai-api=https://llm.example.com/v1`. Optional.",
-            },
-            CREDENTIALS: {
-                "type": "string",
-                "title": "How the key is sent for a standard",
-                "description": "`standard=credential` pairs, separated by commas, for a standard that takes its key another way than `api_key`: `anthropic-api=auth_token` sends it as a bearer token. Optional.",
-            },
-        },
-        "required": [BASE_URL, STANDARDS],
-    })
+pub fn inputs_schema() -> GValue {
+    Inputs::schema().expect("a derived schema builds")
 }
 
 /// The kind and the sign-in method that make an account of it.
@@ -698,7 +616,7 @@ pub fn inputs_schema() -> Value {
 pub fn offer() -> AccountOffer {
     let mut kind = AccountKindInfo::new(ACCOUNT_KIND, "API gateway");
     kind.description = "An address that speaks one or several of the APIs agents use, and a key for it (a gateway or proxy in front of many models). Every program that takes one of the standards you name runs on it.".to_owned();
-    kind.settings = value(&settings_schema());
+    kind.settings = settings_schema();
     kind.endpoints = vec![EndpointSlot::new(MODEL_API).key(BASE_URL)];
     kind.notices = vec![
         "the key is sent to the address you gave, by each program that runs on the account: use an address you trust".to_owned(),
@@ -706,7 +624,7 @@ pub fn offer() -> AccountOffer {
     let mut method =
         LoginMethodInfo::new(ACCOUNT_KIND, "A gateway's address and key", ACCOUNT_KIND);
     method.description = "Names an address, the standards it speaks and a key for it. The key is asked in the form only your application reads and kept as a secret.".to_owned();
-    method.inputs = value(&inputs_schema());
+    method.inputs = inputs_schema();
     let mut offer = AccountOffer::new();
     offer.kinds = vec![kind];
     offer.logins = vec![method];
@@ -737,9 +655,7 @@ impl AccountProvider for ApiGatewayAccounts {
             ));
         }
         // The account's own list: the address speaks whichever standards the person named.
-        let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&account.settings)
-            .map_err(|_| crate::status::bad_value("the account's settings are not a table"))?;
-        Ok(Settings::from_map(&settings)
+        Ok(Settings::from_value(&account.settings)
             .map_err(|error| crate::status::bad_value(error.to_string()))?
             .standards)
     }
@@ -756,9 +672,7 @@ impl AccountProvider for ApiGatewayAccounts {
                 "an API gateway has no such way to sign in",
             ));
         }
-        let inputs = guatiao_serde::adapt::from_value::<Map<String, Value>>(&request.inputs)
-            .map_err(|_| crate::status::bad_value("the inputs are not a table"))?;
-        let settings = Settings::from_map(&inputs)
+        let settings = Settings::from_value(&request.inputs)
             .map_err(|error| crate::status::bad_value(error.to_string()))?;
         let label = settings
             .base_url
@@ -778,7 +692,7 @@ impl AccountProvider for ApiGatewayAccounts {
         let mut credentials = Credentials::new();
         credentials.insert(CREDENTIAL, key);
         let mut outcome = LoginOutcome::new(ACCOUNT_KIND, credentials);
-        outcome.settings = value(&settings.to_value());
+        outcome.settings = settings.to_value()?;
         outcome.label = label;
         Ok(outcome)
     }
@@ -848,28 +762,20 @@ impl AccountProvider for ApiGatewayAccounts {
                 }
             )));
         };
-        let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&grant.settings)
-            .map_err(|_| crate::status::bad_value("the account's settings are not a table"))?;
-        let Some(base) = settings.get(BASE_URL).and_then(Value::as_str) else {
-            return Err(crate::status::bad_value("the account names no address"));
-        };
+        let settings = Settings::from_value_or(&grant.settings, &grant.provides)
+            .map_err(|error| crate::status::bad_value(error.to_string()))?;
         let key = grant
             .credentials
             .expose()
             .get(CREDENTIAL)
             .ok_or_else(|| crate::status::bad_value("the account holds no key"))?
             .to_string();
-        let override_entry = settings
-            .get(BY_STANDARD)
-            .and_then(|table| table.get(standard));
-        let address = override_entry
-            .and_then(|entry| entry.get(BASE_URL))
-            .and_then(Value::as_str)
-            .unwrap_or(base);
+        let address = settings.address_for(standard);
         if standard == ANTHROPIC_API {
-            let bearer = override_entry
-                .and_then(|entry| entry.get("credential"))
-                .and_then(Value::as_str)
+            let bearer = settings
+                .by_standard
+                .get(standard)
+                .and_then(|entry| entry.credential.as_deref())
                 == Some(AUTH_TOKEN_CREDENTIAL);
             Ok(anthropic_models(address, &key, bearer))
         } else {
