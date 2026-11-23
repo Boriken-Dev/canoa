@@ -34,8 +34,18 @@ use sha2::{Digest, Sha256, Sha512};
 pub struct ToolsLimits {
     /// How many redirects one fetch follows.
     pub redirects: u32,
-    /// How long a request waits for the publisher's answer.
+    /// How long a download waits for the publisher's answer.
     pub response_timeout: Duration,
+    /// How long a download waits for a connection.
+    pub connect_timeout: Duration,
+    /// How long a lookup (a release list, a checksum file, a model catalog) waits for a connection: what is only read is not
+    /// waited on as long as what is downloaded.
+    pub lookup_connect: Duration,
+    /// How long a lookup waits for the publisher's answer.
+    pub lookup_response: Duration,
+    /// Whether this request is a lookup. [`LocalTools`] sets it for the documents a store reads, and a transport that keeps what a
+    /// publisher said (its `ETag`) asks the publisher whether it changed instead of reading it again.
+    pub lookup: bool,
     /// How long a body may take, whole.
     pub body_timeout: Duration,
     /// The most files an unpack writes unless the request asks for less.
@@ -49,6 +59,10 @@ impl Default for ToolsLimits {
         Self {
             redirects: 5,
             response_timeout: Duration::from_secs(60),
+            connect_timeout: Duration::from_secs(60),
+            lookup_connect: Duration::from_secs(10),
+            lookup_response: Duration::from_secs(15),
+            lookup: false,
             body_timeout: Duration::from_secs(30 * 60),
             unpack_files: 100_000,
             unpack_bytes: 4 << 30,
@@ -83,47 +97,208 @@ pub trait Transport: Send + Sync + fmt::Debug {
     ///
     /// The reason the request did not get an answer.
     fn get(&self, url: &str, limits: &ToolsLimits) -> Result<Reply, String>;
+
+    /// Keeps what lookups learn (an `ETag` and the document it was for) in `dir`, for a transport that asks the publisher whether a
+    /// document changed. Others keep nothing.
+    fn keep_in(&self, _dir: &Path) {}
+}
+
+/// The most a lookup's answer is kept at, with the `ETag` that says which it was.
+const KEPT_BYTES: usize = 8 << 20;
+
+/// What a publisher said to a lookup, and which version of it that was.
+#[derive(Debug, Clone)]
+struct Kept {
+    etag: String,
+    body: Vec<u8>,
+}
+
+#[derive(Debug, Default)]
+struct Shared {
+    /// The one client every request goes through, with the network it was made for: its connections are reused.
+    agent: Mutex<Option<(Arc<Network>, ureq::Agent)>>,
+    kept: Mutex<BTreeMap<String, Kept>>,
+    /// Where what is kept is also written, so a run that starts later asks whether it changed too.
+    dir: std::sync::OnceLock<PathBuf>,
+}
+
+impl Shared {
+    fn file(&self, url: &str) -> Option<PathBuf> {
+        let name = data_encoding::HEXLOWER.encode(&Sha256::digest(url.as_bytes()));
+        Some(self.dir.get()?.join(format!("{}.http", &name[..32])))
+    }
+
+    fn held(&self, url: &str) -> Option<Kept> {
+        if let Some(kept) = self.kept.lock().ok()?.get(url) {
+            return Some(kept.clone());
+        }
+        // The file is the ETag, a line, then the url's line, then the body.
+        let bytes = fs::read(self.file(url)?).ok()?;
+        let (etag, rest) = split_line(&bytes)?;
+        let (named, body) = split_line(rest)?;
+        if named != url.as_bytes() {
+            return None;
+        }
+        let kept = Kept {
+            etag: String::from_utf8(etag.to_vec()).ok()?,
+            body: body.to_vec(),
+        };
+        self.kept.lock().ok()?.insert(url.to_owned(), kept.clone());
+        Some(kept)
+    }
+
+    fn keep(&self, url: &str, kept: Kept) {
+        if let Some(file) = self.file(url) {
+            let mut bytes = Vec::with_capacity(kept.body.len() + url.len() + kept.etag.len() + 2);
+            bytes.extend_from_slice(kept.etag.as_bytes());
+            bytes.push(b'\n');
+            bytes.extend_from_slice(url.as_bytes());
+            bytes.push(b'\n');
+            bytes.extend_from_slice(&kept.body);
+            if let Some(folder) = file.parent() {
+                let _ = fs::create_dir_all(folder);
+            }
+            let _ = crate::replace::write_file_in_folder(&file, &bytes, crate::replace::SHARED);
+        }
+        if let Ok(mut all) = self.kept.lock() {
+            all.insert(url.to_owned(), kept);
+        }
+    }
+}
+
+fn split_line(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    let at = bytes.iter().position(|byte| *byte == b'\n')?;
+    Some((&bytes[..at], &bytes[at + 1..]))
 }
 
 /// [`Transport`] over HTTPS with `ureq`, through [`Network`]: the system's proxy and its login, the operating system's certificate
 /// verifier and the client certificate of its keystores, unless `[host.network]` says otherwise.
+///
+/// One client serves every request, so its connections to a publisher are reused and the certificate verifier starts once. A
+/// lookup that the publisher gave an `ETag` for is asked again with `If-None-Match`, and a `304` answers with what was kept.
 #[derive(Debug, Default, Clone)]
 pub struct HttpTransport {
     network: Option<Arc<Network>>,
+    shared: Arc<Shared>,
 }
 
 impl HttpTransport {
     /// Sends through `network` instead of the process's.
     #[must_use]
-    pub const fn on(network: Arc<Network>) -> Self {
+    pub fn on(network: Arc<Network>) -> Self {
         Self {
             network: Some(network),
+            shared: Arc::default(),
         }
+    }
+
+    /// The client for `network`: the one made before while it is the same network.
+    fn agent(&self, network: &Arc<Network>) -> Result<ureq::Agent, String> {
+        let mut held = self
+            .shared
+            .agent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((made_for, agent)) = held.as_ref()
+            && Arc::ptr_eq(made_for, network)
+        {
+            return Ok(agent.clone());
+        }
+        // Timeouts are each request's own; a redirect is for the caller to check, and an error status is its answer.
+        let config = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .build();
+        let agent = network.agent(config).map_err(|error| error.to_string())?;
+        *held = Some((Arc::clone(network), agent.clone()));
+        Ok(agent)
     }
 }
 
 impl Transport for HttpTransport {
     fn get(&self, url: &str, limits: &ToolsLimits) -> Result<Reply, String> {
-        let config = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_recv_response(Some(limits.response_timeout))
+        let network = self.network.clone().unwrap_or_else(Network::current);
+        let agent = self.agent(&network)?;
+        let (connect, response) = if limits.lookup {
+            (limits.lookup_connect, limits.lookup_response)
+        } else {
+            (limits.connect_timeout, limits.response_timeout)
+        };
+        let mut request = agent
+            .get(url)
+            .config()
+            .timeout_connect(Some(connect))
+            .timeout_recv_response(Some(response))
             .timeout_recv_body(Some(limits.body_timeout))
             .build();
-        let network = self.network.clone().unwrap_or_else(Network::current);
-        let agent = network.agent(config).map_err(|error| error.to_string())?;
-        let response = agent.get(url).call().map_err(|error| error.to_string())?;
+        let kept = if limits.lookup {
+            self.shared.held(url)
+        } else {
+            None
+        };
+        if let Some(kept) = &kept {
+            request = request.header("If-None-Match", &kept.etag);
+        }
+        let response = request.call().map_err(|error| error.to_string())?;
         let status = response.status().as_u16();
+        if status == 304
+            && let Some(kept) = kept
+        {
+            return Ok(Reply {
+                status: 200,
+                location: None,
+                body: Box::new(io::Cursor::new(kept.body)),
+            });
+        }
         let location = response
             .headers()
             .get("location")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let mut body = response.into_body().into_reader();
+        if limits.lookup
+            && status == 200
+            && let Some(etag) = etag
+        {
+            let mut read = Vec::new();
+            (&mut body)
+                .take(KEPT_BYTES as u64 + 1)
+                .read_to_end(&mut read)
+                .map_err(|error| error.to_string())?;
+            if read.len() > KEPT_BYTES {
+                return Ok(Reply {
+                    status,
+                    location,
+                    body: Box::new(io::Cursor::new(read).chain(body)),
+                });
+            }
+            self.shared.keep(
+                url,
+                Kept {
+                    etag,
+                    body: read.clone(),
+                },
+            );
+            return Ok(Reply {
+                status,
+                location,
+                body: Box::new(io::Cursor::new(read)),
+            });
+        }
         Ok(Reply {
             status,
             location,
-            body: Box::new(response.into_body().into_reader()),
+            body: Box::new(body),
         })
+    }
+
+    fn keep_in(&self, dir: &Path) {
+        let _ = self.shared.dir.set(dir.to_path_buf());
     }
 }
 
@@ -295,6 +470,13 @@ impl LocalTools {
 
     /// Opens `url`, following redirects while each hop stays in an endpoint.
     fn open(&self, url: &str) -> Result<Reply, ProviderError> {
+        self.open_with(url, false)
+    }
+
+    /// As [`open`](Self::open); a `lookup` is a document a store reads, which waits less and may be answered from what was kept.
+    fn open_with(&self, url: &str, lookup: bool) -> Result<Reply, ProviderError> {
+        let mut limits = self.limits.clone();
+        limits.lookup = lookup;
         let mut current = url.to_owned();
         for _ in 0..=self.limits.redirects {
             self.gone()?;
@@ -302,7 +484,7 @@ impl LocalTools {
             if let Ok(mut urls) = self.urls.lock() {
                 urls.push(current.clone());
             }
-            let reply = self.transport.get(&current, &self.limits).map_err(|why| {
+            let reply = self.transport.get(&current, &limits).map_err(|why| {
                 refused(
                     Status::GUATIAO_ERR_INTERNAL,
                     &format!("download failed: {why}"),
@@ -611,7 +793,7 @@ impl InstallTools for LocalTools {
     }
 
     fn fetch_text(&self, url: &str, max_bytes: u64) -> Result<String, ProviderError> {
-        let reply = self.open(url)?;
+        let reply = self.open_with(url, true)?;
         let mut body = Vec::new();
         reply
             .body

@@ -796,6 +796,11 @@ pub struct StoreConfig {
     /// `refresh_every`: seconds between the host asking again what the Store keeps that has gone stale (the newest versions and
     /// the catalogs' index), while at least one client is connected (default 300; 0 never).
     pub refresh_every: Option<u64>,
+    /// `connect_timeout`: seconds a lookup (a release list, a checksum file, a model catalog) waits to connect to a publisher
+    /// (default 10). A download waits 60.
+    pub connect_timeout: Option<u64>,
+    /// `lookup_timeout`: seconds a lookup waits for the publisher's answer (default 15). A download waits 60.
+    pub lookup_timeout: Option<u64>,
     /// `tools`: whether the host offers the `canoa-store` tools (search and inspect) to a session whose client asks for them and
     /// whose key reads the index (default true).
     pub tools: Option<bool>,
@@ -817,6 +822,8 @@ struct StoreSectionSchema {
     models_ttl: Option<u64>,
     catalog_ttl: Option<u64>,
     refresh_every: Option<u64>,
+    connect_timeout: Option<u64>,
+    lookup_timeout: Option<u64>,
     tools: Option<bool>,
 }
 

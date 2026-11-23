@@ -810,7 +810,8 @@ fn store_caches(
     state_dir: Option<&std::path::Path>,
 ) -> crate::store::caches::StoreCaches {
     use crate::store::caches::{
-        DEFAULT_CATALOG_TTL, DEFAULT_LATEST_TTL, DEFAULT_MODELS_TTL, DEFAULT_REFRESH_EVERY,
+        DEFAULT_CATALOG_TTL, DEFAULT_CONNECT_TIMEOUT, DEFAULT_LATEST_TTL, DEFAULT_LOOKUP_TIMEOUT,
+        DEFAULT_MODELS_TTL, DEFAULT_REFRESH_EVERY,
     };
     let seconds =
         |given: Option<u64>, default| given.map_or(default, core::time::Duration::from_secs);
@@ -820,6 +821,10 @@ fn store_caches(
         seconds(config.store.models_ttl, DEFAULT_MODELS_TTL),
         seconds(config.store.catalog_ttl, DEFAULT_CATALOG_TTL),
         seconds(config.store.refresh_every, DEFAULT_REFRESH_EVERY),
+    )
+    .with_lookups(
+        seconds(config.store.connect_timeout, DEFAULT_CONNECT_TIMEOUT),
+        seconds(config.store.lookup_timeout, DEFAULT_LOOKUP_TIMEOUT),
     )
 }
 
@@ -1469,7 +1474,7 @@ mod store_caches_tests {
 
     use super::*;
 
-    fn times(text: &str) -> [Duration; 4] {
+    fn times(text: &str) -> [Duration; 6] {
         let config = Config::from_str_in(text, std::path::Path::new(".")).expect("parses");
         store_caches(&config, None).times()
     }
@@ -1477,16 +1482,28 @@ mod store_caches_tests {
     #[test]
     fn the_times_are_canoa_cfgs_and_the_defaults_are_an_hour_and_five_minutes() {
         let minutes = |each: u64| Duration::from_secs(each * 60);
-        assert_eq!(times(""), [minutes(60), minutes(5), minutes(5), minutes(5)]);
+        assert_eq!(
+            times(""),
+            [
+                minutes(60),
+                minutes(5),
+                minutes(5),
+                minutes(5),
+                Duration::from_secs(10),
+                Duration::from_secs(15)
+            ]
+        );
         assert_eq!(
             times(
-                "[host.store]\nlatest_ttl = 7200\nmodels_ttl = 10\ncatalog_ttl = 20\nrefresh_every = 0\n"
+                "[host.store]\nlatest_ttl = 7200\nmodels_ttl = 10\ncatalog_ttl = 20\nrefresh_every = 0\nconnect_timeout = 3\nlookup_timeout = 4\n"
             ),
             [
                 Duration::from_secs(7200),
                 Duration::from_secs(10),
                 Duration::from_secs(20),
-                Duration::ZERO
+                Duration::ZERO,
+                Duration::from_secs(3),
+                Duration::from_secs(4)
             ]
         );
     }

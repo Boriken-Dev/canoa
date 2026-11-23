@@ -96,6 +96,8 @@ pub(super) struct RawStore {
     pub(super) models_ttl: Option<u64>,
     pub(super) catalog_ttl: Option<u64>,
     pub(super) refresh_every: Option<u64>,
+    pub(super) connect_timeout: Option<u64>,
+    pub(super) lookup_timeout: Option<u64>,
     pub(super) tools: Option<bool>,
 }
 

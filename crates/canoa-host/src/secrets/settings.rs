@@ -558,6 +558,8 @@ mod tests {
             "models_ttl",
             "catalog_ttl",
             "refresh_every",
+            "connect_timeout",
+            "lookup_timeout",
             "tools",
         ] {
             assert!(

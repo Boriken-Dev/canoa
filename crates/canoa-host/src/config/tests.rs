@@ -2095,6 +2095,12 @@ fn the_store_takes_a_time_for_each_thing_it_keeps_and_one_for_renewing_them() {
     assert_eq!(set.store.models_ttl, Some(0));
     assert_eq!(set.store.catalog_ttl, Some(60));
     assert_eq!(set.store.refresh_every, Some(0));
+    let waits = parse("[host.store]\nconnect_timeout = 3\nlookup_timeout = 4\n").expect("parses");
+    assert_eq!(
+        (waits.store.connect_timeout, waits.store.lookup_timeout),
+        (Some(3), Some(4))
+    );
+    assert!(parse("[host.store]\nlookup_timeout = \"15s\"\n").is_err());
     assert!(parse("[host.store]\nlatest_ttl = \"1h\"\n").is_err());
 }
 

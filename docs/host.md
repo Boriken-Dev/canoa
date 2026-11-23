@@ -361,6 +361,8 @@ credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an inst
 # latest_ttl = 3600     # a publisher's newest version of a program
 # models_ttl = 300      # a Store type's list of models (an install, update or removal empties it)
 # catalog_ttl = 300     # the entries of a skills or MCP servers catalog
+# connect_timeout = 10 # a lookup (a release list, a checksum file) waits this long to connect to a publisher; a download waits 60
+# lookup_timeout = 15   # and this long for the answer
 # refresh_every = 300   # while a client is connected, how often what has gone stale is asked again; 0 never
 
 # The tools that search the knowledge an overlay ships (`canoa-kb`). Without `embeddings` they match words; with it, meaning too, by the

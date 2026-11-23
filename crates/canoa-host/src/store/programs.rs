@@ -32,7 +32,7 @@ use sha2::{Digest, Sha256};
 
 use super::footprint::{Difference, Footprint, Watch, is_profile_file, uncovered};
 use super::shelf::{Current, FileRecord, MadeBy, Shelf, ShelfError};
-use super::tools::{HttpTransport, LocalTools, Lookup, Transport};
+use super::tools::{HttpTransport, LocalTools, Lookup, ToolsLimits, Transport};
 use canoa::store::exec::{GuardedSpawner, is_credential_name};
 use canoa::store::protect::{Protected, RECOMMENDED_PLACES, RECOMMENDED_VARIABLES};
 
@@ -379,6 +379,8 @@ pub struct Programs {
     extras: Mutex<Vec<Arc<Registry>>>,
     transport: Arc<dyn Transport>,
     options: Options,
+    /// How long a lookup waits to connect and for an answer; `[host.store] connect_timeout` and `lookup_timeout`.
+    lookups: Mutex<(Duration, Duration)>,
     /// The plans this host made, by token: it applies its own copy of a plan, never one a client sends.
     plans: Mutex<Vec<StoredPlan>>,
 }
@@ -410,6 +412,10 @@ impl Programs {
             extras: Mutex::new(Vec::new()),
             transport: Arc::new(HttpTransport::default()),
             options: Options::default(),
+            lookups: Mutex::new((
+                ToolsLimits::default().lookup_connect,
+                ToolsLimits::default().lookup_response,
+            )),
             plans: Mutex::new(Vec::new()),
         }
     }
@@ -503,8 +509,25 @@ impl Programs {
         }
     }
 
+    /// Waits `connect` to connect and `response` for an answer when a store reads a document (a release list, a checksum file), and
+    /// keeps what publishers say of them under `cache` so a later run asks whether it changed.
+    pub fn lookups(&self, connect: Duration, response: Duration, cache: Option<&Path>) {
+        *self.lookups.lock().unwrap_or_else(PoisonError::into_inner) = (connect, response);
+        if let Some(cache) = cache {
+            self.transport.keep_in(cache);
+        }
+    }
+
     fn tools(&self, info: &StoreInfo) -> LocalTools {
+        let (lookup_connect, lookup_response) =
+            *self.lookups.lock().unwrap_or_else(PoisonError::into_inner);
+        let limits = ToolsLimits {
+            lookup_connect,
+            lookup_response,
+            ..ToolsLimits::default()
+        };
         LocalTools::new(Arc::clone(&self.transport), info.endpoints.clone())
+            .limits(limits)
             .lookup(self.lookup(&self.options.environment))
             .loopback_http(self.options.loopback_http)
             .allow_unverified(self.options.allow_unverified)

@@ -1010,6 +1010,8 @@ fn build_subsystems(
             models_ttl: raw.models_ttl,
             catalog_ttl: raw.catalog_ttl,
             refresh_every: raw.refresh_every,
+            connect_timeout: raw.connect_timeout,
+            lookup_timeout: raw.lookup_timeout,
             tools: raw.tools,
         });
     let network = host

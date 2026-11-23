@@ -1151,6 +1151,9 @@ mod concurrent_tests;
 mod store_cache_tests;
 
 #[cfg(test)]
+mod store_open_tests;
+
+#[cfg(test)]
 mod tests;
 
 impl Control {

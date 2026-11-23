@@ -27,6 +27,10 @@ pub const DEFAULT_CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
 /// How often, while a client is connected, the host asks again what has gone stale, unless `[host.store] refresh_every` says
 /// otherwise. Zero never does.
 pub const DEFAULT_REFRESH_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How long a lookup waits to connect to a publisher, unless `[host.store] connect_timeout` says otherwise.
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a lookup waits for a publisher's answer, unless `[host.store] lookup_timeout` says otherwise.
+pub const DEFAULT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(15);
 /// The longest a failed background request waits before it is tried again, whatever the time to live.
 const RETRY: Duration = Duration::from_secs(60);
 /// The form of `latest.json`.
@@ -62,6 +66,11 @@ pub(crate) struct StoreCaches {
     pub(crate) catalog: TtlCache<Value>,
     /// How often the host asks again what has gone stale while a client is connected; zero never does.
     pub(crate) refresh_every: Duration,
+    /// How long a lookup (a release list, a checksum file) waits to connect, and for the answer.
+    pub(crate) lookup_connect: Duration,
+    pub(crate) lookup_response: Duration,
+    /// Where what publishers said is kept, so a run that starts later asks whether a document changed.
+    pub(crate) dir: Option<PathBuf>,
 }
 
 impl StoreCaches {
@@ -74,11 +83,22 @@ impl StoreCaches {
         refresh_every: Duration,
     ) -> Self {
         Self {
-            latest: Arc::new(LatestCache::new(dir, latest_ttl)),
+            latest: Arc::new(LatestCache::new(dir.clone(), latest_ttl)),
             models: TtlCache::new(models_ttl),
             catalog: TtlCache::new(catalog_ttl),
             refresh_every,
+            lookup_connect: DEFAULT_CONNECT_TIMEOUT,
+            lookup_response: DEFAULT_LOOKUP_TIMEOUT,
+            dir,
         }
+    }
+
+    /// These caches with lookups that wait `connect` to connect and `response` for an answer.
+    #[must_use]
+    pub(crate) const fn with_lookups(mut self, connect: Duration, response: Duration) -> Self {
+        self.lookup_connect = connect;
+        self.lookup_response = response;
+        self
     }
 
     /// Keeps nothing on disk and uses the default times.
@@ -96,12 +116,14 @@ impl StoreCaches {
 #[cfg(test)]
 impl StoreCaches {
     /// The times, in order: the newest versions, the models, the catalogs and the renewal.
-    pub(crate) fn times(&self) -> [Duration; 4] {
+    pub(crate) fn times(&self) -> [Duration; 6] {
         [
             self.latest.ttl,
             self.models.ttl,
             self.catalog.ttl,
             self.refresh_every,
+            self.lookup_connect,
+            self.lookup_response,
         ]
     }
 }

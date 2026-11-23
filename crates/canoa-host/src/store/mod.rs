@@ -10,6 +10,8 @@ pub(crate) mod extension_catalog;
 #[cfg(test)]
 mod extension_catalog_tests;
 pub mod footprint;
+#[cfg(test)]
+pub(crate) mod http_tests;
 pub(crate) mod index;
 pub(crate) mod listings;
 pub(crate) mod mcp;

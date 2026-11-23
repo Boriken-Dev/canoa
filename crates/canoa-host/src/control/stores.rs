@@ -130,6 +130,11 @@ impl Stores {
 
     /// These stores keeping what they learn in `caches`, which the host that serves them also reads and renews.
     pub(crate) fn with_caches(mut self, caches: Arc<crate::store::caches::StoreCaches>) -> Self {
+        self.programs.lookups(
+            caches.lookup_connect,
+            caches.lookup_response,
+            caches.dir.as_ref().map(|dir| dir.join("http")).as_deref(),
+        );
         self.caches = caches;
         self
     }
