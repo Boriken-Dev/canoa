@@ -40,9 +40,10 @@ final class EntryContents {
 /// The id [ContentsStore] keeps an entry under.
 String contentsId(String label, String kind, String name) => '$label/$kind:$name';
 
-/// What every entry of every catalog provides, read ahead when the catalogs are read so that opening an entry shows it without
-/// asking for anything. A reading is kept under the cache directory by catalog, and is current while the entry's pin (or, when
-/// it has none, its catalog's commit) is the one it was made for and, for an entry with no pin, for [readAhead]'s `ttl`.
+/// What the entries the person looks at provide, read when they open one so that its page shows what it holds. A reading is kept under
+/// the cache directory by catalog, and is current while the entry's pin (or, when it has none, its catalog's commit) is the one it
+/// was made for: a catalog at the commit it was read at has the same entries, so nothing is read again. A catalog with no commit, or
+/// a `ttl` of zero, reads an entry with no pin again after `ttl`.
 ///
 /// The host reads: it fetches an entry's files as an install's review does, into a place nothing is installed from, and runs
 /// nothing. This store asks for the entries that are not current in batches and keeps the answers. One entry that cannot be read
@@ -85,9 +86,16 @@ class ContentsStore extends ChangeNotifier {
     if (!_disposed) super.notifyListeners();
   }
 
-  /// Reads every entry of [catalogs] whose last reading is not current, [concurrency] requests at a time. [force] reads them all
-  /// again. [ttl] is how long an entry with no pin stays current; zero reads again every time.
-  Future<void> readAhead(List<LoadedCatalog> catalogs, {required Duration ttl, bool force = false, int concurrency = 3}) async {
+  /// Reads the entries of [catalogs] whose last reading is not current, [concurrency] requests at a time: only those named in
+  /// [only] (ids from [contentsId]) when it is given, else every one. [force] reads them again. An entry with no pin is current
+  /// while its catalog is at the commit it was read at; a catalog with no commit has [ttl] for it, and zero reads again every time.
+  Future<void> readAhead(
+    List<LoadedCatalog> catalogs, {
+    required Duration ttl,
+    bool force = false,
+    int concurrency = 3,
+    Set<String>? only,
+  }) async {
     _running++;
     try {
       final work = <(String label, String id, String key, ContentsRequest request)>[];
@@ -98,11 +106,12 @@ class ContentsStore extends ChangeNotifier {
         final fallback = loaded.commit ?? '';
         void want(String kind, String name, String? pin, ContentsRequest Function(String id) request) {
           final id = contentsId(loaded.label, kind, name);
+          if (only != null && !only.contains(id)) return;
           final key = pin ?? fallback;
           final held = _entries[id];
           final current = held != null &&
               held.key == key &&
-              (pin != null || ttl > Duration.zero && _now().difference(held.readAt) < ttl);
+              (pin != null || ttl > Duration.zero && (fallback.isNotEmpty || _now().difference(held.readAt) < ttl));
           if (!force && current) return;
           try {
             work.add((loaded.label, id, key, request(id)));

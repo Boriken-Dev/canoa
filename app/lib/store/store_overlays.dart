@@ -439,6 +439,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
   }
 
   Future<void> _open(ListedEntry listed) async {
+    unawaited(c.readEntry(listed));
     final saved = await Navigator.of(context).push<CanoaConfig>(selectablePage(
       builder: (_) => OverlayPage(
         listed: listed,

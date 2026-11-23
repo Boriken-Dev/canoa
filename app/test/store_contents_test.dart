@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/store/contents_storage.dart';
 import 'package:canoa/store/contents_store.dart';
+import 'package:canoa/store/store.dart' show LoadedCatalog;
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
@@ -92,20 +93,24 @@ void main() {
       expect(overlays.discarded, containsAll(['full', 'bare']), reason: 'what was fetched to be read is removed');
     });
 
-    test('a refresh with nothing changed reads nothing; time to live and a forced refresh read again', () async {
-      final catalogs = await standInCatalogs(overlays, config);
+    /// The catalogs, as the host's index gives them: at a commit.
+    Future<List<LoadedCatalog>> atCommit(String? commit) async => [
+      for (final each in await standInCatalogs(overlays, config)) LoadedCatalog(label: each.label, source: each.source, commit: commit, catalog: each.catalog),
+    ];
+
+    test('a catalog at the commit it was read at reads nothing again, whatever the time; a new commit and a forced refresh read again', () async {
+      final catalogs = await atCommit('a' * 40);
       final store = make();
       await store.readAhead(catalogs, ttl: ttl);
       final first = store.fetches;
       expect(first, greaterThan(0));
       await store.readAhead(catalogs, ttl: ttl);
       expect(store.fetches, first, reason: 'every reading is current');
-      clock = clock.add(const Duration(minutes: 4));
+      clock = clock.add(const Duration(hours: 3));
       await store.readAhead(catalogs, ttl: ttl);
-      expect(store.fetches, first);
-      clock = clock.add(const Duration(minutes: 2));
-      await store.readAhead(catalogs, ttl: ttl);
-      expect(store.fetches, greaterThan(first));
+      expect(store.fetches, first, reason: 'the same commit has the same entries, so time alone reads nothing');
+      await store.readAhead(await atCommit('b' * 40), ttl: ttl);
+      expect(store.fetches, greaterThan(first), reason: 'the catalog moved, so what it lists may have');
       final before = store.fetches;
       await store.readAhead(catalogs, ttl: ttl, force: true);
       expect(store.fetches - before, first, reason: 'the refresh button reads everything');
@@ -120,6 +125,33 @@ void main() {
       await again.readAhead(catalogs, ttl: ttl);
       expect(again.fetches, 0);
       expect(again.of(contentsId('team', 'overlay', 'full'))!.contents!.skills.single.name, 'review');
+    });
+
+    test('a catalog with no commit has the time to live', () async {
+      final catalogs = await atCommit(null);
+      final store = make();
+      await store.readAhead(catalogs, ttl: ttl);
+      final first = store.fetches;
+      clock = clock.add(const Duration(minutes: 4));
+      await store.readAhead(catalogs, ttl: ttl);
+      expect(store.fetches, first);
+      clock = clock.add(const Duration(minutes: 2));
+      await store.readAhead(catalogs, ttl: ttl);
+      expect(store.fetches, greaterThan(first));
+    });
+
+    test('only the entries asked for are read, and the others stay unread', () async {
+      final catalogs = await atCommit('c' * 40);
+      final store = make();
+      final full = contentsId('team', 'overlay', 'full');
+      await store.readAhead(catalogs, ttl: ttl, only: {full});
+      expect(store.fetches, 1);
+      expect(store.of(full)!.contents!.skills.single.name, 'review');
+      expect(store.of(contentsId('team', 'overlay', 'bare')), isNull);
+      await store.readAhead(catalogs, ttl: ttl, only: {full});
+      expect(store.fetches, 1, reason: 'an entry read at this commit is not read again');
+      await store.readAhead(catalogs, ttl: ttl, only: {contentsId('team', 'overlay', 'bare')});
+      expect(store.fetches, 2);
     });
 
     test('a zero time to live reads again every time', () async {
@@ -144,19 +176,24 @@ void main() {
           'overlays/full/skills/review/SKILL.md': _skill,
           'overlays/bare/pdf/SKILL.md': _skill,
         });
+      final reader = StandInContents(overlays);
       await tester.binding.setSurfaceSize(const Size(1200, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
         theme: themeFor(LookId.canoa, Brightness.dark),
-        home: StoreSection(config: config, home: MemoryHome(overlays), contentsReader: StandInContents(overlays), index: standInIndex(overlays, () => config), onSave: (changed) async => changed),
+        home: StoreSection(config: config, home: MemoryHome(overlays), contentsReader: reader, index: standInIndex(overlays, () => config), onSave: (changed) async => changed),
       ));
       await tester.pumpAndSettle();
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('overlays-discover')));
       await tester.pumpAndSettle();
+      expect(reader.batches, isEmpty, reason: 'listing the catalogs reads no entry');
       await tester.tap(find.byKey(const Key('store-entry-team-full')));
+      // Opening the page reads that entry, and no other.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
       await tester.pumpAndSettle();
+      expect(reader.batches, [[contentsId('team', 'overlay', 'full')]], reason: 'the page read the entry opened and no other');
       expect(find.byKey(const Key('store-fetch')), findsOneWidget, reason: 'installing is reviewed, which is not reading');
       expect(find.byKey(const Key('details-contents-unread')), findsNothing);
       expect(find.byKey(const Key('details-skill-review')), findsOneWidget);

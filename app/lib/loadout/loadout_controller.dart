@@ -159,11 +159,8 @@ class LoadoutController extends ChangeNotifier {
   /// What each installed overlay needs and whether this computer has it, by overlay name, as of the last refresh.
   Map<String, List<NeedLine>> needs = const {};
 
-  /// What every entry of the catalogs provides, read ahead whenever the catalogs are read; none without a host to read them.
+  /// What the entries the person opens provide; none without a host to read them.
   ContentsStore? contents;
-
-  /// The reading ahead in progress or last finished, which a refresh starts.
-  Future<void> readingAhead = Future.value();
 
   CanoaConfig _config;
   CanoaConfig get config => _config;
@@ -260,12 +257,20 @@ class LoadoutController extends ChangeNotifier {
     listing = StoreListing(found);
     await loadTypes();
     loadingCatalogs = false;
-    // Discovery reads what every entry provides, so that opening one asks for nothing; a refresh the person asked for reads it
-    // all again.
-    if (contents case final store?) {
-      readingAhead = store.readAhead(found, ttl: Duration(seconds: config.store.contentsTtlSeconds), force: again);
-    }
     await refresh();
+  }
+
+  /// Reads what [listed] provides, as its page opens: the host fetches that one entry, and nothing the person has not looked at. An
+  /// entry read at the catalog's commit it has now is not read again. Does nothing without a host to read with.
+  Future<void> readEntry(ListedEntry listed) async {
+    final store = contents;
+    if (store == null) return;
+    final id = contentsId(listed.label, 'overlay', listed.entry.name);
+    await store.readAhead(
+      [for (final each in loaded) if (each.label == listed.label) each],
+      ttl: Duration(seconds: config.store.contentsTtlSeconds),
+      only: {id},
+    );
   }
 
   /// Reads what the host says of the types that read catalogs. A host that does not answer leaves what was known.
