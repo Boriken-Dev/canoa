@@ -75,8 +75,16 @@ final class _WebWindow implements PopoutWindow {
   @override
   Future<void> get closed => _closed.future;
 
+  // The window is of this page's origin, so its document can be reached; a window that has not loaded yet sets its own on start.
   @override
-  void setTitle(String title) => this.title = title;
+  void setTitle(String title) {
+    this.title = title;
+    try {
+      window.document.title = '$title - Canoa';
+    } on Object {
+      // A window that went, or that no longer is of this origin, keeps the title it has.
+    }
+  }
 
   // The browser sizes its own windows: this is the size the window was asked for.
   @override
@@ -98,6 +106,9 @@ final class _WebWindows extends WindowList {
   bool get available => web.window.location.protocol == 'http:' || web.window.location.protocol == 'https:';
 
   @override
+  bool get linksItems => available;
+
+  @override
   Future<PopoutWindow> open({
     required String title,
     required String look,
@@ -105,6 +116,7 @@ final class _WebWindows extends WindowList {
     String? session,
     Size size = popoutSize,
     WidgetBuilder? builder,
+    PopoutItem? item,
   }) async {
     final id = _newLinkId();
     final link = BroadcastViewLink(_channelOf(id));
@@ -115,7 +127,14 @@ final class _WebWindows extends WindowList {
       host: here.host,
       port: here.hasPort ? here.port : null,
       path: here.path,
-      queryParameters: {'popout': id, 'title': title, 'look': look, 'density': density},
+      queryParameters: {
+        'popout': id,
+        'title': title,
+        'look': look,
+        'density': density,
+        if (item != null) 'item': item.kind,
+        if (item != null && item.args.isNotEmpty) 'args': jsonEncode(item.args),
+      },
     );
     // Called inside the person's click, so that the browser lets it open.
     final window = web.window.open(address.toString(), '_blank', 'popup=yes,width=${size.width.round()},height=${size.height.round()}');
@@ -184,8 +203,16 @@ PopoutLaunch? popoutLaunch(List<String> args) {
   final query = Uri.base.queryParameters;
   final link = query['popout'];
   if (link == null || link.isEmpty) return null;
+  final item = query['item'];
+  Object? args;
+  try {
+    args = query['args'] == null ? null : jsonDecode(query['args']!);
+  } on FormatException {
+    args = null;
+  }
   return PopoutLaunch(
     link: link,
+    item: item == null || item.isEmpty ? null : PopoutItem(item, PopoutLaunch.itemArgs(args)),
     session: query['session'],
     title: query['title'] ?? 'Canoa',
     look: query['look'] ?? 'canoa',

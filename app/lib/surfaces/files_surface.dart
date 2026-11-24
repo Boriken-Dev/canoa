@@ -11,7 +11,9 @@ import '../files/viewers/file_viewer.dart';
 import '../files/viewers/standard_viewers.dart';
 import '../files/viewers/text_viewer.dart' show visibleText;
 import '../l10n/app_text.dart';
+import '../popout/item_files.dart';
 import '../popout/item_windows.dart';
+import '../popout/popout_window.dart' show PopoutItem;
 import '../served/host_files.dart';
 import '../session_store.dart';
 import '../shell/surface.dart';
@@ -73,6 +75,7 @@ class FilesSurface extends WorkSurface {
       canWrite: canWrite?.call() ?? true,
       viewers: viewers,
       onOpenWindow: onOpenWindow,
+      openInWindow: () => windows?.openInNewWindows ?? false,
     );
     return panel(
       reveal: controller.data[revealKey] as FileReveal?,
@@ -89,6 +92,13 @@ class FilesSurface extends WorkSurface {
                   session: session.id,
                   title: path.substring(path.lastIndexOf(RegExp(r'[\\/]')) + 1),
                   builder: (_) => panel(reveal: reveal),
+                  item: PopoutItem(PopoutItem.file, {
+                    'root': root,
+                    'path': path,
+                    'lang': AppText.of(context).language,
+                    if (files is WorkspaceFileWriter && (canWrite?.call() ?? true)) 'write': '1',
+                  }),
+                  serve: (link) => serveFiles(files, link),
                 ),
               );
             },
@@ -113,10 +123,14 @@ final class FileReveal {
 /// The panel's body: a listing of the workspace, a folder at a time, instruction files loaded for the session, and a file's
 /// preview/editor in its place.
 class FilesPanel extends StatefulWidget {
-  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal, this.canWrite = true, this.viewers, this.onOpenWindow});
+  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal, this.canWrite = true, this.viewers, this.onOpenWindow, this.openInWindow});
 
   /// Opens a file in a window of its own, given its path; null where there are no windows, which leaves the button out.
   final ValueChanged<String>? onOpenWindow;
+
+  /// Whether a click on a file in the listing shows it in a window of its own (Open in, new windows) rather than in the panel, asked
+  /// at the click; only where [onOpenWindow] is given.
+  final bool Function()? openInWindow;
 
   /// The viewers a file can be shown with, and the person's choice among them; null gives the panel its own set of the app's.
   final ViewerRegistry? viewers;
@@ -276,6 +290,14 @@ class _FilesPanelState extends State<FilesPanel> {
         _loading = false;
       });
     }
+  }
+
+  bool get _opensWindow => widget.onOpenWindow != null && (widget.openInWindow?.call() ?? false);
+
+  /// A click on an entry of the listing: a folder is entered, and a file is shown where the person chose to open things.
+  Future<void> _clicked(HostFolderEntry entry) async {
+    if (!entry.isFolder && _opensWindow) return widget.onOpenWindow!(entry.path);
+    return _open(entry);
   }
 
   Future<void> _open(HostFolderEntry entry, {String? section}) async {
@@ -464,7 +486,7 @@ class _FilesPanelState extends State<FilesPanel> {
                           trailing: _opening == doc.path
                               ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
                               : null,
-                          onTap: () => unawaited(_openFilePath(doc.path, doc.name)),
+                          onTap: () => _opensWindow ? widget.onOpenWindow!(doc.path) : unawaited(_openFilePath(doc.path, doc.name)),
                         ),
                       const Divider(height: 1),
                     ],
@@ -482,7 +504,7 @@ class _FilesPanelState extends State<FilesPanel> {
                         trailing: _opening == entry.path
                             ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
                             : null,
-                        onTap: () => _open(entry),
+                        onTap: () => _clicked(entry),
                       ),
                     if (listing.more)
                       Padding(

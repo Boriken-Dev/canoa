@@ -336,6 +336,23 @@ void main() {
       expect(_key('files name'), findsOneWidget);
     });
 
+    testWidgets('with new windows a click on a file in the listing opens its window, and with this window it opens the panel', (tester) async {
+      final s = await pane(tester);
+      expect(s.windows.opened, isEmpty, reason: 'this window: the click showed the file in the panel');
+      expect(_key('files name'), findsOneWidget);
+
+      s.items.openInNewWindows = true;
+      await tester.tap(_key('files back'));
+      await _settle(tester);
+      await tester.tap(_key('files entry notes.txt'));
+      await _settle(tester);
+      await _settle(tester);
+      expect(s.windows.opened, hasLength(1), reason: 'new windows: the click opens the file window');
+      expect(s.windows.opened.single.title, 'notes.txt');
+      expect(_key('files entry notes.txt'), findsOneWidget, reason: 'and the panel stays on its listing');
+      expect(find.text('hello from notes'), findsOneWidget, reason: 'the file is drawn in the window');
+    });
+
     testWidgets('with no windows there is no button', (tester) async {
       final store = SessionStore();
       addTearDown(store.dispose);
@@ -403,6 +420,27 @@ void main() {
       expect(workspace.inWindow, isTrue);
       expect(_key('terminal in window'), findsOneWidget);
       expect(p.host.opened, hasLength(1), reason: 'the window shows the shell the panel had: it opened no second one');
+    });
+
+    testWidgets('a new shell from the + menu opens in the panel, or in the terminal window when the setting says new windows', (tester) async {
+      final p = await panel(tester);
+      final workspace = p.surface.workspaceFor(p.open.find('terminal')!.controller, p.scene.session)!;
+      await tester.tap(_key('panel-add'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('open terminal'));
+      await _settle(tester);
+      expect(workspace.shells, 2);
+      expect(p.scene.windows.opened, isEmpty, reason: 'this window: the shell is in the panel');
+
+      p.scene.items.openInNewWindows = true;
+      await tester.tap(_key('panel-add'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('open terminal'));
+      await _settle(tester);
+      expect(workspace.shells, 3);
+      expect(p.scene.windows.opened, hasLength(1), reason: 'new windows: the terminal opens in its window');
+      expect(workspace.inWindow, isTrue);
+      expect(p.host.opened, hasLength(3), reason: 'the window shows the host shells: it opened none of its own');
     });
 
     testWidgets('what is typed in the window reaches the host shell, and what the shell prints shows there', (tester) async {

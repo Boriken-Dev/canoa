@@ -228,6 +228,33 @@ class TerminalPane extends ChangeNotifier {
   final focusNode = FocusNode(debugLabel: 'terminal');
   RemoteTerminal? _remote;
   StreamSubscription<String>? _printing;
+  final _tee = StreamController<List<int>>.broadcast(sync: true);
+  final _history = <List<int>>[];
+  var _historySize = 0;
+
+  /// The most bytes of what the shell printed that [recentOutput] keeps.
+  static const historyLimit = 256 * 1024;
+
+  /// The shell shown to others: what it prints as it prints it, and what it was last sent. A window that is another page draws the
+  /// shell from these, and the shell stays the host's.
+  Stream<List<int>> get rawOutput => _tee.stream;
+
+  /// The last [historyLimit] bytes the shell printed, so that a window opened late can draw the screen the shell has.
+  List<int> get recentOutput => [for (final chunk in _history) ...chunk];
+
+  /// The running shell; null while it starts and once it ended.
+  RemoteTerminal? get remote => state == PaneState.running ? _remote : null;
+
+  List<int> _record(List<int> bytes) {
+    _history.add(bytes);
+    _historySize += bytes.length;
+    while (_historySize > historyLimit && _history.length > 1) {
+      _historySize -= _history.removeAt(0).length;
+    }
+    _tee.add(bytes);
+    return bytes;
+  }
+
   PaneState state = PaneState.starting;
 
   /// Why the shell did not start or was lost, in the host's words.
@@ -246,6 +273,8 @@ class TerminalPane extends ChangeNotifier {
     await _printing?.cancel();
     _printing = null;
     if (before != null) unawaited(before.close());
+    _history.clear();
+    _historySize = 0;
     state = PaneState.starting;
     problem = null;
     exitCode = null;
@@ -257,7 +286,7 @@ class TerminalPane extends ChangeNotifier {
         return;
       }
       _remote = remote;
-      _printing = remote.output.transform(const Utf8Decoder(allowMalformed: true)).listen(terminal.write);
+      _printing = remote.output.map(_record).transform(const Utf8Decoder(allowMalformed: true)).listen(terminal.write);
       state = PaneState.running;
       notifyListeners();
       if (_pending.isNotEmpty) {
@@ -405,6 +434,7 @@ class TerminalPane extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(close());
+    unawaited(_tee.close());
     focusNode.dispose();
     super.dispose();
   }

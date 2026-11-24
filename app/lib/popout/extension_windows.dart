@@ -98,6 +98,7 @@ final class ExtensionPopoutWindows extends WindowList {
     String? session,
     Size size = popoutSize,
     WidgetBuilder? builder,
+    PopoutItem? item,
   }) async {
     if (session == null) throw StateError('A window needs the session it shows');
     final id = newLinkId();

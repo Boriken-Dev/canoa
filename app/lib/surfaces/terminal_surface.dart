@@ -5,7 +5,9 @@ import 'package:material_ui/material_ui.dart';
 import 'package:xterm2/xterm.dart';
 
 import '../l10n/app_text.dart';
+import '../popout/item_terminal.dart';
 import '../popout/item_windows.dart';
+import '../popout/popout_window.dart' show PopoutItem;
 import '../session_store.dart';
 import '../shell/surface.dart';
 import '../theme/look.dart';
@@ -112,6 +114,8 @@ class TerminalSurface extends WorkSurface {
       changes: Listenable.merge([workspace, env.store]),
       builder: (_) => TerminalPanel(workspace: workspace, window: true, focusOnMount: true),
       onClosed: () => workspace.inWindow = false,
+      item: PopoutItem(PopoutItem.terminal, {'lang': AppText.of(context).language}),
+      serve: (link) => serveTerminal(workspace, link),
     );
     // A window that could not open leaves the screens where they were.
     if (!windows.isOpen(key)) workspace.inWindow = false;
@@ -202,6 +206,10 @@ class TerminalSurface extends WorkSurface {
       label: label,
       icon: icon,
       enabled: !full,
+      openWindow: (context) async {
+        final opened = surfaces.find(id);
+        if (opened != null) await openInWindow(context, session, opened.controller);
+      },
       open: (slot) {
         final existing = surfaces.find(id);
         if (existing == null) {

@@ -73,7 +73,7 @@ class SurfaceAction {
 
 /// One thing the panel's + menu can open: a kind of tab, made new each time it is chosen.
 class NewTab {
-  const NewTab({required this.key, required this.label, required this.icon, required this.open, this.enabled = true});
+  const NewTab({required this.key, required this.label, required this.icon, required this.open, this.enabled = true, this.openWindow});
 
   /// The menu entry's key.
   final String key;
@@ -83,6 +83,10 @@ class NewTab {
 
   /// Opens it in [slot] and chooses it.
   final void Function(SurfaceSlot slot) open;
+
+  /// Shows what [open] opened in a window of its own; null for a tab that has none. It runs after [open] where a plain click on it is
+  /// to open a window (Settings, Appearance, Open in).
+  final Future<void> Function(BuildContext context)? openWindow;
 }
 
 /// A view that can sit in the work panel: details, changes, and what later plans add (files, a browser, a terminal).

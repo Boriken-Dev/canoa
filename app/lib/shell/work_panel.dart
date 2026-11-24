@@ -189,7 +189,12 @@ class WorkPanel extends StatelessWidget {
           ),
       ],
     );
-    chosen?.open(slot);
+    if (chosen == null) return;
+    chosen.open(slot);
+    final show = chosen.openWindow;
+    if (show == null || !button.mounted) return;
+    final windows = SurfaceEnvironment.maybeOf(button)?.windows;
+    if (windows != null && windows.available && windows.openInNewWindows) unawaited(show(button));
   }
 
   Widget _launcher(BuildContext context) {

@@ -11,6 +11,7 @@ import '../theme/look.dart';
 import 'item_windows.dart' show WindowFrame;
 import '../chat/reply_voice.dart';
 import '../voice/reply_speaker.dart';
+import 'item_page.dart';
 import 'platform.dart' as platform;
 import 'popout_conversation.dart';
 import 'popout_launch.dart';
@@ -28,6 +29,7 @@ Future<ChatSessionView> attachPopout(PopoutLaunch launch, {ChatViewLink? link}) 
 /// Runs this process as a pop-out window: attaches to the conversation and draws it. When it cannot attach it says so and offers to
 /// close.
 Future<void> runPopout(PopoutLaunch launch, {ChatViewLink? link}) async {
+  if (launch.item != null) return runItemPopout(launch, link: link);
   WidgetsFlutterBinding.ensureInitialized();
   await platform.preparePopoutWindow(launch);
   try {

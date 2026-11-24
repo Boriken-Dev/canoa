@@ -91,6 +91,9 @@ class PopoutHub extends ChangeNotifier {
   /// The names of the app's look and density, for a window to draw with.
   String look, density;
 
+  /// Whether a plain click on a conversation opens it in a window of its own (Settings, Appearance, Open in).
+  bool openInNewWindows = false;
+
   /// The tabs of the main window. The tab shown is the store's selected session, which the rail changes too.
   final mainTabs = WindowTabs();
 

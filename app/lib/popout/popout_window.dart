@@ -9,6 +9,21 @@ import 'package:flutter/widgets.dart' show ChangeNotifier, Listenable, Widget, W
 /// How big a window for a conversation opens.
 const Size popoutSize = Size(560, 780);
 
+/// What a window that is another page draws in place of a conversation: a file's viewer or a terminal, and what that page needs to
+/// know to draw it. The page asks the page that opened it for the rest over its link.
+final class PopoutItem {
+  const PopoutItem(this.kind, [this.args = const {}]);
+
+  /// The viewer of one file.
+  static const file = 'file';
+
+  /// The shells of a session.
+  static const terminal = 'terminal';
+
+  final String kind;
+  final Map<String, String> args;
+}
+
 /// A window a conversation is shown in, as the window that holds it sees it.
 abstract interface class PopoutWindow {
   /// Names this window among the ones its [PopoutWindows] holds.
@@ -48,6 +63,10 @@ abstract interface class PopoutWindows implements Listenable {
   /// engine that only shows a conversation it is linked to.
   bool get drawsWidgets;
 
+  /// Whether a window that is another page can be given a [PopoutItem] to show, and so a file or a terminal: it draws it from what
+  /// its link brings. A platform that [drawsWidgets] does not need it.
+  bool get linksItems;
+
   /// The windows open now, oldest first.
   List<PopoutWindow> get windows;
 
@@ -55,7 +74,8 @@ abstract interface class PopoutWindows implements Listenable {
   ///
   /// A window of this engine draws [builder]'s widget, and its [PopoutWindow.link] is null. A window that is another page or engine
   /// cannot, and gets a link whose far end attaches to the conversation, which [session] names for a platform that needs it (the
-  /// browser extension's worker keeps the tab it works with by it).
+  /// browser extension's worker keeps the tab it works with by it). A window that is another page given an [item] shows that instead
+  /// of a conversation, over a link that serves it.
   Future<PopoutWindow> open({
     required String title,
     required String look,
@@ -63,6 +83,7 @@ abstract interface class PopoutWindows implements Listenable {
     String? session,
     Size size = popoutSize,
     WidgetBuilder? builder,
+    PopoutItem? item,
   });
 
   /// [app] with the place this platform draws its windows of this engine; the app's root goes through it.
@@ -78,6 +99,9 @@ abstract class WindowList extends ChangeNotifier implements PopoutWindows {
 
   @override
   bool get drawsWidgets => false;
+
+  @override
+  bool get linksItems => false;
 
   @override
   Widget host(Widget app) => app;
@@ -110,5 +134,6 @@ final class NoPopoutWindows extends WindowList {
     String? session,
     Size size = popoutSize,
     WidgetBuilder? builder,
+    PopoutItem? item,
   }) => throw UnsupportedError('This platform has no windows of its own for a conversation');
 }

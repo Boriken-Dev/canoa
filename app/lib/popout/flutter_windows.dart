@@ -123,6 +123,7 @@ final class FlutterWindows extends WindowList {
     String? session,
     Size size = popoutSize,
     WidgetBuilder? builder,
+    PopoutItem? item,
   }) async {
     if (!available) throw UnsupportedError('Flutter\'s windowing is not on in this build');
     if (builder == null) throw ArgumentError.notNull('builder');

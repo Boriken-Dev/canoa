@@ -14,7 +14,10 @@ import 'package:flutter_test/flutter_test.dart';
 /// A window opened in a test: the main window's end of its link when it is another page, and the end the window's own app attaches
 /// by; or, for a window of the engine, what it draws.
 final class FakeWindow implements PopoutWindow {
-  FakeWindow(this.id, this.link, this.far, this.title, this.size, this.builder);
+  FakeWindow(this.id, this.link, this.far, this.title, this.size, this.builder, [this.item]);
+
+  /// What the window was asked to show in place of a conversation, when it is another page.
+  final PopoutItem? item;
 
   @override
   final String id;
@@ -65,7 +68,11 @@ final class FakeWindow implements PopoutWindow {
 /// The platform's windows as a test has them. With [sameEngine] a window draws what the app gives it, as the platform's own windows
 /// do; without, it is another page, linked in memory.
 final class FakeWindows extends WindowList {
-  FakeWindows({this.available = true, this.sameEngine = false, this.draw = false});
+  FakeWindows({this.available = true, this.sameEngine = false, this.draw = false, this.linksItems = false});
+
+  /// Whether a window that is another page can be given a file or a terminal to show, as a browser's can.
+  @override
+  final bool linksItems;
 
   @override
   final bool available;
@@ -106,6 +113,7 @@ final class FakeWindows extends WindowList {
     String? session,
     Size size = popoutSize,
     WidgetBuilder? builder,
+    PopoutItem? item,
   }) async {
     final id = 'window-${opened.length}';
     final FakeWindow window;
@@ -113,7 +121,7 @@ final class FakeWindows extends WindowList {
       window = FakeWindow(id, null, null, title, size, builder);
     } else {
       final (owner, far) = MemoryViewLink.pair();
-      window = FakeWindow(id, owner, far, title, size, null);
+      window = FakeWindow(id, owner, far, title, size, null, item);
     }
     opened.add(window);
     return track(window);
