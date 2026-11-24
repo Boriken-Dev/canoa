@@ -588,9 +588,10 @@ mod tests {
     #[test]
     fn the_polkit_rule_and_the_root_helper_use_the_validators_pattern() {
         let root = env!("CARGO_MANIFEST_DIR");
+        // The guide names the unit with the docs' placeholder, which the docs build fills with the brand's program.
         let guide = std::fs::read_to_string(format!("{root}/../../docs/portal.md")).unwrap();
         assert!(
-            guide.contains(&format!(r"^canoa@{NAME_PATTERN}\.service$")),
+            guide.contains(&format!(r"^{{{{ program }}}}@{NAME_PATTERN}\.service$")),
             "the polkit rule"
         );
         let helper = std::fs::read_to_string(format!("{root}/dist/canoa-instance")).unwrap();
