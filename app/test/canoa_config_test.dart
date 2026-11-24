@@ -1,4 +1,5 @@
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/popout/open_in.dart';
 import 'package:canoa/profile/profile.dart' show GitOverlay;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -216,5 +217,16 @@ provider = "echo_provider"
       expect(() => CanoaConfig.parse('[agents.Claude.hooks]\n$bad\n'), throwsFormatException, reason: bad);
     }
     expect(() => CanoaConfig.parse('[agents.Claude]\nhooks = 3\n'), throwsFormatException);
+  });
+  test('[appearance] open_in is this window unless it says new windows, and only those two are accepted', () {
+    expect(const CanoaConfig().openIn, OpenIn.thisWindow);
+    expect(const CanoaConfig().encode().contains('open_in'), isFalse);
+    final chosen = CanoaConfig.parse('[appearance]\nopen_in = "new_windows"\n');
+    expect(chosen.openIn, OpenIn.newWindows);
+    expect(CanoaConfig.parse(chosen.encode()).openIn, OpenIn.newWindows);
+    expect(chosen.copyWith(openIn: OpenIn.thisWindow).openIn, OpenIn.thisWindow);
+    expect(chosen.withHost(const {}).openIn, OpenIn.newWindows, reason: 'another table written leaves it');
+    expect(() => CanoaConfig.parse('[appearance]\nopen_in = "tabs"\n'), throwsFormatException);
+    expect(() => CanoaConfig.parse('[appearance]\nopen_in = true\n'), throwsFormatException);
   });
 }

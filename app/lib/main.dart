@@ -96,6 +96,7 @@ import 'ledger/session_ledger.dart';
 import 'permissions/host_paths.dart';
 import 'permissions/permission_rules.dart';
 import 'popout/item_windows.dart';
+import 'popout/open_in.dart';
 import 'popout/platform.dart' as popout_platform;
 import 'popout/popout_app.dart';
 import 'popout/popout_hub.dart';
@@ -3465,10 +3466,12 @@ class _CanoaAppState extends State<CanoaApp> {
   Widget build(BuildContext context) {
     _popout
       ..look = config.look.name
-      ..density = config.density.name;
+      ..density = config.density.name
+      ..openInNewWindows = config.openIn == OpenIn.newWindows;
     _itemWindows
       ..look = config.look.name
-      ..density = config.density.name;
+      ..density = config.density.name
+      ..openInNewWindows = config.openIn == OpenIn.newWindows;
     final style = (config.look, config.density, config.language, config.themeMode, config.followProvider);
     if (_windowStyleShown != null && _windowStyleShown != style) {
       // The windows are not built by this state, so they are told once this frame is over.

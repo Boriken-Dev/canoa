@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/permissions/permission_rules.dart';
+import 'package:canoa/popout/open_in.dart';
 import 'package:canoa/providers/provider_catalog.dart';
 import 'dart:io' show FileSystemException;
 
@@ -56,6 +57,7 @@ program = "piper"
 look = "terminal"
 brightness = "system"
 density = "verbose"
+open_in = "new_windows"
 
 [sessions]
 keep = 200
@@ -331,6 +333,13 @@ void main() {
       await choose(tester, 'settings-density', 'Normal');
       expect(h.last.brightness, 'light');
       expect(h.last.density.name, 'normal');
+      expect(h.last.openIn, OpenIn.newWindows, reason: 'the cfg chose new windows and the page shows it');
+      await choose(tester, 'settings-open-in', 'This window');
+      expect(h.last.openIn, OpenIn.thisWindow);
+      expect(h.last.encode().contains('open_in'), isFalse, reason: 'this window is the default, so it is not written');
+      await choose(tester, 'settings-open-in', 'New windows');
+      expect(h.last.openIn, OpenIn.newWindows);
+      expect(CanoaConfig.parse(h.last.encode()).openIn, OpenIn.newWindows, reason: 'and it is written back, so a restart finds it');
       expect(changedTables(every, h.last), {'appearance'});
       expect(find.textContaining('return a + b;'), findsOneWidget);
     });

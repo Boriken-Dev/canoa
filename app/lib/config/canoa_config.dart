@@ -19,6 +19,7 @@ import '../profile/skill_copies.dart' show skillKey, skillsDirectory, validSkill
 import '../profile/profile.dart';
 import '../store/skill_sources.dart';
 import '../store/store_settings.dart';
+import '../popout/open_in.dart';
 import '../theme/look.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, defaultWarnPermille;
 import '../workspace/workspace_template.dart' show defaultWorkspace, workspaceProblem;
@@ -42,6 +43,7 @@ final class CanoaConfig {
     this.followProvider = false,
     this.brightness = 'dark',
     this.density = ChatDensity.normal,
+    this.openIn = OpenIn.thisWindow,
     this.language = '',
     this.agents = const [],
     this.host,
@@ -156,6 +158,9 @@ final class CanoaConfig {
   /// `[appearance] density`: how much of an agent's work a conversation shows, `normal`, `thinking` or `verbose`.
   final ChatDensity density;
 
+  /// `[appearance] open_in`: where a plain click on a conversation, and Open on a file or a terminal, shows it.
+  final OpenIn openIn;
+
   /// `[appearance] language`: the language the app's own words are in, as its code (`en`, `es`); empty follows the system's.
   final String language;
 
@@ -167,7 +172,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? startAtLogin, bool? preferWebTransport, num? connectTimeout,
-      LookId? look, bool? followProvider, String? brightness, ChatDensity? density, String? language, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
+      LookId? look, bool? followProvider, String? brightness, ChatDensity? density, OpenIn? openIn, String? language, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
       NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
       CanoaConfig(
@@ -182,6 +187,7 @@ final class CanoaConfig {
         followProvider: followProvider ?? this.followProvider,
         brightness: brightness ?? this.brightness,
         density: density ?? this.density,
+        openIn: openIn ?? this.openIn,
         language: language ?? this.language,
         agents: agents ?? this.agents,
         host: host,
@@ -217,6 +223,7 @@ final class CanoaConfig {
     followProvider: followProvider,
     brightness: brightness,
     density: density,
+    openIn: openIn,
     language: language,
     agents: agents,
     host: host,
@@ -1236,6 +1243,7 @@ final class CanoaConfig {
     followProvider: followProvider,
     brightness: brightness,
     density: density,
+    openIn: openIn,
     language: language,
     agents: agents,
     host: host,
@@ -1277,7 +1285,7 @@ final class CanoaConfig {
   static const _editedKeys = <String, Set<String>>{
     'desktop': {'start_hidden', 'close_to_tray', 'minimize_to_tray', 'local_host', 'start_at_login'},
     'network': {'prefer_webtransport', 'connect_timeout'},
-    'appearance': {'look', 'follow_provider', 'brightness', 'density', 'language'},
+    'appearance': {'look', 'follow_provider', 'brightness', 'density', 'open_in', 'language'},
     'sessions': {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'},
     'permissions': {'default_mode', 'full_access', 'allow_once_only', 'protected'},
     'notifications': {'permission', 'question', 'finished'},
@@ -1423,6 +1431,11 @@ final class CanoaConfig {
     final density = densityName is String ? ChatDensity.named(densityName) : null;
     if (density == null) {
       throw FormatException('canoa.cfg: appearance.density must be one of ${ChatDensity.values.map((each) => each.name).join(', ')}');
+    }
+    final openInName = appearance['open_in'] ?? OpenIn.thisWindow.key;
+    final openIn = openInName is String ? OpenIn.named(openInName) : null;
+    if (openIn == null) {
+      throw FormatException('canoa.cfg: appearance.open_in must be one of ${OpenIn.values.map((each) => each.key).join(', ')}');
     }
     final languageName = appearance['language'] ?? '';
     if (languageName is! String) throw const FormatException('canoa.cfg: appearance.language must be text');
@@ -1574,7 +1587,7 @@ final class CanoaConfig {
       },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
-      look: look, followProvider: flag(appearance, 'follow_provider', false), brightness: brightness, density: density, language: languageName,
+      look: look, followProvider: flag(appearance, 'follow_provider', false), brightness: brightness, density: density, openIn: openIn, language: languageName,
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
@@ -1669,7 +1682,7 @@ look = "${look.name}"
 follow_provider = $followProvider
 brightness = "$brightness"
 density = "${density.name}"
-${language.isEmpty ? '' : 'language = ${jsonEncode(language)}\n'}
+${openIn == OpenIn.thisWindow ? '' : 'open_in = "${openIn.key}"\n'}${language.isEmpty ? '' : 'language = ${jsonEncode(language)}\n'}
 [sessions]
 keep = ${sessions.keep}
 keep_text = ${sessions.keepText}

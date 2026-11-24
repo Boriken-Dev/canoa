@@ -33,7 +33,7 @@ ChatSession _starting(SessionStore store, String title, {String? cwd}) => store.
 
 /// The rail in a column [width] wide, with a clock that stands still. Nothing here starts an agent.
 Future<List<String>> _show(WidgetTester tester, SessionStore store,
-    {double width = 260, double height = 800, List<String>? closed, Brightness brightness = Brightness.dark, bool unfold = false, Future<void> Function(ChatSession)? onOpenWindow}) async {
+    {double width = 260, double height = 800, List<String>? closed, Brightness brightness = Brightness.dark, bool unfold = false, Future<void> Function(ChatSession)? onOpenWindow, bool opensInWindow = false}) async {
   await tester.binding.setSurfaceSize(Size(width, height));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final asked = closed ?? <String>[];
@@ -47,6 +47,7 @@ Future<List<String>> _show(WidgetTester tester, SessionStore store,
         onSearch: () => asked.add('search'),
         onClose: (session) async => asked.add('close ${session.title}'),
         onOpenWindow: onOpenWindow,
+        opensInWindow: opensInWindow,
         now: () => _now,
         touch: false,
       ),
@@ -424,6 +425,44 @@ void main() {
       await tester.pumpAndSettle();
       expect(asked, ['First', 'First']);
       expect(find.text('Could not open a window: no window for it'), findsOneWidget);
+      store.dispose();
+    });
+
+    testWidgets('a plain click shows the session here, or opens its window when the setting says new windows', (tester) async {
+      final store = SessionStore();
+      final first = _open(store, 'First');
+      _open(store, 'Second');
+      store.select(first.id);
+      final asked = <String>[];
+      await _show(tester, store, onOpenWindow: (session) async => asked.add(session.title));
+      await tester.tap(_row('Second'));
+      await tester.pump();
+      expect(store.selected?.title, 'Second', reason: 'this window: the click selects');
+      expect(asked, isEmpty);
+
+      await _show(tester, store, onOpenWindow: (session) async => asked.add(session.title), opensInWindow: true);
+      await tester.tap(_row('First'));
+      await tester.pump();
+      expect(asked, ['First'], reason: 'new windows: the click opens the session window');
+      expect(store.selected?.title, 'Second', reason: 'and shows nothing here');
+
+      await _show(tester, store, opensInWindow: true);
+      await tester.tap(_row('First'));
+      await tester.pump();
+      expect(store.selected?.title, 'First', reason: 'a platform with no windows still selects');
+      store.dispose();
+    });
+
+    testWidgets('a window that cannot open is said in words, and the click shows nothing here either', (tester) async {
+      final store = SessionStore();
+      final first = _open(store, 'First');
+      _open(store, 'Second');
+      store.select(first.id);
+      await _show(tester, store, onOpenWindow: (_) async => throw StateError('no window for it'), opensInWindow: true);
+      await tester.tap(_row('Second'));
+      await tester.pumpAndSettle();
+      expect(find.text('Could not open a window: no window for it'), findsOneWidget);
+      expect(store.selected?.title, 'First');
       store.dispose();
     });
 

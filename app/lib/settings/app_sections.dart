@@ -8,6 +8,7 @@ import '../l10n/app_text.dart';
 import '../chat/palette.dart' show ShortcutSpec, appShortcutTable, parseShortcutActivator;
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
+import '../popout/open_in.dart';
 import '../theme/look.dart';
 import '../theme/vendor_looks.dart';
 import '../workspace/workspace_template.dart';
@@ -307,6 +308,15 @@ class AppearanceSection extends StatelessWidget {
             value: config.density,
             choices: [for (final density in ChatDensity.values) (density, density.label)],
             onChanged: (v) => controller.change((c) => c.copyWith(density: v)),
+          ),
+          ChoiceRow<OpenIn>(
+            title: context.t('settings.open_in'),
+            configKey: const ['appearance', 'open_in'],
+            description: context.t('settings.open_in_description'),
+            fieldKey: const Key('settings-open-in'),
+            value: config.openIn,
+            choices: [(OpenIn.thisWindow, context.t('settings.open_in_this')), (OpenIn.newWindows, context.t('settings.open_in_new'))],
+            onChanged: (v) => controller.change((c) => c.copyWith(openIn: v)),
           ),
         ]),
         Padding(

@@ -28,6 +28,7 @@ class SessionRail extends StatefulWidget {
     required this.onSearch,
     required this.onClose,
     this.onOpenWindow,
+    this.opensInWindow = false,
     this.onReopen,
     this.running,
     this.onAttach,
@@ -49,6 +50,10 @@ class SessionRail extends StatefulWidget {
 
   /// Opens a conversation in a window of its own, or brings its window forward; null where this platform has none.
   final Future<void> Function(ChatSession)? onOpenWindow;
+
+  /// Whether a plain click on a conversation opens it in a window of its own rather than showing it here; only where [onOpenWindow]
+  /// is given.
+  final bool opensInWindow;
   final Future<void> Function(LedgerEntry)? onReopen;
 
   /// The sessions the host keeps running for several clients, listed above the earlier ones, and what joins one.
@@ -204,6 +209,10 @@ class _SessionRailState extends State<SessionRail> {
                 now: now,
                 touch: widget.touch ?? _touchPlatform,
                 onOpen: () {
+                  if (widget.opensInWindow && widget.onOpenWindow != null && !session.isDraft) {
+                    unawaited(_openWindow(context, session));
+                    return;
+                  }
                   store.select(session.id);
                   _closeDrawer(context);
                 },
