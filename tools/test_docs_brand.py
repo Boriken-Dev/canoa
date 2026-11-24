@@ -102,9 +102,9 @@ class DocsBrand(unittest.TestCase):
         self.assertIn("Kept: {{ other }} and {{ name }}, crates/canoa-host, Boriken-Dev/canoa.", out)
 
     def test_names_default_from_the_program(self):
-        os.environ["BRAND_FILE"] = str(self.brand(config_file="", folder="", home_dir=""))
+        os.environ["BRAND_FILE"] = str(self.brand(program="aui", config_file="", folder="", home_dir=""))
         hook.on_config(config())
-        self.assertEqual(self.render("{{ config_file }} in /etc/{{ folder }}, ~/{{ home_dir }}"), "agents.cfg in /etc/AgentUI, ~/.agents")
+        self.assertEqual(self.render("{{ config_file }} in /etc/{{ folder }}, ~/{{ home_dir }}"), "aui.cfg in /etc/AgentUI, ~/.aui")
 
     def test_the_logo_takes_the_accent_and_the_dark_accent(self):
         os.environ["BRAND_FILE"] = str(self.brand())
