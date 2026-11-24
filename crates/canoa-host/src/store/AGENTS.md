@@ -128,8 +128,10 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
 - Downloads nothing checks (Grok's) are refused unless `Options::allow_unverified`; `current.json` records each file's `verified`. Endpoints may be a prefix
   (`https://storage.googleapis.com/antigravity-public/antigravity-cli/`), which a URL and every redirect has to start with.
 - `Programs::launch` reads `current.json` against a digest the host keeps in `<programs>/.digests/`, outside the program's folder, refuses a launch
-  outside the copy or a copy outside the shelf, and checks every file of the copy (the files an archive unpacked too) against what was recorded
-  at install: a changed, missing or added file refuses. Records survive a rollback. A person with write access to the programs folder can rewrite
+  outside the copy or a copy outside the shelf, and, with `Options::verify_copies` (`[host.store] verify_copies`, off by default), checks every
+  file of the copy (the files an archive unpacked too) against what was recorded at install: a changed, missing or added file refuses. Off, only
+  the launch file must exist. `ProgramDir::verify` is that check and does not look at the option; it hashes the files on every core and, where
+  the system keeps an inode's change time (Unix), leaves `.digests/<program>.checked` so a copy none of whose files has been written since is not read again. Records survive a rollback. A person with write access to the programs folder can rewrite
   both `current.json` and the digest: the check is against a stray edit, not against the owner's own account.
 - A plan is kept by the host per (provider, token) for `Options::plan_ttl` (15 minutes) and `plan_limit` (32), and applied once. The token covers the
   action and the version being replaced. A plan with a registry key, a state folder or a profile file is checked by name: the home's sensitive

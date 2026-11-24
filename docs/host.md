@@ -364,6 +364,7 @@ credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an inst
 # connect_timeout = 10 # a lookup (a release list, a checksum file) waits this long to connect to a publisher; a download waits 60
 # lookup_timeout = 15   # and this long for the answer
 # refresh_every = 300   # while a client is connected, how often what has gone stale is asked again; 0 never
+# verify_copies = false # true: read every file of an installed program against its install record at start and at each lookup; false: trust the copy, its launch file must exist
 
 # The tools that search the knowledge an overlay ships (`canoa-kb`). Without `embeddings` they match words; with it, meaning too, by the
 # server you name. `[overlays.NAME] kb = "index"` serves that overlay's rules and context as a search instead of in the agent's context.
