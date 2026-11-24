@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whisper"]
+exclude = ["third_party/whisper-rs-sys"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -181,6 +182,8 @@ canoa-piper = { path = "extensions/canoa-piper" }
 # The bridge library (coqui-acp-bridge) takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph
 # needs the one source coqui-acp patches it to.
 [patch.crates-io]
+# whisper.cpp 1.9.6 in place of the 1.8.3 whisper-rs-sys 0.15.0 carries (see third_party/whisper-rs-sys/Cargo.toml).
+whisper-rs-sys = { path = "third_party/whisper-rs-sys" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "984db3d54b73de10c7892b06fe269a259de2d1c5" }
 # The published coqui-peer-tls still names coqui-peer's old field; this commit follows it.
 coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = "7cbd7ee208595c055d74eed79a4dafcd0175883d" }
