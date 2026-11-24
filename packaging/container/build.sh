@@ -8,9 +8,10 @@
 #   --no-out     build the image only
 #   --print      print the build commands and run nothing
 #
-# Environment: CONTAINER_ENGINE (podman, or docker), FLUTTER_COMMIT, FLUTTER_VERSION_TAG(_COMMIT) and DEPS_COMMIT (override the Containerfile pins),
-# FLUTTER_REPOSITORY and DEPS_REPOSITORY (another place holding the same commits), FLUTTER_STORAGE_BASE_URL (a mirror of
-# Flutter's engine storage: passed to the build as a build argument and read by the flutter stage's `flutter precache`).
+# The Flutter SDK is the image tools/flutter.pin names (ghcr.io/boriken-dev/flutter-web:<first ten digits of FLUTTER_COMMIT>);
+# the pin is read here, so the build argument FLUTTER_IMAGE_TAG always follows it.
+# Environment: CONTAINER_ENGINE (podman, or docker), FLUTTER_IMAGE_TAG and DEPS_COMMIT (override the pins) and
+# DEPS_REPOSITORY (another place holding the same commit).
 # Arguments after `--` go to every build command (for example `--platform linux/amd64`).
 set -eu
 
@@ -33,8 +34,12 @@ done
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 
+# shellcheck disable=SC1091
+. tools/flutter.pin
+FLUTTER_IMAGE_TAG=${FLUTTER_IMAGE_TAG:-$(printf %.10s "$FLUTTER_COMMIT")}
+
 args=
-for name in FLUTTER_COMMIT FLUTTER_VERSION_TAG FLUTTER_VERSION_TAG_COMMIT DEPS_COMMIT FLUTTER_REPOSITORY DEPS_REPOSITORY FLUTTER_STORAGE_BASE_URL; do
+for name in FLUTTER_IMAGE_TAG DEPS_COMMIT DEPS_REPOSITORY; do
     eval "value=\${$name:-}"
     [ -z "$value" ] || args="$args --build-arg $name=$value"
 done

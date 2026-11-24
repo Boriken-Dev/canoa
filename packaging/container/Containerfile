@@ -1,7 +1,7 @@
 # Canoa's host and web app, built in a container from Boriken Dev's own mirrors:
 #
-#   Flutter     github.com/Boriken-Dev/flutter at FLUTTER_COMMIT (the scanner-clean mirror of Flutter main; it is upstream
-#               commit c0205700e04b, the one docs/getting-started.md names, with bin/internal/engine.version written in)
+#   Flutter     the image ghcr.io/boriken-dev/flutter-web for the pin in tools/flutter.pin: Boriken-Dev/flutter's checkout (the
+#               scanner-clean mirror of Flutter main) with the engine, the Dart SDK and the web artifacts of the mirror's release
 #   every crate, pub package, fallback font and Office.js file
 #               the `deps` branch of github.com/Boriken-Dev/canoa at DEPS_COMMIT
 #               (also the app's git packages, as source trees at the revisions app/pubspec.lock names, and the
@@ -16,15 +16,15 @@
 #
 # What uses the network, by stage. `--network=none` marks the steps that run with it off.
 #   base      the base image and Debian packages (docker.io, deb.debian.org)
-#   flutter   the Flutter repository above, then `flutter precache --web`: the Dart SDK and the web engine artifacts, from
-#             storage.googleapis.com (FLUTTER_STORAGE_BASE_URL names another server for them)
+#   flutter   the Flutter image (ghcr.io) and Debian's python3. Flutter's storage is pointed at a dead address, so a build that
+#             asked Google for anything fails
 #   deps      the deps branch, from github.com/Boriken-Dev
 #   wasm_target  rustup's wasm32 target, from static.rust-lang.org
 #   noise     offline: installing wasm-bindgen's command line and building app/web_noise, from the deps branch's
 #             crates-wasm-bindgen-cli/ and crates-web_noise/
 #   site      offline: the hosted and git packages come from the deps branch
 #   host      the Debian packages for compiling whisper.cpp (cmake, libclang-dev), then offline: the crates come from the deps branch
-# Nothing else is fetched: once base, flutter, deps and wasm_target are built, `podman build --network=none` builds the
+# Nothing else is fetched (nothing from Google or pub.dev): once base, flutter, deps and wasm_target are built, `podman build --network=none` builds the
 # rest. The image holds no credential, and the stages that fetch are not copied into `runtime`.
 #
 # An x86-64 build needs nothing different: the bases are multi-architecture, Flutter's Dart SDK and the
@@ -34,10 +34,11 @@
 ARG BASE_IMAGE=docker.io/library/rust:1.89-bookworm@sha256:948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88c07bb14563c84ff
 ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 
-# Flutter main at upstream c0205700e04b127bbfecdeb6c83d1e0c9c564ed6, as the mirror carries it.
-ARG FLUTTER_COMMIT=33d7f282aaef7665096e5acd368d3c2ee226f6bb
+# The image of the Flutter SDK named in tools/flutter.pin: the first ten digits of its FLUTTER_COMMIT (build.sh passes the
+# pin's; tools/flutter_pin.py check fails when this default is another).
+ARG FLUTTER_IMAGE_TAG=33d7f282aa
 # The deps branch at the commit that mirrors main's Cargo.lock and app/pubspec.lock (its manifest.json names the source).
-ARG DEPS_COMMIT=1020c681825b1576a676acb3b0776eca60e25d40
+ARG DEPS_COMMIT=9bd63bf2ddb3e0f6462bc5104e0c61a017398095
 
 FROM ${BASE_IMAGE} AS base
 ENV DEBIAN_FRONTEND=noninteractive
@@ -47,30 +48,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && git config --system --add safe.directory '*'
 
-# The Flutter SDK from the mirror, with the web artifacts. The fetch takes the commit history without file contents:
-# Flutter works its version out from the newest tag and the commits since it, and app/pubspec.yaml asks for a version
-# (3.51.0-1.0.pre-291 here: 291 commits past upstream's tag 3.51.0-0.2.pre). The mirror carries no 3.51 tags, so the tag
-# is made at the commit that is upstream's bc6e01a3ac in the mirror's rewritten history. Nothing of the app is here, so
-# this layer is reused until FLUTTER_COMMIT changes.
-FROM base AS flutter
-ARG FLUTTER_COMMIT
-ARG FLUTTER_REPOSITORY=https://github.com/Boriken-Dev/flutter.git
-ARG FLUTTER_VERSION_TAG=3.51.0-0.2.pre
-ARG FLUTTER_VERSION_TAG_COMMIT=fbd7ff9ccdb937c8246f75af0db072488dbe3b6d
-# Empty keeps Flutter's own server; a mirror of its storage bucket goes here.
-ARG FLUTTER_STORAGE_BASE_URL=
-# Flutter unpacks archives with tar, which as root would set owners a rootless build has no ids for.
-ENV FLUTTER_ROOT=/opt/flutter PATH=/opt/flutter/bin:${PATH} CI=true TAR_OPTIONS=--no-same-owner
-RUN set -eu; \
-    [ -n "${FLUTTER_STORAGE_BASE_URL}" ] && export FLUTTER_STORAGE_BASE_URL || unset FLUTTER_STORAGE_BASE_URL; \
-    git init --quiet "${FLUTTER_ROOT}"; \
-    git -C "${FLUTTER_ROOT}" fetch --quiet --filter=blob:none "${FLUTTER_REPOSITORY}" "${FLUTTER_COMMIT}"; \
-    git -C "${FLUTTER_ROOT}" tag "${FLUTTER_VERSION_TAG}" "${FLUTTER_VERSION_TAG_COMMIT}"; \
-    git -C "${FLUTTER_ROOT}" checkout --quiet --detach FETCH_HEAD; \
-    [ "$(git -C "${FLUTTER_ROOT}" rev-parse HEAD)" = "${FLUTTER_COMMIT}" ]; \
-    flutter config --no-analytics --no-cli-animations >/dev/null; \
-    flutter precache --web; \
-    flutter --version
+# The Flutter SDK: Boriken Dev's image for the pin, which holds the mirror's checkout with every tag, the engine, the Dart
+# SDK and the web artifacts precached from the mirror's release, so nothing here asks Flutter's storage or flutter/flutter
+# for anything (the image is the Debian toolchain of github.com/Boriken-Dev/flutter-images). Only Debian's python3 is added,
+# for the site's build script. The storage address is a dead one: a step that needed Google's storage fails, it does not
+# fetch. Nothing of the app is here, so this layer is reused until FLUTTER_IMAGE_TAG or the image changes.
+FROM ghcr.io/boriken-dev/flutter-web:${FLUTTER_IMAGE_TAG} AS flutter
+USER root
+ENV DEBIAN_FRONTEND=noninteractive FLUTTER_GIT_URL=https://github.com/Boriken-Dev/flutter.git     FLUTTER_STORAGE_BASE_URL=http://127.0.0.1:9 CI=true
+RUN apt-get update     && apt-get install -y --no-install-recommends python3     && rm -rf /var/lib/apt/lists/*     && git config --system --add safe.directory '*'
+RUN flutter --version
 
 # The deps branch at DEPS_COMMIT, fetched by commit so a moved branch changes nothing.
 FROM base AS deps
