@@ -97,6 +97,7 @@ fn setup_with(name: &str, store_variant: Variant, tune: impl FnOnce(&mut Options
     let mut options = Options::default();
     options.home = Some(home);
     options.watch_registry = false;
+    options.verify_copies = true;
     options.settle = std::time::Duration::from_millis(100);
     // The tests run wherever a developer does, an elevated shell included: elevation is checked by its own test.
     options.allow_elevated = true;
@@ -726,6 +727,7 @@ fn an_elevated_host_installs_only_when_told_it_may() {
     let mut options = Options::default();
     options.home = Some(s.dir.0.join("home"));
     options.watch_registry = false;
+    options.verify_copies = true;
     options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = false;
     let programs = Programs::new(Shelf::unchecked(s.dir.0.join("strict")), registry())
@@ -840,6 +842,7 @@ fn a_download_nothing_checks_needs_the_host_to_have_been_told_and_is_then_record
     let mut options = Options::default();
     options.home = Some(home);
     options.watch_registry = false;
+    options.verify_copies = true;
     options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = true;
     options.allow_unverified = true;
@@ -968,6 +971,7 @@ fn only_the_copy_the_person_picked_is_run_among_those_outside_the_host() {
     let mut options = Options::default();
     options.home = Some(s.dir.0.join("home"));
     options.watch_registry = false;
+    options.verify_copies = true;
     options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = true;
     options.environment = {
@@ -1192,6 +1196,7 @@ fn a_writer_that_outlives_the_apply_is_caught_in_the_settle_window() {
     let mut options = Options::default();
     options.home = Some(s.dir.0.join("home"));
     options.watch_registry = false;
+    options.verify_copies = true;
     options.allow_elevated = true;
     options.settle = std::time::Duration::from_millis(1500);
     let programs = Programs::unchecked_for_tests(&s, options);
@@ -1257,6 +1262,34 @@ fn an_old_install_plan_cannot_put_an_older_version_over_a_newer_copy() {
         .expect_err("stale");
     assert!(format!("{error}").contains("plan again"), "{error}");
     assert_eq!(current(&s).expect("still").version, "2.0.0");
+}
+
+#[test]
+fn a_changed_file_does_not_stop_the_launch_unless_the_copies_are_verified() {
+    let s = setup_with("launchtrust", Variant::Normal, |options| {
+        options.verify_copies = false;
+    });
+    install(&s, None, Action::Install)
+        .expect("installed")
+        .expect("applied");
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    let launch = s.programs.launch(&*store).expect("untouched");
+    let path = launch.path.clone();
+    let mut bytes = fs::read(&path).expect("the program");
+    bytes.push(0);
+    fs::write(&path, bytes).expect("tamper");
+    s.programs
+        .launch(&*store)
+        .expect("a copy is trusted as installed");
+    // Only the launch file has to be there.
+    fs::remove_file(&path).expect("removed");
+    assert!(
+        s.programs.launch(&*store).is_err(),
+        "the launch file is gone"
+    );
 }
 
 #[test]
@@ -1340,6 +1373,7 @@ fn files_unpacked_from_an_archive_are_recorded_and_so_are_the_ones_added_later()
     let mut options = Options::default();
     options.home = Some(home);
     options.watch_registry = false;
+    options.verify_copies = true;
     options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = true;
     let programs = Programs::new(Shelf::unchecked(dir.0.join("programs")), registry())
@@ -1403,6 +1437,7 @@ fn a_plan_that_has_expired_or_was_pushed_out_is_not_applied() {
     let mut options = Options::default();
     options.home = Some(s.dir.0.join("home"));
     options.watch_registry = false;
+    options.verify_copies = true;
     options.allow_elevated = true;
     options.settle = std::time::Duration::from_millis(50);
     options.plan_ttl = std::time::Duration::from_millis(200);

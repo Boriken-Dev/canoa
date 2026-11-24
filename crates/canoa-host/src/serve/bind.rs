@@ -1017,10 +1017,14 @@ fn build_control_hub(
                 .with_caches(caches)
                 .extended(&config.extensions),
         ),
-        None if !config.extensions.is_empty() => match control::Stores::built_in() {
-            Ok(stores) => kept.with_stores(stores.with_caches(caches).extended(&config.extensions)),
-            Err(_) => kept,
-        },
+        None if !config.extensions.is_empty() => {
+            match control::Stores::built_in(config.store.verify_copies.unwrap_or(false)) {
+                Ok(stores) => {
+                    kept.with_stores(stores.with_caches(caches).extended(&config.extensions))
+                }
+                Err(_) => kept,
+            }
+        }
         None => kept,
     })
 }
@@ -1043,6 +1047,7 @@ impl Serving {
             what: error.to_string(),
         })?;
         // The agents the harness starts in this process are found on this process's PATH and in the Store's runtimes.
+        crate::sources::set_verify_copies(config.store.verify_copies.unwrap_or(false));
         coqui_acp_harness::set_program_dirs(crate::sources::program_dirs);
         let adapted;
         let config = match &options.portal {

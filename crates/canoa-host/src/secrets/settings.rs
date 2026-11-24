@@ -561,6 +561,7 @@ mod tests {
             "connect_timeout",
             "lookup_timeout",
             "tools",
+            "verify_copies",
         ] {
             assert!(
                 host_store_schema["properties"].get(field).is_some(),

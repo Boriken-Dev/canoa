@@ -99,6 +99,7 @@ pub(super) struct RawStore {
     pub(super) connect_timeout: Option<u64>,
     pub(super) lookup_timeout: Option<u64>,
     pub(super) tools: Option<bool>,
+    pub(super) verify_copies: Option<bool>,
 }
 
 #[derive(Deserialize)]

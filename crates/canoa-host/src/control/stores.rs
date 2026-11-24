@@ -349,13 +349,18 @@ impl Stores {
         self
     }
 
-    /// The built-in stores over this user's programs folder.
-    pub(crate) fn built_in() -> Result<Self, String> {
+    /// The built-in stores over this user's programs folder; `verify_copies` is `[host.store] verify_copies`.
+    pub(crate) fn built_in(verify_copies: bool) -> Result<Self, String> {
         let root = Shelf::default_root().ok_or("this user has no data folder")?;
         let shelf = Shelf::configured(root).map_err(|error| error.to_string())?;
         let registry = crate::store::registry::built_in()?;
         Ok(Self::new(
-            Arc::new(Programs::new(shelf, Arc::clone(&registry))),
+            Arc::new(Programs::new(shelf, Arc::clone(&registry)).options(
+                crate::store::programs::Options {
+                    verify_copies,
+                    ..crate::store::programs::Options::default()
+                },
+            )),
             agent_stores(crate::bundled::ALL),
         )
         .with_included_extensions(&registry)

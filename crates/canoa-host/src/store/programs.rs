@@ -265,6 +265,10 @@ pub struct Options {
     /// Lets an install take a download nothing checks (Grok's). The plan names each such download, and `current.json` records
     /// that a file was not verified.
     pub allow_unverified: bool,
+    /// Whether [`launch`](Programs::launch) reads every file of the managed copy against what was recorded when it was installed.
+    /// canoa.cfg's `[host.store] verify_copies`; off by default, when only the launch file must exist. An install's own check of
+    /// each download against its publisher's SHA-256 does not depend on it.
+    pub verify_copies: bool,
     /// How many versions to keep.
     pub keep_versions: usize,
     /// How long the host goes on watching after a store's `apply` has returned, before it measures what changed: a change in that
@@ -290,6 +294,7 @@ impl Default for Options {
             credential_variables: lines(RECOMMENDED_VARIABLES),
             watch_registry: cfg!(windows),
             allow_unverified: false,
+            verify_copies: false,
             keep_versions: super::shelf::DEFAULT_KEEP_VERSIONS,
             settle: Duration::from_secs(2),
             plan_ttl: Duration::from_secs(15 * 60),
@@ -308,7 +313,10 @@ impl Options {
     /// variables the list protects.
     #[must_use]
     pub fn from_config(config: &crate::config::Config) -> Self {
-        let mut options = Self::default();
+        let mut options = Self {
+            verify_copies: config.store.verify_copies.unwrap_or(false),
+            ..Self::default()
+        };
         if let Some(list) = &config.store.protected {
             options.protected.clone_from(list);
         }
@@ -789,9 +797,9 @@ impl Programs {
     }
 
     /// The start of the managed copy, after `current.json` is checked against the digest kept outside the program's folder, the launch
-    /// is found to lie inside the copy and the copy inside the programs folder, and every file of the copy is checked against what was
-    /// recorded when it was installed (a file added since, one gone, one changed). Reading every file costs time in proportion to the
-    /// copy: it is for the moment before a session starts.
+    /// is found to lie inside the copy and the copy inside the programs folder and, with [`Options::verify_copies`], every file of the
+    /// copy is checked against what was recorded when it was installed (a file added since, one gone, one changed). Reading every file
+    /// costs time in proportion to the copy: it is for the moment before a session starts. Without it the launch file must exist.
     ///
     /// # Errors
     ///
@@ -815,7 +823,13 @@ impl Programs {
                 "the launch is not inside the managed copy".to_owned(),
             )));
         }
-        program.verify(&current)?;
+        if self.options.verify_copies {
+            program.verify(&current)?;
+        } else if !Path::new(&launch.path).is_file() {
+            return Err(StoreError::Shelf(ShelfError::Refused(
+                "the launch file of the managed copy is gone".to_owned(),
+            )));
+        }
         Ok(launch)
     }
 

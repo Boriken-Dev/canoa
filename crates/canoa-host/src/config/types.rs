@@ -804,6 +804,10 @@ pub struct StoreConfig {
     /// `tools`: whether the host offers the `canoa-store` tools (search and inspect) to a session whose client asks for them and
     /// whose key reads the index (default true).
     pub tools: Option<bool>,
+    /// `verify_copies`: whether the host reads every file of a program the Store installed, against what was recorded when it
+    /// was installed, when it starts and when it looks the program up (default false: a copy is trusted as installed, and only
+    /// its launch file must exist). A download is checked against its publisher's SHA-256 when it is installed either way.
+    pub verify_copies: Option<bool>,
 }
 
 /// Guatiao-derived schema for `[host.store]`.
@@ -825,6 +829,7 @@ struct StoreSectionSchema {
     connect_timeout: Option<u64>,
     lookup_timeout: Option<u64>,
     tools: Option<bool>,
+    verify_copies: Option<bool>,
 }
 
 impl StoreConfig {

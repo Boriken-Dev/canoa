@@ -1013,6 +1013,7 @@ fn build_subsystems(
             connect_timeout: raw.connect_timeout,
             lookup_timeout: raw.lookup_timeout,
             tools: raw.tools,
+            verify_copies: raw.verify_copies,
         });
     let network = host
         .network

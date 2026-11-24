@@ -633,7 +633,10 @@ impl Control {
     fn stores(&self) -> Result<&Stores, (i32, String)> {
         self.stores
             .get_or_init(|| {
-                Stores::built_in().map(|stores| stores.with_caches(Arc::clone(&self.caches)))
+                let verify = self
+                    .loaded_config()
+                    .is_ok_and(|config| config.store.verify_copies.unwrap_or(false));
+                Stores::built_in(verify).map(|stores| stores.with_caches(Arc::clone(&self.caches)))
             })
             .as_ref()
             .map_err(|why| (REFUSED, format!("this host keeps no programs: {why}")))

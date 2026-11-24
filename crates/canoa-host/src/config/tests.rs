@@ -2105,6 +2105,15 @@ fn the_store_takes_a_time_for_each_thing_it_keeps_and_one_for_renewing_them() {
 }
 
 #[test]
+fn the_store_reads_the_files_of_its_copies_only_when_told_to() {
+    let none = parse("[host.store]\nprotected = []\n").expect("parses");
+    assert_eq!(none.store.verify_copies, None);
+    let on = parse("[host.store]\nverify_copies = true\n").expect("parses");
+    assert_eq!(on.store.verify_copies, Some(true));
+    assert!(parse("[host.store]\nverify_copies = \"yes\"\n").is_err());
+}
+
+#[test]
 fn host_usage_keeps_four_hundred_days_unless_told_and_refuses_zero_and_the_unknown() {
     let none = Config::from_str_in("", &base()).expect("parses");
     assert_eq!(none.usage, UsageConfig::default());

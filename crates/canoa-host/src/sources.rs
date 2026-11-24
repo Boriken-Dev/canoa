@@ -44,17 +44,24 @@ pub(crate) fn entries(config: &Config) -> Vec<Source> {
         config,
         &|program, search| find(program, search),
         &|program| {
-            Shelf::default_root().and_then(|root| managed_in(&Shelf::unchecked(root), program))
+            Shelf::default_root().and_then(|root| {
+                managed_in(
+                    &Shelf::unchecked(root),
+                    program,
+                    config.store.verify_copies.unwrap_or(false),
+                )
+            })
         },
     )
 }
 
-/// The copy of `program` that `shelf` manages, as the text settings of its launch, when `current.json` is the one this host wrote, every
-/// file of the copy is as it was installed and each setting that is an absolute path is a file inside the copy.
-fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedCopy> {
+/// The copy of `program` that `shelf` manages, as the text settings of its launch, when `current.json` is the one this host wrote,
+/// every file of the copy is as it was installed (read only when `verify`) and each setting that is an absolute path is a file
+/// inside the copy.
+fn managed_in(shelf: &Shelf, program: &str, verify: bool) -> Option<ManagedCopy> {
     let dir = shelf.program(program).ok()?;
     let current = dir.current_checked().ok()??;
-    verified(shelf, &dir, program, &current).then_some(())?;
+    verified(shelf, &dir, program, &current, verify).then_some(())?;
     let held = &current.launch.settings;
     let inside = |path: &Path| {
         path.is_file()
@@ -76,16 +83,17 @@ fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedCopy> {
 }
 
 /// The program the Store installed under the name `program` on `shelf`, to run in place of one found on the computer: the copy's
-/// own launch path, when `current.json` is the one this host wrote and every file of the copy is as it was installed.
+/// own launch path, when `current.json` is the one this host wrote and, when `verify`, every file of the copy is as it was installed.
 pub(crate) fn managed_program_in(
     shelf: &Shelf,
     program: &str,
+    verify: bool,
 ) -> Option<(PathBuf, Vec<(String, String)>)> {
     let dir = shelf.program(program).ok()?;
     let current = dir.current_checked().ok()??;
     // Every file of the copy is read to verify it, which is not done again while the copy's launch file and its record are as they
     // were: they are stamped by size and time of change, for as long as this host runs.
-    verified(shelf, &dir, program, &current).then_some(())?;
+    verified(shelf, &dir, program, &current, verify).then_some(())?;
     let path = PathBuf::from(&current.launch.path);
     let inside = path.is_absolute()
         && path.is_file()
@@ -111,12 +119,36 @@ type Stamp = (
     String,
 );
 
+/// Whether the functions that look a program up with no configuration to hand read every file of a copy: `[host.store]
+/// verify_copies`, set where the host binds. Off until then.
+static VERIFY_COPIES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets what [`copies_verified`] answers, from `[host.store] verify_copies`.
+pub(crate) fn set_verify_copies(verify: bool) {
+    VERIFY_COPIES.store(verify, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a lookup that holds no configuration reads every file of a copy.
+fn copies_verified() -> bool {
+    VERIFY_COPIES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Process-wide cache of managed runtime copies already integrity-verified for a `(dir_stamp, bin_stamp, path, program)`.
 static VERIFIED: std::sync::Mutex<Vec<Stamp>> = std::sync::Mutex::new(Vec::new());
 
 /// Whether every file of `program`'s copy `current` is as it was installed: read once for as long as the copy's folder and launch
-/// file keep the stamp they had, so the host's several readings of one copy at start cost one.
-fn verified(shelf: &Shelf, dir: &ProgramDir, program: &str, current: &Current) -> bool {
+/// file keep the stamp they had, so the host's several readings of one copy at start cost one. With `verify` unset no file is
+/// read and the copy is taken as installed.
+fn verified(
+    shelf: &Shelf,
+    dir: &ProgramDir,
+    program: &str,
+    current: &Current,
+    verify: bool,
+) -> bool {
+    if !verify {
+        return true;
+    }
     let stamp = stamp_for(shelf, program, current);
     let held = VERIFIED
         .lock()
@@ -160,7 +192,7 @@ fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
 /// The folders of the programs the Store installed on `shelf` (runtimes, agents, tools): where each one's launch file is, for a
 /// copy that is as it was installed, each once and in the order of the programs' names. A copy that changed since adds nothing,
 /// so nothing unchecked reaches a search path.
-pub(crate) fn program_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
+pub(crate) fn program_dirs_in(shelf: &Shelf, verify: bool) -> Vec<PathBuf> {
     let mut names: Vec<String> = std::fs::read_dir(shelf.root())
         .into_iter()
         .flatten()
@@ -175,7 +207,7 @@ pub(crate) fn program_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
             .iter()
             .map(|name| {
                 scope.spawn(move || {
-                    managed_program_in(shelf, name)
+                    managed_program_in(shelf, name, verify)
                         .and_then(|(path, _)| path.parent().map(Path::to_path_buf))
                 })
             })
@@ -195,9 +227,13 @@ pub(crate) fn program_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
 
 /// `base` (a `PATH`), then each folder of the programs on `shelf` it does not already hold: where a name is looked up when the
 /// host hands a library a search path. The person's own folders come first, so a program they installed is never shadowed.
-pub(crate) fn search_path_in(shelf: &Shelf, base: &std::ffi::OsStr) -> std::ffi::OsString {
+pub(crate) fn search_path_in(
+    shelf: &Shelf,
+    base: &std::ffi::OsStr,
+    verify: bool,
+) -> std::ffi::OsString {
     let held: Vec<PathBuf> = std::env::split_paths(base).collect();
-    let extra: Vec<PathBuf> = program_dirs_in(shelf)
+    let extra: Vec<PathBuf> = program_dirs_in(shelf, verify)
         .into_iter()
         .filter(|dir| !held.contains(dir))
         .collect();
@@ -208,19 +244,21 @@ pub(crate) fn search_path_in(shelf: &Shelf, base: &std::ffi::OsStr) -> std::ffi:
 pub(crate) fn search_path() -> std::ffi::OsString {
     let base = std::env::var_os("PATH").unwrap_or_default();
     Shelf::default_root().map_or(base.clone(), |root| {
-        search_path_in(&Shelf::unchecked(root), &base)
+        search_path_in(&Shelf::unchecked(root), &base, copies_verified())
     })
 }
 
 /// [`program_dirs_in`] over this user's programs folder.
 pub(crate) fn program_dirs() -> Vec<PathBuf> {
-    Shelf::default_root().map_or_else(Vec::new, |root| program_dirs_in(&Shelf::unchecked(root)))
+    Shelf::default_root().map_or_else(Vec::new, |root| {
+        program_dirs_in(&Shelf::unchecked(root), copies_verified())
+    })
 }
 
 /// The version of the copy [`managed_program`] runs, when there is one.
 pub(crate) fn managed_version(program: &str) -> Option<String> {
     let shelf = Shelf::unchecked(Shelf::default_root()?);
-    managed_program_in(&shelf, program)?;
+    managed_program_in(&shelf, program, copies_verified())?;
     shelf
         .program(program)
         .ok()?
@@ -234,19 +272,22 @@ pub(crate) fn managed_version(program: &str) -> Option<String> {
 pub(crate) fn managed_program_of_harness_in(
     shelf: &Shelf,
     id: &str,
+    verify: bool,
 ) -> Option<(PathBuf, Vec<(String, String)>)> {
-    managed_program_in(shelf, crate::bundled::managed_program_name(id)?)
+    managed_program_in(shelf, crate::bundled::managed_program_name(id)?, verify)
 }
 
 /// [`managed_program_of_harness_in`] over this user's programs folder.
 pub(crate) fn managed_program_of_harness(id: &str) -> Option<(PathBuf, Vec<(String, String)>)> {
-    Shelf::default_root()
-        .and_then(|root| managed_program_of_harness_in(&Shelf::unchecked(root), id))
+    Shelf::default_root().and_then(|root| {
+        managed_program_of_harness_in(&Shelf::unchecked(root), id, copies_verified())
+    })
 }
 
 /// [`managed_program_in`] over this user's programs folder.
 pub(crate) fn managed_program(program: &str) -> Option<(PathBuf, Vec<(String, String)>)> {
-    Shelf::default_root().and_then(|root| managed_program_in(&Shelf::unchecked(root), program))
+    Shelf::default_root()
+        .and_then(|root| managed_program_in(&Shelf::unchecked(root), program, copies_verified()))
 }
 
 fn sources_in(
@@ -860,36 +901,37 @@ mod tests {
     fn a_program_the_store_installed_runs_from_its_copy_and_a_changed_copy_runs_nowhere() {
         let root = scratch("managed-claude");
         let (shelf, binary) = shelf_with_binary(&root, "claude");
-        let (path, environment) = managed_program_in(&shelf, "claude").expect("a managed copy");
+        let (path, environment) =
+            managed_program_in(&shelf, "claude", true).expect("a managed copy");
         assert_eq!(path, binary);
         assert_eq!(
             environment,
             vec![("DISABLE_AUTOUPDATER".to_owned(), "1".to_owned())]
         );
-        assert_eq!(managed_program_in(&shelf, "codex"), None);
+        assert_eq!(managed_program_in(&shelf, "codex", true), None);
         std::fs::write(&binary, b"changed since the install").expect("written");
-        assert_eq!(managed_program_in(&shelf, "claude"), None);
+        assert_eq!(managed_program_in(&shelf, "claude", true), None);
     }
 
     #[test]
     fn the_folders_of_installed_programs_come_from_checked_copies_only() {
         let root = scratch("program-dirs");
-        assert!(program_dirs_in(&Shelf::unchecked(&root)).is_empty());
+        assert!(program_dirs_in(&Shelf::unchecked(&root), true).is_empty());
         let (shelf, binary) = shelf_with_binary(&root, "node");
         assert_eq!(
-            program_dirs_in(&shelf),
+            program_dirs_in(&shelf, true),
             vec![binary.parent().expect("a folder").to_path_buf()]
         );
         // An agent's copy is as much a program as a runtime, and a copy changed since the install adds nothing.
         let (other, agy) = shelf_with_binary(&root, "agy");
-        assert_eq!(program_dirs_in(&other).len(), 2);
+        assert_eq!(program_dirs_in(&other, true).len(), 2);
         std::fs::write(&agy, b"changed since the install").expect("written");
         assert_eq!(
-            program_dirs_in(&other),
+            program_dirs_in(&other, true),
             vec![binary.parent().expect("a folder").to_path_buf()]
         );
         std::fs::write(&binary, b"changed since the install").expect("written");
-        assert!(program_dirs_in(&shelf).is_empty());
+        assert!(program_dirs_in(&shelf, true).is_empty());
     }
 
     #[test]
@@ -905,12 +947,12 @@ mod tests {
             .expect("a harness whose program is called something else");
         let (shelf, launch) = shelf_with_launch(&root, program, "bin/launcher");
         assert_eq!(
-            managed_program_of_harness_in(&shelf, harness).map(|(path, _)| path),
+            managed_program_of_harness_in(&shelf, harness, true).map(|(path, _)| path),
             Some(launch)
         );
         // The program's own name is no harness, and the launch file's name is no lookup: a search by `program` finds nothing.
-        assert_eq!(managed_program_of_harness_in(&shelf, program), None);
-        let search = search_path_in(&shelf, std::ffi::OsStr::new(""));
+        assert_eq!(managed_program_of_harness_in(&shelf, program, true), None);
+        let search = search_path_in(&shelf, std::ffi::OsStr::new(""), true);
         assert_eq!(canoa::search::find_in(&search, "", program), None);
     }
 
@@ -924,20 +966,20 @@ mod tests {
         let find = |path: &std::ffi::OsStr| canoa::search::find_in(path, "", name);
         // The control: the person's own path has no such program.
         assert_eq!(find(&own), None);
-        let searched = search_path_in(&shelf, &own);
+        let searched = search_path_in(&shelf, &own, true);
         assert_eq!(find(&searched).as_deref(), Some(binary.as_path()));
         let folders: Vec<_> = std::env::split_paths(&searched).collect();
         assert_eq!(folders.len(), 2);
         assert_eq!(folders[0], std::env::split_paths(&own).next().expect("one"));
         // A folder the person already has is not added again.
-        assert_eq!(search_path_in(&shelf, &searched), searched);
+        assert_eq!(search_path_in(&shelf, &searched, true), searched);
     }
 
     #[test]
     fn the_stores_managed_copy_is_read_from_the_shelf_and_checked() {
         let root = scratch("managed-pi");
         let (shelf, script) = shelf_with_pi(&root);
-        let copy = managed_in(&shelf, "pi").expect("a managed Pi");
+        let copy = managed_in(&shelf, "pi", true).expect("a managed Pi");
         let setting = |key: &str| {
             copy.settings
                 .iter()
@@ -947,7 +989,7 @@ mod tests {
         assert_eq!(setting("script"), Some(script.clone()));
         assert!(setting("node").is_some_and(|node| node.ends_with("node.bin")));
         assert_eq!(
-            managed_in(&shelf, "grok"),
+            managed_in(&shelf, "grok", true),
             None,
             "no copy of another program"
         );
@@ -961,7 +1003,7 @@ mod tests {
                 .1,
         );
         std::fs::write(&node, b"changed since the install").expect("written");
-        assert_eq!(managed_in(&shelf, "pi"), None);
+        assert_eq!(managed_in(&shelf, "pi", true), None);
         std::fs::remove_dir_all(&root).expect("removed");
     }
 
@@ -970,7 +1012,38 @@ mod tests {
         let root = scratch("managed-pi-changed");
         let (shelf, script) = shelf_with_pi(&root);
         std::fs::write(&script, b"changed").expect("written");
-        assert_eq!(managed_in(&shelf, "pi"), None);
+        assert_eq!(managed_in(&shelf, "pi", true), None);
+        std::fs::remove_dir_all(&root).expect("removed");
+    }
+
+    #[test]
+    fn a_copy_with_a_changed_file_is_used_and_nothing_is_read_when_copies_are_not_verified() {
+        let root = scratch("managed-pi-unverified");
+        let (shelf, script) = shelf_with_pi(&root);
+        std::fs::write(&script, b"changed").expect("written");
+        // The control: the same copy is refused when its files are checked.
+        assert_eq!(managed_in(&shelf, "pi", true), None);
+        let copy = managed_in(&shelf, "pi", false).expect("trusted as installed");
+        assert!(copy.settings.iter().any(|(name, _)| name == "node"));
+        // No check was made, so none is remembered.
+        let dir = shelf.program("pi").expect("a program");
+        let current = dir.current_checked().expect("read").expect("a copy");
+        let held = VERIFIED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&stamp_for(&shelf, "pi", &current));
+        assert!(!held);
+        // The launch file is still what it must be: gone, it is no copy.
+        let node = std::path::PathBuf::from(
+            &copy
+                .settings
+                .iter()
+                .find(|(name, _)| name == "node")
+                .expect("a node")
+                .1,
+        );
+        std::fs::remove_file(&node).expect("removed");
+        assert_eq!(managed_in(&shelf, "pi", false), None);
         std::fs::remove_dir_all(&root).expect("removed");
     }
 
