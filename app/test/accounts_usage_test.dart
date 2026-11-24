@@ -1,5 +1,7 @@
 // An account's usage as Claude's and Codex's usage pages say it: how much is left, a countdown to the reset and a sentence on the
 // pace, from what the sessions on the account last heard. Settings shows it under the account.
+import 'dart:io';
+
 import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/accounts/accounts_section.dart';
 import 'package:canoa/accounts/usage_view.dart';
@@ -9,6 +11,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_accounts.dart';
+import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 // A Wednesday noon in the local zone, so the day names the forecast says are fixed.
 final _noon = DateTime(2026, 11, 11, 12).millisecondsSinceEpoch ~/ 1000;
@@ -22,6 +25,8 @@ UsageBucket _weekly({required int usedPermille, required int resetsInSeconds, in
 );
 
 void main() {
+  setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/accounts_usage_test.dart')));
+
   test('N% left, from what is used', () {
     expect(leftText(_weekly(usedPermille: 620, resetsInSeconds: 3600), _noon), '38% left');
     expect(leftText(_weekly(usedPermille: 0, resetsInSeconds: 3600), _noon), '100% left');
@@ -110,7 +115,11 @@ void main() {
       window('3p-5h', 'Claude and GPT models', 'Five Hour Limit Remaining', claude, disabled: true, hours: 5),
       window('argon-weekly', 'Gemini 4 Argon', 'Gemini 4 Argon Weekly Limit', ['Gemini 4 Argon'], left: 0, days: 7),
     ]);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: AccountUsageView(report: report, now: _noon)))));
+    tester.view.physicalSize = const Size(640, 440);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(debugShowCheckedModeBanner: false, home: Scaffold(body: SingleChildScrollView(child: AccountUsageView(report: report, now: _noon)))));
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/usage_groups_desktop.png'));
 
     for (final group in ['Gemini Models', 'Claude and GPT models', 'Gemini 4 Argon']) {
       expect(find.byKey(Key('account-group $group')), findsOneWidget);
