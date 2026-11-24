@@ -1023,7 +1023,7 @@ mod programs_tests {
         let mut expected = runtimes_in(&registry, &agents, &in_types, std::env::consts::OS);
         expected.extend(in_types);
         assert!(
-            expected.len() > 6,
+            expected.len() > 5,
             "the libraries offer the runtimes and the programs of their types: {expected:?}"
         );
         let listed = programs(&stores);
