@@ -4,7 +4,19 @@
 
 - Rust 1.89 or later to build the crates.
 - Node.js 22 or later to run Chromium extension policy tests.
-- Flutter from its `main` branch at commit `c0205700e0` (`flutter --version`: 3.51.0-1.0.pre-291, Dart 3.15.0-173.0.dev) for the standalone application, with the windowing feature on (`flutter config --enable-windowing`). The app is built and tested on that commit; the stable channel is too old, and a later `main` may need changes.
+- Flutter from its `main` branch at commit `c0205700e0` (`flutter --version`: 3.51.0-1.0.pre-291, Dart 3.15.0-173.0.dev) for the standalone application, with the windowing feature on (`flutter config --enable-windowing`). The app is built and tested on that commit; the stable channel is too old, and a later `main` may need changes. `tools/flutter.pin` names it once (the commit, the version and the engine); see [the Flutter SDK](#the-flutter-sdk) for getting it without a request to Google's storage.
+
+## The Flutter SDK
+
+Every build of {{ name }} uses the SDK `tools/flutter.pin` names, and none of them fetches it, or its engine, from Google. The framework is [`Boriken-Dev/flutter`](https://github.com/Boriken-Dev/flutter), a mirror of Flutter `main` with the blobs a scanner refuses removed, at `33d7f282aa` (upstream `c0205700e0`); the engine, the Dart SDK and the web artifacts are the assets of that repository's release `engine-<hash>`, Google's files unchanged with a SHA-256 manifest.
+
+```sh
+python tools/flutter_pin.py install ~/sdk/flutter --platforms web,linux   # or windows: the mirror's checkout, precached from the release
+python tools/flutter_pin.py sdk ~/sdk/flutter                            # fails when an SDK is not the pin
+python tools/flutter_pin.py check                                        # fails when the Containerfile, a workflow or this page names another SDK
+```
+
+`install` needs `git`, Python and the network to github.com only. An SDK already at upstream's `c0205700e0` is the pin too, when its engine is the pinned one. The same SDK is in the images `ghcr.io/boriken-dev/flutter-web`, `flutter-linux` and `flutter-windows` (tag `33d7f282aa`, the first ten digits of the mirror's commit), which `packaging/container/Containerfile` and the workflows use: `FROM` one to build in a container, or start from it as a development environment. To move to another Flutter, change `tools/flutter.pin`, publish the new engine's release, build the images, and let `check` name what is left.
 
 ## Rust crates
 
@@ -49,12 +61,12 @@ sh packaging/container/build.sh          # the image `canoa`; {{ program }} and 
 podman run --rm canoa --version
 ```
 
-`CONTAINER_ENGINE=docker` works the same, and `--print` shows the commands. The pins are build arguments, `FLUTTER_COMMIT` and `DEPS_COMMIT`, and the environment overrides them (`build.sh` passes `FLUTTER_COMMIT`, `FLUTTER_VERSION_TAG`, `FLUTTER_VERSION_TAG_COMMIT`, `DEPS_COMMIT`, `FLUTTER_REPOSITORY`, `DEPS_REPOSITORY` and `FLUTTER_STORAGE_BASE_URL` through):
+`CONTAINER_ENGINE=docker` works the same, and `--print` shows the commands. The pins are the Flutter pin, which `build.sh` reads from `tools/flutter.pin` and passes as the build argument `FLUTTER_IMAGE_TAG`, and `DEPS_COMMIT`; the environment overrides them (`build.sh` passes `FLUTTER_IMAGE_TAG`, `DEPS_COMMIT` and `DEPS_REPOSITORY` through):
 
-- **Flutter** is cloned from [`Boriken-Dev/flutter`](https://github.com/Boriken-Dev/flutter), a mirror with the blobs a scanner refuses removed and `bin/internal/engine.version` written in, so its commits are not upstream's. The default `33d7f282aa` is upstream `c0205700e0`, the commit above. The mirror has no `3.51.0-0.2.pre` tag, which Flutter counts commits from to get its version (`3.51.0-1.0.pre-291`, what `app/pubspec.yaml` asks for), so the build makes that tag at the mirror's copy of upstream's `bc6e01a3ac` (`FLUTTER_VERSION_TAG`, `FLUTTER_VERSION_TAG_COMMIT`); a new `FLUTTER_COMMIT` may need both moved.
+- **Flutter** is the image `ghcr.io/boriken-dev/flutter-web` for the pin, which holds the [`Boriken-Dev/flutter`](https://github.com/Boriken-Dev/flutter) checkout at `33d7f282aa` (upstream `c0205700e0`, the commit above) with its tags, and the engine, the Dart SDK and the web artifacts from the mirror's release. The build adds Debian's `python3` and points Flutter's storage at a dead address, so a step that needed Google would fail rather than fetch; `site_build.py` stops when the SDK is not the pin's.
 - **Crates, hosted and git packages, the fallback fonts and Office.js** come from the `deps` branch at `DEPS_COMMIT`, which mirrors the `Cargo.lock`, `app/web_noise/Cargo.lock` and `app/pubspec.lock` of the commit it names (`manifest.json`). The host is built `--offline --locked` with `tools/mirror_crates.py use` as its cargo home; the Noise method is built from `crates-web_noise/` and `wasm-bindgen-cli` installed from `crates-wasm-bindgen-cli/` (`app/tool/build_noise.py --deps`); and the app's packages, the git ones from `pub/git/` included, are resolved `--offline --enforce-lockfile`. Move `DEPS_COMMIT` with the lockfiles: a deps commit that does not cover them stops the build before it compiles.
 
-Three steps reach beyond the deps branch: the base image and Debian packages, `flutter precache --web` (the Dart SDK and the web engine, from Flutter's storage; `FLUTTER_STORAGE_BASE_URL` names another server) and rustup's `wasm32-unknown-unknown` target (`static.rust-lang.org`), each in a stage of its own (`base`, `flutter`, `wasm_target`), as is the fetch of the deps branch itself. Every other step runs with the network off, and `podman build --network=none` builds everything after those stages. The image's architecture is the machine's own: an x86-64 image is built on an x86-64 machine (or with `-- --platform linux/amd64`), with no change to the files.
+Three steps reach beyond the deps branch, none of them Google's or pub.dev's: the base images and Debian packages, the Flutter image (`ghcr.io`) and rustup's `wasm32-unknown-unknown` target (`static.rust-lang.org`), each in a stage of its own (`base`, `flutter`, `wasm_target`), as is the fetch of the deps branch itself. Every other step runs with the network off, and `podman build --network=none` builds everything after those stages. The image's architecture is the machine's own: an x86-64 image is built on an x86-64 machine (or with `-- --platform linux/amd64`), with no change to the files.
 
 ## Tests
 
