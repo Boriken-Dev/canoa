@@ -1,0 +1,10 @@
+{
+  "name": "Canoa",
+  "short_name": "Canoa",
+  "executable": "CanoaUI",
+  "id": "dev.boriken.canoa",
+  "env_prefix": "CANOA",
+  "icon": "assets/icons/canoa.svg",
+  "accent": "#3DAFA1",
+  "accent_on_dark": "#6DE2D2"
+}
