@@ -10,6 +10,7 @@ import 'package:canoa/desktop/desktop_shell_io.dart';
 import 'package:canoa/desktop/tray_icon.dart';
 import 'package:canoa/l10n/app_text.dart';
 import 'package:canoa/l10n/text_pack.dart';
+import 'package:canoa/theme/look.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -107,10 +108,10 @@ void main() {
 
     List<String?> labels(TrayShell shell) => [for (final item in shell.menu!.items!) item.label];
 
-    test('starts with the brand\'s accent, and a look\'s accent changes the icon once', () async {
+    test('starts with the default look\'s accent, and a look\'s accent changes the icon once', () async {
       final shell = await started();
       expect(icons, hasLength(1));
-      expect(icons.single, endsWith(Color(Brand.accentArgb).toARGB32().toRadixString(16)));
+      expect(icons.single, endsWith(lookFor(LookId.canoa, ui.Brightness.dark).accent.toARGB32().toRadixString(16)));
       await shell.applyAppearance(text: AppText.base, accent: _red);
       expect(icons, hasLength(2));
       expect(icons.last, endsWith('ffc0392b'));
@@ -122,7 +123,7 @@ void main() {
       final shell = await started();
       expect(labels(shell).first, 'Open ${Brand.name}');
       const pack = TextPack(strings: {'es': {'tray.hosting': 'Anfitrión…'}, 'en': {'tray.settings': 'Preferences…'}}, defaultLanguage: 'en');
-      await shell.applyAppearance(text: const AppText(language: 'es', pack: pack), accent: Color(Brand.accentArgb));
+      await shell.applyAppearance(text: const AppText(language: 'es', pack: pack), accent: lookFor(LookId.canoa, ui.Brightness.dark).accent);
       expect(labels(shell), ['Abrir ${Brand.name}', 'Anfitrión…', 'Preferences…', 'Ocultar en la bandeja', null, 'Salir de ${Brand.name}']);
       await shell.showWaiting(2);
       expect(labels(shell).first, 'Abrir ${Brand.name} (2 esperan por ti)');

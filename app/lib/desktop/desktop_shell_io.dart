@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../l10n/app_text.dart';
+import '../theme/look.dart';
 import 'desktop_shell.dart';
 import 'login_start.dart';
 import 'tray_icon.dart';
@@ -50,7 +51,8 @@ class TrayShell with WindowListener, TrayListener implements DesktopShell, TrayA
   final LoginStart? _loginStart;
   final Future<String> Function(Color accent) _iconFile;
   AppText _text = AppText.base;
-  Color _accent = Color(Brand.accentArgb);
+  /// Until the look's own accent arrives: the default look's, in the variant that shows on a light and a dark tray alike.
+  Color _accent = lookFor(LookId.canoa, Brightness.dark).accent;
   CanoaConfig config = const CanoaConfig();
   void Function()? onSettings, onHosting;
   bool ready = false, quitting = false;
