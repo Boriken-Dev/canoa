@@ -1,0 +1,26 @@
+{
+  "light": {
+    "page": "#FFFDF8",
+    "card": "#FAF7F1",
+    "field": "#FFFFFF",
+    "line": "#D2CFC8",
+    "text": "#2B2822",
+    "muted": "#6A6358",
+    "accent": "#9A5B1E",
+    "on_accent": "#FFFFFF",
+    "error": "#B3261E",
+    "ok": "#276B37"
+  },
+  "dark": {
+    "page": "#262523",
+    "card": "#232220",
+    "field": "#302E2B",
+    "line": "#504E4A",
+    "text": "#EDE8DE",
+    "muted": "#B3AEA5",
+    "accent": "#D9A066",
+    "on_accent": "#241707",
+    "error": "#EA8F85",
+    "ok": "#7FC48A"
+  }
+}

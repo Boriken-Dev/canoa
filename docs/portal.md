@@ -594,7 +594,8 @@ The portal's settings are a TOML file; every key is optional.
 socket = "/run/{{ program }}-portal/portal.sock"   # what the proxy reaches the portal at
 socket_group = "{{ program }}-proxy"                # the group that may connect to it: the proxy's user and this account only
 site = "/opt/{{ program }}/site"               # the web app's build (flutter build web --csp --no-web-resources-cdn)
-# brand = "/etc/{{ program }}/brand.json"      # the name, mark and colours of the portal's pages, see "The portal's pages carry a brand"; the build's own when unset
+# brand = "/etc/{{ program }}/brand.json"      # the name and mark of the portal's pages, see "The portal's pages carry a brand"; the build's own when unset
+# adjust_contrast = true               # move the pages' accent and notice text until each holds a contrast of 4.5; false uses the default look's colours as given
 socket_dir = "/run/{{ program }}"
 unit = "{{ program }}@{user}.service"
 pam_service = "{{ program }}"
@@ -836,11 +837,17 @@ token is in the page: the cookie is `HttpOnly`, and `fetch` and the WebSocket se
 
 ## The portal's pages carry a brand
 
-The sign-in, one-time code, passkeys and certificate pages take their name, their mark and their accent from the brand, the one the
+The sign-in, one-time code, passkeys and certificate pages take their name and their mark from the brand, the one the
 app reads (`app/brand.json` and its icon, carried into the program at build time): the title and heading say its `name`, the mark
-is its icon drawn inline (no image request, so the page's policy stays `default-src 'none'`), the page's favicon is the same icon
-at `/portal/icon.svg` (the policy gains `img-src 'self'`), and the buttons and links use its `accent` on a light page and
+is its icon drawn inline (no image request, so the page's policy stays `default-src 'none'`), and the page's favicon is the same
+icon at `/portal/icon.svg` (the policy gains `img-src 'self'`). The mark is drawn in the brand's `accent` on a light page and
 `accent_on_dark` on a dark one. Nothing on a portal page says "{{ name }}" but through the brand.
+
+The rest of the colours are the app's default look, light and dark by the browser's setting: the page, the card, the lines, the
+text, the buttons and links (amber, `#9A5B1E` on light and `#D9A066` on dark, with the look's own text on a button), and the
+colours of a notice. The crate carries a copy of them, `src/portal/brand/look.json`, written from the app's look by
+`(cd app && CANOA_WRITE_LOOK=1 flutter test test/portal_look_test.dart)`; the same test, run without the variable, fails when the
+copy is stale. A brand's own colours colour the mark alone.
 
 A deployment branded otherwise sets `brand` to the path of a `brand.json`:
 
@@ -848,15 +855,17 @@ A deployment branded otherwise sets `brand` to the path of a `brand.json`:
 { "name": "Rio Mail", "icon": "art/rio.svg", "accent": "#aa2200", "accent_on_dark": "#ffb09a" }
 ```
 
-`icon` is an SVG file, its path relative to the `brand.json`; `accent` and `accent_on_dark` are `#RRGGBB` (or `#RGB`) colours;
-other keys are ignored. The mark's fill is read from the colour of the SVG's own fill that spells the `accent`, so that it turns
+`icon` is an SVG file, its path relative to the `brand.json`; `accent` and `accent_on_dark` are `#RRGGBB` (or `#RGB`) colours of
+the mark; other keys are ignored. The mark's fill is read from the colour of the SVG's own fill that spells the `accent`, so that it turns
 to `accent_on_dark` on a dark page: draw the icon's fill with the same colour. An icon with a `script` or `foreignObject` is
 refused, and so is a file that is missing or lacks a key: the portal does not start (`brand: ...`).
 
-A brand colour is a mark's colour, not always a readable text colour. For the buttons, links and focus rings the page moves the
-accent toward black (light page) or white (dark page) in small steps until it holds a contrast of 4.5 against the card, and the
-text on a button is the light or the dark text, whichever has the better contrast with it. With the build's own teal this makes the
-light page's accent a deeper teal than the mark; the mark itself keeps the brand's colour.
+The look's colours are held to a contrast by default, and `adjust_contrast = false` turns that off. With it on, the accent of the
+buttons, links and focus rings is moved toward black (light page) or white (dark page) in small steps until it holds 4.5 against
+the card, the text on a button is the look's own unless that has less than 4.5 on the accent (then white or black, whichever is
+better), and the text of an error or success notice is moved the same way against its tint. The default look already holds it
+(amber on the card: 5.05 light, 6.94 dark; the look's text on a button: 5.40 light, 7.64 dark), so nothing moves. It matters for a look
+that changes. With it off, the accent and every colour of the look are used as given, whatever their contrast.
 
 ## The person's own pages
 

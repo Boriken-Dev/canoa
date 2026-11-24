@@ -200,8 +200,10 @@ impl Portal {
             .as_deref()
             .ok_or_else(|| PortalError::Site("`site` names no directory".to_owned()))?;
         let brand = match &settings.brand {
-            Some(path) => brand::Brand::load(path).map_err(PortalError::Settings)?,
-            None => brand::Brand::builtin(),
+            Some(path) => {
+                brand::Brand::load(path, settings.adjust_contrast).map_err(PortalError::Settings)?
+            }
+            None => brand::Brand::builtin(settings.adjust_contrast),
         };
         let root =
             web::site_root(site, &[]).map_err(|error| PortalError::Site(error.to_string()))?;

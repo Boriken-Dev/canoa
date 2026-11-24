@@ -92,8 +92,11 @@ pub struct Settings {
     /// `site`: the web app's build, the files a signed-in browser is given. Required.
     pub site: Option<PathBuf>,
     /// `brand`: a `brand.json` (`name`, `icon`, `accent`, `accent_on_dark`; the icon is an SVG, its path relative to this file) whose
-    /// name, mark and colours the portal's pages carry. Unset: the build's own brand.
+    /// name and mark the portal's pages carry; `accent` and `accent_on_dark` colour the mark. Unset: the build's own brand.
     pub brand: Option<PathBuf>,
+    /// `adjust_contrast`: move the accent of the pages' buttons and links, and the text of their notices, until each holds a
+    /// contrast of 4.5 where it is read (the default). Off, the colours of the app's default look are used as given.
+    pub adjust_contrast: bool,
     /// `socket_dir`: where each user's host keeps its sockets, `DIR/USER`.
     pub socket_dir: PathBuf,
     /// `unit`: the template unit of a user's host, `{user}` standing for the account.
@@ -215,6 +218,7 @@ impl Default for Settings {
             listen: None,
             site: None,
             brand: None,
+            adjust_contrast: true,
             socket_dir: PathBuf::from("/run/canoa"),
             unit: "canoa@{user}.service".to_owned(),
             systemctl: PathBuf::from("systemctl"),
@@ -299,6 +303,7 @@ struct Raw {
     listen: Option<String>,
     site: Option<PathBuf>,
     brand: Option<PathBuf>,
+    adjust_contrast: Option<bool>,
     socket_dir: Option<PathBuf>,
     unit: Option<String>,
     systemctl: Option<PathBuf>,
@@ -368,6 +373,7 @@ impl Settings {
         }
         settings.site = raw.site.or(settings.site);
         settings.brand = raw.brand.or(settings.brand);
+        settings.adjust_contrast = raw.adjust_contrast.unwrap_or(settings.adjust_contrast);
         if let Some(value) = raw.socket_dir {
             settings.socket_dir = value;
         }

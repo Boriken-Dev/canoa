@@ -1850,7 +1850,9 @@ fn the_pages_carry_the_builds_brand() {
     assert!(policy.contains("img-src 'self'"));
     let css = call(rig.addr, "GET", "/portal/login.css", &[], "");
     assert!(css.body.contains("--mark: #3dafa1") && css.body.contains("--mark: #6de2d2"));
-    assert!(!css.body.contains("#9a5b1e"));
+    // The brand's teal draws the mark; the buttons and links are the default look's amber.
+    assert!(css.body.contains("--accent: #9a5b1e") && css.body.contains("--accent: #d9a066"));
+    assert!(!css.body.contains("--accent: #3dafa1") && !css.body.contains("--accent: #6de2d2"));
     let icon = call(rig.addr, "GET", "/portal/icon.svg", &[], "");
     assert_eq!(icon.status, 200);
     assert!(
@@ -1916,7 +1918,7 @@ fn a_brand_file_that_cannot_be_read_stops_the_portal_binding() {
     std::fs::create_dir_all(&base).unwrap();
     let write = |json: &str| {
         std::fs::write(base.join("brand.json"), json).unwrap();
-        Brand::load(&base.join("brand.json")).map(|_| ())
+        Brand::load(&base.join("brand.json"), true).map(|_| ())
     };
     assert!(
         write(
@@ -2521,4 +2523,20 @@ fn no_answer_carries_a_header_twice() {
         }
         assert_eq!(count("cache-control"), 1, "{path}");
     }
+}
+
+#[test]
+fn the_contrast_check_is_a_setting_that_defaults_on() {
+    assert!(Settings::default().adjust_contrast);
+    assert!(Settings::from_toml("").unwrap().adjust_contrast);
+    assert!(
+        !Settings::from_toml("adjust_contrast = false")
+            .unwrap()
+            .adjust_contrast
+    );
+    // The rendered sheet is the look's colours either way, since the default look already holds the contrast.
+    let sheet = |adjust| Brand::builtin(adjust).css().to_owned();
+    assert!(
+        sheet(true).contains("--accent: #9a5b1e") && sheet(false).contains("--accent: #9a5b1e")
+    );
 }
