@@ -1,8 +1,8 @@
-# coqui-syshttp/. at 5d1e1e3bad78b30f4edf7c4c22478a5bdfe481bd, with what it inherits written out.
+# coqui-syshttp/. at 8c23a6af97be812dcee8a953a629c4d80eea0a2e, with what it inherits written out.
 [package]
 name = "coqui-syshttp"
 version = "0.1.0"
-description = "HTTP plumbing that follows the system: the system proxy (PAC, WPAD), proxy login, the OS certificate verifier and client certificates from OS keystores"
+description = "HTTP that follows the system: the system proxy, proxy login, the OS certificate verifier and keystore client certificates, one call for a ureq agent"
 readme = "README.md"
 edition = "2024"
 rust-version = "1.89"
@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Boriken-Dev/coqui-syshttp"
 keywords = ["proxy", "pac", "tls", "client-certificate", "system"]
 categories = ["network-programming", "web-programming::http-client"]
-exclude = [".*", "*.local.*"]
+exclude = [".*", "*.local.*", "/tools/"]
 [package.metadata]
 [package.metadata.docs]
 [package.metadata.docs.rs]
@@ -18,82 +18,31 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
-pac = ["dep:boa_engine", "dep:gethostname"]
-tls = ["dep:rustls", "dep:rustls-platform-verifier", "dep:x509-cert", "dep:sha2", "dep:serde_json", "dep:windows-registry", "dep:rustls-cng", "dep:security-framework"]
-pkcs11 = ["tls", "dep:cryptoki"]
-negotiate = ["dep:libgssapi"]
-ureq = ["tls", "dep:ureq"]
+pac = ["coqui-proxy/pac"]
+negotiate = ["coqui-proxy/negotiate"]
+tls = ["dep:coqui-sslcontext", "coqui-sslcontext/system", "coqui-proxy/tls"]
+pkcs11 = ["tls", "coqui-sslcontext/pkcs11"]
+ureq = ["tls", "dep:ureq", "dep:rustls"]
 [dependencies]
-http = "1"
-percent-encoding = "2"
-base64 = "0.22"
 thiserror = "2"
-if-addrs = "0.15"
-[dependencies.tracing]
-version = "0.1"
-default-features = false
-features = ["std"]
-[dependencies.coqui-net-acl]
-git = "https://github.com/Boriken-Dev/coqui-net-acl"
-rev = "839435acc29b76ec0190b7099f870863313d3fcd"
-[dependencies.boa_engine]
-version = "0.21"
+[dependencies.coqui-proxy]
+git = "https://github.com/Boriken-Dev/coqui-proxy"
+rev = "ff844043be1f895022aef5ac24e97512cf723346"
+[dependencies.coqui-sslcontext]
+git = "https://github.com/Boriken-Dev/coqui-sslcontext"
+rev = "955cd9a455a288a523418daad7e846008c2bf291"
 optional = true
-[dependencies.gethostname]
-version = "1"
+[dependencies.ureq]
+version = "3.5"
+default-features = false
 optional = true
 [dependencies.rustls]
 version = "0.23.46"
 default-features = false
 features = ["ring", "std", "tls12"]
 optional = true
-[dependencies.rustls-platform-verifier]
-version = "0.7"
-optional = true
-[dependencies.x509-cert]
-version = "0.3"
-default-features = false
-features = ["std"]
-optional = true
-[dependencies.sha2]
-version = "0.10"
-default-features = false
-optional = true
-[dependencies.cryptoki]
-version = "0.12"
-optional = true
-[dependencies.serde_json]
-version = "1"
-optional = true
-[dependencies.ureq]
-version = "3.5"
-default-features = false
-optional = true
-[target]
-[target."cfg(windows)"]
-[target."cfg(windows)".dependencies]
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.61"
-features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_Security_Authentication_Identity", "Win32_Security_Credentials", "Win32_System_Rpc", "Win32_System_SystemInformation"]
-[target."cfg(windows)".dependencies.rustls-cng]
-version = "0.7"
-default-features = false
-features = ["ring", "tls12"]
-optional = true
-[target."cfg(windows)".dependencies.windows-registry]
-version = "0.6"
-optional = true
-[target."cfg(target_os = \"macos\")"]
-[target."cfg(target_os = \"macos\")".dependencies]
-[target."cfg(target_os = \"macos\")".dependencies.security-framework]
-version = "3"
-optional = true
-[target."cfg(unix)"]
-[target."cfg(unix)".dependencies]
-[target."cfg(unix)".dependencies.libgssapi]
-version = "0.11"
-optional = true
 [dev-dependencies]
 rcgen = "0.14"
-p12-keystore = "0.4"
 tempfile = "3"
+http = "1"
+base64 = "0.22"

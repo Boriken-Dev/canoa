@@ -1,0 +1,109 @@
+# coqui-sslcontext/. at 955cd9a455a288a523418daad7e846008c2bf291, with what it inherits written out.
+[package]
+name = "coqui-sslcontext"
+version = "0.0.0-alpha.0"
+description = "rustls configurations that follow the system: the OS trust store, client certificates held in OS keystores, server configurations, pins and a test CA"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-sslcontext"
+keywords = ["tls", "rustls", "client-certificate", "pkcs11", "system"]
+categories = ["network-programming", "cryptography"]
+publish = false
+exclude = [".*", "*.local.*", "/tools/"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+system = ["dep:windows-registry", "dep:rustls-cng", "dep:security-framework", "dep:windows-sys", "dep:plist"]
+pkcs11 = ["dep:cryptoki"]
+pkcs12 = ["dep:p12-keystore"]
+encrypted-keys = ["dep:pkcs8"]
+testing = []
+issue = ["dep:rcgen", "dep:time", "dep:rsa", "dep:rand_core"]
+[dependencies]
+rustls-platform-verifier = "0.7"
+rustls-native-certs = "0.8"
+serde_json = "1"
+thiserror = "2"
+base64 = "0.22"
+zeroize = "1"
+[dependencies.rustls]
+version = "0.23.46"
+default-features = false
+features = ["ring", "std", "tls12"]
+[dependencies.x509-cert]
+version = "0.3"
+default-features = false
+features = ["std"]
+[dependencies.sha2]
+version = "0.10"
+default-features = false
+[dependencies.plist]
+version = "1"
+optional = true
+[dependencies.tracing]
+version = "0.1"
+default-features = false
+features = ["std"]
+[dependencies.cryptoki]
+version = "0.12"
+optional = true
+[dependencies.sha1]
+version = "0.10"
+default-features = false
+[dependencies.p12-keystore]
+version = "0.4"
+optional = true
+[dependencies.pkcs8]
+version = "0.11"
+default-features = false
+features = ["alloc", "pem", "encryption", "getrandom"]
+optional = true
+[dependencies.rcgen]
+version = "0.14"
+features = ["x509-parser"]
+optional = true
+[dependencies.time]
+version = "0.3"
+default-features = false
+optional = true
+[dependencies.rsa]
+version = "0.9"
+optional = true
+[dependencies.rand_core]
+version = "0.6"
+features = ["getrandom"]
+optional = true
+[target]
+[target."cfg(windows)"]
+[target."cfg(windows)".dependencies]
+[target."cfg(windows)".dependencies.rustls-cng]
+version = "0.7"
+default-features = false
+features = ["ring", "tls12"]
+optional = true
+[target."cfg(windows)".dependencies.windows-registry]
+version = "0.6"
+optional = true
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_Security_Cryptography"]
+optional = true
+[target."cfg(target_os = \"macos\")"]
+[target."cfg(target_os = \"macos\")".dependencies]
+[target."cfg(target_os = \"macos\")".dependencies.security-framework]
+version = "3"
+optional = true
+[dev-dependencies]
+p12-keystore = "0.4"
+rcgen = "0.14"
+tempfile = "3"
+[dev-dependencies.pkcs8]
+version = "0.11"
+default-features = false
+features = ["alloc", "pem", "encryption", "getrandom"]

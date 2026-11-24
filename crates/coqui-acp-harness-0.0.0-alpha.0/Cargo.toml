@@ -1,6 +1,6 @@
-# coqui-acp/crates/coqui-acp-harness at ba64f35eb5f9a436e3f2670380ae31f2c3b9e07e, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-harness at 9327860746b779f10cf0c64fce661b20edf325a6, with what it inherits written out.
 example = [{ name = "spawner_host", required-features = ["kind"] }, { name = "fake_stdio_cli", required-features = ["kind"] }, { name = "stdio_provider", crate-type = ["cdylib"], required-features = ["kind"] }]
-test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "opencode", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }, { name = "agy_login", required-features = ["antigravity"] }]
+test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "opencode", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }, { name = "agy_login", required-features = ["antigravity"] }, { name = "login_forms", required-features = ["kind"] }]
 [package]
 name = "coqui-acp-harness"
 description = "Serve a coding agent's own command line as an Agent Client Protocol agent: process trees, bounded lines, neutral events, and ACP v1 and v2 shapes"
@@ -104,6 +104,7 @@ default-features = false
 [dev-dependencies]
 [dev-dependencies.coqui-acp]
 path = "../coqui-acp"
+features = ["secret"]
 [dev-dependencies.coqui-acp-api]
 path = "../coqui-acp-api"
 features = ["contract"]

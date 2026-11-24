@@ -1,0 +1,738 @@
+pub mod coqui_proxy
+pub mod coqui_proxy::auth
+pub struct coqui_proxy::auth::Answer
+impl coqui_proxy::auth::Answer
+pub fn coqui_proxy::auth::Answer::authorization(&self) -> &str
+pub fn coqui_proxy::auth::Answer::probe(&self) -> bool
+pub struct coqui_proxy::auth::Negotiate
+impl coqui_proxy::auth::Negotiate
+pub fn coqui_proxy::auth::Negotiate::builder() -> coqui_proxy::auth::NegotiateBuilder
+pub fn coqui_proxy::auth::Negotiate::credentials(&self) -> core::option::Option<&coqui_proxy::Credentials>
+pub fn coqui_proxy::auth::Negotiate::max_legs(&self) -> usize
+pub fn coqui_proxy::auth::Negotiate::max_token(&self) -> usize
+pub fn coqui_proxy::auth::Negotiate::plain_http(&self) -> bool
+pub fn coqui_proxy::auth::Negotiate::wants_proxy(&self, &str) -> bool
+pub struct coqui_proxy::auth::NegotiateBuilder
+impl coqui_proxy::auth::NegotiateBuilder
+pub fn coqui_proxy::auth::NegotiateBuilder::build(self) -> core::result::Result<coqui_proxy::auth::Negotiate, coqui_proxy::Error>
+pub fn coqui_proxy::auth::NegotiateBuilder::credentials(self, coqui_proxy::Credentials) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::max_legs(self, usize) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::max_token(self, usize) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::plain_http(self, bool) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::proxies<I, S>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub struct coqui_proxy::auth::OriginAuth
+impl coqui_proxy::OriginAuth
+pub fn coqui_proxy::OriginAuth::builder() -> coqui_proxy::OriginAuthBuilder
+pub fn coqui_proxy::OriginAuth::login(&self, &str) -> core::result::Result<core::option::Option<coqui_proxy::OriginLogin>, coqui_proxy::Error>
+pub fn coqui_proxy::OriginAuth::max_body(&self) -> usize
+pub fn coqui_proxy::OriginAuth::max_legs(&self) -> usize
+pub fn coqui_proxy::OriginAuth::max_token(&self) -> usize
+pub fn coqui_proxy::OriginAuth::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::OriginAuth::plain_http(&self) -> bool
+pub fn coqui_proxy::OriginAuth::wants_host(&self, &str) -> bool
+pub struct coqui_proxy::auth::OriginAuthBuilder
+impl coqui_proxy::OriginAuthBuilder
+pub fn coqui_proxy::OriginAuthBuilder::basic<I, S>(self, I, coqui_proxy::Credentials) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn coqui_proxy::OriginAuthBuilder::build(self) -> core::result::Result<coqui_proxy::OriginAuth, coqui_proxy::Error>
+pub fn coqui_proxy::OriginAuthBuilder::max_body(self, usize) -> Self
+pub fn coqui_proxy::OriginAuthBuilder::max_legs(self, usize) -> Self
+pub fn coqui_proxy::OriginAuthBuilder::max_token(self, usize) -> Self
+pub fn coqui_proxy::OriginAuthBuilder::negotiate<I, S>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn coqui_proxy::OriginAuthBuilder::negotiate_as<I, S>(self, I, coqui_proxy::Credentials) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn coqui_proxy::OriginAuthBuilder::plain_http(self, bool) -> Self
+pub struct coqui_proxy::auth::OriginLogin
+impl coqui_proxy::OriginLogin
+pub fn coqui_proxy::OriginLogin::answer(&mut self, &[&str]) -> core::result::Result<core::option::Option<coqui_proxy::auth::Answer>, coqui_proxy::Error>
+pub fn coqui_proxy::OriginLogin::finish(&mut self, &[&str]) -> core::result::Result<(), coqui_proxy::Error>
+pub const coqui_proxy::auth::DEFAULT_MAX_BODY: usize
+pub const coqui_proxy::auth::DEFAULT_MAX_LEGS: usize
+pub const coqui_proxy::auth::DEFAULT_MAX_TOKEN: usize
+pub fn coqui_proxy::auth::basic_header(&coqui_proxy::Credentials) -> alloc::string::String
+pub const fn coqui_proxy::auth::negotiate_available() -> bool
+pub mod coqui_proxy::connect
+pub mod coqui_proxy::connect::core
+#[non_exhaustive] pub enum coqui_proxy::connect::core::BodyFraming
+pub coqui_proxy::connect::core::BodyFraming::Chunked
+pub coqui_proxy::connect::core::BodyFraming::Length(usize)
+#[non_exhaustive] pub enum coqui_proxy::connect::core::Outcome
+pub coqui_proxy::connect::core::Outcome::Established
+pub coqui_proxy::connect::core::Outcome::Retry
+pub coqui_proxy::connect::core::Outcome::Retry::authorization: alloc::string::String
+#[non_exhaustive] pub enum coqui_proxy::connect::core::Progress<T>
+pub coqui_proxy::connect::core::Progress::Complete
+pub coqui_proxy::connect::core::Progress::Complete::consumed: usize
+pub coqui_proxy::connect::core::Progress::Complete::value: T
+pub coqui_proxy::connect::core::Progress::Incomplete(usize)
+pub struct coqui_proxy::connect::core::ConnectRequest
+impl coqui_proxy::connect::core::ConnectRequest
+pub fn coqui_proxy::connect::core::ConnectRequest::authorization(self, core::option::Option<alloc::string::String>) -> Self
+pub fn coqui_proxy::connect::core::ConnectRequest::encode(&self) -> alloc::vec::Vec<u8>
+pub fn coqui_proxy::connect::core::ConnectRequest::header(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn coqui_proxy::connect::core::ConnectRequest::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct coqui_proxy::connect::core::ConnectResponse
+impl coqui_proxy::connect::core::ConnectResponse
+pub fn coqui_proxy::connect::core::ConnectResponse::all(&self, &str) -> alloc::vec::Vec<&str>
+pub fn coqui_proxy::connect::core::ConnectResponse::decode(&[u8], &coqui_proxy::settings::ConnectorSettings) -> core::result::Result<coqui_proxy::connect::core::Progress<Self>, coqui_proxy::Error>
+pub fn coqui_proxy::connect::core::ConnectResponse::header(&self, &str) -> core::option::Option<&str>
+pub fn coqui_proxy::connect::core::ConnectResponse::status(&self) -> u16
+impl coqui_proxy::connect::core::ConnectResponse
+pub fn coqui_proxy::connect::core::ConnectResponse::body_framing(&self) -> coqui_proxy::connect::core::BodyFraming
+pub struct coqui_proxy::connect::core::ProxyLogin
+impl coqui_proxy::connect::core::ProxyLogin
+pub fn coqui_proxy::connect::core::ProxyLogin::answer(&mut self, &coqui_proxy::connect::core::ConnectResponse) -> core::result::Result<coqui_proxy::connect::core::Outcome, coqui_proxy::Error>
+pub fn coqui_proxy::connect::core::ProxyLogin::first_authorization(&self) -> core::option::Option<alloc::string::String>
+pub fn coqui_proxy::connect::core::ProxyLogin::new(&coqui_proxy::Proxy, core::option::Option<&coqui_proxy::auth::Negotiate>, bool) -> Self
+impl core::fmt::Debug for coqui_proxy::connect::core::ProxyLogin
+pub fn coqui_proxy::connect::core::ProxyLogin::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn coqui_proxy::connect::core::decode_chunk_size(&[u8]) -> core::result::Result<coqui_proxy::connect::core::Progress<usize>, coqui_proxy::Error>
+pub mod coqui_proxy::connect::socks
+#[non_exhaustive] pub enum coqui_proxy::connect::socks::Method
+pub coqui_proxy::connect::socks::Method::None
+pub coqui_proxy::connect::socks::Method::Password
+#[non_exhaustive] pub enum coqui_proxy::connect::socks::Version
+pub coqui_proxy::connect::socks::Version::V4
+pub coqui_proxy::connect::socks::Version::V5
+pub struct coqui_proxy::connect::socks::Greeting
+impl coqui_proxy::connect::socks::Greeting
+pub fn coqui_proxy::connect::socks::Greeting::decode_choice(&[u8]) -> core::result::Result<coqui_proxy::connect::core::Progress<coqui_proxy::connect::socks::Method>, coqui_proxy::Error>
+pub fn coqui_proxy::connect::socks::Greeting::encode(&self) -> alloc::vec::Vec<u8>
+pub fn coqui_proxy::connect::socks::Greeting::new(bool) -> Self
+pub struct coqui_proxy::connect::socks::PasswordLogin<'a>
+impl<'a> coqui_proxy::connect::socks::PasswordLogin<'a>
+pub fn coqui_proxy::connect::socks::PasswordLogin<'a>::decode_verdict(&[u8]) -> core::result::Result<coqui_proxy::connect::core::Progress<()>, coqui_proxy::Error>
+pub fn coqui_proxy::connect::socks::PasswordLogin<'a>::encode(&self) -> core::result::Result<alloc::vec::Vec<u8>, coqui_proxy::Error>
+pub fn coqui_proxy::connect::socks::PasswordLogin<'a>::new(&'a coqui_proxy::Credentials) -> Self
+pub struct coqui_proxy::connect::socks::Reply
+impl coqui_proxy::connect::socks::Reply
+pub fn coqui_proxy::connect::socks::Reply::decode4(&[u8]) -> core::result::Result<coqui_proxy::connect::core::Progress<Self>, coqui_proxy::Error>
+pub fn coqui_proxy::connect::socks::Reply::decode5(&[u8]) -> core::result::Result<coqui_proxy::connect::core::Progress<Self>, coqui_proxy::Error>
+pub struct coqui_proxy::connect::socks::Request<'a>
+impl<'a> coqui_proxy::connect::socks::Request<'a>
+pub fn coqui_proxy::connect::socks::Request<'a>::encode(&self) -> core::result::Result<alloc::vec::Vec<u8>, coqui_proxy::Error>
+pub fn coqui_proxy::connect::socks::Request<'a>::new(coqui_proxy::connect::socks::Version, &'a str, u16, core::option::Option<&'a str>) -> Self
+#[non_exhaustive] pub enum coqui_proxy::connect::Connection
+pub coqui_proxy::connect::Connection::Tcp(std::net::tcp::TcpStream)
+pub coqui_proxy::connect::Connection::Tls(alloc::boxed::Box<rustls::stream::StreamOwned<rustls::client::client_conn::connection::ClientConnection, std::net::tcp::TcpStream>>)
+impl coqui_proxy::connect::Connection
+pub fn coqui_proxy::connect::Connection::socket(&self) -> &std::net::tcp::TcpStream
+impl alloc::io::read::Read for coqui_proxy::connect::Connection
+pub fn coqui_proxy::connect::Connection::read(&mut self, &mut [u8]) -> core::io::error::Result<usize>
+impl core::io::write::Write for coqui_proxy::connect::Connection
+pub fn coqui_proxy::connect::Connection::flush(&mut self) -> core::io::error::Result<()>
+pub fn coqui_proxy::connect::Connection::write(&mut self, &[u8]) -> core::io::error::Result<usize>
+pub struct coqui_proxy::connect::ProxyConnector
+impl coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnector::builder() -> coqui_proxy::connect::ProxyConnectorBuilder
+pub fn coqui_proxy::connect::ProxyConnector::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::connect::ProxyConnector::with_timeout(&self, core::time::Duration) -> Self
+impl coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnector::connect(&self, &coqui_proxy::Route, &str, u16) -> core::result::Result<coqui_proxy::connect::Connection, coqui_proxy::Error>
+pub fn coqui_proxy::connect::ProxyConnector::connect_url(&self, &coqui_proxy::Resolver, &str) -> core::result::Result<coqui_proxy::connect::Connection, coqui_proxy::Error>
+impl core::default::Default for coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnector::default() -> Self
+pub struct coqui_proxy::connect::ProxyConnectorBuilder
+impl coqui_proxy::connect::ProxyConnectorBuilder
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::build(self) -> coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::negotiate(self, coqui_proxy::auth::Negotiate) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::proxy_tls(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::settings(self, coqui_proxy::settings::ConnectorSettings) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::timeout(self, core::time::Duration) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::user_agent(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub mod coqui_proxy::pac
+#[non_exhaustive] pub enum coqui_proxy::pac::PacEncoding
+pub coqui_proxy::pac::PacEncoding::Latin1
+pub coqui_proxy::pac::PacEncoding::Utf8
+pub struct coqui_proxy::pac::PacScript
+impl coqui_proxy::pac::PacScript
+pub fn coqui_proxy::pac::PacScript::builder(impl core::convert::Into<alloc::string::String>) -> coqui_proxy::pac::PacScriptBuilder
+pub fn coqui_proxy::pac::PacScript::find_proxy_for_url(&self, &str, &str) -> core::result::Result<alloc::string::String, coqui_proxy::Error>
+pub fn coqui_proxy::pac::PacScript::from_file(impl core::convert::AsRef<std::path::Path>, coqui_proxy::pac::PacEncoding, &coqui_proxy::settings::PacSettings) -> core::result::Result<Self, coqui_proxy::Error>
+pub fn coqui_proxy::pac::PacScript::from_location(&str, &coqui_proxy::settings::PacSettings) -> core::result::Result<Self, coqui_proxy::Error>
+pub fn coqui_proxy::pac::PacScript::from_url(&str, &coqui_proxy::settings::PacSettings) -> core::result::Result<Self, coqui_proxy::Error>
+pub fn coqui_proxy::pac::PacScript::routes(&self, &str) -> core::result::Result<alloc::vec::Vec<coqui_proxy::Route>, coqui_proxy::Error>
+pub fn coqui_proxy::pac::PacScript::source(&self) -> &str
+pub fn coqui_proxy::pac::PacScript::timeout(&self) -> core::time::Duration
+impl coqui_proxy::pac::FindProxy for coqui_proxy::pac::PacScript
+pub fn coqui_proxy::pac::PacScript::find_proxy_for_url(&self, &str, &str) -> core::result::Result<alloc::string::String, coqui_proxy::Error>
+impl core::fmt::Debug for coqui_proxy::pac::PacScript
+pub fn coqui_proxy::pac::PacScript::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_proxy::pac::PacScriptBuilder
+impl coqui_proxy::pac::PacScriptBuilder
+pub fn coqui_proxy::pac::PacScriptBuilder::build(self) -> core::result::Result<coqui_proxy::pac::PacScript, coqui_proxy::Error>
+pub fn coqui_proxy::pac::PacScriptBuilder::function(self, impl core::convert::Into<alloc::string::String>, impl core::ops::function::Fn(&[alloc::string::String]) -> core::result::Result<alloc::string::String, coqui_proxy::Error> + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn coqui_proxy::pac::PacScriptBuilder::settings(self, &coqui_proxy::settings::PacSettings) -> Self
+pub fn coqui_proxy::pac::PacScriptBuilder::timeout(self, core::time::Duration) -> Self
+impl core::fmt::Debug for coqui_proxy::pac::PacScriptBuilder
+pub fn coqui_proxy::pac::PacScriptBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_proxy::pac::PacSource
+impl coqui_proxy::pac::PacSource
+pub fn coqui_proxy::pac::PacSource::browser_compatibility(&self) -> bool
+pub fn coqui_proxy::pac::PacSource::new(impl coqui_proxy::pac::FindProxy + 'static) -> Self
+pub fn coqui_proxy::pac::PacSource::script(&self) -> &dyn coqui_proxy::pac::FindProxy
+pub fn coqui_proxy::pac::PacSource::with_browser_compatibility(self, bool) -> Self
+impl coqui_proxy::source::ProxySource for coqui_proxy::pac::PacSource
+pub fn coqui_proxy::pac::PacSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl core::fmt::Debug for coqui_proxy::pac::PacSource
+pub fn coqui_proxy::pac::PacSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const coqui_proxy::pac::DEFAULT_MAX_PAC_BYTES: usize
+pub trait coqui_proxy::pac::FindProxy: core::marker::Send + core::marker::Sync
+pub fn coqui_proxy::pac::FindProxy::find_proxy_for_url(&self, &str, &str) -> core::result::Result<alloc::string::String, coqui_proxy::Error>
+impl coqui_proxy::pac::FindProxy for coqui_proxy::pac::PacScript
+pub fn coqui_proxy::pac::PacScript::find_proxy_for_url(&self, &str, &str) -> core::result::Result<alloc::string::String, coqui_proxy::Error>
+impl<F> coqui_proxy::pac::FindProxy for F where F: core::ops::function::Fn(&str, &str) -> core::result::Result<alloc::string::String, coqui_proxy::Error> + core::marker::Send + core::marker::Sync
+pub fn F::find_proxy_for_url(&self, &str, &str) -> core::result::Result<alloc::string::String, coqui_proxy::Error>
+pub fn coqui_proxy::pac::builtin_names() -> &'static [&'static str]
+pub fn coqui_proxy::pac::discover(core::option::Option<&str>, &coqui_proxy::settings::PacSettings) -> core::result::Result<core::option::Option<coqui_proxy::pac::PacScript>, coqui_proxy::Error>
+pub type coqui_proxy::pac::CustomFunction = alloc::sync::Arc<(dyn core::ops::function::Fn(&[alloc::string::String]) -> core::result::Result<alloc::string::String, coqui_proxy::Error> + core::marker::Send + core::marker::Sync)>
+pub mod coqui_proxy::settings
+#[non_exhaustive] pub struct coqui_proxy::settings::ConnectorSettings
+pub coqui_proxy::settings::ConnectorSettings::happy_eyeballs_delay: core::time::Duration
+pub coqui_proxy::settings::ConnectorSettings::max_response_body_bytes: usize
+pub coqui_proxy::settings::ConnectorSettings::max_response_head_bytes: usize
+pub coqui_proxy::settings::ConnectorSettings::max_response_headers: usize
+pub coqui_proxy::settings::ConnectorSettings::timeout: core::time::Duration
+pub coqui_proxy::settings::ConnectorSettings::user_agent: alloc::string::String
+impl coqui_proxy::settings::ConnectorSettings
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_HAPPY_EYEBALLS_DELAY: core::time::Duration
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_MAX_RESPONSE_BODY_BYTES: usize
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_MAX_RESPONSE_HEADERS: usize
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_MAX_RESPONSE_HEAD_BYTES: usize
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_USER_AGENT: &'static str
+impl core::default::Default for coqui_proxy::settings::ConnectorSettings
+pub fn coqui_proxy::settings::ConnectorSettings::default() -> Self
+#[non_exhaustive] pub struct coqui_proxy::settings::PacSettings
+pub coqui_proxy::settings::PacSettings::browser_compatibility: bool
+pub coqui_proxy::settings::PacSettings::call_timeout: core::time::Duration
+pub coqui_proxy::settings::PacSettings::dns_cache_capacity: usize
+pub coqui_proxy::settings::PacSettings::dns_cache_ttl: core::time::Duration
+pub coqui_proxy::settings::PacSettings::dns_timeout: core::time::Duration
+pub coqui_proxy::settings::PacSettings::download_cache_ttl: core::time::Duration
+pub coqui_proxy::settings::PacSettings::download_timeout: core::time::Duration
+pub coqui_proxy::settings::PacSettings::loop_iterations: u64
+pub coqui_proxy::settings::PacSettings::max_redirects: usize
+pub coqui_proxy::settings::PacSettings::max_script_bytes: usize
+pub coqui_proxy::settings::PacSettings::reader: coqui_proxy::settings::ReaderSettings
+pub coqui_proxy::settings::PacSettings::recursion: usize
+pub coqui_proxy::settings::PacSettings::refusal_after_overrun: core::time::Duration
+pub coqui_proxy::settings::PacSettings::tls: core::option::Option<alloc::sync::Arc<rustls::client::client_conn::ClientConfig>>
+pub coqui_proxy::settings::PacSettings::wpad_cache_ttl: core::time::Duration
+pub coqui_proxy::settings::PacSettings::wpad_probe_timeout: core::time::Duration
+impl coqui_proxy::settings::PacSettings
+pub const coqui_proxy::settings::PacSettings::DEFAULT_CALL_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DNS_CACHE_CAPACITY: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DNS_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DNS_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DOWNLOAD_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DOWNLOAD_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_LOOP_ITERATIONS: u64
+pub const coqui_proxy::settings::PacSettings::DEFAULT_MAX_REDIRECTS: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_MAX_SCRIPT_BYTES: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_RECURSION: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_REFUSAL_AFTER_OVERRUN: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_WPAD_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_WPAD_PROBE_TIMEOUT: core::time::Duration
+impl core::default::Default for coqui_proxy::settings::PacSettings
+pub fn coqui_proxy::settings::PacSettings::default() -> Self
+#[non_exhaustive] pub struct coqui_proxy::settings::ReaderSettings
+pub coqui_proxy::settings::ReaderSettings::cfnetwork_deadline: core::time::Duration
+pub coqui_proxy::settings::ReaderSettings::command_timeout: core::time::Duration
+pub coqui_proxy::settings::ReaderSettings::dhcp_lease_paths: alloc::vec::Vec<std::path::PathBuf>
+pub coqui_proxy::settings::ReaderSettings::gsettings_cache_ttl: core::time::Duration
+pub coqui_proxy::settings::ReaderSettings::winhttp_timeout: core::time::Duration
+impl coqui_proxy::settings::ReaderSettings
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_CFNETWORK_DEADLINE: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_COMMAND_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_GSETTINGS_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_WINHTTP_TIMEOUT: core::time::Duration
+pub fn coqui_proxy::settings::ReaderSettings::default_dhcp_lease_paths() -> alloc::vec::Vec<std::path::PathBuf>
+impl core::default::Default for coqui_proxy::settings::ReaderSettings
+pub fn coqui_proxy::settings::ReaderSettings::default() -> Self
+#[non_exhaustive] pub struct coqui_proxy::settings::ResolverSettings
+pub coqui_proxy::settings::ResolverSettings::bypass_dns_timeout: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::cache_capacity: usize
+pub coqui_proxy::settings::ResolverSettings::cache_ttl: core::option::Option<core::time::Duration>
+pub coqui_proxy::settings::ResolverSettings::failure_memory: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::interface_cache_ttl: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::on_missing_engine: coqui_proxy::OnMissingEngine
+pub coqui_proxy::settings::ResolverSettings::pac: coqui_proxy::settings::PacSettings
+pub coqui_proxy::settings::ResolverSettings::probe: bool
+pub coqui_proxy::settings::ResolverSettings::probe_failure_memory: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::probe_timeout: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::reader: coqui_proxy::settings::ReaderSettings
+pub coqui_proxy::settings::ResolverSettings::rotate: bool
+pub coqui_proxy::settings::ResolverSettings::rotation_capacity: usize
+pub coqui_proxy::settings::ResolverSettings::settings_refresh: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::source_retry: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::system: bool
+pub coqui_proxy::settings::ResolverSettings::timeout: core::time::Duration
+pub coqui_proxy::settings::ResolverSettings::wpad: bool
+impl coqui_proxy::settings::ResolverSettings
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_BYPASS_DNS_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_CACHE_CAPACITY: usize
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_FAILURE_MEMORY: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_INTERFACE_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_PROBE_FAILURE_MEMORY: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_PROBE_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_ROTATION_CAPACITY: usize
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_SETTINGS_REFRESH: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_SOURCE_RETRY: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_TIMEOUT: core::time::Duration
+impl core::default::Default for coqui_proxy::settings::ResolverSettings
+pub fn coqui_proxy::settings::ResolverSettings::default() -> Self
+pub mod coqui_proxy::source
+pub struct coqui_proxy::source::ChainSource
+impl coqui_proxy::source::ChainSource
+pub fn coqui_proxy::source::ChainSource::new(impl core::iter::traits::collect::IntoIterator<Item = alloc::boxed::Box<dyn coqui_proxy::source::ProxySource>>) -> Self
+pub fn coqui_proxy::source::ChainSource::sources(&self) -> &[alloc::sync::Arc<dyn coqui_proxy::source::ProxySource>]
+impl coqui_proxy::source::ProxySource for coqui_proxy::source::ChainSource
+pub fn coqui_proxy::source::ChainSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+pub trait coqui_proxy::source::ProxySource: core::marker::Send + core::marker::Sync + core::fmt::Debug
+pub fn coqui_proxy::source::ProxySource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::EnvSource
+pub fn coqui_proxy::EnvSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::ProxySetting
+pub fn coqui_proxy::ProxySetting::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::pac::PacSource
+pub fn coqui_proxy::pac::PacSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::source::ChainSource
+pub fn coqui_proxy::source::ChainSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::system::SystemSource
+pub fn coqui_proxy::system::SystemSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::system::WinHttpSource
+pub fn coqui_proxy::system::WinHttpSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+pub fn coqui_proxy::source::lookup(&dyn coqui_proxy::source::ProxySource, &str) -> core::result::Result<alloc::vec::Vec<coqui_proxy::Route>, coqui_proxy::Error>
+pub mod coqui_proxy::system
+#[non_exhaustive] pub enum coqui_proxy::system::SettingsSource
+pub coqui_proxy::system::SettingsSource::Gnome
+pub coqui_proxy::system::SettingsSource::Kde
+pub coqui_proxy::system::SettingsSource::MacOs
+pub coqui_proxy::system::SettingsSource::Mate
+pub coqui_proxy::system::SettingsSource::NetworkManager
+pub coqui_proxy::system::SettingsSource::None
+pub coqui_proxy::system::SettingsSource::Windows
+#[non_exhaustive] pub enum coqui_proxy::system::SettingsState
+pub coqui_proxy::system::SettingsState::Configured
+pub coqui_proxy::system::SettingsState::Direct
+pub coqui_proxy::system::SettingsState::Unset
+#[non_exhaustive] pub struct coqui_proxy::system::ReaderSettings
+pub coqui_proxy::system::ReaderSettings::cfnetwork_deadline: core::time::Duration
+pub coqui_proxy::system::ReaderSettings::command_timeout: core::time::Duration
+pub coqui_proxy::system::ReaderSettings::dhcp_lease_paths: alloc::vec::Vec<std::path::PathBuf>
+pub coqui_proxy::system::ReaderSettings::gsettings_cache_ttl: core::time::Duration
+pub coqui_proxy::system::ReaderSettings::winhttp_timeout: core::time::Duration
+impl coqui_proxy::settings::ReaderSettings
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_CFNETWORK_DEADLINE: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_COMMAND_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_GSETTINGS_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_WINHTTP_TIMEOUT: core::time::Duration
+pub fn coqui_proxy::settings::ReaderSettings::default_dhcp_lease_paths() -> alloc::vec::Vec<std::path::PathBuf>
+impl core::default::Default for coqui_proxy::settings::ReaderSettings
+pub fn coqui_proxy::settings::ReaderSettings::default() -> Self
+#[non_exhaustive] pub struct coqui_proxy::system::SystemSettings
+pub coqui_proxy::system::SystemSettings::auto_detect: bool
+pub coqui_proxy::system::SystemSettings::bypass: coqui_proxy::BypassRules
+pub coqui_proxy::system::SystemSettings::pac_script: core::option::Option<alloc::string::String>
+pub coqui_proxy::system::SystemSettings::pac_url: core::option::Option<alloc::string::String>
+pub coqui_proxy::system::SystemSettings::proxies: alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_proxy::Proxy>
+pub coqui_proxy::system::SystemSettings::source: coqui_proxy::system::SettingsSource
+pub coqui_proxy::system::SystemSettings::state: coqui_proxy::system::SettingsState
+impl coqui_proxy::system::SystemSettings
+pub fn coqui_proxy::system::SystemSettings::builder(coqui_proxy::system::SettingsSource, coqui_proxy::system::SettingsState) -> coqui_proxy::system::SystemSettingsBuilder
+pub fn coqui_proxy::system::SystemSettings::read() -> Self
+pub fn coqui_proxy::system::SystemSettings::read_with(&coqui_proxy::settings::ReaderSettings) -> Self
+pub fn coqui_proxy::system::SystemSettings::to_source(&self, bool, core::time::Duration, coqui_proxy::OnMissingEngine) -> coqui_proxy::system::SystemSource
+pub struct coqui_proxy::system::SystemSettingsBuilder
+impl coqui_proxy::system::SystemSettingsBuilder
+pub fn coqui_proxy::system::SystemSettingsBuilder::auto_detect(self, bool) -> Self
+pub fn coqui_proxy::system::SystemSettingsBuilder::build(self) -> coqui_proxy::system::SystemSettings
+pub fn coqui_proxy::system::SystemSettingsBuilder::bypass(self, coqui_proxy::BypassRules) -> Self
+pub fn coqui_proxy::system::SystemSettingsBuilder::pac_script(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn coqui_proxy::system::SystemSettingsBuilder::pac_url(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn coqui_proxy::system::SystemSettingsBuilder::proxy(self, impl core::convert::Into<alloc::string::String>, coqui_proxy::Proxy) -> Self
+pub struct coqui_proxy::system::SystemSource
+impl coqui_proxy::source::ProxySource for coqui_proxy::system::SystemSource
+pub fn coqui_proxy::system::SystemSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+pub struct coqui_proxy::system::WinHttpSource
+impl coqui_proxy::system::WinHttpSource
+pub fn coqui_proxy::system::WinHttpSource::new(core::time::Duration) -> core::option::Option<Self>
+impl coqui_proxy::source::ProxySource for coqui_proxy::system::WinHttpSource
+pub fn coqui_proxy::system::WinHttpSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+#[non_exhaustive] pub enum coqui_proxy::Connection
+pub coqui_proxy::Connection::Tcp(std::net::tcp::TcpStream)
+pub coqui_proxy::Connection::Tls(alloc::boxed::Box<rustls::stream::StreamOwned<rustls::client::client_conn::connection::ClientConnection, std::net::tcp::TcpStream>>)
+impl coqui_proxy::connect::Connection
+pub fn coqui_proxy::connect::Connection::socket(&self) -> &std::net::tcp::TcpStream
+impl alloc::io::read::Read for coqui_proxy::connect::Connection
+pub fn coqui_proxy::connect::Connection::read(&mut self, &mut [u8]) -> core::io::error::Result<usize>
+impl core::io::write::Write for coqui_proxy::connect::Connection
+pub fn coqui_proxy::connect::Connection::flush(&mut self) -> core::io::error::Result<()>
+pub fn coqui_proxy::connect::Connection::write(&mut self, &[u8]) -> core::io::error::Result<usize>
+#[non_exhaustive] pub enum coqui_proxy::Dialect
+pub coqui_proxy::Dialect::GSettings
+pub coqui_proxy::Dialect::Kde
+pub coqui_proxy::Dialect::KdeReversed
+pub coqui_proxy::Dialect::MacOs
+pub coqui_proxy::Dialect::NoProxy
+pub coqui_proxy::Dialect::WinInet
+#[non_exhaustive] pub enum coqui_proxy::Error
+pub coqui_proxy::Error::Io(core::io::error::Error)
+pub coqui_proxy::Error::Login(coqui_proxy::Reason)
+pub coqui_proxy::Error::MissingEngine
+pub coqui_proxy::Error::NoReachableProxy
+pub coqui_proxy::Error::Pac(coqui_proxy::Reason)
+pub coqui_proxy::Error::Parse(&'static str)
+pub coqui_proxy::Error::Refused(coqui_proxy::Reason)
+pub coqui_proxy::Error::Settings(coqui_proxy::Reason)
+pub coqui_proxy::Error::Tls(coqui_proxy::Reason)
+pub coqui_proxy::Error::Unsupported(coqui_proxy::Reason)
+pub coqui_proxy::Error::UnsupportedProxy(alloc::boxed::Box<coqui_proxy::UnsupportedProxy>)
+impl coqui_proxy::Error
+pub fn coqui_proxy::Error::missing_feature(&self) -> core::option::Option<&'static str>
+#[non_exhaustive] pub enum coqui_proxy::OnMissingEngine
+pub coqui_proxy::OnMissingEngine::Direct
+pub coqui_proxy::OnMissingEngine::Error
+#[non_exhaustive] pub enum coqui_proxy::ProxyScheme
+pub coqui_proxy::ProxyScheme::Gateway
+pub coqui_proxy::ProxyScheme::Gateway::tls: bool
+pub coqui_proxy::ProxyScheme::Http
+pub coqui_proxy::ProxyScheme::Https
+pub coqui_proxy::ProxyScheme::Socks4
+pub coqui_proxy::ProxyScheme::Socks5
+impl coqui_proxy::ProxyScheme
+pub const fn coqui_proxy::ProxyScheme::as_str(self) -> &'static str
+pub const fn coqui_proxy::ProxyScheme::default_port(self) -> u16
+impl core::fmt::Display for coqui_proxy::ProxyScheme
+pub fn coqui_proxy::ProxyScheme::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum coqui_proxy::ProxySetting
+pub coqui_proxy::ProxySetting::Direct
+pub coqui_proxy::ProxySetting::Pac(alloc::string::String)
+pub coqui_proxy::ProxySetting::Proxy(coqui_proxy::Proxy)
+pub coqui_proxy::ProxySetting::Routes(alloc::vec::Vec<coqui_proxy::Route>)
+impl coqui_proxy::ProxySetting
+pub fn coqui_proxy::ProxySetting::routes(&self) -> core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>
+impl coqui_proxy::source::ProxySource for coqui_proxy::ProxySetting
+pub fn coqui_proxy::ProxySetting::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl core::convert::From<coqui_proxy::Proxy> for coqui_proxy::ProxySetting
+pub fn coqui_proxy::ProxySetting::from(coqui_proxy::Proxy) -> Self
+impl core::str::traits::FromStr for coqui_proxy::ProxySetting
+pub type coqui_proxy::ProxySetting::Err = coqui_proxy::Error
+pub fn coqui_proxy::ProxySetting::from_str(&str) -> core::result::Result<Self, coqui_proxy::Error>
+#[non_exhaustive] pub enum coqui_proxy::Route
+pub coqui_proxy::Route::Direct
+pub coqui_proxy::Route::Proxy(coqui_proxy::Proxy)
+impl coqui_proxy::Route
+pub fn coqui_proxy::Route::parse_pac_result(&str) -> alloc::vec::Vec<Self>
+pub struct coqui_proxy::BypassRules
+impl coqui_proxy::BypassRules
+pub fn coqui_proxy::BypassRules::entries(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn coqui_proxy::BypassRules::from_entries<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a str>, coqui_proxy::Dialect) -> Self
+pub fn coqui_proxy::BypassRules::is_empty(&self) -> bool
+pub fn coqui_proxy::BypassRules::loopback_proxied(&self) -> bool
+pub fn coqui_proxy::BypassRules::matches(&self, &str) -> bool
+pub fn coqui_proxy::BypassRules::none() -> Self
+pub fn coqui_proxy::BypassRules::parse(&str, coqui_proxy::Dialect) -> Self
+pub fn coqui_proxy::BypassRules::skipped(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn coqui_proxy::BypassRules::with_dns_timeout(self, core::time::Duration) -> Self
+pub fn coqui_proxy::BypassRules::with_interface_cache_ttl(self, core::time::Duration) -> Self
+impl core::default::Default for coqui_proxy::BypassRules
+pub fn coqui_proxy::BypassRules::default() -> Self
+impl core::ops::bit::BitOr for coqui_proxy::BypassRules
+pub type coqui_proxy::BypassRules::Output = coqui_proxy::BypassRules
+pub fn coqui_proxy::BypassRules::bitor(self, Self) -> Self
+pub struct coqui_proxy::ChainSource
+impl coqui_proxy::source::ChainSource
+pub fn coqui_proxy::source::ChainSource::new(impl core::iter::traits::collect::IntoIterator<Item = alloc::boxed::Box<dyn coqui_proxy::source::ProxySource>>) -> Self
+pub fn coqui_proxy::source::ChainSource::sources(&self) -> &[alloc::sync::Arc<dyn coqui_proxy::source::ProxySource>]
+impl coqui_proxy::source::ProxySource for coqui_proxy::source::ChainSource
+pub fn coqui_proxy::source::ChainSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+pub struct coqui_proxy::ChildEnvironment
+impl coqui_proxy::ChildEnvironment
+pub fn coqui_proxy::ChildEnvironment::http_proxy(&self) -> core::option::Option<&coqui_proxy::Proxy>
+pub fn coqui_proxy::ChildEnvironment::https_proxy(&self) -> core::option::Option<&coqui_proxy::Proxy>
+pub fn coqui_proxy::ChildEnvironment::no_proxy(&self) -> &[alloc::string::String]
+pub fn coqui_proxy::ChildEnvironment::pairs(&self) -> alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub fn coqui_proxy::ChildEnvironment::per_endpoint(&self) -> bool
+pub fn coqui_proxy::ChildEnvironment::socks_proxy(&self) -> core::option::Option<&coqui_proxy::Proxy>
+pub fn coqui_proxy::ChildEnvironment::unexpressed(&self) -> &[alloc::string::String]
+#[non_exhaustive] pub struct coqui_proxy::ConnectorSettings
+pub coqui_proxy::ConnectorSettings::happy_eyeballs_delay: core::time::Duration
+pub coqui_proxy::ConnectorSettings::max_response_body_bytes: usize
+pub coqui_proxy::ConnectorSettings::max_response_head_bytes: usize
+pub coqui_proxy::ConnectorSettings::max_response_headers: usize
+pub coqui_proxy::ConnectorSettings::timeout: core::time::Duration
+pub coqui_proxy::ConnectorSettings::user_agent: alloc::string::String
+impl coqui_proxy::settings::ConnectorSettings
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_HAPPY_EYEBALLS_DELAY: core::time::Duration
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_MAX_RESPONSE_BODY_BYTES: usize
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_MAX_RESPONSE_HEADERS: usize
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_MAX_RESPONSE_HEAD_BYTES: usize
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ConnectorSettings::DEFAULT_USER_AGENT: &'static str
+impl core::default::Default for coqui_proxy::settings::ConnectorSettings
+pub fn coqui_proxy::settings::ConnectorSettings::default() -> Self
+pub struct coqui_proxy::Credentials
+impl coqui_proxy::Credentials
+pub fn coqui_proxy::Credentials::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn coqui_proxy::Credentials::password(&self) -> &str
+pub fn coqui_proxy::Credentials::username(&self) -> &str
+pub struct coqui_proxy::EnvSource
+impl coqui_proxy::EnvSource
+pub fn coqui_proxy::EnvSource::builder() -> coqui_proxy::EnvSourceBuilder
+pub fn coqui_proxy::EnvSource::no_proxy(&self) -> &coqui_proxy::BypassRules
+pub fn coqui_proxy::EnvSource::proxies(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_proxy::ProxySetting>
+impl coqui_proxy::source::ProxySource for coqui_proxy::EnvSource
+pub fn coqui_proxy::EnvSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+pub struct coqui_proxy::EnvSourceBuilder
+impl coqui_proxy::EnvSourceBuilder
+pub fn coqui_proxy::EnvSourceBuilder::build(self) -> coqui_proxy::EnvSource
+pub fn coqui_proxy::EnvSourceBuilder::environment(self, coqui_proxy::Environment) -> Self
+pub fn coqui_proxy::EnvSourceBuilder::no_proxy(self, coqui_proxy::BypassRules) -> Self
+pub fn coqui_proxy::EnvSourceBuilder::proxies(self, alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_proxy::ProxySetting>) -> Self
+pub struct coqui_proxy::Environment
+impl coqui_proxy::Environment
+pub fn coqui_proxy::Environment::from_pairs<K: core::convert::Into<alloc::string::String>, V: core::convert::Into<alloc::string::String>>(impl core::iter::traits::collect::IntoIterator<Item = (K, V)>) -> Self
+pub fn coqui_proxy::Environment::get(&self, &str) -> core::option::Option<&str>
+pub fn coqui_proxy::Environment::process() -> Self
+pub fn coqui_proxy::Environment::proxy_variables(&self) -> core::option::Option<coqui_proxy::ProxyVariables>
+pub struct coqui_proxy::Negotiate
+impl coqui_proxy::auth::Negotiate
+pub fn coqui_proxy::auth::Negotiate::builder() -> coqui_proxy::auth::NegotiateBuilder
+pub fn coqui_proxy::auth::Negotiate::credentials(&self) -> core::option::Option<&coqui_proxy::Credentials>
+pub fn coqui_proxy::auth::Negotiate::max_legs(&self) -> usize
+pub fn coqui_proxy::auth::Negotiate::max_token(&self) -> usize
+pub fn coqui_proxy::auth::Negotiate::plain_http(&self) -> bool
+pub fn coqui_proxy::auth::Negotiate::wants_proxy(&self, &str) -> bool
+pub struct coqui_proxy::NegotiateBuilder
+impl coqui_proxy::auth::NegotiateBuilder
+pub fn coqui_proxy::auth::NegotiateBuilder::build(self) -> core::result::Result<coqui_proxy::auth::Negotiate, coqui_proxy::Error>
+pub fn coqui_proxy::auth::NegotiateBuilder::credentials(self, coqui_proxy::Credentials) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::max_legs(self, usize) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::max_token(self, usize) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::plain_http(self, bool) -> Self
+pub fn coqui_proxy::auth::NegotiateBuilder::proxies<I, S>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub struct coqui_proxy::OriginAuth
+impl coqui_proxy::OriginAuth
+pub fn coqui_proxy::OriginAuth::builder() -> coqui_proxy::OriginAuthBuilder
+pub fn coqui_proxy::OriginAuth::login(&self, &str) -> core::result::Result<core::option::Option<coqui_proxy::OriginLogin>, coqui_proxy::Error>
+pub fn coqui_proxy::OriginAuth::max_body(&self) -> usize
+pub fn coqui_proxy::OriginAuth::max_legs(&self) -> usize
+pub fn coqui_proxy::OriginAuth::max_token(&self) -> usize
+pub fn coqui_proxy::OriginAuth::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::OriginAuth::plain_http(&self) -> bool
+pub fn coqui_proxy::OriginAuth::wants_host(&self, &str) -> bool
+pub struct coqui_proxy::OriginAuthBuilder
+impl coqui_proxy::OriginAuthBuilder
+pub fn coqui_proxy::OriginAuthBuilder::basic<I, S>(self, I, coqui_proxy::Credentials) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn coqui_proxy::OriginAuthBuilder::build(self) -> core::result::Result<coqui_proxy::OriginAuth, coqui_proxy::Error>
+pub fn coqui_proxy::OriginAuthBuilder::max_body(self, usize) -> Self
+pub fn coqui_proxy::OriginAuthBuilder::max_legs(self, usize) -> Self
+pub fn coqui_proxy::OriginAuthBuilder::max_token(self, usize) -> Self
+pub fn coqui_proxy::OriginAuthBuilder::negotiate<I, S>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn coqui_proxy::OriginAuthBuilder::negotiate_as<I, S>(self, I, coqui_proxy::Credentials) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn coqui_proxy::OriginAuthBuilder::plain_http(self, bool) -> Self
+pub struct coqui_proxy::OriginLogin
+impl coqui_proxy::OriginLogin
+pub fn coqui_proxy::OriginLogin::answer(&mut self, &[&str]) -> core::result::Result<core::option::Option<coqui_proxy::auth::Answer>, coqui_proxy::Error>
+pub fn coqui_proxy::OriginLogin::finish(&mut self, &[&str]) -> core::result::Result<(), coqui_proxy::Error>
+#[non_exhaustive] pub struct coqui_proxy::PacSettings
+pub coqui_proxy::PacSettings::browser_compatibility: bool
+pub coqui_proxy::PacSettings::call_timeout: core::time::Duration
+pub coqui_proxy::PacSettings::dns_cache_capacity: usize
+pub coqui_proxy::PacSettings::dns_cache_ttl: core::time::Duration
+pub coqui_proxy::PacSettings::dns_timeout: core::time::Duration
+pub coqui_proxy::PacSettings::download_cache_ttl: core::time::Duration
+pub coqui_proxy::PacSettings::download_timeout: core::time::Duration
+pub coqui_proxy::PacSettings::loop_iterations: u64
+pub coqui_proxy::PacSettings::max_redirects: usize
+pub coqui_proxy::PacSettings::max_script_bytes: usize
+pub coqui_proxy::PacSettings::reader: coqui_proxy::settings::ReaderSettings
+pub coqui_proxy::PacSettings::recursion: usize
+pub coqui_proxy::PacSettings::refusal_after_overrun: core::time::Duration
+pub coqui_proxy::PacSettings::tls: core::option::Option<alloc::sync::Arc<rustls::client::client_conn::ClientConfig>>
+pub coqui_proxy::PacSettings::wpad_cache_ttl: core::time::Duration
+pub coqui_proxy::PacSettings::wpad_probe_timeout: core::time::Duration
+impl coqui_proxy::settings::PacSettings
+pub const coqui_proxy::settings::PacSettings::DEFAULT_CALL_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DNS_CACHE_CAPACITY: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DNS_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DNS_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DOWNLOAD_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_DOWNLOAD_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_LOOP_ITERATIONS: u64
+pub const coqui_proxy::settings::PacSettings::DEFAULT_MAX_REDIRECTS: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_MAX_SCRIPT_BYTES: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_RECURSION: usize
+pub const coqui_proxy::settings::PacSettings::DEFAULT_REFUSAL_AFTER_OVERRUN: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_WPAD_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::PacSettings::DEFAULT_WPAD_PROBE_TIMEOUT: core::time::Duration
+impl core::default::Default for coqui_proxy::settings::PacSettings
+pub fn coqui_proxy::settings::PacSettings::default() -> Self
+pub struct coqui_proxy::Proxy
+impl coqui_proxy::Proxy
+pub fn coqui_proxy::Proxy::authority(&self) -> alloc::string::String
+pub fn coqui_proxy::Proxy::builder(coqui_proxy::ProxyScheme, impl core::convert::Into<alloc::string::String>, u16) -> coqui_proxy::ProxyBuilder
+pub fn coqui_proxy::Proxy::credentials(&self) -> core::option::Option<&coqui_proxy::Credentials>
+pub fn coqui_proxy::Proxy::for_url(&str) -> core::result::Result<core::option::Option<Self>, coqui_proxy::Error>
+pub fn coqui_proxy::Proxy::gateway_url(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn coqui_proxy::Proxy::headers(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &str)>
+pub fn coqui_proxy::Proxy::host(&self) -> &str
+pub fn coqui_proxy::Proxy::is_gateway(&self) -> bool
+pub fn coqui_proxy::Proxy::parse(&str) -> core::result::Result<Self, coqui_proxy::Error>
+pub fn coqui_proxy::Proxy::path(&self) -> core::option::Option<&str>
+pub fn coqui_proxy::Proxy::port(&self) -> u16
+pub fn coqui_proxy::Proxy::scheme(&self) -> coqui_proxy::ProxyScheme
+pub fn coqui_proxy::Proxy::url_with_credentials(&self) -> alloc::string::String
+impl core::convert::From<coqui_proxy::Proxy> for coqui_proxy::ProxySetting
+pub fn coqui_proxy::ProxySetting::from(coqui_proxy::Proxy) -> Self
+impl core::fmt::Debug for coqui_proxy::Proxy
+pub fn coqui_proxy::Proxy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for coqui_proxy::Proxy
+pub fn coqui_proxy::Proxy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for coqui_proxy::Proxy
+pub type coqui_proxy::Proxy::Err = coqui_proxy::Error
+pub fn coqui_proxy::Proxy::from_str(&str) -> core::result::Result<Self, coqui_proxy::Error>
+pub struct coqui_proxy::ProxyBuilder
+impl coqui_proxy::ProxyBuilder
+pub fn coqui_proxy::ProxyBuilder::build(self) -> core::result::Result<coqui_proxy::Proxy, coqui_proxy::Error>
+pub fn coqui_proxy::ProxyBuilder::credentials(self, coqui_proxy::Credentials) -> Self
+pub fn coqui_proxy::ProxyBuilder::header(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<coqui_proxy::Secret>) -> Self
+pub fn coqui_proxy::ProxyBuilder::path(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct coqui_proxy::ProxyConnector
+impl coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnector::builder() -> coqui_proxy::connect::ProxyConnectorBuilder
+pub fn coqui_proxy::connect::ProxyConnector::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::connect::ProxyConnector::with_timeout(&self, core::time::Duration) -> Self
+impl coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnector::connect(&self, &coqui_proxy::Route, &str, u16) -> core::result::Result<coqui_proxy::connect::Connection, coqui_proxy::Error>
+pub fn coqui_proxy::connect::ProxyConnector::connect_url(&self, &coqui_proxy::Resolver, &str) -> core::result::Result<coqui_proxy::connect::Connection, coqui_proxy::Error>
+impl core::default::Default for coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnector::default() -> Self
+pub struct coqui_proxy::ProxyConnectorBuilder
+impl coqui_proxy::connect::ProxyConnectorBuilder
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::build(self) -> coqui_proxy::connect::ProxyConnector
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::negotiate(self, coqui_proxy::auth::Negotiate) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::proxy_tls(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::settings(self, coqui_proxy::settings::ConnectorSettings) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::timeout(self, core::time::Duration) -> Self
+pub fn coqui_proxy::connect::ProxyConnectorBuilder::user_agent(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub struct coqui_proxy::ProxyVariables
+impl coqui_proxy::ProxyVariables
+pub fn coqui_proxy::ProxyVariables::has_proxies(&self) -> bool
+pub fn coqui_proxy::ProxyVariables::no_proxy(&self) -> coqui_proxy::BypassRules
+#[non_exhaustive] pub struct coqui_proxy::ReaderSettings
+pub coqui_proxy::ReaderSettings::cfnetwork_deadline: core::time::Duration
+pub coqui_proxy::ReaderSettings::command_timeout: core::time::Duration
+pub coqui_proxy::ReaderSettings::dhcp_lease_paths: alloc::vec::Vec<std::path::PathBuf>
+pub coqui_proxy::ReaderSettings::gsettings_cache_ttl: core::time::Duration
+pub coqui_proxy::ReaderSettings::winhttp_timeout: core::time::Duration
+impl coqui_proxy::settings::ReaderSettings
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_CFNETWORK_DEADLINE: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_COMMAND_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_GSETTINGS_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::ReaderSettings::DEFAULT_WINHTTP_TIMEOUT: core::time::Duration
+pub fn coqui_proxy::settings::ReaderSettings::default_dhcp_lease_paths() -> alloc::vec::Vec<std::path::PathBuf>
+impl core::default::Default for coqui_proxy::settings::ReaderSettings
+pub fn coqui_proxy::settings::ReaderSettings::default() -> Self
+pub struct coqui_proxy::Reason(_)
+impl core::fmt::Display for coqui_proxy::Reason
+pub fn coqui_proxy::Reason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_proxy::Resolver
+impl coqui_proxy::Resolver
+pub fn coqui_proxy::Resolver::builder() -> coqui_proxy::ResolverBuilder
+pub fn coqui_proxy::Resolver::cache_len(&self) -> usize
+pub fn coqui_proxy::Resolver::clear(&self)
+pub fn coqui_proxy::Resolver::lookup(&self, &str) -> core::result::Result<alloc::vec::Vec<coqui_proxy::Route>, coqui_proxy::Error>
+pub fn coqui_proxy::Resolver::no_proxy(&self) -> &coqui_proxy::BypassRules
+pub fn coqui_proxy::Resolver::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::Resolver::report_failure(&self, &coqui_proxy::Proxy)
+pub fn coqui_proxy::Resolver::scheme_proxies(&self, &str) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, coqui_proxy::Proxy>, coqui_proxy::Error>
+pub fn coqui_proxy::Resolver::settings(&self) -> &coqui_proxy::settings::ResolverSettings
+pub fn coqui_proxy::Resolver::sources(&self) -> &[alloc::sync::Arc<dyn coqui_proxy::source::ProxySource>]
+pub fn coqui_proxy::Resolver::system() -> Self
+impl coqui_proxy::Resolver
+pub fn coqui_proxy::Resolver::child_environment<S: core::convert::AsRef<str>>(&self, impl core::iter::traits::collect::IntoIterator<Item = S>) -> core::result::Result<coqui_proxy::ChildEnvironment, coqui_proxy::Error>
+pub struct coqui_proxy::ResolverBuilder
+impl coqui_proxy::ResolverBuilder
+pub fn coqui_proxy::ResolverBuilder::build(self) -> coqui_proxy::Resolver
+pub fn coqui_proxy::ResolverBuilder::credentials(self, coqui_proxy::Credentials) -> Self
+pub fn coqui_proxy::ResolverBuilder::environment(self, coqui_proxy::Environment) -> Self
+pub fn coqui_proxy::ResolverBuilder::no_proxy(self, coqui_proxy::BypassRules) -> Self
+pub fn coqui_proxy::ResolverBuilder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_proxy::ResolverBuilder::on_missing_engine(self, coqui_proxy::OnMissingEngine) -> Self
+pub fn coqui_proxy::ResolverBuilder::proxy(self, coqui_proxy::ProxySetting) -> Self
+pub fn coqui_proxy::ResolverBuilder::resolver_settings(self, coqui_proxy::settings::ResolverSettings) -> Self
+pub fn coqui_proxy::ResolverBuilder::settings(self, coqui_proxy::system::SystemSettings) -> Self
+pub fn coqui_proxy::ResolverBuilder::source(self, impl coqui_proxy::source::ProxySource + 'static) -> Self
+pub fn coqui_proxy::ResolverBuilder::system(self, bool) -> Self
+pub fn coqui_proxy::ResolverBuilder::timeout(self, core::time::Duration) -> Self
+pub fn coqui_proxy::ResolverBuilder::wpad(self, bool) -> Self
+#[non_exhaustive] pub struct coqui_proxy::ResolverSettings
+pub coqui_proxy::ResolverSettings::bypass_dns_timeout: core::time::Duration
+pub coqui_proxy::ResolverSettings::cache_capacity: usize
+pub coqui_proxy::ResolverSettings::cache_ttl: core::option::Option<core::time::Duration>
+pub coqui_proxy::ResolverSettings::failure_memory: core::time::Duration
+pub coqui_proxy::ResolverSettings::interface_cache_ttl: core::time::Duration
+pub coqui_proxy::ResolverSettings::on_missing_engine: coqui_proxy::OnMissingEngine
+pub coqui_proxy::ResolverSettings::pac: coqui_proxy::settings::PacSettings
+pub coqui_proxy::ResolverSettings::probe: bool
+pub coqui_proxy::ResolverSettings::probe_failure_memory: core::time::Duration
+pub coqui_proxy::ResolverSettings::probe_timeout: core::time::Duration
+pub coqui_proxy::ResolverSettings::reader: coqui_proxy::settings::ReaderSettings
+pub coqui_proxy::ResolverSettings::rotate: bool
+pub coqui_proxy::ResolverSettings::rotation_capacity: usize
+pub coqui_proxy::ResolverSettings::settings_refresh: core::time::Duration
+pub coqui_proxy::ResolverSettings::source_retry: core::time::Duration
+pub coqui_proxy::ResolverSettings::system: bool
+pub coqui_proxy::ResolverSettings::timeout: core::time::Duration
+pub coqui_proxy::ResolverSettings::wpad: bool
+impl coqui_proxy::settings::ResolverSettings
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_BYPASS_DNS_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_CACHE_CAPACITY: usize
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_FAILURE_MEMORY: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_INTERFACE_CACHE_TTL: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_PROBE_FAILURE_MEMORY: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_PROBE_TIMEOUT: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_ROTATION_CAPACITY: usize
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_SETTINGS_REFRESH: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_SOURCE_RETRY: core::time::Duration
+pub const coqui_proxy::settings::ResolverSettings::DEFAULT_TIMEOUT: core::time::Duration
+impl core::default::Default for coqui_proxy::settings::ResolverSettings
+pub fn coqui_proxy::settings::ResolverSettings::default() -> Self
+pub struct coqui_proxy::Secret(_)
+impl coqui_proxy::Secret
+pub fn coqui_proxy::Secret::expose(&self) -> &str
+pub fn coqui_proxy::Secret::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::convert::From<&str> for coqui_proxy::Secret
+pub fn coqui_proxy::Secret::from(&str) -> Self
+impl core::convert::From<alloc::string::String> for coqui_proxy::Secret
+pub fn coqui_proxy::Secret::from(alloc::string::String) -> Self
+impl core::fmt::Debug for coqui_proxy::Secret
+pub fn coqui_proxy::Secret::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_proxy::UnsupportedProxy
+impl coqui_proxy::UnsupportedProxy
+pub fn coqui_proxy::UnsupportedProxy::client(&self) -> &str
+pub fn coqui_proxy::UnsupportedProxy::new(impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<(coqui_proxy::Proxy, alloc::string::String)>) -> Self
+pub fn coqui_proxy::UnsupportedProxy::proxies(&self) -> alloc::vec::Vec<&coqui_proxy::Proxy>
+pub fn coqui_proxy::UnsupportedProxy::reasons(&self) -> alloc::vec::Vec<&str>
+impl core::fmt::Display for coqui_proxy::UnsupportedProxy
+pub fn coqui_proxy::UnsupportedProxy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const coqui_proxy::VERSION: &str
+pub trait coqui_proxy::ProxySource: core::marker::Send + core::marker::Sync + core::fmt::Debug
+pub fn coqui_proxy::ProxySource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::EnvSource
+pub fn coqui_proxy::EnvSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::ProxySetting
+pub fn coqui_proxy::ProxySetting::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::pac::PacSource
+pub fn coqui_proxy::pac::PacSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::source::ChainSource
+pub fn coqui_proxy::source::ChainSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::system::SystemSource
+pub fn coqui_proxy::system::SystemSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>
+impl coqui_proxy::source::ProxySource for coqui_proxy::system::WinHttpSource
+pub fn coqui_proxy::system::WinHttpSource::routes(&self, &str) -> core::result::Result<core::option::Option<alloc::vec::Vec<coqui_proxy::Route>>, coqui_proxy::Error>

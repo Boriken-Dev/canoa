@@ -1,0 +1,73 @@
+# coqui-proxy/. at ff844043be1f895022aef5ac24e97512cf723346, with what it inherits written out.
+[package]
+name = "coqui-proxy"
+version = "0.0.0-alpha.0"
+description = "Which proxy a request should use, and a connection through it: the system's proxy settings, PAC and WPAD, bypass rules, proxy login and CONNECT/SOCKS connectors"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-proxy"
+keywords = ["proxy", "pac", "wpad", "socks", "system"]
+categories = ["network-programming"]
+publish = false
+exclude = [".*", "*.local.*", "/tools/"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+pac = ["dep:boa_engine", "dep:boa_gc", "dep:gethostname"]
+tls = ["dep:rustls", "dep:rustls-platform-verifier"]
+negotiate = ["dep:libgssapi"]
+libproxy = ["dep:libloading"]
+[dependencies]
+http = "1"
+percent-encoding = "2"
+base64 = "0.22"
+thiserror = "2"
+if-addrs = "0.15"
+[dependencies.tracing]
+version = "0.1"
+default-features = false
+features = ["std"]
+[dependencies.coqui-net-acl]
+git = "https://github.com/Boriken-Dev/coqui-net-acl"
+rev = "839435acc29b76ec0190b7099f870863313d3fcd"
+[dependencies.boa_engine]
+version = "0.21"
+optional = true
+[dependencies.boa_gc]
+version = "0.21"
+optional = true
+[dependencies.gethostname]
+version = "1"
+optional = true
+[dependencies.rustls]
+version = "0.23.46"
+default-features = false
+features = ["ring", "std", "tls12"]
+optional = true
+[dependencies.rustls-platform-verifier]
+version = "0.7"
+optional = true
+[target]
+[target."cfg(windows)"]
+[target."cfg(windows)".dependencies]
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_Security_Authentication_Identity", "Win32_Security_Credentials", "Win32_System_Rpc", "Win32_System_SystemInformation"]
+[target."cfg(unix)"]
+[target."cfg(unix)".dependencies]
+[target."cfg(unix)".dependencies.libgssapi]
+version = "0.11"
+optional = true
+[target."cfg(unix)".dependencies.libloading]
+version = "0.8"
+optional = true
+[dev-dependencies]
+rcgen = "0.14"
+tempfile = "3"
+proptest = "1"
