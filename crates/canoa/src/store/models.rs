@@ -529,7 +529,11 @@ pub struct Finished {
     pub err: String,
 }
 
-/// Runs `program` with `args` through `spawner` to its end, or ends it (and what it started) when `limit` is over.
+/// Runs `program` with `args` through `spawner` until the program exits, or ends it (and what it started) when `limit` is over.
+///
+/// It ends when the program exits, not when its pipes close: a service the program started and left running keeps them open,
+/// so once the program has exited only what is already buffered is read, for at most [`DRAIN`]. What the program started
+/// is left alone then; only the limit ends it, and what it started.
 ///
 /// # Errors
 ///
@@ -549,7 +553,7 @@ pub fn run(
     let started = Instant::now();
     let mut out = Stream::default();
     let mut err = Stream::default();
-    loop {
+    let exit = loop {
         if started.elapsed() >= limit {
             let _ = process.kill();
             let _ = process.wait(500);
@@ -568,30 +572,34 @@ pub fn run(
         if !err.done {
             err.take(&process, true, if both { 0 } else { 100 })?;
         }
-        if out.done && err.done {
-            break;
-        }
-    }
-    let exit = loop {
-        let exit = process.wait(100)?;
+        let exit = process.wait(0)?;
         if !exit.running {
             break exit;
         }
-        if started.elapsed() >= limit {
-            let _ = process.kill();
-            let _ = process.wait(500);
-            return Err(ProviderError::new(
-                Status::GUATIAO_ERR_GONE,
-                &format!("{program} did not end and was killed"),
-            ));
+        if out.done && err.done {
+            // Both pipes are closed and the program runs on: wait for it, within the limit.
+            let _ = process.wait(100)?;
         }
     };
+    let drain = Instant::now();
+    for (stream, error) in [(&mut out, false), (&mut err, true)] {
+        while !stream.done
+            && drain.elapsed() < DRAIN
+            && stream.take(&process, error, DRAIN_POLL_MS)?
+        {}
+    }
     Ok(Finished {
         code: exit.code,
         out: String::from_utf8_lossy(&out.bytes).into_owned(),
         err: String::from_utf8_lossy(&err.bytes).into_owned(),
     })
 }
+
+/// The most [`run`] reads after the program has exited, for what its pipes still hold.
+const DRAIN: Duration = Duration::from_millis(400);
+
+/// How long one read waits for a pipe's last bytes once the program has exited.
+const DRAIN_POLL_MS: u64 = 50;
 
 /// One of a process's two output streams, read as far as it goes.
 #[derive(Default)]
@@ -601,12 +609,13 @@ struct Stream {
 }
 
 impl Stream {
+    /// Reads once; whether it found anything (a closed stream counts: it is settled).
     fn take(
         &mut self,
         process: &Object<dyn SpawnedProcess>,
         error: bool,
         wait_ms: u64,
-    ) -> Result<(), ProviderError> {
+    ) -> Result<bool, ProviderError> {
         let mut buffer = [0u8; 8192];
         let count = if error {
             process.read_error(&mut buffer, wait_ms)?
@@ -614,16 +623,16 @@ impl Stream {
             process.read(&mut buffer, wait_ms)?
         };
         if count == READ_TIMED_OUT || count == READ_LINK_DOWN {
-            return Ok(());
+            return Ok(false);
         }
         if count <= 0 {
             self.done = true;
-            return Ok(());
+            return Ok(true);
         }
         let count = usize::try_from(count).unwrap_or(0).min(buffer.len());
         let room = MOST_OUTPUT.saturating_sub(self.bytes.len());
         self.bytes.extend_from_slice(&buffer[..count.min(room)]);
-        Ok(())
+        Ok(true)
     }
 }
 

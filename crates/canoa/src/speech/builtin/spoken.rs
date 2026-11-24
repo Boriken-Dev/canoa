@@ -515,6 +515,19 @@ pub fn collect(
                 if let Ok(count) = usize::try_from(count) {
                     let room = limit.saturating_sub(out.len());
                     out.extend_from_slice(&chunk[..count.min(chunk.len()).min(room)]);
+                } else if process.wait(0).is_ok_and(|exit| !exit.running) {
+                    // It has exited but a service it started holds the pipe open: take what is buffered and stop.
+                    while let Ok(count) = process.read(&mut chunk, 50) {
+                        let Ok(count) = usize::try_from(count) else {
+                            break;
+                        };
+                        if count == 0 {
+                            break;
+                        }
+                        let room = limit.saturating_sub(out.len());
+                        out.extend_from_slice(&chunk[..count.min(chunk.len()).min(room)]);
+                    }
+                    break;
                 }
             }
         }

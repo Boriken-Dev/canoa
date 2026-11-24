@@ -362,6 +362,38 @@ fn a_program_that_does_not_finish_in_time_is_ended() {
 }
 
 #[test]
+fn a_program_that_exits_is_done_though_a_service_it_started_holds_its_pipes() {
+    let held = fixture("daemon", true);
+    std::fs::write(held.bin.join("daemon"), "").expect("a program that starts a service");
+    let spawner = crate::store::sources::Reach(coqui_acp_harness::LocalSpawner::new());
+    let spawner = coqui_acp_api::ProcessSpawner::into_object(spawner);
+    let program = held.bin.join(if cfg!(windows) {
+        "foundry.exe"
+    } else {
+        "foundry"
+    });
+    let started = Instant::now();
+    let done = canoa::store::models::run(
+        &spawner,
+        &program.to_string_lossy(),
+        &[
+            "model".to_owned(),
+            "list".to_owned(),
+            "-o".to_owned(),
+            "json".to_owned(),
+        ],
+        Duration::from_secs(60),
+    );
+    let took = started.elapsed();
+    std::fs::write(held.bin.join("daemon_stop"), "").expect("the service is told to end");
+    std::thread::sleep(Duration::from_millis(500));
+    let done = done.expect("finished");
+    assert!(took < Duration::from_secs(10), "{took:?}");
+    assert_eq!(done.code, Some(0));
+    assert!(done.out.contains("qwen3-14b"), "{}", done.out);
+}
+
+#[test]
 fn a_downloaded_model_page_says_its_own_window_and_where_the_form_goes() {
     let held = fixture("page", true);
     held.cached_model(ID, 40960, 8192);

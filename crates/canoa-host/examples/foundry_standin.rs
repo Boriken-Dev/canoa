@@ -1,7 +1,8 @@
 //! A stand-in for Foundry Local's command line, for the tests of the host's model calls. It holds a three-model catalog and keeps
 //! which are downloaded and loaded in the files `cached` and `loaded` of its own folder, one model a line, so a test copies it into a
 //! folder of its own. A file `sleep_ms` there (a number) makes every `model` action wait that long first; a file `fail` makes `list`
-//! fail. It loads nothing and downloads nothing.
+//! fail; a file `daemon` makes `list` start a copy of this program that keeps the pipes it inherited open for up to 30 seconds,
+//! or until a file `daemon_stop` appears, as Foundry Local's service does. It loads nothing and downloads nothing.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -51,6 +52,15 @@ fn keep(name: &str, lines: &[String]) {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let word = |at: usize| args.get(at).map(String::as_str);
+    if word(0) == Some("--daemon") {
+        for _ in 0..300 {
+            if state("daemon_stop").is_some_and(|path| path.exists()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        return ExitCode::SUCCESS;
+    }
     if word(0) == Some("--version") {
         println!("0.14.0");
         return ExitCode::SUCCESS;
@@ -83,6 +93,11 @@ fn main() -> ExitCode {
                 })
                 .collect();
             println!("{}", serde_json::Value::Array(rows));
+            if state("daemon").is_some_and(|path| path.exists())
+                && let Ok(exe) = std::env::current_exe()
+            {
+                let _ = std::process::Command::new(exe).arg("--daemon").spawn();
+            }
         }
         Some(action @ ("download" | "load" | "unload")) => {
             let Some(model) = word(2).filter(|id| CATALOG.iter().any(|(each, ..)| each == id))

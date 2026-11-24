@@ -333,9 +333,14 @@ impl<'a> Run<'a> {
                 let _ = process.kill();
                 return Err(ProviderError::new(Status::GUATIAO_ERR_GONE, why));
             }
-            let count = process.read(&mut buffer, 200)?;
+            let mut count = process.read(&mut buffer, 200)?;
             if count == coqui_acp_api::READ_TIMED_OUT || count == coqui_acp_api::READ_LINK_DOWN {
-                continue;
+                // A service the program started can hold the pipe open after the program has exited: read what is
+                // buffered, and stop when nothing more comes.
+                if process.wait(0)?.running {
+                    continue;
+                }
+                count = process.read(&mut buffer, 50)?;
             }
             if count <= 0 {
                 break;
