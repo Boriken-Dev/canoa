@@ -23,7 +23,7 @@
 #   noise     offline: installing wasm-bindgen's command line and building app/web_noise, from the deps branch's
 #             crates-wasm-bindgen-cli/ and crates-web_noise/
 #   site      offline: the hosted and git packages come from the deps branch
-#   host      offline: the crates come from the deps branch
+#   host      the Debian packages for compiling whisper.cpp (cmake, libclang-dev), then offline: the crates come from the deps branch
 # Nothing else is fetched: once base, flutter, deps and wasm_target are built, `podman build --network=none` builds the
 # rest. The image holds no credential, and the stages that fetch are not copied into `runtime`.
 #
@@ -116,6 +116,9 @@ RUN --network=none python3 packaging/container/site_build.py
 
 # The host, with the site and Office.js built in, from the deps branch's crates alone.
 FROM base AS host
+# whisper.cpp is compiled into the host by cmake (`whisper-rs-sys`), with the C++ compiler the Rust image has and libclang for the
+# bindings. The only fetch of this stage; the build steps below run offline.
+RUN apt-get update     && apt-get install -y --no-install-recommends cmake libclang-dev     && rm -rf /var/lib/apt/lists/*
 ENV CANOA_DEPS=/deps CARGO_NET_OFFLINE=true
 WORKDIR /src
 COPY --from=deps /deps /deps
