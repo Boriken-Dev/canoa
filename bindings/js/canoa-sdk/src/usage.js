@@ -39,9 +39,10 @@ export const Retry = Object.freeze({
 /**
  * One bucket of the account's quota, as the host reads it: unknown coverage, refill and status, in permille and reported, unless a
  * field says otherwise. `remaining` and `limit` are counts of `unit` (`permille`, `tokens`, `requests`, `micro_usd`); `resets_at` is
- * Unix seconds and makes the refill a fixed window.
+ * Unix seconds and makes the refill a fixed window. `group` names the group of allowances the bucket belongs to, `model_names` the
+ * models an app shows for it, and `status` may be `disabled` for a window that does not apply now.
  * @param {string} id starts with the reader's `bucket_prefix`
- * @param {{label?: string, models?: string[], unit?: string, used?: number, limit?: number, remaining?: number, resets_at?: number, status?: string, observed_at?: number, evidence?: string}} [fields]
+ * @param {{label?: string, group?: string, models?: string[], model_names?: string[], unit?: string, used?: number, limit?: number, remaining?: number, resets_at?: number, status?: string, observed_at?: number, evidence?: string}} [fields]
  * @returns {unknown}
  */
 export function bucket(id, fields = {}) {

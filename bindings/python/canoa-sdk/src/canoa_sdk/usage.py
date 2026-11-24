@@ -68,7 +68,9 @@ def bucket(
     id: str,
     *,
     label: Optional[str] = None,
+    group: Optional[str] = None,
     models: Optional[Sequence[str]] = None,
+    model_names: Optional[Sequence[str]] = None,
     unit: str = "permille",
     used: Optional[int] = None,
     limit: Optional[int] = None,
@@ -80,11 +82,15 @@ def bucket(
 ) -> Dict[str, Any]:
     """One bucket of the account's quota, as the host reads it: unknown coverage, refill and status, in permille and reported,
     unless a field says otherwise. `id` starts with the reader's `bucket_prefix`. `remaining` and `limit` count `unit` (`permille`,
-    `tokens`, `requests`, `micro_usd`); `resets_at` is Unix seconds and makes the refill a fixed window."""
+    `tokens`, `requests`, `micro_usd`); `resets_at` is Unix seconds and makes the refill a fixed window. `group` names the group of allowances
+    the bucket belongs to and `model_names` the models an app shows for it; `status` may be `disabled` for a window that does not
+    apply now."""
     fields = {
         "id": id,
         "label": label,
+        "group": group,
         "models": {"kind": "only", "models": list(models)} if models is not None else {"kind": "unknown"},
+        "model_names": list(model_names) if model_names is not None else None,
         "unit": unit,
         "used": used,
         "limit": limit,

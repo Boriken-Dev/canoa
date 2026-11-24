@@ -34,7 +34,7 @@ class UsageReader extends Provider {          // usage.js: static reader (the id
 }
 class UsageReading {                          // usage.js: not a provider: constructor(members); opened(result); read(root, tree) answers reading([...]) or failed(why, retry); processes(root); destroys members when the host lets it go
 }
-bucket(id, {label, models, unit, used, limit, remaining, resets_at, status, observed_at, evidence}); reading(buckets); failed(why, retry = Retry.NEVER); Retry.{NEVER, NOT_YET, NO_ANSWER}
+bucket(id, {label, group, models, model_names, unit, used, limit, remaining, resets_at, status, observed_at, evidence}); reading(buckets); failed(why, retry = Retry.NEVER); Retry.{NEVER, NOT_YET, NO_ANSWER}
 class FormSecretProvider extends SecretProvider            // the person's form: needs_person, holds nothing
 class SystemStoreSecretProvider extends SecretProvider     // a store of keys and texts you supply (read, write, remove), with an index of names
 nameOf(request); keepingOf(request); release(spawner)      // a request's name and value, checked as the kind says; lets the host's spawner go

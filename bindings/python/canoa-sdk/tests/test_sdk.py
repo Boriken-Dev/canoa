@@ -692,3 +692,11 @@ def test_account_provider_and_model_gateway_describe_and_answer_defaults() -> No
     assert lease.models()["known"] is False
     assert destroyed[-1] == "gw-s"
     assert provide.library("local_gw", "1", providers=[LocalGateway]).kinds == ("model_gateway",)
+
+
+def test_a_bucket_says_its_group_the_names_of_its_models_and_that_it_is_disabled() -> None:
+    made = sdk.bucket("q:weekly", group="Gemini Models", model_names=["Gemini Alpha"], status="disabled", observed_at=1)
+    assert made["group"] == "Gemini Models"
+    assert made["model_names"] == ["Gemini Alpha"]
+    assert made["status"] == "disabled"
+    assert "group" not in sdk.bucket("q:weekly", observed_at=1)
