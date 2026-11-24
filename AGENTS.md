@@ -123,6 +123,9 @@ cargo build -p canoa-ffi --lib
 # copy and paste in the terminal of the web app, in a real browser: key events through the engine, the browser's paste event with no clipboard permission, Ctrl+Shift+C and Ctrl+C
 (cd app && flutter build web --release --no-web-resources-cdn -t tool/terminal_page.dart -o <dir>)
 (cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_PAGE=<dir> node e2e/terminal_clipboard.mjs)
+# the web app's windows in a real browser: a session, a file and a terminal each in a browser window that is a child of the page, a message sent and a command run from them, a terminal window closed with its shell still running, and `[appearance] open_in` changing what a click on a session or a file does
+(cd app && flutter build web --release --no-web-resources-cdn -t tool/windows_page.dart -o <dir>)
+(cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_PAGE=<dir> [CANOA_E2E_SHOT=<dir for pictures>] node e2e/web_windows.mjs)
 # providers written with the SDKs, loaded through the host (Python needs its shared library; JavaScript needs a C compiler for QuickJS)
 CANOA_TEST_PYTHON=python3 CANOA_TEST_JS=1 cargo test -p canoa-host --test script_providers   # needs `cargo build -p canoa-host --example stdio_agent`
 (cd bindings/python/canoa-sdk && GUATIAO_LIBRARY=<guatiao_source_py built by the test> PYTHONPATH=<guatiao>/bindings/python/guatiao/src pytest)
