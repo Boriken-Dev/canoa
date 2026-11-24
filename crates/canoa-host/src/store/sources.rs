@@ -148,7 +148,6 @@ impl ProcessSpawner for Reach {
 pub(crate) struct Fetching {
     transport: Arc<dyn Transport>,
     limits: ToolsLimits,
-    loopback_http: bool,
 }
 
 impl Default for Fetching {
@@ -156,7 +155,6 @@ impl Default for Fetching {
         Self {
             transport: Arc::new(HttpTransport::default()),
             limits: ToolsLimits::default(),
-            loopback_http: false,
         }
     }
 }
@@ -175,23 +173,14 @@ impl Fetching {
                 lookup_response: response,
                 ..ToolsLimits::default()
             },
-            loopback_http: false,
         }
-    }
-
-    /// Fetching that reaches a loopback `http` address, which a test's server is.
-    #[cfg(test)]
-    pub(crate) fn loopback(mut self) -> Self {
-        self.loopback_http = true;
-        self
     }
 
     /// The object a source's `read` is handed: it reaches `endpoints` and nothing else.
     fn object(&self, endpoints: Vec<String>) -> Object<dyn SourceFetch> {
         Fetch {
             tools: LocalTools::new(Arc::clone(&self.transport), endpoints)
-                .limits(self.limits.clone())
-                .loopback_http(self.loopback_http),
+                .limits(self.limits.clone()),
         }
         .into_object()
     }
@@ -294,6 +283,9 @@ impl Sources {
         let mut found = Vec::new();
         for provider in registry.providers(KIND) {
             let id = provider.id().to_owned();
+            if crate::disabled::off::<dyn CatalogSourceProvider>(&id) {
+                continue;
+            }
             let offer = registry
                 .offer::<dyn CatalogSourceProvider>(&id)
                 .ok_or_else(|| format!("no provider {id}"))?
@@ -348,6 +340,22 @@ impl Sources {
             .iter()
             .map(|each| &each.info)
             .find(|info| info.id == id)
+    }
+
+    /// The text at the `https` address `url`, through the host's fetch, which may reach nothing but that address's origin: the one
+    /// place an entry that names only an address may read.
+    pub(crate) fn get_text(&self, url: &str, max_bytes: u64) -> Result<String, String> {
+        let rest = url
+            .strip_prefix("https://")
+            .ok_or_else(|| format!("{url} is not an https address"))?;
+        let origin = format!("https://{}", rest.split('/').next().unwrap_or_default());
+        let fetch = Fetch {
+            tools: LocalTools::new(Arc::clone(&self.fetching.transport), vec![origin])
+                .limits(self.fetching.limits.clone()),
+        };
+        fetch
+            .get_text(url, max_bytes)
+            .map_err(|error| error.to_string())
     }
 
     /// The catalog the provider `id` answers with for `request`, or why it gave none.

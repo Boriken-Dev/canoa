@@ -30,6 +30,33 @@ impl Control {
         let label = text_param(params, "label")?.ok_or_else(|| bad("label is needed"))?;
         let search = text_param(params, "search")?.unwrap_or_default();
         let cursor = text_param(params, "cursor")?.filter(|cursor| !cursor.is_empty());
+        let refresh = match params.get("refresh") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(bad("refresh is true or false")),
+        };
+        // A scope whose catalogs answer in one of the host's formats (a type's models, a program's releases) is read by its
+        // entry's source and kept on disk.
+        if let Ok(stores) = self.stores()
+            && let Some(scope) = stores
+                .catalog_types()
+                .into_iter()
+                .find(|scope| scope.id == id && scope.format.is_some())
+        {
+            let store = self.store_section();
+            let entry = catalogs::find(&scope, table_of(&store, &scope.id), label)
+                .map_err(|why| (NOT_FOUND, why))?;
+            let reading = stores
+                .catalog_run()
+                .read(&scope, &entry, refresh)
+                .map_err(|why| (REFUSED, why))?;
+            return crate::store::catalog_view::view(&scope, &entry, &reading).map_err(|why| {
+                (
+                    REFUSED,
+                    format!("{} gave no catalog: {why}", entry.provider),
+                )
+            });
+        }
         let kind: TypeCatalogs = match id {
             "skills" | "mcps" => built_in_types()
                 .into_iter()
@@ -46,11 +73,6 @@ impl Control {
                     format!("this host reads no catalogs of the type {id:?} through store/catalog"),
                 ));
             }
-        };
-        let refresh = match params.get("refresh") {
-            None | Some(Value::Null) => false,
-            Some(Value::Bool(value)) => *value,
-            Some(_) => return Err(bad("refresh is true or false")),
         };
         let store = self.store_section();
         let entry = catalogs::find(&kind, table_of(&store, &kind.id), label)

@@ -100,6 +100,7 @@ pub(super) struct RawStore {
     pub(super) lookup_timeout: Option<u64>,
     pub(super) tools: Option<bool>,
     pub(super) verify_copies: Option<bool>,
+    pub(super) source_ttl: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -195,6 +196,9 @@ pub(super) struct RawHost {
     pub(super) worktrees: Option<RawWorktrees>,
     pub(super) usage: Option<RawHostUsage>,
     pub(super) store: Option<RawStore>,
+    /// `[host.disabled]`: provider ids by kind name that are not offered or run.
+    #[serde(default)]
+    pub(super) disabled: IndexMap<String, Vec<String>>,
     pub(super) network: Option<RawNetwork>,
     pub(super) delegate: Option<RawDelegate>,
     pub(super) kb: Option<RawKb>,

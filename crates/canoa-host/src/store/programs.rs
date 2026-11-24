@@ -11,10 +11,11 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::time::Duration;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
 use canoa::store::models::ModelFile;
@@ -262,9 +263,6 @@ pub struct Options {
     pub credential_variables: Vec<String>,
     /// Whether the footprint reads the user's real registry keys (Windows).
     pub watch_registry: bool,
-    /// Lets an install take a download nothing checks (Grok's). The plan names each such download, and `current.json` records
-    /// that a file was not verified.
-    pub allow_unverified: bool,
     /// Whether [`launch`](Programs::launch) reads every file of the managed copy against what was recorded when it was installed.
     /// canoa.cfg's `[host.store] verify_copies`; off by default, when only the launch file must exist. An install's own check of
     /// each download against its publisher's SHA-256 does not depend on it.
@@ -293,7 +291,6 @@ impl Default for Options {
             protected: lines(RECOMMENDED_PLACES),
             credential_variables: lines(RECOMMENDED_VARIABLES),
             watch_registry: cfg!(windows),
-            allow_unverified: false,
             verify_copies: false,
             keep_versions: super::shelf::DEFAULT_KEEP_VERSIONS,
             settle: Duration::from_secs(2),
@@ -387,6 +384,10 @@ pub struct Programs {
     extras: Mutex<Vec<Arc<Registry>>>,
     transport: Arc<dyn Transport>,
     options: Options,
+    /// The programs whose scope has a catalog entry that says `trusted = true` (`[store.<program>.catalogs.<label>]`): an install of
+    /// one may take a download nothing checks. The plan names each such download, and `current.json` records that a file was not
+    /// verified.
+    trusted: RwLock<BTreeSet<String>>,
     /// How long a lookup waits to connect and for an answer; `[host.store] connect_timeout` and `lookup_timeout`.
     lookups: Mutex<(Duration, Duration)>,
     /// The plans this host made, by token: it applies its own copy of a plan, never one a client sends.
@@ -420,6 +421,7 @@ impl Programs {
             extras: Mutex::new(Vec::new()),
             transport: Arc::new(HttpTransport::default()),
             options: Options::default(),
+            trusted: RwLock::new(BTreeSet::new()),
             lookups: Mutex::new((
                 ToolsLimits::default().lookup_connect,
                 ToolsLimits::default().lookup_response,
@@ -467,6 +469,9 @@ impl Programs {
         settings: &StoreSettings,
     ) -> Result<Arc<dyn ProgramStore>, StoreError> {
         use coqui_acp_api::guatiao::ToValue;
+        if crate::disabled::off::<dyn ProgramStore>(id) {
+            return Err(StoreError::Unknown(id.to_owned()));
+        }
         let extras = self
             .extras
             .lock()
@@ -526,6 +531,20 @@ impl Programs {
         }
     }
 
+    /// Takes `programs` as the ones whose installs may take a download nothing checks, in place of the ones named before: the
+    /// programs whose scope in canoa.cfg has a trusted catalog entry.
+    pub fn trust(&self, programs: impl IntoIterator<Item = String>) {
+        *self.trusted.write().unwrap_or_else(PoisonError::into_inner) =
+            programs.into_iter().collect();
+    }
+
+    fn is_trusted(&self, program: &str) -> bool {
+        self.trusted
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(program)
+    }
+
     /// The transport every fetch of this store goes through, which a source's `fetch` shares.
     pub(crate) fn shared_transport(&self) -> Arc<dyn Transport> {
         Arc::clone(&self.transport)
@@ -533,6 +552,7 @@ impl Programs {
 
     fn tools(&self, info: &StoreInfo) -> LocalTools {
         self.tools_at(&info.endpoints)
+            .allow_unverified(self.is_trusted(&info.program))
     }
 
     fn tools_at(&self, endpoints: &[String]) -> LocalTools {
@@ -547,7 +567,6 @@ impl Programs {
             .limits(limits)
             .lookup(self.lookup(&self.options.environment))
             .loopback_http(self.options.loopback_http)
-            .allow_unverified(self.options.allow_unverified)
     }
 
     fn managed(&self, info: &StoreInfo) -> Result<Option<ManagedCopy>, StoreError> {
@@ -984,7 +1003,7 @@ impl Programs {
             .filter(|d| d.is_unverified())
             .map(|d| d.url.clone())
             .collect();
-        if !unchecked.is_empty() && !self.options.allow_unverified {
+        if !unchecked.is_empty() && !self.is_trusted(&info.program) {
             return Err(StoreError::Unverified(unchecked));
         }
         // One install at a time on the shelf: two measured together would each see the other's changes.
@@ -1203,10 +1222,11 @@ impl Programs {
         &self,
         store: &dyn ProgramStore,
         files: &[ModelFile],
+        checks: Option<&[canoa::store::Check]>,
         cancel: Arc<AtomicBool>,
     ) -> Result<(), StoreError> {
         let info = store.describe()?;
-        self.fetch_models_in(&info.program, &info.endpoints, files, cancel)
+        self.fetch_models_in(&info.program, &info.endpoints, files, checks, cancel)
     }
 
     /// As [`fetch_models`](Self::fetch_models) for the type whose files are kept under `program`, from the origins `endpoints`: the
@@ -1220,10 +1240,22 @@ impl Programs {
         program: &str,
         endpoints: &[String],
         files: &[ModelFile],
+        checks: Option<&[canoa::store::Check]>,
         cancel: Arc<AtomicBool>,
     ) -> Result<(), StoreError> {
         let folder = self.models_folder_of(program)?;
         let names = model_names(files)?;
+        if checks.is_some_and(|checks| checks.len() != files.len()) {
+            return Err(StoreError::Contract(
+                "a model's files and the checks that go with them differ in number".to_owned(),
+            ));
+        }
+        // A file nothing checks is taken only from a catalog entry that says it is trusted: the checks name it, and the plan did.
+        let unchecked = checks.is_some_and(|checks| {
+            checks
+                .iter()
+                .any(|check| matches!(check, canoa::store::Check::Unverified { .. }))
+        });
         // One at a time with the installs: a program's install measures this folder's tree, and a download in it is not its change.
         let _one_at_a_time = self.shelf.apply_lock()?;
         let kept = self.shelf.program(program)?;
@@ -1231,6 +1263,7 @@ impl Programs {
         fs::create_dir_all(&folder).map_err(ShelfError::from)?;
         let tools = self
             .tools_at(endpoints)
+            .allow_unverified(unchecked)
             .granted(&folder)
             .cancelled_by(cancel)
             .into_object();
@@ -1241,16 +1274,20 @@ impl Programs {
         };
         let mut fetched = Vec::new();
         let outcome = (|| -> Result<(), StoreError> {
-            for (file, name) in files.iter().zip(&names) {
+            for (at, (file, name)) in files.iter().zip(&names).enumerate() {
                 let partial = part(name);
                 let _ = fs::remove_file(folder.join(&partial));
                 fetched.push(partial.clone());
+                let check = checks.map_or_else(
+                    || canoa::store::Check::Sha256 {
+                        value: file.sha256.to_ascii_lowercase(),
+                    },
+                    |checks| checks[at].clone(),
+                );
                 let request = canoa::store::FetchRequest::new(
                     file.url.clone(),
                     partial.to_string_lossy().replace('\\', "/"),
-                    canoa::store::Check::Sha256 {
-                        value: file.sha256.to_ascii_lowercase(),
-                    },
+                    check,
                     file.bytes.unwrap_or(1 << 30).max(1),
                 );
                 tools.fetch(request)?;

@@ -329,6 +329,7 @@ pub(crate) fn listed_bases(store: &Value) -> Vec<String> {
     };
     crate::store::catalogs::rows_of(&mcps, crate::store::catalogs::table_of(store, "mcps"))
         .into_iter()
+        .filter(|row| row["enabled"] != false)
         .filter(|row| row["provider"].as_str() == Some(crate::store::catalogs::READ))
         .filter_map(|row| row["source"].as_str().map(str::to_owned))
         .filter(|address| !address.contains(['@', '#']))

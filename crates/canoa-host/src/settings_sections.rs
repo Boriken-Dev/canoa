@@ -141,6 +141,7 @@ impl SectionCatalog {
         for (origin, registry) in found {
             let keys: Vec<String> = registry
                 .offers::<dyn SettingsSection>()
+                .filter(|offer| !crate::disabled::off::<dyn SettingsSection>(offer.id()))
                 .filter_map(|offer| offer.key().map(str::to_owned))
                 .collect();
             for key in keys {

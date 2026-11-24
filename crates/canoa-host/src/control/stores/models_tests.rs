@@ -110,8 +110,10 @@ impl Fixture {
     }
 
     fn act(&self, model: &str, action: &str) -> Result<Value, Failed> {
-        self.stores
-            .model_act(&json!({"type": TYPE, "model": model, "action": action}))
+        self.stores.model_act(
+            &json!({"type": TYPE, "model": model, "action": action}),
+            &self.files,
+        )
     }
 
     fn set(&self, model: &str, values: &Value) -> Result<Value, Failed> {
@@ -197,7 +199,10 @@ fn a_build_without_the_library_lists_no_models_type_and_answers_no_model_call() 
     );
     for refused in [
         stores.models_read(&json!({"type": TYPE}), &files),
-        stores.model_act(&json!({"type": TYPE, "model": ID, "action": "load"})),
+        stores.model_act(
+            &json!({"type": TYPE, "model": ID, "action": "load"}),
+            &files,
+        ),
         stores.model_setting(&json!({"type": TYPE, "model": ID, "values": {}}), &files),
     ] {
         assert_eq!(
@@ -298,7 +303,7 @@ fn a_name_that_could_be_an_option_or_an_action_that_is_not_one_never_reaches_the
     }
     let refused = held
         .stores
-        .model_act(&json!({"type": TYPE, "action": "load"}))
+        .model_act(&json!({"type": TYPE, "action": "load"}), &held.files)
         .expect_err("no model");
     assert_eq!(refused.0, BAD_PARAMS);
     assert!(!held.bin.join("cached").exists() && !held.bin.join("loaded").exists());
@@ -674,7 +679,10 @@ fn a_library_of_no_vendor_adds_a_type_and_its_models_and_a_type_naming_no_provid
     assert_eq!(row["on"], false, "the stub type's program was not found");
     assert_eq!(
         stores
-            .model_act(&json!({"type": "stubs", "model": "one", "action": "go"}))
+            .model_act(
+                &json!({"type": "stubs", "model": "one", "action": "go"}),
+                &files
+            )
             .expect("acted")["note"],
         "go one"
     );

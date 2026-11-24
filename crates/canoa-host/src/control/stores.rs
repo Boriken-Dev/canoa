@@ -171,23 +171,88 @@ impl Stores {
         self.sources.clone()
     }
 
-    /// The store types the extensions add that read catalogs, in the words each gave.
+    /// Takes as trusted the programs whose scope in `store` (canoa.cfg's `[store]`) has a catalog entry that is on and says
+    /// `trusted = true`: an install of one may take a download nothing checks.
+    pub(crate) fn trust_from(&self, store: &Value) {
+        let trusted = self.catalog_types().into_iter().filter(|scope| {
+            crate::store::catalogs::merge(scope, crate::store::catalogs::table_of(store, &scope.id))
+                .iter()
+                .any(|merged| {
+                    merged
+                        .parsed
+                        .as_ref()
+                        .is_ok_and(|entry| entry.enabled && entry.trusted)
+                })
+        });
+        self.programs.trust(trusted.map(|scope| scope.id));
+    }
+
+    /// Forgets what the models pages and the catalogs' entries listed, since canoa.cfg's catalogs changed.
+    pub(crate) fn forget_listings(&self) {
+        self.caches.models.clear();
+        self.caches.catalog.clear();
+    }
+
+    /// What reads the catalogs of the scopes whose catalogs answer in a format of the host's: where they are kept, how long they
+    /// answer, and the sources that read them.
+    pub(crate) fn catalog_run(&self) -> crate::store::catalog_run::Run {
+        crate::store::catalog_run::Run {
+            dir: self.caches.dir.clone(),
+            ttl: self.caches.source_ttl,
+            sources: self.sources.clone(),
+        }
+    }
+
+    /// The scopes that read catalogs, in the words each gave: the store types the extensions add, and the program stores that
+    /// register catalogs for their own releases. A default an extension registers that is no valid label, or that names a format
+    /// its type does not, is left out and logged.
     pub(crate) fn catalog_types(&self) -> Vec<crate::store::catalogs::TypeCatalogs> {
-        self.types
+        let scope = |id: &str, title: &str, words: &canoa::store::extension::CatalogWords| {
+            let mut defaults = Vec::new();
+            for each in &words.defaults {
+                match crate::store::catalogs::Default::registered(each) {
+                    Ok(default) => defaults.push(default),
+                    Err(why) => tracing::warn!(scope = id, "a catalog is not offered: {why}"),
+                }
+            }
+            crate::store::catalogs::TypeCatalogs {
+                id: id.to_owned(),
+                title: title.to_owned(),
+                noun: words.noun.clone(),
+                plural: words.plural.clone(),
+                lists: words.lists.clone(),
+                defaults,
+                fixed: None,
+                format: words.format.clone(),
+            }
+        };
+        let mut scopes: Vec<_> = self
+            .types
             .iter()
             .filter_map(|added| {
                 let words = added.info.catalogs.as_ref()?;
-                Some(crate::store::catalogs::TypeCatalogs {
-                    id: added.info.id.clone(),
-                    title: added.info.title.clone(),
-                    noun: words.noun.clone(),
-                    plural: words.plural.clone(),
-                    lists: words.lists.clone(),
-                    default: None,
-                    fixed: None,
-                })
+                Some(scope(&added.info.id, &added.info.title, words))
             })
-            .collect()
+            .collect();
+        for provider in self
+            .providers
+            .iter()
+            .chain(&self.runtimes)
+            .chain(self.types.iter().flat_map(|t| &t.info.stores))
+        {
+            let Ok(store) = self.programs.store(provider, &StoreSettings::default()) else {
+                continue;
+            };
+            let Ok(info) = store.describe() else {
+                continue;
+            };
+            if let Some(words) = &info.catalogs
+                && !scopes.iter().any(|each| each.id == info.program)
+            {
+                scopes.push(scope(&info.program, &info.title, words));
+            }
+        }
+        scopes
     }
 
     /// The same, also offering the store types the `extensions` of canoa.cfg add. Each extension's library is loaded into a
@@ -204,6 +269,9 @@ impl Stores {
 
     fn load_extension(&mut self, extension: &crate::config::Extension) -> Result<(), String> {
         verify_extension(extension)?;
+        if crate::disabled::off::<dyn StoreExtension>(&extension.provider) {
+            return Ok(());
+        }
         let mut registry =
             coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
         crate::provider::open(&mut registry, &extension.origin).map_err(|e| e.to_string())?;
@@ -309,6 +377,9 @@ impl Stores {
     ) -> Self {
         for offer in registry.offers::<dyn StoreExtension>() {
             let id = offer.id().to_owned();
+            if crate::disabled::off::<dyn StoreExtension>(&id) {
+                continue;
+            }
             let Some(info) = offer
                 .default_instance()
                 .and_then(|extension| extension.describe().ok())
@@ -485,6 +556,7 @@ impl Stores {
 }
 
 mod models;
+mod models_catalog;
 
 type Failed = (i32, String);
 

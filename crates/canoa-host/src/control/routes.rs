@@ -191,8 +191,14 @@ impl Control {
         allow(caller, Grant::ConfigWrite)?;
         self.guard_sources(caller, params)?;
         if apply {
-            self.files
-                .config_set(params, caller.may(Grant::ConfigWriteSessions))
+            let written = self
+                .files
+                .config_set(params, caller.may(Grant::ConfigWriteSessions));
+            if written.is_ok() && params.get("section").and_then(Value::as_str) == Some("store") {
+                // What the catalogs of a type list is what canoa.cfg says now.
+                self.forget_listings();
+            }
+            written
         } else {
             self.files
                 .config_check(params, caller.may(Grant::ConfigWriteSessions))
@@ -210,6 +216,7 @@ impl Control {
             "looks/list" => looks::list(&config),
             "profile_items/list" => profile_items::list(&config),
             "panel_tabs/list" => panel_tabs::list(&crate::panel_tabs::TabCatalog::of(&config)),
+            "providers/registered" => providers::registered(&config),
             _ => providers::list(&config),
         })
     }
@@ -329,6 +336,24 @@ impl Control {
         params: &Value,
     ) -> Result<Value, (i32, String)> {
         self.store_catalog(caller, params)
+    }
+
+    pub(super) fn r_store_catalog_set(
+        &self,
+        caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.store_catalog_set(caller, params)
+    }
+
+    pub(super) fn r_providers_switch(
+        &self,
+        _: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.providers_switch(params)
     }
 
     pub(super) fn r_extension_act(
@@ -470,9 +495,10 @@ impl Control {
         params: &Value,
     ) -> Result<Value, (i32, String)> {
         let stores = self.stores()?;
+        stores.trust_from(&self.store_section());
         match method {
             "store/models" => stores.models_read(params, &self.files),
-            "store/model" => stores.model_act(params),
+            "store/model" => stores.model_act(params, &self.files),
             "store/model_setting" => stores.model_setting(params, &self.files),
             _ => stores.change(method, params),
         }

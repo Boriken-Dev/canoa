@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 /// `canoa-host`: every exception is listed here by file and declaration.
 /// Home-bound runtime state (such as `usage/read`'s allowance cache) belongs on `Control` or `Serving`, not here.
 const ALLOWED: &[(&str, &str)] = &[
+    // What `[host.disabled]` leaves off, set once when the host starts
+    ("disabled.rs", "static CURRENT:"),
     // Config serialization lock across file reads/rewrites
     ("accounts/commands/cfg.rs", "static CONFIG_WRITES:"),
     // Process-wide OS keyring serialization lock & mock/platform store handles

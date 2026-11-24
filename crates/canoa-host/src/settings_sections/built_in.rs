@@ -59,5 +59,7 @@ built_in_sections! {
     Usage("usage", "Usage", "Agents", "speed", "limit warn percent quota");
     Store("store", "Store", "Store", "storefront", "catalog catalogs sources registries overlays skills mcp servers types limits icons size");
     Extensions("extensions", "Extensions", "Store", "extension", "store types runtimes add library provider host restart");
+    CatalogSources("catalog_sources", "Catalog sources", "Store", "hub", "catalogs sources models releases default replace add off pin trust verified pinned unverified checksum digest mirror");
+    Providers("providers", "Providers", "Store", "wrench", "providers libraries kinds account harness vendor off disable switch turn disabled host restart");
     About("about", "About", "About", "info", "version canoa boriken licence");
 }

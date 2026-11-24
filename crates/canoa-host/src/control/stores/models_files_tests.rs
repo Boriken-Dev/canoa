@@ -381,8 +381,10 @@ impl Fixture {
     }
 
     fn act(&self, kind: &str, model: &str, action: &str) -> Result<Value, Failed> {
-        self.stores
-            .model_act(&json!({"type": kind, "model": model, "action": action}))
+        self.stores.model_act(
+            &json!({"type": kind, "model": model, "action": action}),
+            &self.files,
+        )
     }
 
     /// The folder the host keeps the type's models in.
@@ -577,6 +579,7 @@ fn a_name_that_leaves_the_models_folder_is_refused() {
             "whisper",
             &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
             &escaping,
+            None,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .expect_err("refused");

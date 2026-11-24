@@ -61,8 +61,6 @@ fn each_store_installs_its_real_program_into_a_throwaway_folder_and_changes_noth
     let mut options = Options::default();
     // A host that runs as root installs only when told it may: a probe machine without another user says so here.
     options.allow_elevated = std::env::var_os("CANOA_STORE_LIVE_ELEVATED").is_some();
-    // Grok's publisher gives nothing to check its binary against: the plan says so, and this run takes it.
-    options.allow_unverified = true;
     let path_dirs: Vec<PathBuf> = canoa_host::store::footprint::user_path_dirs(
         &std::ffi::OsString::from(options.environment.get("PATH").unwrap_or("")),
     );
@@ -95,6 +93,9 @@ fn each_store_installs_its_real_program_into_a_throwaway_folder_and_changes_noth
         built_in().expect("the built-in stores"),
     )
     .options(options);
+    // Grok's publisher gives nothing to check its binary against: the plan says so, and this run takes it, as an entry that says
+    // `trusted = true` does.
+    programs.trust(["grok".to_owned()]);
     let mut failed = Vec::new();
     for id in wanted.split(',').filter(|s| !s.is_empty()) {
         let provider = format!("{id}_store");

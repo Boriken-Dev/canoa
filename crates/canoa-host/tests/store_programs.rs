@@ -845,10 +845,10 @@ fn a_download_nothing_checks_needs_the_host_to_have_been_told_and_is_then_record
     options.verify_copies = true;
     options.settle = std::time::Duration::from_millis(100);
     options.allow_elevated = true;
-    options.allow_unverified = true;
     let programs = Programs::new(Shelf::unchecked(dir.0.join("programs")), registry())
         .transport(s.transport.clone())
         .options(options);
+    programs.trust(["echo".to_owned()]);
     let store: Arc<dyn ProgramStore> = Arc::new(Rigged {
         engine: Engine::new(EchoRecipe, StoreSettings::default()),
         rc: dir.0.join("home").join(".bashrc"),

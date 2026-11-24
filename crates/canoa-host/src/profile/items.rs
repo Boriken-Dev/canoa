@@ -344,6 +344,7 @@ impl ItemCatalog {
         for (origin, registry) in found {
             let keys: Vec<String> = registry
                 .offers::<dyn ProfileItem>()
+                .filter(|offer| !crate::disabled::off::<dyn ProfileItem>(offer.id()))
                 .filter_map(|offer| offer.key().map(str::to_owned))
                 .collect();
             for key in keys {

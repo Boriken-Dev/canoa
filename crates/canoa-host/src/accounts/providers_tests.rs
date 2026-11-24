@@ -145,3 +145,71 @@ fn an_account_that_names_a_harness_is_refused_with_the_key_named() {
     assert!(why.contains("work") && why.contains("harness"), "{why}");
     config("[host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n");
 }
+
+fn claude_accounts_off() -> crate::disabled::NamedGuard {
+    crate::disabled::naming(crate::disabled::Disabled::new([(
+        "account_provider".to_owned(),
+        vec!["claude_accounts".to_owned()],
+    )]))
+}
+
+#[test]
+fn a_disabled_account_provider_makes_no_kind_while_the_harness_runs_on_another_providers_account() {
+    let config = config("[host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n");
+    let _off = claude_accounts_off();
+    let catalogs = Catalogs::new(&config);
+    assert!(
+        catalogs.made("claude-login").is_none(),
+        "no account of Claude's provider is offered"
+    );
+    assert!(
+        catalogs
+            .harnesses()
+            .iter()
+            .any(|harness| harness == "claude"),
+        "the harness provider is untouched"
+    );
+    // A LiteLLM account provides the Anthropic API, and the claude harness takes it.
+    let proxy = account(
+        "litellm",
+        Some(serde_json::json!({"base_url": "https://llm.example.com"})),
+    );
+    let info = catalogs.kind(&proxy).expect("its kind");
+    assert!(
+        fitting(&catalogs, &proxy, &info)
+            .iter()
+            .any(|each| each == "claude")
+    );
+    assert!(
+        providers::all(&config)
+            .iter()
+            .all(|row| row.id != "claude_accounts"),
+        "the provider is not listed as one to sign in with"
+    );
+}
+
+#[test]
+fn the_accounts_of_a_disabled_provider_stay_in_canoa_cfg_and_are_listed_as_off() {
+    let config = config("[host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n");
+    assert_eq!(config.accounts.len(), 1, "canoa.cfg keeps them");
+    let off = claude_accounts_off();
+    let found = super::commands::kinds_of_off_providers(&Config {
+        disabled: crate::disabled::Disabled::new([(
+            "account_provider".to_owned(),
+            vec!["claude_accounts".to_owned()],
+        )]),
+        ..config.clone()
+    });
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].0, "claude_accounts");
+    assert!(
+        found[0].1.iter().any(|kind| kind == "claude-login"),
+        "{found:?}"
+    );
+    drop(off);
+    let back = Catalogs::new(&config);
+    assert!(
+        back.made("claude-login").is_some(),
+        "turned on again, the account is Claude's again"
+    );
+}

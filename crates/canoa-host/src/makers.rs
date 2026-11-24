@@ -94,6 +94,11 @@ pub(crate) fn makers_in(registry: &Registry) -> Vec<Maker> {
         .collect()
 }
 
+/// Whether `[host.disabled]` leaves `maker`'s provider off: its kinds are then offered to no one.
+fn off(maker: &Maker) -> bool {
+    crate::disabled::off::<dyn AccountProvider>(&maker.provider)
+}
+
 /// The makers the bundled libraries offer, found once.
 pub(crate) fn offered() -> &'static [Maker] {
     static OFFERED: OnceLock<Vec<Maker>> = OnceLock::new();
@@ -227,16 +232,16 @@ impl Makers {
 
     fn visit(&self, mut visitor: impl FnMut(&Maker) -> bool) {
         #[cfg(test)]
-        if stand_ins::visit(|maker| !visitor(maker)) {
+        if stand_ins::visit(|maker| off(maker) || !visitor(maker)) {
             return;
         }
         for maker in offered() {
-            if !visitor(maker) {
+            if !off(maker) && !visitor(maker) {
                 return;
             }
         }
         for maker in self.added.iter() {
-            if !visitor(maker) {
+            if !off(maker) && !visitor(maker) {
                 return;
             }
         }

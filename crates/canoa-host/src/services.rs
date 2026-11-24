@@ -244,6 +244,7 @@ impl Services {
         for registry in registries {
             let keys: Vec<String> = registry
                 .offers::<dyn SessionService>()
+                .filter(|offer| !crate::disabled::off::<dyn SessionService>(offer.id()))
                 .filter_map(|offer| offer.key().map(str::to_owned))
                 .collect();
             for key in keys {

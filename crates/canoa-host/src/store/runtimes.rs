@@ -46,7 +46,9 @@ fn supports_os(info: &StoreInfo, os: &str) -> bool {
 }
 
 fn is_runtime_id(id: &str, agents: &[String], extension_stores: &[String]) -> bool {
-    !agents.iter().any(|agent| agent == id) && !extension_stores.iter().any(|ext| ext == id)
+    !agents.iter().any(|agent| agent == id)
+        && !extension_stores.iter().any(|ext| ext == id)
+        && !crate::disabled::off::<dyn ProgramStore>(id)
 }
 
 /// The runtime store provider ids offered by `registry` for `os`: every `program_store` that is neither an agent store nor

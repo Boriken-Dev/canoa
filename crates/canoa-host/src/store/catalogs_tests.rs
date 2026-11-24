@@ -121,7 +121,11 @@ fn a_default_catalog_is_listed_first_until_its_label_is_named_or_turned_off() {
         labels(json!({"mine": "https://example.org/m.git@main#c.toml"})),
         ["boriken", "mine"]
     );
-    assert!(labels(json!({"boriken": false})).is_empty());
+    assert_eq!(
+        labels(json!({"boriken": false})),
+        ["boriken"],
+        "a default turned off is still listed, off"
+    );
     assert_eq!(
         labels(json!({"boriken": "https://example.org/b.git@main#c.toml"})),
         ["boriken"]
@@ -135,7 +139,7 @@ fn a_default_catalog_is_listed_first_until_its_label_is_named_or_turned_off() {
             .collect()
     };
     assert_eq!(mcp_labels(json!(null)), ["official"]);
-    assert!(mcp_labels(json!({"official": false})).is_empty());
+    assert_eq!(mcp_labels(json!({"official": false})), ["official"]);
     assert_eq!(
         mcp_labels(json!({"official": "https://mirror.example/"})),
         ["official"]
@@ -166,4 +170,161 @@ fn store_catalogs_section_uses_a_closed_guatiao_schema() {
 
     let unknown = guatiao_serde::from_serde(json!({"unexpected": 1})).expect("val");
     assert!(CatalogTableSchema::from_value(&unknown).is_err());
+}
+
+fn scope(defaults: &[(&str, &str)]) -> TypeCatalogs {
+    TypeCatalogs {
+        id: "whisper".to_owned(),
+        title: "Whisper".to_owned(),
+        noun: "source".to_owned(),
+        plural: "sources".to_owned(),
+        lists: "models".to_owned(),
+        defaults: defaults
+            .iter()
+            .map(|(label, provider)| Default {
+                label: (*label).to_owned(),
+                provider: (*provider).to_owned(),
+                fields: Map::new(),
+                pin: Some("5359861c".to_owned()),
+                snapshot: None,
+            })
+            .collect(),
+        fixed: None,
+        format: Some("canoa.models/1".to_owned()),
+    }
+}
+
+fn shown(kind: &TypeCatalogs, table: Value) -> Vec<(String, String, bool)> {
+    rows_of(kind, &table)
+        .into_iter()
+        .map(|row| {
+            (
+                row["label"].as_str().unwrap_or_default().to_owned(),
+                row["origin"].as_str().unwrap_or("problem").to_owned(),
+                row["enabled"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn an_extensions_defaults_come_first_then_an_entry_replaces_by_label_adds_or_turns_one_off() {
+    let kind = scope(&[("ggerganov", "whisper_hf"), ("local", "whisper_folder")]);
+    let row = |label: &str, origin: &str, on: bool| (label.to_owned(), origin.to_owned(), on);
+    assert_eq!(
+        shown(&kind, Value::Null),
+        [
+            row("ggerganov", "default", true),
+            row("local", "default", true)
+        ]
+    );
+    let table = json!({
+        "mine": {"provider": "whisper_hf", "repo": "me/models"},
+        "Local": {"provider": "read", "source": "D:/models.json"},
+        "ggerganov": false,
+    });
+    assert_eq!(
+        shown(&kind, table.clone()),
+        [
+            row("ggerganov", "default", false),
+            row("Local", "replaced", true),
+            row("mine", "added", true),
+        ],
+        "the defaults keep their places, a replacement takes the place of its default, a new label follows"
+    );
+    let rows = rows_of(&kind, &table);
+    assert_eq!(
+        rows[1]["provider"], "read",
+        "an entry replaces its default whole"
+    );
+    assert_eq!(rows[1]["fields"], json!({"source": "D:/models.json"}));
+    assert!(
+        rows[1].get("pin").is_none(),
+        "the default's pin is not carried into the entry that replaced it"
+    );
+    assert_eq!(
+        rows[0]["pin"], "5359861c",
+        "an off default keeps what it was"
+    );
+    assert_eq!(rows[0]["trust"], "pinned");
+}
+
+#[test]
+fn a_catalog_that_is_off_or_no_catalog_is_not_found_and_says_why() {
+    let kind = scope(&[("ggerganov", "whisper_hf")]);
+    let off = find(&kind, &json!({"ggerganov": false}), "Ggerganov");
+    assert!(off.is_err_and(|why| why.contains("turned off")));
+    assert!(find(&kind, &json!({"ggerganov": false}), "other").is_err());
+    let found = find(&kind, &Value::Null, "ggerganov").expect("the default");
+    assert_eq!(
+        (found.provider.as_str(), found.origin),
+        ("whisper_hf", Origin::Default)
+    );
+    let bad = find(&kind, &json!({"ggerganov": {"provider": 7}}), "ggerganov");
+    assert!(
+        bad.is_err_and(|why| why.contains("provider")),
+        "an entry that is no catalog takes its default's place and says why"
+    );
+}
+
+#[test]
+fn the_hosts_keys_are_read_apart_from_the_providers_fields() {
+    let table = json!({"mirror": {
+        "provider": "codex_releases", "origin": "https://mirror.example",
+        "pin": "sha256:1e0c", "trusted": true, "ttl": 90, "keys": ["5A3F"],
+    }});
+    let entry = read(&table).remove(0).expect("valid");
+    assert_eq!(
+        Value::Object(entry.fields.clone()),
+        json!({"origin": "https://mirror.example"})
+    );
+    assert_eq!(
+        (
+            entry.pin.as_deref(),
+            entry.trusted,
+            entry.ttl,
+            entry.keys.as_slice()
+        ),
+        (
+            Some("sha256:1e0c"),
+            true,
+            Some(90),
+            ["5A3F".to_owned()].as_slice()
+        )
+    );
+    assert_eq!(
+        entry.trust(),
+        "unverified",
+        "an entry that takes files with no digest is drawn as such"
+    );
+    for bad in [
+        json!({"pin": 3}),
+        json!({"trusted": "yes"}),
+        json!({"ttl": "soon"}),
+        json!({"keys": "5A3F"}),
+    ] {
+        let parsed = read(&json!({"x": bad}));
+        assert!(parsed[0].is_err(), "{parsed:?}");
+    }
+    let plain = read(&json!({"a": {"provider": "x"}}))
+        .remove(0)
+        .expect("valid");
+    assert_eq!(plain.trust(), "verified");
+}
+
+#[test]
+fn the_types_fixed_catalog_cannot_be_replaced_or_turned_off() {
+    let mut kind = scope(&[]);
+    kind.fixed = Some(("official", "https://registry.example"));
+    for table in [
+        json!({"official": "https://mirror.example"}),
+        json!({"official": false}),
+    ] {
+        let rows = rows_of(&kind, &table);
+        assert_eq!(rows[0]["fixed"], true);
+        assert_eq!(rows[0]["enabled"], true);
+        if table["official"] != json!(false) {
+            assert!(rows[1].get("problem").is_some(), "{rows:?}");
+        }
+    }
 }

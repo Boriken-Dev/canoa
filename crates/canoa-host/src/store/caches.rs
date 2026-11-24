@@ -71,6 +71,8 @@ pub(crate) struct StoreCaches {
     pub(crate) lookup_response: Duration,
     /// Where what publishers said is kept, so a run that starts later asks whether a document changed.
     pub(crate) dir: Option<PathBuf>,
+    /// How long a catalog read through a source provider answers without asking it, unless the entry says its own `ttl`.
+    pub(crate) source_ttl: Duration,
 }
 
 impl StoreCaches {
@@ -90,7 +92,15 @@ impl StoreCaches {
             lookup_connect: DEFAULT_CONNECT_TIMEOUT,
             lookup_response: DEFAULT_LOOKUP_TIMEOUT,
             dir,
+            source_ttl: super::catalog_run::DEFAULT_SOURCE_TTL,
         }
+    }
+
+    /// These caches asking a catalog's source again after `ttl`.
+    #[must_use]
+    pub(crate) const fn with_source_ttl(mut self, ttl: Duration) -> Self {
+        self.source_ttl = ttl;
+        self
     }
 
     /// These caches with lookups that wait `connect` to connect and `response` for an answer.

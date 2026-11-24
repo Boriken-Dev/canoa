@@ -303,6 +303,16 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_config_view,
     ),
     rpc(
+        "providers/registered",
+        Access::Require(Grant::ConfigRead),
+        Control::r_config_view,
+    ),
+    rpc(
+        "providers/switch",
+        Access::Require(Grant::Hosting),
+        Control::r_providers_switch,
+    ),
+    rpc(
         "host/keys",
         Access::Require(Grant::Hosting),
         Control::r_hosting,
@@ -341,6 +351,11 @@ pub(super) static ROUTES: &[Route] = &[
         "store/catalog",
         Access::Require(Grant::OverlayWrite),
         Control::r_store_catalog,
+    ),
+    rpc(
+        "store/catalog_set",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_store_catalog_set,
     ),
     rpc(
         "extension/plan",

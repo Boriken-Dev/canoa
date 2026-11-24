@@ -71,6 +71,8 @@ pub struct Config {
     pub environments: IndexMap<String, EnvironmentConfig>,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
+    /// `[host.disabled]`: the providers the libraries register that this host neither offers nor runs.
+    pub disabled: crate::disabled::Disabled,
     /// `[host.network]`: how the host reaches the network; the system's proxy, login, certificate verifier and client
     /// certificates unless it says otherwise.
     pub network: NetworkConfig,
@@ -131,6 +133,7 @@ impl Default for Config {
             keep_awake: false,
             environments: Default::default(),
             store: Default::default(),
+            disabled: Default::default(),
             network: Default::default(),
             kb: Default::default(),
             mcp_list: Default::default(),
@@ -808,6 +811,9 @@ pub struct StoreConfig {
     /// was installed, when it starts and when it looks the program up (default false: a copy is trusted as installed, and only
     /// its launch file must exist). A download is checked against its publisher's SHA-256 when it is installed either way.
     pub verify_copies: Option<bool>,
+    /// `source_ttl`: seconds a catalog read through a source provider answers with no network (default 3600); an entry's own `ttl`
+    /// replaces it, and a pinned catalog never goes stale.
+    pub source_ttl: Option<u64>,
 }
 
 /// Guatiao-derived schema for `[host.store]`.
@@ -830,6 +836,7 @@ struct StoreSectionSchema {
     lookup_timeout: Option<u64>,
     tools: Option<bool>,
     verify_copies: Option<bool>,
+    source_ttl: Option<u64>,
 }
 
 impl StoreConfig {

@@ -826,6 +826,10 @@ fn store_caches(
         seconds(config.store.connect_timeout, DEFAULT_CONNECT_TIMEOUT),
         seconds(config.store.lookup_timeout, DEFAULT_LOOKUP_TIMEOUT),
     )
+    .with_source_ttl(seconds(
+        config.store.source_ttl,
+        crate::store::catalog_run::DEFAULT_SOURCE_TTL,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -843,6 +847,13 @@ fn build_control_hub(
     services: Arc<crate::services::Services>,
     environments: &Arc<crate::environments::Environments>,
 ) -> Result<control::Control, ServeError> {
+    // What `[host.disabled]` leaves off is read once, as the rest of `[host]` is; what it names that no library offers is only said.
+    crate::disabled::install(config.disabled.clone());
+    if !config.disabled.is_empty() {
+        config
+            .disabled
+            .warn_unknown(&crate::control::providers::pairs(config));
+    }
     let kept = control::Control::open(
         options
             .state_dir

@@ -2,8 +2,13 @@
 //! say of their catalogs (the words for them, and the one offered until the person removes it).
 //!
 //! A label's value is a source the `read` provider reads (a bare string, written `{ provider = "read", source = "..." }` in full),
-//! a table naming a provider and the fields its form asks for, or `false`, which takes a default catalog away. One reader serves
-//! every type, so a catalog written under one type is never listed under another.
+//! a table naming a provider and the fields its form asks for, or `false`, which turns a default catalog off. The host keeps four
+//! keys of a table for itself, which no provider's form may use: `pin`, `trusted`, `ttl` and `keys`. One reader serves every type,
+//! so a catalog written under one type is never listed under another.
+//!
+//! A type's catalogs are its defaults (what its extension registers, in the order registered), then canoa.cfg's entries by label:
+//! a label a default has replaces it whole, a new label is added after the defaults, and `false` turns the default of that label off
+//! (it stays listed, off, so it can be turned on again).
 
 #[cfg(test)]
 use alloc::collections::BTreeMap;
@@ -40,14 +45,51 @@ pub(crate) fn schema() -> Result<GuatiaoValue, ValueError> {
 /// The provider that reads an address or a file the way the Store type reads one: the default when a label names none.
 pub(crate) const READ: &str = "read";
 
+/// The keys of a catalog's table that the host owns.
+const HOST_KEYS: [&str; 4] = ["pin", "trusted", "ttl", "keys"];
+
+/// Where a catalog of a type comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Origin {
+    /// The type's own: what its extension registers (or the host, for the types it carries).
+    Default,
+    /// A default of the type that canoa.cfg's entry of the same label replaced.
+    Replaced,
+    /// An entry canoa.cfg adds.
+    Added,
+}
+
+impl Origin {
+    pub(crate) const fn word(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Replaced => "replaced",
+            Self::Added => "added",
+        }
+    }
+}
+
 /// One catalog of a type, as canoa.cfg has it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Entry {
     pub(crate) label: String,
     /// The `catalog_source` provider that reads it.
     pub(crate) provider: String,
-    /// What the provider's form holds: the table's keys but `provider`.
+    /// What the provider's form holds: the table's keys but `provider` and the host's own.
     pub(crate) fields: Map<String, Value>,
+    /// What fixes its answer: a revision the provider understands, or `sha256:<hex>` of the catalog's text.
+    pub(crate) pin: Option<String>,
+    /// Whether an item with no digest is accepted from it.
+    pub(crate) trusted: bool,
+    /// Seconds before it is read again, in place of `[host.store] source_ttl`.
+    pub(crate) ttl: Option<u64>,
+    /// The publisher key fingerprints it demands a signature from, in place of its provider's.
+    pub(crate) keys: Vec<String>,
+    pub(crate) origin: Origin,
+    /// False for a catalog turned off with `label = false`.
+    pub(crate) enabled: bool,
+    /// What a pinned default answers with before it has been fetched.
+    pub(crate) snapshot: Option<String>,
 }
 
 impl Entry {
@@ -56,19 +98,123 @@ impl Entry {
         self.fields.get("source").and_then(Value::as_str)
     }
 
-    /// One text that differs whenever the provider or a field does, so an index can tell that canoa.cfg now says another thing.
+    /// One text that differs whenever the provider, a field or a host key does, so an index can tell that canoa.cfg now says another
+    /// thing.
     pub(crate) fn spec(&self) -> String {
         if self.provider == READ
+            && self.pin.is_none()
+            && !self.trusted
+            && self.keys.is_empty()
             && let Some(source) = self.source().filter(|_| self.fields.len() == 1)
         {
             return source.to_owned();
         }
         let sorted: alloc::collections::BTreeMap<_, _> = self.fields.iter().collect();
         format!(
-            "{}:{}",
+            "{}:{}:{}:{}:{}",
             self.provider,
-            serde_json::to_string(&sorted).unwrap_or_default()
+            serde_json::to_string(&sorted).unwrap_or_default(),
+            self.pin.as_deref().unwrap_or_default(),
+            self.trusted,
+            self.keys.join(",")
         )
+    }
+
+    /// An entry that reads `source` with the `read` provider.
+    fn reading(label: &str, source: &str, origin: Origin) -> Self {
+        Self::of(
+            label,
+            READ,
+            Map::from_iter([("source".to_owned(), json!(source))]),
+            origin,
+        )
+    }
+
+    fn of(label: &str, provider: &str, fields: Map<String, Value>, origin: Origin) -> Self {
+        Self {
+            label: label.to_owned(),
+            provider: provider.to_owned(),
+            fields,
+            pin: None,
+            trusted: false,
+            ttl: None,
+            keys: Vec::new(),
+            origin,
+            enabled: true,
+            snapshot: None,
+        }
+    }
+
+    /// The catalog a type's default says.
+    fn from_default(default: &Default) -> Self {
+        let mut entry = Self::of(
+            &default.label,
+            &default.provider,
+            default.fields.clone(),
+            Origin::Default,
+        );
+        entry.pin.clone_from(&default.pin);
+        entry.snapshot.clone_from(&default.snapshot);
+        entry
+    }
+
+    /// How far the catalog's items are taken on trust, for the badge a Sources page draws: one whose entry accepts files with no
+    /// digest is `unverified`, a pinned one is `pinned`, and any other needs a digest on every file, `verified`.
+    pub(crate) const fn trust(&self) -> &'static str {
+        if self.trusted {
+            "unverified"
+        } else if self.pin.is_some() {
+            "pinned"
+        } else {
+            "verified"
+        }
+    }
+}
+
+/// A catalog a type offers of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Default {
+    pub(crate) label: String,
+    pub(crate) provider: String,
+    pub(crate) fields: Map<String, Value>,
+    pub(crate) pin: Option<String>,
+    pub(crate) snapshot: Option<String>,
+}
+
+impl Default {
+    /// A default read by the `read` provider from `source`.
+    fn reading(label: &str, source: &str) -> Self {
+        Self {
+            label: label.to_owned(),
+            provider: READ.to_owned(),
+            fields: Map::from_iter([("source".to_owned(), json!(source))]),
+            pin: None,
+            snapshot: None,
+        }
+    }
+
+    /// What an extension registered, or why it is not offered.
+    pub(crate) fn registered(
+        each: &canoa::store::extension::DefaultCatalog,
+    ) -> Result<Self, String> {
+        if !valid_overlay_name(&each.label) {
+            return Err(format!(
+                "the catalog label {:?} is not a name this host keeps a catalog under",
+                each.label
+            ));
+        }
+        let fields = match each.fields.as_deref() {
+            None => Map::new(),
+            Some(text) => serde_json::from_str::<Map<String, Value>>(text)
+                .map_err(|_| format!("the fields of {:?} are not a JSON object", each.label))?,
+        };
+        Ok(Self {
+            label: each.label.clone(),
+            provider: each.provider.clone(),
+            fields,
+            pin: each.pin.clone(),
+            snapshot: each.snapshot.clone(),
+        })
     }
 }
 
@@ -85,13 +231,20 @@ pub(crate) fn table_of<'a>(store: &'a Value, kind: &str) -> &'a Value {
 
 /// Reads one type's table of catalogs, in the order of the labels. A label set to `false` lists nothing.
 pub(crate) fn read(table: &Value) -> Vec<Parsed> {
+    read_all(table)
+        .into_iter()
+        .filter(|parsed| parsed.as_ref().map_or(true, |entry| entry.enabled))
+        .collect()
+}
+
+/// As [`read`], with a label set to `false` listed as an entry that is off (the `read` provider, no fields).
+pub(crate) fn read_all(table: &Value) -> Vec<Parsed> {
     let Some(table) = table.as_object() else {
         return Vec::new();
     };
     let mut seen = alloc::collections::BTreeSet::new();
     table
         .iter()
-        .filter(|(_, value)| **value != Value::Bool(false))
         .map(|(label, value)| {
             let problem = |why: &str| (label.clone(), why.to_owned());
             if !valid_overlay_name(label) || !seen.insert(coqui_aos::normalize_name(label)) {
@@ -100,11 +253,12 @@ pub(crate) fn read(table: &Value) -> Vec<Parsed> {
                 ));
             }
             match value {
-                Value::String(source) => Ok(Entry {
-                    label: label.clone(),
-                    provider: READ.to_owned(),
-                    fields: Map::from_iter([("source".to_owned(), json!(source))]),
-                }),
+                Value::Bool(false) => {
+                    let mut off = Entry::of(label, READ, Map::new(), Origin::Added);
+                    off.enabled = false;
+                    Ok(off)
+                }
+                Value::String(source) => Ok(Entry::reading(label, source, Origin::Added)),
                 Value::Object(table) => {
                     let gval = match guatiao_serde::from_serde(Value::Object(table.clone())) {
                         Ok(value) => value,
@@ -125,14 +279,40 @@ pub(crate) fn read(table: &Value) -> Vec<Parsed> {
                     };
                     let fields = table
                         .iter()
-                        .filter(|(key, _)| *key != "provider")
+                        .filter(|(key, _)| *key != "provider" && !HOST_KEYS.contains(&key.as_str()))
                         .map(|(key, field)| (key.clone(), field.clone()))
                         .collect();
-                    Ok(Entry {
-                        label: label.clone(),
-                        provider,
-                        fields,
-                    })
+                    let mut entry = Entry::of(label, &provider, fields, Origin::Added);
+                    entry.pin = match table.get("pin") {
+                        None | Some(Value::Null) => None,
+                        Some(Value::String(pin)) if !pin.trim().is_empty() => Some(pin.clone()),
+                        Some(_) => {
+                            return Err(problem("pin is a revision, or sha256: and a digest"));
+                        }
+                    };
+                    entry.trusted = match table.get("trusted") {
+                        None | Some(Value::Null) => false,
+                        Some(Value::Bool(trusted)) => *trusted,
+                        Some(_) => return Err(problem("trusted is true or false")),
+                    };
+                    entry.ttl = match table.get("ttl") {
+                        None | Some(Value::Null) => None,
+                        Some(seconds) => Some(
+                            seconds
+                                .as_u64()
+                                .ok_or_else(|| problem("ttl is a number of seconds"))?,
+                        ),
+                    };
+                    entry.keys = match table.get("keys") {
+                        None | Some(Value::Null) => Vec::new(),
+                        Some(Value::Array(keys)) => keys
+                            .iter()
+                            .map(|key| key.as_str().map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()
+                            .ok_or_else(|| problem("keys is a list of key fingerprints"))?,
+                        Some(_) => return Err(problem("keys is a list of key fingerprints")),
+                    };
+                    Ok(entry)
                 }
                 _ => Err(problem(
                     "It is a source, or a table naming a provider and its fields, or false",
@@ -172,24 +352,34 @@ pub(crate) struct TypeCatalogs {
     pub(crate) noun: String,
     pub(crate) plural: String,
     pub(crate) lists: String,
-    /// The catalog offered until the person removes it or gives its label another source.
-    pub(crate) default: Option<(&'static str, &'static str)>,
+    /// The catalogs offered until the person replaces one by its label, adds another or turns one off, in the order registered.
+    pub(crate) defaults: Vec<Default>,
     /// A catalog the type always offers first, which no canoa.cfg entry removes or replaces: its label is the type's own.
     pub(crate) fixed: Option<(&'static str, &'static str)>,
+    /// The format its catalogs answer in (`canoa.models/1`, `canoa.releases/1`); none for a type the host reads itself.
+    pub(crate) format: Option<String>,
 }
 
 /// The types the Store has of its own that read catalogs.
 pub(crate) fn built_in_types() -> Vec<TypeCatalogs> {
-    let words =
-        |id: &str, title: &str, noun: &str, plural: &str, lists: &str, default| TypeCatalogs {
-            id: id.to_owned(),
-            title: title.to_owned(),
-            noun: noun.to_owned(),
-            plural: plural.to_owned(),
-            lists: lists.to_owned(),
-            default,
-            fixed: None,
-        };
+    let words = |id: &str,
+                 title: &str,
+                 noun: &str,
+                 plural: &str,
+                 lists: &str,
+                 default: Option<(&str, &str)>| TypeCatalogs {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        noun: noun.to_owned(),
+        plural: plural.to_owned(),
+        lists: lists.to_owned(),
+        defaults: default
+            .map(|(label, source)| Default::reading(label, source))
+            .into_iter()
+            .collect(),
+        fixed: None,
+        format: None,
+    };
     vec![
         words(
             "overlays",
@@ -244,35 +434,91 @@ pub(crate) fn is_default_skill_source(label: &str, spec: &str) -> bool {
 /// The label of the official MCP registry, which the MCP servers type offers until removed or replaced.
 pub(crate) const OFFICIAL_LABEL: &str = "official";
 
-fn same_label(a: &str, b: &str) -> bool {
+pub(crate) fn same_label(a: &str, b: &str) -> bool {
     coqui_aos::normalize_name(a) == coqui_aos::normalize_name(b)
 }
 
-/// The catalog `label` of `kind`: the fixed one, one canoa.cfg's `table` names, or the default (while the table does not name or
-/// remove its label). The error says why there is none.
+/// The catalogs of `kind` in force: the fixed one, then the type's defaults and canoa.cfg's entries merged by label. A default whose
+/// label an entry names is replaced whole by it (or kept, off, when the entry is `false`); a new label is added after the defaults,
+/// in the file's order; an entry that is no catalog is listed with the reason, in the place of the default it names.
+pub(crate) fn merge(kind: &TypeCatalogs, table: &Value) -> Vec<Merged> {
+    let mut merged: Vec<Merged> = Vec::new();
+    if let Some((label, source)) = kind.fixed {
+        merged.push(Merged {
+            parsed: Ok(Entry::reading(label, source, Origin::Default)),
+            fixed: true,
+        });
+    }
+    for default in &kind.defaults {
+        merged.push(Merged {
+            parsed: Ok(Entry::from_default(default)),
+            fixed: false,
+        });
+    }
+    for parsed in read_all(table) {
+        let label = match &parsed {
+            Ok(entry) => entry.label.clone(),
+            Err((label, _)) => label.clone(),
+        };
+        let at = merged.iter().position(|each| {
+            each.parsed.as_ref().map_or_else(
+                |(own, _)| same_label(own, &label),
+                |entry| same_label(&entry.label, &label),
+            )
+        });
+        match (at, parsed) {
+            (Some(at), _) if merged[at].fixed => merged.push(Merged {
+                parsed: Err((
+                    label,
+                    "The label is the host's own: the official registry is always offered and cannot be replaced"
+                        .to_owned(),
+                )),
+                fixed: false,
+            }),
+            (Some(at), Ok(entry)) if !entry.enabled => {
+                if let Ok(kept) = &mut merged[at].parsed {
+                    kept.enabled = false;
+                }
+            }
+            (Some(at), Ok(mut entry)) => {
+                entry.origin = Origin::Replaced;
+                merged[at].parsed = Ok(entry);
+            }
+            (Some(at), Err(problem)) => merged[at].parsed = Err(problem),
+            // An entry that is `false` and names no default turns nothing off: there is no row for it.
+            (None, Ok(entry)) if !entry.enabled => {}
+            (None, parsed) => merged.push(Merged {
+                parsed,
+                fixed: false,
+            }),
+        }
+    }
+    merged
+}
+
+/// One catalog of a type after the merge.
+#[derive(Clone, Debug)]
+pub(crate) struct Merged {
+    pub(crate) parsed: Parsed,
+    /// Whether it is the type's fixed catalog.
+    pub(crate) fixed: bool,
+}
+
+/// The catalog `label` of `kind`: the fixed one, one the merge of the type's defaults and canoa.cfg's `table` holds. The error says
+/// why there is none, or that it is off.
 pub(crate) fn find(kind: &TypeCatalogs, table: &Value, label: &str) -> Result<Entry, String> {
-    let read = |label: &str, source: &str| Entry {
-        label: label.to_owned(),
-        provider: READ.to_owned(),
-        fields: Map::from_iter([("source".to_owned(), json!(source))]),
-    };
-    if let Some((fixed, source)) = kind.fixed
-        && same_label(fixed, label)
-    {
-        return Ok(read(fixed, source));
-    }
-    let named = table
-        .as_object()
-        .is_some_and(|table| table.keys().any(|key| same_label(key, label)));
-    if !named
-        && let Some((default, source)) = kind.default
-        && same_label(default, label)
-    {
-        return Ok(read(default, source));
-    }
-    for parsed in self::read(table) {
-        match parsed {
-            Ok(entry) if same_label(&entry.label, label) => return Ok(entry),
+    for each in merge(kind, table) {
+        match each.parsed {
+            Ok(entry) if same_label(&entry.label, label) => {
+                return if entry.enabled {
+                    Ok(entry)
+                } else {
+                    Err(format!(
+                        "{} is turned off ({} = false in canoa.cfg)",
+                        entry.label, entry.label
+                    ))
+                };
+            }
             Err((each, why)) if same_label(&each, label) => return Err(why),
             _ => {}
         }
@@ -280,65 +526,53 @@ pub(crate) fn find(kind: &TypeCatalogs, table: &Value, label: &str) -> Result<En
     Err(format!("{} has no catalog {label:?}", kind.title))
 }
 
-/// One type's rows for the Store: the fixed catalog, the default (unless the table names its label or sets it to `false`) and
-/// then the table's own, each with the provider and fields as canoa.cfg has them. A row that is no catalog says why.
-pub(crate) fn rows_of(kind: &TypeCatalogs, table: &Value) -> Vec<Value> {
-    let named = |label: &str| {
-        table.as_object().is_some_and(|table| {
-            table
-                .keys()
-                .any(|key| coqui_aos::normalize_name(key) == coqui_aos::normalize_name(label))
-        })
+/// What the Store says of one catalog's entry: its provider and fields as canoa.cfg has them, where it comes from, whether it is on,
+/// and the keys the host keeps for it.
+pub(crate) fn row_of(kind: &TypeCatalogs, merged: &Merged) -> Value {
+    let entry = match &merged.parsed {
+        Ok(entry) => entry,
+        Err((label, why)) => {
+            return json!({"label": label, "problem": why, "default": false, "enabled": true});
+        }
     };
-    let mut rows = Vec::new();
-    if let Some((label, source)) = kind.fixed {
-        rows.push(json!({
-            "label": label,
-            "provider": READ,
-            "fields": {"source": source},
-            "source": source,
-            "default": true,
-            "fixed": true,
-        }));
+    let mut row = json!({
+        "label": entry.label,
+        "provider": entry.provider,
+        "fields": entry.fields,
+        "default": entry.origin == Origin::Default,
+        "origin": entry.origin.word(),
+        "enabled": entry.enabled,
+        "trusted": entry.trusted,
+    });
+    if let Some(source) = entry.source() {
+        row["source"] = json!(source);
     }
-    if let Some((label, source)) = kind.default
-        && !named(label)
-    {
-        rows.push(json!({
-            "label": label,
-            "provider": READ,
-            "fields": {"source": source},
-            "source": source,
-            "default": true,
-        }));
+    if merged.fixed {
+        row["fixed"] = json!(true);
     }
-    for parsed in read(table) {
-        let taken = |label: &str| {
-            kind.fixed
-                .is_some_and(|(fixed, _)| same_label(fixed, label))
-        };
-        rows.push(match parsed {
-            Ok(entry) if taken(&entry.label) => json!({
-                "label": entry.label,
-                "problem": "The label is the host's own: the official registry is always offered and cannot be replaced",
-                "default": false,
-            }),
-            Ok(entry) => {
-                let mut row = json!({
-                    "label": entry.label,
-                    "provider": entry.provider,
-                    "fields": entry.fields,
-                    "default": false,
-                });
-                if let Some(source) = entry.source() {
-                    row["source"] = json!(source);
-                }
-                row
-            }
-            Err((label, why)) => json!({"label": label, "problem": why, "default": false}),
-        });
+    if let Some(pin) = &entry.pin {
+        row["pin"] = json!(pin);
     }
-    rows
+    if let Some(ttl) = entry.ttl {
+        row["ttl"] = json!(ttl);
+    }
+    if !entry.keys.is_empty() {
+        row["keys"] = json!(entry.keys);
+    }
+    if kind.format.is_some() {
+        row["trust"] = json!(entry.trust());
+        row["snapshot"] = json!(entry.snapshot.is_some());
+    }
+    row
+}
+
+/// One type's rows for the Store: the fixed catalog, then the defaults and canoa.cfg's own, each with the provider and fields as
+/// canoa.cfg has them. A default turned off with `false` is listed, off; a row that is no catalog says why.
+pub(crate) fn rows_of(kind: &TypeCatalogs, table: &Value) -> Vec<Value> {
+    merge(kind, table)
+        .iter()
+        .map(|merged| row_of(kind, merged))
+        .collect()
 }
 
 #[cfg(test)]

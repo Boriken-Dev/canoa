@@ -138,6 +138,7 @@ impl TabCatalog {
         for (origin, registry) in found {
             let keys: Vec<String> = registry
                 .offers::<dyn PanelTab>()
+                .filter(|offer| !crate::disabled::off::<dyn PanelTab>(offer.id()))
                 .filter_map(|offer| offer.key().map(str::to_owned))
                 .collect();
             for key in keys {

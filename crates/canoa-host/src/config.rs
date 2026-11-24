@@ -219,6 +219,7 @@ impl Config {
                 what: "host: max_message_bytes must be at least 1".to_owned(),
             });
         }
+        let disabled = core::mem::take(&mut host.disabled);
         let sub = build_subsystems(&mut host, &directory, &entries)?;
         Ok(Self {
             origins: host.origins,
@@ -244,6 +245,7 @@ impl Config {
             worktrees: sub.worktrees,
             usage: sub.usage,
             store: sub.store,
+            disabled: crate::disabled::Disabled::new(disabled),
             network: sub.network,
             kb: sub.kb,
             mcp_list: sub.mcp_list,
@@ -1014,6 +1016,7 @@ fn build_subsystems(
             lookup_timeout: raw.lookup_timeout,
             tools: raw.tools,
             verify_copies: raw.verify_copies,
+            source_ttl: raw.source_ttl,
         });
     let network = host
         .network

@@ -3,6 +3,8 @@
 
 pub mod builtin;
 pub(crate) mod caches;
+pub(crate) mod catalog_run;
+pub(crate) mod catalog_view;
 pub(crate) mod catalogs;
 pub mod contract;
 pub mod echo;

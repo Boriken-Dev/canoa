@@ -191,6 +191,7 @@ pub(crate) fn described<K: ?Sized + Kind>(registry: &Registry) -> Vec<Described>
     };
     registry
         .offers::<K>()
+        .filter(|offer| !crate::disabled::off::<K>(offer.id()))
         .filter_map(|offer| {
             let key = offer.key()?.to_owned();
             let meta = |name: &str| offer.meta().and_then(|meta| meta.get(name)).and_then(json);

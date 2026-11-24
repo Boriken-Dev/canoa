@@ -54,6 +54,9 @@ struct Row {
     vendor: Option<VendorInfo>,
     harness: Option<String>,
     accounts: Option<Value>,
+    /// The id of the account provider the agent has that `[host.disabled]` leaves off: no account of it is offered, and the
+    /// accounts canoa.cfg holds for it are shown as off.
+    accounts_off: Option<String>,
     /// The title the harness or account provider gives, when no vendor description does.
     title: Option<String>,
 }
@@ -72,6 +75,77 @@ pub(crate) fn list(config: &Config) -> Value {
         "gateways": gateways_of(&loaded),
         "agent_entry": super::agent_entries::agent_entry(),
         "local_agent": super::agent_entries::local_agent(),
+    })
+}
+
+/// Every provider the loaded libraries register, as `(kind, id)`, a provider that serves several kinds once for each.
+pub(crate) fn pairs(config: &Config) -> Vec<(String, String)> {
+    let mut found: Vec<(String, String)> = Vec::new();
+    for (_, registry) in loaded(config).iter() {
+        for provider in registry.all() {
+            for kind in provider.kinds() {
+                let pair = (kind.clone(), provider.id().to_owned());
+                if !found.contains(&pair) {
+                    found.push(pair);
+                }
+            }
+        }
+    }
+    found
+}
+
+/// `providers/registered`: every provider the loaded libraries register, by kind, with whether `[host.disabled]` leaves it off, and
+/// what `[host.disabled]` names that no library offers. `{"providers": [{"kind", "id", "title", "library", "origin", "off",
+/// "kinds"?}], "unknown": [text], "disabled": {kind: [id]}}`; `kinds`, for an account provider, are the account kinds it makes.
+pub(crate) fn registered(config: &Config) -> Value {
+    let mut rows: Vec<Value> = Vec::new();
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for (origin, registry) in loaded(config).iter() {
+        for provider in registry.all() {
+            for kind in provider.kinds() {
+                let pair = (kind.clone(), provider.id().to_owned());
+                if seen.contains(&pair) {
+                    continue;
+                }
+                seen.push(pair);
+                let mut row = json!({
+                    "kind": kind,
+                    "id": provider.id(),
+                    "title": provider.display_name(),
+                    "library": provider.library(),
+                    "origin": origin,
+                    "off": config.disabled.is_off(kind, provider.id()),
+                });
+                if kind
+                    == <dyn AccountProvider as coqui_acp_api::guatiao::library::kind::Kind>::NAME
+                    && let Ok(Some(made)) = crate::kind::account_instance_unchecked(
+                        registry,
+                        provider.id(),
+                        &[],
+                        &Settings::default(),
+                        &Settings::default(),
+                    )
+                    && let Ok(offered) = made.offers()
+                {
+                    row["kinds"] = json!(
+                        offered
+                            .kinds
+                            .iter()
+                            .map(|kind| kind.id.clone())
+                            .collect::<Vec<_>>()
+                    );
+                }
+                rows.push(row);
+            }
+        }
+    }
+    rows.sort_by(|a, b| {
+        (a["kind"].as_str(), a["id"].as_str()).cmp(&(b["kind"].as_str(), b["id"].as_str()))
+    });
+    json!({
+        "providers": rows,
+        "unknown": config.disabled.unknown(&seen),
+        "disabled": config.disabled.to_value(),
     })
 }
 
@@ -99,6 +173,9 @@ pub(crate) fn usage_readers_of(registries: &[(&str, &Registry)]) -> Vec<Value> {
     let mut readers: Vec<Value> = Vec::new();
     for (origin, registry) in registries {
         for offer in registry.offers::<dyn UsageReader>() {
+            if crate::disabled::off::<dyn UsageReader>(offer.id()) {
+                continue;
+            }
             let Some(info) = offer
                 .default_instance()
                 .and_then(|reader| reader.describe().ok())
@@ -263,6 +340,9 @@ pub(crate) fn rows_of(
         // The account providers the harnesses of this registry declare, with the harness each belongs to.
         let mut declared: BTreeMap<String, (String, AccountsLink)> = BTreeMap::new();
         for offer in registry.offers::<dyn AgentVendor>() {
+            if crate::disabled::off::<dyn AgentVendor>(offer.id()) {
+                continue;
+            }
             let Some(info) = offer
                 .default_instance()
                 .and_then(|vendor| vendor.describe().ok())
@@ -282,6 +362,9 @@ pub(crate) fn rows_of(
             }
         }
         for offer in registry.offers::<dyn AcpHarness>() {
+            if crate::disabled::off::<dyn AcpHarness>(offer.id()) {
+                continue;
+            }
             let id = touch(&mut rows, &mut order, offer.id(), origin);
             let Some(slot) = rows.get_mut(&id) else {
                 continue;
@@ -339,6 +422,10 @@ pub(crate) fn rows_of(
             let Some(slot) = rows.get_mut(&id) else {
                 continue;
             };
+            if crate::disabled::off::<dyn AccountProvider>(&provider_id) {
+                slot.accounts_off = Some(provider_id);
+                continue;
+            }
             if let Some(provider) = provider
                 && let Ok(about) = provider.describe()
                 && let Ok(offered) = provider.offers()
@@ -400,6 +487,7 @@ pub(crate) fn rows_of(
                 "imports": super::import::imports(id),
                 "markers": vendor.map(|vendor| vendor.markers.clone()).unwrap_or_default(),
                 "accounts": row.accounts,
+                "accounts_off": row.accounts_off,
                 "source": source,
                 "launch": launch,
                 "origin": row.origin,

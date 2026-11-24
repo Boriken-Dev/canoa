@@ -743,6 +743,9 @@ pub(crate) fn instance(
     id: &str,
     settings: &Settings,
 ) -> Result<(Arc<dyn AcpHarness>, Vec<Departure>), ProviderError> {
+    if crate::disabled::off::<dyn AcpHarness>(id) {
+        return Err(ProviderError::Missing);
+    }
     let offer = registry
         .offer::<dyn AcpHarness>(id)
         .ok_or(ProviderError::Missing)?
@@ -829,6 +832,21 @@ pub(crate) fn account_provider(
 /// The account provider `id`, configured with `own` and with the keys `shared` of `settings` where it declares them; `None` when
 /// the registry offers none.
 pub(crate) fn account_instance(
+    registry: &Registry,
+    id: &str,
+    shared: &[String],
+    settings: &Settings,
+    own: &Settings,
+) -> Result<Option<Arc<dyn AccountProvider>>, ProviderError> {
+    if crate::disabled::off::<dyn AccountProvider>(id) {
+        return Ok(None);
+    }
+    account_instance_unchecked(registry, id, shared, settings, own)
+}
+
+/// As [`account_instance`], for a provider `[host.disabled]` leaves off too: what the host asks of one to say what its accounts
+/// were, never to run them.
+pub(crate) fn account_instance_unchecked(
     registry: &Registry,
     id: &str,
     shared: &[String],

@@ -24,6 +24,7 @@ use coqui_acp_api::guatiao::library::{ProviderError, Registry};
 use coqui_acp_harness::LocalSpawner;
 use serde_json::{Map, Value, json};
 
+use super::models_catalog::FromCatalogs;
 use super::{BAD_PARAMS, Failed, REFUSED, Stores, json_of, text};
 use crate::control::files::Files;
 
@@ -201,7 +202,7 @@ impl Stores {
     /// The folder the host keeps the models installed on their own in, for the type: beside its program's versions.
     ///
     /// A type with no program store keeps them under its own id on the shelf.
-    fn models_folder(&self, type_id: &str) -> Option<String> {
+    pub(super) fn models_folder(&self, type_id: &str) -> Option<String> {
         let folder = if self.speech_store(type_id).is_some() {
             let (_, store) = self.type_store(type_id)?;
             self.programs.models_folder(&*store)
@@ -232,6 +233,20 @@ impl Stores {
             })
             .map_err(|error| failure(&error))
         })
+    }
+
+    /// The rows of the type: those its `model_store` lists, then the ones its catalogs list.
+    fn rows_with_catalogs(
+        &self,
+        held: &Held,
+        refresh: bool,
+        files: &Files,
+    ) -> Result<(ModelList, FromCatalogs), Failed> {
+        let mut list = self.model_rows_asked(held, refresh)?;
+        let taken = list.models.iter().map(|row| row.id.clone()).collect();
+        let from = self.catalog_models(&held.type_id, files, &taken);
+        list.models.extend(from.rows.iter().cloned());
+        Ok((list, from))
     }
 
     /// What a note on the removal of the program of `provider` says of the models of its type: those installed on their own stay,
@@ -268,20 +283,27 @@ impl Stores {
     }
 
     /// `store/models` `{"type"}` -> `{"type", "provider", "title", "catalog", "publisher", "missing", "unavailable"?,
-    /// "settings"?: {"help"?, "schema", "form"?}, "speech": bool, "models": [row, ...]}`, each row as `canoa::store::models::ModelRow`
-    /// with `"values"`, what canoa.cfg keeps for it. Runs the type's program as this user, and nothing else.
+    /// "settings"?: {"help"?, "schema", "form"?}, "speech": bool, "sources": [{"label", "provider", "origin", "enabled", "trust",
+    /// "pin", "fetched"?, "from"?, "stale"?, "items"?, "problem"?}], "models": [row, ...]}`, each row as `canoa::store::models::ModelRow`
+    /// with `"values"`, what canoa.cfg keeps for it, and for a row a catalog listed `"catalog"` (`label`, `provider`, `origin`,
+    /// `trust`, `pin`, `revision`, `fetched`, `from`, `stale`) and `"trust"` (`verified`, `pinned`, `unverified`, null when it has no
+    /// digest and is not installable). Runs the type's program as this user, and nothing else.
     pub(crate) fn models_read(&self, params: &Value, files: &Files) -> Result<Value, Failed> {
         let held = self.model_type(params)?;
         let refresh = params
             .get("refresh")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let list: ModelList = self.model_rows_asked(held, refresh)?;
+        let (list, from) = self.rows_with_catalogs(held, refresh, files)?;
         let table = held.info.settings.as_ref().map(|each| each.table.as_str());
         let kept = table.map(|table| files.model_settings(table));
         let mut rows = Vec::new();
         for row in &list.models {
             let mut shown = json_of(row)?;
+            if let Some(meta) = from.meta.get(&row.id) {
+                shown["catalog"] = meta["catalog"].clone();
+                shown["trust"] = meta["trust"].clone();
+            }
             shown["values"] = kept
                 .as_ref()
                 .and_then(|kept| kept.get(&row.id))
@@ -315,6 +337,7 @@ impl Stores {
                     "installed": self.type_program_found(&held.type_id).is_some(),
                 }))
             }),
+            "sources": from.sources,
             "models": rows,
         }))
     }
@@ -322,14 +345,14 @@ impl Stores {
     /// `store/model` `{"type", "model", "action"}` -> `{"ok": true, "model", "action", "note"?}`: the provider runs one action of
     /// the row's, which may take long (a download), and answers in its program's words when it is refused. The steps `fetch_files` and
     /// `delete_files` are the host's: they move the row's files in the type's models folder.
-    pub(crate) fn model_act(&self, params: &Value) -> Result<Value, Failed> {
+    pub(crate) fn model_act(&self, params: &Value, files: &Files) -> Result<Value, Failed> {
         let held = self.model_type(params)?;
         let model = text(params, "model")?;
         let action = text(params, "action")?;
         // What the action changes is what a listing says, so none is kept past it, done or not.
         let _forget = Forget(&self.caches.models);
         if action == STEP_FETCH_FILES || action == STEP_DELETE_FILES {
-            return self.move_files(held, model, action);
+            return self.move_files(held, model, action, files);
         }
         let mut request = ModelAct::new(model, action);
         request.program = self.type_program(&held.type_id);
@@ -341,8 +364,14 @@ impl Stores {
     }
 
     /// The step `fetch_files` or `delete_files` of the row `model`: its files fetched into the models folder, or taken out of it.
-    fn move_files(&self, held: &Held, model: &str, action: &str) -> Result<Value, Failed> {
-        let rows = self.model_rows(held)?;
+    fn move_files(
+        &self,
+        held: &Held,
+        model: &str,
+        action: &str,
+        files: &Files,
+    ) -> Result<Value, Failed> {
+        let (rows, from) = self.rows_with_catalogs(held, false, files)?;
         let row = rows
             .models
             .iter()
@@ -356,6 +385,11 @@ impl Stores {
         if row.files.is_empty() {
             return Err((REFUSED, format!("{model} has no files to move")));
         }
+        if action == STEP_FETCH_FILES
+            && let Some(why) = from.refused.get(model)
+        {
+            return Err((REFUSED, format!("{model} cannot be installed: {why}")));
+        }
         if self.speech_store(&held.type_id).is_none() {
             // A type with no program: its files are fetched from the origins its model store names, and nothing has to be installed.
             if action == STEP_DELETE_FILES {
@@ -368,6 +402,7 @@ impl Stores {
                         &held.type_id,
                         &held.info.endpoints,
                         &row.files,
+                        from.checks.get(model).map(Vec::as_slice),
                         Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     )
                     .map_err(|error| super::refusal(&error))?;
@@ -401,6 +436,7 @@ impl Stores {
             .fetch_models(
                 &*store,
                 &row.files,
+                from.checks.get(model).map(Vec::as_slice),
                 Arc::new(std::sync::atomic::AtomicBool::new(false)),
             )
             .map_err(|error| super::refusal(&error))?;

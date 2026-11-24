@@ -96,8 +96,17 @@ fn each_type_lists_only_its_own_catalogs() {
         false,
     );
     let all = ask(&control, &Caller::Owner, "store/catalogs", json!({}));
-    assert_eq!(labels(&all, "overlays"), ["team"], "{all}");
-    assert_eq!(labels(&all, "skills"), ["mine"], "{all}");
+    // A default turned off is listed, off, so it can be turned on again.
+    assert_eq!(labels(&all, "overlays"), ["boriken", "team"], "{all}");
+    assert_eq!(labels(&all, "skills"), ["anthropics", "mine"], "{all}");
+    let off = |kind: &str| {
+        all["result"]["types"]
+            .as_array()
+            .and_then(|types| types.iter().find(|each| each["type"] == kind))
+            .map(|each| each["catalogs"][0]["enabled"].clone())
+    };
+    assert_eq!(off("overlays"), Some(json!(false)));
+    assert_eq!(off("skills"), Some(json!(false)));
     assert_eq!(labels(&all, "mcps"), ["official", "corp"], "{all}");
     assert_eq!(labels(&all, "extensions"), ["plugins"], "{all}");
 
@@ -111,7 +120,7 @@ fn each_type_lists_only_its_own_catalogs() {
     assert_eq!(types.len(), 1, "{one}");
     assert_eq!(types[0]["words"]["noun"], "source");
     assert_eq!(types[0]["words"]["lists"], "skills");
-    assert_eq!(types[0]["catalogs"][0]["source"], "owner/repo");
+    assert_eq!(types[0]["catalogs"][1]["source"], "owner/repo");
 
     let unknown = ask(
         &control,

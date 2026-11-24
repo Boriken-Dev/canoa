@@ -222,6 +222,9 @@ pub(crate) struct Row {
     pub(crate) automatic: bool,
     /// What the person is told of the account's settings, such as an address that is plain http beyond this computer.
     pub(crate) warnings: Vec<String>,
+    /// The account provider that made it when `[host.disabled]` leaves that provider off: the account stays in canoa.cfg, is not
+    /// offered and cannot be signed in again until the provider is turned on.
+    pub(crate) disabled: Option<String>,
 }
 
 impl Row {
@@ -230,7 +233,7 @@ impl Row {
             "name": self.name, "provider": self.provider, "agent": self.agent, "kind": self.kind,
             "id": self.id, "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
             "types": self.types, "fits": self.fits, "automatic": self.automatic,
-            "warnings": self.warnings,
+            "warnings": self.warnings, "disabled": self.disabled,
         })
     }
 }
@@ -241,8 +244,41 @@ pub(crate) fn rows(cfg: Cfg<'_>) -> Result<Vec<Row>, Failed> {
     Ok(rows_of(cfg, &accounts_of(cfg)?))
 }
 
+/// The kinds each account provider that `[host.disabled]` leaves off would make, by provider id, read from the libraries the host
+/// has loaded: what says which of canoa.cfg's accounts the switch put out of reach.
+pub(crate) fn kinds_of_off_providers(config: &crate::config::Config) -> Vec<(String, Vec<String>)> {
+    let mut found: Vec<(String, Vec<String>)> = Vec::new();
+    for (_, provider) in config
+        .disabled
+        .each()
+        .filter(|(kind, _)| *kind == "account_provider")
+    {
+        for (_, registry) in crate::control::providers::loaded(config).iter() {
+            let Ok(Some(made)) = crate::kind::account_instance_unchecked(
+                registry,
+                provider,
+                &[],
+                &crate::config::Settings::default(),
+                &crate::config::Settings::default(),
+            ) else {
+                continue;
+            };
+            let Ok(offer) = made.offers() else {
+                continue;
+            };
+            found.push((
+                provider.to_owned(),
+                offer.kinds.iter().map(|kind| kind.id.clone()).collect(),
+            ));
+            break;
+        }
+    }
+    found
+}
+
 fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
     let catalogs = super::matching::Catalogs::new(cfg.config);
+    let off = kinds_of_off_providers(cfg.config);
     let mut rows: Vec<Row> = cfg
         .config
         .accounts
@@ -251,6 +287,11 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
             let (state, revision, expires_at) = state_of(accounts, account);
             let kind = catalogs.kind(account);
             let made = catalogs.made(&account.kind).map(|(made, _)| made);
+            let disabled = made.is_none().then(|| {
+                off.iter()
+                    .find(|(_, kinds)| kinds.contains(&account.kind))
+                    .map(|(provider, _)| provider.clone())
+            });
             Row {
                 name: name.clone(),
                 agent: made.as_ref().and_then(|made| made.harness.clone()),
@@ -273,6 +314,7 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
                     .map(|info| super::address_notes(name, info, account.settings.as_ref()))
                     .unwrap_or_default(),
                 automatic: false,
+                disabled: disabled.flatten(),
             }
         })
         .collect();
@@ -292,6 +334,7 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
             expires_at,
             automatic: true,
             warnings: Vec::new(),
+            disabled: None,
         });
     }
     rows

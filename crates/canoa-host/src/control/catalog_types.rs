@@ -5,13 +5,14 @@
 use serde_json::{Value, json};
 
 use super::{Caller, Control, DENIED, Grant, bad};
-use crate::store::catalogs::{TypeCatalogs, built_in_types, rows_of, table_of};
+use crate::store::catalog_run::Run;
+use crate::store::catalogs::{TypeCatalogs, built_in_types, merge, row_of, table_of};
 
 type Outcome = Result<Value, (i32, String)>;
 
 impl Control {
     /// `store/catalogs` `{"type"?: string}` -> `{"schema": 1, "types": [{"type", "title", "words": {"noun", "plural", "lists"},
-    /// "default"?: {"label", "source"}, "catalogs": [{"label", "provider", "fields", "source"?, "default", "problem"?}],
+    /// "default"?: {"label", "source"}, "format"?, "catalogs": [{"label", "provider", "fields", "source"?, "default", "origin", "enabled", "trusted", "pin"?, "ttl"?, "keys"?, "trust"?, "snapshot"?, "fetched"?, "from"?, "problem"?}],
     /// "sources": [{"id", "title", "help"?, "extension"?, "types", "schema"?, "form"?}]}]}`, the schema and the form a guatiao schema and a
     /// guatiao-intake form document. With `type` only that type is answered.
     /// Needs `overlay.read`, as the catalogs it lists do.
@@ -29,8 +30,10 @@ impl Control {
         };
         let store = self.store_section();
         let mut kinds = built_in_types();
+        let mut run = None;
         if let Ok(stores) = self.stores() {
             kinds.extend(stores.catalog_types());
+            run = Some(stores.catalog_run());
         }
         let sources = self.catalog_sources();
         let mut types = Vec::new();
@@ -38,7 +41,7 @@ impl Control {
             .iter()
             .filter(|kind| wanted.is_none_or(|id| id == kind.id))
         {
-            types.push(answer_for(kind, &store, &sources));
+            types.push(answer_for(kind, &store, &sources, run.as_ref()));
         }
         if let Some(id) = wanted
             && types.is_empty()
@@ -56,6 +59,7 @@ fn answer_for(
     kind: &TypeCatalogs,
     store: &Value,
     sources: &crate::store::sources::Sources,
+    run: Option<&Run>,
 ) -> Value {
     let offered: Vec<Value> = sources
         .list()
@@ -82,8 +86,24 @@ fn answer_for(
         "type": kind.id,
         "title": kind.title,
         "words": {"noun": kind.noun, "plural": kind.plural, "lists": kind.lists},
-        "default": kind.default.map(|(label, source)| json!({"label": label, "source": source})),
-        "catalogs": rows_of(kind, table_of(store, &kind.id)),
+        "default": kind.defaults.first().map(|default| json!({"label": default.label, "source": default.fields.get("source")})),
+        "format": kind.format,
+        "catalogs": merge(kind, table_of(store, &kind.id))
+            .iter()
+            .map(|merged| {
+                let mut row = row_of(kind, merged);
+                if let (Some(run), Ok(entry)) = (run, &merged.parsed)
+                    && kind.format.is_some()
+                    && entry.enabled
+                {
+                    // What was last read, with nothing asked: the page is opened without waiting on any source.
+                    let seen = run.peek(kind, entry);
+                    row["fetched"] = seen["fetched"].clone();
+                    row["from"] = seen["from"].clone();
+                }
+                row
+            })
+            .collect::<Vec<_>>(),
         "sources": offered,
     });
     if kind.id == "skills" {

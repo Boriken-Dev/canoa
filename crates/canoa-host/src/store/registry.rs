@@ -39,6 +39,7 @@ pub(crate) fn agent_stores(bundles: &[Bundle]) -> Vec<String> {
         ids.extend(
             registry
                 .offers::<dyn ProgramStore>()
+                .filter(|offer| !crate::disabled::off::<dyn ProgramStore>(offer.id()))
                 .map(|offer| offer.id().to_owned()),
         );
     }
