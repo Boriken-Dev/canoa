@@ -17,10 +17,8 @@ jobs:
             platform: windows
             bundle: app/build/windows/x64/runner/Release
             host: canoa.exe
-          - os: macos-latest
-            platform: macos
-            bundle: app/build/macos/Build/Products/Release/Canoa.app/Contents/MacOS
-            host: canoa
+          # macOS is not built here: the engine release holds no macOS artifacts (flutter_artifacts.py publishes the
+          # Windows and Linux ones), and Flutter's storage is not used.
     runs-on: ${{ matrix.os }}
     env:
       CANOA_DEPS: ${{ github.workspace }}/deps-cache
@@ -32,11 +30,9 @@ jobs:
           ref: deps
           path: deps-cache
           sparse-checkout: cdn/officeapis.public.onecdn.static.microsoft
-      - uses: subosito/flutter-action@v2
+      - uses: ./.github/actions/flutter
         with:
-          channel: master
-          flutter-version: c0205700e04b127bbfecdeb6c83d1e0c9c564ed6
-          cache: true
+          platforms: web,${{ matrix.platform }}
       - run: flutter config --enable-windowing
       - uses: dtolnay/rust-toolchain@stable
       - name: Linux native dependencies
@@ -69,7 +65,6 @@ jobs:
           esac
           test ! -e "${{ matrix.bundle }}/${{ matrix.host }}"
       - name: The app on a desktop, with its host
-        if: matrix.platform != 'macos'
         working-directory: app
         shell: bash
         env:
@@ -83,7 +78,6 @@ jobs:
             flutter test integration_test/desktop_test.dart -d windows
           fi
       - name: The app on a desktop, from the library it carries
-        if: matrix.platform != 'macos'
         working-directory: app
         shell: bash
         env:

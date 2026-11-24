@@ -12,11 +12,9 @@ jobs:
         with:
           ref: deps
           path: deps-cache
-      - uses: subosito/flutter-action@v2
+      - uses: ./.github/actions/flutter
         with:
-          channel: master
-          flutter-version: c0205700e04b127bbfecdeb6c83d1e0c9c564ed6
-          cache: true
+          platforms: web
       - run: flutter config --enable-windowing
       - name: Verify dependency manifest status
         run: |
