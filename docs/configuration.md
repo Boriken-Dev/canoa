@@ -58,7 +58,7 @@ Configuration tables:
 - [permissions] default_mode: the mode a new session starts in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`, such as `default_mode = "plan"`; unset leaves each agent's own. A session keeps its own choice after that; see [modes](acp-client.md#permission-requests-in-the-chat). An older `full_access` list is read and dropped.
 - Rules made by "Always allow here" are not in {{ config_file }}: they are `permissions.json` beside it (the origin's IndexedDB in a browser) with a `permissions-log.jsonl` beside it (desktop only), edited in Settings, Permissions; see [acp-client](acp-client.md#permission-requests-in-the-chat).
 - [permissions] allow_once_only: `true` makes Bypass answer only with an answer that allows once, so a request that offers only an "always" is left to the person; default `false`.
-- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600; it also keeps what the host found of each installed overlay's source, see [overlay updates](#overlay-updates)), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what has gone stale.
+- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600; it also keeps what the host found of each installed overlay's source, see [overlay updates](#overlay-updates)), `source_ttl` (3600, a catalog read through a source), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what has gone stale.
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Antigravity, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [agents.NAME] program and args: a source of your own, an ACP agent the app starts on its standard streams; Settings → Sources adds and removes them. See [a new session](#a-new-session).
 - [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Antigravity"]`. A preset is never changed, only hidden.
@@ -854,6 +854,53 @@ command = ["python", "make_catalog.py", "--team"]
 cwd = "C:/work/catalogs"                                              # optional: the folder it runs in
 timeout = 60                                                          # optional: seconds it may run
 ```
+
+#### Defaults, replacing, adding and turning off
+
+A type's catalogs are its **defaults** (what the extension that adds the type registers, such as a pinned list of models it ships a copy of), then
+your entries by label: an entry with a default's label **replaces** it whole, a new label **adds** a source after the defaults, and `false`
+turns a default **off** (it stays listed in Settings, Catalog sources, off, so it can be turned on again).
+
+```toml
+[store.whisper.catalogs.ggerganov]            # the default's label: this replaces it
+provider = "whisper_hf"
+repo = "myorg/whisper.cpp-models"
+pin = "0f3c9d1a5b7e2c4d6f8091a2b3c4d5e6f7a8b9c0"   # a revision the source reads at, or "sha256:<hex>" of the catalog's text
+
+[store.whisper.catalogs]
+mine = { provider = "read", source = "D:/models/whisper.json", trusted = true }   # a canoa.models/1 file of your own
+other = false                                 # a default turned off
+```
+
+Four keys of an entry are the host's, whatever the provider: `pin` (a pinned catalog is read once and never goes stale by time; a
+`sha256:` pin must match the text the source answers with), `trusted`, `ttl` (seconds before it is read again; `[host.store] source_ttl`,
+3600, otherwise) and `keys` (the publisher key fingerprints the entry demands a signature from). A provider's own form may not use these
+names. Type catalogs that list models answer in `canoa.models/1` and a program's releases in `canoa.releases/1`
+(`crates/canoa/include/canoa.models.schema.json`, `canoa.releases.schema.json`); every item says which catalog it came from and carries a
+badge: **verified** (a digest the publisher gives for every file), **pinned** (a digest derived at a pinned commit) or **unverified**. A file
+with no digest, or one weaker than SHA-256 or SHA-512, is not offered unless the entry says `trusted = true`, and then it is drawn unverified
+and the download of a program from that scope may take it. What was last read is kept on disk beside `latest.json`
+(`cache/store/catalogs/<scope>/<label>.json`) and a catalog that cannot be reached shows its last answer with the reason; a pinned default
+ships a copy and needs no network the first time. Settings, Catalog sources lists every scope's catalogs with their origin, pin, badge and last
+read, and replaces, adds, turns off and removes them through `store/catalog_set`.
+
+#### Turning off a provider
+
+`[host.disabled]` turns off a provider a library registers, by the kind's name and the provider's id, and leaves the library's other
+providers alone:
+
+```toml
+[host.disabled]
+account_provider = ["claude_accounts"]   # Claude's accounts are not offered; the claude harness still runs on any other provider's account
+store_extension = ["whisper_extension"]  # the Whisper type leaves the Store
+catalog_source = ["command"]             # entries that name this source show that it is off
+```
+
+A provider that is off is not listed or started (account makers, harnesses, program stores, Store types, catalog sources, session services,
+settings sections, panel tabs, profile items, secret providers, and the speech kinds the scripts offer). The accounts of an account provider
+that is off stay in {{ config_file }}, are shown as off in Settings, Accounts and `accounts/list` (`disabled`), and are back when it is turned on.
+The host reads `[host]` when it starts; a kind or an id no library offers is a warning that lists the ones it knows, not a refusal.
+Settings, Providers lists every registered provider by kind with a switch that writes this table (`providers/switch`).
 
 Each source describes itself to the Store: its name, the types it serves (or all of them) and the form it asks for (a schema, and how to show it), which is what
 Store settings shows when you add a catalog to a type. Two come with {{ name }}, as scripts the host carries. **`read`** reads what the type reads itself: a git source

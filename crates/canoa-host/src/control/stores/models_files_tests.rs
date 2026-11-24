@@ -474,6 +474,7 @@ fn a_whisper_model_needs_no_program_and_comes_only_from_the_origins_its_library_
             "whisper",
             &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
             &outside,
+            None,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .expect_err("an address outside the origins");
