@@ -129,7 +129,9 @@ cargo build -p canoa-ffi --lib
 # providers written with the SDKs, loaded through the host (Python needs its shared library; JavaScript needs a C compiler for QuickJS)
 CANOA_TEST_PYTHON=python3 CANOA_TEST_JS=1 cargo test -p canoa-host --test script_providers   # needs `cargo build -p canoa-host --example stdio_agent`
 (cd bindings/python/canoa-sdk && GUATIAO_LIBRARY=<guatiao_source_py built by the test> PYTHONPATH=<guatiao>/bindings/python/guatiao/src pytest)
-mkdocs build --strict
+mkdocs build --strict   # BRAND_FILE=<brand.json> builds the site in another brand's names and mark; the look stays the default's
+(cd app && CANOA_WRITE_LOOK=1 flutter test test/docs_look_test.dart)   # rewrites docs/assets/look.json after a change to the default look; plain, the test fails when it is stale
+python -m unittest tools/test_docs_brand.py   # the docs hook (needs mkdocs)
 ```
 
 `flutter pub get` with an older Flutter rewrites `app/pubspec.lock`: restore it before committing.
