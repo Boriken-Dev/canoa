@@ -1,13 +1,13 @@
 # Providers written as scripts
 
-Most of what Canoa offers a person is a **provider** of a kind: a secret provider, a profile item, a catalog source, a page of Settings,
+Most of what {{ name }} offers a person is a **provider** of a kind: a secret provider, a profile item, a catalog source, a page of Settings,
 a tab of the panel, a Store type, a speech engine, an agent's description. A provider does not have to be Rust. It can be a few lines of
-JavaScript or Python that subclass a base class of the Canoa SDK, and the same files run on Windows, Linux and macOS with nothing to build.
+JavaScript or Python that subclass a base class of the {{ name }} SDK, and the same files run on Windows, Linux and macOS with nothing to build.
 A script is shared between hosts as the files it is.
 
 | Kind | What it is | JavaScript and Python base classes |
 | --- | --- | --- |
-| `agent_vendor` | who an agent is and how Canoa shows it | `AgentVendor` |
+| `agent_vendor` | who an agent is and how {{ name }} shows it | `AgentVendor` |
 | `usage_reader` | how an agent's quota is read | `UsageReader`, `UsageReading` |
 | `store_extension`, `program_store`, `model_store` | a Store type, a program the Store installs, and the models it lists | `StoreExtension`, `ProgramStore`, `ModelStore` |
 | `secret_provider` | somewhere a secret comes from | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` |
@@ -18,15 +18,15 @@ A script is shared between hosts as the files it is.
 | `speech_provider`, `speech_output` | dictation and a voice | `SpeechProvider`, `SpeechOutput` |
 | `account_speech` | the speech-to-text services the accounts of some kinds can call | `AccountSpeech` |
 
-The classes after the first of each row mirror what Canoa carries: subclass one to change a few words, or read it as the example.
+The classes after the first of each row mirror what {{ name }} carries: subclass one to change a few words, or read it as the example.
 The SDK is in `bindings/js/canoa-sdk` (plain ES modules with `.d.ts` files, so TypeScript works too) and `bindings/python/canoa-sdk`; each
 has an `AGENTS.md` with the whole API, and `examples/providers` has a library of each language that serves four kinds.
 
 ## What runs it
 
-**JavaScript is built in.** Canoa carries QuickJS, so a script in JavaScript needs no installed runtime, on any platform it runs on.
+**JavaScript is built in.** {{ name }} carries QuickJS, so a script in JavaScript needs no installed runtime, on any platform it runs on.
 **Python is optional**: a Guatiao source for Python (`guatiao_source_py`) loads a library written in Python for a person who has Python,
-which the Store's Programs list installs. Nothing Canoa ships depends on it.
+which the Store's Programs list installs. Nothing {{ name }} ships depends on it.
 
 A script has no files, network or programs of its own. It is handed what it may use:
 
@@ -89,7 +89,7 @@ class Region(EnvProfileItem):
 
 ## Trying one
 
-Name the folder in the host's `canoa.cfg`. JavaScript uses the engine the host carries:
+Name the folder in the host's `{{ config_file }}`. JavaScript uses the engine the host carries:
 
 ```toml
 [host.extensions.region]
@@ -100,7 +100,7 @@ dirs = ["C:/canoa/region"]                # the folders that hold a *.guatiao ma
 ```
 
 Every kind the library serves is then offered as an extension's would be: the item in Settings, Profiles, the section in Settings, the
-tab in the panel's new-tab menu, the source in a Store type's settings. The host reads `canoa.cfg`'s `[host]` when it starts.
+tab in the panel's new-tab menu, the source in a Store type's settings. The host reads `{{ config_file }}`'s `[host]` when it starts.
 
 ## Publishing one
 
@@ -123,7 +123,7 @@ Store, Extensions lists the package. Installing it shows a plan (the source, the
 folder, checks it against the `pin` before keeping a byte, keeps it in `<home>/extensions/NAME` and writes
 `source = "bundled:js"`, `source_settings`, `pin` and `root` into `[host.extensions.NAME]`. The digest is checked again each time the host
 loads it, so a script that changed since is not run. A package written in Python lists `runtime = "python"` and is refused by a host that
-has no Python source: such a host names the package's folder in `canoa.cfg` under the source it has set up.
+has no Python source: such a host names the package's folder in `{{ config_file }}` under the source it has set up.
 
 **Giving the same package to another host.** A catalog entry is pinned content, so every host that reads the catalog installs the very
 same bytes, and each checks them itself. The Store of a paired host is a client of that host's control channel: choose the entry there
@@ -132,7 +132,7 @@ sitting at.
 
 ## What ships as scripts
 
-Canoa's own Bitwarden secret provider, the identity and proxy profile items (the proxy itself is the host's, the item only says which
+{{ name }}'s own Bitwarden secret provider, the identity and proxy profile items (the proxy itself is the host's, the item only says which
 network its values ask for) and the command and read catalog sources are packages of JavaScript written with these classes, carried in the
 host and offered as an extension's would be. What needs the operating system or the host's own machinery stays Rust: the system
 credential store, the proxy and its TLS handling, the agents' adapters and the Store's installers.

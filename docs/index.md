@@ -1,8 +1,8 @@
-# Canoa
+# {{ name }}
 
 **Discover. Connect. Route.**
 
-Canoa provides a common place to discover, authenticate and interact with local or remote agent services, without binding users to a single provider or client. It includes a responsive Flutter multi-session interface, a browser extension that can offer authorized page/DevTools functionality through MCP, a Rust host (`canoa`) that serves local agents to paired keys, and a small Rust registry of services and client grants.
+{{ name }} provides a common place to discover, authenticate and interact with local or remote agent services, without binding users to a single provider or client. It includes a responsive Flutter multi-session interface, a browser extension that can offer authorized page/DevTools functionality through MCP, a Rust host (`{{ program }}`) that serves local agents to paired keys, and a small Rust registry of services and client grants.
 
 !!! warning "Development status"
     Early development: nothing here implies a published binary or public service. The [roadmap](roadmap.md) is the one record of what exists.
@@ -18,6 +18,6 @@ Canoa provides a common place to discover, authenticate and interact with local 
 
 ## Scope
 
-Canoa is **not** a new agent wire protocol. ACP is the client/agent interface; MCP is the tool interface, and coqui-peer supplies reusable identity and pairing primitives. Implementations may differ provided they agree on a published wire profile and authentication contract.
+{{ name }} is **not** a new agent wire protocol. ACP is the client/agent interface; MCP is the tool interface, and coqui-peer supplies reusable identity and pairing primitives. Implementations may differ provided they agree on a published wire profile and authentication contract.
 
 See the [source repository](https://github.com/Boriken-Dev/canoa) or the [Rust API](https://boriken-dev.github.io/canoa/rust/canoa/index.html).

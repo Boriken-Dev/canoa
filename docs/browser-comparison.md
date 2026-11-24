@@ -1,14 +1,10 @@
----
-brand_names: false
----
-
 # Browser integration reference: ChatGPT and Claude
 
-Review date: 2026-10-31. This is product research, not a claim that Canoa implements these features.
+Review date: 2026-10-31. This is product research, not a claim that {{ name }} implements these features.
 
 ## Products and differences
 
-| Feature | ChatGPT browser extension | Claude in Chrome | Canoa direction |
+| Feature | ChatGPT browser extension | Claude in Chrome | {{ name }} direction |
 | --- | --- | --- | --- |
 | Sidebar chat | Yes, tied to the user's conversations | Yes, with Cowork integration | Flutter `app/` reused in side panel and full-page UI |
 | Existing signed-in browsing context | Yes | Yes | Browser-specific extension integration |
@@ -22,12 +18,12 @@ Review date: 2026-10-31. This is product research, not a claim that Canoa implem
 
 Important: OpenAI also publishes **ChatGPT Search**, which merely changes the address-bar search provider. It is unrelated to browser automation. **ChatGPT Atlas** is a separate browser with integrated Ask ChatGPT and Agent mode; do not conflate its browser security limits with the Chrome extension.
 
-ChatGPT documents support for Chrome, Edge, Brave, Opera and Vivaldi; side chat currently supports Chrome, Edge, Brave and Vivaldi. A browser's actual API support must still be checked independently for Canoa.
+ChatGPT documents support for Chrome, Edge, Brave, Opera and Vivaldi; side chat currently supports Chrome, Edge, Brave and Vivaldi. A browser's actual API support must still be checked independently for {{ name }}.
 
 ## User expectations worth adopting
 
 1. Opening the side panel should keep the current page visible; full-page mode should show the same conversations.
-2. Selecting a tab or text and choosing **Ask Canoa** should make that precise item available as context to the selected session, without broadcasting it to other agents.
+2. Selecting a tab or text and choosing **Ask {{ name }}** should make that precise item available as context to the selected session, without broadcasting it to other agents.
 3. Users should see the verified peer, agent name, session, target tabs, permission mode, and active actions.
 4. A browser task should normally use dedicated tabs or groups so it does not unexpectedly take over the active tab.
 5. A developer can opt in to a privileged **Full debugging** session for a known peer and tab group, using CDP on Chromium. Exposing console, network, execution, debugger and storage internals is high risk and must not be silently inferred from ordinary site access.
@@ -35,7 +31,7 @@ ChatGPT documents support for Chrome, Edge, Brave, Opera and Vivaldi; side chat 
 7. Native code and connected MCP tools are not implicitly allowed because a peer has access to webpage text.
 8. The app and extension need a common session index and message history, but extension grants remain locally enforced by the browser and revocable at any time.
 
-## Where Canoa goes further
+## Where {{ name }} goes further
 
 - **Transport-neutral identity:** ACP-over-WSS and a documented peer-auth profile, rather than one company's account.
 - **Remote sessions:** explicitly bind remote session ID and verified agent peer, with attach, detach, prompt, cancel, resume or load according to the agent's advertised ACP capabilities.

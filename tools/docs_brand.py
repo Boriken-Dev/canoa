@@ -1,12 +1,14 @@
 """MkDocs hook: the documentation site in the brand's names and look.
 
 Enabled by `hooks:` in mkdocs.yml. The brand is `BRAND_FILE`, else `app/brand.json`. The hook sets the site name, draws the
-header's logo from the brand's mark (in `accent`, and in `accent_on_dark` on the dark scheme), and paints both schemes with the
-default look's colours (`docs/assets/look.json`, which `app/test/docs_look_test.dart` keeps current). A brand other than the
-default also gets a favicon of its mark and its names in the text of the pages: the closed set of tokens in `_tokens`. A page
-that is about the project and not the product opts out with `brand_names: false` in its front matter.
+header's logo from the brand's mark (in `accent`, and in `accent_on_dark` on the dark scheme), paints both schemes with the
+default look's colours (`docs/assets/look.json`, which `app/test/docs_look_test.dart` keeps current), and gives a brand other
+than the default a favicon of its mark.
 
-With the default brand the text of every page is returned unchanged.
+A page writes the product's names as placeholders, `{{ name }}`, `{{ short_name }}`, `{{ program }}`, `{{ executable }}`,
+`{{ config_file }}`, `{{ folder }}`, `{{ home_dir }}`, `{{ env_prefix }}` and `{{ id }}`, rendered from the brand for every brand.
+Any other `{{ ... }}` is left as written. In a link's fragment a placeholder renders as a heading's id would, so a link follows
+the heading it names.
 """
 from __future__ import annotations
 
@@ -22,13 +24,9 @@ DEFAULT_FILE = ROOT / "app" / "brand.json"
 LOOK = "assets/look.json"
 SVG_FILL = re.compile(r'(<g\b[^>]*\bfill=")#[0-9A-Fa-f]{6}(")')
 
-# Canoa's own values of the names a page may carry.
-_CANOA = {
-    "name": "Canoa", "executable": "CanoaUI", "env_prefix": "CANOA",
-    "program": "canoa", "config_file": "canoa.cfg", "folder": "Canoa", "home_dir": ".canoa",
-}
-
-_ANCHOR = re.compile(r"(\]\([^)\s#]*#)([\w-]*canoa[\w-]*)(\))")
+PLACEHOLDERS = ("name", "short_name", "program", "executable", "config_file", "folder", "home_dir", "env_prefix", "id")
+_PLACEHOLDER = re.compile(r"(\{)?\{\{\s*(" + "|".join(PLACEHOLDERS) + r")\s*\}\}(\})?")
+_FRAGMENT = re.compile(r"(\]\([^)\s#]*#)((?:[^)\s{]|\{\{[^}]*\}\}|\{)*)(\))")
 
 _brand: dict[str, str] = {}
 _names: dict[str, str] = {}
@@ -47,6 +45,8 @@ def _names_of(data: dict) -> dict[str, str]:
     program = data.get("program") or re.sub(r"[^a-z0-9-]", "", name.lower())
     return {
         "name": name,
+        "short_name": data["short_name"],
+        "id": data["id"],
         "executable": data["executable"],
         "env_prefix": data["env_prefix"],
         "program": program,
@@ -144,37 +144,27 @@ def on_files(files, config):
     return files
 
 
-def _tokens() -> re.Pattern[str]:
-    """One pattern over every token, so a replacement is never matched again by another."""
-    return re.compile(
-        r"(?P<folder>(?<=[/\\])" + re.escape(_CANOA["folder"]) + r"(?![\w-]))"
-        r"|(?P<executable>(?<![\w-])" + re.escape(_CANOA["executable"]) + r"(?![\w-]))"
-        r"|(?P<config_file>(?<![\w.-])" + re.escape(_CANOA["config_file"]) + r"(?![\w-]))"
-        r"|(?P<env_prefix>(?<![\w-])" + re.escape(_CANOA["env_prefix"]) + r"_(?=[A-Z]))"
-        r"|(?P<home_dir>(?<![\w.])" + re.escape(_CANOA["home_dir"]) + r"(?![\w-]))"
-        r"|(?P<program>(?<![\w.-])" + re.escape(_CANOA["program"]) + r"(?=@|-(?:portal|instance|users|proxy)(?![\w-]))"
-        r"|(?<=/opt/)" + re.escape(_CANOA["program"]) + r"(?![\w-])|(?<=/run/)" + re.escape(_CANOA["program"]) + r"(?![\w-]))"
-        r"|(?P<name>(?<![\w-])" + re.escape(_CANOA["name"]) + r"(?!\w))"
+def _slug(text: str) -> str:
+    """The id MkDocs gives a heading holding `text`."""
+    return re.sub(r"[-\s]+", "-", re.sub(r"[^\w\s-]", "", text).strip().lower())
+
+
+def render(markdown: str, names: dict[str, str]) -> str:
+    """`markdown` with each placeholder written as the brand's name, and as its id inside a link's fragment.
+
+    Three braces on each side, `{{{ name }}}`, keep the placeholder as written, with two.
+    """
+
+    def value(m: re.Match[str], fragment: bool = False) -> str:
+        if m.group(1) and m.group(3):
+            return m.group(0)[1:-1]
+        return _slug(names[m.group(2)]) if fragment else names[m.group(2)]
+
+    markdown = _FRAGMENT.sub(
+        lambda m: m.group(1) + _PLACEHOLDER.sub(lambda p: value(p, True), m.group(2)) + m.group(3), markdown
     )
+    return _PLACEHOLDER.sub(value, markdown)
 
 
 def on_page_markdown(markdown, page, config, files):
-    if _default or page.meta.get("brand_names") is False:
-        return markdown
-    new = {key: value for key, value in _names.items() if value != _CANOA[key]}
-    if not new:
-        return markdown
-
-    def replace(match: re.Match[str]) -> str:
-        key = match.lastgroup
-        value = new.get(key)
-        if value is None:
-            return match.group(0)
-        return value + "_" if key == "env_prefix" else value
-
-    text = _tokens().sub(replace, markdown)
-    # A heading that holds the name has a new id: the links to it follow.
-    if "name" in new:
-        slug = re.sub(r"[^a-z0-9]+", "-", new["name"].lower()).strip("-")
-        text = _ANCHOR.sub(lambda m: m.group(1) + m.group(2).replace("canoa", slug) + m.group(3), text)
-    return text
+    return render(markdown, _names)

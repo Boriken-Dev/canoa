@@ -1,6 +1,6 @@
-# Desktop and canoa.cfg
+# Desktop and {{ config_file }}
 
-canoa.cfg is one file in TOML, YAML or JSON, chosen by its first line and read through [anycfg](https://github.com/jose-pr/anycfg-rs). The app and the `canoa` host read it the same way and find it in the same places.
+{{ config_file }} is one file in TOML, YAML or JSON, chosen by its first line and read through [anycfg](https://github.com/jose-pr/anycfg-rs). The app and the `{{ program }}` host read it the same way and find it in the same places.
 
 The default template is [examples/config/canoa.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa.cfg). [canoa-yaml.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa-yaml.cfg) and [canoa-json.cfg](https://github.com/Boriken-Dev/canoa/blob/main/examples/config/canoa-json.cfg) hold the same settings in the other two formats.
 
@@ -14,26 +14,26 @@ The app writes the file back in the format and with the first line it was read w
 
 ## Where it is found
 
-canoa.cfg is read from up to three files, lowest layer first, and merged:
+{{ config_file }} is read from up to three files, lowest layer first, and merged:
 
 | Layer | File |
 | --- | --- |
-| the installed copy | `canoa.cfg` beside the program (the folder of the `canoa` or app executable; for the portable `CanoaUI.exe`, the folder holding that file) |
-| the system's | Windows `%PROGRAMDATA%\Canoa\canoa.cfg` (`C:\ProgramData` without it), elsewhere `/etc/Canoa/canoa.cfg` |
-| your own | Windows `%APPDATA%\Canoa\canoa.cfg`, elsewhere `$XDG_CONFIG_HOME/Canoa/canoa.cfg` (an absolute path) or `~/.config/Canoa/canoa.cfg`; macOS uses `~/.config/Canoa/canoa.cfg` too |
-| PWA / extension | canoa.cfg alongside the deployed index.html, read-only |
+| the installed copy | `{{ config_file }}` beside the program (the folder of the `{{ program }}` or app executable; for the portable `{{ executable }}.exe`, the folder holding that file) |
+| the system's | Windows `%PROGRAMDATA%\{{ folder }}\{{ config_file }}` (`C:\ProgramData` without it), elsewhere `/etc/{{ folder }}/{{ config_file }}` |
+| your own | Windows `%APPDATA%\{{ folder }}\{{ config_file }}`, elsewhere `$XDG_CONFIG_HOME/{{ folder }}/{{ config_file }}` (an absolute path) or `~/.config/{{ folder }}/{{ config_file }}`; macOS uses `~/.config/{{ folder }}/{{ config_file }}` too |
+| PWA / extension | {{ config_file }} alongside the deployed index.html, read-only |
 
 A layer that does not exist is skipped, and each layer may be in any of the three formats. A layer that is malformed is refused, naming its file. The installed copy is where an application ships its defaults, the system's file is for a machine's administrator, and the last is yours.
 
-`--config` (a `canoa` option) or `CANOA_CONFIG` (used when `--config` is not given) replaces the third layer, or all three. Its value is a list of files, split at `;` on Windows and `:` elsewhere (no quoting), the last one highest:
+`--config` (a `{{ program }}` option) or `{{ env_prefix }}_CONFIG` (used when `--config` is not given) replaces the third layer, or all three. Its value is a list of files, split at `;` on Windows and `:` elsewhere (no quoting), the last one highest:
 
 - Without a leading `+`, only the listed files are read: no installed, system or user file.
 - With a leading `+` (`+extra.cfg:more.cfg`), the listed files go on top of the installed, system and user files.
 - An empty entry is refused, and so is a listed file that does not exist, saying which entry.
 
-`canoa layers` prints the files in the order they are read, lowest first, and the one that is written; the app finds the same ones.
+`{{ program }} layers` prints the files in the order they are read, lowest first, and the one that is written; the app finds the same ones.
 
-The portable `CanoaUI.exe` runs the app from an unpacked copy, so it sets `CANOA_INSTALLED_DIR` to its own folder; the installed copy is `canoa.cfg` there. The variable can name that folder for any program.
+The portable `{{ executable }}.exe` runs the app from an unpacked copy, so it sets `{{ env_prefix }}_INSTALLED_DIR` to its own folder; the installed copy is `{{ config_file }}` there. The variable can name that folder for any program.
 
 ### How layers merge
 
@@ -52,37 +52,37 @@ Configuration tables:
 - [desktop] start_hidden, close_to_tray, minimize_to_tray, start_at_login (absent until the first run turns it on; true registers the app to start hidden in the tray when you sign in, for your user only; false removes that), local_host (default true: the app runs its own host; false, or `--no-local-host`, leaves it off)
 - [network] prefer_webtransport, connect_timeout (seconds, any number above 0)
 - [appearance] look (`canoa` or `terminal`), brightness (`dark`, `light` or `system`), density (`normal`, `thinking` or `verbose`, default `normal`), open_in (`this_window`, the default, or `new_windows`: where a plain click on a conversation in the list, on a file in the Files panel and on a new shell in the panel's + menu shows it, here or in a window of its own, on a desktop and in a browser; "Open in new window" stays in each menu either way; Settings, Appearance, Open in), language (a code such as `en` or `es`; empty or absent follows the system's; [the words of the app](themes_and_brands.md)): density is how much of an agent's work a conversation shows. `verbose` draws every step as its own card; `thinking` folds each run of finished tool calls into one line ("Edited calc.js, ran a command +1 −1") and keeps the agent's thoughts; `normal` also hides thoughts and folds a finished turn into "Worked for 1m 29s", with what the agent said after its last step left outside. A step that failed, or waits for an answer, is never folded.
-- [host] what `canoa` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md), and the logins an agent entry may run its sessions on, `[host.accounts.NAME]` and an entry's `accounts`, described in [accounts](host.md#accounts). A credential is never written here: `canoa accounts add` keeps it in the provider `[secrets] accounts` names and writes only the account's kind and id; the account provider that offers the kind made it, and the agents that can run it are the ones that take a standard it provides. The app keeps this table as it is when it saves its settings.
+- [host] what `{{ program }}` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md), and the logins an agent entry may run its sessions on, `[host.accounts.NAME]` and an entry's `accounts`, described in [accounts](host.md#accounts). A credential is never written here: `{{ program }} accounts add` keeps it in the provider `[secrets] accounts` names and writes only the account's kind and id; the account provider that offers the kind made it, and the agents that can run it are the ones that take a standard it provides. The app keeps this table as it is when it saves its settings.
 - [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200), workspace (the folder of a session started with none chosen, a path template; see [a new session](#a-new-session)), while_working (`queue`, the default, or `steer`: what Enter does with a message written while a turn runs; Alt+Enter does the other, and the composer's Steer and Queue buttons are always there), queue_delivery (`merge`, the default, sends everything queued as one message when the turn ends, joined with a blank line; `each` sends one message with each turn)
 - [notifications] permission, question, finished: which of these, in a conversation the person is not looking at, reach them as a notification outside the window; each on by default. See [below](#when-a-conversation-needs-you).
 - [permissions] default_mode: the mode a new session starts in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`, such as `default_mode = "plan"`; unset leaves each agent's own. A session keeps its own choice after that; see [modes](acp-client.md#permission-requests-in-the-chat). An older `full_access` list is read and dropped.
-- Rules made by "Always allow here" are not in canoa.cfg: they are `permissions.json` beside it (the origin's IndexedDB in a browser) with a `permissions-log.jsonl` beside it (desktop only), edited in Settings, Permissions; see [acp-client](acp-client.md#permission-requests-in-the-chat).
+- Rules made by "Always allow here" are not in {{ config_file }}: they are `permissions.json` beside it (the origin's IndexedDB in a browser) with a `permissions-log.jsonl` beside it (desktop only), edited in Settings, Permissions; see [acp-client](acp-client.md#permission-requests-in-the-chat).
 - [permissions] allow_once_only: `true` makes Bypass answer only with an answer that allows once, so a request that offers only an "always" is left to the person; default `false`.
-- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `canoa` ([the host](host.md)). `[host.store] latest_ttl` (3600), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what has gone stale.
+- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what has gone stale.
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Antigravity, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [agents.NAME] program and args: a source of your own, an ACP agent the app starts on its standard streams; Settings → Sources adds and removes them. See [a new session](#a-new-session).
 - [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Antigravity"]`. A preset is never changed, only hidden.
 - [attachments] paste_as_file (characters, default 8000): a longer paste goes with the message as an attachment of its own; embed_limit (bytes, default 1048576): a larger file goes as a link to it rather than as the agent's embedded context.
-- [voice] backend (default `"system"`, the operating system's speech service, which Windows and macOS have), model, language (a tag such as `"es-PR"`; absent is automatic), device (the input device the service names; absent is the system's default) mode (`"toggle"`, the default, or `"hold"` for push to talk: the microphone and Ctrl+Shift+Space listen while held and stop on release) and acknowledged (the services whose first-use notice about where the audio goes you accepted, which Canoa writes and does not ask about again): where speech is turned into text for dictation and how it is held. Settings, Voice says where the audio goes before anything is recorded; Canoa keeps no recording, and the microphone is on only while a dictation or the page's test runs. A service that fails is not replaced by another one. Three more keys are your own voice profile, which Settings, Voice writes and which goes to the service as hints and nowhere else: accent (in your words, such as `"Puerto Rican Spanish"`), voice (`"female"`, `"male"` or another word) and vocabulary (a list of names and words you say). Nothing is worked out from your audio.
-- [speech.NAME] (in the host's canoa.cfg): a speech provider the host runs, so a page and every platform can dictate. `provider` is `speech_command` (a program that reads the audio on its standard input, as a WAV stream or raw samples, and writes the text) or `speech_endpoint` (an HTTP speech-to-text address and model, such as an OpenAI-compatible `/audio/transcriptions`), or the id of a provider that a `library` (a Guatiao library file) or a `source` (a Guatiao source file, or `bundled:js` with `source_settings = { dirs = [...] }` for a folder of JavaScript providers) the table names offers, and the other keys are that provider's settings, which Settings, Voice draws as a form and writes back. A provider is listed in Settings, Voice beside the operating system's service, and `[voice] backend = "host:NAME"` chooses it; where the system has no service of its own (a browser, Linux) and `backend` was never set, a provider made from one of Canoa's offers (below) is used. The program runs, and the address is called, as you; an endpoint's key is never shown again once saved. An argument of a command provider may be `{language}`, `{language_code}` (`es` for `es-PR`), `{vocabulary}`, `{accent}`, `{voice}`, `{rate}` or `{channels}`, each as `{name|fallback}` to say what stands in for an empty one.
+- [voice] backend (default `"system"`, the operating system's speech service, which Windows and macOS have), model, language (a tag such as `"es-PR"`; absent is automatic), device (the input device the service names; absent is the system's default) mode (`"toggle"`, the default, or `"hold"` for push to talk: the microphone and Ctrl+Shift+Space listen while held and stop on release) and acknowledged (the services whose first-use notice about where the audio goes you accepted, which {{ name }} writes and does not ask about again): where speech is turned into text for dictation and how it is held. Settings, Voice says where the audio goes before anything is recorded; {{ name }} keeps no recording, and the microphone is on only while a dictation or the page's test runs. A service that fails is not replaced by another one. Three more keys are your own voice profile, which Settings, Voice writes and which goes to the service as hints and nowhere else: accent (in your words, such as `"Puerto Rican Spanish"`), voice (`"female"`, `"male"` or another word) and vocabulary (a list of names and words you say). Nothing is worked out from your audio.
+- [speech.NAME] (in the host's {{ config_file }}): a speech provider the host runs, so a page and every platform can dictate. `provider` is `speech_command` (a program that reads the audio on its standard input, as a WAV stream or raw samples, and writes the text) or `speech_endpoint` (an HTTP speech-to-text address and model, such as an OpenAI-compatible `/audio/transcriptions`), or the id of a provider that a `library` (a Guatiao library file) or a `source` (a Guatiao source file, or `bundled:js` with `source_settings = { dirs = [...] }` for a folder of JavaScript providers) the table names offers, and the other keys are that provider's settings, which Settings, Voice draws as a form and writes back. A provider is listed in Settings, Voice beside the operating system's service, and `[voice] backend = "host:NAME"` chooses it; where the system has no service of its own (a browser, Linux) and `backend` was never set, a provider made from one of {{ name }}'s offers (below) is used. The program runs, and the address is called, as you; an endpoint's key is never shown again once saved. An argument of a command provider may be `{language}`, `{language_code}` (`es` for `es-PR`), `{vocabulary}`, `{accent}`, `{voice}`, `{rate}` or `{channels}`, each as `{name|fallback}` to say what stands in for an empty one.
 
-  Settings, Voice also offers speech-to-text providers to start from, which the host sets up. **whisper.cpp** (MIT; a library the host carries, so a build without it has no such offer, and the Store lists it as a type of its own) is a local engine: Install asks the host's Store for the publisher's program (Windows or Linux, x86-64 or ARM64) and one model of its published list (Base in every language is the default; Tiny, Small and Large v3 turbo are there too, and English-only forms), each checked against its SHA-256, shows the files before fetching them, then writes a `[speech.whisper]` table (`offer = "whisper"`) that runs `whisper-cli` on the audio: it is turned into text on the host and goes nowhere else. Another model is another install, and the Store's Models page installs and removes each model on its own (it asks for the program first when that is missing). **Foundry Local** (a library the host carries, so a build without it has no such offer) is offered when its service is running on the host and lists a Whisper model: Set up writes `[speech.foundry]` (`service = "foundry"`, `offer = "foundry"`, the model you chose; `service` is the id of the Store type whose library runs the model), and each recording is written to a temporary file on the host, handed to the service by its path and removed afterwards, so nothing leaves the computer. The service's address changes with each start, so it is found when you dictate (`service_address` in the table names one instead); Canoa never loads a model, so load it on the Foundry models page, where a Whisper model's page also has Use as speech provider. **OpenAI, account NAME** (the service is described by a library the host carries, `canoa-openai`, so a build without it offers none) is one offer for each OpenAI API key account you already have in Canoa: Add writes `[speech.openai-NAME]` with `account = "NAME"`, `offer = "openai:NAME"` and no key, and the key is read from the account's store when you dictate, so you never type it again and the provider's title says which key pays; the audio goes over the internet to OpenAI, and the page says so before anything is recorded. A ChatGPT sign-in is not an API key and is listed as not offered, with the reason. Add an API key as an account to use OpenAI's speech-to-text: a key is no longer typed into a form of its own. A page's key needs `voice` to use a provider, `voice.setup` to add one, and `store.programs` to install an engine; the page says which is missing.
-- [say.NAME] (in the host's canoa.cfg): a voice provider the host runs, so a page and every platform can read replies aloud. `provider` is `speech_say_system` (this computer's own voices: Windows' desktop voices, `say` on a Mac, `espeak-ng` elsewhere; the text goes nowhere), `speech_say_endpoint` (an HTTP text-to-speech address in the shape of OpenAI's `audio/speech`, with a `model`, a `voice`, a key and the `models`, `voices` and `styles` you list; the text goes to that address) or `speech_say_command` (a program that reads text on its standard input, or in an argument, and writes audio, with the `voices`, `models` and `styles` you list), or the id of a provider a `library` or a `source` the table names offers (as for `[speech.NAME]`), or one a library this build carries offers: `speech_say_piper` (Piper, a local neural engine, with a `program` and a `voices_dir` of `NAME.onnx` files; the text goes nowhere) and `speech_say_openai` (OpenAI's voices, with a key; the text goes to OpenAI). Two providers need no table: `system`, and `piper` once the Store installed it; accounts whose kind provides `openai-api` at OpenAI's own address (`OpenAI, account NAME`, via `canoa-openai`'s `account_speech_output`) also offer their voices directly without typing a key into `[say]`. Each provider lists its voices, models and speeds in Settings, Voice, and says where the text goes before anything is spoken.
+  Settings, Voice also offers speech-to-text providers to start from, which the host sets up. **whisper.cpp** (MIT; a library the host carries, so a build without it has no such offer, and the Store lists it as a type of its own) is a local engine: Install asks the host's Store for the publisher's program (Windows or Linux, x86-64 or ARM64) and one model of its published list (Base in every language is the default; Tiny, Small and Large v3 turbo are there too, and English-only forms), each checked against its SHA-256, shows the files before fetching them, then writes a `[speech.whisper]` table (`offer = "whisper"`) that runs `whisper-cli` on the audio: it is turned into text on the host and goes nowhere else. Another model is another install, and the Store's Models page installs and removes each model on its own (it asks for the program first when that is missing). **Foundry Local** (a library the host carries, so a build without it has no such offer) is offered when its service is running on the host and lists a Whisper model: Set up writes `[speech.foundry]` (`service = "foundry"`, `offer = "foundry"`, the model you chose; `service` is the id of the Store type whose library runs the model), and each recording is written to a temporary file on the host, handed to the service by its path and removed afterwards, so nothing leaves the computer. The service's address changes with each start, so it is found when you dictate (`service_address` in the table names one instead); {{ name }} never loads a model, so load it on the Foundry models page, where a Whisper model's page also has Use as speech provider. **OpenAI, account NAME** (the service is described by a library the host carries, `canoa-openai`, so a build without it offers none) is one offer for each OpenAI API key account you already have in {{ name }}: Add writes `[speech.openai-NAME]` with `account = "NAME"`, `offer = "openai:NAME"` and no key, and the key is read from the account's store when you dictate, so you never type it again and the provider's title says which key pays; the audio goes over the internet to OpenAI, and the page says so before anything is recorded. A ChatGPT sign-in is not an API key and is listed as not offered, with the reason. Add an API key as an account to use OpenAI's speech-to-text: a key is no longer typed into a form of its own. A page's key needs `voice` to use a provider, `voice.setup` to add one, and `store.programs` to install an engine; the page says which is missing.
+- [say.NAME] (in the host's {{ config_file }}): a voice provider the host runs, so a page and every platform can read replies aloud. `provider` is `speech_say_system` (this computer's own voices: Windows' desktop voices, `say` on a Mac, `espeak-ng` elsewhere; the text goes nowhere), `speech_say_endpoint` (an HTTP text-to-speech address in the shape of OpenAI's `audio/speech`, with a `model`, a `voice`, a key and the `models`, `voices` and `styles` you list; the text goes to that address) or `speech_say_command` (a program that reads text on its standard input, or in an argument, and writes audio, with the `voices`, `models` and `styles` you list), or the id of a provider a `library` or a `source` the table names offers (as for `[speech.NAME]`), or one a library this build carries offers: `speech_say_piper` (Piper, a local neural engine, with a `program` and a `voices_dir` of `NAME.onnx` files; the text goes nowhere) and `speech_say_openai` (OpenAI's voices, with a key; the text goes to OpenAI). Two providers need no table: `system`, and `piper` once the Store installed it; accounts whose kind provides `openai-api` at OpenAI's own address (`OpenAI, account NAME`, via `canoa-openai`'s `account_speech_output`) also offer their voices directly without typing a key into `[say]`. Each provider lists its voices, models and speeds in Settings, Voice, and says where the text goes before anything is spoken.
 - [voice] output (the voice provider that reads replies aloud, by the id Settings gives it: `"browser"` for the browser's own voices, `"host:NAME"` for a `[say.NAME]` provider of the host; absent is this page's own voices when it has them, else the host's operating system), output_voice, output_model, output_style, output_speed (a multiple of normal speech, above 0 and at most 10) and read_replies (`true` reads each reply aloud as it streams in; the switch beside the microphone sets it): how replies are read aloud. Each agent reply has a Play button beside Copy that reads its prose, a sentence at a time, without code blocks or a tool's output; typing or dictating stops voice mode's reading. A conversation popped out into a window of its own, and a child's conversation, have the same Play button, and voice mode reads a child's replies as they arrive while it is shown; a pop-out window plays nothing itself but asks the main window to, so its voice is the same. A provider that fails stops the reading and is never replaced by another. Audio a host provider sends back is played by the page's Web Audio, and on the desktop by Windows' waveOut, `afplay` on macOS and `paplay`, `pw-cat` or `aplay` on Linux, whichever is installed.
 - [usage] warn_permille (thousandths, default 800): from this much of a usage bucket used, the usage control beside the mode shows a status; an exhausted bucket always shows as an error. See [usage](acp-client.md#usage).
-- [usage] limit_phrases (a list of text; unset means `RESOURCE_EXHAUSTED`, `Resource has been exhausted`, `exhausted your capacity`, `Error 429`, `rate limit`, `usage limit`, `quota` and `throttling_error`): the words that make a failed turn of an agent that reports no usage a limit, read by `canoa` for the stdio agents it serves (ASCII case does not matter). A list replaces the defaults rather than adding to them, and `[]` infers nothing. See [usage](acp-client.md#usage).
+- [usage] limit_phrases (a list of text; unset means `RESOURCE_EXHAUSTED`, `Resource has been exhausted`, `exhausted your capacity`, `Error 429`, `rate limit`, `usage limit`, `quota` and `throttling_error`): the words that make a failed turn of an agent that reports no usage a limit, read by `{{ program }}` for the stdio agents it serves (ASCII case does not matter). A list replaces the defaults rather than adding to them, and `[]` infers nothing. See [usage](acp-client.md#usage).
 - `title` on a `[host.agents.NAME]` entry (text, 1 to 64 characters, not blank, no control characters; optional): what the app shows for the entry in its source picker instead of the entry's name. A provider or tool entry takes none. It is listed beside `harness` (the provider id) in the host's lines and in `/canoa.json`, which is how the app learns both.
-- `usage` on a `[host.agents.NAME]` entry with `program`: the id of a usage reader, one a bundled agent offers (`"antigravity"`) or a library or source of this file offers (an extension written with the SDK's `UsageReader`; `canoa serve` stops naming the entry when nothing offers it) makes `canoa` read that agent's quota as `reported` usage buckets, the way [usage](acp-client.md#usage) describes. The app's Add an agent sets it when the command is `agy acp`.
+- `usage` on a `[host.agents.NAME]` entry with `program`: the id of a usage reader, one a bundled agent offers (`"antigravity"`) or a library or source of this file offers (an extension written with the SDK's `UsageReader`; `{{ program }} serve` stops naming the entry when nothing offers it) makes `{{ program }}` read that agent's quota as `reported` usage buckets, the way [usage](acp-client.md#usage) describes. The app's Add an agent sets it when the command is `agy acp`.
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
 - [store]: the Store's limits and [the catalogs of each Store type](#catalogs-of-each-store-type), `[store.TYPE.catalogs.LABEL]`; the overlay store is described [below](#the-overlay-store), `[store.extensions.catalogs]` lists [extensions catalogs](#extensions-catalogs), and `[store] skills_search` turns on [searching skills.sh](#searching-skillssh).
 
-The session list is `sessions.json` beside canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session. It also keeps, per source, what its agent offered (model, effort, mode and its other choices) and took with a prompt when it last ran, and the last model, effort and mode the agent took from you.
+The session list is `sessions.json` beside {{ config_file }} on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session. It also keeps, per source, what its agent offered (model, effort, mode and its other choices) and took with a prompt when it last ran, and the last model, effort and mode the agent took from you.
 
 ### A new session
 
 **New session**, Ctrl+N (⌘N on a Mac) or the palette opens a new session in the middle of the window: a choice of **Chat** or **Workspace** (and, for a workspace, its folder: recent folders, or **Open folder…**) above the message box, and in the row under the box `+`, the **source**, **Local** or **Worktree**, the agent's **mode**, **model** and **effort**, the prompt **cache**, the **overlays** it starts with, and Send. It is in the side list at once, as New, with nothing started: no agent, no connection and no worktree. One left untouched is shown again rather than another made, and a new one starts from the source chosen last, as the kind of session started last (a Chat before any); the recent folders are in the folder menu, and choosing one is for that session only. A chat has no worktree, so **Local** and **Worktree** appear for a workspace only.
 
-A **Chat** is a session with no project: it works in a folder of its own that Canoa makes and never shows in the new-session view, the list or the header, on the first message and never before, and takes away again if the agent does not start. The details panel says Chat and keeps the folder under Technical details. A **Workspace** session works in the folder the person chooses, and cannot start without one. The folder of a chat comes from `[sessions] workspace` (Settings: Where chats keep their files), a path template whose `${name}` variables are put in when the folder is made (Settings shows it with what it makes now); the default is `${documents}/Canoa/scratch/${session}`. The session list records which a session is; a chat opens again in its own folder, and the list grouped by workspace and Earlier conversations put chats under **Chats**.
+A **Chat** is a session with no project: it works in a folder of its own that {{ name }} makes and never shows in the new-session view, the list or the header, on the first message and never before, and takes away again if the agent does not start. The details panel says Chat and keeps the folder under Technical details. A **Workspace** session works in the folder the person chooses, and cannot start without one. The folder of a chat comes from `[sessions] workspace` (Settings: Where chats keep their files), a path template whose `${name}` variables are put in when the folder is made (Settings shows it with what it makes now); the default is `${documents}/{{ folder }}/scratch/${session}`. The session list records which a session is; a chat opens again in its own folder, and the list grouped by workspace and Earlier conversations put chats under **Chats**.
 
 A conversation's name is what the agent reports, else the first line of the first message. A name the person gives it (Rename) is kept, and no later name from the agent replaces it, including after the session is opened again.
 
@@ -90,43 +90,43 @@ A conversation's name is what the agent reports, else the first line of the firs
 | --- | --- |
 | `${documents}` | the person's Documents folder: on Windows the Documents known folder (which follows a redirected or OneDrive Documents), on Linux `$XDG_DOCUMENTS_DIR`, else `user-dirs.dirs`, else `~/Documents`, on macOS `~/Documents` |
 | `${home}` | the home folder |
-| `${session}` | Canoa's own id for the session, a UUID made with the draft before any agent runs and kept in the session list beside the id the agent reports |
+| `${session}` | {{ name }}'s own id for the session, a UUID made with the draft before any agent runs and kept in the session list beside the id the agent reports |
 | `${date}`, `${time}`, `${datetime}` | local time when the session's draft was made, so the folder shown is the folder made: `2026-11-11`, `153005`, `2026-11-11T153005` |
 | `${handler}` | the harness's `acp_harness` provider id, the same for a hosted and a preset source: `claude`, `codex`, `grok`, `antigravity`, `opencode`, `pi` or a hosted entry's own `harness`; else the source's label |
 | `${source}` | the source's label |
 | `${host}` | this computer's name |
 | `${fqdn}` | a webpage's host name; empty on the desktop |
 
-Only the template places separators (`/` or `\`, either spelling): every value except `${documents}` and `${home}` is made one path segment, its separators, `..`, control and reserved characters replaced by `_`, and a part of the template that a variable leaves empty (`${fqdn}` on the desktop) is dropped. canoa.cfg is refused, naming `sessions.workspace`, when the template names a variable not in the table, leaves a `${` open, or has no `${session}`, so two sessions never share a folder by accident.
+Only the template places separators (`/` or `\`, either spelling): every value except `${documents}` and `${home}` is made one path segment, its separators, `..`, control and reserved characters replaced by `_`, and a part of the template that a variable leaves empty (`${fqdn}` on the desktop) is dropped. {{ config_file }} is refused, naming `sessions.workspace`, when the template names a variable not in the table, leaves a `${` open, or has no `${session}`, so two sessions never share a folder by accident.
 
-A session started from a webpage works in `<Documents>/Canoa/scratch/<site>/<session>` on the machine its agent runs on: one folder for the site, one for each session. The page names the site, not a path: its `session/new` carries `{"site": "<host name>"}` under `_meta["dev.boriken.canoa/site"]` and no folder (the app sends `/`, which the host replaces), and `canoa`, which serves the agent, resolves the folder itself, makes it (private to the user on Unix) and starts the agent there. The folder does not follow `[sessions] workspace`. The host's Documents folder is `XDG_DOCUMENTS_DIR` when the host's environment sets it, on any system, else the one `${documents}` names above. The site is the page's host name in lower case with an international name as punycode, no port, path or credentials, and the host takes it only as written: a name that is not a plain name fails the session with `-32602` and nothing is made. Refused: `..`, a separator, a colon (so a drive letter), a first label Windows reserves for a device (`con`, `nul`, `com1` and the rest, with or without an extension), an IPv6 address, a label that is empty, over 63 characters or has anything but letters, digits and inner hyphens, a name over 253 characters, an upper-case letter or a non-ASCII one; the app shows no panel for a page with such a name. The host's answer to `session/new` carries the same key with `site`, `id` and `folder`, and the session list records them. The extension's panel for the page in front lists that site's earlier sessions, newest first, with **Resume** and **New session**. **Resume** opens the session again, through the browser's provider (which has to hold the agent's grant), with `session/load` or `session/resume` naming the site and the recorded folder; the host takes that folder only when it is one session's own under that site's scratch folder, and makes it again if it is gone. An entry with `working_roots` refuses a site session whose folder is outside them. The host makes no other folder for a page.
+A session started from a webpage works in `<Documents>/{{ folder }}/scratch/<site>/<session>` on the machine its agent runs on: one folder for the site, one for each session. The page names the site, not a path: its `session/new` carries `{"site": "<host name>"}` under `_meta["dev.boriken.canoa/site"]` and no folder (the app sends `/`, which the host replaces), and `{{ program }}`, which serves the agent, resolves the folder itself, makes it (private to the user on Unix) and starts the agent there. The folder does not follow `[sessions] workspace`. The host's Documents folder is `XDG_DOCUMENTS_DIR` when the host's environment sets it, on any system, else the one `${documents}` names above. The site is the page's host name in lower case with an international name as punycode, no port, path or credentials, and the host takes it only as written: a name that is not a plain name fails the session with `-32602` and nothing is made. Refused: `..`, a separator, a colon (so a drive letter), a first label Windows reserves for a device (`con`, `nul`, `com1` and the rest, with or without an extension), an IPv6 address, a label that is empty, over 63 characters or has anything but letters, digits and inner hyphens, a name over 253 characters, an upper-case letter or a non-ASCII one; the app shows no panel for a page with such a name. The host's answer to `session/new` carries the same key with `site`, `id` and `folder`, and the session list records them. The extension's panel for the page in front lists that site's earlier sessions, newest first, with **Resume** and **New session**. **Resume** opens the session again, through the browser's provider (which has to hold the agent's grant), with `session/load` or `session/resume` naming the site and the recorded folder; the host takes that folder only when it is one session's own under that site's scratch folder, and makes it again if it is gone. An entry with `working_roots` refuses a site session whose folder is outside them. The host makes no other folder for a page.
 
-A source is a program with its arguments and what else it needs: the host's own sources (Claude Code and Codex through the host's translators, Antigravity as `agy acp`, Grok as `grok agent stdio`, OpenCode as `opencode acp` through the built-in `opencode` harness, Pi; served by `canoa serve --local-sources` to the app that runs it, with no address, and replaced by an entry of the same name in `[host.agents]`), the commands under `[agents.NAME]` (served by the host as its own sources: adding or removing one restarts the host, which ends the sessions open on it), and the agent entries the `canoa` this app runs is serving, as `canoa serve` lists them: an entry added to `[host.agents]`, a `harness` entry naming any provider included, is a source once the host serves it, with no change to the app (the app does not read the entry, and a draft kept on a hosted source gets it back when the host serves it). Settings → Sources lists them with where each program was found (on PATH, else where its installer puts it: `%LOCALAPPDATA%\agy\bin` for `agy` on Windows, `~/.grok/bin` for `grok`), hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
+A source is a program with its arguments and what else it needs: the host's own sources (Claude Code and Codex through the host's translators, Antigravity as `agy acp`, Grok as `grok agent stdio`, OpenCode as `opencode acp` through the built-in `opencode` harness, Pi; served by `{{ program }} serve --local-sources` to the app that runs it, with no address, and replaced by an entry of the same name in `[host.agents]`), the commands under `[agents.NAME]` (served by the host as its own sources: adding or removing one restarts the host, which ends the sessions open on it), and the agent entries the `{{ program }}` this app runs is serving, as `{{ program }} serve` lists them: an entry added to `[host.agents]`, a `harness` entry naming any provider included, is a source once the host serves it, with no change to the app (the app does not read the entry, and a draft kept on a hosted source gets it back when the host serves it). Settings → Sources lists them with where each program was found (on PATH, else where its installer puts it: `%LOCALAPPDATA%\agy\bin` for `agy` on Windows, `~/.grok/bin` for `grok`), hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
 
-The first message starts it: the worktree is made, the profile is prepared (its dialog shown only when it has more than a model, effort or mode to approve), the agent started or the host reached, `session/new` sent with the folder, the profile and its MCP servers, the model, effort and mode chosen set, and then the message sent with what goes with it. A start that fails says why, takes back the worktree it made, and leaves the message to send again. Until then the session is kept in `drafts/` beside canoa.cfg, with what is written in it and what goes with it, and comes back after a restart; closing it leaves nothing there or in the session list. The session list notes it once it has started.
+The first message starts it: the worktree is made, the profile is prepared (its dialog shown only when it has more than a model, effort or mode to approve), the agent started or the host reached, `session/new` sent with the folder, the profile and its MCP servers, the model, effort and mode chosen set, and then the message sent with what goes with it. A start that fails says why, takes back the worktree it made, and leaves the message to send again. Until then the session is kept in `drafts/` beside {{ config_file }}, with what is written in it and what goes with it, and comes back after a restart; closing it leaves nothing there or in the session list. The session list notes it once it has started.
 
-Before its source has run, model and effort offer only **Default**, which sets nothing; once it has, they list what the agent offered then, with when. A new session's default is the profile's value, else your last choice for that source. After the start they list what the agent offers, a change is sent with `session/set_config_option` and shown once the agent takes it, and a value it refuses goes back, with its reason in the conversation. A change during a turn is sent before the next message. **Cache** is how long the agent's prompt cache lives, for this session: Short (about 5 minutes, for one-shot and background runs), Long (about an hour, for a session you are active in) or the harness's own Default. Unchosen, a chat session asks Long, or what its entry's `cache_lifetime` in canoa.cfg says; your choice wins and is kept with the draft and the session. It shows only for a source whose provider said what it does with the choice, and that sentence is printed under the message box (Codex's reads "ignored", since its app server has no such setting). Full access shows in the mode control, in red, beside the conversation's banner. The overlays can be changed until the first message; after it the control shows what applied.
+Before its source has run, model and effort offer only **Default**, which sets nothing; once it has, they list what the agent offered then, with when. A new session's default is the profile's value, else your last choice for that source. After the start they list what the agent offers, a change is sent with `session/set_config_option` and shown once the agent takes it, and a value it refuses goes back, with its reason in the conversation. A change during a turn is sent before the next message. **Cache** is how long the agent's prompt cache lives, for this session: Short (about 5 minutes, for one-shot and background runs), Long (about an hour, for a session you are active in) or the harness's own Default. Unchosen, a chat session asks Long, or what its entry's `cache_lifetime` in {{ config_file }} says; your choice wins and is kept with the draft and the session. It shows only for a source whose provider said what it does with the choice, and that sentence is printed under the message box (Codex's reads "ignored", since its app server has no such setting). Full access shows in the mode control, in red, beside the conversation's banner. The overlays can be changed until the first message; after it the control shows what applied.
 
 ### A worktree per session
 
-**Worktree** under a new session's message (only for a folder in a git repository), or **In a new git worktree, on its own branch** in a new session on a saved Canoa host, starts the session in a new worktree of the repository holding the folder, from that directory's current commit. For a new session it is made when the first message is sent, and named after its source. The branch is `canoa/` and the session's title (or its agent's name) in lower-case letters and digits joined by hyphens, then six random hexadecimal digits, such as `canoa/fix-the-tests-3fa91c`; nothing else is taken, so no branch reads as an option, a range or a path step. The worktree goes beside the repository, in `<repository>.worktrees/<branch without canoa/>`, and a `.worktrees` directory already there that is a link is refused. The session list shows the branch, and the session list kept across runs notes the worktree with the session.
+**Worktree** under a new session's message (only for a folder in a git repository), or **In a new git worktree, on its own branch** in a new session on a saved {{ name }} host, starts the session in a new worktree of the repository holding the folder, from that directory's current commit. For a new session it is made when the first message is sent, and named after its source. The branch is `canoa/` and the session's title (or its agent's name) in lower-case letters and digits joined by hyphens, then six random hexadecimal digits, such as `canoa/fix-the-tests-3fa91c`; nothing else is taken, so no branch reads as an option, a range or a path step. The worktree goes beside the repository, in `<repository>.worktrees/<branch without canoa/>`, and a `.worktrees` directory already there that is a link is refused. The session list shows the branch, and the session list kept across runs notes the worktree with the session.
 
 - **An agent this app runs**: the app runs `git` itself, with an argument list, its hooks and fsmonitor off, and refuses a repository whose own settings name a filter, an include or an attributes file, or whose git directory is apart from its work tree, as a submodule's is. Filters in your global settings, such as Git LFS's, run as usual.
-- **An agent `canoa` serves**: the host makes the worktree, only inside its entry's working roots, as [the host](host.md#worktrees) describes; with no working root, or `worktrees = false`, it makes none. The browser's provider makes none.
+- **An agent `{{ program }}` serves**: the host makes the worktree, only inside its entry's working roots, as [the host](host.md#worktrees) describes; with no working root, or `worktrees = false`, it makes none. The browser's provider makes none.
 
-Closing the session ends its agent first, then asks whether to keep the worktree. Everything there in no commit is counted: changed, new, and files git ignores. Removing them is a button of its own that names them, and a different set found before anything is deleted is told again; without that button nothing in no commit is removed. A HEAD left detached at commits no branch holds keeps the worktree. Its branch goes with it only when it holds no commit another branch, tag or remote does not have, and only if no commit came meanwhile; otherwise it stays, so no commit is lost. A session list entry is taken only when its worktree is where Canoa puts that branch beside that repository. Reopening a session from the list finds its worktree again, even with its HEAD moved, or says it is gone and does not start the agent.
+Closing the session ends its agent first, then asks whether to keep the worktree. Everything there in no commit is counted: changed, new, and files git ignores. Removing them is a button of its own that names them, and a different set found before anything is deleted is told again; without that button nothing in no commit is removed. A HEAD left detached at commits no branch holds keeps the worktree. Its branch goes with it only when it holds no commit another branch, tag or remote does not have, and only if no commit came meanwhile; otherwise it stays, so no commit is lost. A session list entry is taken only when its worktree is where {{ name }} puts that branch beside that repository. Reopening a session from the list finds its worktree again, even with its HEAD moved, or says it is gone and does not start the agent.
 
-Do not store identity private keys, tokens or passwords in canoa.cfg.
+Do not store identity private keys, tokens or passwords in {{ config_file }}.
 
 ## Profiles
 
 A profile is what an agent is launched with: environment variables, an initial context, skills, MCP servers, and the
 model, effort and mode it starts with. It comes in layers, merged lowest first:
 
-1. **built-in**: Canoa's own: the [standard access](#access), and nothing else;
+1. **built-in**: {{ name }}'s own: the [standard access](#access), and nothing else;
 2. **overlays**, each named in `[overlays]`: [AOS](https://github.com/Boriken-Dev/agent-overlay-spec) overlays, in their composition order (`priority`, then name);
-3. **yours**: `[profile]` in canoa.cfg;
-4. **the project's**: `.canoa/profile.toml` in the working directory, only once you trust that directory;
+3. **yours**: `[profile]` in {{ config_file }};
+4. **the project's**: `{{ home_dir }}/profile.toml` in the working directory, only once you trust that directory;
 5. **the agent's entry**: `[agents.NAME.profile]`, where `NAME` is an agent's label (an entry with only a `profile` names
    a preset, such as `Claude`);
 6. **the session** being started: the profile chosen for it in its footer (`[profiles.NAME]`, below), and what was changed
@@ -165,11 +165,11 @@ context = "Answer briefly."
 
 ### Profile items
 
-What a profile may set is not a list in Canoa: each thing is an **item**, a provider of the `profile_item` kind that says its name, the
+What a profile may set is not a list in {{ name }}: each thing is an **item**, a provider of the `profile_item` kind that says its name, the
 harnesses it is for and the form it asks for, and that turns the values you gave it into what a session gets (environment
 variables, arguments for a program the host starts, values of the session's own settings, the network its programs use). The model,
-effort, mode, starting instructions and access are items Canoa carries, kept in a profile under their own keys; a proxy and an
-identity are items that ship with the host as scripts (JavaScript, offered as an extension's would be), and an extension of canoa.cfg's `[host.extensions]` (or a library or source
+effort, mode, starting instructions and access are items {{ name }} carries, kept in a profile under their own keys; a proxy and an
+identity are items that ship with the host as scripts (JavaScript, offered as an extension's would be), and an extension of {{ config_file }}'s `[host.extensions]` (or a library or source
 an agent entry loads) adds more the same way. Settings → Profiles draws a form for each item the host lists
 (`profile_items/list`), and a profile keeps what you entered for an item under `items`:
 
@@ -266,7 +266,7 @@ long after its last session for the next one that asks (default 0: it ends with 
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's
 `model`, `effort`, `mode` or `context`. **Settings → Profiles** shows the effective profile of each agent, every value
-beside the layer it came from, and what each layer removed. canoa reads the same schema
+beside the layer it came from, and what each layer removed. {{ program }} reads the same schema
 (`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds the app and the host to the same merge.
 What each harness takes of it, and how, is [below](#applying-a-profile).
 
@@ -287,7 +287,7 @@ max_running = 3
 ```toml
 [overlays]
 team = "https://github.com/example/canoa-profiles.git@main#team"   # an AOS source string, <repository>@<ref>#<path>
-mine = { dir = "profiles/mine" }                                   # a directory, relative to canoa.cfg's
+mine = { dir = "profiles/mine" }                                   # a directory, relative to {{ config_file }}'s
 # pinned = { source = "...", pin = "sha256:..." }                 # what installing writes: the tree digest it checks
 # tuned = { dir = "profiles/tuned", options = { depth = "deep" } } # values for the options the overlay's manifest declares
 
@@ -329,7 +329,7 @@ model = "claude-opus-4-1"
 A project's profile file has the same keys at its top level (`model = ...`, `[env.NAME]`). Each entry takes exactly one form, and
 a key the schema does not know is refused. Names: environment variables a letter or `_` then letters, digits or `_`;
 skills, MCP servers and headers 1 to 64 letters, digits, `-` or `_`. A relative path is read from its layer's
-directory: canoa.cfg's for yours and an agent's, the overlay's, or the working directory for a project.
+directory: {{ config_file }}'s for yours and an agent's, the overlay's, or the working directory for a project.
 
 **An overlay or a project comes from elsewhere**, so it is held to more:
 
@@ -366,12 +366,12 @@ value, and never empty; a value already set in the host's own environment is kep
 | `AGENTS_ROLE` | `delegate` when another agent started the session as a task |
 | `AGENTS_PROJECT_ROOT`, `AGENTS_SESSION_ID` | the session's folder and id, for the hooks that run for it |
 
-An agent entry that names no profile (no `profiles`) starts with the default profile: canoa.cfg's top level (`[profile]`,
+An agent entry that names no profile (no `profiles`) starts with the default profile: {{ config_file }}'s top level (`[profile]`,
 `[overlays]`, `[profiles.default]`), so its overlays, skills, hooks, access and variables, `<NAME>_OVERLAY_ROOT` included, reach
 its sessions as they do for a named profile, whether the entry is a source of the host's own or written by hand under
 `[host.agents.NAME]`. An entry that names a profile gets that one instead, and one that should run bare names an empty
-profile (`profiles = ["bare"]` with an empty `[host.profiles.bare]`). `canoa check` prints the profile each entry starts with
-and why, and *Effective setup* lists it as `profile`. Without anything in canoa.cfg's top level there is no profile and no
+profile (`profiles = ["bare"]` with an empty `[host.profiles.bare]`). `{{ program }} check` prints the profile each entry starts with
+and why, and *Effective setup* lists it as `profile`. Without anything in {{ config_file }}'s top level there is no profile and no
 overlay, and the agent is still given the identity variables above that do not depend on one (`AGENTS_HOST`, `AGENTS_HARNESS`,
 `AGENT`, `AGENTS_VENDOR`, the account's).
 
@@ -414,7 +414,7 @@ The names follow what the three command lines share: a sandbox that is off, one 
 writes nothing; a network on or off; and the three steps from asking about everything to asking about nothing. Each
 harness's own words are in the tables below, and a part a harness has no way to say is
 listed as not supported in the session's **Profile** line, with why. An agent that is none of these (a command you add) is
-started as its entry says: Canoa passes it no access setting.
+started as its entry says: {{ name }} passes it no access setting.
 
 | Access | Claude Code | Codex | Pi |
 | --- | --- | --- | --- |
@@ -457,7 +457,7 @@ session's Profile line says the access did not set it.
 With nothing set, every agent starts with the standard access, whatever the configuration of its own command line says: no
 sandbox, the network on, everything asked. Every mode the agent has is offered in the mode control, Bypass included, and any
 paired key may choose any of them. An overlay or a project may not set `access`: a layer from elsewhere could loosen it, so
-such a file is refused (`reserved`). `canoa agent ID` takes the same as `--sandbox none|workspace|read-only`,
+such a file is refused (`reserved`). `{{ program }} agent ID` takes the same as `--sandbox none|workspace|read-only`,
 `--no-network` and `--approvals ask|edits|never`.
 
 ### Applying a profile
@@ -472,12 +472,12 @@ servers, with the events they run for and the digest of the overlay's files, and
 `[agents.NAME.hooks]`. The per-session overlay choice and project trust are not done in the host yet. An agent reached on another machine is
 given what that host's `[host.profiles]` offers; with none, its conversation says so.
 
-Claude Code and Codex are run by `canoa agent claude` and `canoa agent codex`, the host's own translators of their stdio
+Claude Code and Codex are run by `{{ program }} agent claude` and `{{ program }} agent codex`, the host's own translators of their stdio
 protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), with no Node; the desktop app runs them from its own
 executable, and a `[host.agents]` entry with `harness` runs them inside the host. Pi is run the same way by coqui-acp's
 `coqui-acp-pi` (`harness = "pi"`), which needs only `pi`.
 
-| Part | Claude Code (`canoa agent claude`) | Codex (`canoa agent codex`) | Gemini CLI (a command you add) | Pi (`coqui-acp-pi`) | Another agent |
+| Part | Claude Code (`{{ program }} agent claude`) | Codex (`{{ program }} agent codex`) | Gemini CLI (a command you add) | Pi (`coqui-acp-pi`) | Another agent |
 | --- | --- | --- | --- | --- | --- |
 | Environment | the process of `claude` | the process of `codex app-server` | the agent's process | the agent's process | the agent's process |
 | Initial context | ACP `systemPrompt`, appended: `claude --append-system-prompt-file` | ACP `systemPrompt`, appended: the thread's developer instructions | not supported | ACP `systemPrompt`, appended: `pi --append-system-prompt` | ACP `systemPrompt` when it advertises it |
@@ -486,13 +486,13 @@ executable, and a `[host.agents]` entry with `harness` runs them inside the host
 | Model, effort | the session's config options `model` and `effort`: the models Claude Code lists and their efforts | the same: the models Codex lists and their reasoning efforts | the session's config option offering that value | the config options `model` and `effort` (Thinking): the models Pi has credentials for | the same |
 | Mode | not supported: the translator offers no mode | not supported: the translator offers no mode | the session's config option offering that value | the config option `mode`: Pi asks nobody, so the translator asks, and refuses protected paths | the same |
 
-Plugins from a client are off in `canoa agent claude` unless `--setting allow_client_plugins=true` is given, since a plugin's hooks and
+Plugins from a client are off in `{{ program }} agent claude` unless `--setting allow_client_plugins=true` is given, since a plugin's hooks and
 MCP servers run with nothing asked. The app passes it, as it writes the only plugin, `canoa-profile`. A host entry allows
 them only when it offers profiles, and then only its own: the host removes every `_meta` a client sends.
 
 Which harness an agent is comes from what it says in `initialize`, else from the preset it was started from. A part a
 harness does not take is listed as not supported, with why: Gemini CLI, Pi, OpenCode and Grok read context and skills only
-from their own directories when they start. What the dialog says is what Canoa expects; the conversation says what the
+from their own directories when they start. What the dialog says is what {{ name }} expects; the conversation says what the
 agent itself advertised.
 
 Antigravity (`agy acp`) takes skills like Codex: it reads `.agents/skills` inside each directory a session gives it as
@@ -519,7 +519,7 @@ when one of your layers shares it, and otherwise leave it out and say so. A comm
 working directory, not the overlay's, since ACP gives an MCP server none: the dialog says so.
 
 A server from your own layers is on unless you turn it off; one from an overlay or a project is off until you allow it.
-**Keep these choices** in the dialog writes them to canoa.cfg, under the agent:
+**Keep these choices** in the dialog writes them to {{ config_file }}, under the agent:
 
 ```toml
 [agents.Claude.mcp]
@@ -537,27 +537,27 @@ An overlay is an [Agent Overlay Specification](https://github.com/Boriken-Dev/ag
 directory whose files take effect by convention (`skills/<name>/SKILL.md`, `CONTEXT.md`, `rules/<name>.md`, the file
 `env`), with an optional manifest in one of two forms, never both (an overlay with both is left out). `OVERLAY.md` holds
 the manifest as front matter between `---` lines, YAML unless its first line is a format line such as `#!toml`, and its
-body, when it holds more than white space, is the overlay's context in place of `CONTEXT.md`, which Canoa then ignores
+body, when it holds more than white space, is the overlay's context in place of `CONTEXT.md`, which {{ name }} then ignores
 and lists among what it does not apply. `overlay.cfg` is TOML, or JSON or YAML after a `#!json` or `#!yaml` line. YAML is
-read as a restricted subset: a tag, anchor, alias or merge key leaves the overlay out. Canoa reads the
+read as a restricted subset: a tag, anchor, alias or merge key leaves the overlay out. {{ name }} reads the
 manifest statically and validates it; one it cannot read or that is not valid leaves the overlay out, except that a
-problem in `[about]`, store metadata, never does. Canoa applies:
+problem in `[about]`, store metadata, never does. {{ name }} applies:
 
 - the environment: the overlay's env files (the file `env` read as dotenv, and `env_files`), `env`, and `paths`, each
   value substituted (`${NAME}` and its operators) when a session starts, in the overlays' order, after every overlay's
   `<NAME>_OVERLAY_ROOT`. A placeholder reads what overlays set and the variables your own layers share; any other variable
   of this computer it names is an error, so no session starts. A secret reference is read only for `provider = "env"`
-  and a variable you share; Canoa holds no named or file secrets, so those stay unset when `optional`, and otherwise
+  and a variable you share; {{ name }} holds no named or file secrets, so those stay unset when `optional`, and otherwise
   stop the session from starting. A substituted value is at most 1 MiB, expressions nest at most 32 deep, and a pattern
   may take at most ten million steps;
 - skills, MCP servers (`env_passthrough` and `headers_env` only for variables you share; no header over plain `http` to
   another host), rules, routing lines and context as initial context, and the `model` and `effort` hints of
   `[harness.<id>]` for the agent's harness (`claude-code`, `codex`, `gemini-cli`, `pi` for the presets);
 - `${NAME}` in the overlay's context files (and the body of `OVERLAY.md`) and in the body of each bundled skill, replaced
-  when Canoa hands the text to the agent, never in the installed files: `AOS_OVERLAY_ROOT` (a private copy of the
+  when {{ name }} hands the text to the agent, never in the installed files: `AOS_OVERLAY_ROOT` (a private copy of the
   overlay's verified files, the one its hooks run from), `AOS_OVERLAY_NAME`, `AOS_PROJECT_ROOT` (the folder the session is
   opened in; a skill's body is written once for the connection, so it keeps this name as written) and the overlay's
-  options. Canoa gives an overlay no state directory and its scopes no label, so `AOS_OVERLAY_STATE` and
+  options. {{ name }} gives an overlay no state directory and its scopes no label, so `AOS_OVERLAY_STATE` and
   `AOS_OVERLAY_SCOPE` stay as written. Anything else, `$${` aside, is left as written, and nothing is replaced in `rules`,
   `routing` or a skill fetched from elsewhere. An option's value is the one in `[overlays.NAME] options`, else the
   manifest's `default`; a **sensitive** option is never put in text, and a value of another type than the option declares
@@ -581,7 +581,7 @@ overlay's own (`overlays/.environments/NAME/`, a virtual environment for Python 
 made beside the overlay and never inside it, so the overlay's digest never covers it), then runs its setup as the
 specification's phases say (`install` the first time, `sync` after, with the state directory `overlays/.state/NAME/`), and
 records the digest it prepared in `overlays/.prepared/NAME.json`. It runs outside any agent's session, and a step that fails
-ends it with the end of what it printed and leaves the record and the earlier environment as they were. Canoa gives every
+ends it with the end of what it printed and leaves the record and the earlier environment as they were. {{ name }} gives every
 overlay an environment of its own, so a shared or named `environment` is not shared. A setup that says it needs no network
 is not kept from it, and the plan says so. A session puts the packages after the overlay's own `lib/python/` and
 `lib/node/`, and says per dependency file and setup whether it is prepared for the version installed; an overlay installed
@@ -600,18 +600,18 @@ on the host's `PATH`, and the agent is given the program's absolute path.
 The agent's own program is always the one on the host's `PATH` (and in the Store's runtimes): a folder a profile or an
 overlay puts first on the `PATH` of the agent's processes never decides which program the agent is, on any system.
 
-Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
+{{ name }} does not apply yet, and **Settings → Profiles** lists as "not applied by {{ name }} yet": `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
 harnesses' hints. Each line names its overlay. An overlay's own `bin/` goes first on `PATH`, and its `lib/python/` and
 `lib/node/` on `PYTHONPATH` and `NODE_PATH`, ahead of the host's own entries, for the agent and the programs it starts.
 A `paths` entry that leaves the overlay's folder is refused, and a `paths` entry may set only those three of the variables
-Canoa keeps to itself.
+{{ name }} keeps to itself.
 
-From git, the desktop app installs an overlay into `overlays/NAME/` beside canoa.cfg, with `overlays/NAME.json`
+From git, the desktop app installs an overlay into `overlays/NAME/` beside {{ config_file }}, with `overlays/NAME.json`
 recording the source, the commit, each file's git blob id and **the tree digest** of what it wrote, and its history in
 `overlays/.cache/NAME.git`. **Install…** and **Check for changes…** in Settings → Profiles fetch the source and show
 the commit, the tree digest, every file it adds, changes or removes, and its `OVERLAY.md` or `overlay.cfg`; nothing changes until you
 apply, and what is applied is that commit's files, checked against the digest as they are written. Applying **pins**
-the overlay in canoa.cfg by its digest, `NAME = { source = "...", pin = "sha256:..." }`: a later check whose files
+the overlay in {{ config_file }} by its digest, `NAME = { source = "...", pin = "sha256:..." }`: a later check whose files
 have another digest installs nothing until you change the pin. Each time profiles are built the installed copy is
 digested again, and one whose files changed is
 left out until synced. An overlay with no pin, or a `{ dir = "..." }` with none, is reported as `unpinned` each time.
@@ -619,7 +619,7 @@ A pin is a SHA-256 over every file's bytes as published, the same on every platf
 The ref is a branch, a tag, or a whole commit id, which names that commit even if a branch or tag carries the same
 name; an abbreviated id is not taken. Only that ref is fetched, one commit deep. An overlay is upstream's copy,
 replaced whole on each apply: put your own additions in `[profile]`, which wins over it. An overlay installed from
-another source than the one canoa.cfg names is left out until it is synced.
+another source than the one {{ config_file }} names is left out until it is synced.
 
 Nothing from a source runs: its files are read out of git's object store, never checked out, so no hook, filter or
 attribute of the source applies. A link or a submodule refuses the whole overlay, and so does a file name that is not
@@ -650,7 +650,7 @@ installs them with the overlay:
   Settings → Profiles, list each skill with its source (no user information, no query), its pin or that it has none,
   the catalog that gave the source, and what installing does: fetched, fetched again because the source or pin changed
   from the one you accepted, or kept. A name no catalog offers is **missing** and one two catalogs offer is
-  **ambiguous**: both are reported with the overlay naming them, Canoa never picks one, and the overlay applies
+  **ambiguous**: both are reported with the overlay naming them, {{ name }} never picks one, and the overlay applies
   without them. Nothing of a skill is fetched until you apply, and the one yes covers the overlay and its skills.
 - **A skill is fetched like an overlay**, from git objects at its ref (its `HEAD` with none), never checked out, with a
   Git that gets none of your credential helpers, SSH agent, askpass programs or settings, follows no redirect to
@@ -682,13 +682,13 @@ installs them with the overlay:
 - **It is delivered like a bundled skill**, to the agents that take one, after the same checks: the record must list
   the overlay and the files must still have the recorded digest. A skill that fails them, or was never fetched, is
   listed in **Settings → Profiles** as not applied (`skills.NAME: from SOURCE, not fetched: install or sync the overlay in
-  Canoa`, or `a named skill; no catalog resolved it here: install or sync the overlay in Canoa`), never silently missing.
+  {{ name }}`, or `a named skill; no catalog resolved it here: install or sync the overlay in {{ name }}`), never silently missing.
 - **The store's Skills section** lists each skill here with the overlays that name it (or that you chose it) and its
   source and pin, and the skills your catalogs offer, each installable by your own choice after the same review.
 - **Removal.** Removing an overlay offers to remove the skills that only it named; a skill another overlay names stays,
   and one you chose is never offered. Declining leaves it listed as named by no overlay, to remove there.
 
-`canoa` itself fetches nothing: it delivers a skill the app fetched, after the same checks, and reports the others.
+`{{ program }}` itself fetches nothing: it delivers a skill the app fetched, after the same checks, and reports the others.
 
 ### The Store
 
@@ -705,7 +705,7 @@ shown before it is installed. **Store settings** holds the catalogs: each one's 
 adds one.
 
 - **Overlays.** Installed: each overlay's icon, summary, source, pin, what it applies (environment variables, skills, MCP
-  servers, context) and what Canoa does not apply yet, a switch for whether **new sessions** start with it, an update
+  servers, context) and what {{ name }} does not apply yet, a switch for whether **new sessions** start with it, an update
   check and Remove (for one the store installed). Discover: the overlays of the catalogs below, filterable by catalog,
   tag and text. With no catalog it offers a known one and a spec to paste.
 - **Loadouts.** A loadout is a named collection a session starts with: whole overlays, skills you chose, and MCP
@@ -728,7 +728,7 @@ adds one.
   `[defaults] loadout`, so a kind with no entry starts with the default. A kind that is not in that list refuses the
   file; a loadout `[loadouts]` no longer holds (deleted by hand) does not: the session gets the default, and its profile
   line says the kind's loadout is gone. The host resolves it when the session starts, so it also applies where the
-  client cannot read canoa.cfg, and the profile report names the loadout the session got (`loadout`). Deleting a loadout in
+  client cannot read {{ config_file }}, and the profile report names the loadout the session got (`loadout`). Deleting a loadout in
   the app drops the entries that name it, and renaming one carries them.
 - **Editing loadouts.** The Loadouts section lists them in the index beside the main area (the default marked, a search when there are many, New loadout at the top) and shows the chosen one there: what it holds, whether it can start, and what a new session gets from it. The choice is kept across a restart. It edits, duplicates and deletes
   them, makes one the default and starts a session with one. Its editor adds installed overlays, skills and servers from a
@@ -739,7 +739,7 @@ adds one.
   composer's, the kind's default marked and chosen until the person picks another. What is chosen is sent as
   `_meta["dev.boriken.canoa/loadout"]` and `["dev.boriken.canoa/preset"]` with the client's kind, applies to the next session
   only, and the conversation notes which loadout it started with when the link does not carry the host's report. The
-  extension's panel reads canoa.cfg through its worker for the names; a panel that cannot shows no control and the host
+  extension's panel reads {{ config_file }} through its worker for the names; a panel that cannot shows no control and the host
   still applies the kind's default.
 - **The choice per session.** The composer's loadout control names the loadout a session starts with, sent as
   `_meta["dev.boriken.canoa/loadout"]`, and changes its overlays for this session alone.
@@ -757,17 +757,17 @@ adds one.
 - **MCPs.** Installed: the servers `[profile.mcp]` and your overlays define; an overlay's is marked with the overlay and has no Remove of its own. Discover: the
   [MCP Registry](https://github.com/modelcontextprotocol/registry) (`registry.modelcontextprotocol.io`, `GET
   /v0.1/servers`), each server a `server.json`. Installing shows the registry's claims, the digest of the `server.json`,
-  each way to run it (an npm, PyPI or OCI package, or a remote address) with the command or address Canoa would write,
-  and what it needs from your environment: a secret is a `from_env` reference, never written to canoa.cfg. A package
+  each way to run it (an npm, PyPI or OCI package, or a remote address) with the command or address {{ name }} would write,
+  and what it needs from your environment: a secret is a `from_env` reference, never written to {{ config_file }}. A package
   whose runtime (`npx`, `uvx`, `docker`) is not on this computer, a bundle, a package of another registry type, a
-  remote over plain `http` and anything else Canoa does not run is refused with the reason. An installed server is
+  remote over plain `http` and anything else {{ name }} does not run is refused with the reason. An installed server is
   written to `[profile.mcp.NAME]`, noted in `[store.mcp.NAME]` (`registry`, `server`, `version`, `digest`) and turned
   off for every agent in `[agents.NAME.mcp]`, so nothing starts until you allow it.
   A team's own servers can be listed by another registry that serves the same API, added by its `https` address (or
   `http` on the loopback address), or by a git repository holding a JSON file in the API's list shape, added as
   `<repository>@<ref>#<file>`; they are kept in `[store.mcps.catalogs]` and chosen beside the official one in Discover.
   A git list is fetched at its ref like a catalog and read as one page.
-- **Applying a change.** The host reads canoa.cfg's layers again when each session of its own sources starts, so a
+- **Applying a change.** The host reads {{ config_file }}'s layers again when each session of its own sources starts, so a
   change to `[overlays]`, `[profile]` or `[agents.*.mcp]` reaches the next session and ends none that is open. A file
   that no longer parses is refused and the profile stays as the last good file gave it.
 
@@ -808,7 +808,7 @@ With no `[host.network]` table every fetch the host makes (the Store's downloads
 
 The desktop app's own requests (the list a saved connection's host serves at `canoa.json`, its status probe, the terminal check) are sent by the host it runs through `network/fetch`, so they follow the same settings; the app's own library would use none of them. A served page's requests are its browser's.
 
-The desktop app's WebSocket to a remote Canoa host follows all of them too: the app asks its host (`network/tunnel`) to open the connection, and for a `wss` address the host reaches the server through the proxy the system names (logged in as above) or straight, makes the TLS itself (the certificate verifier and client certificates above, with `ca_file` and `client_certificate` over them) and gives the app a loopback connection to the plain WebSocket, which only the app can use. A server whose certificate only the operating system trusts, such as a company or TLS-inspecting proxy's authority, is therefore trusted, and a server that asks for a client certificate is given the one a browser would offer; one the host does not trust is not connected to, and the error says why. A `ws` address is carried through a proxy the system names and opened by the app itself where it names none. This computer's own address is always opened by the app itself. WebTransport, which no HTTP proxy carries, is not used by the desktop app, which dials the WebSocket endpoint.
+The desktop app's WebSocket to a remote {{ name }} host follows all of them too: the app asks its host (`network/tunnel`) to open the connection, and for a `wss` address the host reaches the server through the proxy the system names (logged in as above) or straight, makes the TLS itself (the certificate verifier and client certificates above, with `ca_file` and `client_certificate` over them) and gives the app a loopback connection to the plain WebSocket, which only the app can use. A server whose certificate only the operating system trusts, such as a company or TLS-inspecting proxy's authority, is therefore trusted, and a server that asks for a client certificate is given the one a browser would offer; one the host does not trust is not connected to, and the error says why. A `ws` address is carried through a proxy the system names and opened by the app itself where it names none. This computer's own address is always opened by the app itself. WebTransport, which no HTTP proxy carries, is not used by the desktop app, which dials the WebSocket endpoint.
 
 A program the host starts (an agent, Node or Python, `git`) is given `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for that proxy when its environment names none; variables the person or the entry set are never replaced. A proxy chosen per URL (PAC, WPAD) cannot be written as variables, so it is asked about the addresses the programs reach (the package registries, GitHub, the agents' own services; `endpoints` adds to them) and the proxy it names for those is the one given. Each key below is an override and none is needed:
 
@@ -817,7 +817,7 @@ A program the host starts (an agent, Node or Python, `git`) is given `HTTP_PROXY
 proxy = "system"                 # system (the default), none, pac:LOCATION (a URL, a file: URL or a path), or a proxy for every URL:
                                  # [scheme://][user[:password]@]host[:port]
 proxy_user = "alice"             # a login for every HTTP proxy that names none of its own
-proxy_password_env = "PROXY_PW"  # the variable holding its password; the password is never in canoa.cfg
+proxy_password_env = "PROXY_PW"  # the variable holding its password; the password is never in {{ config_file }}
 no_proxy = ["corp.example", "*.lan", "10.0.0.0/8"]   # replaces the system's bypass list; "<-loopback>" sends loopback through the proxy too
 negotiate = true                 # answer a proxy's Negotiate or NTLM with the logon session (Windows only)
 client_certificate = "system"    # system (the default), none, or a PEM file holding a certificate chain and its unencrypted key
@@ -827,7 +827,7 @@ endpoints = ["https://tools.corp.example/"]   # addresses the programs reach, fo
 proxy_idle_seconds = 0             # how long the proxy a profile's system or pac mode runs is kept after its last session
 ```
 
-Paths are read from the folder of canoa.cfg. The host starts only with a setting it can use: a proxy it cannot read, a `proxy_password_env` variable that is not set, or a certificate file that is missing is refused at start, with the key named. Git's client certificate is not chosen from the keystore as a browser's is: Git for Windows presents one only when its `http.sslCert` names it, which a source the person typed gets from their own git configuration.
+Paths are read from the folder of {{ config_file }}. The host starts only with a setting it can use: a proxy it cannot read, a `proxy_password_env` variable that is not set, or a certificate file that is missing is refused at start, with the key named. Git's client certificate is not chosen from the keystore as a browser's is: Git for Windows presents one only when its `http.sslCert` names it, which a source the person typed gets from their own git configuration.
 
 ### Catalogs of each Store type
 
@@ -853,7 +853,7 @@ timeout = 60                                                          # optional
 ```
 
 Each source describes itself to the Store: its name, the types it serves (or all of them) and the form it asks for (a schema, and how to show it), which is what
-Store settings shows when you add a catalog to a type. Two come with Canoa, as scripts the host carries. **`read`** reads what the type reads itself: a git source
+Store settings shows when you add a catalog to a type. Two come with {{ name }}, as scripts the host carries. **`read`** reads what the type reads itself: a git source
 (overlays and extensions), `owner/repo`, a git URL or a folder (skills), a registry's address (MCP servers). **`command`** runs a
 program you name, as you and with your environment, each time the catalog is refreshed, and takes its standard output (or the file named
 by `file`, in the folder it ran in) as the catalog in the type's own format, read exactly as a fetched one is. It serves every type;
@@ -882,7 +882,7 @@ you or code an extension supplied, so it is the same trust as naming a library.
 
 ### Secrets
 
-When an agent needs a password or a key it asks for it by name, and Canoa answers from what it already holds before it asks you. Where a secret comes from is a provider: **the form** (you type it in the app), **the system store** (Windows' Credential Manager, the Secret Service on Linux, the Keychain on a Mac: besides what Canoa keeps there, the Secrets section lists the other entries your account can read, such as the credentials of other programs, marks them as not Canoa's and shows one only when you press Show; Forget on one of those asks first and deletes it from the store) and any a library adds, such as a Bitwarden one written as a script. The form that asks you also asks how long to keep what you type: this once, for this session, until Canoa closes, for 15 minutes, an hour, 8 hours or a day, or **Remember** in the system store. An agent never sees the value, only a handle, and using it still asks you as any command does.
+When an agent needs a password or a key it asks for it by name, and {{ name }} answers from what it already holds before it asks you. Where a secret comes from is a provider: **the form** (you type it in the app), **the system store** (Windows' Credential Manager, the Secret Service on Linux, the Keychain on a Mac: besides what {{ name }} keeps there, the Secrets section lists the other entries your account can read, such as the credentials of other programs, marks them as not {{ name }}'s and shows one only when you press Show; Forget on one of those asks first and deletes it from the store) and any a library adds, such as a Bitwarden one written as a script. The form that asks you also asks how long to keep what you type: this once, for this session, until {{ name }} closes, for 15 minutes, an hour, 8 hours or a day, or **Remember** in the system store. An agent never sees the value, only a handle, and using it still asks you as any command does.
 
 ```toml
 [secrets]
@@ -897,32 +897,32 @@ github_token = "work"     # this name is answered by the entry below
 
 [secrets.providers.work]
 provider = "bitwarden"
-keep = "close"            # what this entry gives stays until Canoa closes, or less if it says so itself
+keep = "close"            # what this entry gives stays until {{ name }} closes, or less if it says so itself
 command = "bw"
 [secrets.providers.work.from]
-session = { entry = "form", name = "bw_session" }   # the key that opens the vault is a secret you gave Canoa, never written here
+session = { entry = "form", name = "bw_session" }   # the key that opens the vault is a secret you gave {{ name }}, never written here
 ```
 
-**Bitwarden** is a provider that ships in Canoa, written as a script that Canoa runs itself, so there is nothing to build. It reads an item of your vault by name through Bitwarden's own `bw` command, which the Store installs if you have none (Store, Secret providers), so `bw` has to be signed in (`bw login`). Point a name or the default at it and take the key `bw unlock --raw` prints from another provider, such as the form, as the secret `bw_session`:
+**Bitwarden** is a provider that ships in {{ name }}, written as a script that {{ name }} runs itself, so there is nothing to build. It reads an item of your vault by name through Bitwarden's own `bw` command, which the Store installs if you have none (Store, Secret providers), so `bw` has to be signed in (`bw login`). Point a name or the default at it and take the key `bw unlock --raw` prints from another provider, such as the form, as the secret `bw_session`:
 
 ```toml
 [secrets.providers.work]
 provider = "bitwarden"
 [secrets.providers.work.from]
-session = { entry = "form", name = "bw_session" }   # the key is a secret you gave Canoa, so it is not written here
+session = { entry = "form", name = "bw_session" }   # the key is a secret you gave {{ name }}, so it is not written here
 ```
 
-Store, Secret providers lists Bitwarden's command line (`bw`), which it installs for you with a plan you confirm (the zip of your system, checked against the SHA-256 GitHub lists for it); Canoa runs it itself and no agent finds it by name.
+Store, Secret providers lists Bitwarden's command line (`bw`), which it installs for you with a plan you confirm (the zip of your system, checked against the SHA-256 GitHub lists for it); {{ name }} runs it itself and no agent finds it by name.
 
-A script of your own is added as an extension that names the JavaScript Canoa carries: `source = "bundled:js"`, with `source_settings` of `dirs` (the folders of its `*.guatiao` manifests) and `kinds` (the description of the kind it serves, `canoa.secret.kinds.json`).
+A script of your own is added as an extension that names the JavaScript {{ name }} carries: `source = "bundled:js"`, with `source_settings` of `dirs` (the folders of its `*.guatiao` manifests) and `kinds` (the description of the kind it serves, `canoa.secret.kinds.json`).
 
 The vault is never unlocked for you: until the key is given, a request for a name Bitwarden answers falls back to asking you, and a wrong or expired key does the same. The key goes to `bw` in its environment, never on a command line.
 
-**Set up a vault** in the app: Secrets, Set up a vault, at the foot of its index (or, after the Store installs `bw`, it opens by itself) draws the provider's settings from the form the host describes. A setting that is a secret, such as Bitwarden's session key, is never a box to type in: you choose where it comes from, another setup or the form (you type it when Canoa asks, and the form that asks opens next), and what you choose is saved in canoa.cfg as a reference, never as the secret.
+**Set up a vault** in the app: Secrets, Set up a vault, at the foot of its index (or, after the Store installs `bw`, it opens by itself) draws the provider's settings from the form the host describes. A setting that is a secret, such as Bitwarden's session key, is never a box to type in: you choose where it comes from, another setup or the form (you type it when {{ name }} asks, and the form that asks opens next), and what you choose is saved in {{ config_file }} as a reference, never as the secret.
 
-The **Secrets** section of the app has an index like the Store's: All vaults, then one row per vault (the form, the system store and each setup you made) with how many secrets it holds. All vaults lists what Canoa holds, each secret's vault and name, its value hidden until you press Show, and how long it is kept. Forget takes one out (of the system store too, when it was kept there), and Set a secret asks for a value in a form only the app and the host can read.
+The **Secrets** section of the app has an index like the Store's: All vaults, then one row per vault (the form, the system store and each setup you made) with how many secrets it holds. All vaults lists what {{ name }} holds, each secret's vault and name, its value hidden until you press Show, and how long it is kept. Forget takes one out (of the system store too, when it was kept there), and Set a secret asks for a value in a form only the app and the host can read.
 
-An agent can say how long it can wait for your answer; Canoa never waits longer than `max_wait`, and when you are not connected at all it tells the agent so at once instead of waiting. A question nobody answered in time disappears from your screen.
+An agent can say how long it can wait for your answer; {{ name }} never waits longer than `max_wait`, and when you are not connected at all it tells the agent so at once instead of waiting. A question nobody answered in time disappears from your screen.
 
 The credentials of your agents' accounts and your mail passwords are kept the same way, as secrets named `accounts/…` in the provider `accounts` names, so they are in the Secrets section too (each home's system store is its own: two homes never see each other's) and can be kept in any setup that keeps what it is given. A host that kept them before (in the operating system's store under its own name, or in sealed files) moves each account into the new place the first time it is used, and takes the old copy away only once the new one reads back the same. `[host] account_store` is gone: `account_store = "file"` is now `accounts = "file"` in `[secrets]`.
 
@@ -949,21 +949,21 @@ for `SKILL.md` as `npx skills` searches: the source's own, else the folders unde
 (`.claude/skills`, `.agents/skills`, ...), else any within five folders. A skill's name has to be its folder's, as the
 [Agent Skills specification](https://agentskills.io/specification) says, and one that is not is listed with why it cannot be installed.
 
-Canoa offers `anthropics` (`anthropics/skills`) first. It is fetched with none of your git settings, credentials or keys; a source you
+{{ name }} offers `anthropics` (`anthropics/skills`) first. It is fetched with none of your git settings, credentials or keys; a source you
 add is yours, so it is fetched as you would from a shell, which reads a private repository with your credentials. To remove the
 default, use Remove this source or set `anthropics = false`; giving the label a source of yours replaces it.
 
 ```toml
 [store.skills.catalogs]
-anthropics = false                                  # leave out the source Canoa offers by default
+anthropics = false                                  # leave out the source {{ name }} offers by default
 web = "addyosmani/web-quality-skills"               # a label of yours = a source as above
 ```
 
 ### Searching skills.sh
 
-[skills.sh](https://skills.sh) ranks skills by how often `npx skills add` installed them, and has a search. Canoa can search it for you, but
+[skills.sh](https://skills.sh) ranks skills by how often `npx skills add` installed them, and has a search. {{ name }} can search it for you, but
 it is off until you turn it on, because skills.sh is a third party and its search address is not documented. Turn it on in Store settings
-(Skills, Search skills.sh) or in canoa.cfg:
+(Skills, Search skills.sh) or in {{ config_file }}:
 
 ```toml
 [store]
@@ -980,11 +980,11 @@ is dropped, and one whose repository has no `SKILL.md` for it says so. Turning t
 
 ### Extensions catalogs
 
-An extension is code the host loads to add to Canoa: a library that adds store types, or a [package of scripts](script_providers.md)
+An extension is code the host loads to add to {{ name }}: a library that adds store types, or a [package of scripts](script_providers.md)
 that serves any kind of provider. Store, Extensions lists the extensions of
 the **extensions catalogs** you name in `[store.extensions.catalogs]`, a label of yours for each, written as a catalog is in
 `[store.overlays.catalogs]` (`<repository>@<ref>#<file>`) but a list of its own: none is offered until you add one, and a catalog of overlays is
-never read as one of extensions. Canoa's own format, described here, is not the overlay catalog's.
+never read as one of extensions. {{ name }}'s own format, described here, is not the overlay catalog's.
 
 ```toml
 [store.extensions.catalogs]
@@ -1079,20 +1079,20 @@ what the Store installed) and removes an extension with its files; one you name 
 Store, Overlays, Discover lists the overlays of the catalogs `[store.overlays.catalogs]` names, to search, read about and
 install. A catalog is an [AOS catalog](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/catalog.md):
 a file in a git repository, TOML, JSON (or, with any other name, `overlay.cfg`'s rule), listing overlays by name and
-source, with a summary, an icon, tags and the like for each. Canoa fetches it as it fetches an overlay (git objects at
+source, with a summary, an icon, tags and the like for each. {{ name }} fetches it as it fetches an overlay (git objects at
 the ref named, one commit deep, never checked out, with the same limits), and reads YAML in neither. A `#path` that is
 a directory of the repository is a catalog too: each subdirectory is an overlay of that name, as `dotagents` reads a
 repository of overlays (`https://github.com/example/overlays.git@main#overlays`).
 
-Canoa offers one catalog of its own, first, with nothing configured: `boriken`, Boriken Dev's overlays
+{{ name }} offers one catalog of its own, first, with nothing configured: `boriken`, Boriken Dev's overlays
 (`https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml`). It is fetched like any catalog, by the host,
 so a desktop app and a served page list the same. Yours add beside it. To remove it, use Remove on the Overlays settings page in the Store, or
-set `boriken = false` in your own canoa.cfg: that is kept across restarts and never edits a lower layer. Giving the label
+set `boriken = false` in your own {{ config_file }}: that is kept across restarts and never edits a lower layer. Giving the label
 `boriken` a source of yours replaces it, and the Overlays settings page's Add, or the Store's own offer brings it back.
 
 ```toml
 [store.overlays.catalogs]
-boriken = false   # leave out the catalog Canoa offers by default
+boriken = false   # leave out the catalog {{ name }} offers by default
 team = "https://github.com/example/overlays.git@main#catalog.toml"   # a label of yours = <repository>@<ref>#<catalog file>
 
 [store]
@@ -1119,17 +1119,17 @@ its default.
   source and the pin it claims. **Fetch and show what it would do** fetches the overlay, installing nothing, and shows
   what the overlay itself says (its name, description, `[about]` and icon, from its own files), the commit and tree
   digest, and what it would do as Settings → Profiles would apply it: its environment, skills, MCP servers and context,
-  what Canoa does not apply (setup, dependencies, commands, the `bin`/`lib` defaults), each setup and
+  what {{ name }} does not apply (setup, dependencies, commands, the `bin`/`lib` defaults), each setup and
   whether it says it needs the network, the overlays it requires, what none of your layers shares, and its non-default settings.
   A tag or a summary is never taken as evidence of any of it.
 - **A catalog's pin** is checked against the tree fetched: one that does not match is shown as a refusal and the
   overlay cannot be installed from that entry. An entry with no pin is shown as unpinned.
 - **Install and pin** installs exactly what was shown, through the path **Install…** takes, and names the overlay in
   `[overlays]` as `{ source, pin }`, pinned to the digest checked. **Update** shows what an update changes first. A pin
-  canoa.cfg already gives the overlay holds as it does for **Check for changes…**: a tree of another digest installs
+  {{ config_file }} already gives the overlay holds as it does for **Check for changes…**: a tree of another digest installs
   only once you choose **Update and move the pin…** and confirm the move, naming both digests. **Remove…** takes the
   overlay out of `[overlays]` and deletes its files and fetched history. The store records the catalog it installed an overlay
-  from; an overlay of the same name that canoa.cfg names from another source, or from the same source by hand, is
+  from; an overlay of the same name that {{ config_file }} names from another source, or from the same source by hand, is
   neither installed over, updated nor removed. Nothing of an overlay runs, from the store or
   otherwise. Catalogs are fetched into `overlays/.catalogs/LABEL.git`; what a page fetched and did not install is
   deleted when the page closes.
@@ -1140,7 +1140,7 @@ its default.
 
 Only git sources with a branch, tag or commit install: an entry whose source is a directory, a URL that is not git, or
 git with no ref is listed, and its page says why it does not install. `homepage` and `repository` are shown whole as links that open in the system's browser when tapped, never fetched by
-Canoa; one that is not a plain ASCII `http` or `https` address stays text. A web build lists no catalog.
+{{ name }}; one that is not a plain ASCII `http` or `https` address stays text. A web build lists no catalog.
 
 ### Saved connections
 
@@ -1148,19 +1148,19 @@ The **Hosts** section lists this computer first (Local: the host inside the app,
 
 ```toml
 [connections."Work desk"]
-kind = "canoa"                  # "canoa" (a Canoa host, whose agents and abilities it lists) or "acp" (one agent at an endpoint)
-address = "https://desk.example:7800/"   # a Canoa host's web address; for "acp", a wss:// or ws:// endpoint (or https:// with transport = "webtransport")
+kind = "canoa"                  # "canoa" (a {{ name }} host, whose agents and abilities it lists) or "acp" (one agent at an endpoint)
+address = "https://desk.example:7800/"   # a {{ name }} host's web address; for "acp", a wss:// or ws:// endpoint (or https:// with transport = "webtransport")
 peer = "sha256:..."             # the pinned peer id, 64 hex digits
 method = "noise"                # the proof the other end runs: "noise" or "webcrypto"
 ```
 
-A Canoa host is read from the list it serves at its address when the section opens, which connects to nothing; a direct agent is connected to only when the person asks it to be checked. What either lists of itself is its claim: connecting proves that it holds the pinned id. A direct endpoint offers a session and nothing else, so the section shows no folder browsing, files or management for it, and a workspace is typed as a path on that machine. Removing a connection removes only this app's record of it and names the sessions that were on it; nothing is stopped on the other end. A page served by a host saves its connections in canoa.cfg on that host, through the control channel, when its key holds `config.write`; the host refuses an address with a user name or password and any key but the five above.
+A {{ name }} host is read from the list it serves at its address when the section opens, which connects to nothing; a direct agent is connected to only when the person asks it to be checked. What either lists of itself is its claim: connecting proves that it holds the pinned id. A direct endpoint offers a session and nothing else, so the section shows no folder browsing, files or management for it, and a workspace is typed as a path on that machine. Removing a connection removes only this app's record of it and names the sessions that were on it; nothing is stopped on the other end. A page served by a host saves its connections in {{ config_file }} on that host, through the control channel, when its key holds `config.write`; the host refuses an address with a user name or password and any key but the five above.
 
 ### Trusting a project
 
 A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first, every
 invisible or control character in it named as `<U+XXXX>`. The
-trust is kept per directory, links resolved, in `trust.json` beside canoa.cfg, with the SHA-256 of the file you were
+trust is kept per directory, links resolved, in `trust.json` beside {{ config_file }}, with the SHA-256 of the file you were
 shown: if the file changes, it is ignored again until you trust it again. **Stop trusting** revokes it for every later
 session. A web build reads no working directory and installs no overlay.
 
@@ -1169,11 +1169,11 @@ session. A web build reads no working directory and installs no overlay.
 An extension can add to Settings the way it adds to the Store. A provider of the `settings_section` kind says a section's name, icon
 and the form it asks for (a guatiao schema and the guatiao-intake form that shows it). It either sits in Settings' list under a heading
 of its own (`Extensions` when it names none) or is a titled group at the end of an existing section's page (`under`). Its values are
-kept in `[settings.ID]` of canoa.cfg, or by the provider itself; a field the schema marks sensitive is never shown again, only said to
-be set, and is not written to canoa.cfg: it is kept as the secret `settings/ID/MEMBER` by the provider `[secrets] accounts` names (the
-operating system's store unless you chose another), where the Secrets section lists it. A secret an older canoa.cfg holds in
+kept in `[settings.ID]` of {{ config_file }}, or by the provider itself; a field the schema marks sensitive is never shown again, only said to
+be set, and is not written to {{ config_file }}: it is kept as the secret `settings/ID/MEMBER` by the provider `[secrets] accounts` names (the
+operating system's store unless you chose another), where the Secrets section lists it. A secret an older {{ config_file }} holds in
 `[settings.ID]` is moved there the first time the section is opened. The host lists the sections it loaded with `settings/sections`. A section disappears from Settings with the extension that
-offered it, and the values it kept stay in canoa.cfg until you remove the table. The pages Canoa draws itself (General, Appearance,
+offered it, and the values it kept stay in {{ config_file }} until you remove the table. The pages {{ name }} draws itself (General, Appearance,
 Accounts and the rest) are listed by the host the same way, so the app learns what Settings has from the host and not from a list of its own.
 
 ### Panel tabs from extensions
@@ -1183,7 +1183,7 @@ Logs and what an extension adds: a provider of the `panel_tab` kind says a tab's
 own, or one it names), a log whose latest lines the provider answers, or a page the extension serves on this computer's loopback
 (`http` or `https` on `127.0.0.1`, `[::1]` or `localhost`; any other address is refused). The host lists the kinds with `panel_tabs/list`.
 Opening Logs and an extension's logs needs the key to hold `hosting`. A page's tab names its address and has a button that opens it in
-your browser; Canoa embeds no web view, and a page on a host that runs on another computer is not offered, since its loopback is not yours.
+your browser; {{ name }} embeds no web view, and a page on a host that runs on another computer is not offered, since its loopback is not yours.
 
 ### Copy and paste in a terminal
 
@@ -1203,21 +1203,21 @@ copy command where the clipboard API is not there.
 
 ## Limits and warnings
 
-Canoa does not refuse a choice because it is weak or unusual, and a limit is a setting with a default and no ceiling of its own. Where
-something is told instead of refused, it is in the log as `non-default:`, in `canoa check`, and where the app shows the account.
+{{ name }} does not refuse a choice because it is weak or unusual, and a limit is a setting with a default and no ceiling of its own. Where
+something is told instead of refused, it is in the log as `non-default:`, in `{{ program }} check`, and where the app shows the account.
 
 - **Plain http.** Any `http` or `https` address is accepted for an account's address (the API-gateway and LiteLLM kinds, and any
   kind's endpoint setting), a mail account's `server` and `autodiscover`, `[store] skills_search`, an MCP registry, `[host.kb]`'s
   `embeddings` and `llm_endpoint`, and the address of an MCP server a paired client hands a session. One that goes over plain `http`
-  to somewhere other than this computer is told of: `canoa check` and `canoa accounts list` print it, the host logs it when it
+  to somewhere other than this computer is told of: `{{ program }} check` and `{{ program }} accounts list` print it, the host logs it when it
   starts, and the account's row in Settings shows it. An address that holds a login is still refused.
 - **Messages.** `[host] max_message_bytes` (16 MiB) is the longest ACP message, as one line, either way on a connection: a prompt
-  carrying an attachment is one message, and base64 makes a file a third larger. There is no ceiling of Canoa's own, so raise it to
+  carrying an attachment is one message, and base64 makes a file a third larger. There is no ceiling of {{ name }}'s own, so raise it to
   send a larger file. A message over it is refused with the setting named (the link's error, the host's log), and the connection
   carries on.
 - **Listing MCP servers.** `[host.mcp_list]` `query_seconds` (5, all of one server's lists), `max_items_per_server` (1000) and
   `max_reply_bytes` (4 MiB, an HTTP body or a line of output) are what listing a session's tools and resources is held to; each is at
-  least 1 and has no ceiling of Canoa's own.
+  least 1 and has no ceiling of {{ name }}'s own.
 - **Worktrees.** `[host.worktrees]` `max_per_repository` (32) and `git_seconds` (120).
 - **Delegation.** `[host.delegate]` `wait_seconds` (300, the longest one `task_status` waits) and `dial_seconds` (20, reaching an agent
   on another machine).
@@ -1226,25 +1226,25 @@ something is told instead of refused, it is in the log as `non-default:`, in `ca
 - **Files.** The host answers `fs/list` and `fs/read` a page at a time and says where the next one starts, so a long folder or a large
   file is reachable whole.
 - **Writing files.** `fs/write` (grants `files` and `files.write`) has no limit of its own beyond `[host] max_message_bytes`, which bounds the
-  one request that carries the text; it never writes a place on your protected list, nor canoa.cfg or the host's state folder without
+  one request that carries the text; it never writes a place on your protected list, nor {{ config_file }} or the host's state folder without
   `files.write.host`.
 - **Keep awake.** Settings > General > Power (`[settings.power] keep_awake`, off by default) keeps this computer from idle-sleeping while an
   agent turn runs, for as long as the turn does; it lets go when the turn ends, the connection closes or the host stops, however it
   stops. Read when the host starts.
-- **Secrets.** A secret provider lists every name it holds; a name or a value has no length limit of Canoa's.
+- **Secrets.** A secret provider lists every name it holds; a name or a value has no length limit of {{ name }}'s.
 - **The Store.** A program is offered for any platform its publisher has a build for.
 
 ## Windows, macOS and Linux tray behavior
 
-Canoa uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open Canoa, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `canoa` running; Exit, or **Quit Canoa** in Settings, ends them.
+{{ name }} uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open {{ name }}, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `{{ program }}` running; Exit, or **Quit {{ name }}** in Settings, ends them.
 
 What has been run, by platform:
 
-- **Windows 11 (arm64)**: the icon is in the notification area (in its overflow, until the person pins it), named Canoa. Closing the window hides it while the host keeps serving, and the real extension in Edge ran a turn through that host with the window closed. Two clicks on the icon within half a second, Windows' default double-click time, open the window; that decision is tested through the plugin's events, and a double click by mouse was not run.
-- **Linux (Fedora 44 under WSLg, arm64)**: tray_manager draws the icon as a StatusNotifier item, which passes no clicks on, so **Open Canoa** in its menu opens the chat. The app looks for a StatusNotifier host on the session bus (`org.kde.StatusNotifierWatcher`). With one, closing the window hides it, and picking Open Canoa from the menu over D-Bus, as a panel does, brings it back. WSLg's desktop has none, so there the app shows no icon, and closing the window minimizes it instead of hiding it where nothing could bring it back; WSLg does not report the window as minimized.
+- **Windows 11 (arm64)**: the icon is in the notification area (in its overflow, until the person pins it), named {{ name }}. Closing the window hides it while the host keeps serving, and the real extension in Edge ran a turn through that host with the window closed. Two clicks on the icon within half a second, Windows' default double-click time, open the window; that decision is tested through the plugin's events, and a double click by mouse was not run.
+- **Linux (Fedora 44 under WSLg, arm64)**: tray_manager draws the icon as a StatusNotifier item, which passes no clicks on, so **Open {{ name }}** in its menu opens the chat. The app looks for a StatusNotifier host on the session bus (`org.kde.StatusNotifierWatcher`). With one, closing the window hides it, and picking Open {{ name }} from the menu over D-Bus, as a panel does, brings it back. WSLg's desktop has none, so there the app shows no icon, and closing the window minimizes it instead of hiding it where nothing could bring it back; WSLg does not report the window as minimized.
 - **macOS**: not run.
 
-The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage) and Store (Store, Extensions), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same canoa.cfg file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment canoa.cfg.
+The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage) and Store (Store, Extensions), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same {{ config_file }} file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment {{ config_file }}.
 
 Where the host grants the key `usage`, the app also has a Usage section of its own (its selector icon, with an index of All accounts and each account under its provider). Its Limits view shows each account's allowances as the host last heard them: how much is left, a bar, the reset, the pace and when the figure was read, with a warning in words once a reading is half an hour old. An account that several hosts report under the same identity is one allowance, the newest reading; Host, Provider and Account filters share the index's selection. The section holds the `[usage] warn_permille` choice, so Settings does not list Usage then. Accounts are still managed in Settings.
 
@@ -1256,15 +1256,15 @@ A conversation needs the person when its agent asks leave to use a tool, asks a 
 stopped does not count). If that conversation is not the one shown, or the window is hidden, minimized or not focused, the
 desktop shows a notification, and choosing it opens that conversation. A notification names the conversation and its agent and
 says which of the three it is, nothing else: never the command, the path or anything else the agent sent, which a lock screen or
-a shared screen could show. `[notifications]` in canoa.cfg, or Settings → **Notifications**, turns each kind off: `permission`,
+a shared screen could show. `[notifications]` in {{ config_file }}, or Settings → **Notifications**, turns each kind off: `permission`,
 `question` and `finished`, each on by default.
 
 In the side list, a conversation waiting for an answer is marked **Needs you**, one whose turn is running shows that it works,
 and one whose turn ended since it was last chosen has a dot. The tray says how many conversations wait for an answer: its
 tooltip on Windows, the first item of its menu everywhere.
 
-- **Windows**: a toast, through leanflutter's `local_notifier`. The first one creates a Start menu shortcut named Canoa to
-  the running program (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Canoa.lnk`), which Windows requires to show a toast
+- **Windows**: a toast, through leanflutter's `local_notifier`. The first one creates a Start menu shortcut named {{ name }} to
+  the running program (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\{{ name }}.lnk`), which Windows requires to show a toast
   for a program not installed from a package; nothing is created until a notification is shown.
 - **Linux**: a freedesktop notification through libnotify, which needs a notification service on the session bus.
 - **Web, a PWA and the extension**: the browser's Notification API, once the person allows it from Settings → Notifications →
@@ -1273,10 +1273,10 @@ tooltip on Windows, the first item of its menu everywhere.
 `app/integration_test/notification_test.dart` has a conversation behind the chosen one finish its turn in the app's own window,
 and holds the window open for `CANOA_TEST_HOLD` seconds. What has been run:
 
-- **Windows 11 (arm64)**: Windows' own notification history for Canoa held the toast, titled with the conversation and saying
+- **Windows 11 (arm64)**: Windows' own notification history for {{ name }} held the toast, titled with the conversation and saying
   its agent finished its turn. Choosing it was not run.
 - **Linux (Fedora 44 under WSLg, arm64)**: WSLg has no notification service of its own; with `dunst` running, it received the
-  notification from Canoa with the same words. Choosing it was not run.
+  notification from {{ name }} with the same words. Choosing it was not run.
 - **Web and macOS**: not run.
 
 ## Building desktop runners
@@ -1289,10 +1289,10 @@ This repository keeps the canonical Flutter code in app/. `python app/tool/build
     flutter pub get
     flutter build windows  # use linux or macos on that platform
 
-The generated runner names the executable `canoa`, the command-line program's name, which Windows and macOS read as the
-same file. `app/tool/name_runner.sh` renames it before the first build, as above: the executable becomes `CanoaUI`
-(`CanoaUI.exe` on Windows), the window and the file's description are titled Canoa, and on macOS the bundle is `Canoa.app`
-with the executable `CanoaUI` (not yet run on a Mac). People see Canoa everywhere; only the file is `CanoaUI`.
+The generated runner names the executable `{{ program }}`, the command-line program's name, which Windows and macOS read as the
+same file. `app/tool/name_runner.sh` renames it before the first build, as above: the executable becomes `{{ executable }}`
+(`{{ executable }}.exe` on Windows), the window and the file's description are titled {{ name }}, and on macOS the bundle is `{{ name }}.app`
+with the executable `{{ executable }}` (not yet run on a Mac). People see {{ name }} everywhere; only the file is `{{ executable }}`.
 
 On Linux the tray and window packages (leanflutter's `tray_manager` and `window_manager`) link system libraries that no Dart package carries, so a build needs them installed, offline too:
 
@@ -1303,10 +1303,10 @@ On Linux the tray and window packages (leanflutter's `tray_manager` and `window_
 deprecated, and the generated runner builds with `-Werror`, so build with
 `CXXFLAGS=-Wno-error=deprecated-declarations` there (Fedora 44).
 
-A desktop build carries the host as a library, with no `canoa` program: the app's own plugin, `app/native`, builds
+A desktop build carries the host as a library, with no `{{ program }}` program: the app's own plugin, `app/native`, builds
 `crates/canoa-ffi` with cargo as part of `flutter build`, so `cargo` has to be on PATH or in `~/.cargo/bin`, and the runner
 has to be generated in `app/`, whose workspace the plugin finds from there. The result is `canoa_ffi.dll` beside
-`CanoaUI.exe`, or `lib/libcanoa_ffi.so` in a Linux bundle; a macOS build is written and has not been run. With
+`{{ executable }}.exe`, or `lib/libcanoa_ffi.so` in a Linux bundle; a macOS build is written and has not been run. With
 `CANOA_WEB_DIST` set to the absolute path of a web build, the library has the web app built in.
 
 `app/integration_test/desktop_test.dart` runs the app on a real desktop. On a Linux session with no tray, run
@@ -1317,4 +1317,4 @@ The `deps` branch mirrors those packages' Dart side and names these in its `mani
 
 ## Limitations
 
-Canoa is still an early-stage app. The tray controller preserves the process, in-memory sessions and the host while its window is hidden; it does not replace a native background service or automatically install a startup entry. After a restart, sessions are listed from `sessions.json` and open again only through their agents, which have to offer `session/load` or `session/resume`.
+{{ name }} is still an early-stage app. The tray controller preserves the process, in-memory sessions and the host while its window is hidden; it does not replace a native background service or automatically install a startup entry. After a restart, sessions are listed from `sessions.json` and open again only through their agents, which have to offer `session/load` or `session/resume`.

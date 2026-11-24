@@ -1,8 +1,8 @@
-# Canoa agent transport profile
+# {{ name }} agent transport profile
 
-Canoa prefers **WebTransport over HTTPS**, with **WebSocket over WSS** as its fallback. A direct WebSocket connection is also supported for a peer that does not advertise WebTransport.
+{{ name }} prefers **WebTransport over HTTPS**, with **WebSocket over WSS** as its fallback. A direct WebSocket connection is also supported for a peer that does not advertise WebTransport.
 
-This borrows Guatiao's separation of a message channel from a higher-level protocol, plus the browser/Dart-VM conditional WebTransport implementation. Unlike Guatiao's current `RemoteLink.connect`, Canoa actually attempts a fallback on **opening** failure.
+This borrows Guatiao's separation of a message channel from a higher-level protocol, plus the browser/Dart-VM conditional WebTransport implementation. Unlike Guatiao's current `RemoteLink.connect`, {{ name }} actually attempts a fallback on **opening** failure.
 
 ## Endpoint descriptor
 
@@ -19,10 +19,10 @@ These are transport locations, **not authentication evidence**. Both must resolv
 
 ## Wire framing
 
-- **WebTransport** (a Canoa-specific draft profile): a single reliable bidirectional stream, `u32` little-endian length + UTF-8 JSON-RPC message. Maximum 1 MiB per message. Do not use unreliable datagrams for ACP commands or transcript updates.
+- **WebTransport** (a {{ name }}-specific draft profile): a single reliable bidirectional stream, `u32` little-endian length + UTF-8 JSON-RPC message. Maximum 1 MiB per message. Do not use unreliable datagrams for ACP commands or transcript updates.
 - **WebSocket** (the experimental remote ACP transport profile): one complete JSON-RPC message per **text frame**, not Guatiao's binary message format.
 - ACP initialization, session methods, notifications, cancellation, ordered updates and permissions are **identical** above the framing adapter.
-- WebTransport is not an official upstream ACP transport yet. A Canoa-compatible agent needs to support this documented stream framing, and interoperability tests between independent implementations are still required.
+- WebTransport is not an official upstream ACP transport yet. A {{ name }}-compatible agent needs to support this documented stream framing, and interoperability tests between independent implementations are still required.
 
 ## Fallback rules
 
@@ -32,7 +32,7 @@ These are transport locations, **not authentication evidence**. Both must resolv
 4. Run the same coqui-peer-compatible verified identity handshake on the chosen channel. WSS certificate validation or a WebTransport browser certificate pin is not a substitute for that identity proof.
 5. Resuming a lost agent session requires a separate explicit ACP reconnect/resume operation after a new authenticated connection. Never replay an uncertain prompt or action automatically.
 
-Plain WS is fine where the link is sealed in-band, as Canoa's paired Noise or WebCrypto channel is; an unsealed plain WS is for local development, on a loopback address.
+Plain WS is fine where the link is sealed in-band, as {{ name }}'s paired Noise or WebCrypto channel is; an unsealed plain WS is for local development, on a loopback address.
 
 ## Platform support
 
@@ -53,6 +53,6 @@ The transport classes are in [coqui-transport-web](https://github.com/Boriken-De
 
 ## Coqui layering
 
-The `coqui_transport_web` Dart package owns a bounded, ordered queue during protocol setup, with no cryptographic decisions. Peer key verification is done by the experimental coqui-peer browser method, whose canonical source is outside the Canoa repository. Canoa uses a pinned, unmodified bundle copy and supplies a separate application permission decision.
+The `coqui_transport_web` Dart package owns a bounded, ordered queue during protocol setup, with no cryptographic decisions. Peer key verification is done by the experimental coqui-peer browser method, whose canonical source is outside the {{ name }} repository. {{ name }} uses a pinned, unmodified bundle copy and supplies a separate application permission decision.
 
-The Canoa code that performs `hello/challenge/proof/accept` frame exchange is a transport adapter for the Coqui method; it is not a second authentication mechanism. Canoa's default client continues to fail closed when the peer key is unpinned or the remote method is unsupported.
+The {{ name }} code that performs `hello/challenge/proof/accept` frame exchange is a transport adapter for the Coqui method; it is not a second authentication mechanism. {{ name }}'s default client continues to fail closed when the peer key is unpinned or the remote method is unsupported.

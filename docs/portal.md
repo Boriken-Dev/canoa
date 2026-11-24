@@ -1,13 +1,13 @@
 # The portal
 
-`canoa portal` is the web app for a machine several people use. Each person signs in with their account on that machine and gets
-a `canoa` host of their own, started as them, in their home: their agents, their settings, their sessions and their files are
+`{{ program }} portal` is the web app for a machine several people use. Each person signs in with their account on that machine and gets
+a `{{ program }}` host of their own, started as them, in their home: their agents, their settings, their sessions and their files are
 theirs alone. Nothing of one person's is reachable from another's.
 
 It is built with the `portal` feature (Unix only; it links the system's PAM library) and runs behind a proxy that speaks TLS.
 
 ```text
-browser ──HTTPS──> proxy ──HTTP over a Unix socket──> canoa portal ──socket──> canoa serve --portal   (as the person, in their home)
+browser ──HTTPS──> proxy ──HTTP over a Unix socket──> {{ program }} portal ──socket──> {{ program }} serve --portal   (as the person, in their home)
 ```
 
 ## What the portal does
@@ -32,7 +32,7 @@ browser ──HTTPS──> proxy ──HTTP over a Unix socket──> canoa port
   to be this site's own scheme and host, and `/canoa.json`, which starts a host, refuses a browser that says it is a
   cross-site request. The sign-in page sends `Referrer-Policy: same-origin`, since a browser posts `Origin: null` from a page
   that sends no referrer.
-- **Starts the person's host** as the template unit `canoa@NAME.service` when they first use it, and **stops it** after
+- **Starts the person's host** as the template unit `{{ program }}@NAME.service` when they first use it, and **stops it** after
   `idle_seconds` with no channel open. At most `max_hosts` run at once. The account is looked up again each time a host is
   wanted: one that was removed or renamed since the sign-in loses its sessions. A host that is slow to answer delays only its
   own person.
@@ -57,7 +57,7 @@ portal on), and watch the log for sign-ins refused for their failures.
 
 **Measure the failure floor.** `failure_floor_seconds` (default 2) hides how long a directory takes to answer only if it is
 longer than the slowest answer. Before turning the portal on, time wrong passwords through the PAM service for an account that
-exists and for one that does not, many times each (`pamtester canoa NAME authenticate`, or a loop over `su`), and set the floor
+exists and for one that does not, many times each (`pamtester {{ program }} NAME authenticate`, or a loop over `su`), and set the floor
 above the slowest, with margin: the default was not measured against your directory. A directory that sometimes takes longer
 than the floor shows through those answers.
 
@@ -69,10 +69,10 @@ against the provider's own schema when the portal starts:
 ```toml
 authenticators = [
   { provider = "coqui_access_system" },
-  { provider = "coqui_access_password", library = "/opt/canoa/libcoqui_access_password_plugin.so",
-    config = { source = { file = { path = "/var/lib/canoa-portal/passwords.toml", format = "toml" } } } },
-  { provider = "coqui_access_mtls", library = "/opt/canoa/libcoqui_access_mtls_plugin.so", enrol = true,
-    config = { trust = "pinned", source = { file = { path = "/var/lib/canoa-portal/certificates.toml", format = "toml" } } } },
+  { provider = "coqui_access_password", library = "/opt/{{ program }}/libcoqui_access_password_plugin.so",
+    config = { source = { file = { path = "/var/lib/{{ program }}-portal/passwords.toml", format = "toml" } } } },
+  { provider = "coqui_access_mtls", library = "/opt/{{ program }}/libcoqui_access_mtls_plugin.so", enrol = true,
+    config = { trust = "pinned", source = { file = { path = "/var/lib/{{ program }}-portal/certificates.toml", format = "toml" } } } },
 ]
 ```
 
@@ -224,8 +224,8 @@ portal's machine forwards to the portal's socket:
    the sample), or all at server level with no location setting any.
 4. In the portal's settings, `certificate_header` is the same name (lower case in the file), `trusted_proxies` is as before, and
    the certificate provider has `enrol = true` and `trust = "pinned"` (add `ca` only when the chain is forwarded). The portal's
-   unit gets `StateDirectory=canoa-portal` and `StateDirectoryMode=0700`, since `ProtectSystem=strict` leaves nothing else
-   writable, and the table lives there (`/var/lib/canoa-portal`): the files hold who may sign in, and the portal warns at start
+   unit gets `StateDirectory={{ program }}-portal` and `StateDirectoryMode=0700`, since `ProtectSystem=strict` leaves nothing else
+   writable, and the table lives there (`/var/lib/{{ program }}-portal`): the files hold who may sign in, and the portal warns at start
    about a `source` or `waiting` file a group or others can read. Build the plugin library from coqui-access and install it
    where `library` says, owned by root.
 5. **The HAProxy to nginx hop** is where the header is believed, so it must be authenticated, not only encrypted: nginx on
@@ -245,7 +245,7 @@ too, by what the value looks like, with no setting. Ask for the certificate, and
 ```nginx
 server {
     listen 443 ssl;
-    server_name canoa.example;
+    server_name {{ program }}.example;
     ssl_protocols TLSv1.3;
     ssl_certificate     PUBLIC.pem;
     ssl_certificate_key PUBLIC.key;
@@ -255,7 +255,7 @@ server {
     ssl_verify_client optional_no_ca;
 
     location / {
-        proxy_pass http://unix:/run/canoa-portal/portal.sock;
+        proxy_pass http://unix:/run/{{ program }}-portal/portal.sock;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $remote_addr;
@@ -294,14 +294,14 @@ directory), which share nothing but those files, so it needs a `source` file:
 ```toml
 authenticators = [
   { provider = "coqui_access_system" },
-  { provider = "coqui_access_passkey", library = "/opt/canoa/libcoqui_access_passkey_plugin.so",
-    config = { rp_id = "canoa.example", origins = ["https://canoa.example"],
-               source = { file = { path = "/var/lib/canoa-portal/passkeys.toml", format = "toml" } } } },
+  { provider = "coqui_access_passkey", library = "/opt/{{ program }}/libcoqui_access_passkey_plugin.so",
+    config = { rp_id = "{{ program }}.example", origins = ["https://{{ program }}.example"],
+               source = { file = { path = "/var/lib/{{ program }}-portal/passkeys.toml", format = "toml" } } } },
 ]
 ```
 
 - **The relying party is the portal's own host.** `rp_id` is the name the page is served at, never a parent domain: a passkey
-  made for `canoa.example` cannot be asked for by `www.example` or any sibling of it, and `example` would let every site under it
+  made for `{{ program }}.example` cannot be asked for by `www.example` or any sibling of it, and `example` would let every site under it
   ask for the same passkeys. `origins` is the one origin a browser signs in from (scheme, host and port). A browser offers
   WebAuthn only over HTTPS or on `http://localhost`, so the address the person types must be the name in `origins`: another
   name, such as the proxy's own address, signs no one in by passkey. For a development run on a loopback port,
@@ -328,7 +328,7 @@ authenticators = [
   again under the same name does not inherit the passkeys of the one before: they sign no one in, and adding a passkey takes
   them away.
 - **Sessions end with the passkey.** A session a passkey opened records which one. Removing it, from the Passkeys page or with
-  `canoa portal passkeys remove`, ends the sessions it opened at their next use (a channel within a few seconds), and no other.
+  `{{ program }} portal passkeys remove`, ends the sessions it opened at their next use (a channel within a few seconds), and no other.
 
 **Adding one** is on `/portal/passkeys`, which lists the account's passkeys (name, the day each was added and last used, whether
 it syncs, whether it is disabled), names and removes them, and adds a new one. A passkey is a way in that works from anywhere
@@ -344,13 +344,13 @@ password with a one-time code, say. An `enrol` rule that allows a password alone
 the rule allows, add a passkey that then signs in from wherever a passkey is accepted: write the rule as strict as the way in
 you want to protect, and loosen it for the first passkey only for as long as that takes.
 
-`canoa portal --config FILE passkeys ...`, run as the portal's account, is the administrator's way, and there is no way to add
+`{{ program }} portal --config FILE passkeys ...`, run as the portal's account, is the administrator's way, and there is no way to add
 one from the command line, since a passkey is made by the person's device:
 
 ```sh
-canoa portal --config /etc/canoa/portal.toml passkeys list                  # one JSON line per passkey: user, id, label, added, last_used, synced, disabled; never a key
-canoa portal --config /etc/canoa/portal.toml passkeys remove alice ID       # one passkey of alice
-canoa portal --config /etc/canoa/portal.toml passkeys remove alice          # every passkey of alice
+{{ program }} portal --config /etc/{{ program }}/portal.toml passkeys list                  # one JSON line per passkey: user, id, label, added, last_used, synced, disabled; never a key
+{{ program }} portal --config /etc/{{ program }}/portal.toml passkeys remove alice ID       # one passkey of alice
+{{ program }} portal --config /etc/{{ program }}/portal.toml passkeys remove alice          # every passkey of alice
 ```
 
 The command refuses to run as an account that does not own the provider's files (`source`, `pending`, `ceremonies`, and their
@@ -446,8 +446,8 @@ never offers them first.
 ```toml
 authenticators = [
   { provider = "coqui_access_system" },
-  { provider = "coqui_access_totp", library = "/opt/canoa/libcoqui_access_totp_plugin.so",
-    config = { source = { file = { path = "/var/lib/canoa-portal/totp.toml", format = "toml" } }, issuer = "Canoa" } },
+  { provider = "coqui_access_totp", library = "/opt/{{ program }}/libcoqui_access_totp_plugin.so",
+    config = { source = { file = { path = "/var/lib/{{ program }}-portal/totp.toml", format = "toml" } }, issuer = "{{ name }}" } },
 ]
 
 # From inside the network only, a person who has no code yet may set one up while signing in, with their password. Nothing else
@@ -474,7 +474,7 @@ allow = [["password", "totp"], ["password", "recovery_code"]]
 
 The one-time code provider needs a `source` file: the portal asks it to check codes and to set them up, and the file is what
 the two share. It is the factor itself, a readable secret for each account, so keep it where only the portal's account can read
-it (the unit's `StateDirectory=canoa-portal`, mode `0700`). Install the library like any other, owned by root.
+it (the unit's `StateDirectory={{ program }}-portal`, mode `0700`). Install the library like any other, owned by root.
 
 - **A pending sign-in.** When the steps passed are not enough and the policy offers more, the portal keeps what has passed in
   memory and gives the browser the cookie `__Host-canoa-pending` (`HttpOnly`, `Secure`, `SameSite=Strict`) naming it. The page
@@ -499,7 +499,7 @@ it (the unit's `StateDirectory=canoa-portal`, mode `0700`). Install the library 
   can keep the code step shut for that person while they keep failing; the window's failures leave it as time passes, so it is
   not for good, but the day's cap holds a day. **Changing the account's password is the remedy for a lock-out**: whoever was
   guessing needed the old one, and the person's counts, which the portal keeps in memory, do not change with it. An
-  administrator clears them with `canoa portal --config FILE factor unlock NAME`: the provider notes the time in its own table (an account with no code has nothing to clear), a
+  administrator clears them with `{{ program }} portal --config FILE factor unlock NAME`: the provider notes the time in its own table (an account with no code has nothing to clear), a
   running portal clears the account's counts at its next try for it (no restart, and once for each unlock), and the provider's
   own delay of the account ends with it. Restarting the portal clears every count. The first refusal in a window is logged at
   `warn`, naming the account, the address and which limit, and the ones after it at `info`. Every failed step is answered no sooner than `failure_floor` after the request began.
@@ -538,15 +538,15 @@ an administrator does**. Two purposes, because they are not the same trust:
 - Whoever holds the first factor can set up a code for an account that has none, where an `enrol_first` rule allows it. That is
   what such a rule says.
 
-`canoa portal --config FILE factor ...`, run as the portal's account, is the administrator's way:
+`{{ program }} portal --config FILE factor ...`, run as the portal's account, is the administrator's way:
 
 ```sh
-canoa portal --config /etc/canoa/portal.toml factor list                    # one JSON line per account: id, user, enrolled, disabled, waiting, reset
-canoa portal --config /etc/canoa/portal.toml factor enrol alice              # prints the link and the recovery codes, once; refused for an account that has a code: reset it first
-canoa portal --config /etc/canoa/portal.toml factor enrol alice --code 123456  # the first code from the app confirms it
-canoa portal --config /etc/canoa/portal.toml factor reset alice              # removes the code, its recovery codes and any setup waiting
-canoa portal --config /etc/canoa/portal.toml factor reset --id 1000:alice    # the same by the id `list` shows, for an account that is gone
-canoa portal --config /etc/canoa/portal.toml factor unlock alice             # clears the account's failure counts, after its password was changed
+{{ program }} portal --config /etc/{{ program }}/portal.toml factor list                    # one JSON line per account: id, user, enrolled, disabled, waiting, reset
+{{ program }} portal --config /etc/{{ program }}/portal.toml factor enrol alice              # prints the link and the recovery codes, once; refused for an account that has a code: reset it first
+{{ program }} portal --config /etc/{{ program }}/portal.toml factor enrol alice --code 123456  # the first code from the app confirms it
+{{ program }} portal --config /etc/{{ program }}/portal.toml factor reset alice              # removes the code, its recovery codes and any setup waiting
+{{ program }} portal --config /etc/{{ program }}/portal.toml factor reset --id 1000:alice    # the same by the id `list` shows, for an account that is gone
+{{ program }} portal --config /etc/{{ program }}/portal.toml factor unlock alice             # clears the account's failure counts, after its password was changed
 ```
 
 After `reset`, the sessions that used the code end at their next use (a channel within a few seconds), and the account is
@@ -559,18 +559,18 @@ code or a recovery code.
 The provider takes the code away and keeps the mark in one write under its table's lock, so a reset that is interrupted leaves the
 account with its code and no mark, and one that is not leaves the mark and no code. An account the provider holds no code for
 (one whose setup was never confirmed) is not marked. The command refuses to run as an account that does not own the one-time code provider's files (`source`, `pending`, `waiting`, and their locks) and the folders they are in: it would make files the portal's account cannot read, and every code step would answer `503`. Files of other providers, a password table under a folder root owns, say, are not its concern. The provider is the one whose authenticator takes one-time codes. Run it as the portal's account, for instance
-`sudo -u canoa`.
+`sudo -u {{ program }}`.
 
-## The person's host: `canoa serve --portal`
+## The person's host: `{{ program }} serve --portal`
 
 ```sh
-canoa serve --portal /run/canoa/NAME --portal-user canoa --portal-group canoa-users --supervised
+{{ program }} serve --portal /run/{{ program }}/NAME --portal-user {{ program }} --portal-group {{ program }}-users --supervised
 ```
 
 Every entry and the control channel listen on a Unix socket in the directory (`entries/ENTRY.sock`, `control.sock`), whatever
-canoa.cfg says of an address, and the web app is not served from it. `portal.sock` takes three requests, each a line of JSON
+{{ config_file }} says of an address, and the web app is not served from it. `portal.sock` takes three requests, each a line of JSON
 answered with a line of JSON: `{"op":"index"}` (the host's id, method and entries), `{"op":"accept","peer":ID}` (accepts a key
-that connected and is waiting, as `canoa accept` does) and `{"op":"revoke","peer":ID}`.
+that connected and is waiting, as `{{ program }} accept` does) and `{"op":"revoke","peer":ID}`.
 
 The host **refuses to run**, whatever the portal asked for, as root, in the system and dynamic-user ranges (61184 to 65535,
 `nobody` included; the ids a directory gives people are larger or smaller), as a user id below `--portal-min-uid` (default
@@ -584,23 +584,23 @@ at the other end of each connection and closes any that is not `--portal-user`, 
 in the other direction: it dials a person's socket for that person's user id and turns away a socket whose maker is anyone
 else, so a link in the person's own folder to another person's socket leads nowhere. Whoever reaches the control socket has signed in
 as that person, so each key it introduces holds every page grant on the control channel (see [the host](host.md)) without being
-named in canoa.cfg: the limit is the portal's sign-in, not the key.
+named in {{ config_file }}: the limit is the portal's sign-in, not the key.
 
 ## Setting it up
 
 The portal's settings are a TOML file; every key is optional.
 
 ```toml
-socket = "/run/canoa-portal/portal.sock"   # what the proxy reaches the portal at
-socket_group = "canoa-proxy"                # the group that may connect to it: the proxy's user and this account only
-site = "/opt/canoa/site"               # the web app's build (flutter build web --csp --no-web-resources-cdn)
-# brand = "/etc/canoa/brand.json"      # the name, mark and colours of the portal's pages, see "The portal's pages carry a brand"; the build's own when unset
-socket_dir = "/run/canoa"
-unit = "canoa@{user}.service"
-pam_service = "canoa"
+socket = "/run/{{ program }}-portal/portal.sock"   # what the proxy reaches the portal at
+socket_group = "{{ program }}-proxy"                # the group that may connect to it: the proxy's user and this account only
+site = "/opt/{{ program }}/site"               # the web app's build (flutter build web --csp --no-web-resources-cdn)
+# brand = "/etc/{{ program }}/brand.json"      # the name, mark and colours of the portal's pages, see "The portal's pages carry a brand"; the build's own when unset
+socket_dir = "/run/{{ program }}"
+unit = "{{ program }}@{user}.service"
+pam_service = "{{ program }}"
 min_uid = 1000                         # the lowest user id that may sign in; root never may
-groups = ["canoa-users"]               # the groups an account must be in: name them
-hosts = ["canoa.example"]              # Host names a request may carry, besides localhost and addresses
+groups = ["{{ program }}-users"]               # the groups an account must be in: name them
+hosts = ["{{ program }}.example"]              # Host names a request may carry, besides localhost and addresses
 authenticators = [{ provider = "coqui_access_system" }]   # see "Signing in"
 certificate_header = "x-client-cert"   # where the proxy puts the browser's certificate (base64 DER, or PEM, plain or percent-encoded)
 enrol_seconds = 600                    # how long after a password sign-in a certificate may be pinned, and after showing the enrol factors a code set up
@@ -642,27 +642,27 @@ that `polkitd` runs, and check its systemd version: the rule's safety depends on
 `StartTransientUnit`, a different call that carries no unit name the rule could check, and the rule below does not match it).
 
 **The root helper**, with no sudoers wildcard: install
-`crates/canoa-host/dist/canoa-instance` as `/usr/libexec/canoa-instance` (root, `0755`), add
+`crates/canoa-host/dist/canoa-instance` as `/usr/libexec/{{ program }}-instance` (root, `0755`), add
 
 ```text
-canoa ALL=(root) NOPASSWD: /usr/libexec/canoa-instance
+{{ program }} ALL=(root) NOPASSWD: /usr/libexec/{{ program }}-instance
 ```
 
-to a sudoers file, and set `elevate = ["sudo", "-n"]` and `systemctl = "/usr/libexec/canoa-instance"`. It takes
-`start|stop canoa@NAME.service` and nothing else, checks NAME against the pattern above, requires the account to be in one of
+to a sudoers file, and set `elevate = ["sudo", "-n"]` and `systemctl = "/usr/libexec/{{ program }}-instance"`. It takes
+`start|stop {{ program }}@NAME.service` and nothing else, checks NAME against the pattern above, requires the account to be in one of
 its `ALLOWED_GROUPS` (set it to the portal's `groups`; with none it starts nothing), and refuses a user id below 1000 or in the
 system and dynamic-user ranges (61184 to 65535, which includes `nobody`). It needs the portal's unit to leave out `NoNewPrivileges` and `CapabilityBoundingSet` (see below).
 
-**The polkit rule**, which needs neither, in `/etc/polkit-1/rules.d/50-canoa.rules` (set `elevate` and `systemctl` to nothing
+**The polkit rule**, which needs neither, in `/etc/polkit-1/rules.d/50-{{ program }}.rules` (set `elevate` and `systemctl` to nothing
 and the portal runs plain `systemctl`):
 
 ```js
 polkit.addRule(function (action, subject) {
-  if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "canoa") {
+  if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "{{ program }}") {
     var unit = action.lookup("unit");
     var verb = action.lookup("verb");
     if ((verb == "start" || verb == "stop") &&
-        /^canoa@[A-Za-z_][A-Za-z0-9._-]{0,31}\.service$/.test(unit)) {
+        /^{{ program }}@[A-Za-z_][A-Za-z0-9._-]{0,31}\.service$/.test(unit)) {
       return polkit.Result.YES;
     }
   }
@@ -674,7 +674,7 @@ account outside the `--portal-group` groups) is what stops a unit for `postgres`
 the helper checks the same. Keep the rule's regex and the helper's pattern identical to the validator's; a test
 reads this page for it.
 
-**The PAM service**, `/etc/pam.d/canoa`, for SSSD:
+**The PAM service**, `/etc/pam.d/{{ program }}`, for SSSD:
 
 ```text
 auth    required pam_sss.so
@@ -683,7 +683,7 @@ account required pam_sss.so
 
 Without a file, PAM falls back to `other`, which refuses everyone.
 
-**The slice** that bounds all the people's hosts together, `/etc/systemd/system/canoa.slice`:
+**The slice** that bounds all the people's hosts together, `/etc/systemd/system/{{ program }}.slice`:
 
 ```ini
 [Slice]
@@ -691,19 +691,19 @@ MemoryMax=24G
 TasksMax=8192
 ```
 
-**The person's unit**, `/etc/systemd/system/canoa@.service`:
+**The person's unit**, `/etc/systemd/system/{{ program }}@.service`:
 
 ```ini
 [Unit]
-Description=Canoa host for %i
+Description={{ name }} host for %i
 
 [Service]
-Slice=canoa.slice
+Slice={{ program }}.slice
 User=%i
 WorkingDirectory=~
-ExecStartPre=+/usr/bin/install -d -m 0711 /run/canoa
-ExecStartPre=+/usr/bin/install -d -o %i -g canoa -m 0710 /run/canoa/%i
-ExecStart=/opt/canoa/canoa serve --portal /run/canoa/%i --portal-user canoa --portal-group canoa-users --supervised
+ExecStartPre=+/usr/bin/install -d -m 0711 /run/{{ program }}
+ExecStartPre=+/usr/bin/install -d -o %i -g {{ program }} -m 0710 /run/{{ program }}/%i
+ExecStart=/opt/{{ program }}/{{ program }} serve --portal /run/{{ program }}/%i --portal-user {{ program }} --portal-group {{ program }}-users --supervised
 RestrictSUIDSGID=yes
 Restart=on-failure
 RestartForceExitStatus=75
@@ -715,30 +715,30 @@ PrivateTmp=yes
 ProtectSystem=full
 ```
 
-`/run/canoa` is `0711`, so no one can list it, and each person's folder is `0710`, owned by them with the group `canoa`: the
+`/run/{{ program }}` is `0711`, so no one can list it, and each person's folder is `0710`, owned by them with the group `{{ program }}`: the
 portal's account (and no one else) can reach the sockets in it. Size the limits to the machine and what a person runs; a
 person's agents run inside them. `--supervised` and `Restart=` let a page ask the host to restart itself. The entries every
-person's host offers go in a canoa.cfg beside the program (`/opt/canoa/canoa.cfg`); each person's own `~/.config/Canoa/canoa.cfg`
+person's host offers go in a {{ config_file }} beside the program (`/opt/{{ program }}/{{ config_file }}`); each person's own `~/.config/{{ folder }}/{{ config_file }}`
 goes over it, and is what their settings are written to.
 
 **The portal's account and unit.** The account is a system account with no shell, no password and no scheduled jobs:
 
 ```sh
-useradd --system --no-create-home --shell /usr/sbin/nologin canoa
-passwd -l canoa
+useradd --system --no-create-home --shell /usr/sbin/nologin {{ program }}
+passwd -l {{ program }}
 # and leave it out of /etc/cron.allow and /etc/at.allow, or name it in cron.deny and at.deny
 ```
 
-`/etc/systemd/system/canoa-portal.service`:
+`/etc/systemd/system/{{ program }}-portal.service`:
 
 ```ini
 [Service]
-User=canoa
-Group=canoa-proxy
-SupplementaryGroups=canoa
-RuntimeDirectory=canoa-portal
+User={{ program }}
+Group={{ program }}-proxy
+SupplementaryGroups={{ program }}
+RuntimeDirectory={{ program }}-portal
 RuntimeDirectoryMode=0750
-ExecStart=/opt/canoa/canoa portal --config /etc/canoa/portal.toml
+ExecStart=/opt/{{ program }}/{{ program }} portal --config /etc/{{ program }}/portal.toml
 UMask=077
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -773,9 +773,9 @@ set `use_fully_qualified_names = False` in the domain's section of `sssd.conf`, 
 
 Set `kernel.yama.ptrace_scope` to 1 or more: it lets a process trace only its own descendants, so a compromised process of
 the portal's account cannot attach to the portal's other processes. (Accounts cannot trace one another's anyway without
-`CAP_SYS_PTRACE`, which is why it is no help between people.) The portal's group is `canoa-proxy`, whose members are this account and the
-proxy's user: put the proxy's user in the group `canoa-proxy`, which is what lets it into `/run/canoa-portal`, and not in `canoa`,
-which would let it into every person's folder under `/run/canoa`.
+`CAP_SYS_PTRACE`, which is why it is no help between people.) The portal's group is `{{ program }}-proxy`, whose members are this account and the
+proxy's user: put the proxy's user in the group `{{ program }}-proxy`, which is what lets it into `/run/{{ program }}-portal`, and not in `{{ program }}`,
+which would let it into every person's folder under `/run/{{ program }}`.
 
 **The proxy** passes the browser's address and the upgrade, over the socket. Every `proxy_set_header` the portal needs is in the
 location, because a location that sets any inherits none from the server (see the trap under "Signing in by certificate"); the
@@ -789,10 +789,10 @@ map $realip_remote_addr $canoa_client_cert {
     default          "";
 }
 server {
-    server_name canoa.example;
+    server_name {{ program }}.example;
     # ... TLS ...
     location / {
-        proxy_pass http://unix:/run/canoa-portal/portal.sock:;
+        proxy_pass http://unix:/run/{{ program }}-portal/portal.sock:;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $remote_addr;   # replaces what the browser sent
@@ -840,7 +840,7 @@ The sign-in, one-time code, passkeys and certificate pages take their name, thei
 app reads (`app/brand.json` and its icon, carried into the program at build time): the title and heading say its `name`, the mark
 is its icon drawn inline (no image request, so the page's policy stays `default-src 'none'`), the page's favicon is the same icon
 at `/portal/icon.svg` (the policy gains `img-src 'self'`), and the buttons and links use its `accent` on a light page and
-`accent_on_dark` on a dark one. Nothing on a portal page says "Canoa" but through the brand.
+`accent_on_dark` on a dark one. Nothing on a portal page says "{{ name }}" but through the brand.
 
 A deployment branded otherwise sets `brand` to the path of a `brand.json`:
 
@@ -935,7 +935,7 @@ and WKWebView block third-party cookies, and a pane in them is expected to ask f
   ends with it. Keep a page open, or raise the setting.
 - A person's host is started once, however many requests come together, and given `start_seconds` to answer.
 - Kerberos tickets for the person's processes are not provided by the portal.
-- The control channel can change a person's own canoa.cfg sections and uploads; it is the person's own account that does it.
+- The control channel can change a person's own {{ config_file }} sections and uploads; it is the person's own account that does it.
 - The same browser key holds `store.programs` and `accounts`: from the app the person installs, updates and removes agent
   programs in their own programs folder and signs in to providers, with the sign-in's typed answers sealed to the browser's
   key. Both run code as that person, which is what their sign-in already allows; neither reaches another person's host.
@@ -947,11 +947,11 @@ A checklist for the machine, in order:
 
 1. **Homes.** Make each person's home before their first sign-in (`pam_mkhomedir` or `oddjob-mkhomedir` in a login service, or by
    hand): the unit's `WorkingDirectory=~` fails without it.
-2. **Groups.** Create the sign-in group (`canoa-users`), put the people in it, and name it in the portal's `groups`, the
+2. **Groups.** Create the sign-in group (`{{ program }}-users`), put the people in it, and name it in the portal's `groups`, the
    unit's `--portal-group` and the helper's `ALLOWED_GROUPS`.
 3. **SSSD.** `use_fully_qualified_names = False`, and `id NAME` answering for a person from the portal's account.
-4. **Polkit.** Confirm `polkitd` runs and note `systemctl --version`; check that the rule starts `canoa@NAME.service` for the
-   portal's account and nothing else (`systemctl start canoa@root.service` must be refused). Use the helper if there is no
+4. **Polkit.** Confirm `polkitd` runs and note `systemctl --version`; check that the rule starts `{{ program }}@NAME.service` for the
+   portal's account and nothing else (`systemctl start {{ program }}@root.service` must be refused). Use the helper if there is no
    polkit, with the changes above.
 5. **The directory's lockout policy.** Read the domain's password policy and set the limits below its threshold.
 6. **Hardening.** The portal's unit, the slice, the unit's limits, `ptrace_scope`, the account without shell, password or jobs.

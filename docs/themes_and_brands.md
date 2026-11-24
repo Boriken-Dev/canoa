@@ -1,7 +1,3 @@
----
-brand_names: false
----
-
 # Words, symbols and brands
 
 Everything the app writes and the symbols it draws for a section come from one text provider. A look can replace any subset of
@@ -78,12 +74,40 @@ elsewhere. `--portable` and the Office add-in's identifiers still name Canoa.
 `mkdocs build` reads the same brand file (`BRAND_FILE`, else `app/brand.json`) through the hook `tools/docs_brand.py`:
 
 - the site's name is `name`, and the header's logo is the brand's `icon` drawn in `accent` (in `accent_on_dark` on the dark scheme);
-- both colour schemes are painted with the default look's colours, the page, text, bar and accent of Canoa's look in light and dark, whatever the brand: a rebranded build changes the mark's colour and keeps the look, as the app does. The colours are `docs/assets/look.json`, which `app/test/docs_look_test.dart` keeps current (`cd app && CANOA_WRITE_LOOK=1 flutter test test/docs_look_test.dart` rewrites it);
-- a brand other than the default also gets a favicon of its mark (the default keeps the committed `docs/assets/favicon.ico`) and its names in the text of the pages. Only a closed list of tokens is replaced: `Canoa` (`name`), `CanoaUI` (`executable`), `canoa.cfg` (`config_file`, `<program>.cfg` when absent), `CANOA_` (`env_prefix`), `.canoa` (`home_dir`, `.<program>` when absent), the folder in `/etc/Canoa`, `%APPDATA%\Canoa` and the like (`folder`, `name` when absent), and `canoa@`, `canoa-portal`, `/opt/canoa` and `/run/canoa` (`program`, the lower-cased `name` when absent). Crate and repository names (`canoa-host`, `Boriken-Dev/canoa`), wire identifiers (`dev.boriken.canoa/...`) and URLs are never replaced. A page about the project and not the product (the roadmap, the offline dependencies, the browser comparisons) and this page opt out with `brand_names: false` in its front matter.
-
-With the default brand the pages are not touched, so the site is the one the repository has always built.
+- both colour schemes are painted with the default look's colours, the page, text, bar and accent of Canoa's look in light and dark,
+  whatever the brand: a rebranded build changes the mark's colour and keeps the look, as the app does. The colours are
+  `docs/assets/look.json`, which `app/test/docs_look_test.dart` keeps current
+  (`cd app && CANOA_WRITE_LOOK=1 flutter test test/docs_look_test.dart` rewrites it);
+- a brand other than the default also gets a favicon of its mark; the default keeps the committed `docs/assets/favicon.ico`;
+- the pages name the product with placeholders, below.
 
 ```sh
 BRAND_FILE=path/to/brand.json mkdocs build --strict
 ```
 
+### Writing a page with placeholders
+
+A page writes the product's names as placeholders, and the build renders them from the brand, the default brand included:
+
+| Placeholder | Is | For |
+| --- | --- | --- |
+| `{{{ name }}}`, `{{{ short_name }}}` | the brand's `name` and `short_name` | the product in prose and headings: "the {{{ name }}} host" |
+| `{{{ program }}}` | `program`, the command line's name (the brand's lower-cased name when the file gives none) | commands, and the names derived from it on Linux: `{{{ program }}} serve`, `{{{ program }}}@NAME.service`, `/opt/{{{ program }}}` |
+| `{{{ executable }}}` | `executable` | the desktop program: `{{{ executable }}}.exe` |
+| `{{{ config_file }}}` | `config_file` (`<program>.cfg` when absent) | the configuration file's name |
+| `{{{ folder }}}` | `folder` (`name` when absent) | the folder under each operating system's configuration and data roots: `/etc/{{{ folder }}}` |
+| `{{{ home_dir }}}` | `home_dir` (`.<program>` when absent), dot included | the home: `~/{{{ home_dir }}}` |
+| `{{{ env_prefix }}}` | `env_prefix` | the product's environment variables: `{{{ env_prefix }}}_CONFIG` |
+| `{{{ id }}}` | `id` | the reverse-DNS identifier |
+
+A placeholder works in prose, headings, code blocks and links. In a link's fragment it renders as the heading's id would, so
+`[text](browser.md#{{{ name }}}-on-this-computer)` follows the heading "{{{ name }}} on this computer". A `{{ other }}` that is not
+in the table is left as written, and three braces keep a placeholder as written, as two (how this page
+shows them).
+
+Keep a name literal when it is not the product's but a fact of this repository or of a protocol: crate names (`canoa-host`,
+`canoa-whisper`), the repository and its URLs (`Boriken-Dev/canoa`), wire identifiers (`dev.boriken.canoa/...`, `/canoa.json`,
+`_canoa/...`), Cargo targets, build and test variables (`CANOA_DEPS`, `CANOA_WEB_DIST`), and a line that deliberately means Canoa
+itself. `tools/test_docs_brand.py` fails on a `docs/*.md` line that names the product literally (`Canoa` as a word,
+`canoa.cfg`, `CANOA_CONFIG`, `~/.canoa`, `canoa@`, `/etc/canoa`, `/opt/canoa`); a line that has to stay literal goes in its
+allowlist, with the page and the reason. This page is on that list: it describes Canoa's own brand file.

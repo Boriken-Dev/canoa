@@ -1,6 +1,6 @@
 # User-installed site adapters
 
-A Canoa site adapter is user-installed code that exposes a stable collection of **MCP tools** for one or more website origins. It is useful when a site does not offer WebMCP or a remote MCP service.
+A {{ name }} site adapter is user-installed code that exposes a stable collection of **MCP tools** for one or more website origins. It is useful when a site does not offer WebMCP or a remote MCP service.
 
 ## Contract
 

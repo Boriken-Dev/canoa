@@ -1,16 +1,16 @@
 # Protocol roles
 
-Canoa supports two distinct protocol directions: **ACP** for applications connecting to agents, and **MCP** for agents consuming tools and capabilities exposed by a browser or a website.
+{{ name }} supports two distinct protocol directions: **ACP** for applications connecting to agents, and **MCP** for agents consuming tools and capabilities exposed by a browser or a website.
 
 ## Where ACP runs
 
-A `[host]` entry in canoa.cfg is a stdio ACP agent, a [Guatiao](https://github.com/Boriken-Dev/guatiao) provider or an `acp_harness` provider (Claude Code, Codex and Pi through their Rust translators), served to paired keys by [`canoa`](host.md). An entry listens on an address, on a Windows named pipe or Unix socket (`pipe:NAME`, `unix:PATH`) for a native client on the same machine, or through a transport provider (`transport = "<id>"`); the host's own code reaches its entries in process. The overlays a profile applies are read through the Agent Overlay Specification ([coqui-aos](https://github.com/Boriken-Dev/coqui-aos)). ACP versions 1 and 2 are both spoken, and delegation between sessions uses A2A tasks.
+A `[host]` entry in {{ config_file }} is a stdio ACP agent, a [Guatiao](https://github.com/Boriken-Dev/guatiao) provider or an `acp_harness` provider (Claude Code, Codex and Pi through their Rust translators), served to paired keys by [`{{ program }}`](host.md). An entry listens on an address, on a Windows named pipe or Unix socket (`pipe:NAME`, `unix:PATH`) for a native client on the same machine, or through a transport provider (`transport = "<id>"`); the host's own code reaches its entries in process. The overlays a profile applies are read through the Agent Overlay Specification ([coqui-aos](https://github.com/Boriken-Dev/coqui-aos)). ACP versions 1 and 2 are both spoken, and delegation between sessions uses A2A tasks.
 
 ## ACP over WebTransport and WebSocket
 
-ACP JSON-RPC uses Canoa's draft ordered-stream framing on WebTransport, or complete text messages over WSS, according to the remote transport profile the agent implements. Canoa cannot presume that every ACP stdio agent also implements WebSocket. The endpoint advertises its ACP protocol version and supports a compatible WS profile. `wss://` is the production default; plaintext `ws://` requires an explicit, local-only developer opt-in.
+ACP JSON-RPC uses {{ name }}'s draft ordered-stream framing on WebTransport, or complete text messages over WSS, according to the remote transport profile the agent implements. {{ name }} cannot presume that every ACP stdio agent also implements WebSocket. The endpoint advertises its ACP protocol version and supports a compatible WS profile. `wss://` is the production default; plaintext `ws://` requires an explicit, local-only developer opt-in.
 
-Peer authentication is separate from ACP. Canoa uses `coqui-peer` semantics and a **documented interoperable, versioned WebSocket peer-auth profile** (the WebCrypto and Noise methods), not a secret Canoa token or an unspecified claim of identity. Since a browser cannot select a TLS client certificate or add arbitrary WebSocket headers, browser peer proof must be possible after WSS setup, before sending ACP messages.
+Peer authentication is separate from ACP. {{ name }} uses `coqui-peer` semantics and a **documented interoperable, versioned WebSocket peer-auth profile** (the WebCrypto and Noise methods), not a secret {{ name }} token or an unspecified claim of identity. Since a browser cannot select a TLS client certificate or add arbitrary WebSocket headers, browser peer proof must be possible after WSS setup, before sending ACP messages.
 
 ## ACP v2 Flutter session client
 
@@ -24,7 +24,7 @@ The v2 prompt response only acknowledges **message insertion**. Agent message ch
 
 The Chromium extension owns policy decisions for tab access. Browser tools such as `browser_read_page`, `browser_click`, `browser_fill`, and WebMCP discovery/invocation are provided only after a local browser grant. A compatible MCP server may forward such calls into the extension, but its approval is insufficient to override a browser denial.
 
-ACP and MCP must not be confused: simply opening an ACP WebSocket does not advertise an MCP server to the agent. An agent must explicitly support the MCP transport used by Canoa, or negotiate a standardized MCP-over-ACP extension where available.
+ACP and MCP must not be confused: simply opening an ACP WebSocket does not advertise an MCP server to the agent. An agent must explicitly support the MCP transport used by {{ name }}, or negotiate a standardized MCP-over-ACP extension where available.
 
 ## Website-provided MCP
 

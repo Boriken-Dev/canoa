@@ -1,13 +1,13 @@
 # The host
 
-`canoa` serves agents to Canoa's chat on this machine. Each entry of canoa.cfg's `[host]` table is one agent, on a
+`{{ program }}` serves agents to {{ name }}'s chat on this machine. Each entry of {{ config_file }}'s `[host]` table is one agent, on a
 WebSocket of its own, on loopback unless its `listen` says otherwise (or on a [pipe or Unix socket](#a-pipe-or-unix-socket)):
 
 - **Claude Code or Codex**: the installed `claude` or `codex`, served by the host's own translators of their stdio
   protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), inside the host, with no Node. See
   [Claude and ChatGPT](#claude-and-chatgpt).
 - **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as
-  `agy acp`, or `canoa agent claude` itself (with `--setting allow_client_plugins=true` when a profile gives it skills).
+  `agy acp`, or `{{ program }} agent claude` itself (with `--setting allow_client_plugins=true` when a profile gives it skills).
 - **A Guatiao provider**: coqui-acp-provider's `agent_provider` kind, served through its ACP facade. It comes from a
   library file, written once in any language Guatiao builds a library from, or from a Guatiao source: a file that runs
   libraries written in another language, such as Python, Lua, JavaScript, Rhai or WebAssembly.
@@ -58,7 +58,7 @@ import_dirs = ["python/runtime"]                           # optional, Windows: 
 ```
 
 `library` and `source` exclude each other, and `source_settings` goes with `source` alone. Relative paths in `library`,
-`source`, `home` and the `dirs`, `manifests`, `paths` and `import_dirs` lists are made absolute from canoa.cfg's directory
+`source`, `home` and the `dirs`, `manifests`, `paths` and `import_dirs` lists are made absolute from {{ config_file }}'s directory
 when the file is read; the provider's process runs in that directory, so any other relative path in `source_settings` is
 taken from there too. The source reads the rest; it refuses a value it does not take when a connection loads it.
 
@@ -69,11 +69,11 @@ is TOML unless its first line is `#!json` or `#!yaml`.
 
 | `isolation` | What it reads | What it ignores |
 | --- | --- | --- |
-| `shipped` (the default) | what ships with the program: a `._pth` or `pyvenv.cfg` beside `canoa`, on Windows `canoa`'s own directory, `home`, the installation's `site-packages`, `paths` | `PYTHONPATH`, `PYTHONHOME` and every other `PYTHON*` variable, the user's own `site-packages` |
-| `isolated` | the standard library of `home` (else of the installation `python3.dll` came from) and `paths`, nothing else | everything beside `canoa`, the installation's `site-packages`, the environment |
+| `shipped` (the default) | what ships with the program: a `._pth` or `pyvenv.cfg` beside `{{ program }}`, on Windows `{{ program }}`'s own directory, `home`, the installation's `site-packages`, `paths` | `PYTHONPATH`, `PYTHONHOME` and every other `PYTHON*` variable, the user's own `site-packages` |
+| `isolated` | the standard library of `home` (else of the installation `python3.dll` came from) and `paths`, nothing else | everything beside `{{ program }}`, the installation's `site-packages`, the environment |
 | `inherit` | the environment as well, as a `python` started from the host would | nothing |
 
-With `inherit`, whoever sets the host's environment chooses the code a library runs. `canoa serve` lists it in its
+With `inherit`, whoever sets the host's environment chooses the code a library runs. `{{ program }} serve` lists it in its
 log when it starts, once per entry, as configuration: `non-default: host.providers.NAME.source_settings.isolation is
 inherit, default shipped`. The first source a process adds decides `isolation` and `home`; each connection is a process of its own.
 
@@ -83,10 +83,10 @@ proves with a one-time token. Its standard input is closed once the settings are
 
 On Windows the Python's `python3.dll` has to be found: name its directory (`sys.base_prefix`) in `import_dirs`. The
 entry's `import_search` says where else it may come from: `library` looks only in `import_dirs` (after the source's own
-directory, `canoa`'s and the system's); `path` also in the Windows directory, the provider's working directory
-(canoa.cfg's) and every directory on `PATH`, so whoever can write any of those chooses the Python that loads. Without
+directory, `{{ program }}`'s and the system's); `path` also in the Windows directory, the provider's working directory
+({{ config_file }}'s) and every directory on `PATH`, so whoever can write any of those chooses the Python that loads. Without
 `import_search` an entry whose `import_dirs` names a directory takes `library`, and one that names none takes `path`,
-which keeps a Python on `PATH` working. `canoa serve` logs every entry on `path` when it starts: as configuration
+which keeps a Python on `PATH` working. `{{ program }} serve` logs every entry on `path` when it starts: as configuration
 (`non-default: host.providers.NAME.import_search is path, default library`) when the file says `path`, as a warning
 when the host took it because `import_dirs` names no directory, with how to narrow it. On Linux and macOS the
 source links that Python's shared library, found where the loader looks, or through `LD_LIBRARY_PATH` or
@@ -109,7 +109,7 @@ The table is checked against the schema the provider declares when a connection 
 its code; a misspelled or ill-typed setting fails that connection, and the host's log names the setting, never its value.
 A provider that is its own instance refuses `settings`.
 
-Settings are read from canoa.cfg only, never from a client. They reach the provider's process on its standard input, not
+Settings are read from {{ config_file }} only, never from a client. They reach the provider's process on its standard input, not
 on its command line, which other users of the machine may be able to read.
 
 ### A command-line tool
@@ -165,9 +165,9 @@ reject = { type = "extension_ui_response", id = "{id}", cancelled = true }
   JSON of `prompt`, `cancel`, `allow`, `reject` and `line`, a string that is a placeholder alone keeps the value's type,
   and only values are filled: a prompt cannot add a key or end the line, since it is never parsed as JSON, and U+2028 and
   U+2029, at which some line readers split, are escaped.
-- **On a command line**: `serve` gives the entry, as JSON, to `canoa tool` on its command line, which other users of
+- **On a command line**: `serve` gives the entry, as JSON, to `{{ program }} tool` on its command line, which other users of
   the machine may be able to read. Put nothing secret in a tool entry; a key belongs in the host's environment, which the
-  tool inherits. An entry is at most 16 KiB as JSON and holds no NUL, or canoa.cfg is refused.
+  tool inherits. An entry is at most 16 KiB as JSON and holds no NUL, or {{ config_file }} is refused.
 - **The person is told** what they would not otherwise know: every session opens with the notices the entry implies,
   listed under `_meta["dev.boriken.canoa/notices"]` in the answer to `session/new`, which the app shows in the
   conversation as the agent's words (any agent can send that key, so the app never shows it as its own). One says what the tool does without asking, in the entry's own `unasked` words, which every entry must give;
@@ -198,14 +198,14 @@ host as the `pi` harness, so it needs only `pi` (no Node, no `npx`, no adapter) 
 it too, with `settings` for `executable`, or `node` with `script`, and `protected`. The tool entry is for a tool like Pi with
 no translator.
 
-`canoa serve` reads the same canoa.cfg as the app, from the same layers (the installed copy, the system's file and yours, or the files `--config` or `CANOA_CONFIG` list; see [the configuration](configuration.md#where-it-is-found)), and
+`{{ program }} serve` reads the same {{ config_file }} as the app, from the same layers (the installed copy, the system's file and yours, or the files `--config` or `{{ env_prefix }}_CONFIG` list; see [the configuration](configuration.md#where-it-is-found)), and
 prints one JSON line per entry: its name, kind, address, its provider id (a `harness` entry) and `title` when it has them, the host's peer id and the method it proves by. The app keeps `[host]` as it is when it
 saves its own settings.
 
 ## Profiles
 
 A stdio agent entry can be launched with a profile, the same schema as the app's `[profile]` (see
-[Desktop and canoa.cfg](configuration.md)): environment variables, an initial context, skills, MCP servers and model,
+[Desktop and {{ config_file }}](configuration.md)): environment variables, an initial context, skills, MCP servers and model,
 effort and mode defaults.
 
 ```toml
@@ -215,7 +215,7 @@ profiles = ["review", "plain"]        # a client chooses among these; the first 
 
 [host.profiles.review]
 context = { text = "Review before you change anything." }
-overlays = ["team"]                   # installed by the app in overlays/ beside canoa.cfg
+overlays = ["team"]                   # installed by the app in overlays/ beside {{ config_file }}
 allow_mcp = { team = "sha256:…" }     # an overlay's MCP server, at the digest of its definition
 allow_hooks = { team = "sha256:…" }   # an overlay's hooks, at the digest of its files
 
@@ -234,11 +234,11 @@ command = "/usr/local/bin/lint-mcp"
   message is refused (`-32602`) and logged, and no agent starts for a refused `initialize`. A first message that is not
   `initialize` is refused too, before any secret is read or any agent starts; only [worktree requests](#worktrees),
   which the host answers itself with git, may come before it. A client never sends a
-  profile's contents: every value comes from canoa.cfg. It may narrow which of the profile's overlays one connection
+  profile's contents: every value comes from {{ config_file }}. It may narrow which of the profile's overlays one connection
   starts with, as a list of names in `_meta["dev.boriken.canoa/overlays"]`: a name the profile does not list adds
   nothing, and the report says which overlays were not chosen.
 - **The environment** reaches the agent's process when it starts, on the first line of its standard input through
-  `canoa launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
+  `{{ program }} launch`, never on a command line. A reference (`from_env`, `from_file`) is read from the host's own
   environment and files when the connection starts; one that cannot be read starts no agent.
 - **Context, skills and MCP servers** go with each `session/new`, `session/load` and `session/resume`, where the
   agent's harness takes them, as the app does: the context through ACP `systemPrompt` (before a client's own), skills as the
@@ -265,13 +265,13 @@ command = "/usr/local/bin/lint-mcp"
   anything else applies nothing, is reported with the end of its standard error, and the session still starts. The report
   lists each script as `applied`, `refused` or `off`.
 - **A skill an overlay names from elsewhere** is delivered only from the copy the app fetched (`overlays/.skills/`), at
-  its record's digest, the overlay's pin and any pin a top-level `[skill_pins]` table in canoa.cfg gives its name
+  its record's digest, the overlay's pin and any pin a top-level `[skill_pins]` table in {{ config_file }} gives its name
   (`review = "sha256:…"`). It never takes a name another overlay's skill holds; one kept out, one not fetched and one
   from plain `http` or a private network address are reported.
 - **The client is told what applied.** The answer to `initialize` and to each session request carries, under
   `_meta["dev.boriken.canoa/profile"]`, the profile's name, the harness, a one-line summary and each part with its layer,
   `applied`, `not supported`, `off` or `refused`, and why: names only, never a value.
-- The host reads no project's `.canoa/profile.toml`: the directory is the client's to name.
+- The host reads no project's `{{ home_dir }}/profile.toml`: the directory is the client's to name.
 
 ## Worktrees
 
@@ -385,7 +385,7 @@ llm_model = "qwen2.5-1.5b-instruct-generic-cpu:4"   # the exact id it loaded; re
 harness = "claude"
 accounts = ["work", "personal"] # a session runs on the first unless its client names another
 
-[host.accounts.work]            # written by `canoa accounts add`; holds no credential
+[host.accounts.work]            # written by `{{ program }} accounts add`; holds no credential
 kind = "claude-login"
 id = "0b7d3c1e-5a52-4f0e-9d0f-6c1f5d5b8e21"
 
@@ -394,23 +394,23 @@ standard = "claude-code"
 accounts = ["local", "work"]
 ```
 
-A session runs on one account, with a model that account lists, or on a pool: a named set of accounts that provide the same standard (the kind of credential: a Claude Code login, an Anthropic API key, an OpenAI API key, whatever the providers name). The Accounts section makes, edits and removes pools: pick the standard and it offers every account that provides it. Canoa also makes an `any-<standard>` pool for each standard an account provides, holding all of them, which follows the accounts as they are added and removed and is written nowhere. It is listed (Settings, the pickers) only while two or more accounts hold it, since a pool of one cannot rotate; a session or canoa.cfg that names it still gets it. An entry offers a pool by naming it among its `accounts`. A pool takes each new session on the next of its accounts that lists the model and has usage left, in turn; a session keeps its account while its prompt cache is warm, moves to the next account when the cache has lapsed or when its account has run out (the conversation goes with it, and the chat says which account and why), and a turn that no account of the pool can take is refused with the time the soonest allowance refills. A session on one account is never moved: when that account runs out, the chat offers the move.
+A session runs on one account, with a model that account lists, or on a pool: a named set of accounts that provide the same standard (the kind of credential: a Claude Code login, an Anthropic API key, an OpenAI API key, whatever the providers name). The Accounts section makes, edits and removes pools: pick the standard and it offers every account that provides it. {{ name }} also makes an `any-<standard>` pool for each standard an account provides, holding all of them, which follows the accounts as they are added and removed and is written nowhere. It is listed (Settings, the pickers) only while two or more accounts hold it, since a pool of one cannot rotate; a session or {{ config_file }} that names it still gets it. An entry offers a pool by naming it among its `accounts`. A pool takes each new session on the next of its accounts that lists the model and has usage left, in turn; a session keeps its account while its prompt cache is warm, moves to the next account when the cache has lapsed or when its account has run out (the conversation goes with it, and the chat says which account and why), and a turn that no account of the pool can take is refused with the time the soonest allowance refills. A session on one account is never moved: when that account runs out, the chat offers the move.
 
 ```sh
-canoa accounts providers                                         # the account providers: each agent's own and each maker (a proxy, a gateway, a model service), with its own ways to sign in
-canoa accounts add work --provider claude_accounts --method subscription   # signs in; asks for the code the page shows, with no echo
-canoa accounts list                                              # name, provider, kind, state; never a credential. canoa.cfg's accounts, then `local` of each harness that has a login of its own
-canoa accounts login work                                        # sign in again when a login was lost
-canoa accounts remove work                                       # forgets the stored credential and the account's directory
+{{ program }} accounts providers                                         # the account providers: each agent's own and each maker (a proxy, a gateway, a model service), with its own ways to sign in
+{{ program }} accounts add work --provider claude_accounts --method subscription   # signs in; asks for the code the page shows, with no echo
+{{ program }} accounts list                                              # name, provider, kind, state; never a credential. {{ config_file }}'s accounts, then `local` of each harness that has a login of its own
+{{ program }} accounts login work                                        # sign in again when a login was lost
+{{ program }} accounts remove work                                       # forgets the stored credential and the account's directory
 ```
 
-- **A credential is never in canoa.cfg.** A file that holds one under `[host.accounts]` is refused, naming the key and not
+- **A credential is never in {{ config_file }}.** A file that holds one under `[host.accounts]` is refused, naming the key and not
   quoting the value. It rests in the operating system's credential store (Windows Credential Manager, macOS Keychain,
   Secret Service), and a typed key is read from the terminal without echo, never from the command line. A host with no
   such store, a Linux service with no session bus for one, keeps a file per account in the host's directory instead,
   sealed to a key beside it, with nothing to set: `[secrets] accounts = "auto"` is the default, probes the operating system's
   store once and falls back to files when it does not answer. That keeps a copied file closed and nothing from anyone who
-  can read the directory, so the host logs it as a weakening with the reason, and `canoa accounts list` prints the same
+  can read the directory, so the host logs it as a weakening with the reason, and `{{ program }} accounts list` prints the same
   note. Once files hold an account, `auto` stays on files, so a store that answers later does not hide them. `"file"`
   chooses files outright; `"os"` insists on the operating system's store and fails, naming `auto` and `file`, where there
   is none.
@@ -429,7 +429,7 @@ canoa accounts remove work                                       # forgets the s
 - The app adds, signs in to and removes accounts over the host's control channel, on the desktop and in a browser alike: a
   sign-in that asks for a typed secret (Claude's code, an API key) puts a form to the app, and the answer comes back sealed to the
   key that asked, so the host opens it and nothing else sees it. The same holds for a paired key whose host grants `accounts`.
-  The app also sets which accounts an agent entry offers (`accounts/offer`), which writes canoa.cfg. The host does not start again
+  The app also sets which accounts an agent entry offers (`accounts/offer`), which writes {{ config_file }}. The host does not start again
   by itself: the offers apply from its next start, and the app asks for one (`host/restart`, which a host run with `--supervised`
   answers by ending so that its supervisor starts it).
 
@@ -440,7 +440,7 @@ Codex or Pi the entry runs. It holds no credential: the model's id (`model`, as 
 the service's address (`endpoint`; the running service's own is read from `~/.foundry/daemon.json`), are the account.
 
 ```sh
-canoa accounts add local --provider foundry_accounts --method foundry-local --input model=qwen3-14b-generic-gpu:2
+{{ program }} accounts add local --provider foundry_accounts --method foundry-local --input model=qwen3-14b-generic-gpu:2
 ```
 
 - **Loading a model is the person's.** Load it first, from the Store's Foundry models page (Foundry Local itself is in the
@@ -466,7 +466,7 @@ canoa accounts add local --provider foundry_accounts --method foundry-local --in
 - **`engine`** is `service` (the default: the model lives in the Foundry Local service) or `sdk` (the model lives in a process
   of the host's own, through Foundry Local's Rust SDK, which needs a build with the `foundry` feature and `library`, a copy of its
   native library made outside the installed package: Windows does not let a program outside the package load one from it).
-- **The `sdk` engine runs in its own process.** The gateway starts `canoa helper canoa-foundry` (the program the host starts its
+- **The `sdk` engine runs in its own process.** The gateway starts `{{ program }} helper canoa-foundry` (the program the host starts its
   other commands with) through the host's spawner for the account, which opens the SDK, loads the model and answers over its standard input and output. The native library
   crashes on some models and prompts (a segmentation fault on a prompt of about two thousand tokens was measured on
   `gpt-oss-20b-generic-gpu:1`), and a crash there ends only that process: the request under way fails with how it ended, and the
@@ -493,7 +493,7 @@ canoa accounts add local --provider foundry_accounts --method foundry-local --in
 - **A model's window.** The window is how many tokens a prompt and its answer may take together: a model's own
   `genai_config.json` says what it was built for (`model.context_length`, the most it can be set to) and what a session over
   it allows as cached (`search.max_length`). The Store's page of a Foundry model shows both and offers a setting, kept in
-  canoa.cfg:
+  {{ config_file }}:
 
   ```toml
   [foundry.models."qwen3-1.7b-generic-gpu:2"]
@@ -504,7 +504,7 @@ canoa accounts add local --provider foundry_accounts --method foundry-local --in
   (a re-download would undo that): with `engine = "sdk"` the host makes a folder of its own for the model under
   `foundry-windows/` in its home, with a hard link to each of the cached model's files and its own `genai_config.json` whose
   `search.max_length` is the window, and registers it in the SDK's local catalog (the one in `foundry-models/`). The weights are linked, never copied: on a
-  drive that cannot link them (Canoa's home and Foundry Local's cache on different drives) the account's gateway is refused
+  drive that cannot link them ({{ name }}'s home and Foundry Local's cache on different drives) the account's gateway is refused
   with that said, since copying gigabytes silently is not a choice to make for the person. The setting is read when a gateway
   starts. **The `service` engine ignores it**: the Foundry Local service loads the models of its own cache and has no call to
   load another folder (its routes as measured on 0.14.0 include `/catalogs/local/v1/`, which listed no model, and none that registers one), so
@@ -552,7 +552,7 @@ Which agents ask their client for files and commands, so that serving them chang
 
 When a client asks for the tools of an agent that does its own work to be served from an environment that is not this computer, the host turns that work there where the agent's description says how, and refuses the connection where it does not (its tools would act on this computer), naming `run` and `tools`:
 
-- **Claude Code.** Each session request carries a plugin, `canoa-environment`, with a `PreToolUse` hook on every tool (matcher `*`) and a `SessionStart` hook, both running `canoa hook-forward`. A `Bash` command is rewritten to run in the environment: `"canoa" hook-forward --channel "FILE" env-exec ID; exit $?; <your command>`, the command as written after an `exit` that ends the shell first, so your rules that name its first word still find it. A `PowerShell` command becomes `try { & "canoa" ... env-exec ID } finally { exit ... }; $null = { <your command> }`: PowerShell reads the whole script first, so the command is the body of a script block that is never run, and one naming `trap` or `#requires` (which PowerShell acts on before the first statement) is refused. The hook decides nothing: Claude Code's own mode and your allow, ask and deny rules judge the rewritten command, which with no rule for it means it asks (and `dontAsk` refuses it). The file tools (`Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep`, `Glob`, `LS`) are refused with the way to do the same there: the `env_<name>` tools, which the session is given, or the shell. The tools that act on nothing of this computer's pass as they are (tasks and subagents, whose own tools go through the same hook, `TodoWrite`, questions to you, plan mode, `WebFetch`, `WebSearch`, a background command's output, and every tool of an MCP server the session was given); every other tool (`LSP`, `EnterWorktree`, `Monitor`, `Skill`, one Claude Code adds later) is refused. A command starts in the environment's own working folder, and its output comes back byte for byte with its exit status.
+- **Claude Code.** Each session request carries a plugin, `canoa-environment`, with a `PreToolUse` hook on every tool (matcher `*`) and a `SessionStart` hook, both running `{{ program }} hook-forward`. A `Bash` command is rewritten to run in the environment: `"{{ program }}" hook-forward --channel "FILE" env-exec ID; exit $?; <your command>`, the command as written after an `exit` that ends the shell first, so your rules that name its first word still find it. A `PowerShell` command becomes `try { & "{{ program }}" ... env-exec ID } finally { exit ... }; $null = { <your command> }`: PowerShell reads the whole script first, so the command is the body of a script block that is never run, and one naming `trap` or `#requires` (which PowerShell acts on before the first statement) is refused. The hook decides nothing: Claude Code's own mode and your allow, ask and deny rules judge the rewritten command, which with no rule for it means it asks (and `dontAsk` refuses it). The file tools (`Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep`, `Glob`, `LS`) are refused with the way to do the same there: the `env_<name>` tools, which the session is given, or the shell. The tools that act on nothing of this computer's pass as they are (tasks and subagents, whose own tools go through the same hook, `TodoWrite`, questions to you, plan mode, `WebFetch`, `WebSearch`, a background command's output, and every tool of an MCP server the session was given); every other tool (`LSP`, `EnterWorktree`, `Monitor`, `Skill`, one Claude Code adds later) is refused. A command starts in the environment's own working folder, and its output comes back byte for byte with its exit status.
 - **Codex and Pi** are refused. Codex runs a hook only once its user configuration records a hash of it, and Pi loads an extension only from its own folder or its command line, which its provider does not offer; the host writes into neither the person's `CODEX_HOME` nor `PI_CODING_AGENT_DIR`. Run them in the environment, or offer it as tools.
 - An agent that runs in the environment its tools are served from already acts there, and is left as it is; one that runs in another environment cannot have its tools served from a third.
 
@@ -568,80 +568,80 @@ to the person's own browser, because reaching that host needs the person's own s
 
 ## In the desktop app
 
-Canoa's desktop app carries the host as a library and runs it in its own process, on the host's own threads, so there is
+{{ name }}'s desktop app carries the host as a library and runs it in its own process, on the host's own threads, so there is
 no other program to install or start. Agents stay child processes of the host.
 
-- It starts its host when it starts, whatever canoa.cfg names and whether or not there is one yet, and again whenever its
+- It starts its host when it starts, whatever {{ config_file }} names and whether or not there is one yet, and again whenever its
   hosting dialog changes it. With nothing to host, the host is up and idle. If it ends on its own, the app starts it again after a pause that doubles from
-  one second up to a minute, and back to one second after a run of thirty seconds. A canoa.cfg the host refuses (status 2)
+  one second up to a minute, and back to one second after a run of thirty seconds. A {{ config_file }} the host refuses (status 2)
   is shown, and not retried until the person asks.
-- `local_host = false` under `[desktop]` in canoa.cfg, or starting the app with `--no-local-host`, leaves it off. Hosting
+- `local_host = false` under `[desktop]` in {{ config_file }}, or starting the app with `--no-local-host`, leaves it off. Hosting
   says so; the keys can still be managed, and sessions on other hosts work as before.
-- **One host on a home.** The app's host and a `canoa serve` on the same `COQUI_AGENTIC_PEER_HOME` never run together: the
-  second says which is running (`canoa (process 12) already hosts this home`, or `CanoaUI ...`) and does not start. The app
+- **One host on a home.** The app's host and a `{{ program }} serve` on the same `COQUI_AGENTIC_PEER_HOME` never run together: the
+  second says which is running (`{{ program }} (process 12) already hosts this home`, or `{{ executable }} ...`) and does not start. The app
   shows it in Hosting and tries again only when asked, so the two never take turns. A lock in the home decides, which a
   holder gives up however it ends.
 - Closing the window leaves the host and its agents running. Quitting stops the host, which ends every agent it started.
   If the app dies, agents on Windows end with it; on Unix each sees its standard input close, and most then exit.
 - A provider, a tool, and an agent with a profile need a process of the host's own. The app starts itself for those, with
   `--canoa-child` first, and that process runs the command and never reaches Flutter or a window.
-- `canoa` stays for servers and for use with no desktop: the same library with a command line in front. `CANOA_HOST`
-  names a `canoa` for the app to run as a child instead, which is for tests.
+- `{{ program }}` stays for servers and for use with no desktop: the same library with a command line in front. `{{ env_prefix }}_HOST`
+  names a `{{ program }}` for the app to run as a child instead, which is for tests.
 
 **Hosting**, in Local's overview in the app's Hosts section and in its tray menu, shows the host's state and its peer id, lists its entries with
-their addresses, adds a stdio ACP agent by its command on a loopback port of its own, after `canoa check` accepts the
+their addresses, adds a stdio ACP agent by its command on a loopback port of its own, after `{{ program }} check` accepts the
 change, and stops hosting one. It lists the keys that may connect, pairs a waiting one and removes one, and shows a PIN for
 a program to pair with.
 
 ## Pairing
 
 The host proves itself and its clients by the method of this host's identity, Noise or WebCrypto, kept with its trust store
-in `.canoa` in the user's home folder (`%USERPROFILE%\.canoa` on Windows; `COQUI_AGENTIC_PEER_HOME` names another). `canoa serve --program --paired` reads the
+in `{{ home_dir }}` in the user's home folder (`%USERPROFILE%\{{ home_dir }}` on Windows; `COQUI_AGENTIC_PEER_HOME` names another). `{{ program }} serve --program --paired` reads the
 same layout. A home keeps each method's identity in a file of its own:
 a home paired before Noise keeps its WebCrypto identity and its paired keys, and `--method` names one when a home has
 both. A key is of one method, and a client of the other is refused, which the host's log says. The home records the
-method named last, or its first identity's, so the app's `serve` and `pair`, which name none, use it. **Canoa's app proves
-by WebCrypto today:** a home it reaches must prove by WebCrypto (`canoa serve --method webcrypto` once) until the app
-proves by Noise. A home with no identity gets a Noise one; to move a WebCrypto home, run `canoa serve --method noise`
+method named last, or its first identity's, so the app's `serve` and `pair`, which name none, use it. **{{ name }}'s app proves
+by WebCrypto today:** a home it reaches must prove by WebCrypto (`{{ program }} serve --method webcrypto` once) until the app
+proves by Noise. A home with no identity gets a Noise one; to move a WebCrypto home, run `{{ program }} serve --method noise`
 once and pair each browser again: its Noise key is a new key.
 
-While a host runs on a home, `canoa id --method X` and `canoa pair --method X` refuse to change the home's method: the
-host's next restart (it restarts on every `canoa.cfg` change) would come up with the other identity and refuse every
+While a host runs on a home, `{{ program }} id --method X` and `{{ program }} pair --method X` refuse to change the home's method: the
+host's next restart (it restarts on every `{{ config_file }}` change) would come up with the other identity and refuse every
 client already paired. The refusal names the running host and ends with status 3; `--force` changes the method anyway and
 logs it at `info`. Naming the method the home already has is never refused, and a home no host runs on changes freely.
 
 A browser pairs by connecting once:
 
 1. In the browser, give the entry's address (`ws://127.0.0.1:7801`), the host's peer id, which Hosting shows (and
-   `canoa id` prints), and the method it proves by, which `serve` prints: in Canoa's Add connection dialog, or by
+   `{{ program }} id` prints), and the method it proves by, which `serve` prints: in {{ name }}'s Add connection dialog, or by
    adding the agent by hand in the extension's window.
 2. The first connection is turned away, and the browser's key waits on the host.
-3. Hosting lists it as waiting, as does `canoa peers`. Compare its whole id with the one the browser shows (Canoa's
+3. Hosting lists it as waiting, as does `{{ program }} peers`. Compare its whole id with the one the browser shows ({{ name }}'s
    Add connection dialog, or the extension's permissions page), then pair it: **Pair…** and **Pair** in Hosting, or
-   `canoa accept <id>`.
-4. Connect again. Removing the key in Hosting, or `canoa revoke <id>`, ends its links within about a second.
+   `{{ program }} accept <id>`.
+4. Connect again. Removing the key in Hosting, or `{{ program }} revoke <id>`, ends its links within about a second.
 
-A program with a native key, such as another `canoa`, can pair by PIN instead: **Show a PIN** in Hosting, or
-`canoa pair`, shows six digits and an address, and `canoa pair --join ADDRESS` with those digits pairs it.
-One wrong try ends the PIN, and it pairs by the host's method. `canoa pair` refuses a browser, so a page cannot spend
-the PIN, unless `--origin` names it; a browser pairs with it by connecting once. The extension and Canoa's web Add connection dialog pair by PIN with
-`canoa pair --method noise --origin ORIGIN`, the origin each of them shows.
+A program with a native key, such as another `{{ program }}`, can pair by PIN instead: **Show a PIN** in Hosting, or
+`{{ program }} pair`, shows six digits and an address, and `{{ program }} pair --join ADDRESS` with those digits pairs it.
+One wrong try ends the PIN, and it pairs by the host's method. `{{ program }} pair` refuses a browser, so a page cannot spend
+the PIN, unless `--origin` names it; a browser pairs with it by connecting once. The extension and {{ name }}'s web Add connection dialog pair by PIN with
+`{{ program }} pair --method noise --origin ORIGIN`, the origin each of them shows.
 
 A key's first use is always the person's decision: nothing is accepted automatically, and the app pairs or removes a key
 only from a dialog that shows its whole id.
 
 ## The web app
 
-The host can serve Canoa's web build itself, so a browser on this machine opens the chat with no other web server:
+The host can serve {{ name }}'s web build itself, so a browser on this machine opens the chat with no other web server:
 
 ```sh
-canoa serve --web app/build/web     # a directory, or [host.web] dir in canoa.cfg
-canoa serve --web                   # the site built in, in a build with the web feature
+{{ program }} serve --web app/build/web     # a directory, or [host.web] dir in {{ config_file }}
+{{ program }} serve --web                   # the site built in, in a build with the web feature
 ```
 
 ```toml
 [host.web]
-dir = "site"                 # relative to canoa.cfg; without it, the site built in
+dir = "site"                 # relative to {{ config_file }}; without it, the site built in
 listen = "127.0.0.1:7800"    # the default
 mode = "local"               # "local" or "remote": where the person sits (see below)
 ```
@@ -649,7 +649,7 @@ mode = "local"               # "local" or "remote": where the person sits (see b
 `serve` prints `{"web": "http://127.0.0.1:7800"}` after its entries. Open that address: the Hosts section lists that host, named as the host that served the page and never as Local, with
 its peer id, its method and its entries, read from `/canoa.json`. That is only what the host says of itself. Connecting still proves the host holds that id's key, and the host turns the
 browser away until its key is paired, as in [Pairing](#pairing): connect once, then accept the browser's id in Hosting
-or with `canoa accept`.
+or with `{{ program }} accept`.
 
 `mode` says where the person is in front of the page. **`local`**: the browser is at this computer, so Open in starts VS Code or the file
 manager here (a key holding `workspace.open`; `workspace/openers` says what is installed). **`remote`**: the browser is only the interface to
@@ -667,7 +667,7 @@ What it serves and refuses:
   connections to the site and the host's entries alone. Inline and evaluated script are refused, so the site must be
   built with `flutter build web --csp --no-web-resources-cdn`. The app carries its Roboto font and looks for any other
   beside the page, so that build fetches nothing from outside the site.
-- **Not the host's own files.** A site directory that holds canoa.cfg's directory or the host's identity and trust store
+- **Not the host's own files.** A site directory that holds {{ config_file }}'s directory or the host's identity and trust store
   is refused.
 - **Requests for this host only.** A request whose `Host` is not `localhost`, an IP address or a name in `[host.web]
   hosts` is refused, so another site cannot reach this one by pointing a name of its own at this machine.
@@ -705,18 +705,18 @@ read and draft the mail you set up there without a step of its own; `office_secr
 computer from being admitted. Do not set it behind a proxy.
 
 Three more things belong to the same setting. **The pane's tools:** while the pane is open in Outlook, Word or Excel, every session
-of this Canoa can use that application's tools (`canoa-outlook`, `canoa-word`, `canoa-excel`: the open item, the document, the
+of this {{ name }} can use that application's tools (`canoa-outlook`, `canoa-word`, `canoa-excel`: the open item, the document, the
 workbook), and a change is asked in the pane first. **A secret**, for a computer other accounts use: `office_secret = true` makes the
-host keep one in its home and refuse the page's requests that do not carry it; the manifest is rendered with it. **Starting Canoa
-from the pane:** `canoa office-launcher`, a small program you leave running, holds the pane's address while no Canoa runs and shows a
-page with **Start Canoa**, which starts it; `canoa office-launcher --install` makes it start when you sign in (`--uninstall` stops that, `--status` says
+host keep one in its home and refuse the page's requests that do not carry it; the manifest is rendered with it. **Starting {{ name }}
+from the pane:** `{{ program }} office-launcher`, a small program you leave running, holds the pane's address while no {{ name }} runs and shows a
+page with **Start {{ name }}**, which starts it; `{{ program }} office-launcher --install` makes it start when you sign in (`--uninstall` stops that, `--status` says
 whether it does and whether a launcher answers). `clients/office/README.md` in the repository says how to set each up.
 
 The API header lists every setting.
 
 ## The browser extension on this computer
 
-`canoa native install` lets the Canoa extension in Chrome, Edge or Chromium use the Canoa on this computer; the desktop app does it each time it starts. The extension then lists the host's entries, its own sources and your own agent commands among them, and its sessions and settings, once you pair it with a PIN: **Hosting, then Pair the browser extension** in the app, or `canoa pair --native`, shows the PIN and you type it in the extension. When Canoa is not running the extension says so and offers **Start Canoa**.
+`{{ program }} native install` lets the {{ name }} extension in Chrome, Edge or Chromium use the {{ name }} on this computer; the desktop app does it each time it starts. The extension then lists the host's entries, its own sources and your own agent commands among them, and its sessions and settings, once you pair it with a PIN: **Hosting, then Pair the browser extension** in the app, or `{{ program }} pair --native`, shows the PIN and you type it in the extension. When {{ name }} is not running the extension says so and offers **Start {{ name }}**.
 
 ```toml
 [host.native]
@@ -724,7 +724,7 @@ enabled = true                                 # false closes the door the brows
 control = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "discover"]   # the default
 ```
 
-`control` is what a browser key may do on the control channel; it cannot hold `config.write.sessions`, `overlay.write`, `host.restart` or `upload`. A key paired this way works only from the extension that paired it. `canoa native status` shows what is registered and what Start would run, and `canoa native uninstall` removes it. Chrome, Edge and Chromium installed as Flatpak or Snap cannot start a native host. See [browser integration](browser.md#canoa-on-this-computer).
+`control` is what a browser key may do on the control channel; it cannot hold `config.write.sessions`, `overlay.write`, `host.restart` or `upload`. A key paired this way works only from the extension that paired it. `{{ program }} native status` shows what is registered and what Start would run, and `{{ program }} native uninstall` removes it. Chrome, Edge and Chromium installed as Flatpak or Snap cannot start a native host. See [browser integration](browser.md#{{ name }}-on-this-computer).
 
 ## A pipe or Unix socket
 
@@ -736,10 +736,10 @@ pipe `\\.\pipe\NAME`, or to `unix:PATH` on Unix, a socket at an absolute path (`
 [host.agents.claude]
 harness = "claude"
 listen = "pipe:canoa-claude"          # Windows
-# listen = "unix:/run/user/1000/canoa/claude.sock"   # Linux and macOS
+# listen = "unix:/run/user/1000/{{ program }}/claude.sock"   # Linux and macOS
 ```
 
-The proof is the same as on an address: the entry serves a key only once it is paired (`canoa accept`), `peers` and
+The proof is the same as on an address: the entry serves a key only once it is paired (`{{ program }} accept`), `peers` and
 `max_peers` apply, and every message after the proof is sealed. What is added is the operating system's access control
 before the proof, from [`coqui-transport-pipe`](https://github.com/Boriken-Dev/coqui-transport-pipe) with its defaults:
 
@@ -752,7 +752,7 @@ before the proof, from [`coqui-transport-pipe`](https://github.com/Boriken-Dev/c
 That decides who can reach the entry, not who is let in: only a paired key is. A pipe name is visible to every user on
 Windows, so a client that connects before any host listens would reach whoever listens first, and only the key proof tells
 it from your host; pin the host's id as for an address. The web app never lists a pipe entry in `/canoa.json` or lets the
-page connect to one, since a browser cannot reach it. `canoa check` prints the entry and refuses a name the system cannot
+page connect to one, since a browser cannot reach it. `{{ program }} check` prints the entry and refuses a name the system cannot
 use, and a `unix:` path is refused on Windows.
 
 The app dials such an entry when the host it runs lists one (`app/lib/acp/pipe_channel.dart`: on Windows a pipe opened for overlapped I/O through `dart:ffi`, on Unix a socket from `dart:io`), proving the same pinned key, and so can a Rust client with `canoa_host::pipe::PipeChannel::connect`.
@@ -804,7 +804,7 @@ provider, `wss://` and WebTransport are not offered yet.
   outside it is followed. A worktree is made, read or removed only where links are resolved too; see
   [Worktrees](#worktrees).
 - **Only the profiles an entry offers, by name.** What a profile holds, its secrets and its MCP servers included, comes
-  from canoa.cfg alone; see [Profiles](#profiles).
+  from {{ config_file }} alone; see [Profiles](#profiles).
 
 ## What it trusts
 
@@ -815,15 +815,15 @@ provider, `wss://` and WebTransport are not offered yet.
   trusted as fully as a program you run, and so is whoever can write it or its directory.
 - **A provider source runs code too, and loads more.** Python's source trusts, besides its own file: the Python whose
   shared library `import_dirs` or the system finds; that Python's standard library, and unless `isolation` is
-  `isolated` its `site-packages` and their `.pth` files and, on Windows, `canoa`'s own directory with a
-  `canoa._pth` or `pyvenv.cfg` there; `GUATIAO_LIBRARY`, which its process inherits; every directory in `paths`;
+  `isolated` its `site-packages` and their `.pth` files and, on Windows, `{{ program }}`'s own directory with a
+  `{{ program }}._pth` or `pyvenv.cfg` there; `GUATIAO_LIBRARY`, which its process inherits; every directory in `paths`;
   every manifest in `dirs` and the directories it names; and every module those import. With `isolation = "inherit"` it
   also trusts your own site-packages and the host's `PYTHONPATH` and `PYTHONHOME`. Whoever can write any of them runs code
   as you.
 - **On Windows a source's imports are looked for more widely.** A library's imports are found beside it, beside the host
   and in the system's directories only. For a source, an import it names itself that those leave missing, such as
   `python3.dll`, is looked for in `import_dirs` and, with `import_search = "path"` (the default when `import_dirs` names no
-  directory, and logged as a warning), the Windows directory, the provider's working directory (canoa.cfg's) and every
+  directory, and logged as a warning), the Windows directory, the provider's working directory ({{ config_file }}'s) and every
   directory on `PATH`, in that order: the first `python3.dll` found there is the one that loads. The source is then
   opened with the narrow search again, so its other imports come from where they did.
 - **A stdio agent** is the program the file names, with the host's environment and working directory, and its profile's
@@ -852,7 +852,7 @@ The host never sees, stores or forwards a vendor credential, and never reuses a 
 | | Claude | ChatGPT |
 | --- | --- | --- |
 | Entry | `harness = "claude"`, whose provider runs `claude` in stream-json mode inside the host (`executable` names another) | `harness = "codex"`, whose provider starts `codex app-server` inside the host (`executable` names another) |
-| On standard streams | `canoa agent claude` | `canoa agent codex` |
+| On standard streams | `{{ program }} agent claude` | `{{ program }} agent codex` |
 | Sign-in | `claude` signed in on this machine: a subscription, or an API key | `codex` signed in with a ChatGPT plan, or an API key |
 | Protocol it drives | `claude -p --input-format stream-json --output-format stream-json`, `--resume` | `codex app-server`'s JSON-RPC |
 
@@ -876,7 +876,7 @@ the rule it suggests, reject; Codex: its own decisions).
 [host.agents.claude]
 harness = "claude"
 setting_sources = ["project"]     # of user, project, local; unset is Claude Code's own
-executable = "C:/Tools/claude.exe"  # optional: a name on PATH, or a path from canoa.cfg's directory
+executable = "C:/Tools/claude.exe"  # optional: a name on PATH, or a path from {{ config_file }}'s directory
 
 [host.agents.codex]
 harness = "codex"
@@ -896,9 +896,9 @@ the harness has a control for it. Claude Code has: `short` is a 5-minute cache a
 `CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`), `off` sets `DISABLE_PROMPT_CACHING`, and `default` leaves the environment's. On a
 subscription a 1-hour cache write costs twice the input price against 1.25 times for 5 minutes, so a one-shot or background
 run is better with `short`, and a session someone is active in with `long`. Codex's app server has no such setting, and
-`canoa options NAME --entry` prints each provider's own sentence on it as `cache_lifetime` and the lifetimes it honours as `cache_choices`; `off` goes only to a provider that lists it (a client's `off` for Codex is the default). The key is the entry's default: the
+`{{ program }} options NAME --entry` prints each provider's own sentence on it as `cache_lifetime` and the lifetimes it honours as `cache_choices`; `off` goes only to a provider that lists it (a client's `off` for Codex is the default). The key is the entry's default: the
 chat asks `long` for a session when the entry says nothing, and the person can choose another for one session in the
-new-session view, which wins. A value other than the four is refused naming `cache_lifetime`. `canoa agent ID`
+new-session view, which wins. A value other than the four is refused naming `cache_lifetime`. `{{ program }} agent ID`
 takes the same as `--cache-lifetime`.
 
 On Windows the providers start `claude.exe` and `codex.exe`, as the native installers put them; an npm-installed `.cmd`
@@ -909,13 +909,13 @@ takes, since the host removes every client's `_meta`; context, MCP servers and C
 0.164.0 and 0.166.0; another version runs, with a notice.
 
 **An outside harness.** Any provider of the `acp_harness` kind, in any language Guatiao loads, is chosen the same way, by
-its id, and needs no rebuild of Canoa. The entry names where its code is, as a provider entry does, and the provider's own
+its id, and needs no rebuild of {{ name }}. The entry names where its code is, as a provider entry does, and the provider's own
 configuration:
 
 ```toml
 [host.agents.echo]
 harness = "acp_echo_harness_echo_harness"   # the provider's id
-source = "guatiao_source_py.dll"            # or library = "..."; relative paths are from canoa.cfg's directory
+source = "guatiao_source_py.dll"            # or library = "..."; relative paths are from {{ config_file }}'s directory
 settings = { title = "Echo" }               # optional: the provider's configuration, checked against its schema at start
 [host.agents.echo.source_settings]          # as for a provider entry
 dirs = ["harness"]
@@ -923,7 +923,7 @@ dirs = ["harness"]
 
 `executable` and `setting_sources` are the `claude` and `codex` providers' settings and belong to the built-in ids; another id
 takes `settings` alone. Loading runs the provider's code with the host's rights,
-in the host's process, so a provider that crashes takes the host with it. Canoa passes no account, so the provider runs on
+in the host's process, so a provider that crashes takes the host with it. {{ name }} passes no account, so the provider runs on
 the harness's own sign-in, and the prompt cache lifetime is the harness's default.
 
 **What the host hears.** A provider tells the host what is no message of the client's through the spawner the host hands
@@ -957,7 +957,7 @@ page, so check its sharing rules before pairing anyone else.
 
 ## Mail as a source
 
-With a mail account in canoa.cfg the host gives an agent the person's own mail as it gives it an overlay's knowledge: search it,
+With a mail account in {{ config_file }} the host gives an agent the person's own mail as it gives it an overlay's knowledge: search it,
 read it, find what is related to a message, and draft into it. Gather what was said before writing a new message, or sort an
 inbox, from any session on this computer.
 
@@ -970,7 +970,7 @@ backend = "ews"                          # Exchange Server's web services
 email = "ana@example.com"                # Autodiscover finds the server from this ...
 server = "https://mail.example.com/EWS/Exchange.asmx"   # ... or name it, and nothing is discovered
 user = "EXAMPLE\\ana"
-# The password is not here. Adding the account (Settings, Mail, or `canoa service mail add`) keeps it in the host's account store and writes
+# The password is not here. Adding the account (Settings, Mail, or `{{ program }} service mail add`) keeps it in the host's account store and writes
 # an `id = "..."` line that names it;
 # or name a variable that holds it, which is read before the store's copy:
 # password_env = "WORK_MAIL_PASSWORD"
@@ -1004,11 +1004,11 @@ backend = "outlook"                      # classic Outlook for Windows, every ac
 - **Exchange Server (`ews`).** Requests go through the host's network settings (`[host.network]`) like every other fetch. `server`
   or `email` is required; a plain `http` address is accepted only on this computer, since a password would cross the network in the
   clear. Basic sign-in needs `user` and a password: the one the host keeps in the account store when the account is added (the operating
-  system's credential store, or sealed files where it has none: the same store `canoa accounts` uses), or the variable `password_env`
-  names, which wins when both are given. `canoa service mail add --params -` takes the account as a JSON object on standard input (the password with it, never on the
+  system's credential store, or sealed files where it has none: the same store `{{ program }} accounts` uses), or the variable `password_env`
+  names, which wins when both are given. `{{ program }} service mail add --params -` takes the account as a JSON object on standard input (the password with it, never on the
   command line: `{"name": "work", "backend": "ews", "server": "URL", "user": "U", "password": "..."}`) and writes the account's table with an `id`
-  and no password; `canoa service mail accounts` lists each account's name, backend, server and whether its password is there, never the
-  password; `canoa service mail remove --params '{"name": "work"}'` takes the table out and forgets the stored password. A `password` key in canoa.cfg is refused. Settings, Mail in the app does the same (add, Test sign-in, Remove) through the control channel's `services.setup` grant, which the app's own link holds and a paired key only when canoa.cfg lists it, and the mail tools of a running host follow each change at once. `auth = "windows"` signs in with the person's own Windows logon
+  and no password; `{{ program }} service mail accounts` lists each account's name, backend, server and whether its password is there, never the
+  password; `{{ program }} service mail remove --params '{"name": "work"}'` takes the table out and forgets the stored password. A `password` key in {{ config_file }} is refused. Settings, Mail in the app does the same (add, Test sign-in, Remove) through the control channel's `services.setup` grant, which the app's own link holds and a paired key only when {{ config_file }} lists it, and the mail tools of a running host follow each change at once. `auth = "windows"` signs in with the person's own Windows logon
   instead, with no user or password: when the server answers `401` offering Negotiate or NTLM, the host answers with the logon
   session (Kerberos, then NTLM) on the same connection, and sends the request again with it. A server that offers only Basic is
   left at its `401`, and the error names what it offers. It needs Windows: elsewhere the sign-in fails with a message. Exchange Online
@@ -1033,7 +1033,7 @@ backend = "outlook"                      # classic Outlook for Windows, every ac
 
 ## Delegating a task to another agent
 
-With `[host.delegate]` on (the default) and a client that asks for it, an agent is given four tools, `delegate_targets`, `delegate_task`, `task_status` and `cancel`, on a loopback server behind a bearer made for that one session. An agent that takes HTTP MCP servers reaches it directly; any other reaches it through a small stdio server, `canoa mcp-bridge`, that the host starts for it with the address and the bearer in its environment, never on its command line. A task runs as a session of another source in a folder at or inside the delegating session's own, in the delegating session's permission mode or one that asks for more, and everything it asks the person goes to the person on the delegating session. `max_depth`, `max_children`, `max_running` and `sources` bound it; see the host's API header for every setting. A client that says it can show tasks, answer a task's permission request and stop it is told what becomes of each task (`_canoa/delegate/event`) and can ask for a task's updates and stop it; the app keeps each conversation's task list from these, shows a task's request with its title and source, and an "allow for the session" given there covers that task only.
+With `[host.delegate]` on (the default) and a client that asks for it, an agent is given four tools, `delegate_targets`, `delegate_task`, `task_status` and `cancel`, on a loopback server behind a bearer made for that one session. An agent that takes HTTP MCP servers reaches it directly; any other reaches it through a small stdio server, `{{ program }} mcp-bridge`, that the host starts for it with the address and the bearer in its environment, never on its command line. A task runs as a session of another source in a folder at or inside the delegating session's own, in the delegating session's permission mode or one that asks for more, and everything it asks the person goes to the person on the delegating session. `max_depth`, `max_children`, `max_running` and `sources` bound it; see the host's API header for every setting. A client that says it can show tasks, answer a task's permission request and stop it is told what becomes of each task (`_canoa/delegate/event`) and can ask for a task's updates and stop it; the app keeps each conversation's task list from these, shows a task's request with its title and source, and an "allow for the session" given there covers that task only.
 
 A task may be handed more than its text: `context` `messages` gives it the newest turns of the delegating conversation and `files` the files that conversation's tools touched, bounded by `context_bytes` and never for a task that crosses machines. The person's own Delegate task shows that text in full before anything is sent and gives the task exactly it; an agent's own call may attach either only when the person allowed it in the session's Delegation setup, which also narrows the agents, sets the default and the limit on tasks running at once.
 

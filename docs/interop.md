@@ -1,14 +1,14 @@
-# Canoa interoperability profile
+# {{ name }} interoperability profile
 
-Canoa is one implementation of a browser-to-agent gateway model. A compatible implementation does not need to run Canoa or use its libraries.
+{{ name }} is one implementation of a browser-to-agent gateway model. A compatible implementation does not need to run {{ name }} or use its libraries.
 
 ## Minimum remote agent interface
 
-1. **Agent Client Protocol (ACP)** is the application protocol. Use the published ACP lifecycle and JSON-RPC methods, not Canoa-specific method replacements.
-2. **WebTransport over HTTPS** is preferred, with **WebSocket over WSS** as fallback. WebTransport uses a Canoa draft profile with an ordered bidirectional stream and little-endian length-prefixed UTF-8 JSON-RPC messages; WebSocket carries complete JSON-RPC text frames. WebTransport is not yet an upstream ACP standard transport; both addresses must be advertised and bound to the same verified peer. See [transport selection](transport.md).
+1. **Agent Client Protocol (ACP)** is the application protocol. Use the published ACP lifecycle and JSON-RPC methods, not {{ name }}-specific method replacements.
+2. **WebTransport over HTTPS** is preferred, with **WebSocket over WSS** as fallback. WebTransport uses a {{ name }} draft profile with an ordered bidirectional stream and little-endian length-prefixed UTF-8 JSON-RPC messages; WebSocket carries complete JSON-RPC text frames. WebTransport is not yet an upstream ACP standard transport; both addresses must be advertised and bound to the same verified peer. See [transport selection](transport.md).
 3. **Authenticated peer identity** must be verified **before** an ACP session is exposed. The `coqui-peer` family is the reference implementation for peer identity, pairing and trust, but merely claiming a `PeerId` string is not proof. A conforming non-Rust implementation needs the same documented on-wire proof and key-rotation semantics; using the Rust crate is not required. The browser method is versioned as `dev.boriken.coqui.peer-webcrypto/v1`, with its source and wire in [coqui-peer-webcrypto](https://github.com/Boriken-Dev/coqui-peer-webcrypto); it is not an upstream standard, and has had one independent review. It ends in an encrypted session: every ACP message after the proof is one sealed record in a binary frame, a plain message ends the connection, and a reverse proxy that ends TLS can neither read nor inject.
 4. **Capabilities** are negotiated by ACP. Browser tools are exposed as MCP only when the remote agent can consume them through a supported MCP connection or an explicitly negotiated ACP/MCP bridge. The MCP-over-ACP extension is currently experimental, not assumed mandatory.
-5. **Local policy** is owned by each client implementation. There is no global Canoa permission authority.
+5. **Local policy** is owned by each client implementation. There is no global {{ name }} permission authority.
 
 ## Two independent permissions
 
@@ -38,7 +38,7 @@ Do not send long-lived tokens in URL query strings; they can leak through logs. 
 
 Implementations may discover endpoints through DNS-SD or manual pairing. Discovery is not a trust proof.
 
-A web page reaches a person's agents through [ACP in the browser](https://boriken-dev.github.io/coqui-acp/browser/), a draft contract in coqui-acp that any provider can implement. Canoa's extension is one implementation of it. The agents of the Canoa on the person's computer are among those a page can be given, in a folder the host makes for the page's site and never one the page names ([Canoa on this computer](browser.md#a-web-page-and-the-canoa-on-this-computer)); discovery goes through that Canoa's native messaging host, and an endpoint can also be entered by hand.
+A web page reaches a person's agents through [ACP in the browser](https://boriken-dev.github.io/coqui-acp/browser/), a draft contract in coqui-acp that any provider can implement. {{ name }}'s extension is one implementation of it. The agents of the {{ name }} on the person's computer are among those a page can be given, in a folder the host makes for the page's site and never one the page names ([{{ name }} on this computer](browser.md#a-web-page-and-the-{{ name }}-on-this-computer)); discovery goes through that {{ name }}'s native messaging host, and an endpoint can also be entered by hand.
 
 ## Conformance tests (planned)
 

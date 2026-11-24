@@ -1,6 +1,6 @@
 # ACP v2 Flutter session controller
 
-The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client** and an explicit pinned-key connection dialog, using the experimental WebCrypto method from coqui-peer. The default PWA and extension chat start on a welcome page. A remote connection works only when the agent endpoint implements the same method and speaks ACP v2 or v1. A person pairs a key on the host (`canoa accept`, the desktop app's Hosting section, or a PIN) and `canoa` serves the agents; see [the host](host.md) and the [roadmap](roadmap.md).
+The shared {{ name }} Flutter interface has a tested **ACP v2 JSON-RPC client** and an explicit pinned-key connection dialog, using the experimental WebCrypto method from coqui-peer. The default PWA and extension chat start on a welcome page. A remote connection works only when the agent endpoint implements the same method and speaks ACP v2 or v1. A person pairs a key on the host (`{{ program }} accept`, the desktop app's Hosting section, or a PIN) and `{{ program }}` serves the agents; see [the host](host.md) and the [roadmap](roadmap.md).
 
 ## Components
 
@@ -15,7 +15,7 @@ The shared Canoa Flutter interface has a tested **ACP v2 JSON-RPC client** and a
 
 ## ACP v2 semantics
 
-After independently verified peer authentication, the client sends `initialize` using protocol version 2, `capabilities: {}`, and Boriken Dev's Canoa client information. It rejects agents not advertising v2 session support.
+After independently verified peer authentication, the client sends `initialize` using protocol version 2, `capabilities: {}`, and Boriken Dev's {{ name }} client information. It rejects agents not advertising v2 session support.
 
 Session creation requires an absolute workspace path and sends `session/new`. Existing remote sessions can be attached via `session/resume`, optionally asking for a full transcript with `replayFrom: { "type": "start" }`.
 
@@ -29,17 +29,17 @@ Every `sessionUpdate` kind in the v2 schema has a place on screen. A `plan_updat
 
 A verified transport must be produced by a callback that **cryptographically proves the expected peer identity** and answers with a channel tied to that proof, since a plain channel after a proof belongs to whoever carries it. A claimed `peerId` string, TLS hostname, or an unverified server hello is never sufficient. The ordinary ACP tests inject a fake verifier for protocol testing only. The browser method is now sourced from [coqui-peer](https://github.com/Boriken-Dev/coqui-peer/tree/main/methods/webcrypto), bundled unchanged with a source-blob hash test, and driven via a transport-level staged message queue.
 
-Canoa's implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The native Rust responder and JavaScript↔Rust handshake tests now live in coqui-peer, with Coqui TrustStore-based acceptance and revocation. `canoa serve` with the `stdio_agent` example exercises a real socket, Coqui proof and v2 session messages. The echo fixture does not execute or represent an AI agent.
+{{ name }}'s implementation intentionally **does not** connect the standard UI to unverified remote endpoints. A rejected peer proof closes the link and cannot trigger WebTransport-to-WebSocket downgrade. The native Rust responder and JavaScript↔Rust handshake tests now live in coqui-peer, with Coqui TrustStore-based acceptance and revocation. `{{ program }} serve` with the `stdio_agent` example exercises a real socket, Coqui proof and v2 session messages. The echo fixture does not execute or represent an AI agent.
 
 The client negotiates: it requests v2 and accepts v1, whichever the agent selects.
 
 ## Permission requests in the chat
 
 A `session/request_permission` shows as a card in its conversation with the tool, what it would run or touch, and one button per
-option the agent offered, under the agent's own name for it: refusals first, then kinds Canoa does not know, then what allows,
+option the agent offered, under the agent's own name for it: refusals first, then kinds {{ name }} does not know, then what allows,
 once before always. An option sent without a name is named by its kind. The answer selects that option's `optionId`. What an
-`allow_always` or `reject_always` answer remembers belongs to the agent, which the card says when it offers one: Canoa keeps
-nothing of it and cannot undo it. A request offering no option Canoa can read can only be cancelled, and one whose options repeat
+`allow_always` or `reject_always` answer remembers belongs to the agent, which the card says when it offers one: {{ name }} keeps
+nothing of it and cannot undo it. A request offering no option {{ name }} can read can only be cancelled, and one whose options repeat
 an id is answered cancelled without being shown, since the agent could take that id for either. A conversation holds at most 64
 questions waiting; the agent's further ones are answered cancelled, and the conversation says so.
 
@@ -53,7 +53,7 @@ is refused alone.
 **Modes.** The mode a session is in shows in the line under the composer's box, and is changed
 from its menu or with Shift+Tab in the message, which goes on to the next mode and round. Nothing is asked: choosing a mode is
 the whole act. The control offers the agent's own modes (the `mode` option, or an agent's `modes`), read from the agent and
-never assumed; `canoa agent claude` and `canoa agent codex` offer Canoa's five where their tool has them: Manual, Accept edits,
+never assumed; `{{ program }} agent claude` and `{{ program }} agent codex` offer {{ name }}'s five where their tool has them: Manual, Accept edits,
 Auto, Plan and Bypass (the table of what each sets is in the translators' headers, in coqui-acp). A session keeps its own mode
 in the session list, so a session opened again, or after the app restarts, is put back in it before anything else is sent; Settings'
 **Mode of a new session** (`[permissions] default_mode`) is where a new one starts, and a profile's mode wins over it.
@@ -62,10 +62,10 @@ Shift+Tab goes on from the mode last asked for, so quick presses do not repeat o
 like any other mode, and does nothing while the session connects or is being opened again.
 
 **Bypass** asks for nothing. Where the agent has a mode that asks for nothing (`bypass`, `bypassPermissions`), that is the one
-chosen. Where it has none, Canoa provides it by answering the agent's requests itself: every request that offers an allow is
-answered, with `allow_once` when offered, else `allow_always` (Settings' **Bypass answers with allow once only**, `[permissions] allow_once_only`, leaves a request that offers only an "always" to the person), and each answer is said in the conversation. Canoa's Bypass sits on the agent's own mode, which stays as it was: leaving Bypass returns to it, and the session list keeps both,
+chosen. Where it has none, {{ name }} provides it by answering the agent's requests itself: every request that offers an allow is
+answered, with `allow_once` when offered, else `allow_always` (Settings' **Bypass answers with allow once only**, `[permissions] allow_once_only`, leaves a request that offers only an "always" to the person), and each answer is said in the conversation. {{ name }}'s Bypass sits on the agent's own mode, which stays as it was: leaving Bypass returns to it, and the session list keeps both,
 so a reopened session is put back in that mode and in Bypass. When the agent is itself in a mode that asks for nothing, or says
-so by itself, Canoa answers nothing: what the agent still asks is the person's. A request that offers no allow, a question
+so by itself, {{ name }} answers nothing: what the agent still asks is the person's. A request that offers no allow, a question
 and a plan are still the person's, and are shown with that said. A request already waiting when Bypass is chosen is
 answered too. A request reaches only the conversation of the connection that sent it, whatever session id the agent chose. While
 Bypass is on, the mode control shows in the accent colour and a banner and a mark on the session's row say so; the banner's
@@ -94,16 +94,16 @@ opens the rule to read before anything is kept:
   clear, grant, install and the like, so `get_or_create_issue` and `search_replace` get none), and never
   for one of the `execute` kind or whose server or tool name says it runs things (run, exec, process, shell, terminal, eval, bash,
   command, cmd, spawn, script, invoke, powershell, pwsh).
-- Commands and tools apply only while the session is in a mode Canoa can see asks about commands (the agent's Manual or Plan);
+- Commands and tools apply only while the session is in a mode {{ name }} can see asks about commands (the agent's Manual or Plan);
   in Accept edits, in Bypass, in the mode an agent's own "always" switches to, in any other mode or before the agent has said, a
   request asks as it would.
 - A change to a file is allowed for that file or a folder under the session's own, by an absolute path with no `.` or `..` in it
   (the system resolves `..` after links), and only for a session on this computer (`SessionPlace.local`) in a desktop build,
   which can follow links. Nothing is offered for a hosted, peer or browser-provided session, in a browser, or where the session
-  folder is the person's home folder, holds it, or touches Canoa's configuration folder (read as written and after links are
+  folder is the person's home folder, holds it, or touches {{ name }}'s configuration folder (read as written and after links are
   resolved). A path that is relative, starts with `~`, holds a `:` other than a drive letter's (a stream, `C:x`) or is a network
   path is never offered a rule. Below the session folder nothing on the **protected list** is ever covered. The list is `[permissions] protected` in
-  canoa.cfg (text with a pattern a line, or an array of such lines), edited in Settings, Permissions with a **Restore
+  {{ config_file }} (text with a pattern a line, or an array of such lines), edited in Settings, Permissions with a **Restore
   recommended** action; lines that are also in the recommended list show in the accent colour. When the key is absent the
   recommended list applies (`recommendedProtected` in `protected_paths.dart`): every name that starts with a dot (`.*`: `.git`,
   `.claude`, `.envrc`, ...), build and test scripts and manifests (`package.json`, `makefile`, `pyproject.toml`, `setup.py`,
@@ -136,7 +136,7 @@ command or a path (a background run, a second path), asks as before.
 A request that needs the rules is matched after the rules file is read again, in order with the requests before it, and only if
 nothing changed meanwhile: a request that was waiting when the person pressed Stop, closed the conversation, or the connection
 ended is answered cancelled, and one that finds the mode, Bypass or the cards different is decided on what they are now. Each rule
-made and each use is said in the conversation. Rules are kept in `permissions.json` beside canoa.cfg (in the browser, the origin's
+made and each use is said in the conversation. Rules are kept in `permissions.json` beside {{ config_file }} (in the browser, the origin's
 IndexedDB). On a desktop the file is replaced through a temp file named for that write, under a lock that the read-merge-write holds,
 so another instance cannot write between; a rule another program added is kept and shown as not made in this app, and a rule
 another instance revoked is dropped. A rename another process's open file refuses is tried again for up to two seconds; the read and the
@@ -153,14 +153,14 @@ and only when the command begins with a plain program or path (otherwise `(comma
 or `$name=...` before it, a quoted value, and a URL), never an argument; for a path or tool the thing itself. It holds no hash of the text, only grows, and a
 browser keeps none. A rule an earlier version wrote that this one does not understand (the prefix rules it once had) is kept,
 shown as no longer supported and never applied, until it is revoked. Settings lists the rules under **Permissions** with when each
-was made and how often it answered, and **Revoke** takes one back at once. Canoa adds no rule when the person picks the agent's own
+was made and how often it answered, and **Revoke** takes one back at once. {{ name }} adds no rule when the person picks the agent's own
 "always": that stays the agent's, and when the agent then changes the session's mode, the conversation says it did. Rules are kept
 by this app, per client, for every session it shows, wherever the agent runs; they move to the host with the session state when
 that moves.
 
 Known limits, said in the dialog too: a hard link to a file outside the folder is not detected; the list of names that are never
 covered, and the list of tool names that execute, cannot be complete; and what the agent has itself been set to allow (its own permission rules, rules it remembered) is
-outside what Canoa can see, and can make its Manual mode silent.
+outside what {{ name }} can see, and can make its Manual mode silent.
 
 ## The changes pane
 
@@ -177,21 +177,21 @@ from says so. A line number counts in the text the agent sent, which is the whol
 
 ## An agent's questions as forms
 
-Canoa advertises ACP's form elicitation, so an agent can ask the person something (Claude's adapter does for its
+{{ name }} advertises ACP's form elicitation, so an agent can ask the person something (Claude's adapter does for its
 `AskUserQuestion` tool). `elicitation/create` shows as a card in its conversation, built from the request's schema: text, one
 choice, several choices, a number or a whole number, yes or no, each with the agent's title and description, required ones
 marked. **Send answer** is offered only once the answer fits the form; **Decline** refuses to answer and **Cancel** dismisses
-it. A question of a kind Canoa does not know is shown as one it cannot answer, and when it is required only Decline and Cancel
+it. A question of a kind {{ name }} does not know is shown as one it cannot answer, and when it is required only Decline and Cancel
 remain. Everything the agent wrote is shown as text, with nothing that could reorder or hide what surrounds it, and no link in
 it is followed. A question counts as needing the person, with its own notification (`[notifications] question`). Stop, closing
-the conversation, or the agent going away answers a waiting question cancelled. URL elicitation is not offered: Canoa opens no
+the conversation, or the agent going away answers a waiting question cancelled. URL elicitation is not offered: {{ name }} opens no
 address an agent names. `coqui_acp` reads the form and checks the answer, as `vectors/elicitation.json` in coqui-acp says.
 
 ## A new session, started by its first message
 
 A new session is the conversation's empty view: the folder above the message box, and under it the source, Local or
 Worktree, the agent's mode, model and effort, the overlays, `+` and Send ([a new session](configuration.md#a-new-session)).
-Nothing starts until the first message. Then the app starts the agent, or reaches `canoa` for a hosted one, sends
+Nothing starts until the first message. Then the app starts the agent, or reaches `{{ program }}` for a hosted one, sends
 `initialize`, then `session/new` with the folder, the profile's `systemPrompt`, `additionalDirectories`, `_meta` and MCP
 servers, sets each choice made beforehand with `session/set_config_option`, and sends the message. A choice the agent does not
 offer by then is said in the conversation and not sent. A start that fails leaves the session as it was, with the message.
@@ -213,7 +213,7 @@ the source also names the model's default effort) rather than Default twice; a s
 "Claude needs a sign-in" with **Sign in** (the Accounts flow; an account the entry offers carries its own login, so the
 machine's is not asked for), or "Couldn't start Claude" with **Try again**. Sending to a source of the first two asks the host
 once more, then opens that action and keeps the message. The mode control is in the line under the composer's box (see Modes above), with Bypass beside the agent's own
-modes; its menu is headed "Permissions · this session" and gives each mode Canoa knows a line on what it does.
+modes; its menu is headed "Permissions · this session" and gives each mode {{ name }} knows a line on what it does.
 
 ## Usage
 
@@ -223,9 +223,9 @@ An agent that advertises coqui-acp's usage extension (`dev.boriken.coqui.acp/usa
 - It shows in the accent of the scheme from `[usage] warn_permille` used (800 by default) or when the agent itself says `warning`, and in the colour of an error once the bucket is exhausted.
 - Its menu lists every bucket, the most pressing first, with the figure and refill, **inferred** where the agent gave only the words of an error, which models it covers, how long ago it was observed, the account, and the last refusal with its retry-after.
 - A session's spend (tokens, and cost when the agent reported one; an absent cost stays absent) joins the context figure in the conversation's header.
-- The account is the host's: `canoa` tells the agent the entry's name and sets it on every report it relays.
-- An agent that reports nothing (a generic ACP agent, a gateway, `agy` without `usage = "antigravity"`) still gets the control once the `canoa` that serves it has seen it refused for a limit. For a stdio agent whose `initialize` answer does not advertise the extension, `canoa` advertises it with the source `inferred`, reads each failed prompt (the error's message and data) and each refusal for `[usage] limit_phrases` (`RESOURCE_EXHAUSTED`, `Error 429`, `rate limit`, `usage limit`, `quota` and a few more when unset; a list replaces them, `[]` turns it off), and keeps one report for the entry: a single exhausted bucket marked **inferred**, which models it covers unknown, with a reset only when the text gave one. It answers `_coqui_acp/usage` itself and tells a client that asked for notices when the report changes. The bucket ends at the reset the text named, else the retry-after it named counted from when the host saw it, else when a turn of that agent ends well; a good turn does not clear one that still has a reset to wait for. An agent that advertises the extension is passed through as it is, and a capacity error such as a 503 is not a limit. The host reads the agent's own words, which may echo what a client sent: a client whose prompt makes the agent fail with its own text can set the entry's shared limit. While the host speaks for the agent it also drops the agent's own `_coqui_acp/usage_update`, and it answers `_coqui_acp/usage` only once the agent's `initialize` answer has shown the agent does not advertise it; a request sent before then goes to the agent.
-- An Antigravity entry (`usage = "antigravity"` on its `[host.agents]` entry, which the app sets for `agy acp`) is **reported**, not only inferred: `canoa` reads agy's quota from the loopback port agy's own process opens once a session is open, so the control shows a bucket for each allowance (agy's 5-hour and 7-day windows) with the share of each model's allowance left, spending no turn. `canoa` advertises the usage capability for it with the sources `reported` and `inferred` and with `needs_session`, and the report is the buckets read beside any inferred refusal. It reads once a session has been open for 10 seconds with no turn running, or when its first turn ends, so it stays out of agy's start and first turn (again after 2, 4, 8 and 16 seconds while agy has not opened its port), after each answered prompt, and when a client asks and the last reading is over 15 seconds old; a request waits for its reading, and the host's relay never does. A client that asks with no session open makes `canoa` start an `agy acp` of its own in an empty directory under its state directory, open an empty session (no prompt, nothing spent; agy keeps that session on disk but does not list it), read, and end it, at most one at a time and not within 15 seconds of the last. An entry with profiles starts none of these, since the profile's environment is not applied to it. Only the quota is read: the account's name and email, which the same answer holds, are never kept, sent or logged. A reading whose port no longer belongs to the agent's processes is dropped, and so is one whose answer is not agy's.
+- The account is the host's: `{{ program }}` tells the agent the entry's name and sets it on every report it relays.
+- An agent that reports nothing (a generic ACP agent, a gateway, `agy` without `usage = "antigravity"`) still gets the control once the `{{ program }}` that serves it has seen it refused for a limit. For a stdio agent whose `initialize` answer does not advertise the extension, `{{ program }}` advertises it with the source `inferred`, reads each failed prompt (the error's message and data) and each refusal for `[usage] limit_phrases` (`RESOURCE_EXHAUSTED`, `Error 429`, `rate limit`, `usage limit`, `quota` and a few more when unset; a list replaces them, `[]` turns it off), and keeps one report for the entry: a single exhausted bucket marked **inferred**, which models it covers unknown, with a reset only when the text gave one. It answers `_coqui_acp/usage` itself and tells a client that asked for notices when the report changes. The bucket ends at the reset the text named, else the retry-after it named counted from when the host saw it, else when a turn of that agent ends well; a good turn does not clear one that still has a reset to wait for. An agent that advertises the extension is passed through as it is, and a capacity error such as a 503 is not a limit. The host reads the agent's own words, which may echo what a client sent: a client whose prompt makes the agent fail with its own text can set the entry's shared limit. While the host speaks for the agent it also drops the agent's own `_coqui_acp/usage_update`, and it answers `_coqui_acp/usage` only once the agent's `initialize` answer has shown the agent does not advertise it; a request sent before then goes to the agent.
+- An Antigravity entry (`usage = "antigravity"` on its `[host.agents]` entry, which the app sets for `agy acp`) is **reported**, not only inferred: `{{ program }}` reads agy's quota from the loopback port agy's own process opens once a session is open, so the control shows a bucket for each allowance (agy's 5-hour and 7-day windows) with the share of each model's allowance left, spending no turn. `{{ program }}` advertises the usage capability for it with the sources `reported` and `inferred` and with `needs_session`, and the report is the buckets read beside any inferred refusal. It reads once a session has been open for 10 seconds with no turn running, or when its first turn ends, so it stays out of agy's start and first turn (again after 2, 4, 8 and 16 seconds while agy has not opened its port), after each answered prompt, and when a client asks and the last reading is over 15 seconds old; a request waits for its reading, and the host's relay never does. A client that asks with no session open makes `{{ program }}` start an `agy acp` of its own in an empty directory under its state directory, open an empty session (no prompt, nothing spent; agy keeps that session on disk but does not list it), read, and end it, at most one at a time and not within 15 seconds of the last. An entry with profiles starts none of these, since the profile's environment is not applied to it. Only the quota is read: the account's name and email, which the same answer holds, are never kept, sent or logged. A reading whose port no longer belongs to the agent's processes is dropped, and so is one whose answer is not agy's.
 
 ## What goes with a message
 
@@ -244,7 +244,7 @@ elsewhere the folder is walked, at most 8 levels deep and 5000 entries, with no 
 another computer has no `@`, since the agent could not read its links. The placeholder names what the message takes ("@ files,
 / commands") and is one line on a phone.
 
-**`/` lists two groups.** The agent's commands, then Canoa's own actions (the next mode, Settings, the source settings,
+**`/` lists two groups.** The agent's commands, then {{ name }}'s own actions (the next mode, Settings, the source settings,
 Loadout, and what the session was given), each under its title. An action runs when chosen and sends nothing. `+` has Slash
 commands, which starts the list from an empty message.
 

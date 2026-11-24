@@ -15,37 +15,37 @@ cargo test --workspace --all-features
 cargo doc --workspace --no-deps --all-features
 ```
 
-The workspace holds `canoa` (the registry of services and client grants), `canoa-host` (the `canoa` program: it serves agents to paired keys, the web app, and `canoa portal`), `canoa-ffi` (the host as a library behind a C ABI) and `canoa-launch` (the portable Windows launcher). Peer identity, pairing and transport come from the coqui crates the host builds on. `cargo build -p canoa-host --bin canoa` makes the program; see [the host](host.md).
+The workspace holds `canoa` (the registry of services and client grants), `canoa-host` (the `{{ program }}` program: it serves agents to paired keys, the web app, and `{{ program }} portal`), `canoa-ffi` (the host as a library behind a C ABI) and `canoa-launch` (the portable Windows launcher). Peer identity, pairing and transport come from the coqui crates the host builds on. `cargo build -p canoa-host --bin canoa` makes the program; see [the host](host.md).
 
 ## Desktop app
 
-The desktop app is the whole product on one machine: it carries the host as a library, so it runs the agents canoa.cfg names (Claude, Codex, Pi or any ACP agent) itself, with no `canoa` program installed. It needs `flutter` and `cargo` on PATH, and on Linux the system libraries listed in [configuration](configuration.md#building-desktop-runners).
+The desktop app is the whole product on one machine: it carries the host as a library, so it runs the agents {{ config_file }} names (Claude, Codex, Pi or any ACP agent) itself, with no `{{ program }}` program installed. It needs `flutter` and `cargo` on PATH, and on Linux the system libraries listed in [configuration](configuration.md#building-desktop-runners).
 
 ```sh
-python app/tool/build.py desktop          # builds, then prints the path of CanoaUI (CanoaUI.exe on Windows)
+python app/tool/build.py desktop          # builds, then prints the path of {{ executable }} ({{ executable }}.exe on Windows)
 python app/tool/build.py desktop --run    # runs it with flutter run instead
 python app/tool/build.py desktop --debug  # a debug build; --platform windows|linux|macos names the platform (default: this machine's)
-python app/tool/build.py desktop --portable   # one file: CanoaUI.exe on Windows, an AppImage on Linux; see [one file per platform](portable.md)
+python app/tool/build.py desktop --portable   # one file: {{ executable }}.exe on Windows, an AppImage on Linux; see [one file per platform](portable.md)
 ```
 
-The first run generates the platform's runner (`flutter create`) in `app/`, names the executable `CanoaUI` and, on Windows, gives it Canoa's icon; none of that is committed. `app/pubspec.lock` is put back if Flutter rewrites it. Closing the window leaves Canoa in the tray; see [the desktop section of the app's README](https://github.com/Boriken-Dev/canoa/blob/main/app/README.md#desktop-tray-and-canoacfg) and [the host](host.md#in-the-desktop-app) for hosting and pairing.
+The first run generates the platform's runner (`flutter create`) in `app/`, names the executable `{{ executable }}` and, on Windows, gives it {{ name }}'s icon; none of that is committed. `app/pubspec.lock` is put back if Flutter rewrites it. Closing the window leaves {{ name }} in the tray; see [the desktop section of the app's README](https://github.com/Boriken-Dev/canoa/blob/main/app/README.md#desktop-tray-and-canoacfg) and [the host](host.md#in-the-desktop-app) for hosting and pairing.
 
 ## Web app
 
 ```sh
 python app/tool/build_noise.py   # the Noise method as WebAssembly, into app/web/noise
 (cd app && flutter build web --release --csp --no-web-resources-cdn)   # app/build/web; the host's policy needs --csp
-canoa serve --web app/build/web                                           # served on loopback
+{{ program }} serve --web app/build/web                                           # served on loopback
 ```
 
-The web app has no agents of its own: it connects to a host by its printed URL and peer id, proves its key, and the host's owner accepts that key with `canoa accept`. See [the web app](host.md#the-web-app). `python app/tool/build.py pwa` makes the same bundle without `--csp`, for any other static server; `--wasm` output may need COOP/COEP headers and a compatible browser. For development, `cd app && flutter run -d chrome`.
+The web app has no agents of its own: it connects to a host by its printed URL and peer id, proves its key, and the host's owner accepts that key with `{{ program }} accept`. See [the web app](host.md#the-web-app). `python app/tool/build.py pwa` makes the same bundle without `--csp`, for any other static server; `--wasm` output may need COOP/COEP headers and a compatible browser. For development, `cd app && flutter run -d chrome`.
 
 ## In a container
 
-`packaging/container/Containerfile` builds the Linux host (`canoa`, with the web app and Office.js built in) and the web app in one image, from Boriken Dev's own copies of what it needs, and `build.sh` runs it and copies the results out:
+`packaging/container/Containerfile` builds the Linux host (`{{ program }}`, with the web app and Office.js built in) and the web app in one image, from Boriken Dev's own copies of what it needs, and `build.sh` runs it and copies the results out:
 
 ```sh
-sh packaging/container/build.sh          # the image `canoa`; canoa and site/ in ./out
+sh packaging/container/build.sh          # the image `canoa`; {{ program }} and site/ in ./out
 podman run --rm canoa --version
 ```
 
@@ -74,10 +74,10 @@ python app/tool/build.py chromium
 (cd clients/browser/chromium && npm test)
 ```
 
-Load `clients/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask Canoa** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`. The extension connects the chat to a host over a proven link and offers an agent the browser's tools once a person grants them; see [browser integration](browser.md). The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
+Load `clients/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask {{ name }}** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`. The extension connects the chat to a host over a proven link and offers an agent the browser's tools once a person grants them; see [browser integration](browser.md). The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
 
 See [browser integration](browser.md).
 
 ## Authenticated WSS smoke test
 
-`canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`) provides a local test endpoint that uses mutually authenticated Coqui peer proof and ACP. Name `target/debug/examples/stdio_agent` as the `program` of a `[host.agents.echo]` entry in canoa.cfg, run `canoa serve`, connect from the browser with the printed URL and peer id, and `canoa accept` the key that connects. Its only behavior is echoing messages, not invoking an AI model or browser tool.
+`{{ program }} serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`) provides a local test endpoint that uses mutually authenticated Coqui peer proof and ACP. Name `target/debug/examples/stdio_agent` as the `program` of a `[host.agents.echo]` entry in {{ config_file }}, run `{{ program }} serve`, connect from the browser with the printed URL and peer id, and `{{ program }} accept` the key that connects. Its only behavior is echoing messages, not invoking an AI model or browser tool.
