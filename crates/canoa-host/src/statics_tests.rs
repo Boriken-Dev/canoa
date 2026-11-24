@@ -72,6 +72,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ("scripts.rs", "static ROOT:"),
     ("secrets/bundled.rs", "static BUNDLE:"),
     ("sources.rs", "static VERIFIED:"),
+    ("sources.rs", "static VERIFY_COPIES:"),
     // Process-wide fork/exec FD inheritance guard & detached starter handle
     ("spawn/apart.rs", "static FORK_GATE:"),
     ("spawn/apart.rs", "static PREPARE:"),

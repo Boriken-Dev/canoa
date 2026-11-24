@@ -120,7 +120,8 @@ type Stamp = (
 );
 
 /// Whether the functions that look a program up with no configuration to hand read every file of a copy: `[host.store]
-/// verify_copies`, set where the host binds. Off until then.
+/// verify_copies`, set where the host binds. Process-wide because those lookups (from `spawn.rs`, the harness start, `shells::here` and the
+/// `set_program_dirs` fn pointer the harness takes) have no configuration to read it from. Off until then.
 static VERIFY_COPIES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Sets what [`copies_verified`] answers, from `[host.store] verify_copies`.
