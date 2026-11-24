@@ -8,6 +8,7 @@ import '../extension/tab_bridge.dart';
 import '../extension/tab_owner_banner.dart';
 import '../extension/tab_shares.dart';
 import '../theme/look.dart';
+import 'item_windows.dart' show WindowFrame;
 import '../chat/reply_voice.dart';
 import '../voice/reply_speaker.dart';
 import 'platform.dart' as platform;
@@ -42,7 +43,11 @@ Future<void> runPopout(PopoutLaunch launch, {ChatViewLink? link}) async {
 
 /// The app of a pop-out window: Canoa's look around one conversation.
 class PopoutApp extends StatelessWidget {
-  const PopoutApp({super.key, required this.launch, this.conversation, this.problem, this.onClose, this.banner, this.renderers = chat.ChatRenderers.none, this.speaker});
+  const PopoutApp({super.key, required this.launch, this.conversation, this.problem, this.onClose, this.banner, this.renderers = chat.ChatRenderers.none, this.speaker, this.frame});
+
+  /// Puts the window's content under the main window's theme and words, for a window of the app's own engine; null draws the look
+  /// the launch names, which is all a window that is another page has.
+  final WindowFrame? frame;
 
   final PopoutLaunch launch;
 
@@ -65,6 +70,21 @@ class PopoutApp extends StatelessWidget {
     final look = LookId.named(launch.look) ?? LookId.canoa;
     final density = chat.ChatDensity.named(launch.density) ?? chat.ChatDensity.normal;
     void close() => onClose != null ? onClose!() : unawaited(platform.closePopoutWindow());
+    final shown = conversation;
+    if (frame != null && shown != null) {
+      return Builder(
+        builder: (context) => frame!(
+          context,
+          PopoutChat(
+            conversation: shown,
+            onDock: close,
+            banner: banner,
+            renderers: speaker == null ? renderers : replyRenderers(speaker!).merge(renderers),
+            speaker: speaker,
+          ),
+        ),
+      );
+    }
     return MaterialApp(
       title: '${launch.title} - Canoa',
       debugShowCheckedModeBanner: false,

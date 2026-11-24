@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../popout/item_windows.dart' show ItemWindows;
 import '../session_store.dart';
 import '../usage/spend_model.dart' show SpendRow;
 import 'layout_state.dart' show ShellLayout;
@@ -256,6 +257,7 @@ class SurfaceEnvironment extends InheritedWidget {
     this.onAttachText,
     this.onOpenInFiles,
     this.onOpenSurface,
+    this.windows,
     this.openShells = 0,
     this.runningShells = 0,
     required super.child,
@@ -269,6 +271,9 @@ class SurfaceEnvironment extends InheritedWidget {
 
   /// Opens another surface by id (`terminal`, `subagents`, `details`); null where there is no panel to open it in.
   final ValueChanged<String>? onOpenSurface;
+
+  /// Where a surface opens one of its things in a window of its own; null where there are no windows to draw in.
+  final ItemWindows? windows;
 
   /// How many interactive shells are open for the session, and how many of them are running.
   final int openShells, runningShells;

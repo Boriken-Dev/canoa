@@ -10,7 +10,7 @@
   "lib/chat/context_pill.dart": 2,
   "lib/chat/conversation_export.dart": 4,
   "lib/chat/conversation_find.dart": 4,
-  "lib/chat/conversation_view.dart": 10,
+  "lib/chat/conversation_view.dart": 9,
   "lib/chat/delegate_dialog.dart": 31,
   "lib/chat/delegation_row.dart": 5,
   "lib/chat/delegation_setup_dialog.dart": 13,

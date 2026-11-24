@@ -111,6 +111,8 @@ Future<List<CanoaConfig>> pumpApp(
   // The app asks the host for choices as it does where nothing stands in for it.
   bool hostChoices = false,
   PopoutWindows? popoutWindows,
+  // What the app's root goes through, as the platform's windows are drawn beside it.
+  Widget Function(Widget app)? around,
   AccountsHost? accountsHost,
   AgentMoves? agentMoves,
   ServedApp? served,
@@ -140,7 +142,7 @@ Future<List<CanoaConfig>> pumpApp(
   addTearDown(() => home.deleteSync(recursive: true));
   final written = <CanoaConfig>[];
   if (openIn && !workspaceOpener.canOpen) workspaceOpener = await OpenHost().opener();
-  await tester.pumpWidget(CanoaApp(
+  final app = CanoaApp(
     home: profileHome,
     hostFolders: hostFolders ?? ScratchHost(documents ?? home.path, template: config.sessions.workspace),
     store: store,
@@ -182,7 +184,8 @@ Future<List<CanoaConfig>> pumpApp(
     speechCapture: capture,
     voiceOutputs: voiceOutputs,
     pcmPlayer: pcmPlayer,
-  ));
+  );
+  await tester.pumpWidget(around == null ? app : around(app));
   await tester.pumpAndSettle();
   return written;
 }

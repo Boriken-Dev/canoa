@@ -11,6 +11,7 @@ import '../files/viewers/file_viewer.dart';
 import '../files/viewers/standard_viewers.dart';
 import '../files/viewers/text_viewer.dart' show visibleText;
 import '../l10n/app_text.dart';
+import '../popout/item_windows.dart';
 import '../served/host_files.dart';
 import '../session_store.dart';
 import '../shell/surface.dart';
@@ -63,15 +64,39 @@ class FilesSurface extends WorkSurface {
     if (root == null || files == null) return const Center(child: Text('This host\'s files cannot be reached from here.'));
     // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
     final here = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target != null;
-    return FilesPanel(
+    final windows = SurfaceEnvironment.maybeOf(context)?.windows;
+    Widget panel({FileReveal? reveal, ValueChanged<String>? onOpenWindow}) => FilesPanel(
       files: files,
       root: root,
       opener: here ? workspaceOpener : null,
-      reveal: controller.data[revealKey] as FileReveal?,
+      reveal: reveal,
       canWrite: canWrite?.call() ?? true,
       viewers: viewers,
+      onOpenWindow: onOpenWindow,
+    );
+    return panel(
+      reveal: controller.data[revealKey] as FileReveal?,
+      onOpenWindow: windows == null || !windows.available
+          ? null
+          : (path) {
+              // One request, shown once: a new object each time the window is drawn would show the file again.
+              final reveal = FileReveal(path);
+              unawaited(
+                showItemWindow(
+                  context,
+                  windows,
+                  key: windowKey(session, path),
+                  session: session.id,
+                  title: path.substring(path.lastIndexOf(RegExp(r'[\\/]')) + 1),
+                  builder: (_) => panel(reveal: reveal),
+                ),
+              );
+            },
     );
   }
+
+  /// The key of the window that shows [path] of [session]'s workspace.
+  static String windowKey(ChatSession session, String path) => 'file:${session.id}:$path';
 }
 
 /// A request to show one file: each request is its own object, so asking for the same path again shows it again.
@@ -88,7 +113,10 @@ final class FileReveal {
 /// The panel's body: a listing of the workspace, a folder at a time, instruction files loaded for the session, and a file's
 /// preview/editor in its place.
 class FilesPanel extends StatefulWidget {
-  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal, this.canWrite = true, this.viewers});
+  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal, this.canWrite = true, this.viewers, this.onOpenWindow});
+
+  /// Opens a file in a window of its own, given its path; null where there are no windows, which leaves the button out.
+  final ValueChanged<String>? onOpenWindow;
 
   /// The viewers a file can be shown with, and the person's choice among them; null gives the panel its own set of the app's.
   final ViewerRegistry? viewers;
@@ -527,6 +555,13 @@ class _FilesPanelState extends State<FilesPanel> {
                       onPressed: () => unawaited(_loadWhole(writer, file)),
                       child: const Text('Load all to edit'),
                     ),
+                if (widget.onOpenWindow != null)
+                  IconButton(
+                    key: const ValueKey('files window'),
+                    tooltip: context.t('window.open'),
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    onPressed: () => widget.onOpenWindow!(file.path),
+                  ),
                 ..._actions(context, file.path),
                 if (_fileProblem == null) Text(sizeText(file.size), style: muted),
               ],

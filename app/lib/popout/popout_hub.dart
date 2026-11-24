@@ -8,6 +8,7 @@ import '../chat/reply_voice.dart' show followReplies;
 import '../extension/tab_shares.dart' show sessionKeyOf;
 import '../session_store.dart';
 import '../voice/reply_reader.dart';
+import 'item_windows.dart' show WindowFrame;
 import 'popout_app.dart';
 import 'popout_conversation.dart';
 import 'popout_launch.dart';
@@ -57,6 +58,7 @@ class PopoutHub extends ChangeNotifier {
     this.shareInterval = const Duration(milliseconds: 80),
     this.reader,
     this.onVoiceMode,
+    this.frame,
   }) {
     store.addListener(_storeChanged);
   }
@@ -66,6 +68,9 @@ class PopoutHub extends ChangeNotifier {
 
   /// Told when a window turns voice mode on or off, to keep the choice.
   final ValueChanged<bool>? onVoiceMode;
+
+  /// Gives a window of this engine the app's theme and words; null where the window draws its own.
+  final WindowFrame? frame;
 
   final SessionStore store;
   final PopoutWindows windows;
@@ -136,6 +141,7 @@ class PopoutHub extends ChangeNotifier {
     launch: PopoutLaunch(link: popped.window.id, title: popped.window.title, look: look, density: density),
     conversation: popped.live!,
     speaker: popped.speaker,
+    frame: frame,
     onClose: () => unawaited(popped.window.close()),
   );
 

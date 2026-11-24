@@ -11,6 +11,7 @@ import '../chat/delegation_setup_dialog.dart';
 import '../chat/inspector.dart' show changeTotals;
 import '../chat/palette.dart';
 import '../ledger/session_ledger.dart';
+import '../popout/item_windows.dart';
 import '../popout/popout_hub.dart';
 import '../rail/session_groups.dart';
 import '../selectable.dart';
@@ -42,6 +43,9 @@ final class ConversationHandle {
 
   /// The conversations shown in a window of their own; set by the app.
   PopoutHub? popout;
+
+  /// Where a file's viewer or a terminal opens in a window of its own; set by the app.
+  ItemWindows? windows;
 }
 
 List<PaletteItem> _closedLedgerItems(

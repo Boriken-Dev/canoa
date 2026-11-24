@@ -446,12 +446,23 @@ class TerminalWorkspace extends ChangeNotifier {
   int _made = 0;
   bool _released = false;
   bool _focusWished = false;
+  bool _inWindow = false;
 
   /// How many shells each tab had running when listeners were last told.
   List<int> _told = const [];
 
   /// The most shells open at once in one conversation; the host holds 8 to a link.
   static const limit = 8;
+
+  /// Whether the screens are drawn in a window of their own, which then holds the keyboard; the panel shows where they went. The
+  /// shells are the host's and go on whatever draws them.
+  bool get inWindow => _inWindow;
+
+  set inWindow(bool value) {
+    if (_inWindow == value) return;
+    _inWindow = value;
+    notifyListeners();
+  }
 
   int get shells => [for (final tab in tabs) ...tab.panes].length;
   int get runningShells => tabs.fold(0, (sum, tab) => sum + tab.runningCount);

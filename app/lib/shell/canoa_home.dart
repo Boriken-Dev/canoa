@@ -122,6 +122,7 @@ class CanoaHome extends StatelessWidget {
     },
     onSearch: () => unawaited(_palette(context, sessionsOnly: true)),
     onClose: conversation.close ?? store.close,
+    onOpenWindow: conversation.popout?.available ?? false ? conversation.popout!.popOut : null,
   );
 
   Future<void> _palette(BuildContext context, {bool sessionsOnly = false}) => showAppPalette(

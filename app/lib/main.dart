@@ -95,6 +95,7 @@ import 'ledger/running_sessions.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/host_paths.dart';
 import 'permissions/permission_rules.dart';
+import 'popout/item_windows.dart';
 import 'popout/platform.dart' as popout_platform;
 import 'popout/popout_app.dart';
 import 'popout/popout_hub.dart';
@@ -1073,7 +1074,33 @@ class _CanoaAppState extends State<CanoaApp> {
   final ValueNotifier<SessionGrouping> _grouping = ValueNotifier(SessionGrouping.status);
 
   /// The conversations shown in a window of their own.
-  late final PopoutHub _popout = PopoutHub(store, widget.popoutWindows ?? popout_platform.createPopoutWindows(), reader: _reader, onVoiceMode: _voiceModeChanged);
+  late final PopoutWindows _windows = widget.popoutWindows ?? popout_platform.createPopoutWindows();
+  late final PopoutHub _popout = PopoutHub(store, _windows, reader: _reader, onVoiceMode: _voiceModeChanged, frame: _windowFrame);
+
+  /// The files and terminals shown in a window of their own.
+  late final ItemWindows _itemWindows = ItemWindows(_windows, store: store, frame: _windowFrame);
+
+  /// Tells the windows of this engine, which are drawn beside the app and not under it, that the look or the language changed.
+  final _windowStyle = ValueNotifier<int>(0);
+  Object? _windowStyleShown;
+
+  /// [home] under the main window's own theme and words, as a window of this engine draws it: the same look, brightness, density
+  /// and language, followed as they change.
+  Widget _windowFrame(BuildContext context, Widget home) => ListenableBuilder(
+    listenable: Listenable.merge([_windowStyle, vendorLooks, providerCatalog, store, _layout]),
+    builder: (_, _) {
+      final family = config.followProvider ? _familyShown() : config.look;
+      return MaterialApp(
+        title: Brand.name,
+        debugShowCheckedModeBanner: false,
+        builder: (context, child) => AppTextHost(language: config.language.isEmpty ? null : config.language, child: child ?? const SizedBox.shrink()),
+        theme: _theme(family, Brightness.light),
+        darkTheme: _theme(family, Brightness.dark),
+        themeMode: config.themeMode,
+        home: home,
+      );
+    },
+  );
 
   /// This state sits above the app's Navigator, so its dialogs open in the Navigator's context.
   final _navigator = GlobalKey<NavigatorState>();
@@ -3094,6 +3121,7 @@ class _CanoaAppState extends State<CanoaApp> {
       ..imported = _importedFor
       ..showImported = _showImported;
     _conversation.popout = _popout;
+    _conversation.windows = _itemWindows;
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
     store.addListener(_showWaiting);
@@ -3166,6 +3194,8 @@ class _CanoaAppState extends State<CanoaApp> {
     _loadoutsSelection.dispose();
     _start.dispose();
     _popout.dispose();
+    _itemWindows.dispose();
+    _windowStyle.dispose();
     unawaited(_paneRelations?.cancel());
     _pane?.dispose();
     if (_ownsRelations) (_relations as ChangeNotifier).dispose();
@@ -3436,6 +3466,15 @@ class _CanoaAppState extends State<CanoaApp> {
     _popout
       ..look = config.look.name
       ..density = config.density.name;
+    _itemWindows
+      ..look = config.look.name
+      ..density = config.density.name;
+    final style = (config.look, config.density, config.language, config.themeMode, config.followProvider);
+    if (_windowStyleShown != null && _windowStyleShown != style) {
+      // The windows are not built by this state, so they are told once this frame is over.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _windowStyle.value++);
+    }
+    _windowStyleShown = style;
     return ListenableBuilder(
       listenable: Listenable.merge([vendorLooks, providerCatalog]),
       builder: (_, _) => config.followProvider

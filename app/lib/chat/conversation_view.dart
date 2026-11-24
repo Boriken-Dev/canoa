@@ -10,6 +10,7 @@ import '../acp/client.dart' show AcpSessionInfo;
 import '../desktop/control_client.dart' show hostWords;
 import '../highlight/highlighted.dart' show highlightRenderers;
 import '../history/session_import.dart' show earlierPage;
+import '../l10n/app_text.dart';
 import '../profile/report.dart';
 import '../rail/session_groups.dart' show rowStateOf;
 import '../selectable.dart';
@@ -303,10 +304,11 @@ class _ConversationViewState extends State<ConversationView> {
 
   Future<void> _popOut(ChatSession session) async {
     final messenger = ScaffoldMessenger.of(context);
+    final text = AppText.of(context);
     try {
       await widget.handle.popout!.popOut(session);
     } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text('Could not open a window: ${hostWords(error)}')));
+      messenger.showSnackBar(SnackBar(content: Text(text('window.failed', {'why': hostWords(error)}))));
     }
   }
 
@@ -331,9 +333,9 @@ class _ConversationViewState extends State<ConversationView> {
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
       if (session != null && (!widget.narrow || Uri.base.queryParameters['view'] == 'panel') && !session.isDraft && (widget.handle.popout?.available ?? false))
         if (widget.handle.popout!.isPoppedOut(session))
-          ('Bring back from its own window', Icons.close_fullscreen, () => unawaited(widget.handle.popout!.dockBack(session)))
+          (context.t('window.bring_back'), Icons.close_fullscreen, () => unawaited(widget.handle.popout!.dockBack(session)))
         else
-          ('Open in its own window', Icons.open_in_new, () => unawaited(_popOut(session))),
+          (context.t('window.open'), Icons.open_in_new, () => unawaited(_popOut(session))),
       if (!widget.chatOnly) ?_workspaceEntry(session),
       if (widget.chatOnly && widget.onOpenFullApp != null) ('Open the full app', Icons.open_in_new, widget.onOpenFullApp!),
       if (session?.profile case final report?)
@@ -515,6 +517,7 @@ class _ConversationViewState extends State<ConversationView> {
             onAttachText: widget.store.canAttach(session) ? (name, text) => _attachText(session, name, text) : null,
             onOpenInFiles: _filesSurface(session) == null ? null : (path) => _openInFiles(session, path),
             onOpenSurface: (id) => _openSurface(session, id),
+            windows: widget.handle.windows,
             openShells: workspace?.shells ?? 0,
             runningShells: workspace?.runningShells ?? 0,
             onOpenChild: () {

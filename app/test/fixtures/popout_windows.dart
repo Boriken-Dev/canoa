@@ -65,11 +65,17 @@ final class FakeWindow implements PopoutWindow {
 /// The platform's windows as a test has them. With [sameEngine] a window draws what the app gives it, as the platform's own windows
 /// do; without, it is another page, linked in memory.
 final class FakeWindows extends WindowList {
-  FakeWindows({this.available = true, this.sameEngine = false});
+  FakeWindows({this.available = true, this.sameEngine = false, this.draw = false});
 
   @override
   final bool available;
   final bool sameEngine;
+
+  /// Whether [host] draws the windows of the engine beside the app, as the platform's root does.
+  final bool draw;
+
+  @override
+  bool get drawsWidgets => available && sameEngine;
   final opened = <FakeWindow>[];
 
   /// What [host] was asked to draw beside.
@@ -78,7 +84,18 @@ final class FakeWindows extends WindowList {
   @override
   Widget host(Widget app) {
     hosted++;
-    return app;
+    if (!draw) return app;
+    return ListenableBuilder(
+      listenable: this,
+      builder: (context, _) => Row(
+        textDirection: TextDirection.ltr,
+        children: [
+          Expanded(flex: 2, child: app),
+          for (final window in opened)
+            if (!window.isClosed && window.builder != null) Expanded(child: Builder(builder: window.builder!)),
+        ],
+      ),
+    );
   }
 
   @override

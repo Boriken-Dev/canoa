@@ -44,6 +44,10 @@ abstract interface class PopoutWindows implements Listenable {
   /// Whether this platform can open one.
   bool get available;
 
+  /// Whether a window draws a widget this engine gives it, as a file or a terminal needs; false where a window is another page or
+  /// engine that only shows a conversation it is linked to.
+  bool get drawsWidgets;
+
   /// The windows open now, oldest first.
   List<PopoutWindow> get windows;
 
@@ -71,6 +75,9 @@ abstract class WindowList extends ChangeNotifier implements PopoutWindows {
 
   @override
   List<PopoutWindow> get windows => List.unmodifiable(_windows);
+
+  @override
+  bool get drawsWidgets => false;
 
   @override
   Widget host(Widget app) => app;

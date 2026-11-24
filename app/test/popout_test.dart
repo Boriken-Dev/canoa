@@ -211,7 +211,7 @@ void main() {
     final windows = FakeWindows();
     await pumpApp(tester, store, popoutWindows: windows);
 
-    await tester.tap(find.byTooltip('Open in its own window'));
+    await tester.tap(find.byTooltip('Open in new window'));
     await tester.pump();
     await tester.pump();
     expect(windows.opened, hasLength(1));
@@ -220,7 +220,7 @@ void main() {
     await tester.tap(find.byTooltip('Bring back from its own window'));
     await _settle(tester);
     expect(windows.opened.single.isClosed, isTrue);
-    expect(find.byTooltip('Open in its own window'), findsOneWidget);
+    expect(find.byTooltip('Open in new window'), findsOneWidget);
     expect(session.status, SessionStatus.connected);
   });
 
@@ -229,6 +229,6 @@ void main() {
     final agent = ScriptedAgent();
     await tester.runAsync(() => agent.start(store));
     await pumpApp(tester, store, popoutWindows: NoPopoutWindows());
-    expect(find.byTooltip('Open in its own window'), findsNothing);
+    expect(find.byTooltip('Open in new window'), findsNothing);
   });
 }

@@ -2,16 +2,20 @@
 // no second attachment and no copy, and what either window does is one change that both show.
 import 'dart:async';
 
+import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/l10n/app_text.dart';
 import 'package:canoa/popout/popout_hub.dart';
+import 'package:canoa/popout/popout_view.dart' show PopoutChat;
 import 'package:canoa/session_store.dart';
 import 'package:canoa/voice/reply_reader.dart';
 import 'package:canoa/voice/speech_output.dart' show SpeakChoices;
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show Settlement;
-import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show PermissionCard;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, PermissionCard;
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryButton;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
-import 'fixtures/app_fixture.dart' show pumpApp;
+import 'fixtures/app_fixture.dart' show pumpApp, scripted;
 import 'fixtures/fake_voice.dart';
 import 'fixtures/popout_windows.dart';
 import 'fixtures/scripted_agent.dart';
@@ -196,7 +200,7 @@ void main() {
     final windows = FakeWindows(sameEngine: true);
     await pumpApp(tester, store, popoutWindows: windows);
 
-    await tester.tap(find.byTooltip('Open in its own window'));
+    await tester.tap(find.byTooltip('Open in new window'));
     await tester.pump();
     await tester.pump();
     expect(windows.opened, hasLength(1));
@@ -205,8 +209,45 @@ void main() {
     await tester.tap(find.byTooltip('Bring back from its own window'));
     await _settle(tester);
     expect(windows.opened.single.isClosed, isTrue);
-    expect(find.byTooltip('Open in its own window'), findsOneWidget);
+    expect(find.byTooltip('Open in new window'), findsOneWidget);
     expect(session.status, SessionStatus.connected);
+  });
+
+  testWidgets('the session list opens several sessions in windows at once, each in the app language, and again brings one forward', (tester) async {
+    final store = SessionStore();
+    final first = await tester.runAsync(() => ScriptedAgent().start(store)) as ChatSession;
+    final second = await tester.runAsync(() => ScriptedAgent().start(store)) as ChatSession;
+    second.title = 'Second';
+    final windows = FakeWindows(sameEngine: true, draw: true);
+    await pumpApp(
+      tester,
+      store,
+      popoutWindows: windows,
+      around: windows.host,
+      size: const Size(2000, 900),
+      config: const CanoaConfig(agents: [scripted], density: ChatDensity.verbose, language: 'es'),
+    );
+
+    Future<void> openFromList(String title) async {
+      final click = await tester.createGesture(kind: PointerDeviceKind.mouse, buttons: kSecondaryButton);
+      await click.down(tester.getCenter(find.ancestor(of: find.text(title), matching: find.byType(ListTile)).first));
+      await click.up();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Abrir en una ventana nueva'));
+      await _settle(tester);
+    }
+
+    await openFromList(first.title);
+    await openFromList('Second');
+    expect(windows.opened.map((w) => w.title), [first.title, 'Second']);
+    expect(find.byType(PopoutChat), findsNWidgets(2), reason: 'both are on screen at once, each with its composer');
+    final words = AppText.of(tester.element(find.byType(PopoutChat).first));
+    expect(words.language, 'es', reason: 'a window reads in the language the main window does');
+
+    await openFromList(first.title);
+    expect(windows.opened, hasLength(2), reason: 'the session is out already');
+    expect(windows.opened.first.focused, 1);
+    expect(windows.opened.last.focused, 0);
   });
 
   testWidgets('two conversations are out at once, each in its own window, and each window shows its own', (tester) async {

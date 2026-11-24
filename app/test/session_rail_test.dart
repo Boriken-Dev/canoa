@@ -33,7 +33,7 @@ ChatSession _starting(SessionStore store, String title, {String? cwd}) => store.
 
 /// The rail in a column [width] wide, with a clock that stands still. Nothing here starts an agent.
 Future<List<String>> _show(WidgetTester tester, SessionStore store,
-    {double width = 260, double height = 800, List<String>? closed, Brightness brightness = Brightness.dark, bool unfold = false}) async {
+    {double width = 260, double height = 800, List<String>? closed, Brightness brightness = Brightness.dark, bool unfold = false, Future<void> Function(ChatSession)? onOpenWindow}) async {
   await tester.binding.setSurfaceSize(Size(width, height));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final asked = closed ?? <String>[];
@@ -46,6 +46,7 @@ Future<List<String>> _show(WidgetTester tester, SessionStore store,
         onNewSession: () => asked.add('new'),
         onSearch: () => asked.add('search'),
         onClose: (session) async => asked.add('close ${session.title}'),
+        onOpenWindow: onOpenWindow,
         now: () => _now,
         touch: false,
       ),
@@ -397,6 +398,42 @@ void main() {
         final item = find.ancestor(of: find.text(label), matching: find.byType(MenuItemButton)).first;
         expect(find.descendant(of: item, matching: find.text(key)), findsOneWidget, reason: '$label has the key $key');
       }
+      store.dispose();
+    });
+
+    testWidgets('where windows exist the menu also opens a session in a new window, with W, and says so when it cannot', (tester) async {
+      final store = SessionStore();
+      final first = _open(store, 'First');
+      store.select(first.id);
+      final asked = <String>[];
+      var refuse = false;
+      await _show(tester, store, onOpenWindow: (session) async {
+        asked.add(session.title);
+        if (refuse) throw StateError('no window for it');
+      });
+      await _openMenu(tester, 'First');
+      final item = find.ancestor(of: find.text('Open in new window'), matching: find.byType(MenuItemButton)).first;
+      expect(find.descendant(of: item, matching: find.text('W')), findsOneWidget);
+      await tester.tap(find.text('Open in new window'));
+      await tester.pumpAndSettle();
+      expect(asked, ['First']);
+
+      refuse = true;
+      await _openMenu(tester, 'First');
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+      await tester.pumpAndSettle();
+      expect(asked, ['First', 'First']);
+      expect(find.text('Could not open a window: no window for it'), findsOneWidget);
+      store.dispose();
+    });
+
+    testWidgets('with no windows the menu has no such entry', (tester) async {
+      final store = SessionStore();
+      final first = _open(store, 'First');
+      store.select(first.id);
+      await _show(tester, store);
+      await _openMenu(tester, 'First');
+      expect(find.text('Open in new window'), findsNothing);
       store.dispose();
     });
 

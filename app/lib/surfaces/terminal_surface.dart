@@ -4,6 +4,8 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:xterm2/xterm.dart';
 
+import '../l10n/app_text.dart';
+import '../popout/item_windows.dart';
 import '../session_store.dart';
 import '../shell/surface.dart';
 import '../theme/look.dart';
@@ -83,6 +85,40 @@ class TerminalSurface extends WorkSurface {
     return null;
   }
 
+  /// The key of the window that shows [session]'s shells.
+  static String windowKey(ChatSession session) => 'terminal:${session.id}';
+
+  /// Shows [session]'s shells in a window of their own, or brings that window forward. The shells stay the surface's: the window is
+  /// another place to draw them, and closing it leaves them running, while closing the surface ends them and closes the window.
+  Future<void> openInWindow(BuildContext context, ChatSession session, SurfaceController controller) async {
+    final env = SurfaceEnvironment.maybeOf(context);
+    final windows = env?.windows;
+    final workspace = workspaceFor(controller, session);
+    if (env == null || windows == null || workspace == null) return;
+    final key = windowKey(session);
+    // Ending the shells ends their window.
+    if (controller.data['window release'] == null) {
+      controller.data['window release'] = true;
+      controller.onRelease(() => windows.close(key));
+    }
+    workspace.inWindow = true;
+    await showItemWindow(
+      context,
+      windows,
+      key: key,
+      session: session.id,
+      title: _windowTitle(workspace, session),
+      titleOf: () => _windowTitle(workspace, session),
+      changes: Listenable.merge([workspace, env.store]),
+      builder: (_) => TerminalPanel(workspace: workspace, window: true, focusOnMount: true),
+      onClosed: () => workspace.inWindow = false,
+    );
+    // A window that could not open leaves the screens where they were.
+    if (!windows.isOpen(key)) workspace.inWindow = false;
+  }
+
+  static String _windowTitle(TerminalWorkspace workspace, ChatSession session) => '${workspace.active?.name ?? 'Terminal'}: ${session.title}';
+
   /// The shells are the panel's own tabs, so the panel has one tab bar and the shells have none of their own.
   @override
   List<SurfaceTab> tabs(ChatSession session, SurfaceController controller) {
@@ -119,10 +155,16 @@ class TerminalSurface extends WorkSurface {
     final tab = workspace?.active;
     if (workspace == null || tab == null) return const [];
     final pane = workspace.focused;
-    final attach = SurfaceEnvironment.maybeOf(context)?.onAttachText;
+    final env = SurfaceEnvironment.maybeOf(context);
+    final attach = env?.onAttachText;
     return [
       SurfaceAction(id: 'split', label: 'Split: a second shell beside this one', enabled: tab.panes.length < 2 && !workspace.full, run: (_) => workspace.split(tab)),
       SurfaceAction(id: 'rename', label: 'Rename the tab', run: (context) => unawaited(renameTerminalTab(context, workspace, tab))),
+      if (env?.windows case final windows? when windows.available)
+        if (workspace.inWindow)
+          SurfaceAction(id: 'window', label: context.t('window.terminal_back'), run: (_) => unawaited(windows.close(windowKey(session))))
+        else
+          SurfaceAction(id: 'window', label: context.t('window.open'), run: (context) => unawaited(openInWindow(context, session, controller))),
       if (pane != null) ...[
         SurfaceAction(id: 'copy', label: 'Copy the selected text', enabled: pane.selection != null, run: (context) => unawaited(copyFromTerminal(context, pane))),
         SurfaceAction(id: 'paste', label: 'Paste into the shell', run: (context) => unawaited(pasteIntoTerminal(context, pane))),
@@ -189,7 +231,8 @@ class TerminalSurface extends WorkSurface {
     }
     final workspace = workspaceFor(controller, session);
     if (workspace == null) return const Center(child: Text('This host offers no terminal.'));
-    return TerminalPanel(workspace: workspace, showToolbar: false);
+    final windows = SurfaceEnvironment.maybeOf(context)?.windows;
+    return TerminalPanel(workspace: workspace, showToolbar: false, onBringBack: windows == null ? null : () => unawaited(windows.close(windowKey(session))));
   }
 }
 
@@ -218,7 +261,14 @@ const terminalTextStyle = TerminalStyle(
 /// The terminal's tabs and screens. The shell the person chose (a new one, a split, another tab), and the panel when it is brought
 /// in front, take the keyboard.
 class TerminalPanel extends StatefulWidget {
-  const TerminalPanel({super.key, required this.workspace, this.onAttachText, this.showToolbar = true, this.focusOnMount = false});
+  const TerminalPanel({super.key, required this.workspace, this.onAttachText, this.showToolbar = true, this.focusOnMount = false, this.window = false, this.onBringBack});
+
+  /// Whether this is the panel of the window the shells were opened in, which draws them while [TerminalWorkspace.inWindow]; any
+  /// other panel says where they are instead.
+  final bool window;
+
+  /// Brings the shells back from their window; null leaves the note without the button.
+  final VoidCallback? onBringBack;
 
   final TerminalWorkspace workspace;
   final void Function(String name, String text)? onAttachText;
@@ -387,11 +437,25 @@ class _TerminalPanelState extends State<TerminalPanel> {
     );
   }
 
+  Widget _elsewhere(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(context.t('window.terminal_here'), key: const ValueKey('terminal in window'), textAlign: TextAlign.center),
+        if (widget.onBringBack != null) ...[
+          const SizedBox(height: 12),
+          FilledButton(key: const ValueKey('terminal bring back'), onPressed: widget.onBringBack, child: Text(context.t('window.terminal_back'))),
+        ],
+      ]),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: workspace,
     builder: (context, _) {
       final active = workspace.active;
+      if (workspace.inWindow && !widget.window) return _elsewhere(context);
       if (workspace.takeFocusWish()) _takeKeyboard();
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (widget.showToolbar) ...[_toolbar(context), const Divider(height: 1)],

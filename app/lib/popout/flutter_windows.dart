@@ -113,6 +113,9 @@ final class FlutterWindows extends WindowList {
   bool get available => isWindowingEnabled && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   @override
+  bool get drawsWidgets => available;
+
+  @override
   Future<PopoutWindow> open({
     required String title,
     required String look,

@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatf
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import '../desktop/control_client.dart' show hostWords;
+import '../l10n/app_text.dart';
 import '../ledger/ledger_list.dart';
 import '../ledger/running_sessions.dart';
 import '../ledger/session_ledger.dart';
@@ -25,6 +27,7 @@ class SessionRail extends StatefulWidget {
     required this.onNewSession,
     required this.onSearch,
     required this.onClose,
+    this.onOpenWindow,
     this.onReopen,
     this.running,
     this.onAttach,
@@ -43,6 +46,9 @@ class SessionRail extends StatefulWidget {
 
   /// Ends a conversation here, asking first about anything it made.
   final Future<void> Function(ChatSession) onClose;
+
+  /// Opens a conversation in a window of its own, or brings its window forward; null where this platform has none.
+  final Future<void> Function(ChatSession)? onOpenWindow;
   final Future<void> Function(LedgerEntry)? onReopen;
 
   /// The sessions the host keeps running for several clients, listed above the earlier ones, and what joins one.
@@ -86,6 +92,16 @@ class _SessionRailState extends State<SessionRail> {
 
   void _closeDrawer(BuildContext context) {
     if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) Navigator.pop(context);
+  }
+
+  Future<void> _openWindow(BuildContext context, ChatSession session) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final text = AppText.of(context);
+    try {
+      await widget.onOpenWindow!(session);
+    } on Object catch (error) {
+      messenger?.showSnackBar(SnackBar(content: Text(text('window.failed', {'why': hostWords(error)}))));
+    }
   }
 
   Future<void> _rename(BuildContext context, ChatSession session) async {
@@ -197,6 +213,7 @@ class _SessionRailState extends State<SessionRail> {
                   _closeDrawer(context);
                 },
                 onClose: () => unawaited(widget.onClose(session)),
+                onOpenWindow: widget.onOpenWindow == null || session.isDraft ? null : () => unawaited(_openWindow(context, session)),
               ),
         ],
         if (store.ledger != null) LedgerList(ledger: store.ledger!, store: store, onReopen: widget.onReopen, running: widget.running, onAttach: widget.onAttach),
@@ -323,6 +340,7 @@ class _SessionRow extends StatefulWidget {
     required this.onRename,
     required this.onFork,
     required this.onClose,
+    this.onOpenWindow,
   });
 
   final SessionStore store;
@@ -331,6 +349,9 @@ class _SessionRow extends StatefulWidget {
   final DateTime now;
   final bool touch;
   final VoidCallback onOpen, onRename, onFork, onClose;
+
+  /// Null where the session cannot be shown in a window of its own.
+  final VoidCallback? onOpenWindow;
 
   @override
   State<_SessionRow> createState() => _SessionRowState();
@@ -355,6 +376,7 @@ class _SessionRowState extends State<_SessionRow> {
         const SingleActivator(LogicalKeyboardKey.keyP), () => widget.store.setPinned(session, !session.pinned)),
       ('Rename', Icons.edit_outlined, const SingleActivator(LogicalKeyboardKey.keyR), widget.onRename),
       ('New session like this', Icons.call_split, const SingleActivator(LogicalKeyboardKey.keyF), widget.onFork),
+      if (widget.onOpenWindow != null) (context.t('window.open'), Icons.open_in_new, const SingleActivator(LogicalKeyboardKey.keyW), widget.onOpenWindow!),
       (session.archived ? 'Unarchive' : 'Archive', Icons.inventory_2_outlined,
         const SingleActivator(LogicalKeyboardKey.keyA), () => widget.store.setArchived(session, !session.archived)),
       ('Close', Icons.close, const SingleActivator(LogicalKeyboardKey.keyC), widget.onClose),
