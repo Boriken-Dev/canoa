@@ -27,6 +27,8 @@ import '../served/portal_session.dart';
 import 'overlay_sections.dart';
 import 'sign_in_section.dart';
 import 'extension_settings.dart';
+import 'provider_switches.dart';
+import '../store/catalog_sources.dart';
 import 'host_sections.dart';
 import 'shell_settings.dart';
 import 'setting_layers.dart';
@@ -82,6 +84,8 @@ class SettingsPage extends StatefulWidget {
     this.accounts,
     this.mail,
     this.extensions,
+    this.providers,
+    this.catalogSources,
     this.shells,
     this.usageSection = false,
     this.voiceBackends = const [],
@@ -144,6 +148,14 @@ class SettingsPage extends StatefulWidget {
 
   /// The store extensions the host loads, for the Extensions section; none where the key may not change the host's settings.
   final ExtensionSettings? extensions;
+
+  /// The providers the libraries register, each with a switch, for the Providers section; none where the key may not change the
+  /// host's settings.
+  final ProviderSwitches? providers;
+
+  /// The catalogs of every Store type, with where each comes from and how far it is trusted, for the Catalog sources section; none
+  /// where the app has no host.
+  final CatalogSources? catalogSources;
 
   /// The shells the host found and the choice of which its terminals and agents use, for the Shells section; none where the key may
   /// not change the host's settings.
@@ -222,6 +234,8 @@ class SettingsPageState extends State<SettingsPage> {
     'usage': (ready: !widget.usageSection, build: () => UsageWarning(controller: controller)),
     'store': (ready: true, build: () => StoreSection(key: const Key('settings-store'), onStore: widget.onLoadout)),
     'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),
+    'catalog_sources': (ready: widget.catalogSources != null, build: () => CatalogSourcesSection(key: const Key('settings-catalog-sources'), sources: widget.catalogSources!)),
+    'providers': (ready: widget.providers != null, build: () => ProvidersSection(key: const Key('settings-providers'), switches: widget.providers!)),
     'signin': (ready: widget.portal != null, build: () => SignInSection(key: const Key('settings-signin'), portal: widget.portal!)),
     'about': (ready: true, build: () => AboutSection(version: widget.version)),
   };

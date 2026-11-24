@@ -6,8 +6,10 @@ import 'package:canoa/mail/mail_accounts.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/profile/profile_home.dart';
 import 'package:canoa/settings/host_sections.dart';
+import 'package:canoa/settings/provider_switches.dart';
 import 'package:canoa/settings/settings_page.dart';
 import 'package:canoa/sources/sources.dart';
+import 'package:canoa/store/catalog_sources.dart';
 import 'package:canoa/store/programs.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:canoa/voice/host_speech.dart';
@@ -54,6 +56,8 @@ Future<SettingsHarness> openSettings(
   ReplyReader? reader,
   HostSections? hostSections,
   PortalSession? portal,
+  ProviderSwitches? providers,
+  CatalogSources? catalogSources,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -88,6 +92,8 @@ Future<SettingsHarness> openSettings(
       reader: reader,
       hostSections: hostSections ?? builtInSections(),
       portal: portal,
+      providers: providers,
+      catalogSources: catalogSources,
     ),
   ));
   await tester.pumpAndSettle();

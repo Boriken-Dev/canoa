@@ -189,6 +189,32 @@ const builtInSectionsListing = r'''
       "form": null
     },
     {
+      "id": "catalog_sources",
+      "title": "Catalog sources",
+      "help": null,
+      "icon": "hub",
+      "group": "Store",
+      "under": null,
+      "keywords": "catalogs sources models releases default replace add off pin trust verified pinned unverified checksum digest mirror",
+      "origin": "built-in",
+      "stored": "config",
+      "schema": null,
+      "form": null
+    },
+    {
+      "id": "providers",
+      "title": "Providers",
+      "help": null,
+      "icon": "wrench",
+      "group": "Store",
+      "under": null,
+      "keywords": "providers libraries kinds account harness vendor off disable switch turn disabled host restart",
+      "origin": "built-in",
+      "stored": "config",
+      "schema": null,
+      "form": null
+    },
+    {
       "id": "about",
       "title": "About",
       "help": null,

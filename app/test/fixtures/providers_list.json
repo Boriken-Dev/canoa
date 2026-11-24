@@ -105,6 +105,7 @@
         ],
         "local": true
       },
+      "accounts_off": null,
       "source": "Claude",
       "launch": null,
       "origin": "bundled"
@@ -205,6 +206,7 @@
         ],
         "local": true
       },
+      "accounts_off": null,
       "source": "Codex",
       "launch": null,
       "origin": "bundled"
@@ -263,6 +265,7 @@
         "usage": [],
         "local": true
       },
+      "accounts_off": null,
       "source": "Antigravity",
       "launch": {
         "program": "agy",
@@ -337,6 +340,7 @@
         "usage": [],
         "local": true
       },
+      "accounts_off": null,
       "source": "Grok",
       "launch": null,
       "origin": "bundled"
@@ -401,6 +405,7 @@
         "usage": [],
         "local": true
       },
+      "accounts_off": null,
       "source": "OpenCode",
       "launch": null,
       "origin": "bundled"
@@ -468,6 +473,7 @@
         "usage": [],
         "local": true
       },
+      "accounts_off": null,
       "source": "Pi",
       "launch": null,
       "origin": "bundled"
@@ -490,6 +496,7 @@
       "imports": false,
       "markers": [],
       "accounts": null,
+      "accounts_off": null,
       "source": null,
       "launch": null,
       "origin": "bundled"

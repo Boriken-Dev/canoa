@@ -121,6 +121,7 @@ import 'secrets/provider_setup.dart';
 import 'secrets/secrets_section.dart';
 import 'secrets/secrets_index.dart';
 import 'settings/extension_settings.dart';
+import 'settings/provider_switches.dart';
 import 'settings/host_sections.dart';
 import 'shell/panel_tabs.dart';
 import 'settings/shell_settings.dart';
@@ -581,6 +582,9 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The store extensions of the host's canoa.cfg, edited in Settings where this key may change the host's own settings.
   ExtensionSettings? get _extensionSettings => _grants?.may(HostGrants.hosting) ?? false ? _services.extensionSettingsHeld : null;
 
+  /// The providers the libraries register, each with a switch, where this key may change the host's own settings.
+  ProviderSwitches? get _providerSwitches => _grants?.may(HostGrants.hosting) ?? false ? _services.providerSwitchesHeld : null;
+
   /// The shells the host found and which of them its terminals and agents use, chosen in Settings where this key may change the
   /// host's own settings.
   ShellSettings? get _shellSettings => _grants?.may(HostGrants.hosting) ?? false ? _services.shellSettingsHeld : null;
@@ -843,6 +847,8 @@ class _CanoaAppState extends State<CanoaApp> {
       accounts: _accounts,
       mail: _mail,
       extensions: _extensionSettings,
+      providers: _providerSwitches,
+      catalogSources: _services.catalogSourcesHeld,
       hostSections: _hostSections,
       portal: widget.served?.portal,
       shells: _shellSettings,

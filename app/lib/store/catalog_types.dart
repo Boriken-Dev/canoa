@@ -49,7 +49,22 @@ final class CatalogSourceForm {
 
 /// One catalog of a type as the host lists it.
 final class CatalogRow {
-  const CatalogRow({required this.label, required this.spec, this.isDefault = false, this.fixed = false, this.problem});
+  const CatalogRow({
+    required this.label,
+    required this.spec,
+    this.isDefault = false,
+    this.fixed = false,
+    this.problem,
+    this.origin = 'added',
+    this.enabled = true,
+    this.pin,
+    this.trusted = false,
+    this.ttl,
+    this.trust,
+    this.fetched,
+    this.from,
+    this.hasSnapshot = false,
+  });
 
   final String label;
   final CatalogSpec? spec;
@@ -62,6 +77,31 @@ final class CatalogRow {
 
   /// Why the host reads no catalog from the entry.
   final String? problem;
+
+  /// Where it comes from: `default` (the type's own), `replaced` (canoa.cfg's entry took a default's place) or `added`.
+  final String origin;
+
+  /// False for a default canoa.cfg turned off with `label = false`; it stays listed so it can be turned on again.
+  final bool enabled;
+
+  /// What fixes its answer (a revision, or `sha256:` and a digest), when the entry or the default says one.
+  final String? pin;
+
+  /// Whether the entry takes files that publish no checksum.
+  final bool trusted;
+
+  /// Seconds before it is read again, when the entry says.
+  final int? ttl;
+
+  /// How far its items are taken on trust: `verified`, `pinned` or `unverified`; null for a type the host reads itself.
+  final String? trust;
+
+  /// When it was last read, in milliseconds since the epoch (0 for a shipped copy), and where from: `cache` or `snapshot`.
+  final int? fetched;
+  final String? from;
+
+  /// Whether the extension ships a copy of it, which a pinned catalog answers with before it has been fetched.
+  final bool hasSnapshot;
 
   /// What to show of where it comes from.
   String get shown => spec == null ? '' : (spec!.source ?? '${spec!.provider}: ${spec!.fields.values.map((v) => v is List ? v.join(' ') : '$v').join(', ')}');
@@ -76,6 +116,7 @@ final class CatalogType {
     this.defaultLabel,
     this.defaultSpec,
     this.skillsSearchDefault,
+    this.format,
     this.rows = const [],
     this.sources = const [],
   });
@@ -92,6 +133,7 @@ final class CatalogType {
       defaultLabel: def is Map<Object?, Object?> ? def['label'] as String? : null,
       defaultSpec: def is Map<Object?, Object?> ? def['source'] as String? : null,
       skillsSearchDefault: each['skills_search'] as String?,
+      format: each['format'] as String?,
       rows: [
         for (final row in each['catalogs'] as List<Object?>? ?? const [])
           if (row is Map<Object?, Object?>)
@@ -103,6 +145,15 @@ final class CatalogType {
               isDefault: row['default'] == true,
               fixed: row['fixed'] == true,
               problem: row['problem'] as String?,
+              origin: row['origin'] is String ? row['origin'] as String : (row['default'] == true ? 'default' : 'added'),
+              enabled: row['enabled'] != false,
+              pin: row['pin'] as String?,
+              trusted: row['trusted'] == true,
+              ttl: (row['ttl'] as num?)?.toInt(),
+              trust: row['trust'] as String?,
+              fetched: (row['fetched'] as num?)?.toInt(),
+              from: row['from'] as String?,
+              hasSnapshot: row['snapshot'] == true,
             ),
       ],
       sources: [for (final source in each['sources'] as List<Object?>? ?? const []) if (source is Map<Object?, Object?>) CatalogSourceForm.fromAnswer(source)],
@@ -118,6 +169,9 @@ final class CatalogType {
 
   /// The directory address the host uses when `skills_search = true`.
   final String? skillsSearchDefault;
+
+  /// The format its catalogs answer in (`canoa.models/1`, `canoa.releases/1`); null for a type the host reads itself.
+  final String? format;
   final List<CatalogRow> rows;
 
   /// The catalog sources that serve the type, the one that reads what the type reads itself first.
