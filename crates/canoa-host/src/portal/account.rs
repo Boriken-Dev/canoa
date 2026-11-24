@@ -76,6 +76,16 @@ pub fn show(inner: &Inner, request: &Request, conn: &Conn) -> Response {
         "sign_out".to_owned(),
         serde_json::json!({"path": LOGOUT, "allowed": true}),
     );
+    // The app opens these in the address bar, below the mount the portal is served under.
+    for entry in pages.values_mut() {
+        let mounted = entry
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .map(|path| inner.mount.path(path));
+        if let Some(path) = mounted {
+            entry["path"] = path.into();
+        }
+    }
     Response::json(200, &serde_json::Value::Object(pages))
         .with("Cache-Control", "no-store".to_owned())
 }

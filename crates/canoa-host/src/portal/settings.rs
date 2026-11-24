@@ -94,6 +94,9 @@ pub struct Settings {
     /// `brand`: a `brand.json` (`name`, `icon`, `accent`, `accent_on_dark`; the icon is an SVG, its path relative to this file) whose
     /// name and mark the portal's pages carry; `accent` and `accent_on_dark` colour the mark. Unset: the build's own brand.
     pub brand: Option<PathBuf>,
+    /// `base_path`: the path the proxy serves the portal under, `/` or such as `/canoa/` (a leading and a trailing slash are added;
+    /// words of letters, digits and `-`). The proxy passes the path on as it came, and a request outside it is answered `404`.
+    pub base_path: String,
     /// `adjust_contrast`: move the accent of the pages' buttons and links, and the text of their notices, until each holds a
     /// contrast of 4.5 where it is read (the default). Off, the colours of the app's default look are used as given.
     pub adjust_contrast: bool,
@@ -218,6 +221,7 @@ impl Default for Settings {
             listen: None,
             site: None,
             brand: None,
+            base_path: "/".to_owned(),
             adjust_contrast: true,
             socket_dir: PathBuf::from("/run/canoa"),
             unit: "canoa@{user}.service".to_owned(),
@@ -303,6 +307,7 @@ struct Raw {
     listen: Option<String>,
     site: Option<PathBuf>,
     brand: Option<PathBuf>,
+    base_path: Option<String>,
     adjust_contrast: Option<bool>,
     socket_dir: Option<PathBuf>,
     unit: Option<String>,
@@ -373,6 +378,9 @@ impl Settings {
         }
         settings.site = raw.site.or(settings.site);
         settings.brand = raw.brand.or(settings.brand);
+        if let Some(path) = raw.base_path {
+            settings.base_path = super::mount::normalise(&path)?;
+        }
         settings.adjust_contrast = raw.adjust_contrast.unwrap_or(settings.adjust_contrast);
         if let Some(value) = raw.socket_dir {
             settings.socket_dir = value;
@@ -577,6 +585,10 @@ impl Settings {
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         {
             return Err("certificate_header: a header name".to_owned());
+        }
+        if super::mount::normalise(&self.base_path).as_deref().ok() != Some(self.base_path.as_str())
+        {
+            return Err("base_path: a path of words between slashes, such as /canoa/".to_owned());
         }
         if self.min_uid == 0 {
             return Err("min_uid: at least 1; root never signs in".to_owned());

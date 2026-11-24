@@ -2490,6 +2490,7 @@ mod account;
 mod chooser;
 mod office;
 mod passkeys;
+mod prefix;
 mod second_step;
 mod sign_in_policy;
 

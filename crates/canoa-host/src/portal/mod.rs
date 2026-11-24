@@ -14,6 +14,7 @@ mod conn;
 mod device;
 mod factor;
 mod instance;
+mod mount;
 mod office;
 mod page;
 mod passkeys;
@@ -117,6 +118,8 @@ impl core::error::Error for PortalError {}
 
 struct Inner {
     settings: Settings,
+    /// Where the portal is mounted: the prefix its paths carry.
+    mount: mount::Mount,
     root: PathBuf,
     sessions: Sessions,
     pendings: session::Pendings,
@@ -286,6 +289,7 @@ impl Portal {
                 settings.max_sessions,
                 settings.max_sessions_per_user,
             ),
+            mount: mount::Mount::new(&settings.base_path),
             root,
             instances,
             accounts,
@@ -408,6 +412,8 @@ struct Request {
     version: u8,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
+    /// The words of the mount the request came in under, which name its cookies; none at the root.
+    cookie_slug: Option<String>,
 }
 
 impl Request {
@@ -451,6 +457,10 @@ impl Request {
     /// The value of the cookie called `cookie`; none when the browser sent two of that name, since it cannot be told which is
     /// its own.
     fn cookie(&self, cookie: &str) -> Option<String> {
+        let cookie = &match &self.cookie_slug {
+            Some(slug) => mount::scoped_name(cookie, slug),
+            None => cookie.to_owned(),
+        };
         let mut found = None;
         for (name, value) in &self.headers {
             if name != "cookie" {
@@ -503,6 +513,7 @@ fn read_request(
                         })
                         .collect(),
                     body: Vec::new(),
+                    cookie_slug: None,
                 };
                 break (length, request);
             }
@@ -947,7 +958,7 @@ fn serve_connection(inner: &Inner, mut conn: Conn) {
     let mut buffer = Vec::new();
     let mut served = 0_usize;
     while !inner.stopped.load(Ordering::SeqCst) {
-        let request = match read_request(&mut conn, &mut buffer, inner, served == 0) {
+        let mut request = match read_request(&mut conn, &mut buffer, inner, served == 0) {
             Ok(request) => request,
             Err(Unread::Gone) => return,
             Err(Unread::Refuse(status)) => {
@@ -957,6 +968,20 @@ fn serve_connection(inner: &Inner, mut conn: Conn) {
         };
         served += 1;
         let head = request.method == "HEAD";
+        match inner.mount.enter(&mut request) {
+            mount::Entry::Inside => {}
+            outside => {
+                let mut response =
+                    if matches!(outside, mount::Entry::Bare) && (head || request.method == "GET") {
+                        Response::redirect("/")
+                    } else {
+                        Response::refusal(404)
+                    };
+                inner.mount.leave(&mut response);
+                let _ = write_response(inner, &mut conn, response, head, false);
+                return;
+            }
+        }
         if request
             .header("upgrade")
             .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
@@ -1120,7 +1145,8 @@ fn resume(
 }
 
 fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
-    let response = route(inner, request, conn);
+    let mut response = route(inner, request, conn);
+    inner.mount.leave(&mut response);
     // The Office dialog is a window another origin opened, which Office talks to through that link: while a browser signs in
     // there, no page of the portal cuts it with `Cross-Origin-Opener-Policy`.
     if inner.office.is_some() && request.cookie(OFFICE_COOKIE).is_some() {
@@ -1548,11 +1574,14 @@ fn index(inner: &Inner, request: &Request, conn: &Conn, session: &Session) -> Re
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("");
             let url = if kind == "control" {
-                format!("{origin}/portal/ws/control")
+                format!("{origin}{}", inner.mount.path("/portal/ws/control"))
             } else if entry.get("local").is_some() {
                 continue;
             } else {
-                format!("{origin}/portal/ws/entry/{name}")
+                format!(
+                    "{origin}{}",
+                    inner.mount.path(&format!("/portal/ws/entry/{name}"))
+                )
             };
             entry["url"] = url.into();
         }
@@ -1663,9 +1692,22 @@ fn site_file(
             payload: Payload::Bytes(Vec::new()),
         };
     }
-    let Body::File(file, length) = found.body else {
+    let Body::File(mut file, length) = found.body else {
         return Response::refusal(404);
     };
+    // The app finds its files, and the host it is served by, from the page's base: below a mount the page is read whole, so that
+    // `Mount::leave` puts the mount on its `<base href=\"/\">`.
+    if name == "index.html" && inner.mount.base() != "/" {
+        let mut page = Vec::new();
+        if io::Read::read_to_end(&mut file, &mut page).is_err() {
+            return Response::refusal(500);
+        }
+        return Response {
+            status: 200,
+            headers,
+            payload: Payload::Bytes(page),
+        };
+    }
     Response {
         status: 200,
         headers,
