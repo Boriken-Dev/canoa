@@ -572,10 +572,20 @@ fn antigravity() -> Reader {
         .session_only()
 }
 
+/// Settings that look for Antigravity's stored login in a folder that holds none, and not in the operating system's keyring, so
+/// a reading in these tests is of the session's own processes whatever the person has signed in to.
+fn no_login() -> serde_json::Map<String, serde_json::Value> {
+    let home = std::env::temp_dir().join(format!("canoa-no-login-{}", std::process::id()));
+    let mut settings = serde_json::Map::new();
+    settings.insert("home".to_owned(), home.display().to_string().into());
+    settings.insert("keyring".to_owned(), false.into());
+    settings
+}
+
 fn quota_entry(state_dir: Option<std::path::PathBuf>, private: bool) -> Quota {
     Quota::new(Launch {
         reader: antigravity(),
-        settings: serde_json::Map::new(),
+        settings: no_login(),
         program: "canoa-test-no-such-agy".into(),
         args: Vec::new(),
         state_dir,
@@ -827,7 +837,7 @@ fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
 fn per_connection_entry() -> Arc<Inference> {
     Arc::new(Inference::new(None).with_reader(Launch {
         reader: antigravity(),
-        settings: serde_json::Map::new(),
+        settings: no_login(),
         program: "canoa-test-no-such-agy".into(),
         args: Vec::new(),
         state_dir: None,
@@ -977,7 +987,7 @@ fn a_panic_in_a_private_reading_still_answers_who_asked() {
     let state = std::env::temp_dir().join(format!("canoa-panic-test-{}", std::process::id()));
     let quota = Arc::new(Quota::new(Launch {
         reader: antigravity(),
-        settings: serde_json::Map::new(),
+        settings: no_login(),
         program: "x".into(),
         args: Vec::new(),
         state_dir: Some(state.clone()),
@@ -1001,7 +1011,7 @@ fn a_request_that_comes_while_a_private_agent_reads_waits_for_it() {
     let gate = Mutex::new(gate);
     let quota = Arc::new(Quota::new(Launch {
         reader: antigravity(),
-        settings: serde_json::Map::new(),
+        settings: no_login(),
         program: "x".into(),
         args: Vec::new(),
         state_dir: Some(state.clone()),

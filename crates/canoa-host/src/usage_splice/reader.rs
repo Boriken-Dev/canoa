@@ -236,15 +236,20 @@ pub(crate) struct Configured {
 /// One agent's reading, opened from its reader and asked one thread at a time. A library's reading is let go before the library.
 struct Opened {
     reading: Mutex<Object<dyn UsageReading>>,
-    /// Keeps the library the reading came from loaded; declared after the reading, which is let go first.
+    /// The configured instance the reading came from, declared after the reading, which is let go first.
+    _instance: Option<Instance<dyn UsageReader>>,
+    /// Keeps the library the reading came from loaded.
     _library: Option<Arc<Registry>>,
 }
 
 impl Opened {
-    fn new(reader: &Reader) -> Result<Self, String> {
-        reader.open().map(|reading| Self {
-            reading: Mutex::new(reading),
-            _library: reader.registry.clone(),
+    /// A reading of `reader` configured with the entry's `settings`, the same configuration its stored reading is made with.
+    fn new(reader: &Reader, settings: &serde_json::Map<String, Value>) -> Result<Self, String> {
+        let configured = reader.open_configured(&Value::Object(settings.clone()))?;
+        Ok(Self {
+            reading: Mutex::new(configured.reading),
+            _instance: configured._instance,
+            _library: configured._library,
         })
     }
 
@@ -584,7 +589,7 @@ impl Quota {
             json!({"protocolVersion": 1, "clientCapabilities": {}}),
         )?;
         let opened = ask(2, "session/new", json!({"cwd": cwd, "mcpServers": []}))?;
-        let reading = Opened::new(&self.command.reader)?;
+        let reading = Opened::new(&self.command.reader, &self.command.settings)?;
         reading.opened(&opened.to_string());
         // The agent was started for this, below nothing of the host's: its whole tree is looked through from the first try.
         let mut why = "the agent shows nothing to read".to_owned();
@@ -729,7 +734,7 @@ impl Reading {
         account: Option<String>,
         root: u32,
     ) -> Option<Self> {
-        let reading = match Opened::new(&quota.command.reader) {
+        let reading = match Opened::new(&quota.command.reader, &quota.command.settings) {
             Ok(reading) => reading,
             Err(why) => {
                 tracing::debug!("usage reader {}: {why}", quota.command.reader.id());
