@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.claude
+**/target
+**/node_modules
+**/__pycache__
+app/build
+app/.dart_tool
+app/web/noise
+app/test
+app/integration_test
+docs
+site
+out

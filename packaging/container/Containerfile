@@ -1,0 +1,142 @@
+# Canoa's host and web app, built in a container from Boriken Dev's own mirrors:
+#
+#   Flutter     github.com/Boriken-Dev/flutter at FLUTTER_COMMIT (the scanner-clean mirror of Flutter main; it is upstream
+#               commit c0205700e04b, the one docs/getting-started.md names, with bin/internal/engine.version written in)
+#   every crate, hosted pub package, fallback font and Office.js file
+#               the `deps` branch of github.com/Boriken-Dev/canoa at DEPS_COMMIT
+#   the app's git packages (coqui_acp, coqui_aos, coqui_transport_web)
+#               github.com/Boriken-Dev, at the revisions app/pubspec.lock names
+#
+#   sh packaging/container/build.sh                 # the image `canoa`, and canoa and site/ copied into ./out
+#   sh packaging/container/build.sh --print         # the command, nothing run
+#   podman run --rm canoa --version
+#
+# `docker` works the same (CONTAINER_ENGINE=docker). Build from the repository root with the root as the context
+# (`.containerignore` leaves out what a build never reads).
+#
+# What uses the network, by stage. `--network=none` marks the steps that run with it off.
+#   base      the base image and Debian packages (docker.io, deb.debian.org)
+#   flutter   the Flutter repository above, then `flutter precache --web`: the Dart SDK and the web engine artifacts, from
+#             storage.googleapis.com (FLUTTER_STORAGE_BASE_URL names another server for them)
+#   noise     rustup's wasm32 target, `cargo install wasm-bindgen-cli` and the crates of app/web_noise, from
+#             static.rust-lang.org and crates.io / github.com/Boriken-Dev: that crate has a lock of its own that the
+#             deps branch does not carry
+#   site      the app's git packages, from github.com/Boriken-Dev; the rest of the site build runs offline
+#   host      offline: the crates come from the deps branch
+# Nothing else is fetched. The image holds no credential, and the stages that fetch are not copied into `runtime`.
+#
+# An x86-64 build needs nothing different: the bases are multi-architecture, Flutter's Dart SDK and the
+# wasm-bindgen build take the machine's own, and the site is architecture-independent. Build it on an x86-64 machine,
+# or with `--platform linux/amd64` under emulation, slowly.
+
+ARG BASE_IMAGE=docker.io/library/rust:1.89-bookworm@sha256:948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88c07bb14563c84ff
+ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+
+# Flutter main at upstream c0205700e04b127bbfecdeb6c83d1e0c9c564ed6, as the mirror carries it.
+ARG FLUTTER_COMMIT=33d7f282aaef7665096e5acd368d3c2ee226f6bb
+# The deps branch at the commit that mirrors main's Cargo.lock and app/pubspec.lock (its manifest.json names the source).
+ARG DEPS_COMMIT=1020c681825b1576a676acb3b0776eca60e25d40
+
+FROM ${BASE_IMAGE} AS base
+ENV DEBIAN_FRONTEND=noninteractive
+# git and python3 (3.11 or later, for tools/mirror_crates.py) are in the Rust image; unzip and xz are Flutter's.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git python3 unzip xz-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --system --add safe.directory '*'
+
+# The Flutter SDK from the mirror, with the web artifacts. The fetch takes the commit history without file contents:
+# Flutter works its version out from the newest tag and the commits since it, and app/pubspec.yaml asks for a version
+# (3.51.0-1.0.pre-291 here: 291 commits past upstream's tag 3.51.0-0.2.pre). The mirror carries no 3.51 tags, so the tag
+# is made at the commit that is upstream's bc6e01a3ac in the mirror's rewritten history. Nothing of the app is here, so
+# this layer is reused until FLUTTER_COMMIT changes.
+FROM base AS flutter
+ARG FLUTTER_COMMIT
+ARG FLUTTER_REPOSITORY=https://github.com/Boriken-Dev/flutter.git
+ARG FLUTTER_VERSION_TAG=3.51.0-0.2.pre
+ARG FLUTTER_VERSION_TAG_COMMIT=fbd7ff9ccdb937c8246f75af0db072488dbe3b6d
+# Empty keeps Flutter's own server; a mirror of its storage bucket goes here.
+ARG FLUTTER_STORAGE_BASE_URL=
+# Flutter unpacks archives with tar, which as root would set owners a rootless build has no ids for.
+ENV FLUTTER_ROOT=/opt/flutter PATH=/opt/flutter/bin:${PATH} CI=true TAR_OPTIONS=--no-same-owner
+RUN set -eu; \
+    [ -n "${FLUTTER_STORAGE_BASE_URL}" ] && export FLUTTER_STORAGE_BASE_URL || unset FLUTTER_STORAGE_BASE_URL; \
+    git init --quiet "${FLUTTER_ROOT}"; \
+    git -C "${FLUTTER_ROOT}" fetch --quiet --filter=blob:none "${FLUTTER_REPOSITORY}" "${FLUTTER_COMMIT}"; \
+    git -C "${FLUTTER_ROOT}" tag "${FLUTTER_VERSION_TAG}" "${FLUTTER_VERSION_TAG_COMMIT}"; \
+    git -C "${FLUTTER_ROOT}" checkout --quiet --detach FETCH_HEAD; \
+    [ "$(git -C "${FLUTTER_ROOT}" rev-parse HEAD)" = "${FLUTTER_COMMIT}" ]; \
+    flutter config --no-analytics --no-cli-animations >/dev/null; \
+    flutter precache --web; \
+    flutter --version
+
+# wasm-bindgen's command line and the web app's Noise method, which the page loads as WebAssembly. They depend only on
+# app/web_noise, so a change elsewhere in the source leaves this layer alone.
+FROM base AS noise
+ARG WASM_BINDGEN_VERSION=0.2.128
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
+WORKDIR /src
+COPY app/web_noise app/web_noise
+COPY app/tool/build_noise.py app/tool/build_noise.py
+RUN CARGO_TARGET_DIR=/tmp/noise-target python3 app/tool/build_noise.py --out /out/noise \
+    && rm -rf /tmp/noise-target
+
+# The deps branch at DEPS_COMMIT, fetched by commit so a moved branch changes nothing.
+FROM base AS deps
+ARG DEPS_COMMIT
+ARG DEPS_REPOSITORY=https://github.com/Boriken-Dev/canoa.git
+RUN set -eu; \
+    git init --quiet /deps; \
+    git -C /deps fetch --quiet --depth 1 "${DEPS_REPOSITORY}" "${DEPS_COMMIT}"; \
+    git -C /deps checkout --quiet --detach FETCH_HEAD; \
+    [ "$(git -C /deps rev-parse HEAD)" = "${DEPS_COMMIT}" ]; \
+    rm -rf /deps/.git
+
+# The web app, built the way build.py builds it for the host: --csp, no service worker, the fallback fonts from the
+# deps branch (a missing or changed one stops the build).
+FROM flutter AS site
+ENV CANOA_DEPS=/deps PUB_CACHE=/opt/pub-cache
+WORKDIR /src
+COPY --from=deps /deps /deps
+COPY app app
+COPY tools tools
+COPY packaging/container/site_build.py packaging/container/site_build.py
+COPY Cargo.lock Cargo.toml ./
+COPY --from=noise /out/noise app/web/noise
+RUN python3 packaging/container/site_build.py --seed-git
+RUN --network=none python3 packaging/container/site_build.py
+
+# The host, with the site and Office.js built in, from the deps branch's crates alone.
+FROM base AS host
+ENV CANOA_DEPS=/deps CARGO_NET_OFFLINE=true
+WORKDIR /src
+COPY --from=deps /deps /deps
+COPY Cargo.toml Cargo.lock ./
+COPY crates crates
+COPY extensions extensions
+COPY examples examples
+# The host embeds pages and scripts of the browser extension and the Office add-in.
+COPY clients clients
+COPY tools tools
+COPY --from=site /src/app/build/web /site
+# The cargo home whose config replaces crates.io and every git source by /deps/crates; it refuses a lock the folder
+# does not cover.
+RUN --network=none python3 tools/mirror_crates.py use /deps --out /opt/cargo-offline
+RUN --network=none CANOA_WEB_DIST=/site cargo --config /opt/cargo-offline/config.toml build --release --locked --offline -p canoa-host --bin canoa \
+    && strip target/release/canoa \
+    && target/release/canoa --version
+
+# What build.sh copies out: the program and the site it serves.
+FROM scratch AS out
+COPY --from=host /src/target/release/canoa /canoa
+COPY --from=site /src/app/build/web /site
+
+FROM ${RUNTIME_IMAGE} AS runtime
+RUN groupadd --system --gid 10001 canoa \
+    && useradd --system --uid 10001 --gid canoa --create-home --home-dir /home/canoa --shell /usr/sbin/nologin canoa
+COPY --from=host /src/target/release/canoa /usr/local/bin/canoa
+USER canoa
+ENV HOME=/home/canoa
+VOLUME /home/canoa
+ENTRYPOINT ["canoa"]
