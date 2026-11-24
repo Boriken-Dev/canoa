@@ -85,7 +85,11 @@ fn a_recorded_wav_streamed_through_the_providers_in_canoa_cfg_comes_back_as_its_
         .iter()
         .filter_map(|kind| kind["id"].as_str())
         .collect();
-    assert_eq!(types, ["speech_command", "speech_endpoint"]);
+    assert_eq!(
+        types,
+        ["speech_command", "speech_endpoint", "speech_whisper"],
+        "the host's own kinds, then the carried libraries'"
+    );
     assert!(
         listed["types"][0]["form"]["sections"].is_array(),
         "{listed}"
