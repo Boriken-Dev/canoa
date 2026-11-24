@@ -53,6 +53,10 @@ const fn default_beam() -> u32 {
     5
 }
 
+const fn default_flash() -> bool {
+    true
+}
+
 /// What the whisper.cpp provider is configured with.
 #[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
 #[form(section(id = "whisper", label = "whisper.cpp"))]
@@ -72,6 +76,11 @@ pub struct WhisperSettings {
     #[map(default = default_beam())]
     #[schema(advanced, section = "whisper", title = "Search width")]
     pub beam_size: u32,
+    /// Whether attention is computed in one fused step, as whisper.cpp's own program does by default: on the processor it is a third
+    /// faster for the same text.
+    #[map(default = default_flash())]
+    #[schema(advanced, section = "whisper", title = "Flash attention")]
+    pub flash_attention: bool,
 }
 
 impl WhisperSettings {
@@ -83,6 +92,7 @@ impl WhisperSettings {
             models_dir: models_dir.into(),
             threads: None,
             beam_size: default_beam(),
+            flash_attention: default_flash(),
         }
     }
 
@@ -160,7 +170,8 @@ impl SpeechProvider for WhisperSpeech {
         }
         // The model loads while the person speaks, so the text is there soon after they stop.
         let warm = file.clone();
-        std::thread::spawn(move || drop(loaded(&warm)));
+        let flash = self.settings.flash_attention;
+        std::thread::spawn(move || drop(loaded(&warm, flash)));
         Ok(Recording {
             settings: self.settings.clone(),
             file,
@@ -269,6 +280,7 @@ fn samples_of(audio: &[u8], format: &AudioFormat) -> Vec<f32> {
 /// A model held in memory, as the state its transcriptions run in (the state keeps the model loaded); one recording at a time uses it.
 struct Loaded {
     file: PathBuf,
+    flash: bool,
     state: Mutex<WhisperState>,
 }
 
@@ -284,11 +296,15 @@ static HELD: Mutex<Held> = Mutex::new(Held {
 });
 
 /// The model in `file`, loaded now or kept from the last recording. A different model frees the one held.
-fn loaded(file: &Path) -> Result<Arc<Loaded>, ProviderError> {
+fn loaded(file: &Path, flash: bool) -> Result<Arc<Loaded>, ProviderError> {
     whisper_rs::install_logging_hooks();
     {
         let held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((loaded, _)) = held.loaded.as_ref().filter(|(each, _)| each.file == file) {
+        if let Some((loaded, _)) = held
+            .loaded
+            .as_ref()
+            .filter(|(each, _)| each.file == file && each.flash == flash)
+        {
             let loaded = Arc::clone(loaded);
             drop(held);
             touch(&loaded);
@@ -298,23 +314,29 @@ fn loaded(file: &Path) -> Result<Arc<Loaded>, ProviderError> {
     let text = file
         .to_str()
         .ok_or_else(|| bad_value("the model's path is not text"))?;
-    let context = WhisperContext::new_with_params(text, WhisperContextParameters::default())
-        .map_err(|error| {
-            internal(alloc::format!(
-                "the model {} could not be loaded: {error}",
-                file.display()
-            ))
-        })?;
+    let mut parameters = WhisperContextParameters::default();
+    parameters.flash_attn(flash);
+    let context = WhisperContext::new_with_params(text, parameters).map_err(|error| {
+        internal(alloc::format!(
+            "the model {} could not be loaded: {error}",
+            file.display()
+        ))
+    })?;
     let state = context
         .create_state()
         .map_err(|error| internal(alloc::format!("whisper.cpp could not start: {error}")))?;
     let made = Arc::new(Loaded {
         file: file.to_path_buf(),
+        flash,
         state: Mutex::new(state),
     });
     let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
     // Two recordings that asked at once loaded the same model: the first one kept stays.
-    if let Some((loaded, _)) = held.loaded.as_ref().filter(|(each, _)| each.file == file) {
+    if let Some((loaded, _)) = held
+        .loaded
+        .as_ref()
+        .filter(|(each, _)| each.file == file && each.flash == flash)
+    {
         return Ok(Arc::clone(loaded));
     }
     held.loaded = Some((Arc::clone(&made), Instant::now()));
@@ -381,7 +403,7 @@ fn transcribe(
     language: Option<&str>,
     prompt: &str,
 ) -> Result<Transcript, ProviderError> {
-    let model = loaded(file)?;
+    let model = loaded(file, settings.flash_attention)?;
     let strategy = if settings.beam_size > 1 {
         SamplingStrategy::BeamSearch {
             beam_size: i32::try_from(settings.beam_size).unwrap_or(5),
