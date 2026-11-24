@@ -84,6 +84,47 @@ Future<void> main() async {
 
     s = await ask('dock');
     check((s['windows'] as List).isEmpty && s['pending'].toString() == '[Edit c.txt]', 'docked back from the window\'s own button, the conversation is as it was');
+
+    // Several windows at once: two sessions, a file and a terminal.
+    s = await ask('open_sessions');
+    final titles = [for (final each in s['windows'] as List) (each as Map)['title']];
+    check(titles.toString() == '[Fix calc, Second]', 'two sessions are each in a window of their own: $titles');
+    check(s['chats'] == 2, 'both windows draw a conversation with its composer');
+    check((s['windows'] as List).every((each) => (each as Map)['link'] == false && (each['width'] as num) > 0), 'each is a real window of the engine');
+
+    s = await ask('send_second');
+    var extra = s['extra'] as Map<String, dynamic>;
+    check(extra['second prompts'] == 1, 'a message written in the second window reaches the second session\'s agent: ${extra['second prompts']}');
+    check(extra['first prompts'] == 1, 'the first session\'s agent was not sent it: ${extra['first prompts']}');
+    check(extra['shown in the first window'] == 0, 'the first window does not show it');
+    check(extra['first window waits on z'] == 0, 'a request of the second session does not wait in the first window');
+    check(extra['first agent was answered 9'] == false, 'and is not answered there');
+    check(extra['z settled by'].toString() == '[${(s['windows'] as List).last['id']}]', 'it was answered in the second window, which the conversation says: ${extra['z settled by']}');
+    check(s['pending'].toString() == '[Edit c.txt]', 'the first session still waits for its own request');
+
+    s = await ask('open_file');
+    final names = [for (final each in s['windows'] as List) (each as Map)['title']];
+    check(names.toString() == '[Fix calc, Second, notes.txt]', 'the file is in a third window, titled with its name: $names');
+    extra = s['extra'] as Map<String, dynamic>;
+    check(extra['files panels'] == 2, 'the pane and the file\'s window each have a viewer, and the window\'s shows the file\'s text');
+
+    s = await ask('open_terminal');
+    extra = s['extra'] as Map<String, dynamic>;
+    final all = [for (final each in s['windows'] as List) (each as Map)['title']];
+    check(all.toString() == '[Fix calc, Second, notes.txt, Shell 1: Second]', 'the terminal is in a fourth window: $all');
+    check(extra['screens'] == 1 && extra['panel says it is in a window'] == true, 'one screen is drawn, in the window, and the panel says where it went');
+    check(extra['shells opened'] == 1, 'the window shows the one shell, and a command run in it ran in a real shell');
+
+    s = await ask('close_terminal_window');
+    extra = s['extra'] as Map<String, dynamic>;
+    check(!([for (final each in s['windows'] as List) (each as Map)['title']]).contains('Shell 1: Second'), 'the terminal\'s window is closed');
+    check(extra['shell state'] == 'running' && extra['shells after'] == 1, 'the shell goes on running, and no second one was started: ${extra['shell state']}');
+    check(extra['screen keeps the first answer'] == true, 'the same shell answered again, with its screen as it was');
+    check((s['windows'] as List).length == 3, 'the two sessions and the file stay open');
+
+    s = await ask('finish');
+    extra = s['extra'] as Map<String, dynamic>;
+    check(extra['shell ended with its terminal'] == true, 'closing the terminal ends its shell');
   } finally {
     await driver.close();
   }
