@@ -1,0 +1,11 @@
+# The Flutter SDK every build of this repository uses; tools/flutter_pin.py reads it, and `python tools/flutter_pin.py check`
+# fails when a consumer names another. It is sourced by sh, so keep it to KEY=VALUE lines.
+#
+# FLUTTER_COMMIT    the commit of github.com/Boriken-Dev/flutter (the scanner-clean mirror of Flutter main)
+# FLUTTER_UPSTREAM  the commit of flutter/flutter it mirrors
+# FLUTTER_VERSION   what `flutter --version` reports there (app/pubspec.yaml asks for at least this)
+# FLUTTER_ENGINE    bin/internal/engine.version: the engine, whose files are the assets of the release engine-<hash> of the mirror
+FLUTTER_COMMIT=33d7f282aaef7665096e5acd368d3c2ee226f6bb
+FLUTTER_UPSTREAM=c0205700e04b127bbfecdeb6c83d1e0c9c564ed6
+FLUTTER_VERSION=3.51.0-1.0.pre-291
+FLUTTER_ENGINE=89573e968cbf3febdf4f07189cc2bef6cbef830b
