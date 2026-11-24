@@ -1544,3 +1544,143 @@ fn a_removed_passkey_signs_no_one_in_and_the_listing_never_shows_a_key() {
     assert_eq!(access.remove_passkeys_of(&me, None), Ok(1));
     assert_eq!(access.remove_passkeys_of(&me, None), Ok(0));
 }
+
+/// `der` as a PEM block, its lines 64 columns wide, each ending in `eol`.
+fn pem(der: &[u8], eol: &str) -> String {
+    let body = data_encoding::BASE64.encode(der);
+    let mut out = format!("-----BEGIN CERTIFICATE-----{eol}");
+    for line in body.as_bytes().chunks(64) {
+        out.push_str(core::str::from_utf8(line).unwrap());
+        out.push_str(eol);
+    }
+    out.push_str("-----END CERTIFICATE-----");
+    out.push_str(eol);
+    out
+}
+
+/// What nginx's `$ssl_client_escaped_cert` makes of `text`: every byte but a letter or digit as `%XX`.
+fn escaped(text: &str) -> String {
+    text.bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
+}
+
+fn chain_of(value: &str) -> Option<Vec<Vec<u8>>> {
+    forwarded_chain(&header(value), "x-client-cert")
+}
+
+#[test]
+fn every_form_a_proxy_forwards_a_certificate_in_reads_as_the_same_chain() {
+    let (leaf, _) = certificate();
+    let (second, _) = certificate();
+    let one = vec![leaf.clone()];
+    let two = vec![leaf.clone(), second.clone()];
+    let base64 = |ders: &[&[u8]]| {
+        ders.iter()
+            .map(|der| data_encoding::BASE64.encode(der))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    assert_eq!(chain_of(&base64(&[&leaf])), Some(one.clone()));
+    assert_eq!(chain_of(&base64(&[&leaf, &second])), Some(two.clone()));
+    // HAProxy and nginx's `$ssl_client_cert` and `$ssl_client_escaped_cert`, and plain PEM.
+    assert_eq!(chain_of(&pem(&leaf, "\n")), Some(one.clone()));
+    assert_eq!(chain_of(&pem(&leaf, "\r\n")), Some(one.clone()));
+    assert_eq!(chain_of(&pem(&leaf, "\n\t")), Some(one.clone()));
+    assert_eq!(chain_of(&pem(&leaf, " ")), Some(one.clone()));
+    assert_eq!(chain_of(&escaped(&pem(&leaf, "\n"))), Some(one));
+    let both = format!("{}{}", pem(&leaf, "\n"), pem(&second, "\n"));
+    assert_eq!(chain_of(&both), Some(two.clone()));
+    assert_eq!(chain_of(&escaped(&both)), Some(two.clone()));
+    assert_eq!(
+        chain_of(&format!(
+            "{}\n\t{}",
+            pem(&leaf, "\n\t"),
+            pem(&second, "\n\t")
+        )),
+        Some(two)
+    );
+}
+
+#[test]
+fn a_forwarded_certificate_that_does_not_decode_is_refused_not_a_crash() {
+    let (leaf, _) = certificate();
+    let good = pem(&leaf, "\n");
+    // A block with no end, text around a block, a body that is not base64, another kind of block, and no block's body at all.
+    for bad in [
+        good.replace("-----END CERTIFICATE-----", ""),
+        format!("junk\n{good}"),
+        format!("{good}junk"),
+        good.replacen("MI", "M!", 1),
+        good.replace("CERTIFICATE", "PRIVATE KEY"),
+        "-----BEGIN CERTIFICATE----------END CERTIFICATE-----".to_owned(),
+        "-----BEGIN CERTIFICATE-----".to_owned(),
+    ] {
+        assert_eq!(chain_of(&bad), None, "{bad}");
+        assert_eq!(chain_of(&escaped(&bad)), None, "{bad}");
+    }
+    // A percent sign that is no escape, one cut short, and escapes that are not UTF-8.
+    for bad in [
+        "%zz",
+        "%4",
+        "%",
+        "%FF%FE",
+        "-----BEGIN%20CERTIFICATE-----%4",
+    ] {
+        assert_eq!(chain_of(bad), None, "{bad}");
+    }
+    assert_eq!(chain_of(""), None);
+}
+
+#[test]
+fn a_forwarded_header_is_measured_as_sent_and_holds_eight_certificates_at_most() {
+    let (leaf, _) = certificate();
+    let block = pem(&leaf, "\n");
+    let eight = block.repeat(8);
+    assert_eq!(chain_of(&eight).map(|chain| chain.len()), Some(8));
+    assert_eq!(chain_of(&block.repeat(9)), None);
+    assert_eq!(chain_of(&escaped(&block.repeat(9))), None);
+    // Over 16 KiB as sent, though little of it is certificate.
+    let padded = format!("{block}{}", " ".repeat(super::certs::MAX_HEADER));
+    assert_eq!(chain_of(&padded), None);
+    let at_limit = format!(
+        "{block}{}",
+        " ".repeat(super::certs::MAX_HEADER - block.len())
+    );
+    assert_eq!(at_limit.len(), super::certs::MAX_HEADER);
+    assert_eq!(chain_of(&at_limit).map(|chain| chain.len()), Some(1));
+}
+
+#[test]
+fn a_certificate_nginx_forwards_as_escaped_pem_signs_its_account_in() {
+    let dir = scratch("pinned-nginx");
+    let (access, me, der) = pinned(&dir.join("peers.toml"), &[]);
+    for value in [
+        escaped(&pem(&der, "\n")),
+        pem(&der, "\n\t"),
+        pem(&der, "\n"),
+    ] {
+        admits(
+            access.sign_in_certificate(&header(&value), client(), &[]),
+            &me,
+            "coqui_access_mtls",
+        );
+        assert!(access.carries_certificate(&header(&value)));
+    }
+    let (other, _) = certificate();
+    assert_eq!(
+        access.sign_in_certificate(&header(&escaped(&pem(&other, "\n"))), client(), &[]),
+        SignIn::Unpinned
+    );
+    assert_eq!(
+        access.sign_in_certificate(&header("%zz"), client(), &[]),
+        SignIn::Refused
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

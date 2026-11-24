@@ -98,22 +98,77 @@ pub(super) fn outside_validity(fields: &CertificateFields) -> bool {
     now < fields.not_before || now > fields.not_after
 }
 
-/// The certificates (DER, leaf first) in the one `header` of `headers`: base64, comma-separated. `None` for no header, two,
-/// one too large, one that is not base64 or holds too many certificates.
+/// The certificates (DER, leaf first) in the one `header` of `headers`. The value is told by its content: base64 DER, comma
+/// separated (HAProxy's `ssl_c_der,base64`), or PEM, plain, with its lines folded by a tab or by spaces (nginx's
+/// `$ssl_client_cert`), or percent-encoded (nginx's `$ssl_client_escaped_cert`). `None` for no header, two, one over
+/// `MAX_HEADER` bytes as sent, one that does not decode or holds too many certificates.
 pub(super) fn forwarded_chain(headers: &[(String, String)], header: &str) -> Option<Vec<Vec<u8>>> {
     let mut found = headers.iter().filter(|(name, _)| name == header);
     let (_, value) = found.next()?;
     if found.next().is_some() || value.len() > MAX_HEADER {
         return None;
     }
-    let chain: Vec<_> = value
-        .split(',')
-        .map(|part| data_encoding::BASE64.decode(part.trim().as_bytes()).ok())
-        .collect::<Option<_>>()?;
+    let text = if value.contains('%') {
+        percent_decode(value)?
+    } else {
+        value.clone()
+    };
+    let chain = if text.contains("-----BEGIN") {
+        pem_chain(&text)?
+    } else {
+        text.split(',')
+            .map(|part| data_encoding::BASE64.decode(part.trim().as_bytes()).ok())
+            .collect::<Option<Vec<_>>>()?
+    };
     if chain.is_empty() || chain.len() > MAX_CHAIN || chain.iter().any(Vec::is_empty) {
         return None;
     }
     Some(chain)
+}
+
+/// `text` with each `%XX` turned into its byte; `None` for a `%` without two hex digits or a result that is not UTF-8.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        if byte == b'%' {
+            let pair = bytes.get(at + 1..at + 3)?;
+            let hex = core::str::from_utf8(pair).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            at += 3;
+        } else {
+            out.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// The DER of each `CERTIFICATE` block of `text`, in order. Only whitespace may stand between blocks, and whitespace inside
+/// a block is dropped, so line breaks, tab-indented continuation lines and a header folded onto one line all read alike.
+fn pem_chain(text: &str) -> Option<Vec<Vec<u8>>> {
+    const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
+    const END: &str = "-----END CERTIFICATE-----";
+    let mut rest = text;
+    let mut chain = Vec::new();
+    while let Some(start) = rest.find(BEGIN) {
+        if !rest[..start].trim().is_empty() {
+            return None;
+        }
+        let body = &rest[start + BEGIN.len()..];
+        let stop = body.find(END)?;
+        let encoded: String = body[..stop]
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        chain.push(data_encoding::BASE64.decode(encoded.as_bytes()).ok()?);
+        rest = &body[stop + END.len()..];
+        if chain.len() > MAX_CHAIN {
+            return None;
+        }
+    }
+    rest.trim().is_empty().then_some(chain)
 }
 
 pub(super) fn presented(headers: &[(String, String)], header: &str) -> Option<Presented> {

@@ -2,7 +2,7 @@
 //! claims it, and every method ending at an account of the operating system.
 //!
 //! A name and a password go, in list order, to the providers that take a password: `Unknown` passes the credential on and
-//! `Invalid` ends the try. A certificate the trusted proxy forwarded (DER in base64, in one header) goes to the providers that
+//! `Invalid` ends the try. A certificate the trusted proxy forwarded (DER in base64 or PEM, in one header) goes to the providers that
 //! take a request, as the chain a transport would have verified the key of; they decide whether to trust it (pinned, or signed
 //! by a CA) and which account it is. Whoever a provider names is then looked up in the operating system's own directory under the portal's `min_uid` and `groups`, so a
 //! method adds a way in and never a person.
