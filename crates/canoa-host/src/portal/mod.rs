@@ -8,6 +8,7 @@
 
 mod access;
 mod account;
+mod brand;
 mod conn;
 #[cfg(test)]
 mod device;
@@ -127,6 +128,8 @@ struct Inner {
     /// The unlock time the portal last acted on for each account.
     unlocked: Mutex<alloc::collections::BTreeMap<u32, i64>>,
     policy: policy::Policy,
+    /// The name, mark and colours of the pages.
+    brand: brand::Brand,
     /// The add-in's routes and their policies, when `office` asks for them.
     office: Option<web::Office>,
     /// The sign-ins that ended in the Office dialog and wait for the task pane's frame to claim them.
@@ -196,6 +199,10 @@ impl Portal {
             .site
             .as_deref()
             .ok_or_else(|| PortalError::Site("`site` names no directory".to_owned()))?;
+        let brand = match &settings.brand {
+            Some(path) => brand::Brand::load(path).map_err(PortalError::Settings)?,
+            None => brand::Brand::builtin(),
+        };
         let root =
             web::site_root(site, &[]).map_err(|error| PortalError::Site(error.to_string()))?;
         let socket = match &settings.socket {
@@ -267,6 +274,7 @@ impl Portal {
             )
             .with_person_limit(settings.max_factor_failures_per_person)
             .with_person_daily(settings.max_factor_failures_per_day, settings.factor_day),
+            brand,
             policy,
             office: settings
                 .office
@@ -830,7 +838,14 @@ fn login_response(
                 return Response::text(
                     status,
                     "text/html; charset=utf-8",
-                    page::render_step(&pending.user, &decision.methods(), notice, retry, setup),
+                    page::render_step(
+                        &inner.brand,
+                        &pending.user,
+                        &decision.methods(),
+                        notice,
+                        retry,
+                        setup,
+                    ),
                 )
                 .with("Content-Security-Policy", page::POLICY.to_owned());
             }
@@ -838,7 +853,7 @@ fn login_response(
                 return Response::text(
                     503,
                     "text/html; charset=utf-8",
-                    page::render(&[], Some(page::Notice::Unavailable), None),
+                    page::render(&inner.brand, &[], Some(page::Notice::Unavailable), None),
                 )
                 .with("Content-Security-Policy", page::POLICY.to_owned());
             }
@@ -871,12 +886,12 @@ fn login_first(
     Response::text(
         status,
         "text/html; charset=utf-8",
-        page::render(&methods, notice, retry),
+        page::render(&inner.brand, &methods, notice, retry),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
 }
 
-fn asset(kind: &'static str, body: &'static str) -> Response {
+fn asset(kind: &'static str, body: &str) -> Response {
     Response::text(200, kind, body).replacing("Cache-Control", "no-cache".to_owned())
 }
 
@@ -1104,7 +1119,8 @@ fn route(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             };
             login_response(inner, request, conn, 200, notice, None)
         }
-        ("GET" | "HEAD", page::CSS_PATH) => asset("text/css; charset=utf-8", page::CSS),
+        ("GET" | "HEAD", page::CSS_PATH) => asset("text/css; charset=utf-8", inner.brand.css()),
+        ("GET" | "HEAD", page::ICON_PATH) => asset("image/svg+xml", inner.brand.icon()),
         ("GET" | "HEAD", page::JS_PATH) => asset("text/javascript; charset=utf-8", page::JS),
         ("GET" | "HEAD", METHODS) => methods_response(inner, request, conn),
         ("GET" | "HEAD", CERTIFICATE) => match authed(inner, request) {
@@ -1256,6 +1272,7 @@ fn certificate_page(
         code,
         "text/html; charset=utf-8",
         page::render_certificate(
+            &inner.brand,
             &session.user,
             status.as_ref(),
             needs_password,

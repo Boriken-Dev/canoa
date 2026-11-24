@@ -1,20 +1,21 @@
-//! The portal's splash and sign-in page: Canoa's mark and colours, light and dark, one card at any width, and a section for each
+//! The portal's splash and sign-in page: the brand's mark and colours, light and dark, one card at any width, and a section for each
 //! way in the portal accepts. The page is server-rendered from the same list `GET /portal/methods` answers, and its one
 //! script (`/portal/login.js`, under `script-src 'self'`) counts a `429`'s wait down and runs the passkey ceremonies a page asks
 //! for; what only it can do stays hidden until it runs.
 
+use super::brand::Brand;
 use super::signin::Method;
 use super::signin::{CertificateStatus, FactorStanding, PasskeyInfo, PinState};
 use super::{CERTIFICATE, FACTOR, LOGIN, PASSKEY, PASSKEYS};
 
-/// The page's stylesheet, served at [`CSS_PATH`].
-pub const CSS: &str = include_str!("page/login.css");
 /// The page's script, served at [`JS_PATH`].
 pub const JS: &str = include_str!("page/login.js");
 /// Where the stylesheet is served.
 pub const CSS_PATH: &str = "/portal/login.css";
 /// Where the script is served.
 pub const JS_PATH: &str = "/portal/login.js";
+/// Where the favicon, the brand's icon, is served.
+pub const ICON_PATH: &str = "/portal/icon.svg";
 
 /// What the page says above the forms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,10 +67,7 @@ impl Notice {
 }
 
 /// The Content-Security-Policy of the page: nothing inline, nothing from elsewhere.
-pub const POLICY: &str = "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
-
-// The paths of `app/assets/icons/canoa.svg`, at the size the page draws them.
-const MARK: &str = r##"<svg class="mark" viewBox="0 0 64 64" width="72" height="72" role="img" aria-label="Canoa"><defs><mask id="carved" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><path fill="#fff" d="M 2 23 C 5 27 9 30 15 30 L 49 30 C 55 30 59 27 60.5 17 L 63.5 17 C 64.5 31 59 41 49 41.5 C 38 42.5 26 42.5 15 41.5 C 6 40.5 1 32 0 24 Z"/><path fill="#000" d="M 34.1 14.8 L 19.2 45.5 L 26.1 48.8 L 40.9 18.2 Z"/><path fill="none" stroke="#000" stroke-width="1.3" stroke-linecap="round" d="M 47.1 35.9 C 47.3 36.2 47.1 36.9 46.5 37.1 C 45.9 37.4 44.8 36.9 44.6 35.9 C 44.4 34.9 45.2 33.5 46.5 33.3 C 47.8 33.1 49.5 34.2 49.8 35.9 C 50 37.6 48.6 39.6 46.5 39.8 C 44.4 40.1 42.1 38.3 41.9 35.9"/></mask></defs><g fill="#3DAFA1"><rect width="64" height="64" mask="url(#carved)"/><path d="M 43.3 0.2 L 21.8 44.5 C 20 48.4 16.6 46.8 14.8 50.6 C 12.1 56.1 14.7 61.3 15 63 C 16.5 62.2 22.2 61 24.8 55.5 C 26.7 51.6 23.4 50 25.3 46.2 L 46.7 1.8 Z"/></g></svg>"##;
+pub const POLICY: &str = "default-src 'none'; style-src 'self'; img-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
 /// What opens a section only the page's script shows: without it the section stays hidden.
 const GATED: &str = "<div hidden data-gated>";
@@ -166,7 +164,14 @@ fn certificate_form() -> String {
 
 /// The sign-in page offering `methods`, with `notice` above them. `retry` is the seconds a `429` asks to wait.
 #[must_use]
-pub fn render(methods: &[Method], notice: Option<Notice>, retry: Option<u64>) -> Vec<u8> {
+pub fn render(
+    brand: &Brand,
+    methods: &[Method],
+    notice: Option<Notice>,
+    retry: Option<u64>,
+) -> Vec<u8> {
+    let name = brand.name_html();
+    let mark = brand.mark();
     let note = notice.map_or_else(String::new, |notice| {
         let wait = if notice == Notice::Throttled {
             " <span id=\"wait\">Try again later.</span>"
@@ -195,7 +200,7 @@ pub fn render(methods: &[Method], notice: Option<Notice>, retry: Option<u64>) ->
     };
     let retry = retry.map_or_else(String::new, |seconds| format!(" data-retry=\"{seconds}\""));
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign in to Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main{retry}><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Sign in to continue</p></header>{note}{body}</main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>"
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign in to {name}</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"{ICON_PATH}\"><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main{retry}><header>{mark}<h1>{name}</h1><p class=\"tag\">Sign in to continue</p></header>{note}{body}</main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>"
     )
     .into_bytes()
 }
@@ -210,7 +215,7 @@ pub enum CertNotice {
 }
 
 /// `text` as HTML text. A certificate's subject is whatever its maker wrote.
-fn escape(text: &str) -> String {
+pub(super) fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         match c {
@@ -236,12 +241,15 @@ fn post_button(action: &str, label: &str, class: &str) -> String {
 /// the certificate was not the one a password signed the session in with, so pinning it asks for the password again.
 #[must_use]
 pub fn render_certificate(
+    brand: &Brand,
     user: &str,
     status: Option<&CertificateStatus>,
     needs_password: bool,
     notice: Option<CertNotice>,
     links: Links,
 ) -> Vec<u8> {
+    let name = brand.name_html();
+    let mark = brand.mark();
     let note = match notice {
         Some(CertNotice::Done(text)) => {
             format!("<p class=\"notice ok\" role=\"status\">{text}</p>")
@@ -289,9 +297,9 @@ pub fn render_certificate(
             }
         }
     }
-    let more = nav(Here::Certificate, links);
+    let more = nav(Here::Certificate, links, &name);
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Certificate, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}</main><footer>Boriken Dev</footer></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Certificate, {name}</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"{ICON_PATH}\"><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{mark}<h1>{name}</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}</main><footer>Boriken Dev</footer></body></html>",
         escape(user)
     )
     .into_bytes()
@@ -363,12 +371,15 @@ fn step_certificate_form() -> String {
 /// a `429` asks to wait.
 #[must_use]
 pub fn render_step(
+    brand: &Brand,
     user: &str,
     methods: &[Method],
     notice: Option<Notice>,
     retry: Option<u64>,
     setup: SetupOffer,
 ) -> Vec<u8> {
+    let name = brand.name_html();
+    let mark = brand.mark();
     let note = notice.map_or_else(String::new, |notice| {
         let wait = if notice == Notice::Throttled {
             " <span id=\"wait\">Try again later.</span>"
@@ -408,7 +419,7 @@ pub fn render_step(
     );
     let retry = retry.map_or_else(String::new, |seconds| format!(" data-retry=\"{seconds}\""));
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign in to Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main{retry}><header>{MARK}<h1>Canoa</h1><p class=\"tag\">One more step for {}</p></header>{note}{body}{cancel}</main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign in to {name}</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"{ICON_PATH}\"><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main{retry}><header>{mark}<h1>{name}</h1><p class=\"tag\">One more step for {}</p></header>{note}{body}{cancel}</main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>",
         escape(user)
     )
     .into_bytes()
@@ -510,7 +521,7 @@ enum Here {
 }
 
 /// The links at the foot of a signed-in page: the other pages the portal has, and the app.
-fn nav(here: Here, links: Links) -> String {
+fn nav(here: Here, links: Links, name: &str) -> String {
     let mut out = String::from("<nav class=\"pages\">");
     for (page, on, path, text) in [
         (Here::Code, links.code, FACTOR, "Your one-time code"),
@@ -528,13 +539,16 @@ fn nav(here: Here, links: Links) -> String {
             ));
         }
     }
-    out.push_str("<p class=\"hint\"><a href=\"/\">Continue to Canoa</a></p></nav>");
+    out.push_str(&format!(
+        "<p class=\"hint\"><a href=\"/\">Continue to {name}</a></p></nav>"
+    ));
     out
 }
 
 /// The page of `user`'s one-time code. `signing_in` says it is part of a sign-in, which the person returns to afterwards.
 #[must_use]
 pub fn render_factor(
+    brand: &Brand,
     user: &str,
     standing: FactorStanding,
     stage: FactorStage<'_>,
@@ -542,6 +556,8 @@ pub fn render_factor(
     signing_in: bool,
     links: Links,
 ) -> Vec<u8> {
+    let name = brand.name_html();
+    let mark = brand.mark();
     let note = match notice {
         Some(CertNotice::Done(text)) => {
             format!("<p class=\"notice ok\" role=\"status\">{text}</p>")
@@ -599,7 +615,7 @@ pub fn render_factor(
             "<form class=\"method\" method=\"post\" action=\"{LOGIN}\"><input type=\"hidden\" name=\"method\" value=\"cancel\"><button type=\"submit\" class=\"secondary\">Start over</button></form><p class=\"hint\"><a href=\"{LOGIN}\">Back to the sign-in</a></p>"
         )
     } else {
-        nav(Here::Code, links)
+        nav(Here::Code, links, &name)
     };
     // The script only runs a passkey ceremony here: a setup link and its drawing need none.
     let script = if body.contains("data-passkey") {
@@ -608,7 +624,7 @@ pub fn render_factor(
         String::new()
     };
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign-in code, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">{} {}</p></header>{note}{body}{back}</main><footer>Boriken Dev</footer>{script}</body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Sign-in code, {name}</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"{ICON_PATH}\"><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{mark}<h1>{name}</h1><p class=\"tag\">{} {}</p></header>{note}{body}{back}</main><footer>Boriken Dev</footer>{script}</body></html>",
         if signing_in { "Signing in as" } else { "Signed in as" },
         escape(user)
     )
@@ -686,12 +702,15 @@ fn passkey_item(passkey: &PasskeyInfo) -> String {
 /// The page of `user`'s passkeys: each one, and what it takes to add another. `passkeys` is `None` when they could not be read.
 #[must_use]
 pub fn render_passkeys(
+    brand: &Brand,
     user: &str,
     passkeys: Option<&[PasskeyInfo]>,
     stage: PasskeyStage<'_>,
     notice: Option<CertNotice>,
     links: Links,
 ) -> Vec<u8> {
+    let name = brand.name_html();
+    let mark = brand.mark();
     let note = match notice {
         Some(CertNotice::Done(text)) => {
             format!("<p class=\"notice ok\" role=\"status\">{text}</p>")
@@ -739,9 +758,9 @@ pub fn render_passkeys(
         }
     }
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Passkeys, Canoa</title><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{MARK}<h1>Canoa</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}</main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>Passkeys, {name}</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"{ICON_PATH}\"><link rel=\"stylesheet\" href=\"{CSS_PATH}\"></head><body><main><header>{mark}<h1>{name}</h1><p class=\"tag\">Signed in as {}</p></header>{note}{body}{more}</main><footer>Boriken Dev</footer><script src=\"{JS_PATH}\"></script></body></html>",
         escape(user),
-        more = nav(Here::Passkeys, links)
+        more = nav(Here::Passkeys, links, &name)
     )
     .into_bytes()
 }

@@ -242,6 +242,7 @@ fn page(
         status,
         "text/html; charset=utf-8",
         page::render_passkeys(
+            &inner.brand,
             &who.user,
             held.as_deref(),
             stage_of(gate),

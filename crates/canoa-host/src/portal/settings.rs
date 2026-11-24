@@ -91,6 +91,9 @@ pub struct Settings {
     pub listen: Option<SocketAddr>,
     /// `site`: the web app's build, the files a signed-in browser is given. Required.
     pub site: Option<PathBuf>,
+    /// `brand`: a `brand.json` (`name`, `icon`, `accent`, `accent_on_dark`; the icon is an SVG, its path relative to this file) whose
+    /// name, mark and colours the portal's pages carry. Unset: the build's own brand.
+    pub brand: Option<PathBuf>,
     /// `socket_dir`: where each user's host keeps its sockets, `DIR/USER`.
     pub socket_dir: PathBuf,
     /// `unit`: the template unit of a user's host, `{user}` standing for the account.
@@ -211,6 +214,7 @@ impl Default for Settings {
             socket_group: None,
             listen: None,
             site: None,
+            brand: None,
             socket_dir: PathBuf::from("/run/canoa"),
             unit: "canoa@{user}.service".to_owned(),
             systemctl: PathBuf::from("systemctl"),
@@ -294,6 +298,7 @@ struct Raw {
     socket_group: Option<String>,
     listen: Option<String>,
     site: Option<PathBuf>,
+    brand: Option<PathBuf>,
     socket_dir: Option<PathBuf>,
     unit: Option<String>,
     systemctl: Option<PathBuf>,
@@ -362,6 +367,7 @@ impl Settings {
             );
         }
         settings.site = raw.site.or(settings.site);
+        settings.brand = raw.brand.or(settings.brand);
         if let Some(value) = raw.socket_dir {
             settings.socket_dir = value;
         }
@@ -511,6 +517,13 @@ impl Settings {
         }
         if self.pam_service.is_empty() || self.pam_service.contains('/') {
             return Err("pam_service: a service name".to_owned());
+        }
+        if self
+            .brand
+            .as_ref()
+            .is_some_and(|brand| !brand.is_absolute())
+        {
+            return Err("brand: an absolute path".to_owned());
         }
         if !self.socket_dir.is_absolute() {
             return Err("socket_dir: an absolute path".to_owned());

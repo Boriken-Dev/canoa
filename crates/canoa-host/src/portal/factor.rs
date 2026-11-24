@@ -197,6 +197,7 @@ fn page(
         status,
         "text/html; charset=utf-8",
         page::render_factor(
+            &inner.brand,
             &who.user,
             standing,
             stage,

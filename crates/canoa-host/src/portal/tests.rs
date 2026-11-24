@@ -18,6 +18,7 @@ use std::thread;
 use coqui_transport::Channel;
 use coqui_transport_pipe::{Listener, PipeName};
 
+use super::brand::Brand;
 use super::*;
 
 /// Accounts that are `name:password` pairs; counts each time it is asked. The password `FAIL` is an accounts failure.
@@ -1837,6 +1838,116 @@ fn the_page_offers_the_methods_and_runs_nothing_inline() {
     }
 }
 
+#[test]
+fn the_pages_carry_the_builds_brand() {
+    let rig = rig(|_| {}, 0);
+    let login = call(rig.addr, "GET", LOGIN, &[], "");
+    assert!(login.body.contains("<title>Sign in to Canoa</title>"));
+    assert!(login.body.contains("<h1>Canoa</h1>"));
+    assert!(login.body.contains("<svg class=\"mark\""));
+    assert!(login.body.contains("href=\"/portal/icon.svg\""));
+    let policy = login.header("content-security-policy").unwrap();
+    assert!(policy.contains("img-src 'self'"));
+    let css = call(rig.addr, "GET", "/portal/login.css", &[], "");
+    assert!(css.body.contains("--mark: #3dafa1") && css.body.contains("--mark: #6de2d2"));
+    assert!(!css.body.contains("#9a5b1e"));
+    let icon = call(rig.addr, "GET", "/portal/icon.svg", &[], "");
+    assert_eq!(icon.status, 200);
+    assert!(
+        icon.header("content-type")
+            .unwrap()
+            .starts_with("image/svg+xml")
+    );
+    assert!(icon.body.contains("<svg") && icon.body.contains("#3DAFA1"));
+    let cookie = signed_in(&rig, "canoatesta");
+    for path in [CERTIFICATE, FACTOR, PASSKEYS] {
+        let page = call(rig.addr, "GET", path, &[("Cookie", cookie.clone())], "");
+        assert!(page.body.contains("<h1>Canoa</h1>"), "{path}");
+        assert!(page.body.contains("<svg class=\"mark\""), "{path}");
+        assert!(page.body.contains("href=\"/portal/icon.svg\""), "{path}");
+    }
+}
+
+#[test]
+fn a_brand_file_changes_the_name_the_mark_and_the_accent() {
+    let base = std::env::temp_dir().join(format!("canoa-portal-brand-{}", std::process::id()));
+    std::fs::create_dir_all(base.join("art")).unwrap();
+    std::fs::write(
+        base.join("brand.json"),
+        r##"{"name": "Rio <Mail>", "icon": "art/rio.svg", "accent": "#aa2200", "accent_on_dark": "#ffb09a"}"##,
+    )
+    .unwrap();
+    std::fs::write(
+        base.join("art/rio.svg"),
+        "<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\" width=\"8\" height=\"8\"><title>Rio</title><!-- a square --><rect width=\"8\" height=\"8\" fill=\"#AA2200\"/></svg>",
+    )
+    .unwrap();
+    let file = base.join("brand.json");
+    let rig = rig(|settings| settings.brand = Some(file), 0);
+    let login = call(rig.addr, "GET", LOGIN, &[], "");
+    assert!(
+        login
+            .body
+            .contains("<title>Sign in to Rio &lt;Mail&gt;</title>")
+    );
+    assert!(login.body.contains("<h1>Rio &lt;Mail&gt;</h1>"));
+    assert!(login.body.contains("aria-label=\"Rio &lt;Mail&gt;\""));
+    assert!(
+        login
+            .body
+            .contains("<rect width=\"8\" height=\"8\" fill=\"#AA2200\"/>")
+    );
+    assert!(!login.body.contains("Canoa") && !login.body.contains("<!--"));
+    let css = call(rig.addr, "GET", "/portal/login.css", &[], "");
+    assert!(css.body.contains("--mark: #aa2200") && css.body.contains("--mark: #ffb09a"));
+    assert!(css.body.contains("[fill=\"#aa2200\" i]"));
+    assert!(!css.body.contains("#3dafa1"));
+    let icon = call(rig.addr, "GET", "/portal/icon.svg", &[], "");
+    assert!(icon.body.contains("<rect"));
+    let cookie = signed_in(&rig, "canoatesta");
+    let page = call(rig.addr, "GET", CERTIFICATE, &[("Cookie", cookie)], "");
+    assert!(page.body.contains("Rio &lt;Mail&gt;") && !page.body.contains("Canoa"));
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_brand_file_that_cannot_be_read_stops_the_portal_binding() {
+    let base = std::env::temp_dir().join(format!("canoa-portal-brand-bad-{}", std::process::id()));
+    std::fs::create_dir_all(&base).unwrap();
+    let write = |json: &str| {
+        std::fs::write(base.join("brand.json"), json).unwrap();
+        Brand::load(&base.join("brand.json")).map(|_| ())
+    };
+    assert!(
+        write(
+            r##"{"name": "A", "icon": "none.svg", "accent": "#aa2200", "accent_on_dark": "#fff"}"##
+        )
+        .is_err()
+    );
+    std::fs::write(
+        base.join("a.svg"),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    )
+    .unwrap();
+    assert!(
+        write(r##"{"name": "A", "icon": "a.svg", "accent": "red", "accent_on_dark": "#fff"}"##)
+            .is_err()
+    );
+    assert!(
+        write(r##"{"name": "", "icon": "a.svg", "accent": "#aa2200", "accent_on_dark": "#fff"}"##)
+            .is_err()
+    );
+    assert!(
+        write(r##"{"name": "A", "icon": "a.svg", "accent": "#aa2200", "accent_on_dark": "#fff"}"##)
+            .is_ok()
+    );
+    std::fs::write(base.join("a.svg"), "<svg><script>1</script></svg>").unwrap();
+    assert!(
+        write(r##"{"name": "A", "icon": "a.svg", "accent": "#aa2200", "accent_on_dark": "#fff"}"##)
+            .is_err()
+    );
+    std::fs::remove_dir_all(base).unwrap();
+}
 #[test]
 fn a_certificate_from_the_proxy_signs_in_and_the_provider_sees_no_cookie() {
     let rig = rig(|_| {}, 0);
