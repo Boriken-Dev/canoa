@@ -4,19 +4,24 @@
 Each hosted package keeps what a build needs: its tests, examples, benchmarks, docs and
 .github directories are dropped, then any remaining file that a malware or archive
 scanner would refuse (archives, executables, key files, pack files, opaque
-high-entropy data) is deleted. Git dependencies are not mirrored (their bare clones are
-pack files); manifest.json records each one's URL and pinned revision from
-pubspec.lock, and resolving them needs the network. Hosted packages resolve offline
-from the result with PUB_CACHE pointed at the branch's pub directory.
+high-entropy data) is deleted. A git dependency is carried as a source tree, never a clone (a
+clone is pack files): pub/git/<repo>-<revision>/ holds, at the revision pubspec.lock names, the path
+each package of that repository uses, as `git archive` writes it and under the same filtering. The
+folder is named as pub names its own checkout, so app/tool/offline_pub.py seeds a pub cache with it
+and pub resolves hosted and git packages offline, with PUB_CACHE pointed at that cache.
 The one exception is cdn/office-js/, which holds a whole repository tree unmodified, by the owner's word.
 """
 import argparse
 import collections
 import json
 import math
+import io
 import re
 import shutil
+import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -121,6 +126,75 @@ def filter_hosted(root):
     return dict(sorted(dropped.items())),deleted
 
 
+def git_checkout_name(entry):
+    """The folder pub's own cache gives a git dependency's checkout: <repository>-<revision>."""
+    return entry["url"].rstrip("/").rsplit("/",1)[-1].removesuffix(".git")+"-"+entry["revision"]
+
+
+def run_git(*args,cwd=None):
+    done=subprocess.run(["git",*args],cwd=cwd,capture_output=True)
+    if done.returncode:
+        raise SystemExit("git "+" ".join(args)+": "+done.stderr.decode("utf-8","replace").strip())
+    return done.stdout
+
+
+def filter_packages(destination,paths):
+    """filter_hosted for packages that sit at `paths` inside a repository checkout."""
+    dropped=collections.Counter()
+    deleted=[]
+    for path in paths:
+        package=destination/path
+        for name in DROP_DIRECTORIES:
+            directory=package/name
+            if directory.is_dir():
+                dropped[name]+=sum(1 for f in directory.rglob("*") if f.is_file())
+                shutil.rmtree(directory)
+        for file in sorted(f for f in package.rglob("*") if f.is_file()):
+            kind=flagged_kind(file.read_bytes(),file.name)
+            if kind:
+                dropped[kind]+=1
+                deleted.append(dict(path=file.relative_to(destination).as_posix(),kind=kind))
+                file.unlink()
+    return dict(sorted(dropped.items())),deleted
+
+
+def mirror_git(root,gits):
+    """Writes each git dependency's package paths at its revision under root/<repo>-<revision>/; returns what was kept.
+
+    The tree is `git archive`'s, so it holds exactly the revision's files. Each package then loses what
+    compiling never reads, and any file a scanner would refuse, as a hosted package does.
+    """
+    if root.exists(): shutil.rmtree(root)
+    kept=[]
+    sources={}
+    for entry in gits:
+        sources.setdefault((entry["url"],entry["revision"]),[]).append(entry)
+    for (url,revision),entries in sorted(sources.items()):
+        name=git_checkout_name(entries[0])
+        paths=sorted({(entry["path"] or ".") for entry in entries})
+        with tempfile.TemporaryDirectory() as scratch:
+            run_git("init","--quiet",scratch)
+            run_git("fetch","--quiet","--depth","1",url,revision,cwd=scratch)
+            if run_git("rev-parse","FETCH_HEAD",cwd=scratch).decode().strip()!=revision:
+                raise SystemExit(f"{url} did not give {revision}")
+            archive=run_git("archive","--format=tar",revision,"--",*paths,cwd=scratch)
+        destination=root/name
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            for member in tar:
+                if member.isfile():
+                    target=destination/member.name
+                    target.parent.mkdir(parents=True,exist_ok=True)
+                    target.write_bytes(tar.extractfile(member).read())
+        for path in paths:
+            if not (destination/path/"pubspec.yaml").is_file():
+                raise SystemExit(f"{url} at {revision} has no package at {path}")
+        for entry in entries:
+            kept.append(dict(package=entry["package"],checkout=name,path=entry["path"] or "."))
+        dropped,deleted=filter_packages(destination,paths)
+        if deleted: print("Deleted from",name+":",", ".join(item["path"] for item in deleted))
+    return sorted(kept,key=lambda item:item["package"])
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--source-pub",required=True)
@@ -136,12 +210,11 @@ def main():
         dst=target/"pub"/kind
         if dst.exists(): shutil.rmtree(dst)
         if src.exists(): shutil.copytree(src,dst,ignore=shutil.ignore_patterns("*.lock"))
-    stale=target/"pub"/"git"
-    if stale.exists(): shutil.rmtree(stale)
     dropped,deleted=filter_hosted(target/"pub"/"hosted")
     directory=target/"pub"/"hosted"/"pub.dev"
     packages=sorted(item.name for item in directory.glob("*") if item.is_dir())
     gits=git_dependencies(args.lock)
+    gitkept=mirror_git(target/"pub"/"git",gits)
     missing=[name for name in DESKTOP_PACKAGES if not any(package.rsplit("-",1)[0]==name for package in packages)]
     if missing: raise SystemExit("Desktop packages missing from the mirror: "+", ".join(missing))
     files=[]
@@ -168,8 +241,8 @@ def main():
         fallback_fonts.check_engine(pinned,fallback_fonts.flutter_root())
         fallback=fallback_fonts.mirror(target,pinned)
     report=dict(format=2,source="Boriken-Dev/canoa",sourceCommit=args.revision,
-                status="complete",pubPackages=packages,gitDependencies=gits,
-                gitDependenciesNote="not mirrored; pub fetches them from their URL, so they need the network",
+                status="complete",pubPackages=packages,gitDependencies=gits,gitPackages=gitkept,
+                gitDependenciesNote="source trees at the locked revision under pub/git/<repository>-<revision>/, named as pub names its checkout",
                 dropped=dict(directories=list(DROP_DIRECTORIES),counts=dropped,deletedFlaggedFiles=deleted),
                 cdnFiles=files,
                 officeJs=None if office_pin is None else dict(repository=office_pin["repository"],commit=office_pin["commit"],
@@ -177,6 +250,6 @@ def main():
                 fallbackFonts=dict(count=0 if args.skip_cdn else len(pinned),bytes=fallback),
                 desktopPackages=list(DESKTOP_PACKAGES),desktopLinuxSystemPackages=list(DESKTOP_LINUX_SYSTEM))
     (target/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
-    print("Mirrored",len(packages),"pub packages,",len(gits),"git dependencies recorded and",len(files),"CDN files;",
+    print("Mirrored",len(packages),"pub packages,",len(gits),"git dependencies and",len(files),"CDN files;",
           "dropped",sum(dropped.values()),"files")
 if __name__=="__main__": main()

@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Build the web app the host serves, from the deps branch and a pub cache, with the network off.
 
-  site_build.py --seed-git   put the app's git packages in the pub cache (the one step that fetches, from the
-                             repositories app/pubspec.lock names)
-  site_build.py              resolve the packages offline, build with --csp, and finish the site as app/tool/build.py does
+Resolve the packages offline (the hosted ones and the git ones, from the deps branch), build with --csp, and finish the
+site as app/tool/build.py does.
 
 Run by packaging/container/Containerfile; it needs CANOA_DEPS (the deps branch), PUB_CACHE and Flutter on PATH, and
 app/web/noise already built (app/tool/build_noise.py).
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
@@ -25,22 +23,6 @@ import offline_pub  # noqa: E402
 
 def run(*command: str, cwd: Path | None = None) -> None:
     subprocess.run(command, check=True, cwd=cwd)
-
-
-def seed_git(cache: Path) -> None:
-    """Each git package of the lock as pub caches it: a bare clone named by the URL's hash, and a checkout at the revision."""
-    lock = (ROOT / "app" / "pubspec.lock").read_text(encoding="utf-8")
-    for package in offline_pub.parse_lock(lock):
-        if package.source != "git":
-            continue
-        bare = cache / "git" / "cache" / f"{package.repo}-{hashlib.sha1(package.url.encode()).hexdigest()}"
-        checkout = cache / "git" / f"{package.repo}-{package.resolved_ref}"
-        if checkout.is_dir():
-            continue
-        run("git", "clone", "--quiet", "--mirror", package.url, str(bare))
-        run("git", "clone", "--quiet", "--no-checkout", str(bare), str(checkout))
-        run("git", "-C", str(checkout), "checkout", "--quiet", package.resolved_ref)
-        print(f"{package.name}: {package.url} at {package.resolved_ref[:12]}")
 
 
 def build_site() -> Path:
@@ -59,10 +41,6 @@ def build_site() -> Path:
 
 
 def main() -> None:
-    cache = Path(os.environ["PUB_CACHE"])
-    if "--seed-git" in sys.argv[1:]:
-        seed_git(cache)
-        return
     try:
         dist = build_site()
     except (RuntimeError, subprocess.CalledProcessError) as error:

@@ -106,6 +106,23 @@ class PlanTests(unittest.TestCase):
         self.assertTrue((self.target / "git" / "cache" / "coqui-acp-1234").is_dir())
         self.assertFalse((self.user_cache / "hosted").exists(), "the user's cache is only read")
 
+    def test_a_git_dependency_on_the_deps_branch_seeds_the_cache_with_the_list_pub_reads(self):
+        user = self.user_cache.parent / "empty_cache"
+        for sub in ("coqui_acp", "coqui_acp_chat"):
+            folder = self.deps / "pub" / "git" / f"coqui-acp-{REV}" / "bindings" / "dart" / sub
+            folder.mkdir(parents=True)
+            (folder / "pubspec.yaml").write_text("name: x\n")
+        plan = offline_pub.plan_from(lock(), self.deps, user, self.target)
+        self.assertIsNone(plan.reason)
+        listing = self.target / "git" / f"coqui-acp-{REV}" / ".git" / "pub-packages"
+        self.assertEqual(listing.read_text(), "bindings/dart/coqui_acp\nbindings/dart/coqui_acp_chat")
+        self.assertFalse((self.deps / "pub" / "git" / f"coqui-acp-{REV}" / ".git").exists(), "the deps checkout is only read")
+        import hashlib
+        import subprocess
+        bare = self.target / "git" / "cache" / ("coqui-acp-" + hashlib.sha1(b"https://github.com/Boriken-Dev/coqui-acp.git").hexdigest())
+        found = subprocess.run(["git", "-C", str(bare), "rev-list", "--max-count=1", REV], capture_output=True, text=True)
+        self.assertEqual((found.returncode, found.stdout.strip()), (0, REV), "pub asks its bare repository for the locked revision")
+
     def test_a_different_hosted_package_falls_back_and_names_it(self):
         plan = self.plan(lock(sha="b" * 64))
         self.assertIsNone(plan.cache)
