@@ -57,7 +57,9 @@ enum PasskeyAction {
     Remove {
         /// The account, by name, as `list` shows it (an account that is gone still has its name).
         name: String,
-        /// The passkey's id as `list` shows it; every passkey of the account when it is left out.
+        /// The passkey's id as `list` shows it; every passkey of the account when it is left out. An id is base64url and may start
+        /// with a hyphen.
+        #[arg(allow_hyphen_values = true)]
         id: Option<String>,
     },
 }
@@ -73,7 +75,7 @@ enum FactorAction {
         /// The account, by name.
         name: String,
         /// The first code from the app: confirms the setup that is waiting.
-        #[arg(long, value_name = "CODE")]
+        #[arg(long, value_name = "CODE", allow_hyphen_values = true)]
         code: Option<String>,
     },
     /// Clear what the portal counted of NAME's failed second-step tries, and the provider's delay of the account. For a person who
@@ -91,7 +93,12 @@ enum FactorAction {
         #[arg(required_unless_present = "id")]
         name: Option<String>,
         /// The code's id as `list` shows it (`1000:alice`), for an account that is gone.
-        #[arg(long, value_name = "ID", conflicts_with = "name")]
+        #[arg(
+            long,
+            value_name = "ID",
+            conflicts_with = "name",
+            allow_hyphen_values = true
+        )]
         id: Option<String>,
     },
 }

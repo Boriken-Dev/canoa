@@ -162,6 +162,11 @@ fn an_administrator_lists_and_removes_passkeys_and_no_listing_carries_a_key() {
     assert!(!wrong.status.success());
     assert!(String::from_utf8_lossy(&wrong.stderr).contains("no passkey with that id"));
     assert_eq!(lines(&passkeys(&config, &["list"])).len(), 1);
+    // An id may start with a hyphen: it reaches the lookup, which finds none, and is not read as an option.
+    let hyphen = passkeys(&config, &["remove", &name, "-O_fixed-id"]);
+    let said = String::from_utf8_lossy(&hyphen.stderr).into_owned();
+    assert!(said.contains("no passkey with that id"), "{said}");
+    assert_eq!(lines(&passkeys(&config, &["list"])).len(), 1);
     let removed = passkeys(&config, &["remove", &name, &id]);
     assert!(
         removed.status.success(),

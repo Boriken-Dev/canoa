@@ -179,6 +179,14 @@ fn an_administrator_sets_a_code_up_lists_it_and_resets_it() {
     let said = String::from_utf8_lossy(&wrong.stderr).into_owned();
     assert!(said.contains("not accepted"), "{said}");
     assert!(!said.contains("000000") && !said.contains("secret="));
+    // A code or an id that starts with a hyphen is a value, not an option.
+    let dashed = factor(&config, &["enrol", &name, "--code", "-123456"]);
+    let said = String::from_utf8_lossy(&dashed.stderr).into_owned();
+    assert_eq!(dashed.status.code(), Some(1), "{said}");
+    assert!(said.contains("not accepted"), "{said}");
+    let dashed = factor(&config, &["reset", "--id", "-junk"]);
+    let said = String::from_utf8_lossy(&dashed.stderr).into_owned();
+    assert!(!said.contains("unexpected argument"), "{said}");
     // A name the portal does not sign in is a mistake in the invocation.
     assert_eq!(
         factor(&config, &["enrol", "nobodyatall"]).status.code(),
