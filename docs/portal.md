@@ -605,6 +605,7 @@ socket = "/run/{{ program }}-portal/portal.sock"   # what the proxy reaches the 
 socket_group = "{{ program }}-proxy"                # the group that may connect to it: the proxy's user and this account only
 site = "/opt/{{ program }}/site"               # the web app's build (flutter build web --csp --no-web-resources-cdn)
 # brand = "/etc/{{ program }}/brand.json"      # the name and mark of the portal's pages, see "The portal's pages carry a brand"; the build's own when unset
+# base_path = "/"                      # the path the proxy serves the portal under, such as "/{{ program }}/", see "Under a path prefix"
 # adjust_contrast = true               # move the pages' accent and notice text until each holds a contrast of 4.5; false uses the default look's colours as given
 socket_dir = "/run/{{ program }}"
 unit = "{{ program }}@{user}.service"
@@ -816,7 +817,60 @@ server {
 }
 ```
 
+## Under a path prefix
+
+The portal can share a host name with other sites, at `https://HOST/{{ program }}/` and not at the root. One setting says where:
+
+```toml
+base_path = "/{{ program }}/"   # default "/"; a leading and a trailing slash are added; words of letters, digits and -
+```
+
+The proxy passes the request's path **as it came, prefix kept**; the portal answers `404` to a path outside the prefix (and
+sends `/{{ program }}` to `/{{ program }}/`). Everything the portal writes is the prefix and then its own path: the redirects, the forms' actions, the
+links, the tabs, the page's stylesheet, script and icon, the channels' addresses in `canoa.json`, and the `<base href>` of the web
+app, so that the app finds its files, `canoa.json`, `manifest.json` and the portal's calls below the prefix, and the browser's
+address bar stays there. The pages a portal at `/` gives are not changed by the setting.
+
+```nginx
+location /{{ program }}/ {
+    # no URI after the socket: nginx then sends the path unchanged. `proxy_pass http://unix:...:/;` would cut the prefix off, and
+    # every request would be answered 404
+    proxy_pass http://unix:/run/{{ program }}-portal/portal.sock:;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header X-Client-Cert $canoa_client_cert;
+    proxy_read_timeout 1h;
+}
+location = /{{ program }} { return 308 /{{ program }}/; }   # optional: the portal does this too
+```
+
+The same rules as for a location at `/` hold: every `proxy_set_header` in the location (see "Signing in by certificate"). The
+files the browser asks for at the root of the host, such as `/favicon.ico`, are the host's own and are not the portal's.
+
+**The cookies.** A `__Host-` cookie must have `Path=/`, which would send it to every site on the host name. Under a prefix the
+portal sets `__Secure-` cookies instead, each with `Path=` the prefix and a name that ends in the prefix's words
+(`__Secure-{{ program }}.{{ program }}` for `/{{ program }}/`, `__Secure-{{ program }}.a_b` for `/a/b/`), so two portals on one host, or one at `/`, do not
+read each other's: a cookie another path or the root set is not a session of this portal. Still `HttpOnly`, `Secure`,
+`SameSite=Strict` and no `Domain`; with `base_path = "/"` the cookies are the `__Host-` ones they have always been.
+
+**No `X-Forwarded-Prefix`.** The portal does not read it. The prefix is a fact of how the site is published, which the
+person who sets up the proxy writes in one place; the portal needs it before any request, to name its cookies and write its
+paths, and a header can only say it with a request, from whoever sent it. A portal told by a header would have to decide whom to believe
+(the proxy's socket is the one connection whose headers are believed, but the loopback `listen` address is not), and a
+proxy that dropped or changed it would send a cookie to the wrong path. `base_path` and the proxy's `location` say the same
+thing and a mismatch is a `404`, which shows at once.
+
+The passkey's relying party is the host name and the origins are scheme and host: a prefix changes neither, so passkeys and
+pinned certificates work as they do at the root. The Office add-in's manifests are rendered for an origin, with no path, so the
+add-in is for a portal at the root.
+
 ## The browser's side
+
+With `base_path` set, every path below is under it.
 
 | Request | Answer |
 | --- | --- |
@@ -885,7 +939,7 @@ portal has, and to the app (**Continue to** the brand's name); a page for someth
 passkey provider, no certificate provider with `enrol = true`) is not linked.
 
 The app has a **Sign-in** page in Settings, shown only when a portal served it. It asks `GET /portal/account` and lists what the
-portal says, each page opening in the same tab:
+portal says, each page opening in the same tab (under a prefix each `path` carries it):
 
 ```json
 {"user": "alice",
