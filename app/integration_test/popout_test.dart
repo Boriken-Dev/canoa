@@ -4,14 +4,18 @@
 //
 //   flutter drive --driver=test_driver/popout_test.dart --target=integration_test/popout_test.dart -d windows   (or -d linux)
 //
-// The window draws the conversation the main window holds, so a request answered in one window is answered in both, a message
-// written in either is in the one queue, and a reply arrives in both at once. Closing the pop-out closes only it; closing the main
-// window puts it away in the tray and leaves the pop-out where it is. A button in the pop-out is pressed by calling what it calls:
-// a driver cannot reach a second window.
+// The window draws the conversation the main window held, which is then a tab of that window and of no other (the main window
+// shows its next tab). A request answered in the window is answered once, a message written there and one the app sends go to the
+// one queue, and a reply arrives in the window. Closing the pop-out closes only it, and its tab goes back to the main window; closing
+// the main window puts it away in the tray and leaves the pop-out where it is. A button in the pop-out is pressed by calling what it
+// calls: a driver cannot reach a second window.
 //
 // After that, several windows at once: two sessions, a file's viewer and a terminal, each in a window of its own and each live: a
 // message sent in a session's window reaches that session's agent, the file's text is drawn in its window, and a command typed in
 // the terminal window runs in a real shell that goes on running when the window is closed.
+//
+// Last, tabs: the two sessions as tabs of the main window (closing their windows sent them there), one moved to a window of its own
+// through its tab's menu, a message sent in each, and the tab moved back, each step read from the strips and the chats on screen.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -19,6 +23,7 @@ import 'dart:io';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell_io.dart';
 import 'package:canoa/main.dart';
+import 'package:canoa/popout/hub_tabs.dart' show TabbedWindow;
 import 'package:canoa/popout/platform.dart' as platform;
 import 'package:canoa/popout/popout_view.dart';
 import 'package:canoa/popout/popout_window.dart';
@@ -32,6 +37,7 @@ import 'package:canoa/shell/work_panel.dart' show PanelFrame;
 import 'package:canoa/surfaces/files_surface.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
 import 'package:canoa/surfaces/terminal_surface.dart';
+import 'package:canoa/tabs/session_tab_strip.dart';
 import 'package:canoa/workspace/open_in.dart' show workspaceOpener;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity;
 import 'package:material_ui/material_ui.dart';
@@ -63,7 +69,7 @@ List<Element> _elements(bool Function(Element element) test) {
 bool _inWindow(Element element) {
   var inside = false;
   element.visitAncestorElements((ancestor) {
-    if (ancestor.widget is PopoutChat) inside = true;
+    if (ancestor.widget is PopoutChat || ancestor.widget is TabbedWindow) inside = true;
     return !inside;
   });
   return inside;
@@ -188,6 +194,47 @@ bool _inChatOf(ChatSession session, Element element) {
 int _saidIn(ChatSession session, String needle) =>
     _elements((e) => e.widget is RichText && (e.widget as RichText).text.toPlainText().contains(needle) && _inChatOf(session, e)).length;
 
+/// The tab strips on screen: the main window's and each window's own, as the titles of their tabs and the one shown.
+List<Map<String, Object?>> _strips() => [
+  for (final element in _elements((e) => e.widget is SessionTabStrip))
+    {
+      // The new-session page the app opens on is a tab too; the titles are of the conversations, in alphabetical order.
+      'tabs': [for (final session in (element.widget as SessionTabStrip).sessions) if (!session.isDraft) session.title]..sort(),
+      'current': (element.widget as SessionTabStrip).sessions.where((session) => session.id == (element.widget as SessionTabStrip).current).map((s) => s.title).firstOrNull,
+      'inWindow': _inTabbedWindow(element),
+    },
+];
+
+bool _inTabbedWindow(Element element) {
+  var inside = false;
+  element.visitAncestorElements((ancestor) {
+    if (ancestor.widget is TabbedWindow) inside = true;
+    return !inside;
+  });
+  return inside;
+}
+
+/// Presses the menu button of [session]'s tab and then the entry [entry] of the menu, as a person would.
+Future<void> _tabMenu(ChatSession session, Key entry) async {
+  final button = _first((e) => e.widget is IconButton && e.widget.key == Key('tab-menu-${session.id}'));
+  if (button == null) throw StateError('no menu button on the tab of ${session.title}');
+  (button.widget as IconButton).onPressed!();
+  Element? item() => _first((e) => e.widget is PopupMenuItem && e.widget.key == entry);
+  final end = DateTime.now().add(const Duration(seconds: 10));
+  while (item() == null) {
+    if (DateTime.now().isAfter(end)) throw StateError('the menu did not offer $entry');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+  InkWell? tap;
+  void find(Element each) {
+    if (each.widget is InkWell && tap == null) tap = each.widget as InkWell;
+    each.visitChildren(find);
+  }
+
+  item()!.visitChildren(find);
+  tap!.onTap!();
+}
+
 bool _isPrompt(Map<String, dynamic> message) => message['method'] == 'session/prompt';
 
 Future<void> main() async {
@@ -304,6 +351,7 @@ final class _Scene {
     'visible': await windowManager.isVisible(),
     'tray': shell.hasTray,
     'extra': extra,
+    'strips': _strips(),
     'said': {
       'Reading calc.js.': _said('Reading calc.js.'),
       'And it is fixed.': _said('And it is fixed.'),
@@ -331,13 +379,13 @@ final class _Scene {
         await until(() => agent.answerTo(6) != null, 'the main window answer to reach the agent');
         await until(() => _said('Answered in Canoa.')['window']! > 0, 'the window to say where it was answered');
       case 'both_send':
-        await Future.wait([store.sendText('from the main window'), _chat!.conversation.send('from the window')]);
+        await Future.wait([store.sendTextTo(session, 'from the main window', attached: false), _chat!.conversation.send('from the window')]);
         await until(() => session.queue.length == 2, 'both messages to be queued');
         await until(() => _said('2 messages wait for this turn to end.')['window']! > 0, 'the window to show the queue');
       case 'reply':
         agent.update({'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': ' And it is fixed.'}});
         agent.ask(7, 'Edit c.txt');
-        await until(() => _said('And it is fixed.').values.every((n) => n > 0) && _said('Edit c.txt').values.every((n) => n > 0), 'the reply and the new request in both windows');
+        await until(() => _said('And it is fixed.')['window']! > 0 && _said('Edit c.txt')['window']! > 0, 'the reply and the new request in the window');
       case 'close_popout':
         if (Platform.isWindows) {
           if (!closeWindowTitled('Fix calc - Canoa')) throw StateError('no window to close among ${windowTitles()}');
@@ -382,6 +430,11 @@ final class _Scene {
         await until(() => secondAgent.answerTo(9) != null, 'the answer given in the second window to reach its agent');
         extra['first agent was answered 9'] = agent.answerTo(9) != null;
         extra['z settled by'] = [for (final q in second.chat.settledPermissions) '${q.outcome?.by}'];
+      case 'second_home':
+        // The files panel is the main window's, and the main window shows only what is its own tab: the second session comes back.
+        final back = _elements((e) => e.widget is IconButton && _inChatOf(second, e) && (e.widget as IconButton).tooltip == 'Bring back to the main window').single.widget as IconButton;
+        back.onPressed!();
+        await until(() => windows.windows.length == 1 && store.selectedId == second.id, 'the second session to be back in the main window');
       case 'open_file':
         final frame = _first((e) => e.widget is PanelFrame)!.widget as PanelFrame;
         frame.surfaces.openSurface(files, SurfaceSlot.right);
@@ -424,6 +477,29 @@ final class _Scene {
         workspace.focused!.terminal.textInput(_multiply(7, 8));
         await until(() => workspace.focused!.terminal.buffer.getText().contains('56'), 'the same shell to answer once more');
         extra['screen keeps the first answer'] = workspace.focused!.terminal.buffer.getText().contains('42');
+      case 'tabs_start':
+        // Closing the windows of the two sessions sent their tabs to the main window.
+        await until(() => _strips().any((strip) => strip['inWindow'] == false && (strip['tabs'] as List).length == 2), 'the two sessions to be tabs of the main window');
+      case 'tabs_move':
+        await _tabMenu(second, const Key('tab-move-new'));
+        await until(() => windows.windows.length == 1 && _chatOf(second) != null, 'the window of the second session');
+        await until(() => _strips().every((strip) => (strip['tabs'] as List).length != 2), 'the main window to lose the tab');
+        extra['chat of the first in a window'] = _chatOf(session) != null;
+      case 'tabs_send':
+        await _chatOf(second)!.conversation.send('typed in the tab window');
+        await store.sendText('typed in the main tab');
+        await until(() => _saidIn(second, 'typed in the tab window') > 0 || second.queue.any((m) => m.text == 'typed in the tab window'), 'the second session to take its message');
+        extra['second queue'] = [for (final m in second.queue) '${m.text} from ${m.from}'];
+        extra['first queue'] = [for (final m in session.queue) '${m.text} from ${m.from}'];
+        extra['second prompts'] = secondAgent.sent.where(_isPrompt).length;
+        extra['first prompts'] = agent.sent.where(_isPrompt).length;
+        await until(() => _saidIn(second, '1 message waits for this turn to end.') > 0, 'the window to show its queue');
+        extra['window says one waits'] = _saidIn(second, '1 message waits for this turn to end.');
+      case 'tabs_back':
+        final dock = _elements((e) => e.widget is IconButton && _inWindow(e) && (e.widget as IconButton).tooltip == 'Bring back to the main window').single.widget as IconButton;
+        dock.onPressed!();
+        await until(() => windows.windows.isEmpty && _strips().any((strip) => (strip['tabs'] as List).length == 2), 'the tab to be back in the main window');
+        extra['clients after'] = [for (final c in second.chat.clients) c.id];
       case 'finish':
         final frame = _first((e) => e.widget is PanelFrame)!.widget as PanelFrame;
         for (final window in [...windows.windows]) {
