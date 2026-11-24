@@ -430,8 +430,7 @@ final class _Scene {
           await window.close();
         }
         frame.surfaces.close('terminal');
-        await _shells.opened.single.exited.timeout(const Duration(seconds: 10), onTimeout: () => null);
-        extra['shell ended with its terminal'] = true;
+        extra['shell ended with its terminal'] = await Future.any([_shells.opened.single.exited.then((_) => true), Future.delayed(const Duration(seconds: 10), () => false)]);
         folder.deleteSync(recursive: true);
       default:
         throw ArgumentError('unknown message $message');

@@ -6,6 +6,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Directory;
 import 'dart:typed_data';
 
 import 'package:canoa/l10n/app_text.dart';
@@ -25,6 +26,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'fixtures/popout_windows.dart';
 import 'fixtures/sample_render.dart' show loadTerminalFont;
+import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 /// A folder with one file in it, on a host that holds nothing else.
 final class _Files implements WorkspaceFiles {
@@ -138,7 +140,10 @@ Widget _app(Widget child, {String? language}) => MaterialApp(
 );
 
 void main() {
-  setUpAll(loadTerminalFont);
+  setUpAll(() async {
+    goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/item_windows_test.dart'));
+    await loadTerminalFont();
+  });
 
   group('an item\'s window', () {
     testWidgets('opens once for its key, and asking again brings that window forward', (tester) async {

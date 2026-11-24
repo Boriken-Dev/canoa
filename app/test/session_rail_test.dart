@@ -602,6 +602,14 @@ void main() {
       });
     }
 
+    testWidgets('the menu of a session where windows exist offers a new window', (tester) async {
+      final store = await busy();
+      await _show(tester, store, width: 260, height: 1000, onOpenWindow: (_) async {});
+      await _openMenu(tester, 'Refactor the rail');
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/rail_menu_window.png'));
+      store.dispose();
+    });
+
     testWidgets('the rail with Settled and Archived open, and a menu', (tester) async {
       final store = await busy();
       await _show(tester, store, width: 260, height: 1000);
