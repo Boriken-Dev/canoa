@@ -532,8 +532,9 @@ pub struct Finished {
 /// Runs `program` with `args` through `spawner` until the program exits, or ends it (and what it started) when `limit` is over.
 ///
 /// It ends when the program exits, not when its pipes close: a service the program started and left running keeps them open,
-/// so once the program has exited only what is already buffered is read, for at most [`DRAIN`]. What the program started
-/// is left alone then; only the limit ends it, and what it started.
+/// so once the program has exited only what is already buffered is read, for at most 400 ms. `run` ends nothing the
+/// program started once it has exited (the spawner may, when it lets go of the process); only the limit ends the program,
+/// and what it started.
 ///
 /// # Errors
 ///
