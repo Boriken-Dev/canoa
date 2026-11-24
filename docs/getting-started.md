@@ -40,6 +40,23 @@ canoa serve --web app/build/web                                           # serv
 
 The web app has no agents of its own: it connects to a host by its printed URL and peer id, proves its key, and the host's owner accepts that key with `canoa accept`. See [the web app](host.md#the-web-app). `python app/tool/build.py pwa` makes the same bundle without `--csp`, for any other static server; `--wasm` output may need COOP/COEP headers and a compatible browser. For development, `cd app && flutter run -d chrome`.
 
+## In a container
+
+`packaging/container/Containerfile` builds the Linux host (`canoa`, with the web app and Office.js built in) and the web app in one image, from Boriken Dev's own copies of what it needs, and `build.sh` runs it and copies the results out:
+
+```sh
+sh packaging/container/build.sh          # the image `canoa`; canoa and site/ in ./out
+podman run --rm canoa --version
+```
+
+`CONTAINER_ENGINE=docker` works the same, and `--print` shows the commands. The pins are build arguments, `FLUTTER_COMMIT` and `DEPS_COMMIT`, and the environment overrides them (`build.sh` passes `FLUTTER_COMMIT`, `FLUTTER_VERSION_TAG`, `FLUTTER_VERSION_TAG_COMMIT`, `DEPS_COMMIT`, `FLUTTER_REPOSITORY`, `DEPS_REPOSITORY` and `FLUTTER_STORAGE_BASE_URL` through):
+
+- **Flutter** is cloned from [`Boriken-Dev/flutter`](https://github.com/Boriken-Dev/flutter), a mirror with the blobs a scanner refuses removed and `bin/internal/engine.version` written in, so its commits are not upstream's. The default `33d7f282aa` is upstream `c0205700e0`, the commit above. The mirror has no `3.51.0-0.2.pre` tag, which Flutter counts commits from to get its version (`3.51.0-1.0.pre-291`, what `app/pubspec.yaml` asks for), so the build makes that tag at the mirror's copy of upstream's `bc6e01a3ac` (`FLUTTER_VERSION_TAG`, `FLUTTER_VERSION_TAG_COMMIT`); a new `FLUTTER_COMMIT` may need both moved.
+- **Crates, hosted packages, the fallback fonts and Office.js** come from the `deps` branch at `DEPS_COMMIT`, which mirrors the `Cargo.lock` and `app/pubspec.lock` of the commit it names (`manifest.json`). The host is built `--offline --locked` with `tools/mirror_crates.py use` as its cargo home, and the app's packages are resolved `--offline --enforce-lockfile`. Move `DEPS_COMMIT` with the lockfiles: a deps commit that does not cover them stops the build before it compiles.
+- **The app's git packages** (`coqui_acp` and the others in `app/pubspec.lock`) are cloned from `github.com/Boriken-Dev` at the revisions the lock names; the deps branch does not carry them.
+
+Four steps reach beyond those: the base image and Debian packages, `flutter precache --web` (the Dart SDK and the web engine, from Flutter's storage; `FLUTTER_STORAGE_BASE_URL` names another server), and the Noise method's WebAssembly, whose crate has a lock of its own that the deps branch does not mirror (rustup's `wasm32` target, `wasm-bindgen-cli` and its crates). Every other step runs with the network off. The image's architecture is the machine's own: an x86-64 image is built on an x86-64 machine (or with `-- --platform linux/amd64`), with no change to the files.
+
 ## Tests
 
 ```sh

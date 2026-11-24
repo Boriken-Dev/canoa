@@ -1,7 +1,4 @@
-.git
-.github
-.agents
-.claude
+.*
 **/target
 **/node_modules
 **/__pycache__

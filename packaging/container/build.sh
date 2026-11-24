@@ -8,7 +8,7 @@
 #   --no-out     build the image only
 #   --print      print the build commands and run nothing
 #
-# Environment: CONTAINER_ENGINE (podman, or docker), FLUTTER_COMMIT and DEPS_COMMIT (override the Containerfile's pins),
+# Environment: CONTAINER_ENGINE (podman, or docker), FLUTTER_COMMIT, FLUTTER_VERSION_TAG(_COMMIT) and DEPS_COMMIT (override the Containerfile pins),
 # FLUTTER_REPOSITORY and DEPS_REPOSITORY (another place holding the same commits), FLUTTER_STORAGE_BASE_URL (a mirror of
 # Flutter's engine storage: passed to the build as a build argument and read by the flutter stage's `flutter precache`).
 # Arguments after `--` go to every build command (for example `--platform linux/amd64`).
@@ -34,7 +34,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 
 args=
-for name in FLUTTER_COMMIT DEPS_COMMIT FLUTTER_REPOSITORY DEPS_REPOSITORY FLUTTER_STORAGE_BASE_URL; do
+for name in FLUTTER_COMMIT FLUTTER_VERSION_TAG FLUTTER_VERSION_TAG_COMMIT DEPS_COMMIT FLUTTER_REPOSITORY DEPS_REPOSITORY FLUTTER_STORAGE_BASE_URL; do
     eval "value=\${$name:-}"
     [ -z "$value" ] || args="$args --build-arg $name=$value"
 done
