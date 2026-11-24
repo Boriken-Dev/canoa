@@ -41,7 +41,8 @@ final class PortalSession {
   /// The account that is signed in.
   final String user;
 
-  /// The portal's own address; the requests go to it.
+  /// The portal's own address; the requests go to it. Its paths are relative to this: the page's base, which is where the
+  /// portal is mounted (`/` or a prefix such as `/canoa/`).
   final Uri base;
 
   final http.Client _client;
@@ -50,7 +51,7 @@ final class PortalSession {
   final Future<String> Function(PeerMethod method) _localPeer;
   Future<void>? _pairing;
 
-  Uri get login => base.resolve('/portal/login');
+  Uri get login => base.resolve('portal/login');
 
   /// Sends the browser to the sign-in page.
   void signedOut() => _navigate(login);
@@ -59,7 +60,7 @@ final class PortalSession {
   /// as "yes", since the portal being slow is no reason to leave the page.
   Future<bool> active() async {
     try {
-      final response = await _client.get(base.resolve('/portal/session'));
+      final response = await _client.get(base.resolve('portal/session'));
       if (response.statusCode == 401) {
         signedOut();
         return false;
@@ -78,7 +79,7 @@ final class PortalSession {
     final http.Response response;
     try {
       response = await _client.post(
-        base.resolve('/portal/pair'),
+        base.resolve('portal/pair'),
         headers: {'content-type': 'application/json'},
         body: jsonEncode({'peer': peer}),
       );
@@ -116,7 +117,7 @@ final class PortalSession {
   /// the sign-in page.
   Future<PortalAccount?> account() async {
     try {
-      final response = await _client.get(base.resolve('/portal/account'));
+      final response = await _client.get(base.resolve('portal/account'));
       if (response.statusCode == 401) {
         signedOut();
         return null;
@@ -133,7 +134,7 @@ final class PortalSession {
 
   /// Ends the session on the portal and returns the browser to the sign-in page.
   Future<void> signOut() async {
-    await _client.post(base.resolve('/portal/logout'));
+    await _client.post(base.resolve('portal/logout'));
     signedOut();
   }
 

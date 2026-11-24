@@ -21,6 +21,7 @@ import 'host_config.dart';
 import 'host_files.dart';
 import 'host_state.dart';
 import 'local_admission.dart';
+import 'app_base.dart';
 import 'portal_session.dart';
 import 'served_control.dart';
 
@@ -211,7 +212,7 @@ final class ServedApp {
     final user = host.user;
     final portal = user == null
         ? null
-        : PortalSession(user: user, base: base ?? Uri.base, client: client, navigate: navigate, localPeer: localPeer);
+        : PortalSession(user: user, base: base ?? appBase(), client: client, navigate: navigate, localPeer: localPeer);
     final path = host.admit;
     final admission = portal != null || path == null
         ? null

@@ -119,7 +119,7 @@ Future<ServedHost?> loadServedHost({http.Client? client, Uri? base, void Functio
     final page = base ?? appBase();
     final response = await ask.get(page.resolve('canoa.json'));
     if (response.statusCode == 401) {
-      final login = page.resolve('/portal/login');
+      final login = page.resolve('portal/login');
       if (signedOut != null) {
         signedOut(login);
       } else if (_inPage) {

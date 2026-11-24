@@ -277,6 +277,48 @@ void main() {
       expect(find.byKey(const ValueKey('sign-out')), findsNothing);
     });
   });
+
+  group('under a prefix', () {
+    final mounted = Uri.parse('http://localhost:7890/canoa/');
+
+    test('every request and the sign-in address are below the base of the page, never at the root', () async {
+      final asked = <String>[];
+      final client = MockClient((request) async {
+        asked.add('${request.method} ${request.url.path}');
+        return switch (request.url.path) {
+          '/canoa/canoa.json' => http.Response(_index(), 200),
+          '/canoa/portal/session' => http.Response('{}', 401),
+          '/canoa/portal/account' => http.Response('{}', 401),
+          _ => http.Response('', 204),
+        };
+      });
+      final navigated = <Uri>[];
+      final host = await loadServedHost(client: client, base: mounted);
+      expect(host?.user, 'canoatesta');
+      final session = PortalSession(user: 'canoatesta', base: mounted, client: client, navigate: navigated.add, localPeer: (method) async => _own);
+      expect(await session.active(), isFalse);
+      await session.account();
+      await session.signOut();
+      expect(asked, [
+        'GET /canoa/canoa.json',
+        'GET /canoa/portal/session',
+        'GET /canoa/portal/account',
+        'POST /canoa/portal/logout',
+      ]);
+      expect(navigated, everyElement(Uri.parse('http://localhost:7890/canoa/portal/login')));
+      expect(navigated, hasLength(3));
+      // A page the portal names carries the prefix itself.
+      session.open('/canoa/portal/factor');
+      expect(navigated.last, Uri.parse('http://localhost:7890/canoa/portal/factor'));
+    });
+
+    test('a 401 of the index goes to the sign-in below the base', () async {
+      final logins = <Uri>[];
+      final client = MockClient((request) async => http.Response('', 401));
+      expect(await loadServedHost(client: client, base: mounted, signedOut: logins.add), isNull);
+      expect(logins, [Uri.parse('http://localhost:7890/canoa/portal/login')]);
+    });
+  });
 }
 
 /// A control channel that answers every request with an empty result.
