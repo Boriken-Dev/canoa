@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use canoa::store::source::{CatalogSourceProvider, ReadRequest, SourceInfo};
+use canoa::store::source::{CatalogSourceProvider, ReadRequest, SourceFetch, SourceInfo};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
@@ -55,6 +55,7 @@ impl CatalogSourceProvider for Standin {
         &self,
         request: ReadRequest,
         _spawner: Object<dyn ProcessSpawner>,
+        _fetch: Object<dyn SourceFetch>,
     ) -> Result<String, ProviderError> {
         if is_down(&request.label) {
             return Err(canoa::status::internal("the stand-in is down"));
@@ -80,6 +81,7 @@ impl CatalogSourceProvider for Everywhere {
         &self,
         request: ReadRequest,
         _spawner: Object<dyn ProcessSpawner>,
+        _fetch: Object<dyn SourceFetch>,
     ) -> Result<String, ProviderError> {
         if is_down(&request.label) {
             return Err(canoa::status::internal("the stand-in is down"));
@@ -107,6 +109,7 @@ impl CatalogSourceProvider for Lister {
         &self,
         request: ReadRequest,
         _spawner: Object<dyn ProcessSpawner>,
+        _fetch: Object<dyn SourceFetch>,
     ) -> Result<String, ProviderError> {
         if is_down(&request.label) {
             return Err(canoa::status::internal("the stand-in is down"));

@@ -6,8 +6,9 @@ class Team(CatalogSource):
     title = "A team's list"
     types = ["skills"]
 
-    def read(self, request, spawner):
+    def read(self, request, spawner, fetch):
         spawner.destroy()
+        fetch.destroy()
         return json.dumps({"skills": []})
 ```
 
@@ -19,6 +20,10 @@ good catalog it keeps.
 A source that runs a program or reads a file does it through the `spawner` `read` is handed: it starts a program (`spawn`) and reads a
 file anywhere the person's account can (`read_file`, by an absolute path). A script has no other way to do either, and the source
 destroys the spawner it was handed, even when it refuses.
+
+A source that reads an address does it through the `fetch` `read` is handed (`get_text`, `get_json`): the host's own client, proxy and
+certificate checks, and only the places the source names in `endpoints` (the class attribute; an address an entry names is allowed because
+the person wrote the entry). `keys` names the publisher key fingerprints the source verifies with. The source destroys the fetch too.
 
 The classes that mirror what Canoa carries are `CommandCatalogSource` (a program the person named, run on each refresh, whose output
 is the catalog) and `ReadCatalogSource` (a place the Store type reads itself: a git source, an address or a file).
@@ -103,6 +108,8 @@ class CatalogSource(WithForm, provide.Provider, kinds.CatalogSource, abstract=Tr
     title: ClassVar[str]
     help: ClassVar[Optional[str]] = None
     types: ClassVar[Sequence[str]] = ()
+    endpoints: ClassVar[Sequence[str]] = ()
+    keys: ClassVar[Sequence[str]] = ()
     values: ClassVar[Optional[type]] = None
     values_schema: ClassVar[Optional[Dict[str, Any]]] = None
     values_form: ClassVar[Optional[Dict[str, Any]]] = None
@@ -128,6 +135,8 @@ class CatalogSource(WithForm, provide.Provider, kinds.CatalogSource, abstract=Tr
                 "title": self.title,
                 "help": self.help,
                 "types": list(self.types),
+                "endpoints": list(self.endpoints),
+                "keys": list(self.keys),
                 "schema": schema,
                 "form": form or None,
             }
@@ -137,7 +146,7 @@ class CatalogSource(WithForm, provide.Provider, kinds.CatalogSource, abstract=Tr
         return self.info()
 
     @abstract
-    def read(self, request: Ref, spawner: Taken[kinds.ProcessSpawner]) -> str:
+    def read(self, request: Ref, spawner: Taken[kinds.ProcessSpawner], fetch: Taken[kinds.SourceFetch]) -> str:
         """The catalog's text."""
         raise Unsupported("read is not implemented")
 
@@ -162,7 +171,7 @@ class ReadCatalogSource(CatalogSource, abstract=True):
         },
     }
 
-    def read(self, request: Ref, spawner: Taken[kinds.ProcessSpawner]) -> str:
+    def read(self, request: Ref, spawner: Taken[kinds.ProcessSpawner], fetch: Taken[kinds.SourceFetch]) -> str:
         try:
             source = fields_of(request).get("source")
             if not isinstance(source, str) or not source:
@@ -176,6 +185,7 @@ class ReadCatalogSource(CatalogSource, abstract=True):
             return text_of_catalog(data)
         finally:
             _release(spawner)
+            _release(fetch)
 
 
 def _absolute(path: str) -> bool:
@@ -251,11 +261,12 @@ class CommandCatalogSource(CatalogSource, abstract=True):
     }
     values_form = {"fields": {"timeout": {"unit": "s"}}}
 
-    def read(self, request: Ref, spawner: Taken[kinds.ProcessSpawner]) -> str:
+    def read(self, request: Ref, spawner: Taken[kinds.ProcessSpawner], fetch: Taken[kinds.SourceFetch]) -> str:
         try:
             return self._run(fields_of(request), spawner)
         finally:
             _release(spawner)
+            _release(fetch)
 
     def _run(self, fields: Dict[str, Any], spawner: Any) -> str:
         command = fields.get("command")

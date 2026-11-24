@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boriken.dev/canoa/schemas/canoa.releases-1.json",
+  "title": "canoa.releases/1",
+  "description": "A catalog of the releases of a program a Store scope installs. A source reads its upstream (a publisher's feed, a release API) and answers with this.",
+  "type": "object",
+  "required": ["format", "releases"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": "canoa.releases/1" },
+    "channels": {
+      "type": "object",
+      "description": "The version each channel is at.",
+      "additionalProperties": { "type": "string" }
+    },
+    "releases": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "type": "object",
+        "required": ["version"],
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "minLength": 1 },
+          "channels": { "type": "array", "items": { "type": "string" } },
+          "notices": { "type": "array", "items": { "type": "string" } },
+          "platforms": {
+            "type": "object",
+            "description": "By <os>-<arch>, such as windows-x86_64.",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["parts"],
+              "additionalProperties": false,
+              "properties": {
+                "launch": { "type": "string", "description": "The file that is started, inside the copy." },
+                "parts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["url", "path"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "url": { "type": "string", "pattern": "^https://" },
+                      "path": { "type": "string", "minLength": 1 },
+                      "file": { "type": "string" },
+                      "bytes": { "type": "integer", "minimum": 0 },
+                      "executable": { "type": "boolean" },
+                      "derived": { "type": "boolean" },
+                      "check": { "$ref": "#/$defs/check" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "signed": {
+      "type": "object",
+      "required": ["by", "over"],
+      "additionalProperties": false,
+      "properties": {
+        "by": { "type": "string", "description": "The fingerprint of the key that signed the document the source read." },
+        "over": { "type": "string", "description": "Which document the signature covered." }
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "description": "What checks the file; absent when the publisher gives nothing, which the host takes only from an entry that says trusted = true.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["sha256"],
+          "additionalProperties": false,
+          "properties": { "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" } }
+        },
+        {
+          "type": "object",
+          "required": ["sha512"],
+          "additionalProperties": false,
+          "properties": { "sha512": { "type": "string", "pattern": "^[0-9a-fA-F]{128}$" } }
+        },
+        {
+          "type": "object",
+          "required": ["git_blob"],
+          "additionalProperties": false,
+          "properties": { "git_blob": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" } }
+        },
+        {
+          "type": "object",
+          "required": ["unverified"],
+          "additionalProperties": false,
+          "properties": { "unverified": { "type": "string" } }
+        }
+      ]
+    }
+  }
+}

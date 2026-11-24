@@ -2,9 +2,9 @@
   "kinds": [
     {
       "name": "catalog_source",
-      "floor_hash": 2158006965,
+      "floor_hash": 11332496,
       "object": false,
-      "doc": "Where a catalog comes from.\n\n`read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good\ncatalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.\n\nA source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the\nperson's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by\nits absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,\neven when it refuses.",
+      "doc": "Where a catalog comes from.\n\n`read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good\ncatalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.\n\nA source that reads an address does it through the `fetch` `read` is handed, which keeps to the source's `endpoints`.\n\nA source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the\nperson's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by\nits absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys\nboth, even when it refuses.",
       "slots": [
         {
           "name": "describe",
@@ -31,12 +31,64 @@
               "type": "object",
               "kind": "process_spawner",
               "pass": "taken"
+            },
+            {
+              "name": "fetch",
+              "type": "object",
+              "kind": "source_fetch",
+              "pass": "taken"
             }
           ],
           "answer": {
             "type": "text"
           },
           "doc": "The catalog's text."
+        }
+      ]
+    },
+    {
+      "name": "source_fetch",
+      "floor_hash": 634123251,
+      "object": true,
+      "doc": "What the host does for a source that reads over the network: one `https` document at a time, through the client, proxy and\ncertificate checks the host's own downloads use, and only from the places the source's `endpoints` declare (and the address\nof the entry the person wrote). A source never opens a connection by itself. The source destroys it, as it does the spawner.",
+      "slots": [
+        {
+          "name": "get_text",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "url",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "A text document. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text; an address outside the places allowed, or a\nserver's refusal, is the reason in the error."
+        },
+        {
+          "name": "get_json",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "url",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "A JSON document, as its text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON."
         }
       ]
     },

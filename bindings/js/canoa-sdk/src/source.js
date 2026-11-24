@@ -4,8 +4,9 @@
 //     static source = 'team';
 //     static title = 'A team\'s list';
 //     static types = ['skills'];
-//     read(request, spawner) {
+//     read(request, spawner, fetch) {
 //       release(spawner);
+//       release(fetch);
 //       return JSON.stringify({ skills: [] });
 //     }
 //   }
@@ -19,6 +20,10 @@
 // a file anywhere the person's account can (`read_file`, by an absolute path). A script has no other way to do either, and the source
 // destroys the spawner it was handed, even when it refuses (`release`).
 //
+// A source that reads an address does it through the `fetch` `read` is handed (`getText`, `getJson`): the host's own client, proxy and
+// certificate checks, and only the places the source names in `endpoints` (an address an entry names is allowed because the person
+// wrote the entry). `keys` names the publisher key fingerprints it verifies with. The source releases the fetch too.
+//
 // The classes that mirror what Canoa carries are `CommandCatalogSource` (a program the person named, run on each refresh, whose
 // output is the catalog) and `ReadCatalogSource` (a place the Store type reads itself: a git source, an address or a file).
 import { BadValue, Internal, NotFound, Unsupported } from 'guatiao';
@@ -29,6 +34,7 @@ import { dataOf } from './model.js';
 import { yieldCalls } from './wait.js';
 
 /** @typedef {import('./model.js').Spawner} Spawner the host's, which the source destroys */
+/** @typedef {{ getText(url: string, maxBytes: bigint): string, getJson(url: string, maxBytes: bigint): string, destroy(): void }} Fetch the host's, which the source destroys */
 /** @typedef {import('./model.js').Process} Process a program the spawner started */
 
 /** The most bytes of a catalog a source may answer with. */
@@ -42,7 +48,7 @@ const POLL = 100n;
 
 /**
  * Lets go of the host's spawner a call was handed: every call does, whether it runs a program or refuses.
- * @param {Spawner | undefined} spawner
+ * @param {Spawner | Fetch | undefined} spawner
  */
 export function release(spawner) {
   if (spawner && typeof spawner.destroy === 'function') spawner.destroy();
@@ -103,13 +109,24 @@ export class CatalogSource extends Provider {
   /** @type {string} */ static title;
   /** @type {string | undefined} a line saying what it reads */ static help;
   /** @type {string[]} the Store types it serves, by id; none serves every type */ static types = [];
+  /** @type {string[]} the https places its fetch may reach: an origin or a prefix with a path */ static endpoints = [];
+  /** @type {string[]} the publisher key fingerprints it verifies with */ static keys = [];
   /** @type {object | undefined} a guatiao schema of an object: what its form asks for */ static values;
   /** @type {object | undefined} a guatiao-intake form document: how `values` is shown */ static form;
 
   /** The description, from the static fields. */
   info() {
     const c = /** @type {typeof CatalogSource} */ (this.constructor);
-    return { id: c.source, title: c.title, help: c.help, types: c.types, schema: c.values, form: c.form };
+    return {
+      id: c.source,
+      title: c.title,
+      help: c.help,
+      types: c.types,
+      schema: c.values,
+      form: c.form,
+      endpoints: c.endpoints,
+      keys: c.keys,
+    };
   }
 
   describe() {
@@ -120,10 +137,12 @@ export class CatalogSource extends Provider {
    * The catalog's text.
    * @param {{kind: string, label: string, fields: string}} _request
    * @param {Spawner} spawner
+   * @param {Fetch} fetch
    * @returns {string}
    */
-  read(_request, spawner) {
+  read(_request, spawner, fetch) {
     release(spawner);
+    release(fetch);
     throw new Unsupported('read is not implemented');
   }
 }
@@ -153,8 +172,9 @@ export class ReadCatalogSource extends CatalogSource {
   /**
    * @param {{kind: string, label: string, fields: string}} request
    * @param {Spawner} spawner
+   * @param {Fetch} fetch
    */
-  read(request, spawner) {
+  read(request, spawner, fetch) {
     try {
       const source = fieldsOf(request).source;
       if (typeof source !== 'string' || source === '') throw new BadValue('the source is needed');
@@ -168,6 +188,7 @@ export class ReadCatalogSource extends CatalogSource {
       return textOfCatalog(bytes);
     } finally {
       release(spawner);
+      release(fetch);
     }
   }
 }
@@ -298,12 +319,14 @@ export class CommandCatalogSource extends CatalogSource {
   /**
    * @param {{kind: string, label: string, fields: string}} request
    * @param {Spawner} spawner
+   * @param {Fetch} fetch
    */
-  read(request, spawner) {
+  read(request, spawner, fetch) {
     try {
       return this.#run(fieldsOf(request), spawner);
     } finally {
       release(spawner);
+      release(fetch);
     }
   }
 
@@ -311,6 +334,7 @@ export class CommandCatalogSource extends CatalogSource {
    * The program of `fields` run through `spawner`: the catalog it printed, or why it did not produce one.
    * @param {Record<string, unknown>} fields
    * @param {Spawner} spawner
+   * @param {Fetch} fetch
    */
   #run(fields, spawner) {
     const words = Array.isArray(fields.command) ? fields.command.filter((/** @type {unknown} */ word) => typeof word === 'string') : [];

@@ -35,7 +35,7 @@ export class RegionItem extends EnvProfileItem {
   static note = 'puts the session in a region';
 }
 
-/** A team's skills: no program or file is read, so the spawner the host hands over is let go. */
+/** A team's skills: no program or file is read, so the spawner and the fetch the host hands over are let go. */
 export class TeamSource extends CatalogSource {
   static source = 'team';
   static title = "A team's list";
@@ -50,9 +50,11 @@ export class TeamSource extends CatalogSource {
   /**
    * @param {{kind: string, label: string, fields: string}} request
    * @param {import('../../../../bindings/js/canoa-sdk/src/model.js').Spawner} spawner
+   * @param {{destroy(): void}} fetch
    */
-  read(request, spawner) {
+  read(request, spawner, fetch) {
     release(spawner);
+    release(fetch);
     const { team } = fieldsOf(request);
     return JSON.stringify({ skills: [{ name: `from-${team}`, description: 'Listed by a script.', source: 'owner/repo' }] });
   }

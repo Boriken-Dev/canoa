@@ -390,8 +390,16 @@ class _Spawner:
         self.destroyed = True
 
 
+class _Fetch:
+    def __init__(self) -> None:
+        self.destroyed = False
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+
 def _read(source: Any, fields: dict, spawner: _Spawner) -> str:
-    return source.read({"kind": "overlays", "label": "x", "fields": json.dumps(fields)}, spawner)
+    return source.read({"kind": "overlays", "label": "x", "fields": json.dumps(fields)}, spawner, _Fetch())
 
 
 class Command(sdk.CommandCatalogSource):
@@ -516,7 +524,7 @@ def test_a_catalog_source_is_the_provider_of_the_id_it_is_described_under() -> N
         source = "team"
         title = "Team"
 
-        def read(self, request: Any, spawner: Any) -> str:
+        def read(self, request: Any, spawner: Any, fetch: Any) -> str:
             return ""
 
     assert Team.__guatiao_provider__.id == "team"
@@ -700,3 +708,31 @@ def test_a_bucket_says_its_group_the_names_of_its_models_and_that_it_is_disabled
     assert made["model_names"] == ["Gemini Alpha"]
     assert made["status"] == "disabled"
     assert "group" not in sdk.bucket("q:weekly", observed_at=1)
+
+
+def test_a_source_lets_go_of_the_fetch_it_was_handed_whether_or_not_it_answers() -> None:
+    class Read(sdk.ReadCatalogSource):
+        pass
+
+    spawner, fetch = _Spawner(files={"/here/catalog.toml": b"x = 1\n"}), _Fetch()
+    request = {"kind": "overlays", "label": "x", "fields": json.dumps({"source": "/here/catalog.toml"})}
+    assert Read().read(request, spawner, fetch) == "x = 1\n"
+    assert spawner.destroyed and fetch.destroyed
+    refused = _Fetch()
+    with pytest.raises(BadValue):
+        Read().read({"kind": "overlays", "label": "x", "fields": json.dumps({})}, _Spawner(), refused)
+    assert refused.destroyed
+
+
+def test_a_source_describes_the_places_it_fetches_from_and_the_keys_it_verifies_with() -> None:
+    class Hub(sdk.CatalogSource):
+        source = "hub"
+        title = "Hub"
+        endpoints = ["https://huggingface.co/"]
+        keys = ["AB12"]
+
+        def read(self, request: Any, spawner: Any, fetch: Any) -> str:
+            return ""
+
+    described = Hub().describe()
+    assert list(described["endpoints"]) == ["https://huggingface.co/"] and list(described["keys"]) == ["AB12"]

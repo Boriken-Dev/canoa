@@ -27,10 +27,26 @@
         "default": []
       },
       "schema": {
-        "description": "The values its form asks for, as a guatiao schema of an object; none for a source that asks for nothing. A member the schema marks sensitive is never shown in clear."
+        "description": "The values its form asks for, as a guatiao schema of an object; none for a source that asks for nothing. A member the schema marks sensitive is never shown in clear. No member is called one of [`HOST_KEYS`]."
       },
       "form": {
         "description": "How the schema is shown, a guatiao-intake form document; none shows the form the schema implies."
+      },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `https` places its `fetch` may reach: an origin (`https://host`) or a prefix with a path (`https://host/repo/`) that a URL has to start with, redirects included. None means it fetches nothing from a place of its own: an address an entry names is allowed only because the person wrote the entry.",
+        "default": []
+      },
+      "keys": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The fingerprints of the publisher keys it verifies what it reads with, in the publisher's own notation; none when it verifies nothing. An entry's `keys` replace them.",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -54,6 +70,21 @@
       "fields": {
         "type": "string",
         "description": "What the form's fields hold, as a JSON object of what the schema's members hold, keyed by member name. A field the person left empty is absent, so the provider uses its own default."
+      },
+      "pin": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The entry's `pin`: a revision the source understands (a commit, a version), or `sha256:<hex>` of the catalog's text, which the host checks itself. None follows the source's upstream."
+      },
+      "keys": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The fingerprints the entry demands a signature from, in place of the source's own `keys`; none when it names none.",
+        "default": []
       }
     },
     "additionalProperties": false,

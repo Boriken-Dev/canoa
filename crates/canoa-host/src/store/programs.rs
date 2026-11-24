@@ -526,6 +526,11 @@ impl Programs {
         }
     }
 
+    /// The transport every fetch of this store goes through, which a source's `fetch` shares.
+    pub(crate) fn shared_transport(&self) -> Arc<dyn Transport> {
+        Arc::clone(&self.transport)
+    }
+
     fn tools(&self, info: &StoreInfo) -> LocalTools {
         self.tools_at(&info.endpoints)
     }

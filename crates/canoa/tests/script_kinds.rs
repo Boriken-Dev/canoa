@@ -33,13 +33,17 @@ use canoa::profile_item::{
 };
 use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
 use canoa::settings_section::{SectionInfo, SettingsSectionVtable, Stored};
-use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
+use canoa::store::extension::{
+    CatalogWords, DefaultCatalog, ExtensionInfo, ExtensionType, StoreExtensionVtable,
+};
 use canoa::store::models::{
     Fact, ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
     ModelSettings, ModelStoreInfo, ModelStoreVtable, RowAction, Section, ServedModel, ServiceQuery,
     ServiceReport, SpeechRun, SpeechService, SpeechUse,
 };
-use canoa::store::source::{CatalogSourceProviderVtable, ReadRequest, SourceInfo};
+use canoa::store::source::{
+    CatalogSourceProviderVtable, ReadRequest, SourceFetchVtable, SourceInfo,
+};
 use canoa::usage_reader::{
     Failure, ProcessMembersVtable, ReaderInfo, Reading, Retry, UsageReaderVtable,
     UsageReadingVtable,
@@ -163,6 +167,8 @@ fn the_committed_extension_schemas_are_what_this_build_describes() {
         &schemas(vec![
             ("ExtensionInfo", schema_of::<ExtensionInfo>()),
             ("ExtensionType", schema_of::<ExtensionType>()),
+            ("CatalogWords", schema_of::<CatalogWords>()),
+            ("DefaultCatalog", schema_of::<DefaultCatalog>()),
         ]),
     );
 }
@@ -265,12 +271,13 @@ fn the_committed_profile_item_schemas_are_what_this_build_describes() {
 
 #[test]
 fn the_committed_catalog_source_description_is_what_this_build_describes() {
-    // The spawner a source's `read` is handed is described beside it, as the other kinds that name it do.
+    // The spawner and the fetch a source's `read` is handed are described beside it, as the other kinds that name them do.
     committed(
         "include/canoa.catalog_source.kinds.json",
         &document(&format!(
-            "{},{},{}",
+            "{},{},{},{}",
             CatalogSourceProviderVtable::description(),
+            SourceFetchVtable::description(),
             ProcessSpawnerVtable::description(),
             SpawnedProcessVtable::description()
         )),

@@ -140,6 +140,14 @@ impl Stores {
             caches.lookup_response,
             caches.dir.as_ref().map(|dir| dir.join("http")).as_deref(),
         );
+        self.sources = self
+            .sources
+            .clone()
+            .fetching(crate::store::sources::Fetching::through(
+                self.programs.shared_transport(),
+                caches.lookup_connect,
+                caches.lookup_response,
+            ));
         self.caches = caches;
         self
     }

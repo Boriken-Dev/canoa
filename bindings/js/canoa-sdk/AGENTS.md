@@ -46,7 +46,7 @@ class SettingProfileItem extends ProfileItem  // one text becomes a session sett
 class EnvProfileItem extends ProfileItem      // values become variables: static variables = {member: [NAMES]}, lines?, lineLabel, note
 class NetworkProfileItem extends ProfileItem  // values become a network effect, the proxy item's members (the proxy itself is the host's)
 valuesOf(request); textOf(values, name); wordsOf(values, name); effect({env, args, settings, network, notes}); NETWORK_MODES
-class CatalogSource extends Provider {        // source.js: where a Store type's catalog comes from; read(request, spawner) -> the catalog's text
+class CatalogSource extends Provider {        // source.js: where a Store type's catalog comes from; read(request, spawner, fetch) -> the catalog's text
   static source; static title; static help; static types = [];     // source = the id canoa.cfg records; its provider id too
   static values; static form;
 }

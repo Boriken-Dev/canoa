@@ -421,16 +421,39 @@ class AccountSpeechOutput(KindProtocol, Protocol, kind="account_speech_output", 
         ...
 
 
-class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=2158006965):
+class SourceFetch(KindProtocol, Protocol, kind="source_fetch", floor_hash=634123251, is_object=True):
+    """What the host does for a source that reads over the network: one `https` document at a time, through the client, proxy and
+    certificate checks the host's own downloads use, and only from the places the source's `endpoints` declare (and the address
+    of the entry the person wrote). A source never opens a connection by itself. The source destroys it, as it does the spawner.
+    """
+
+    @required
+    @fallible
+    def get_text(self, url: str, max_bytes: U64) -> str:
+        """A text document. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text; an address outside the places allowed, or a
+        server's refusal, is the reason in the error.
+        """
+        ...
+
+    @required
+    @fallible
+    def get_json(self, url: str, max_bytes: U64) -> str:
+        """A JSON document, as its text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON."""
+        ...
+
+
+class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=11332496):
     """Where a catalog comes from.
 
     `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
     catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
 
+    A source that reads an address does it through the `fetch` `read` is handed, which keeps to the source's `endpoints`.
+
     A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
     person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
-    its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
-    even when it refuses.
+    its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys
+    both, even when it refuses.
     """
 
     @required
@@ -441,7 +464,7 @@ class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=21
 
     @required
     @fallible
-    def read(self, request: Ref, spawner: Taken[ProcessSpawner]) -> str:
+    def read(self, request: Ref, spawner: Taken[ProcessSpawner], fetch: Taken[SourceFetch]) -> str:
         """The catalog's text."""
         ...
 
@@ -1123,4 +1146,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "CatalogSource", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

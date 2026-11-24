@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
 use canoa::store::{
     Action, ApplyOutcome, ApplyRequest, Change, Check, Download, FetchRequest, Fetched,
     FindRequest, Found, InstallPlan, InstallPrompterVtable, InstallToolsVtable, LatestQuery,
@@ -97,6 +98,8 @@ fn the_committed_schemas_are_what_this_build_describes() {
         ("Fetched", schema_of::<Fetched>()),
         ("UnpackRequest", schema_of::<UnpackRequest>()),
         ("Unpacked", schema_of::<Unpacked>()),
+        ("CatalogWords", schema_of::<CatalogWords>()),
+        ("DefaultCatalog", schema_of::<DefaultCatalog>()),
     ];
     let document: serde_json::Map<String, Json> = schemas
         .into_iter()

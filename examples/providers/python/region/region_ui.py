@@ -53,15 +53,16 @@ class TeamValues:
 
 
 class TeamSource(CatalogSource):
-    """A team's skills: no program or file is read, so the spawner the host hands over is let go."""
+    """A team's skills: no program or file is read, so the spawner and the fetch the host hands over are let go."""
 
     source = "team"
     title = "A team's list"
     types = ["skills"]
     values = TeamValues
 
-    def read(self, request, spawner):  # type: ignore[no-untyped-def]
+    def read(self, request, spawner, fetch):  # type: ignore[no-untyped-def]
         spawner.destroy()
+        fetch.destroy()
         team = fields_of(request)["team"]
         return json.dumps({"skills": [{"name": f"from-{team}", "description": "Listed by a script.", "source": "owner/repo"}]})
 

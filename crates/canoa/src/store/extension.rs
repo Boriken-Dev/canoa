@@ -64,7 +64,7 @@ pub struct ExtensionType {
     pub models: Option<String>,
 }
 
-/// What a Store type calls its catalogs, in its own words.
+/// What a Store type (or a program's store) calls its catalogs, in its own words, and the catalogs its extension registers for it.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
@@ -75,10 +75,104 @@ pub struct CatalogWords {
     pub plural: String,
     /// What the type lists, in the plural: `overlays`, `skills`.
     pub lists: String,
+    /// The format every catalog of the type answers in: [`crate::store::catalog::MODELS_FORMAT`] or
+    /// [`crate::store::catalog::RELEASES_FORMAT`]. None for a type whose catalogs are read in a format of the host's own.
+    pub format: Option<String>,
+    /// The catalogs the extension registers for the type, offered until the person replaces one by its label, adds another, or
+    /// turns one off. The first is the type's default.
+    #[map(default)]
+    pub defaults: Vec<DefaultCatalog>,
+}
+
+/// One catalog an extension registers for its type: a source (a `catalog_source` provider and the values its form asks for), and
+/// the data it ships so that a pinned one answers with no network.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct DefaultCatalog {
+    /// What canoa.cfg calls it (`[store.<type>.catalogs.<label>]`): 1 to 64 letters, digits, `.`, `_` and `-`. An entry with this
+    /// label replaces it whole.
+    pub label: String,
+    /// The `catalog_source` provider that reads it.
+    pub provider: String,
+    /// The values the provider's form holds, as a JSON object; absent for none.
+    pub fields: Option<String>,
+    /// The revision the extension's author verified (a commit, a version), or `sha256:<hex>` of the catalog's text. A pinned
+    /// catalog is read once and never refreshed by time; absent follows the provider's upstream.
+    pub pin: Option<String>,
+    /// The catalog's text, in the type's format, as it was when `pin` was verified: what a pinned catalog answers with when it has
+    /// not been fetched (a first run with no network). Absent ships none.
+    pub snapshot: Option<String>,
+}
+
+impl DefaultCatalog {
+    /// A default catalog read by `provider`, asking for no values.
+    #[must_use]
+    pub fn new(label: impl Into<String>, provider: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            provider: provider.into(),
+            fields: None,
+            pin: None,
+            snapshot: None,
+        }
+    }
+
+    /// This catalog with the values `fields` (a JSON object).
+    #[must_use]
+    pub fn with_fields(mut self, fields: impl Into<String>) -> Self {
+        self.fields = Some(fields.into());
+        self
+    }
+
+    /// This catalog pinned at `pin`, answering with `snapshot` until it has been fetched.
+    #[must_use]
+    pub fn pinned(mut self, pin: impl Into<String>, snapshot: impl Into<String>) -> Self {
+        self.pin = Some(pin.into());
+        self.snapshot = Some(snapshot.into());
+        self
+    }
+
+    /// Why this catalog cannot be offered for a type that reads `format`, or `None` when it can.
+    #[must_use]
+    pub fn problem(&self, format: Option<&str>) -> Option<String> {
+        let label = &self.label;
+        let word = (1..=64).contains(&label.len())
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+        if !word {
+            return Some(format!(
+                "the catalog label {label:?} is not 1 to 64 letters, digits, `.`, `_` and `-`"
+            ));
+        }
+        if self.provider.is_empty() {
+            return Some(format!("the catalog {label:?} names no provider"));
+        }
+        if let Some(fields) = &self.fields
+            && !serde_json::from_str::<serde_json::Value>(fields)
+                .is_ok_and(|value| value.is_object())
+        {
+            return Some(format!(
+                "the fields of the catalog {label:?} are not a JSON object"
+            ));
+        }
+        if let Some(snapshot) = &self.snapshot {
+            let Some(format) = format else {
+                return Some(format!(
+                    "the catalog {label:?} ships a snapshot, but its type names no format"
+                ));
+            };
+            if let Err(why) = crate::store::catalog::check_format(format, snapshot) {
+                return Some(format!("the snapshot of the catalog {label:?}: {why}"));
+            }
+        }
+        None
+    }
 }
 
 impl CatalogWords {
-    /// Words for the catalogs of a type that lists `lists`.
+    /// Words for the catalogs of a type that lists `lists`, with no format and no default catalog.
     #[must_use]
     pub fn new(
         noun: impl Into<String>,
@@ -89,7 +183,62 @@ impl CatalogWords {
             noun: noun.into(),
             plural: plural.into(),
             lists: lists.into(),
+            format: None,
+            defaults: Vec::new(),
         }
+    }
+
+    /// These catalogs answering in `format`, one of [`crate::store::catalog::FORMATS`].
+    #[must_use]
+    pub fn in_format(mut self, format: impl Into<String>) -> Self {
+        self.format = Some(format.into());
+        self
+    }
+
+    /// These catalogs registering `defaults`.
+    #[must_use]
+    pub fn registering(mut self, defaults: impl IntoIterator<Item = DefaultCatalog>) -> Self {
+        self.defaults = defaults.into_iter().collect();
+        self
+    }
+
+    /// Why these words cannot be offered, or `None` when they can.
+    #[must_use]
+    pub fn problem(&self) -> Option<String> {
+        if self.noun.trim().is_empty()
+            || self.plural.trim().is_empty()
+            || self.lists.trim().is_empty()
+        {
+            return Some("a type's catalogs need a noun, its plural and what they list".to_owned());
+        }
+        if let Some(format) = &self.format
+            && !crate::store::catalog::FORMATS.contains(&format.as_str())
+        {
+            return Some(format!(
+                "the catalog format {format:?} is not one of {}",
+                crate::store::catalog::FORMATS.join(", ")
+            ));
+        }
+        if !self.defaults.is_empty() && self.format.is_none() {
+            return Some(
+                "a type that registers catalogs names the format they answer in".to_owned(),
+            );
+        }
+        for (at, each) in self.defaults.iter().enumerate() {
+            if let Some(problem) = each.problem(self.format.as_deref()) {
+                return Some(problem);
+            }
+            if self.defaults[..at]
+                .iter()
+                .any(|before| before.label.eq_ignore_ascii_case(&each.label))
+            {
+                return Some(format!(
+                    "the catalog label {:?} is registered twice",
+                    each.label
+                ));
+            }
+        }
+        None
     }
 }
 
@@ -144,6 +293,9 @@ impl ExtensionType {
         }
         if self.title.trim().is_empty() {
             return Some(format!("the type {:?} has no title", self.id));
+        }
+        if let Some(problem) = self.catalogs.as_ref().and_then(CatalogWords::problem) {
+            return Some(format!("the type {:?}: {problem}", self.id));
         }
         if let Some(icon) = self.icon.as_deref().filter(|icon| is_icon_image(icon)) {
             let body = ICON_IMAGE_PREFIXES

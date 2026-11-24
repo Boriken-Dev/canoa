@@ -55,6 +55,57 @@
                 "lists": {
                   "type": "string",
                   "description": "What the type lists, in the plural: `overlays`, `skills`."
+                },
+                "format": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The format every catalog of the type answers in: [`crate::store::catalog::MODELS_FORMAT`] or [`crate::store::catalog::RELEASES_FORMAT`]. None for a type whose catalogs are read in a format of the host's own."
+                },
+                "defaults": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "description": "What canoa.cfg calls it (`[store.<type>.catalogs.<label>]`): 1 to 64 letters, digits, `.`, `_` and `-`. An entry with this label replaces it whole."
+                      },
+                      "provider": {
+                        "type": "string",
+                        "description": "The `catalog_source` provider that reads it."
+                      },
+                      "fields": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "The values the provider's form holds, as a JSON object; absent for none."
+                      },
+                      "pin": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "The revision the extension's author verified (a commit, a version), or `sha256:<hex>` of the catalog's text. A pinned catalog is read once and never refreshed by time; absent follows the provider's upstream."
+                      },
+                      "snapshot": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "The catalog's text, in the type's format, as it was when `pin` was verified: what a pinned catalog answers with when it has not been fetched (a first run with no network). Absent ships none."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "label",
+                      "provider"
+                    ]
+                  },
+                  "description": "The catalogs the extension registers for the type, offered until the person replaces one by its label, adds another, or turns one off. The first is the type's default.",
+                  "default": []
                 }
               },
               "additionalProperties": false,
@@ -133,6 +184,57 @@
           "lists": {
             "type": "string",
             "description": "What the type lists, in the plural: `overlays`, `skills`."
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The format every catalog of the type answers in: [`crate::store::catalog::MODELS_FORMAT`] or [`crate::store::catalog::RELEASES_FORMAT`]. None for a type whose catalogs are read in a format of the host's own."
+          },
+          "defaults": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "What canoa.cfg calls it (`[store.<type>.catalogs.<label>]`): 1 to 64 letters, digits, `.`, `_` and `-`. An entry with this label replaces it whole."
+                },
+                "provider": {
+                  "type": "string",
+                  "description": "The `catalog_source` provider that reads it."
+                },
+                "fields": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The values the provider's form holds, as a JSON object; absent for none."
+                },
+                "pin": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The revision the extension's author verified (a commit, a version), or `sha256:<hex>` of the catalog's text. A pinned catalog is read once and never refreshed by time; absent follows the provider's upstream."
+                },
+                "snapshot": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The catalog's text, in the type's format, as it was when `pin` was verified: what a pinned catalog answers with when it has not been fetched (a first run with no network). Absent ships none."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "provider"
+              ]
+            },
+            "description": "The catalogs the extension registers for the type, offered until the person replaces one by its label, adds another, or turns one off. The first is the type's default.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -156,6 +258,121 @@
       "id",
       "title",
       "stores"
+    ]
+  },
+  "CatalogWords": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "noun": {
+        "type": "string",
+        "description": "What one is called: `catalog`, `source`, `registry`."
+      },
+      "plural": {
+        "type": "string",
+        "description": "The same in the plural."
+      },
+      "lists": {
+        "type": "string",
+        "description": "What the type lists, in the plural: `overlays`, `skills`."
+      },
+      "format": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The format every catalog of the type answers in: [`crate::store::catalog::MODELS_FORMAT`] or [`crate::store::catalog::RELEASES_FORMAT`]. None for a type whose catalogs are read in a format of the host's own."
+      },
+      "defaults": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "What canoa.cfg calls it (`[store.<type>.catalogs.<label>]`): 1 to 64 letters, digits, `.`, `_` and `-`. An entry with this label replaces it whole."
+            },
+            "provider": {
+              "type": "string",
+              "description": "The `catalog_source` provider that reads it."
+            },
+            "fields": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The values the provider's form holds, as a JSON object; absent for none."
+            },
+            "pin": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The revision the extension's author verified (a commit, a version), or `sha256:<hex>` of the catalog's text. A pinned catalog is read once and never refreshed by time; absent follows the provider's upstream."
+            },
+            "snapshot": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The catalog's text, in the type's format, as it was when `pin` was verified: what a pinned catalog answers with when it has not been fetched (a first run with no network). Absent ships none."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "provider"
+          ]
+        },
+        "description": "The catalogs the extension registers for the type, offered until the person replaces one by its label, adds another, or turns one off. The first is the type's default.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "noun",
+      "plural",
+      "lists"
+    ]
+  },
+  "DefaultCatalog": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string",
+        "description": "What canoa.cfg calls it (`[store.<type>.catalogs.<label>]`): 1 to 64 letters, digits, `.`, `_` and `-`. An entry with this label replaces it whole."
+      },
+      "provider": {
+        "type": "string",
+        "description": "The `catalog_source` provider that reads it."
+      },
+      "fields": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The values the provider's form holds, as a JSON object; absent for none."
+      },
+      "pin": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The revision the extension's author verified (a commit, a version), or `sha256:<hex>` of the catalog's text. A pinned catalog is read once and never refreshed by time; absent follows the provider's upstream."
+      },
+      "snapshot": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The catalog's text, in the type's format, as it was when `pin` was verified: what a pinned catalog answers with when it has not been fetched (a first run with no network). Absent ships none."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "label",
+      "provider"
     ]
   }
 }

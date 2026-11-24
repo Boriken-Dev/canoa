@@ -668,10 +668,12 @@ export declare const AccountSpeechOutput: k.DescribedKind<AccountSpeechOutput, A
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
  * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
  *
+ * A source that reads an address does it through the `fetch` `read` is handed, which keeps to the source's `endpoints`.
+ *
  * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
  * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
- * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
- * even when it refuses.
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys
+ * both, even when it refuses.
  *
  * The `catalog_source` kind: what a provider of it implements.
  */
@@ -679,7 +681,7 @@ export interface CatalogSource {
   /** What this provider is. The same answer on every call, with nothing run. */
   describe(): unknown;
   /** The catalog's text. */
-  read(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): string;
+  read(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>, fetch: k.ObjectHandle<typeof SourceFetch>): string;
 }
 
 /** A caller's handle on a `catalog_source` table: a method per slot. */
@@ -687,7 +689,7 @@ export interface CatalogSourceRemote extends k.RemoteBase<typeof CatalogSource> 
   /** What this provider is. The same answer on every call, with nothing run. */
   describe(): g.Value;
   /** The catalog's text. */
-  read(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): string;
+  read(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>, fetch: SourceFetch | k.ObjectHandle<typeof SourceFetch>): string;
 }
 
 /**
@@ -696,12 +698,49 @@ export interface CatalogSourceRemote extends k.RemoteBase<typeof CatalogSource> 
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
  * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
  *
+ * A source that reads an address does it through the `fetch` `read` is handed, which keeps to the source's `endpoints`.
+ *
  * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
  * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
- * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
- * even when it refuses.
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys
+ * both, even when it refuses.
  */
 export declare const CatalogSource: k.DescribedKind<CatalogSource, CatalogSourceRemote, false>;
+
+/**
+ * What the host does for a source that reads over the network: one `https` document at a time, through the client, proxy and
+ * certificate checks the host's own downloads use, and only from the places the source's `endpoints` declare (and the address
+ * of the entry the person wrote). A source never opens a connection by itself. The source destroys it, as it does the spawner.
+ *
+ * The `source_fetch` kind: what an object of it implements.
+ */
+export interface SourceFetch {
+  /**
+   * A text document. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text; an address outside the places allowed, or a
+   * server's refusal, is the reason in the error.
+   */
+  getText(url: string, maxBytes: bigint): string;
+  /** A JSON document, as its text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON. */
+  getJson(url: string, maxBytes: bigint): string;
+}
+
+/** A caller's handle on a `source_fetch` table or object: a method per slot. */
+export interface SourceFetchRemote extends k.RemoteBase<typeof SourceFetch> {
+  /**
+   * A text document. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text; an address outside the places allowed, or a
+   * server's refusal, is the reason in the error.
+   */
+  getText(url: string, maxBytes: number | bigint): string;
+  /** A JSON document, as its text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON. */
+  getJson(url: string, maxBytes: number | bigint): string;
+}
+
+/**
+ * What the host does for a source that reads over the network: one `https` document at a time, through the client, proxy and
+ * certificate checks the host's own downloads use, and only from the places the source's `endpoints` declare (and the address
+ * of the entry the person wrote). A source never opens a connection by itself. The source destroys it, as it does the spawner.
+ */
+export declare const SourceFetch: k.DescribedKind<SourceFetch, SourceFetchRemote, true>;
 
 /**
  * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).

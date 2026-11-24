@@ -12,7 +12,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use canoa::store::source::{CatalogSourceProvider, KIND, ReadRequest, SourceInfo};
+use canoa::store::source::{CatalogSourceProvider, KIND, ReadRequest, SourceFetch, SourceInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{
@@ -21,6 +21,7 @@ use coqui_acp_api::{
 use coqui_acp_harness::LocalSpawner;
 
 use crate::scripts::Bundle;
+use crate::store::tools::{HttpTransport, LocalTools, ToolsLimits, Transport};
 
 /// The sources that ship in the host, with the SDK modules they import.
 static BUNDLE: Bundle = Bundle {
@@ -141,6 +142,98 @@ impl ProcessSpawner for Reach {
     }
 }
 
+/// What a source's `fetch` reaches the network with: the host's own client, so the system's proxy and the operating system's
+/// certificate verifier apply, and the limits `[host.store]` sets for what is only read.
+#[derive(Clone, Debug)]
+pub(crate) struct Fetching {
+    transport: Arc<dyn Transport>,
+    limits: ToolsLimits,
+    loopback_http: bool,
+}
+
+impl Default for Fetching {
+    fn default() -> Self {
+        Self {
+            transport: Arc::new(HttpTransport::default()),
+            limits: ToolsLimits::default(),
+            loopback_http: false,
+        }
+    }
+}
+
+impl Fetching {
+    /// Fetching through `transport`, waiting `connect` to connect and `response` for an answer.
+    pub(crate) fn through(
+        transport: Arc<dyn Transport>,
+        connect: core::time::Duration,
+        response: core::time::Duration,
+    ) -> Self {
+        Self {
+            transport,
+            limits: ToolsLimits {
+                lookup_connect: connect,
+                lookup_response: response,
+                ..ToolsLimits::default()
+            },
+            loopback_http: false,
+        }
+    }
+
+    /// Fetching that reaches a loopback `http` address, which a test's server is.
+    #[cfg(test)]
+    pub(crate) fn loopback(mut self) -> Self {
+        self.loopback_http = true;
+        self
+    }
+
+    /// The object a source's `read` is handed: it reaches `endpoints` and nothing else.
+    fn object(&self, endpoints: Vec<String>) -> Object<dyn SourceFetch> {
+        Fetch {
+            tools: LocalTools::new(Arc::clone(&self.transport), endpoints)
+                .limits(self.limits.clone())
+                .loopback_http(self.loopback_http),
+        }
+        .into_object()
+    }
+}
+
+/// [`SourceFetch`] over the host's checked fetch of a document.
+struct Fetch {
+    tools: LocalTools,
+}
+
+impl SourceFetch for Fetch {
+    fn get_text(&self, url: &str, max_bytes: u64) -> Result<String, ProviderError> {
+        use canoa::store::InstallTools as _;
+        self.tools.fetch_text(url, max_bytes)
+    }
+
+    fn get_json(&self, url: &str, max_bytes: u64) -> Result<String, ProviderError> {
+        let text = self.get_text(url, max_bytes)?;
+        serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|_| refused(Status::GUATIAO_ERR_BAD_VALUE, format!("{url} is not JSON")))?;
+        Ok(text)
+    }
+}
+
+/// The places a source may fetch from for one entry: the ones its description declares, and the `https` addresses the entry's own
+/// values hold, which the person wrote into canoa.cfg.
+fn reach(info: &SourceInfo, fields: &str) -> Vec<String> {
+    let mut places = info.endpoints.clone();
+    if let Ok(serde_json::Value::Object(values)) = serde_json::from_str(fields) {
+        for value in values.values() {
+            if let Some(text) = value.as_str()
+                && let Some(rest) = text.strip_prefix("https://")
+                && !rest.is_empty()
+                && !places.iter().any(|each| each == text)
+            {
+                places.push(text.to_owned());
+            }
+        }
+    }
+    places
+}
+
 /// One provider this host offers.
 #[derive(Clone)]
 struct Held {
@@ -154,6 +247,7 @@ struct Held {
 #[derive(Clone, Default)]
 pub(crate) struct Sources {
     held: Vec<Held>,
+    fetching: Fetching,
 }
 
 impl core::fmt::Debug for Sources {
@@ -234,6 +328,12 @@ impl Sources {
         Ok(())
     }
 
+    /// These sources reaching the network through `fetching`.
+    pub(crate) fn fetching(mut self, fetching: Fetching) -> Self {
+        self.fetching = fetching;
+        self
+    }
+
     /// Each provider and the extension that brought it.
     pub(crate) fn list(&self) -> impl Iterator<Item = (&SourceInfo, Option<&str>)> {
         self.held
@@ -263,13 +363,14 @@ impl Sources {
                 request.kind
             ));
         }
+        let fetch = self.fetching.object(reach(&held.info, &request.fields));
         held.registry
             .offer::<dyn CatalogSourceProvider>(id)
             .ok_or_else(|| format!("no provider {id}"))?
             .map_err(|_| format!("{id} is not a catalog_source"))?
             .default_instance()
             .ok_or_else(|| format!("{id} needs settings"))?
-            .read(request, Reach(LocalSpawner::new()).into_object())
+            .read(request, Reach(LocalSpawner::new()).into_object(), fetch)
             .map_err(|error| error.to_string())
     }
 }

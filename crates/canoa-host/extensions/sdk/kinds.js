@@ -4,7 +4,6 @@
 import { kindsOf } from 'guatiao/kinds';
 
 const described = kindsOf({
-  "format": 1,
   "kinds": [
     {
       "name": "account_provider",
@@ -275,36 +274,39 @@ const described = kindsOf({
       ]
     },
     {
-      "floor_hash": 4038904472,
       "name": "process_spawner",
+      "floor_hash": 4038904472,
       "object": true,
       "slots": [
         {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
           "answer": {
             "type": "value"
-          },
-          "args": [],
-          "fallible": true,
-          "name": "describe",
-          "required": true
+          }
         },
         {
-          "answer": {
-            "kind": "spawned_process",
-            "type": "object"
-          },
+          "name": "spawn",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "spec",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             }
           ],
-          "fallible": true,
-          "name": "spawn",
-          "required": true
+          "answer": {
+            "type": "object",
+            "kind": "spawned_process"
+          }
         },
         {
+          "name": "write_file",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "path",
@@ -312,22 +314,19 @@ const described = kindsOf({
             },
             {
               "name": "bytes",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             },
             {
               "name": "private",
               "type": "bool"
             }
-          ],
-          "fallible": true,
-          "name": "write_file",
-          "required": true
+          ]
         },
         {
-          "answer": {
-            "type": "value"
-          },
+          "name": "read_file",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "path",
@@ -338,93 +337,75 @@ const described = kindsOf({
               "type": "u64"
             }
           ],
-          "fallible": true,
-          "name": "read_file",
-          "required": true
-        },
-        {
           "answer": {
             "type": "value"
-          },
-          "args": [
-            {
-              "name": "path",
-              "type": "str"
-            }
-          ],
-          "fallible": true,
+          }
+        },
+        {
           "name": "file_info",
-          "required": true
-        },
-        {
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "path",
               "type": "str"
             }
           ],
-          "fallible": true,
-          "name": "remove_file",
-          "required": true
+          "answer": {
+            "type": "value"
+          }
         },
         {
+          "name": "remove_file",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ]
+        },
+        {
+          "name": "notice",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "notice",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             }
-          ],
-          "fallible": true,
-          "name": "notice",
-          "required": true
+          ]
         }
       ]
     },
     {
-      "floor_hash": 3306532587,
       "name": "spawned_process",
+      "floor_hash": 3306532587,
       "object": true,
       "slots": [
         {
+          "name": "write",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "bytes",
               "type": "bytes"
             }
-          ],
-          "fallible": true,
-          "name": "write",
-          "required": true
+          ]
         },
         {
-          "args": [],
-          "fallible": true,
           "name": "close_input",
-          "required": true
+          "required": true,
+          "fallible": true,
+          "args": []
         },
         {
-          "answer": {
-            "type": "i64"
-          },
-          "args": [
-            {
-              "name": "dst",
-              "type": "bytes_mut"
-            },
-            {
-              "name": "timeout_ms",
-              "type": "u64"
-            }
-          ],
-          "fallible": true,
           "name": "read",
-          "required": true
-        },
-        {
-          "answer": {
-            "type": "i64"
-          },
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "dst",
@@ -435,50 +416,68 @@ const described = kindsOf({
               "type": "u64"
             }
           ],
-          "fallible": true,
-          "name": "read_error",
-          "required": true
+          "answer": {
+            "type": "i64"
+          }
         },
         {
+          "name": "read_error",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "dst",
+              "type": "bytes_mut"
+            },
+            {
+              "name": "timeout_ms",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "i64"
+          }
+        },
+        {
+          "name": "resize",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "size",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             }
-          ],
-          "fallible": true,
-          "name": "resize",
-          "required": true
+          ]
         },
         {
-          "answer": {
-            "type": "value"
-          },
+          "name": "wait",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "timeout_ms",
               "type": "u64"
             }
           ],
-          "fallible": true,
-          "name": "wait",
-          "required": true
-        },
-        {
-          "args": [],
-          "fallible": true,
-          "name": "kill",
-          "required": true
-        },
-        {
           "answer": {
             "type": "value"
-          },
-          "args": [],
+          }
+        },
+        {
+          "name": "kill",
+          "required": true,
           "fallible": true,
+          "args": []
+        },
+        {
           "name": "link",
-          "required": true
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
         }
       ]
     },
@@ -516,7 +515,7 @@ const described = kindsOf({
     },
     {
       "name": "catalog_source",
-      "floor_hash": 2158006965,
+      "floor_hash": 11332496,
       "object": false,
       "slots": [
         {
@@ -543,6 +542,55 @@ const described = kindsOf({
               "type": "object",
               "kind": "process_spawner",
               "pass": "taken"
+            },
+            {
+              "name": "fetch",
+              "type": "object",
+              "kind": "source_fetch",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ]
+    },
+    {
+      "name": "source_fetch",
+      "floor_hash": 634123251,
+      "object": true,
+      "slots": [
+        {
+          "name": "get_text",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "url",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "get_json",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "url",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
             }
           ],
           "answer": {
@@ -1168,201 +1216,201 @@ const described = kindsOf({
       ]
     },
     {
-      "floor_hash": 3478619964,
       "name": "program_store",
+      "floor_hash": 3478619964,
       "object": false,
       "slots": [
         {
-          "answer": {
-            "type": "value"
-          },
-          "args": [],
-          "fallible": true,
           "name": "describe",
-          "required": true
-        },
-        {
+          "required": true,
+          "fallible": true,
+          "args": [],
           "answer": {
             "type": "value"
-          },
-          "args": [
-            {
-              "name": "query",
-              "pass": "borrowed",
-              "type": "value"
-            },
-            {
-              "kind": "process_spawner",
-              "name": "spawner",
-              "pass": "taken",
-              "type": "object"
-            },
-            {
-              "kind": "install_tools",
-              "name": "tools",
-              "pass": "taken",
-              "type": "object"
-            }
-          ],
-          "fallible": true,
+          }
+        },
+        {
           "name": "program",
-          "required": true
-        },
-        {
-          "answer": {
-            "type": "value"
-          },
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "query",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             },
             {
-              "kind": "install_tools",
-              "name": "tools",
-              "pass": "taken",
-              "type": "object"
-            }
-          ],
-          "fallible": true,
-          "name": "latest",
-          "required": true
-        },
-        {
-          "answer": {
-            "type": "value"
-          },
-          "args": [
-            {
-              "name": "request",
-              "pass": "borrowed",
-              "type": "value"
-            },
-            {
-              "kind": "install_tools",
-              "name": "tools",
-              "pass": "taken",
-              "type": "object"
-            }
-          ],
-          "fallible": true,
-          "name": "plan",
-          "required": true
-        },
-        {
-          "answer": {
-            "type": "value"
-          },
-          "args": [
-            {
-              "name": "request",
-              "pass": "borrowed",
-              "type": "value"
-            },
-            {
-              "kind": "process_spawner",
               "name": "spawner",
-              "pass": "taken",
-              "type": "object"
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
             },
             {
-              "kind": "install_tools",
               "name": "tools",
-              "pass": "taken",
-              "type": "object"
-            },
-            {
-              "kind": "install_prompter",
-              "name": "prompter",
-              "pass": "taken",
-              "type": "object"
+              "type": "object",
+              "kind": "install_tools",
+              "pass": "taken"
             }
           ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "latest",
+          "required": true,
           "fallible": true,
+          "args": [
+            {
+              "name": "query",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "tools",
+              "type": "object",
+              "kind": "install_tools",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "plan",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "tools",
+              "type": "object",
+              "kind": "install_tools",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
           "name": "apply",
-          "required": true
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "tools",
+              "type": "object",
+              "kind": "install_tools",
+              "pass": "taken"
+            },
+            {
+              "name": "prompter",
+              "type": "object",
+              "kind": "install_prompter",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
         }
       ]
     },
     {
-      "floor_hash": 1751029952,
       "name": "install_prompter",
+      "floor_hash": 1751029952,
       "object": true,
       "slots": [
         {
+          "name": "say",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "line",
               "type": "str"
             }
-          ],
-          "fallible": true,
-          "name": "say",
-          "required": true
+          ]
         },
         {
+          "name": "progress",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "progress",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             }
-          ],
-          "fallible": true,
-          "name": "progress",
-          "required": true
+          ]
         },
         {
-          "answer": {
-            "type": "value"
-          },
+          "name": "ask",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "form",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             }
           ],
-          "fallible": true,
-          "name": "ask",
-          "required": true
+          "answer": {
+            "type": "value"
+          }
         },
         {
+          "name": "cancelled",
+          "required": true,
+          "fallible": true,
+          "args": [],
           "answer": {
             "type": "bool"
-          },
-          "args": [],
-          "fallible": true,
-          "name": "cancelled",
-          "required": true
+          }
         }
       ]
     },
     {
-      "floor_hash": 821327524,
       "name": "install_tools",
+      "floor_hash": 821327524,
       "object": true,
       "slots": [
         {
-          "answer": {
-            "type": "value"
-          },
+          "name": "find",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "request",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             }
           ],
-          "fallible": true,
-          "name": "find",
-          "required": true
+          "answer": {
+            "type": "value"
+          }
         },
         {
-          "answer": {
-            "type": "text"
-          },
+          "name": "fetch_text",
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "url",
@@ -1373,39 +1421,39 @@ const described = kindsOf({
               "type": "u64"
             }
           ],
-          "fallible": true,
-          "name": "fetch_text",
-          "required": true
+          "answer": {
+            "type": "text"
+          }
         },
         {
-          "answer": {
-            "type": "value"
-          },
-          "args": [
-            {
-              "name": "request",
-              "pass": "borrowed",
-              "type": "value"
-            }
-          ],
-          "fallible": true,
           "name": "fetch",
-          "required": true
-        },
-        {
-          "answer": {
-            "type": "value"
-          },
+          "required": true,
+          "fallible": true,
           "args": [
             {
               "name": "request",
-              "pass": "borrowed",
-              "type": "value"
+              "type": "value",
+              "pass": "borrowed"
             }
           ],
-          "fallible": true,
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
           "name": "unpack",
-          "required": true
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
         }
       ]
     },
@@ -1836,12 +1884,21 @@ export const AccountSpeechOutput = described["account_speech_output"];
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
  * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
  *
+ * A source that reads an address does it through the `fetch` `read` is handed, which keeps to the source's `endpoints`.
+ *
  * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
  * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
- * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
- * even when it refuses.
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys
+ * both, even when it refuses.
  */
 export const CatalogSource = described["catalog_source"];
+
+/**
+ * What the host does for a source that reads over the network: one `https` document at a time, through the client, proxy and
+ * certificate checks the host's own downloads use, and only from the places the source's `endpoints` declare (and the address
+ * of the entry the person wrote). A source never opens a connection by itself. The source destroys it, as it does the spawner.
+ */
+export const SourceFetch = described["source_fetch"];
 
 /**
  * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).

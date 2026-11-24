@@ -24,7 +24,7 @@ use canoa::speech::output::{SpeechOutputVtable, SpeechUtteranceVtable};
 use canoa::speech::{SpeechProviderVtable, SpeechSessionVtable};
 use canoa::store::extension::StoreExtensionVtable;
 use canoa::store::models::ModelStoreVtable;
-use canoa::store::source::CatalogSourceProviderVtable;
+use canoa::store::source::{CatalogSourceProviderVtable, SourceFetchVtable};
 use canoa::store::{InstallPrompterVtable, InstallToolsVtable, ProgramStoreVtable};
 use canoa::usage_reader::{ProcessMembersVtable, UsageReaderVtable, UsageReadingVtable};
 use canoa::vendor::AgentVendorVtable;
@@ -45,6 +45,7 @@ pub(crate) fn document() -> String {
         SecretProviderVtable::description(),
         ProfileItemVtable::description(),
         CatalogSourceProviderVtable::description(),
+        SourceFetchVtable::description(),
         UsageReaderVtable::description(),
         UsageReadingVtable::description(),
         ProcessMembersVtable::description(),

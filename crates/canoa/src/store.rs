@@ -18,6 +18,7 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Schema, Secret, ToValue, Value};
 use coqui_acp_api::{Environment, LoginAnswer, LoginForm, ProcessSpawner};
 
+pub mod catalog;
 pub mod engine;
 pub mod exec;
 pub mod extension;
@@ -166,6 +167,9 @@ pub struct StoreInfo {
     /// download is never let reach them.
     #[map(default)]
     pub services: Vec<String>,
+    /// What the program's store calls its catalogs and the ones its extension registers for it: where its releases are listed
+    /// (`canoa.releases/1`). None for a store whose releases the recipe reads itself.
+    pub catalogs: Option<extension::CatalogWords>,
 }
 
 /// Whether `name` is a program folder name: 1 to 64 of `a-z`, `0-9` and `-`.
@@ -751,6 +755,7 @@ impl StoreInfo {
             channels: Vec::new(),
             endpoints: Vec::new(),
             services: Vec::new(),
+            catalogs: None,
         }
     }
 }

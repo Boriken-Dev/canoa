@@ -46,7 +46,7 @@ class SettingProfileItem(ProfileItem)   # one text becomes a session setting: se
 class EnvProfileItem(ProfileItem)       # values become variables: variables = {member: [NAMES]}, lines = None, line_label, note
 class NetworkProfileItem(ProfileItem)   # values become a network effect, the proxy item's members (the proxy itself is the host's)
 values_of(request); text_of(values, name); words_of(values, name); effect(env=, args=, settings=, network=, notes=); NETWORK_MODES
-class CatalogSource:      # canoa_sdk.source: where a Store type's catalog comes from; abstract slot read(request, spawner) -> the catalog's text
+class CatalogSource:      # canoa_sdk.source: where a Store type's catalog comes from; abstract slot read(request, spawner, fetch) -> the catalog's text
     source: str; title: str; help = None; types = ()          # source = the id canoa.cfg records, and the provider's id
     values = None         # a dataclass, as above
 class CommandCatalogSource(CatalogSource)   # a program the person named; its output (or `file`) is the catalog
