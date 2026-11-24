@@ -1816,7 +1816,15 @@ fn the_page_offers_the_methods_and_runs_nothing_inline() {
     let rig = rig(|_| {}, 0);
     let proxied = request(&To::Unix(rig.sock.clone()), "GET", LOGIN, &[], "");
     assert!(proxied.body.contains("name=\"password\""));
-    assert!(proxied.body.contains("Sign in with your certificate"));
+    assert!(proxied.body.contains("id=\"tab-certificate\""));
+    let certificate = request(
+        &To::Unix(rig.sock.clone()),
+        "GET",
+        &format!("{LOGIN}?method=certificate"),
+        &[],
+        "",
+    );
+    assert!(certificate.body.contains("Sign in with your certificate"));
     let local = call(rig.addr, "GET", LOGIN, &[], "");
     assert!(local.body.contains("name=\"password\""));
     assert!(!local.body.contains("certificate"));
@@ -2479,6 +2487,7 @@ fn the_certificate_sign_in_is_asked_for_the_browsers_address_not_the_proxys() {
 }
 
 mod account;
+mod chooser;
 mod office;
 mod passkeys;
 mod second_step;

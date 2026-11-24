@@ -437,6 +437,16 @@ is enough alone, from anywhere.
 - The log says which policy is in force when the portal starts: `sign-in policy: 2 rules`, the provider's id, or `none: every
   method from anywhere`.
 
+### The way in a page shows
+
+A page that offers more than one way in shows them as tabs, and the form of one at a time. The tabs are in the order the policy
+gave the methods for that connection and purpose (sign-in, or the again of setting a code or a passkey up), and the first is the
+one shown: put the way you want people to use first in `allow`. Each tab is a link to the page with `?method=ID` (`password`,
+`certificate`, `passkey`, `totp`, `recovery_code`), so the page works without a script, and a word that is none of the offered
+ways in shows the first. A form that fails shows its own tab again with the notice. On a narrow screen, or for more than four
+ways in, the page's script shows a list in place of the tabs; it also moves between tabs with the arrow keys, Home and End.
+Only the passkey form needs the script; where it is the one shown without one, the page says so and the other tabs are there.
+
 ### A second step
 
 A chain of more than one method makes a sign-in take more than one step. The one-time code (`totp`) and the recovery code
@@ -478,7 +488,7 @@ it (the unit's `StateDirectory={{ program }}-portal`, mode `0700`). Install the 
 
 - **A pending sign-in.** When the steps passed are not enough and the policy offers more, the portal keeps what has passed in
   memory and gives the browser the cookie `__Host-canoa-pending` (`HttpOnly`, `Secure`, `SameSite=Strict`) naming it. The page
-  then asks for the next step: a code field (`autocomplete="one-time-code"`, `inputmode="numeric"`), **Use a recovery code**
+  then asks for the next step: a code field (`autocomplete="one-time-code"`, `inputmode="numeric"`), a **Recovery code** tab
   where the policy offers one, a line saying the browser must present its certificate where that is the step, and **Start
   over**. `GET /portal/methods` with the cookie answers `{"step": "next", "methods": [...]}`. When a sign-in by password
   carries a certificate on the proxy's socket and the next step may be a certificate, that is tried in the same request.
@@ -810,7 +820,7 @@ server {
 
 | Request | Answer |
 | --- | --- |
-| `GET /portal/login`, `POST /portal/login` (`method` = `password` with `user` and `password`, `certificate`, or `passkey` with `answer`, as a form) | the sign-in page; a right credential is `303 /` with the cookie (`303 /portal/certificate` for a password sign-in that carries a certificate to enrol), a wrong one `401`, a method this connection does not offer `400`, too many failures `429` |
+| `GET /portal/login` (`?method=ID` names the way in shown), `POST /portal/login` (`method` = `password` with `user` and `password`, `certificate`, or `passkey` with `answer`, as a form) | the sign-in page; a right credential is `303 /` with the cookie (`303 /portal/certificate` for a password sign-in that carries a certificate to enrol), a wrong one `401`, a method this connection does not offer `400`, too many failures `429` |
 | `GET /portal/methods` | the ways in this connection may use, as JSON; no cookie |
 | `POST /portal/passkey` (the page's own origin; `for=enrol` for a signed-in person showing a passkey again) | the options for `navigator.credentials.get` as `{"options": ...}` and the cookie that names the challenge; `403` where no passkey is offered, `429` with `Retry-After` when too many challenges wait |
 | `GET /portal/passkeys`, `POST /portal/passkeys` (`action` = `step`, `begin`, `confirm`, `remove`, `label` or `cancel`) | the account's passkeys and what adding one takes; show a factor again, begin (the creation options as JSON) and confirm an addition, remove or name one (signed in) |

@@ -40,14 +40,17 @@ struct Who {
     user: String,
     uid: u32,
     groups: Vec<String>,
+    /// The way in the page is on, from the request.
+    chosen: Option<String>,
 }
 
-fn who_of(inner: &Inner, session: &Session) -> Result<Who, Response> {
+fn who_of(inner: &Inner, request: &Request, session: &Session) -> Result<Who, Response> {
     match inner.accounts.still(&session.user, session.uid) {
         Standing::Present(groups) => Ok(Who {
             user: session.user.clone(),
             uid: session.uid,
             groups,
+            chosen: request.chosen(),
         }),
         Standing::Gone => Err(Response::redirect(LOGIN)),
         _ => Err(Response::refusal(503)),
@@ -111,7 +114,7 @@ pub fn challenge(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             Ok(session) => session,
             Err(_) => return Response::refusal(401),
         };
-        let who = match who_of(inner, &session) {
+        let who = match who_of(inner, request, &session) {
             Ok(who) => who,
             Err(_) => return Response::refusal(401),
         };
@@ -246,6 +249,7 @@ fn page(
             &who.user,
             held.as_deref(),
             stage_of(gate),
+            who.chosen.as_deref(),
             notice,
             account::links(inner, &who.user, who.uid),
         ),
@@ -275,7 +279,7 @@ pub fn show(inner: &Inner, request: &Request, conn: &Conn) -> Response {
         Ok(session) => session,
         Err(response) => return response,
     };
-    let who = match who_of(inner, &session) {
+    let who = match who_of(inner, request, &session) {
         Ok(who) => who,
         Err(response) => return response,
     };
@@ -308,7 +312,7 @@ pub fn act(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         Err(response) if response.status == 303 => return Response::refusal(401),
         Err(response) => return response,
     };
-    let who = match who_of(inner, &session) {
+    let who = match who_of(inner, request, &session) {
         Ok(who) => who,
         Err(response) if response.status == 303 => return Response::refusal(401),
         Err(response) => return response,
@@ -618,7 +622,7 @@ pub(super) fn availability(
     conn: &Conn,
     session: &Session,
 ) -> Result<Option<PasskeyPage>, Response> {
-    let who = who_of(inner, session)?;
+    let who = who_of(inner, request, session)?;
     let enrol = enrol_pending(inner, request, session);
     let stage = gate(
         inner,

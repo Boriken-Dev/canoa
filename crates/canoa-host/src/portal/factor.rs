@@ -23,6 +23,8 @@ struct Who {
     user: String,
     uid: u32,
     groups: Vec<String>,
+    /// The way in the page is on, from the request.
+    chosen: Option<String>,
 }
 
 /// What the person may do on the page now.
@@ -49,13 +51,18 @@ fn actor(inner: &Inner, request: &Request, conn: &Conn) -> Result<Actor, Respons
     Err(Response::redirect(LOGIN))
 }
 
-fn who_of(inner: &Inner, actor: &Actor) -> Result<Who, Response> {
+fn who_of(inner: &Inner, request: &Request, actor: &Actor) -> Result<Who, Response> {
     let (user, uid) = match actor {
         Actor::Session(session) => (session.user.clone(), session.uid),
         Actor::Setup(_, pending) => (pending.user.clone(), pending.uid),
     };
     match inner.accounts.still(&user, uid) {
-        Standing::Present(groups) => Ok(Who { user, uid, groups }),
+        Standing::Present(groups) => Ok(Who {
+            user,
+            uid,
+            groups,
+            chosen: request.chosen(),
+        }),
         Standing::Gone => Err(Response::redirect(LOGIN)),
         _ => Err(Response::refusal(503)),
     }
@@ -201,6 +208,7 @@ fn page(
             &who.user,
             standing,
             stage,
+            who.chosen.as_deref(),
             notice,
             signing_in,
             account::links(inner, &who.user, who.uid),
@@ -244,7 +252,7 @@ pub fn show(inner: &Inner, request: &Request, conn: &Conn) -> Response {
         Ok(actor) => actor,
         Err(response) => return response,
     };
-    let who = match who_of(inner, &actor) {
+    let who = match who_of(inner, request, &actor) {
         Ok(who) => who,
         Err(response) => return response,
     };
@@ -278,7 +286,7 @@ pub fn act(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> R
         Err(response) if response.status == 303 => return Response::refusal(401),
         Err(response) => return response,
     };
-    let who = match who_of(inner, &actor) {
+    let who = match who_of(inner, request, &actor) {
         Ok(who) => who,
         Err(response) if response.status == 303 => return Response::refusal(401),
         Err(response) => return response,
@@ -659,7 +667,7 @@ pub(super) fn availability(
     session: &Session,
 ) -> Result<Option<(FactorStanding, Option<&'static str>)>, Response> {
     let actor = Actor::Session(session.clone());
-    let who = who_of(inner, &actor)?;
+    let who = who_of(inner, request, &actor)?;
     let enrol = enrol_pending(inner, request, &actor);
     let (standing, stage) = gate(
         inner,

@@ -284,7 +284,7 @@ fn the_page_of_the_next_step_asks_for_a_code_the_way_a_browser_fills_one_in() {
         LOGIN,
         &[
             ("X-Forwarded-For", "10.1.2.3".to_owned()),
-            ("Cookie", pending),
+            ("Cookie", pending.clone()),
         ],
         "",
     );
@@ -293,9 +293,34 @@ fn the_page_of_the_next_step_asks_for_a_code_the_way_a_browser_fills_one_in() {
     assert!(
         body.contains("autocomplete=\"one-time-code\"") && body.contains("inputmode=\"numeric\"")
     );
-    assert!(body.contains("Use a recovery code"));
-    assert!(body.contains("must present it") || body.contains("must present your certificate"));
+    // The code is the first step offered and so the tab shown; the others are tabs, and the page of one is its own.
+    assert!(body.contains("id=\"tab-totp\"") && body.contains("id=\"tab-recovery_code\""));
     assert!(body.contains("value=\"cancel\""));
+    let recovery = request(
+        &proxied(&rig),
+        "GET",
+        &format!("{LOGIN}?method=recovery_code"),
+        &[
+            ("X-Forwarded-For", "10.1.2.3".to_owned()),
+            ("Cookie", pending.clone()),
+        ],
+        "",
+    );
+    assert!(recovery.body.contains("Each works once.") && !recovery.body.contains("one-time-code"));
+    let certificate = request(
+        &proxied(&rig),
+        "GET",
+        &format!("{LOGIN}?method=certificate"),
+        &[
+            ("X-Forwarded-For", "10.1.2.3".to_owned()),
+            ("Cookie", pending),
+        ],
+        "",
+    );
+    assert!(
+        certificate.body.contains("must present it")
+            || certificate.body.contains("must present your certificate")
+    );
     assert!(
         !body.contains("name=\"password\""),
         "the first step is not asked again"

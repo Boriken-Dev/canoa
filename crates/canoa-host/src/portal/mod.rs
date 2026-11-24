@@ -430,6 +430,19 @@ impl Request {
         self.target.split_once('?').map_or("", |(_, query)| query)
     }
 
+    /// The way in a page is on: `method` in the address, else the form that was posted. A word that is none of the page's ways
+    /// in leaves it on the first.
+    fn chosen(&self) -> Option<String> {
+        url::form_urlencoded::parse(self.query().as_bytes())
+            .find(|(key, _)| key == "method")
+            .map(|(_, value)| value.into_owned())
+            .or_else(|| {
+                (self.method == "POST")
+                    .then(|| form_field(&self.body, "method"))
+                    .flatten()
+            })
+    }
+
     /// The session the browser holds: the site's cookie, else the task pane's.
     fn token(&self) -> Option<String> {
         self.cookie(COOKIE).or_else(|| self.cookie(PANE_COOKIE))
@@ -844,6 +857,7 @@ fn login_response(
                         &inner.brand,
                         &pending.user,
                         &decision.methods(),
+                        request.chosen().as_deref(),
                         notice,
                         retry,
                         setup,
@@ -855,7 +869,13 @@ fn login_response(
                 return Response::text(
                     503,
                     "text/html; charset=utf-8",
-                    page::render(&inner.brand, &[], Some(page::Notice::Unavailable), None),
+                    page::render(
+                        &inner.brand,
+                        &[],
+                        None,
+                        Some(page::Notice::Unavailable),
+                        None,
+                    ),
                 )
                 .with("Content-Security-Policy", page::POLICY.to_owned());
             }
@@ -888,7 +908,13 @@ fn login_first(
     Response::text(
         status,
         "text/html; charset=utf-8",
-        page::render(&inner.brand, &methods, notice, retry),
+        page::render(
+            &inner.brand,
+            &methods,
+            request.chosen().as_deref(),
+            notice,
+            retry,
+        ),
     )
     .with("Content-Security-Policy", page::POLICY.to_owned())
 }
@@ -1114,9 +1140,12 @@ fn route(inner: &Inner, request: &Request, conn: &Conn) -> Response {
     }
     match (request.method.as_str(), path) {
         ("GET" | "HEAD", LOGIN) => {
-            let notice = match request.query() {
-                "e=1" => Some(page::Notice::Failed),
-                "e=2" => Some(page::Notice::Throttled),
+            let failure = url::form_urlencoded::parse(request.query().as_bytes())
+                .find(|(key, _)| key == "e")
+                .map(|(_, value)| value.into_owned());
+            let notice = match failure.as_deref() {
+                Some("1") => Some(page::Notice::Failed),
+                Some("2") => Some(page::Notice::Throttled),
                 _ => None,
             };
             login_response(inner, request, conn, 200, notice, None)

@@ -212,7 +212,17 @@ fn the_methods_and_the_page_offer_a_passkey_wherever_a_certificate_is_and_a_pass
             "{other:?}"
         );
     }
+    // The certificate is the policy's first way in from outside, so it is the tab shown; the passkey is the next.
     let outside = keys.get(LOGIN, OUTSIDE, &[]);
+    assert!(
+        outside.body.contains("Sign in with your certificate")
+            && outside.body.contains("id=\"tab-passkey\"")
+            && !outside.body.contains("data-passkey=\"get\"")
+            && !outside.body.contains("name=\"password\""),
+        "{}",
+        outside.body
+    );
+    let outside = keys.get(&format!("{LOGIN}?method=passkey"), OUTSIDE, &[]);
     assert!(
         outside.body.contains("data-passkey=\"get\"")
             && outside.body.contains("Sign in with a passkey")
@@ -220,11 +230,10 @@ fn the_methods_and_the_page_offer_a_passkey_wherever_a_certificate_is_and_a_pass
         "{}",
         outside.body
     );
-    // The passkey section is hidden until the script runs: without it every other way in is an ordinary form.
+    // The passkey form is hidden until the script runs, and says so where it is the one shown without it.
     assert!(
-        outside
-            .body
-            .contains("<div hidden data-gated><div class=\"or\""),
+        outside.body.contains("<div hidden data-gated><form")
+            && outside.body.contains("<noscript>"),
         "{}",
         outside.body
     );
@@ -625,7 +634,8 @@ fn a_password_typed_inside_the_network_adds_no_passkey() {
     let mut device = Device::new();
     keys.add(&mut device, "laptop");
     let session = inside_session(&keys);
-    let page = keys.get(PASSKEYS, INSIDE, &[&session]);
+    // The certificate is the policy's first way in, so the passkey is its tab.
+    let page = keys.get(&format!("{PASSKEYS}?method=passkey"), INSIDE, &[&session]);
     assert!(
         page.body.contains("show who you are again")
             && page.body.contains("data-passkey=\"get\"")

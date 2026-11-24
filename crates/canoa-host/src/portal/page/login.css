@@ -100,3 +100,33 @@ form + form, p + form { margin-top: 10px; }
 .passkeys form + form { margin-top: 8px; }
 .passkeys form input:not([type="hidden"]) { margin: 0; flex: 1; }
 .passkeys form button { width: auto; }
+
+.chooser { margin: 0 0 16px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab {
+  padding: 8px 12px;
+  margin-bottom: -1px;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.pick {
+  display: none;
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.chooser.enhanced.many .tabs { display: none; }
+.chooser.enhanced.many .pick { display: block; }
+@media (max-width: 30rem) {
+  .chooser.enhanced .tabs { display: none; }
+  .chooser.enhanced .pick { display: block; }
+}
+.panel:focus-visible { outline: none; }

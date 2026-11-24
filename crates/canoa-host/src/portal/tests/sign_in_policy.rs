@@ -111,9 +111,12 @@ fn the_page_and_the_methods_offer_what_the_network_rule_allows_from_where_the_br
         )
         .body
     };
+    // The password is the first way in from inside, and the certificate is the next tab.
     let inside = page("10.1.2.3");
     assert!(
-        inside.contains("name=\"password\"") && inside.contains("Sign in with your certificate")
+        inside.contains("name=\"password\"")
+            && inside.contains("id=\"tab-certificate\"")
+            && !inside.contains("Sign in with your certificate")
     );
     let outside = page("203.0.113.7");
     assert!(

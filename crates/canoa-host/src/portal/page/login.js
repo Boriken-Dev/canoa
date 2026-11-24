@@ -151,6 +151,42 @@
     for (var k = 0; k < missing.length; k++) missing[k].hidden = works;
   }
 
+  // The chooser of ways in: each tab is a link to the page with `?method=`, so it works without this. Here the arrow keys, Home and
+  // End move between the tabs (the focused one is the one a Tab key reaches), and a list stands in for them on a narrow screen
+  // or for many, going to the page of the way picked.
+  function chooser() {
+    var boxes = document.querySelectorAll(".chooser");
+    for (var i = 0; i < boxes.length; i++) {
+      (function (box) {
+        var tabs = box.querySelectorAll("[role=tab]");
+        var pick = box.querySelector("[data-pick]");
+        box.classList.add("enhanced");
+        if (pick) {
+          pick.hidden = false;
+          pick.addEventListener("change", function () {
+            window.location.href = pick.value;
+          });
+        }
+        for (var t = 0; t < tabs.length; t++) {
+          tabs[t].tabIndex = tabs[t].getAttribute("aria-selected") === "true" ? 0 : -1;
+          tabs[t].addEventListener("keydown", function (event) {
+            var at = Array.prototype.indexOf.call(tabs, event.currentTarget);
+            var to = at;
+            if (event.key === "ArrowRight" || event.key === "ArrowDown") to = (at + 1) % tabs.length;
+            else if (event.key === "ArrowLeft" || event.key === "ArrowUp") to = (at + tabs.length - 1) % tabs.length;
+            else if (event.key === "Home") to = 0;
+            else if (event.key === "End") to = tabs.length - 1;
+            else return;
+            event.preventDefault();
+            for (var u = 0; u < tabs.length; u++) tabs[u].tabIndex = u === to ? 0 : -1;
+            tabs[to].focus();
+          });
+        }
+      })(boxes[i]);
+    }
+  }
+
   countdown();
+  chooser();
   passkeys();
 })();

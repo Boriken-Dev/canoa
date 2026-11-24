@@ -1,5 +1,5 @@
-//! The portal's splash and sign-in page: the brand's mark and colours, light and dark, one card at any width, and a section for each
-//! way in the portal accepts. The page is server-rendered from the same list `GET /portal/methods` answers, and its one
+//! The portal's splash and sign-in page: the brand's mark and the look's colours, light and dark, one card at any width, and a tab for
+//! each way in the portal accepts, with the form of the selected one. The page is server-rendered from the same list `GET /portal/methods` answers, and its one
 //! script (`/portal/login.js`, under `script-src 'self'`) counts a `429`'s wait down and runs the passkey ceremonies a page asks
 //! for; what only it can do stays hidden until it runs.
 
@@ -71,37 +71,70 @@ pub const POLICY: &str = "default-src 'none'; style-src 'self'; img-src 'self'; 
 
 /// What opens a section only the page's script shows: without it the section stays hidden.
 const GATED: &str = "<div hidden data-gated>";
-const OR: &str = "<div class=\"or\" role=\"separator\"><span>or</span></div>";
 
 /// `html` as a section the script reveals.
 fn gated(html: &str) -> String {
     format!("{GATED}{html}</div>")
 }
 
-/// The sections of a page, each after the first set off by "or". A section only the script reveals brings its own separator,
-/// so that a page without the script shows none for it.
-fn join(sections: &[String]) -> String {
-    let mut out = String::new();
-    for (index, section) in sections.iter().enumerate() {
-        match (index, section.strip_prefix(GATED)) {
-            (0, _) => out.push_str(section),
-            (_, Some(inner)) => {
-                out.push_str(GATED);
-                out.push_str(OR);
-                out.push_str(inner);
-            }
-            (_, None) => {
-                out.push_str(OR);
-                out.push_str(section);
-            }
-        }
+/// The words on a way in's tab.
+const fn label(method: Method) -> &'static str {
+    match method {
+        Method::Password => "Password",
+        Method::Certificate => "Certificate",
+        Method::Passkey => "Passkey",
+        Method::Totp => "One-time code",
+        Method::RecoveryCode => "Recovery code",
     }
-    if !sections.is_empty() && sections.iter().all(|section| section.starts_with(GATED)) {
-        out.push_str(
-            "<noscript><p class=\"notice\" role=\"alert\">This needs a browser with scripts turned on.</p></noscript>",
-        );
+}
+
+/// The most ways in the tabs hold on one row; more are a list to choose from.
+const MANY: usize = 4;
+
+/// The way in `chosen` names among `sections`, else the first: the order the policy gave is the order of the tabs, and its first
+/// is the default.
+fn selected(sections: &[(Method, String)], chosen: Option<&str>) -> usize {
+    chosen
+        .and_then(Method::from_id)
+        .and_then(|method| sections.iter().position(|(each, _)| *each == method))
+        .unwrap_or(0)
+}
+
+/// The ways in of a page as a chooser: tabs, each a link to `path?method=ID`, and a list the script shows in their place on a
+/// narrow screen or for many, with the form of the selected one below. One way in is its form alone. Only the selected form is in
+/// the page, so that the page works without the script and an error stays on the form it came from. A form only the script runs
+/// says so in its place when there is none.
+fn choose(path: &str, sections: &[(Method, String)], chosen: Option<&str>) -> String {
+    let at = selected(sections, chosen);
+    let (method, section) = &sections[at];
+    let panel = if section.starts_with(GATED) {
+        format!(
+            "{section}<noscript><p class=\"notice\" role=\"alert\">This needs a browser with scripts turned on.</p></noscript>"
+        )
+    } else {
+        section.clone()
+    };
+    if sections.len() == 1 {
+        return panel;
     }
-    out
+    let mut tabs = String::new();
+    let mut list = String::new();
+    for (index, (each, _)) in sections.iter().enumerate() {
+        let (id, words) = (each.id(), label(*each));
+        let on = index == at;
+        tabs.push_str(&format!(
+            "<a class=\"tab\" role=\"tab\" id=\"tab-{id}\" href=\"{path}?method={id}\" aria-selected=\"{on}\" aria-controls=\"panel\">{words}</a>"
+        ));
+        list.push_str(&format!(
+            "<option value=\"{path}?method={id}\"{}>{words}</option>",
+            if on { " selected" } else { "" }
+        ));
+    }
+    let many = if sections.len() > MANY { " many" } else { "" };
+    format!(
+        "<div class=\"chooser{many}\"><div class=\"tabs\" role=\"tablist\" aria-label=\"Way to continue\">{tabs}</div><select class=\"pick\" hidden data-pick aria-label=\"Way to continue\">{list}</select></div><div id=\"panel\" class=\"panel\" role=\"tabpanel\" aria-labelledby=\"tab-{}\">{panel}</div>",
+        method.id()
+    )
 }
 
 /// A form the script runs a passkey ceremony for: it asks `PASSKEY` for options with `options_body`, has the browser answer, and
@@ -167,6 +200,7 @@ fn certificate_form() -> String {
 pub fn render(
     brand: &Brand,
     methods: &[Method],
+    chosen: Option<&str>,
     notice: Option<Notice>,
     retry: Option<u64>,
 ) -> Vec<u8> {
@@ -185,18 +219,21 @@ pub fn render(
     });
     let mut sections = Vec::new();
     for method in methods {
-        sections.push(match method {
-            Method::Password => password_form(),
-            Method::Certificate => certificate_form(),
-            Method::Passkey => passkey_login_form(),
-            // A code is checked for an account an earlier step named, and so has no place on the first page.
-            Method::Totp | Method::RecoveryCode => continue,
-        });
+        sections.push((
+            *method,
+            match method {
+                Method::Password => password_form(),
+                Method::Certificate => certificate_form(),
+                Method::Passkey => passkey_login_form(),
+                // A code is checked for an account an earlier step named, and so has no place on the first page.
+                Method::Totp | Method::RecoveryCode => continue,
+            },
+        ));
     }
     let body = if sections.is_empty() {
         "<p class=\"notice\" role=\"alert\">No way to sign in is available here.</p>".to_owned()
     } else {
-        join(&sections)
+        choose(LOGIN, &sections, chosen)
     };
     let retry = retry.map_or_else(String::new, |seconds| format!(" data-retry=\"{seconds}\""));
     format!(
@@ -374,6 +411,7 @@ pub fn render_step(
     brand: &Brand,
     user: &str,
     methods: &[Method],
+    chosen: Option<&str>,
     notice: Option<Notice>,
     retry: Option<u64>,
     setup: SetupOffer,
@@ -393,18 +431,21 @@ pub fn render_step(
     });
     let mut sections = Vec::new();
     for method in methods {
-        sections.push(match method {
-            Method::Totp => code_form(Method::Totp),
-            Method::RecoveryCode => format!(
-                "<details class=\"recovery\"><summary>Use a recovery code</summary>{}</details>",
-                code_form(Method::RecoveryCode)
-            ),
-            Method::Password => password_form(),
-            Method::Certificate => step_certificate_form(),
-            Method::Passkey => passkey_login_form(),
-        });
+        sections.push((
+            *method,
+            match method {
+                Method::Totp | Method::RecoveryCode => code_form(*method),
+                Method::Password => password_form(),
+                Method::Certificate => step_certificate_form(),
+                Method::Passkey => passkey_login_form(),
+            },
+        ));
     }
-    let mut body = join(&sections);
+    let mut body = if sections.is_empty() {
+        String::new()
+    } else {
+        choose(LOGIN, &sections, chosen)
+    };
     match setup {
         SetupOffer::Link => body.push_str(&format!(
             "<p class=\"hint\">No code is set up for your account. <a href=\"{FACTOR}\">Set up a code</a>.</p>"
@@ -467,10 +508,10 @@ fn qr(text: &str) -> Option<String> {
 }
 
 /// The forms that show a factor again, as a signed-in person would to sign in, posted to `post_to` as `action=step`.
-fn ask_forms(post_to: &str, user: &str, methods: &[Method]) -> String {
+fn ask_forms(post_to: &str, user: &str, methods: &[Method], chosen: Option<&str>) -> String {
     let mut sections = Vec::new();
     for method in methods {
-        sections.push(match method {
+        sections.push((*method, match method {
             Method::Password => format!(
                 "<form class=\"method\" method=\"post\" action=\"{post_to}\"><input type=\"hidden\" name=\"action\" value=\"step\"><input type=\"hidden\" name=\"method\" value=\"password\"><input type=\"hidden\" name=\"user\" value=\"{}\"><label for=\"password\">Password</label><input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required><button type=\"submit\">Continue</button></form>",
                 escape(user)
@@ -490,9 +531,13 @@ fn ask_forms(post_to: &str, user: &str, methods: &[Method]) -> String {
                     method.id()
                 )
             }
-        });
+        }));
     }
-    join(&sections)
+    if sections.is_empty() {
+        String::new()
+    } else {
+        choose(post_to, &sections, chosen)
+    }
 }
 
 fn factor_post(action: &str, label: &str, class: &str) -> String {
@@ -547,11 +592,16 @@ fn nav(here: Here, links: Links, name: &str) -> String {
 
 /// The page of `user`'s one-time code. `signing_in` says it is part of a sign-in, which the person returns to afterwards.
 #[must_use]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the page's state as the handlers hold it, passed through"
+)]
 pub fn render_factor(
     brand: &Brand,
     user: &str,
     standing: FactorStanding,
     stage: FactorStage<'_>,
+    chosen: Option<&str>,
     notice: Option<CertNotice>,
     signing_in: bool,
     links: Links,
@@ -584,7 +634,7 @@ pub fn render_factor(
         ),
         FactorStage::Ask(methods) => {
             body.push_str("<p>To set up a code, show who you are again.</p>");
-            body.push_str(&ask_forms(FACTOR, user, methods));
+            body.push_str(&ask_forms(FACTOR, user, methods, chosen));
         }
         FactorStage::Ready => {
             body.push_str("<p>You can set up a code now. It replaces any code you have.</p>");
@@ -706,6 +756,7 @@ pub fn render_passkeys(
     user: &str,
     passkeys: Option<&[PasskeyInfo]>,
     stage: PasskeyStage<'_>,
+    chosen: Option<&str>,
     notice: Option<CertNotice>,
     links: Links,
 ) -> Vec<u8> {
@@ -740,7 +791,7 @@ pub fn render_passkeys(
         ),
         PasskeyStage::Ask(methods) => {
             body.push_str("<p>To add a passkey, show who you are again.</p>");
-            body.push_str(&ask_forms(PASSKEYS, user, methods));
+            body.push_str(&ask_forms(PASSKEYS, user, methods, chosen));
         }
         PasskeyStage::Ready => {
             body.push_str(&passkey_form(
