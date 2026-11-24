@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ui' show Size;
 
 import 'package:coqui_acp_chat/experimental.dart' show ChatViewLink;
+import 'package:flutter/widgets.dart' show WidgetBuilder;
 
 import 'popout_window.dart';
 
@@ -22,9 +24,18 @@ abstract interface class PopoutBridge {
 }
 
 final class _ExtensionWindow implements PopoutWindow {
-  _ExtensionWindow(this.link, this.bridge, this.session, this.windowId) {
+  _ExtensionWindow(this.link, this.bridge, this.session, this.windowId, this.title, this.size) {
     _listen = bridge.closed.where((id) => id == windowId).listen((_) => _gone());
   }
+
+  @override
+  String get id => session;
+
+  @override
+  String title;
+
+  @override
+  Size size;
 
   @override
   final ChatViewLink link;
@@ -41,6 +52,13 @@ final class _ExtensionWindow implements PopoutWindow {
 
   @override
   Future<void> get closed => _closed.future;
+
+  @override
+  void setTitle(String title) => this.title = title;
+
+  // The browser's own window has the size the worker gave it.
+  @override
+  void setSize(Size size) => this.size = size;
 
   @override
   Future<void> focus() => bridge.focus(session);
@@ -60,7 +78,7 @@ final class _ExtensionWindow implements PopoutWindow {
 }
 
 /// Windows of the browser extension, each a second view of a session the side panel holds, over a channel only the two pages know.
-final class ExtensionPopoutWindows implements PopoutWindows {
+final class ExtensionPopoutWindows extends WindowList {
   ExtensionPopoutWindows(this.bridge, {required this.linkFor, required this.newLinkId});
 
   final PopoutBridge bridge;
@@ -73,13 +91,20 @@ final class ExtensionPopoutWindows implements PopoutWindows {
   bool get available => bridge.client == 'panel';
 
   @override
-  Future<PopoutWindow> open({required String title, required String look, required String density, String? session}) async {
+  Future<PopoutWindow> open({
+    required String title,
+    required String look,
+    required String density,
+    String? session,
+    Size size = popoutSize,
+    WidgetBuilder? builder,
+  }) async {
     if (session == null) throw StateError('A window needs the session it shows');
     final id = newLinkId();
     final link = linkFor(id);
     try {
       final windowId = await bridge.open(session: session, link: id, title: title, look: look, density: density);
-      return _ExtensionWindow(link, bridge, session, windowId);
+      return track(_ExtensionWindow(link, bridge, session, windowId, title, size));
     } on Object catch (error) {
       await link.close();
       throw StateError('The browser did not open the window: ${error is StateError ? error.message : error}');

@@ -205,3 +205,67 @@ final class ReadAloudBridge {
     reader.release(session);
   }
 }
+
+/// The speaker of a window of this engine, which has no need to ask: it is the app's own [reader], whose voices and player the
+/// window shares. Voice mode asked for here follows this window's conversation, as it does for a window that asks over a link, and
+/// goes back to following the main window's when the window ends.
+final class SessionReplySpeaker extends ChangeNotifier implements ReplySpeaker {
+  SessionReplySpeaker({required this.reader, required this.session, required this.onVoiceMode}) {
+    reader.addListener(notifyListeners);
+  }
+
+  final ReplyReader reader;
+
+  /// The id of the conversation the window shows.
+  final String session;
+
+  /// Told when the window turns voice mode on or off, to keep the choice.
+  final ValueChanged<bool> onVoiceMode;
+
+  @override
+  bool get available => reader.available;
+
+  @override
+  bool get voiceMode => reader.voiceMode && reader.pinned == session;
+
+  @override
+  bool get busy => reader.busy;
+
+  @override
+  String? get reading => reader.reading;
+
+  @override
+  bool isReading(String key) => reader.isReading(key);
+
+  @override
+  String? get error => reader.error;
+
+  @override
+  String? get errorKey => reader.errorKey;
+
+  @override
+  void clearError() => reader.clearError();
+
+  @override
+  Future<void> toggle(String key, String markdown) => reader.toggle(key, markdown);
+
+  @override
+  void stop() => reader.stop();
+
+  @override
+  void setVoiceMode(bool on) {
+    reader.setVoiceMode(on, session: on ? session : null);
+    onVoiceMode(on);
+  }
+
+  @override
+  void unlock() => reader.unlock();
+
+  /// Stops following this window's conversation.
+  @override
+  void dispose() {
+    reader.removeListener(notifyListeners);
+    reader.release(session);
+    super.dispose();
+  }
+}

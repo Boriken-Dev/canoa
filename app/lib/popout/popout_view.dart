@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as model;
-import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'package:material_ui/material_ui.dart';
 
@@ -9,22 +8,23 @@ import '../chat/reply_voice.dart' show VoiceModeMenuItem, VoiceModeStatus;
 import '../chat/session_views.dart' show appName;
 import '../theme/look.dart';
 import '../voice/reply_speaker.dart';
+import 'popout_conversation.dart';
 
 /// A conversation in a window of its own: the transcript, what the agent waits on, and a composer, drawn over a
-/// [ChatSessionView] of the conversation the main window holds. It keeps nothing of the conversation itself; what the person does
-/// here is asked of the main window, and what comes of it, or of an answer given there, arrives as the next state.
+/// [PopoutConversation], the conversation the main window holds. It keeps nothing of the conversation itself; what the person does
+/// here is asked of the conversation, and what comes of it, or of an answer given elsewhere, shows as the next state.
 class PopoutChat extends StatefulWidget {
-  const PopoutChat({super.key, required this.view, this.onDock, this.banner, this.renderers = chat.ChatRenderers.none, this.speaker});
+  const PopoutChat({super.key, required this.conversation, this.onDock, this.banner, this.renderers = chat.ChatRenderers.none, this.speaker});
 
-  /// Reads replies aloud through the main window; null for none, which leaves voice mode's switch out.
+  /// Reads replies aloud, through the main window when this window is another page; null for none, which leaves voice mode's switch out.
   final ReplySpeaker? speaker;
 
   /// A line under the header, from the platform the window runs in; null for none.
   final Widget? banner;
 
-  final ChatSessionView view;
+  final PopoutConversation conversation;
 
-  /// Called after the view has detached, to close the window.
+  /// Called after the conversation has detached, to close the window.
   final VoidCallback? onDock;
 
   final chat.ChatRenderers renderers;
@@ -42,7 +42,7 @@ class _PopoutChatState extends State<PopoutChat> {
   StreamSubscription<model.ChatEvent>? _events;
   String? _problem;
 
-  model.ChatSession get _session => widget.view.session;
+  model.ChatSession get _session => widget.conversation.session;
 
   @override
   void initState() {
@@ -51,7 +51,7 @@ class _PopoutChatState extends State<PopoutChat> {
     // Whether anything can be read aloud is told by the main window after the transcript was first drawn.
     widget.speaker?.addListener(_changed);
     _events = _session.events.listen(_event);
-    unawaited(widget.view.done.then((_) => _changed()));
+    unawaited(widget.conversation.done.then((_) => _changed()));
   }
 
   @override
@@ -73,7 +73,7 @@ class _PopoutChatState extends State<PopoutChat> {
     if (event is! model.PermissionSettledEvent || !mounted) return;
     final outcome = event.question.outcome;
     final by = outcome?.by;
-    if (outcome == null || outcome.how != model.Settlement.answered || by == null || by == widget.view.clientId) return;
+    if (outcome == null || outcome.how != model.Settlement.answered || by == null || by == widget.conversation.clientId) return;
     final name = _session.clients.where((c) => c.id == by).firstOrNull?.name ?? by;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text('Answered in $name.')));
   }
@@ -83,7 +83,7 @@ class _PopoutChatState extends State<PopoutChat> {
     if (text.isEmpty) return;
     _input.clear();
     try {
-      await widget.view.send(text);
+      await widget.conversation.send(text);
       if (mounted) setState(() => _problem = null);
     } catch (error) {
       if (!mounted) return;
@@ -93,14 +93,14 @@ class _PopoutChatState extends State<PopoutChat> {
   }
 
   Future<void> _dock() async {
-    await widget.view.detach();
+    await widget.conversation.detach();
     widget.onDock?.call();
   }
 
   @override
   Widget build(BuildContext context) {
     final session = _session;
-    final view = widget.view;
+    final view = widget.conversation;
     final working = session.status == model.ChatStatus.working;
     final waiting = session.pendingPermissions.firstOrNull;
     final asking = session.pendingQuestions.firstOrNull;

@@ -226,7 +226,7 @@ Future<void> main(List<String> args) async {
   // The executable's own entry takes this before Flutter starts; reaching here means a runner built without it, which must
   // not answer a host's own command by opening another window.
   if (args.firstOrNull == canoaChildFlag) throw StateError('this build has no entry for $canoaChildFlag');
-  // A window the app opened for one conversation runs this same program, and only shows that conversation.
+  // A page the app opened for one conversation runs this same program, and only shows that conversation.
   final popped = popout_platform.popoutLaunch(args);
   if (popped != null) return runPopout(popped);
   WidgetsFlutterBinding.ensureInitialized();
@@ -307,11 +307,13 @@ Future<void> main(List<String> args) async {
     onHosting: host == null || served != null ? null : () => hostingSignal.value++,
     background: args.contains(backgroundFlag),
   );
-  runApp(CanoaApp(
+  // The windows of a desktop are drawn beside the app, in the same engine: its root says where.
+  final windows = popout_platform.createPopoutWindows();
+  runApp(windows.host(CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
     host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts, served: served, layout: layout,
-    localHost: localHost,
-  ));
+    localHost: localHost, popoutWindows: windows,
+  )));
   await hosting;
 }
 

@@ -9,15 +9,15 @@ import 'popout_launch.dart';
 /// How this platform opens a window for a conversation; [PopoutWindows.available] says whether it can.
 PopoutWindows createPopoutWindows() => platform.createPopoutWindows();
 
-/// The launch this process was started with when it is a pop-out window, from the program's arguments (a desktop engine's) or its
-/// address (a page's); null for the app itself.
+/// The launch this process was started with when it is a pop-out page, from its address; null for the app itself and for a desktop,
+/// whose windows are of its own engine.
 PopoutLaunch? popoutLaunch(List<String> args) => platform.popoutLaunch(args);
 
-/// The window's end of the link to the window that holds the conversation.
+/// The page's end of the link to the page that holds the conversation.
 Future<ChatViewLink> connectPopout(PopoutLaunch launch) => platform.connectPopout(launch);
 
-/// Gets the window ready (its title) and shows it.
+/// Gets the page ready (its title).
 Future<void> preparePopoutWindow(PopoutLaunch launch) => platform.preparePopoutWindow(launch);
 
-/// Closes this window, which is a pop-out window.
+/// Closes this page, which is a pop-out window.
 Future<void> closePopoutWindow() => platform.closePopoutWindow();

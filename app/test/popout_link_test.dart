@@ -92,11 +92,9 @@ void main() {
       expect(PopoutLaunch.decode('{"kind":"canoa.popout","link":"x"}')!.look, 'canoa', reason: 'what is missing takes its default');
     });
 
-    test('a desktop engine\'s arguments are a launch when they are the plugin\'s and carry one', () {
+    test('a desktop starts as the app whatever its arguments say: its windows are of its own engine and carry no launch', () {
       const launch = PopoutLaunch(link: 'abc', title: 'T');
-      expect(platform.popoutLaunch(['multi_window', 'window-id', launch.encode()])?.link, 'abc');
-      expect(platform.popoutLaunch(['multi_window', 'window-id', '{}']), isNull);
-      expect(platform.popoutLaunch(['multi_window']), isNull);
+      expect(platform.popoutLaunch(['multi_window', 'window-id', launch.encode()]), isNull);
       expect(platform.popoutLaunch(const []), isNull);
       expect(platform.popoutLaunch(['--no-local-host']), isNull);
     });

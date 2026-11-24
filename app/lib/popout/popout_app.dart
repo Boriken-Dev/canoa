@@ -11,6 +11,7 @@ import '../theme/look.dart';
 import '../chat/reply_voice.dart';
 import '../voice/reply_speaker.dart';
 import 'platform.dart' as platform;
+import 'popout_conversation.dart';
 import 'popout_launch.dart';
 import 'popout_view.dart';
 import 'read_aloud.dart';
@@ -33,7 +34,7 @@ Future<void> runPopout(PopoutLaunch launch, {ChatViewLink? link}) async {
     final banner = bridge == null ? null : TabOwnerBanner(tabs: TabShares(bridge), sessionKey: launch.session!);
     // Reading aloud is asked of the main window over the same link, since that is where the voices and the player are.
     final reading = ReadAloudLink(link ?? await platform.connectPopout(launch));
-    runApp(PopoutApp(launch: launch, view: await attachPopout(launch, link: reading), banner: banner, speaker: RemoteReplySpeaker(reading)));
+    runApp(PopoutApp(launch: launch, conversation: LinkedConversation(await attachPopout(launch, link: reading)), banner: banner, speaker: RemoteReplySpeaker(reading)));
   } on Object catch (error) {
     runApp(PopoutApp(launch: launch, problem: error is StateError ? error.message : '$error'));
   }
@@ -41,12 +42,12 @@ Future<void> runPopout(PopoutLaunch launch, {ChatViewLink? link}) async {
 
 /// The app of a pop-out window: Canoa's look around one conversation.
 class PopoutApp extends StatelessWidget {
-  const PopoutApp({super.key, required this.launch, this.view, this.problem, this.onClose, this.banner, this.renderers = chat.ChatRenderers.none, this.speaker});
+  const PopoutApp({super.key, required this.launch, this.conversation, this.problem, this.onClose, this.banner, this.renderers = chat.ChatRenderers.none, this.speaker});
 
   final PopoutLaunch launch;
 
   /// The conversation, once attached; null with a [problem] when it could not be.
-  final ChatSessionView? view;
+  final PopoutConversation? conversation;
   final String? problem;
 
   /// Closes the window; by default through the platform.
@@ -69,7 +70,7 @@ class PopoutApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: themeFor(look, Brightness.light, density: density),
       darkTheme: themeFor(look, Brightness.dark, density: density),
-      home: view == null
+      home: conversation == null
           ? Scaffold(
               body: Center(
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -80,7 +81,7 @@ class PopoutApp extends StatelessWidget {
               ),
             )
           : PopoutChat(
-              view: view!,
+              conversation: conversation!,
               onDock: close,
               banner: banner,
               renderers: speaker == null ? renderers : replyRenderers(speaker!).merge(renderers),

@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:math' show Random;
+import 'dart:ui' show Size;
 
 import 'package:coqui_acp_chat/experimental.dart' show ChatViewLink;
+import 'package:flutter/widgets.dart' show WidgetBuilder;
 import 'package:web/web.dart' as web;
 
 import 'extension_windows.dart';
@@ -39,7 +41,7 @@ String _newLinkId() {
 }
 
 final class _WebWindow implements PopoutWindow {
-  _WebWindow(this.link, this.window) {
+  _WebWindow(this.id, this.link, this.window, this.title, this.size) {
     // A page that goes away says nothing to a channel, so whether it is still there is asked.
     _poll = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (window.closed) _gone();
@@ -53,8 +55,14 @@ final class _WebWindow implements PopoutWindow {
   }).toJS;
 
   @override
+  final String id;
+  @override
   final BroadcastViewLink link;
   final web.Window window;
+  @override
+  String title;
+  @override
+  Size size;
   final _closed = Completer<void>();
   late final Timer _poll;
 
@@ -68,6 +76,13 @@ final class _WebWindow implements PopoutWindow {
   Future<void> get closed => _closed.future;
 
   @override
+  void setTitle(String title) => this.title = title;
+
+  // The browser sizes its own windows: this is the size the window was asked for.
+  @override
+  void setSize(Size size) => this.size = size;
+
+  @override
   Future<void> focus() async => window.focus();
 
   @override
@@ -78,12 +93,19 @@ final class _WebWindow implements PopoutWindow {
   }
 }
 
-final class _WebWindows implements PopoutWindows {
+final class _WebWindows extends WindowList {
   @override
   bool get available => web.window.location.protocol == 'http:' || web.window.location.protocol == 'https:';
 
   @override
-  Future<PopoutWindow> open({required String title, required String look, required String density, String? session}) async {
+  Future<PopoutWindow> open({
+    required String title,
+    required String look,
+    required String density,
+    String? session,
+    Size size = popoutSize,
+    WidgetBuilder? builder,
+  }) async {
     final id = _newLinkId();
     final link = BroadcastViewLink(_channelOf(id));
     final here = Uri.base;
@@ -96,12 +118,12 @@ final class _WebWindows implements PopoutWindows {
       queryParameters: {'popout': id, 'title': title, 'look': look, 'density': density},
     );
     // Called inside the person's click, so that the browser lets it open.
-    final window = web.window.open(address.toString(), '_blank', 'popup=yes,width=560,height=780');
+    final window = web.window.open(address.toString(), '_blank', 'popup=yes,width=${size.width.round()},height=${size.height.round()}');
     if (window == null) {
       await link.close();
       throw StateError('The browser did not open the window: allow pop-ups for this page');
     }
-    return _WebWindow(link, window);
+    return track(_WebWindow(id, link, window, title, size));
   }
 }
 

@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:canoa/chat/child_thread.dart';
 import 'package:canoa/chat/reply_voice.dart';
 import 'package:canoa/popout/popout_app.dart';
+import 'package:canoa/popout/popout_conversation.dart';
 import 'package:canoa/popout/popout_hub.dart';
 import 'package:canoa/popout/popout_launch.dart';
 import 'package:canoa/popout/read_aloud.dart';
@@ -73,12 +74,12 @@ Future<_Scene> _scene(WidgetTester tester) async {
 Future<RemoteReplySpeaker> _show(WidgetTester tester, FakeWindow window) async {
   // Attached on the real clock, as the window's own program would be, so what the owner sends reaches it.
   final (link, view) = (await tester.runAsync(() async {
-    final link = ReadAloudLink(window.far);
+    final link = ReadAloudLink(window.far!);
     return (link, await ChatSessionView.attach(link, clientId: 'window-1', name: 'the pop-out window'));
   }))!;
   final speaker = RemoteReplySpeaker(link);
   addTearDown(speaker.dispose);
-  await tester.pumpWidget(PopoutApp(launch: PopoutLaunch(link: 'test', title: window.title), view: view, onClose: window.closeByUser, speaker: speaker));
+  await tester.pumpWidget(PopoutApp(launch: PopoutLaunch(link: 'test', title: window.title), conversation: LinkedConversation(view), onClose: window.closeByUser, speaker: speaker));
   await _settle(tester);
   return speaker;
 }
@@ -140,8 +141,8 @@ void main() {
       addTearDown(bare.dispose);
       await tester.runAsync(() => bare.popOut(scene.session));
       final window = (bare.windows as FakeWindows).opened.single;
-      final view = await tester.runAsync(() => ChatSessionView.attach(window.far, clientId: 'window-1', name: 'the pop-out window')) as ChatSessionView;
-      await tester.pumpWidget(PopoutApp(launch: PopoutLaunch(link: 'test', title: window.title), view: view, onClose: window.closeByUser));
+      final view = await tester.runAsync(() => ChatSessionView.attach(window.far!, clientId: 'window-1', name: 'the pop-out window')) as ChatSessionView;
+      await tester.pumpWidget(PopoutApp(launch: PopoutLaunch(link: 'test', title: window.title), conversation: LinkedConversation(view), onClose: window.closeByUser));
       await _settle(tester);
       expect(find.byKey(const Key('reply-play')), findsNothing);
       expect(find.byKey(const Key('voice-mode')), findsNothing);

@@ -7,6 +7,7 @@ import 'package:canoa/extension/tab_owner_banner.dart';
 import 'package:canoa/extension/tab_shares.dart';
 import 'package:canoa/popout/extension_windows.dart';
 import 'package:canoa/popout/popout_app.dart';
+import 'package:canoa/popout/popout_conversation.dart';
 import 'package:canoa/popout/popout_hub.dart';
 import 'package:canoa/popout/popout_launch.dart';
 import 'package:canoa/session_store.dart';
@@ -195,7 +196,7 @@ void main() {
       ..open(_tab(2, 'Mail'))
       ..bind('ws-1', 1);
     final launch = PopoutLaunch(link: 'ab' * 16, title: session.title, session: 'ws-1');
-    await tester.pumpWidget(PopoutApp(launch: launch, view: view, onClose: () {}, banner: TabOwnerBanner(tabs: TabShares(bridge), sessionKey: 'ws-1')));
+    await tester.pumpWidget(PopoutApp(launch: launch, conversation: LinkedConversation(view), onClose: () {}, banner: TabOwnerBanner(tabs: TabShares(bridge), sessionKey: 'ws-1')));
     await _settle(tester);
     expect(find.text('"Docs" is with the side panel'), findsOneWidget);
     expect(find.byType(PermissionCard), findsOneWidget);

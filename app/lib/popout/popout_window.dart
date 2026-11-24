@@ -1,14 +1,35 @@
+import 'dart:async';
+import 'dart:ui' show Size;
+
 import 'package:coqui_acp_chat/experimental.dart' show ChatViewLink;
+import 'package:flutter/widgets.dart' show ChangeNotifier, Listenable, Widget, WidgetBuilder;
 
-// What a platform gives the pop-out, with nothing of Flutter in it.
+// What a platform gives the pop-out: windows to open, find and close. Only an implementation knows what a window is made of.
 
-/// A window another conversation is shown in, as the window that holds it sees it.
+/// How big a window for a conversation opens.
+const Size popoutSize = Size(560, 780);
+
+/// A window a conversation is shown in, as the window that holds it sees it.
 abstract interface class PopoutWindow {
-  /// This end of the link to the window's view; its far end is in the window.
-  ChatViewLink get link;
+  /// Names this window among the ones its [PopoutWindows] holds.
+  String get id;
+
+  /// The title the window was given.
+  String get title;
+
+  /// The size of the window's drawable area now; [Size.zero] once it is gone.
+  Size get size;
+
+  /// This end of the link to the window's view, for a window that is another page or engine and only shows what it is sent; its
+  /// far end is in the window. Null for a window of this engine, which draws the conversation itself.
+  ChatViewLink? get link;
 
   /// Completes when the window is gone, however it went.
   Future<void> get closed;
+
+  void setTitle(String title);
+
+  void setSize(Size size);
 
   /// Brings the window to the front.
   Future<void> focus();
@@ -17,25 +38,70 @@ abstract interface class PopoutWindow {
   Future<void> close();
 }
 
-/// Where a conversation can be shown in a window of its own: the platform's way to make one and to reach it.
-abstract interface class PopoutWindows {
+/// Where a conversation can be shown in a window of its own: the platform's way to make one and to reach it. It tells its listeners
+/// when a window comes or goes.
+abstract interface class PopoutWindows implements Listenable {
   /// Whether this platform can open one.
   bool get available;
 
-  /// Opens a window that attaches to the conversation on the other end of the returned window's link, titled [title], drawn with
-  /// [look] and [density] (the names of the app's own settings). [session] names the conversation for a platform that needs it (the
+  /// The windows open now, oldest first.
+  List<PopoutWindow> get windows;
+
+  /// Opens a window titled [title], [size] big and drawn with [look] and [density] (the names of the app's own settings).
+  ///
+  /// A window of this engine draws [builder]'s widget, and its [PopoutWindow.link] is null. A window that is another page or engine
+  /// cannot, and gets a link whose far end attaches to the conversation, which [session] names for a platform that needs it (the
   /// browser extension's worker keeps the tab it works with by it).
-  Future<PopoutWindow> open({required String title, required String look, required String density, String? session});
+  Future<PopoutWindow> open({
+    required String title,
+    required String look,
+    required String density,
+    String? session,
+    Size size = popoutSize,
+    WidgetBuilder? builder,
+  });
+
+  /// [app] with the place this platform draws its windows of this engine; the app's root goes through it.
+  Widget host(Widget app);
+}
+
+/// A [PopoutWindows] that keeps the list and tells when it changes, for an implementation to build on.
+abstract class WindowList extends ChangeNotifier implements PopoutWindows {
+  final _windows = <PopoutWindow>[];
+
+  @override
+  List<PopoutWindow> get windows => List.unmodifiable(_windows);
+
+  @override
+  Widget host(Widget app) => app;
+
+  /// Lists [window] until it is gone.
+  T track<T extends PopoutWindow>(T window) {
+    _windows.add(window);
+    notifyListeners();
+    unawaited(
+      window.closed.then((_) {
+        if (_windows.remove(window)) notifyListeners();
+      }),
+    );
+    return window;
+  }
 }
 
 /// A platform with no way to open one.
-final class NoPopoutWindows implements PopoutWindows {
-  const NoPopoutWindows();
+final class NoPopoutWindows extends WindowList {
+  NoPopoutWindows();
 
   @override
   bool get available => false;
 
   @override
-  Future<PopoutWindow> open({required String title, required String look, required String density, String? session}) =>
-      throw UnsupportedError('This platform has no windows of its own for a conversation');
+  Future<PopoutWindow> open({
+    required String title,
+    required String look,
+    required String density,
+    String? session,
+    Size size = popoutSize,
+    WidgetBuilder? builder,
+  }) => throw UnsupportedError('This platform has no windows of its own for a conversation');
 }

@@ -1,33 +1,22 @@
-// The system speech service on Windows through the real plugin, in each kind of Flutter engine the app runs: the main window's, and a
-// second window's (a pop-out window is a second engine of the same program). A recording the system's own voice makes is played in
-// place of the microphone (the plugin's inputFile option), so nothing opens the microphone.
+// The system speech service on Windows through the real plugin. A recording the system's own voice makes is played in place of the
+// microphone (the plugin's inputFile option), so nothing opens the microphone.
 //
-//   flutter drive --driver=test_driver/integration_test.dart --target=integration_test/system_speech_test.dart -d windows
-//
-// Not `flutter test`: its generated entry waits for the test server before it calls `main`, and a second engine inherits that entry,
-// so the window's `main` never runs. `flutter drive` runs this file's `main` in every engine. The window's engine runs it with the
-// arguments the plugin gives it: the recording to dictate and the file to write what it heard to.
+//   flutter test integration_test/system_speech_test.dart -d windows
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/voice/speech_backend.dart';
 import 'package:canoa/voice/system_speech.dart';
-import 'package:desktop_multi_window/desktop_multi_window.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 // ignore: depend_on_referenced_packages
 import 'package:speech_to_text_platform_interface/speech_to_text_platform_interface.dart' show SpeechConfigOption, SpeechToTextPlatform;
 // ignore: depend_on_referenced_packages
 import 'package:speech_to_text_windows/speech_to_text_windows.dart' show SpeechToTextWindows;
-import 'package:window_manager/window_manager.dart';
 
 const _words = 'hello world this is a test of dictation';
 
-Future<void> main(List<String> args) async {
-  // The registrant has run before `main`, in whichever engine this is.
-  if (args.length >= 3 && args.first == 'multi_window') return _window(args[2]);
+Future<void> main() async {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory dir;
@@ -44,44 +33,6 @@ Future<void> main(List<String> args) async {
       expect((await _dictate(recorded.path)).toLowerCase(), contains('hello world'));
     });
   }, timeout: const Timeout(Duration(minutes: 3)));
-
-  testWidgets('a second window dictates a recording through the Windows plugin', (tester) async {
-    await tester.runAsync(() async {
-      final heard = File('${dir.path}${Platform.pathSeparator}window.json');
-      final window = await WindowController.create(
-        WindowConfiguration(arguments: jsonEncode({'wav': recorded.path, 'out': heard.path}), hiddenAtLaunch: true),
-      );
-      addTearDown(() => window.hide().then<void>((_) {}, onError: (Object _) {}));
-      final end = DateTime.now().add(const Duration(minutes: 2));
-      while (!heard.existsSync()) {
-        if (DateTime.now().isAfter(end)) fail('the second window never said what it heard');
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-      }
-      final said = jsonDecode(await heard.readAsString()) as Map<String, dynamic>;
-      expect(said['platform'], 'SpeechToTextWindows', reason: 'the plugin registers itself in the second window before its main runs');
-      expect(said['error'], isNull);
-      expect((said['text'] as String).toLowerCase(), contains('hello world'));
-    });
-  }, timeout: const Timeout(Duration(minutes: 3)));
-}
-
-/// What a second window does: dictates the recording and writes what the engine, the words or the failure came to.
-Future<void> _window(String launch) async {
-  WidgetsFlutterBinding.ensureInitialized();
-  final asked = jsonDecode(launch) as Map<String, dynamic>;
-  final said = <String, Object?>{'platform': SpeechToTextPlatform.instance.runtimeType.toString()};
-  try {
-    said['text'] = await _dictate(asked['wav'] as String);
-  } on Object catch (error) {
-    said['error'] = error is SpeechFailure ? error.message : '$error';
-  }
-  await File(asked['out'] as String).writeAsString(jsonEncode(said));
-  try {
-    await windowManager.ensureInitialized();
-    await windowManager.close();
-  } on Object {
-    // The window is hidden and the test hides it too.
-  }
 }
 
 /// The words the system heard in [wav], which plays in real time; the dictation is stopped once it has played.

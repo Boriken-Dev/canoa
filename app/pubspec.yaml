@@ -42,7 +42,6 @@ dependencies:
     path: native
   crypto: ^3.0.6
   desktop_drop: ^0.8.4
-  desktop_multi_window: ^0.3.1
   file_selector: ^1.1.0
   local_notifier: ^0.1.6
   markdown: ^7.3.1

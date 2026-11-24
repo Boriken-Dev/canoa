@@ -201,7 +201,7 @@ void main() {
     final hub = PopoutHub(store, FakeWindows());
     addTearDown(hub.dispose);
     await expectLater(hub.popOut(draft), throwsStateError);
-    expect(PopoutHub(store, const NoPopoutWindows()).available, isFalse);
+    expect(PopoutHub(store, NoPopoutWindows()).available, isFalse);
   });
 
   testWidgets('the conversation\'s own header opens and brings back the window', (tester) async {
@@ -228,7 +228,7 @@ void main() {
     final store = SessionStore();
     final agent = ScriptedAgent();
     await tester.runAsync(() => agent.start(store));
-    await pumpApp(tester, store, popoutWindows: const NoPopoutWindows());
+    await pumpApp(tester, store, popoutWindows: NoPopoutWindows());
     expect(find.byTooltip('Open in its own window'), findsNothing);
   });
 }
