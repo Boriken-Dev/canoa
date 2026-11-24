@@ -137,8 +137,9 @@ portal itself (`connect-src 'self'`) and nothing inline.
 ### Signing in by certificate
 
 The browser's certificate reaches the portal only in a header the proxy sets, and only on the proxy's socket: `certificate_header`
-(default `x-client-cert`) carries it as base64 of the DER, leaf first, several certificates separated by commas, and a request
-with the header twice, a header over 16 KiB, bad base64 or more than eight certificates is refused. The portal hands the chain to
+(default `x-client-cert`) carries it as base64 of the DER, leaf first, several certificates separated by commas (what HAProxy's
+`ssl_c_der,base64` sends), or as PEM (what nginx sends, below), told apart by the value with no setting, and a request with the
+header twice, a header over 16 KiB as sent, bad encoding or more than eight certificates is refused. The portal hands the chain to
 the providers that take a request as a transport would after verifying the key, and the **provider** decides whether to trust
 it: `coqui_access_mtls` pins certificates by their SHA-256 fingerprint (`trust = "pinned"`), accepts those a CA signed
 (`"ca"`, which needs the chain, so the proxy must forward the intermediates) or either (`"pinned-or-ca"`). Then the account is
@@ -237,6 +238,49 @@ portal's machine forwards to the portal's socket:
 
 The portal believes the header only because it arrived on `socket`. Anything that can write to that socket (the proxy's group)
 can sign in as anyone whose certificate is pinned, by sending the header itself.
+
+**When nginx itself terminates the client certificate** (no HAProxy), it forwards the certificate as PEM, and the portal reads that
+too, by what the value looks like, with no setting. Ask for the certificate, and forward the one escaped variable:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name canoa.example;
+    ssl_protocols TLSv1.3;
+    ssl_certificate     PUBLIC.pem;
+    ssl_certificate_key PUBLIC.key;
+
+    # Ask for a certificate and do not judge it: the portal pins certificates itself. `optional` with `ssl_client_certificate`
+    # (or `ssl_trusted_certificate`) would have nginx verify it against a CA instead, and refuse one that fails.
+    ssl_verify_client optional_no_ca;
+
+    location / {
+        proxy_pass http://unix:/run/canoa-portal/portal.sock;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        # Set from nginx's own variable, so a header the browser sent is replaced, and empty when it sent no certificate.
+        proxy_set_header X-Client-Cert $ssl_client_escaped_cert;
+    }
+}
+```
+
+The portal accepts `$ssl_client_escaped_cert` (percent-encoded PEM; use this one), `$ssl_client_cert` (PEM whose continuation
+lines nginx prefixes with a tab, deprecated by nginx, and not valid in a header, so one that arrives with its line breaks
+folded to spaces is read too) and plain PEM, besides the base64 DER HAProxy sends. The limits are the same, measured on the
+header as sent: one header, at most 16 KiB, at most eight certificates, and a value that does not decode is a refusal. A PEM is
+read leaf first, in the order it is written.
+
+nginx forwards **only the leaf** (the chain a browser sent is not in any variable), so `trust = "ca"` cannot work behind it, since
+it needs the intermediates: use `trust = "pinned"`, which needs the leaf alone, or have nginx verify the chain
+(`ssl_verify_client optional;` with `ssl_client_certificate` or `ssl_trusted_certificate` naming the CA) and treat the pin as
+the portal's own check. `optional_no_ca` also lets through a certificate nginx would have refused; the pin is the only check then.
+
+The same caution holds as with HAProxy: the header is believed because of where it arrives. The portal's `socket` must be reachable
+only by this nginx (`socket_group`), `trusted_proxies` must name it, and nginx must set the header itself in **every** `location`
+that proxies to the portal (the inheritance trap above), or a browser's own `X-Client-Cert` reaches the portal on the one that
+does not. A nginx that is not the browser's first hop must also drop the header from whoever is not the proxy before it, as the
+`map` above does.
 
 ### Signing in by passkey
 
@@ -550,6 +594,7 @@ The portal's settings are a TOML file; every key is optional.
 socket = "/run/canoa-portal/portal.sock"   # what the proxy reaches the portal at
 socket_group = "canoa-proxy"                # the group that may connect to it: the proxy's user and this account only
 site = "/opt/canoa/site"               # the web app's build (flutter build web --csp --no-web-resources-cdn)
+# brand = "/etc/canoa/brand.json"      # the name, mark and colours of the portal's pages, see "The portal's pages carry a brand"; the build's own when unset
 socket_dir = "/run/canoa"
 unit = "canoa@{user}.service"
 pam_service = "canoa"
@@ -557,7 +602,7 @@ min_uid = 1000                         # the lowest user id that may sign in; ro
 groups = ["canoa-users"]               # the groups an account must be in: name them
 hosts = ["canoa.example"]              # Host names a request may carry, besides localhost and addresses
 authenticators = [{ provider = "coqui_access_system" }]   # see "Signing in"
-certificate_header = "x-client-cert"   # where the proxy puts the browser's certificate (base64 DER)
+certificate_header = "x-client-cert"   # where the proxy puts the browser's certificate (base64 DER, or PEM, plain or percent-encoded)
 enrol_seconds = 600                    # how long after a password sign-in a certificate may be pinned, and after showing the enrol factors a code set up
 trusted_proxies = []                   # proxies of ours that may appear in X-Forwarded-For before the browser's address
 client_address_header = "x-forwarded-for"   # or the header your proxy puts the browser's address in
@@ -789,11 +834,35 @@ and connects again. The rail shows the account and a **Sign out**, which posts `
 **Sign-in** page, which only a page a portal served has (see "The person's own pages"). No
 token is in the page: the cookie is `HttpOnly`, and `fetch` and the WebSocket send it by themselves.
 
+## The portal's pages carry a brand
+
+The sign-in, one-time code, passkeys and certificate pages take their name, their mark and their accent from the brand, the one the
+app reads (`app/brand.json` and its icon, carried into the program at build time): the title and heading say its `name`, the mark
+is its icon drawn inline (no image request, so the page's policy stays `default-src 'none'`), the page's favicon is the same icon
+at `/portal/icon.svg` (the policy gains `img-src 'self'`), and the buttons and links use its `accent` on a light page and
+`accent_on_dark` on a dark one. Nothing on a portal page says "Canoa" but through the brand.
+
+A deployment branded otherwise sets `brand` to the path of a `brand.json`:
+
+```json
+{ "name": "Rio Mail", "icon": "art/rio.svg", "accent": "#aa2200", "accent_on_dark": "#ffb09a" }
+```
+
+`icon` is an SVG file, its path relative to the `brand.json`; `accent` and `accent_on_dark` are `#RRGGBB` (or `#RGB`) colours;
+other keys are ignored. The mark's fill is read from the colour of the SVG's own fill that spells the `accent`, so that it turns
+to `accent_on_dark` on a dark page: draw the icon's fill with the same colour. An icon with a `script` or `foreignObject` is
+refused, and so is a file that is missing or lacks a key: the portal does not start (`brand: ...`).
+
+A brand colour is a mark's colour, not always a readable text colour. For the buttons, links and focus rings the page moves the
+accent toward black (light page) or white (dark page) in small steps until it holds a contrast of 4.5 against the card, and the
+text on a button is the light or the dark text, whichever has the better contrast with it. With the build's own teal this makes the
+light page's accent a deeper teal than the mark; the mark itself keeps the brand's colour.
+
 ## The person's own pages
 
 A signed-in person sets up their one-time code, adds a passkey, enrols a certificate and signs out on the portal's own pages:
 `/portal/factor`, `/portal/passkeys`, `/portal/certificate` and `POST /portal/logout`. Each of those pages links to the others the
-portal has, and to the app (**Continue to Canoa**); a page for something this portal does not keep (no one-time code provider, no
+portal has, and to the app (**Continue to** the brand's name); a page for something this portal does not keep (no one-time code provider, no
 passkey provider, no certificate provider with `enrol = true`) is not linked.
 
 The app has a **Sign-in** page in Settings, shown only when a portal served it. It asks `GET /portal/account` and lists what the
