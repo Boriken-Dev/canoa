@@ -1,7 +1,7 @@
 {
   "format": 2,
   "source": "Boriken-Dev/canoa",
-  "sourceCommit": "4e076e57777d62c3383e49e822670b82ca76ad34",
+  "sourceCommit": "22b46a47b46ff03075f06dddef69757cfae1fb98",
   "status": "complete",
   "pubPackages": [
     ".cache",
@@ -142,7 +142,34 @@
       "revision": "1e19611126472e8dc47c0e640bae2b86a7e6d713"
     }
   ],
-  "gitDependenciesNote": "not mirrored; pub fetches them from their URL, so they need the network",
+  "gitPackages": [
+    {
+      "package": "coqui_acp",
+      "checkout": "coqui-acp-d36f4557c4511e61d91a176a2f2bba41de59b2cc",
+      "path": "bindings/dart/coqui_acp"
+    },
+    {
+      "package": "coqui_acp_chat",
+      "checkout": "coqui-acp-d36f4557c4511e61d91a176a2f2bba41de59b2cc",
+      "path": "bindings/dart/coqui_acp_chat"
+    },
+    {
+      "package": "coqui_acp_chat_ui",
+      "checkout": "coqui-acp-d36f4557c4511e61d91a176a2f2bba41de59b2cc",
+      "path": "bindings/dart/coqui_acp_chat_ui"
+    },
+    {
+      "package": "coqui_aos",
+      "checkout": "coqui-aos-169125d3bfcb1b2cb1c3b33b297e373f2930c54a",
+      "path": "dart"
+    },
+    {
+      "package": "coqui_transport_web",
+      "checkout": "coqui-transport-web-1e19611126472e8dc47c0e640bae2b86a7e6d713",
+      "path": "bindings/dart/coqui_transport_web"
+    }
+  ],
+  "gitDependenciesNote": "source trees at the locked revision under pub/git/<repository>-<revision>/, named as pub names its checkout",
   "dropped": {
     "directories": [
       "test",

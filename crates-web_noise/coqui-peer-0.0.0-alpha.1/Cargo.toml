@@ -1,0 +1,91 @@
+# coqui-peer/. at 984db3d54b73de10c7892b06fe269a259de2d1c5, with what it inherits written out.
+[package]
+name = "coqui-peer"
+version = "0.0.0-alpha.1"
+description = "Peer identity and trust independent of the authentication method: ids, a trust store with pairing, and a sans-IO handshake trait"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-peer"
+homepage = "https://boriken-dev.github.io/coqui-peer/"
+keywords = ["peer", "identity", "trust", "pairing", "handshake"]
+categories = ["authentication", "cryptography", "network-programming"]
+exclude = [".*", "*.local.*", "/tools/"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+serde = ["dep:serde"]
+tokio = ["dep:tokio"]
+pin = ["dep:spake2", "dep:hkdf", "dep:hmac", "dep:rand_core"]
+coqui-transport = ["dep:coqui-transport"]
+[dependencies]
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["alloc"]
+[dependencies.sha1]
+version = "0.11.0"
+default-features = false
+[dependencies.sha2]
+version = "0.11.1"
+default-features = false
+[dependencies.subtle]
+version = "2.6"
+default-features = false
+[dependencies.zeroize]
+version = "1"
+default-features = false
+features = ["alloc"]
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["derive", "std"]
+optional = true
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive"]
+[dependencies.tokio]
+version = "1"
+default-features = false
+features = ["io-util", "time"]
+optional = true
+[dependencies.spake2]
+version = "0.4"
+default-features = false
+optional = true
+[dependencies.hkdf]
+version = "0.13"
+default-features = false
+optional = true
+[dependencies.hmac]
+version = "0.13"
+default-features = false
+optional = true
+[dependencies.rand_core]
+version = "0.6"
+default-features = false
+features = ["getrandom"]
+optional = true
+[dependencies.coqui-transport]
+git = "https://github.com/Boriken-Dev/coqui-transport"
+rev = "1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
+optional = true
+[dev-dependencies]
+tempfile = "3"
+serde_json = "1"
+toml = "=1.1.8"
+serde = "1"
+[dev-dependencies.tokio]
+version = "1"
+default-features = false
+features = ["macros", "rt", "io-util", "sync", "time"]
+[dev-dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive", "serde"]

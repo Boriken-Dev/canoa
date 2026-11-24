@@ -6,3 +6,5 @@
 *.tar.gz binary
 crates/** -text
 cdn/office-js/** -text
+crates-web_noise/** -text
+crates-wasm-bindgen-cli/** -text
