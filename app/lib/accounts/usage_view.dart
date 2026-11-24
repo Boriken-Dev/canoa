@@ -2,6 +2,8 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageBucket, UsageRepor
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/app_text.dart';
+
 /// How much of [bucket] is left, as Claude's and Codex's usage pages say it: `38% left`, to the nearest percent. Some is never said
 /// as none and some used is never said as none used. Null when the bucket gives no fraction, and for a window that has ended,
 /// whose figures are of the window before.
@@ -184,7 +186,7 @@ class AccountUsageView extends StatelessWidget {
               if (_sharedModels(buckets) case final models?)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text('Models: $models', key: Key('account-models $group'), style: small),
+                  child: Text(context.t('usage.models', {'models': models}), key: Key('account-models $group'), style: small),
                 ),
               const SizedBox(height: 8),
               Padding(
@@ -222,7 +224,7 @@ class _Bucket extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final small = text.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
-    final left = bucket.isDisabled ? 'Disabled' : leftText(bucket, now) ?? (bucket.isExhausted ? 'Limit reached' : figureOf(bucket));
+    final left = bucket.isDisabled ? context.t('usage.disabled') : leftText(bucket, now) ?? (bucket.isExhausted ? 'Limit reached' : figureOf(bucket));
     final level = levelOf(bucket, now, warnPermille: warnPermille);
     final colour = switch (level) {
       UsageLevel.danger => scheme.error,
@@ -252,7 +254,7 @@ class _Bucket extends StatelessWidget {
           Text(bucket.isExhausted ? 'Limit reached' : level == UsageLevel.danger ? 'Almost used up' : 'Running low', style: small?.copyWith(color: colour)),
         ]),
       if (models)
-        if (modelsText(bucket) case final covered?) Text('Models: $covered', key: Key('account-models ${bucket.id}'), style: small),
+        if (modelsText(bucket) case final covered?) Text(context.t('usage.models', {'models': covered}), key: Key('account-models ${bucket.id}'), style: small),
       if (reset != null) Text(reset, key: Key('account-reset ${bucket.id}'), style: small),
       if (sourceText(bucket) case final source?) Text(source, key: Key('account-source ${bucket.id}'), style: small),
       if (pace != null) Text(pace, key: Key('account-pace ${bucket.id}'), style: small?.copyWith(color: level == UsageLevel.calm ? null : colour)),
