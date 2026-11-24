@@ -203,5 +203,43 @@ class ConfigTests(unittest.TestCase):
                 mc.use(deps, lock, b"x", tmp / "home")
 
 
+class VendorTests(unittest.TestCase):
+    def test_every_vendor_names_a_lock_or_a_tool_and_one_folder(self):
+        self.assertEqual(len({v.folder for v in mc.VENDORS}), len(mc.VENDORS))
+        for vendor in mc.VENDORS:
+            self.assertNotEqual(vendor.lock is None, vendor.tool is None, vendor.folder)
+            if vendor.lock:
+                self.assertTrue((mc.ROOT / vendor.lock).is_file(), vendor.lock)
+
+    def test_problems_are_named_by_their_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = write_lock(Path(tmp))
+            found = mc.problems(lock, mc.read_dir(Path(tmp) / "none"), folder="crates-web_noise")
+            self.assertIn("crates-web_noise/dep-1.2.3: missing, Cargo.lock names it", found)
+
+    def test_a_vendor_folder_is_marked_as_never_converted_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deps = Path(tmp)
+            (deps / ".gitattributes").write_text("*.woff2 binary")
+            mc.keep_bytes(deps, "crates-web_noise")
+            mc.keep_bytes(deps, "crates-web_noise")
+            self.assertEqual((deps / ".gitattributes").read_text(), "*.woff2 binary\ncrates-web_noise/** -text\n")
+
+    def test_a_tool_is_locked_by_the_cargo_lock_it_is_packaged_with(self):
+        packaged = LOCK.replace('name = "app"\nversion = "0.1.0"', 'name = "tool"\nversion = "2.0.0"')
+        with tempfile.TemporaryDirectory() as tmp:
+            deps = Path(tmp)
+            vendor = mc.Vendor("crates-tool", None, "tool")
+            with patch("mirror_crates.tool_version", return_value="2.0.0"):
+                with self.assertRaisesRegex(mc.Problem, "missing"):
+                    mc.tool_lock(vendor, deps, fetch=False)
+                vendored(deps / "crates-tool", "tool-2.0.0", "e" * 64, extra={"Cargo.lock": packaged.encode()})
+                lock, text = mc.tool_lock(vendor, deps, fetch=False)
+            self.assertEqual(text, packaged.encode())
+            names = sorted(c.dir for c in lock.crates)
+            self.assertEqual(names, ["dep-1.2.3", "tool-2.0.0"])
+            self.assertEqual(next(c for c in lock.crates if c.name == "tool").checksum, "e" * 64)
+
+
 if __name__ == "__main__":
     unittest.main()

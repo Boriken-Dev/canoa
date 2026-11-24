@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Keep the deps branch's crates/ equal to Cargo.lock, and write the cargo config that builds from it.
 
-crates/ is a cargo vendor directory: each package Cargo.lock names, from crates.io or git, is a directory
-`<name>-<version>/` of unpacked source with a `.cargo-checksum.json`. Tests, examples, benchmarks, fixtures and
-anything an archive scanner would refuse are left out, since compiling reads none of them; a binary a build does
-read is written as text (see `inline_bytes` and `patch_ring`).
+The deps branch holds one cargo vendor directory per VENDORS entry: each package a lock names, from crates.io or git,
+is a directory `<name>-<version>/` of unpacked source with a `.cargo-checksum.json`. A directory holds one copy of a
+name and version, so the locks that need different sources of one package each have a directory: `crates/` for the
+workspace's Cargo.lock, `crates-web_noise/` for app/web_noise/Cargo.lock, and `crates-wasm-bindgen-cli/` for the
+wasm-bindgen command line (the crate and the Cargo.lock it is packaged with), which `cargo install --locked` builds.
+Tests, examples, benchmarks, fixtures and anything an archive scanner would refuse are left out, since compiling
+reads none of them; a binary a build does read is written as text (see `inline_bytes` and `patch_ring`).
 
-  mirror_crates.py sync DEPS_DIR    make DEPS_DIR/crates match Cargo.lock: fetch, verify, remove
+  mirror_crates.py sync DEPS_DIR    make every vendor directory match its lock: fetch, verify, remove
   mirror_crates.py check DEPS_DIR   fail, naming what is missing, changed or stale (every file is re-hashed)
-  mirror_crates.py use DEPS_DIR     write a cargo home with a config that replaces every source by DEPS_DIR/crates
+  mirror_crates.py use DEPS_DIR     write a cargo home with a config that replaces every source by one directory
 
-Each takes --cargo-lock FILE (default: the repository's). Exits 0, or 1 with one line per problem.
-Needs Python 3.11 or later, and git for a git-sourced package.
+Each takes --vendor FOLDER to act on one directory (default: all; `use` defaults to `crates`). Exits 0, or 1 with one
+line per problem. Needs Python 3.11 or later, and git for a git-sourced package.
 """
 from __future__ import annotations
 
@@ -41,6 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index"
 CRATES_URL = "https://static.crates.io/crates/{name}/{name}-{version}.crate"
 CHECKSUM = ".cargo-checksum.json"
+INDEX_URL = "https://index.crates.io/{path}"
 CONFIG_MARK = "# Written by tools/mirror_crates.py."
 SOURCE = "canoa-deps"
 # Directories at a package's top that compiling never reads, and at any depth the ones that hold only test data.
@@ -60,6 +64,26 @@ PEM_MARKER = re.compile(rb"-----(BEGIN|END) ((?:[A-Z0-9-]+ )?PRIVATE KEY)-----")
 PEM_REPLACEMENT = rb"----\1 \2-----"
 # A name Windows cannot create, which would make the checkout differ between platforms.
 RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", re.IGNORECASE)
+
+
+class Vendor(NamedTuple):
+    """One vendor directory on the deps branch, and where its lock comes from."""
+
+    folder: str
+    # The Cargo.lock below the repository root, or None when `tool` supplies it.
+    lock: str | None
+    # A crate installed with `cargo install --locked`: its lock is the Cargo.lock it is packaged with.
+    tool: str | None = None
+
+
+WEB_NOISE_LOCK = "app/web_noise/Cargo.lock"
+VENDORS = (
+    Vendor("crates", "Cargo.lock"),
+    Vendor("crates-web_noise", WEB_NOISE_LOCK),
+    Vendor("crates-wasm-bindgen-cli", None, "wasm-bindgen-cli"),
+)
+# The command line is installed at the version of the library it reads the output of, which the web bridge's lock pins.
+TOOL_VERSION_OF = {"wasm-bindgen-cli": "wasm-bindgen"}
 
 
 class Problem(Exception):
@@ -131,14 +155,18 @@ def flagged_kind(body: bytes, name: str) -> str | None:
 
 
 def read_lock(path: Path) -> Lock:
+    return parse_lock(path.read_text(encoding="utf-8"), path.name)
+
+
+def parse_lock(text: str, label: str) -> Lock:
     lock = Lock([], {}, {})
-    for package in tomllib.loads(path.read_text(encoding="utf-8")).get("package", []):
+    for package in tomllib.loads(text).get("package", []):
         name, version, source = package["name"], package["version"], package.get("source")
         if source is None:
             continue
         if source == CRATES_IO:
             if "checksum" not in package:
-                raise Problem(f"{path.name} gives {name} {version} no checksum")
+                raise Problem(f"{label} gives {name} {version} no checksum")
             lock.crates.append(Crate(name, version, package["checksum"]))
         elif source.startswith("git+"):
             parts = urllib.parse.urlsplit(source.removeprefix("git+"))
@@ -195,9 +223,11 @@ def read_dir(crates: Path, deep: bool = True) -> Tree:
     return tree
 
 
-def package_problems(tree: Tree, name: str, checksum: str | None, repo: Repo | None, deep: bool) -> list[str]:
+def package_problems(
+    tree: Tree, name: str, checksum: str | None, repo: Repo | None, deep: bool, folder: str = "crates"
+) -> list[str]:
     """What keeps one directory from being the package Cargo.lock names, a line each."""
-    where = f"crates/{name}"
+    where = f"{folder}/{name}"
     if name not in tree.dirs:
         return [f"{where}: missing, Cargo.lock names it"]
     sums = tree.sums.get(name)
@@ -223,14 +253,14 @@ def package_problems(tree: Tree, name: str, checksum: str | None, repo: Repo | N
     return found
 
 
-def problems(lock: Lock, tree: Tree, deep: bool = True) -> list[str]:
-    """One line for each thing keeping a crates/ from covering Cargo.lock exactly."""
+def problems(lock: Lock, tree: Tree, deep: bool = True, folder: str = "crates") -> list[str]:
+    """One line for each thing keeping a vendor directory from covering its lock exactly."""
     found = []
     wanted = wanted_packages(lock)
     for name, (checksum, repo) in wanted.items():
-        found += package_problems(tree, name, checksum, repo, deep)
-    found += [f"crates/{n}: stale, Cargo.lock does not name it" for n in sorted(set(tree.dirs) - set(wanted))]
-    found += [f"crates/{n}: a file; a vendor directory holds only package directories" for n in sorted(tree.loose)]
+        found += package_problems(tree, name, checksum, repo, deep, folder)
+    found += [f"{folder}/{n}: stale, Cargo.lock does not name it" for n in sorted(set(tree.dirs) - set(wanted))]
+    found += [f"{folder}/{n}: a file; a vendor directory holds only package directories" for n in sorted(tree.loose)]
     return found
 
 
@@ -578,9 +608,9 @@ def materialize_repo(repo: Repo, wanted: list[tuple[str, str]], crates: Path) ->
             write_package(crates / f"{name}-{version}", files, None)  # a git package has no registry checksum
 
 
-def sync(deps_dir: Path, lock: Lock) -> list[str]:
-    """Makes deps_dir/crates cover the lock and hold nothing else; returns a line per change."""
-    crates = deps_dir / "crates"
+def sync(deps_dir: Path, lock: Lock, folder: str = "crates") -> list[str]:
+    """Makes deps_dir/folder cover the lock and hold nothing else; returns a line per change."""
+    crates = deps_dir / folder
     wanted = wanted_packages(lock)
     crates.mkdir(parents=True, exist_ok=True)
     for entry in sorted(crates.iterdir()):
@@ -601,7 +631,20 @@ def sync(deps_dir: Path, lock: Lock) -> list[str]:
             pool.submit(materialize_repo, r, p, crates) for r, p in repo_jobs
         ]:
             future.result()
+    keep_bytes(deps_dir, folder)
     return changes + [f"{'replaced' if n in tree.dirs else 'added'} {n}" for n in sorted(stale)]
+
+
+def keep_bytes(deps_dir: Path, folder: str) -> None:
+    """Has the branch's .gitattributes say git never converts the line endings of a vendor folder.
+
+    Each file is listed in `.cargo-checksum.json` with its SHA-256, so a checkout that changed one would fail cargo.
+    """
+    attributes = deps_dir / ".gitattributes"
+    text = attributes.read_text(encoding="utf-8") if attributes.is_file() else ""
+    line = f"{folder}/** -text"
+    if line not in text.splitlines():
+        attributes.write_text(text + ("" if not text or text.endswith("\n") else "\n") + line + "\n", encoding="utf-8", newline="")
 
 
 def toml_value(value: object) -> str:
@@ -723,13 +766,16 @@ def config_text(lock: Lock, crates: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def use(deps_dir: Path, lock: Lock, lock_text: bytes, out: Path | None = None, deep: bool = False) -> Path:
-    """Write a cargo home whose config builds from deps_dir/crates; returns it (the value for CARGO_HOME)."""
-    crates = (deps_dir / "crates").resolve()
-    found = problems(lock, read_dir(crates, deep), deep)
+def use(
+    deps_dir: Path, lock: Lock, lock_text: bytes, out: Path | None = None, deep: bool = False, folder: str = "crates"
+) -> Path:
+    """Write a cargo home whose config builds from deps_dir/folder; returns it (the value for CARGO_HOME)."""
+    crates = (deps_dir / folder).resolve()
+    found = problems(lock, read_dir(crates, deep), deep, folder)
     if found:
         raise Problem("; ".join(found[:5]) + f" ({len(found)} in all); run sync first")
-    out = (out or Path(tempfile.gettempdir()) / f"canoa-cargo-{sha256(lock_text)[:12]}").resolve()
+    name = f"canoa-cargo-{sha256(lock_text)[:12]}" if folder == "crates" else f"canoa-cargo-{folder}-{sha256(lock_text)[:12]}"
+    out = (out or Path(tempfile.gettempdir()) / name).resolve()
     if out == ROOT or ROOT in out.parents:
         raise Problem(f"{out} is inside the repository; the cargo home goes outside it")
     config = out / "config.toml"
@@ -740,33 +786,90 @@ def use(deps_dir: Path, lock: Lock, lock_text: bytes, out: Path | None = None, d
     return out
 
 
+def tool_version(tool: str) -> str:
+    """The version a tool is installed at: the one its library has in the web bridge's lock."""
+    wanted = TOOL_VERSION_OF[tool]
+    versions = [c.version for c in read_lock(ROOT / WEB_NOISE_LOCK).crates if c.name == wanted]
+    if len(versions) != 1:
+        raise Problem(f"{WEB_NOISE_LOCK} names {len(versions)} versions of {wanted}, and {tool} needs one")
+    return versions[0]
+
+
+def index_checksum(name: str, version: str) -> str:
+    """The SHA-256 crates.io's index gives one version of a crate."""
+    lower = name.lower()
+    path = f"{lower[:2]}/{lower[2:4]}/{lower}" if len(lower) > 3 else f"{len(lower)}/{lower}"
+    for line in download(INDEX_URL.format(path=path)).decode("utf-8").splitlines():
+        entry = json.loads(line)
+        if entry["vers"] == version:
+            return entry["cksum"]
+    raise Problem(f"crates.io's index has no {name} {version}")
+
+
+def tool_lock(vendor: Vendor, deps_dir: Path, fetch: bool) -> tuple[Lock, bytes]:
+    """The lock of a tool: the Cargo.lock packaged with its crate, which is the crate's own directory in the vendor.
+
+    With `fetch` the crate is downloaded, and checked against crates.io's index, when its directory is not there.
+    """
+    version = tool_version(vendor.tool)
+    name = f"{vendor.tool}-{version}"
+    folder = deps_dir / vendor.folder
+    sums = read_dir(folder, deep=False).sums.get(name, {})
+    if fetch and not sums.get("package"):
+        folder.mkdir(parents=True, exist_ok=True)
+        materialize_crate(Crate(vendor.tool, version, index_checksum(vendor.tool, version)), folder)
+        sums = read_dir(folder, deep=False).sums[name]
+    packaged = folder / name / "Cargo.lock"
+    if not sums.get("package") or not packaged.is_file():
+        raise Problem(f"{vendor.folder}/{name}: missing, or without the Cargo.lock it is packaged with")
+    text = packaged.read_bytes()
+    lock = parse_lock(text.decode("utf-8"), f"{name}/Cargo.lock")
+    lock.crates.append(Crate(vendor.tool, version, sums["package"]))
+    return lock, text
+
+
+def vendor_lock(vendor: Vendor, deps_dir: Path, fetch: bool = False) -> tuple[Lock, bytes]:
+    if vendor.tool:
+        return tool_lock(vendor, deps_dir, fetch)
+    path = ROOT / vendor.lock
+    return read_lock(path), path.read_bytes()
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Keep crates/ on the deps branch equal to Cargo.lock.")
+    names = ", ".join(v.folder for v in VENDORS)
+    parser = argparse.ArgumentParser(description="Keep the vendor directories on the deps branch equal to their locks.")
     parser.add_argument("command", choices=("sync", "check", "use"))
     parser.add_argument("deps_dir", type=Path, metavar="DEPS_DIR")
-    parser.add_argument("--cargo-lock", type=Path, default=ROOT / "Cargo.lock")
+    parser.add_argument("--vendor", metavar="FOLDER", help=f"one of {names} (use: the default is crates)")
     parser.add_argument("--out", type=Path, help="use: the cargo home to write (default: a temporary directory)")
     args = parser.parse_args()
+    chosen = [v for v in VENDORS if args.vendor in (None, v.folder)]
+    if not chosen:
+        parser.error(f"--vendor is one of {names}")
+    if args.command == "use" and args.vendor is None:
+        chosen = chosen[:1]
     try:
-        lock = read_lock(args.cargo_lock)
-        if args.command == "sync":
-            changes = sync(args.deps_dir, lock)
-            print("\n".join(changes))
-            print(f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources, {len(changes)} changed")
-        elif args.command == "check":
-            found = problems(lock, read_dir(args.deps_dir / "crates"))
-            for line in found:
-                print(line, file=sys.stderr)
-            if found:
-                return 1
-            print(f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources cover {args.cargo_lock.name}")
-        else:
-            home = use(args.deps_dir, lock, args.cargo_lock.read_bytes(), args.out)
-            print(f"CARGO_HOME={home} CARGO_NET_OFFLINE=true")
+        failed = False
+        for vendor in chosen:
+            lock, text = vendor_lock(vendor, args.deps_dir, fetch=args.command == "sync")
+            if args.command == "sync":
+                changes = sync(args.deps_dir, lock, vendor.folder)
+                print("\n".join(changes))
+                print(f"ok: {vendor.folder}: {len(lock.crates)} crates, {len(lock.repos)} git sources, {len(changes)} changed")
+            elif args.command == "check":
+                found = problems(lock, read_dir(args.deps_dir / vendor.folder), folder=vendor.folder)
+                for line in found:
+                    print(line, file=sys.stderr)
+                failed = failed or bool(found)
+                if not found:
+                    print(f"ok: {vendor.folder}: {len(lock.crates)} crates, {len(lock.repos)} git sources cover its lock")
+            else:
+                home = use(args.deps_dir, lock, text, args.out, folder=vendor.folder)
+                print(f"CARGO_HOME={home} CARGO_NET_OFFLINE=true")
+        return 1 if failed else 0
     except Problem as problem:
         print(f"mirror_crates: {problem}", file=sys.stderr)
         return 1
-    return 0
 
 
 if __name__ == "__main__":
