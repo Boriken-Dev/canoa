@@ -1,3 +1,7 @@
+---
+brand_names: false
+---
+
 # Roadmap and implementation status
 
 This page distinguishes tested code from planned integration work.

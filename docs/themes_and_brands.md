@@ -1,3 +1,7 @@
+---
+brand_names: false
+---
+
 # Words, symbols and brands
 
 Everything the app writes and the symbols it draws for a section come from one text provider. A look can replace any subset of
@@ -68,3 +72,18 @@ The build gives the app these as `--dart-define`s, the host's build the prefix a
 (`name_runner.sh`) and the Windows program its icon (`canoa_mark.py --brand FILE --out DIR` renders the set; it needs Pillow). The
 tray icon is drawn at run time from the same mark in the accent of the look in force: an `.ico` of several sizes on Windows, a PNG
 elsewhere. `--portable` and the Office add-in's identifiers still name Canoa.
+
+## The documentation follows the brand
+
+`mkdocs build` reads the same brand file (`BRAND_FILE`, else `app/brand.json`) through the hook `tools/docs_brand.py`:
+
+- the site's name is `name`, and the header's logo is the brand's `icon` drawn in `accent` (in `accent_on_dark` on the dark scheme);
+- both colour schemes are painted with the default look's colours, the page, text, bar and accent of Canoa's look in light and dark, whatever the brand: a rebranded build changes the mark's colour and keeps the look, as the app does. The colours are `docs/assets/look.json`, which `app/test/docs_look_test.dart` keeps current (`cd app && CANOA_WRITE_LOOK=1 flutter test test/docs_look_test.dart` rewrites it);
+- a brand other than the default also gets a favicon of its mark (the default keeps the committed `docs/assets/favicon.ico`) and its names in the text of the pages. Only a closed list of tokens is replaced: `Canoa` (`name`), `CanoaUI` (`executable`), `canoa.cfg` (`config_file`, `<program>.cfg` when absent), `CANOA_` (`env_prefix`), `.canoa` (`home_dir`, `.<program>` when absent), the folder in `/etc/Canoa`, `%APPDATA%\Canoa` and the like (`folder`, `name` when absent), and `canoa@`, `canoa-portal`, `/opt/canoa` and `/run/canoa` (`program`, the lower-cased `name` when absent). Crate and repository names (`canoa-host`, `Boriken-Dev/canoa`), wire identifiers (`dev.boriken.canoa/...`) and URLs are never replaced. A page about the project and not the product (the roadmap, the offline dependencies, the browser comparisons) and this page opt out with `brand_names: false` in its front matter.
+
+With the default brand the pages are not touched, so the site is the one the repository has always built.
+
+```sh
+BRAND_FILE=path/to/brand.json mkdocs build --strict
+```
+

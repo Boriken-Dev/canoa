@@ -1,3 +1,7 @@
+---
+brand_names: false
+---
+
 # Browser integration reference: ChatGPT and Claude
 
 Review date: 2026-10-31. This is product research, not a claim that Canoa implements these features.
