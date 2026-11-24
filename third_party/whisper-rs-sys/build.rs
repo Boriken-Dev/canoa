@@ -268,6 +268,10 @@ fn main() {
         config.define("CMAKE_BUILD_TYPE", "Release");
     }
 
+    if target == "aarch64-pc-windows-msvc" {
+        windows_arm64(&mut config);
+    }
+
     // Allow passing any WHISPER or CMAKE compile flags
     for (key, value) in env::vars() {
         let is_whisper_flag =
@@ -390,4 +394,50 @@ fn get_whisper_cpp_version(whisper_root: &std::path::Path) -> std::io::Result<Op
         [Some(a), Some(b), Some(c)] => Some(format!("{}.{}.{}", a, b, c)),
         _ => None,
     })
+}
+
+/// The first of `names` that is a file in a folder of `PATH`, or else in one of `extra`.
+fn find_program(names: &[&str], extra: &[PathBuf]) -> Option<PathBuf> {
+    let path = env::var_os("PATH").unwrap_or_default();
+    env::split_paths(&path)
+        .chain(extra.iter().cloned())
+        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
+        .find(|candidate| candidate.is_file())
+}
+
+/// ggml refuses `cl.exe` for ARM and needs `clang-cl`, which `cmake` finds with Ninja (the Visual Studio generator picks `cl.exe`).
+/// Both are looked for on `PATH`, then in LLVM's and Visual Studio's own folders. The code is built for Armv8.6-A with the dot product
+/// and int8 matrix multiply, not for the build machine's own CPU (`GGML_NATIVE`): that would use the SVE and SME this machine's
+/// processor has, which ran 2.4 times slower here than the same source without them, and would not run on a processor without them.
+fn windows_arm64(config: &mut Config) {
+    let program_files: Vec<PathBuf> = ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(|name| env::var_os(name).map(PathBuf::from))
+        .collect();
+    let llvm: Vec<PathBuf> = program_files.iter().map(|dir| dir.join("LLVM").join("bin")).collect();
+    let mut visual_studio = Vec::new();
+    for base in &program_files {
+        for edition in ["BuildTools", "Community", "Professional", "Enterprise"] {
+            for year in ["2022", "2019"] {
+                visual_studio.push(
+                    base.join("Microsoft Visual Studio").join(year).join(edition).join(
+                        r"Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja",
+                    ),
+                );
+            }
+        }
+    }
+    config.generator("Ninja");
+    if let Some(ninja) = find_program(&["ninja.exe"], &visual_studio) {
+        config.define("CMAKE_MAKE_PROGRAM", ninja);
+    }
+    let clang = find_program(&["clang-cl.exe"], &llvm)
+        .unwrap_or_else(|| PathBuf::from("clang-cl"));
+    config.define("CMAKE_C_COMPILER", &clang);
+    config.define("CMAKE_CXX_COMPILER", &clang);
+    config.define("CMAKE_ASM_COMPILER", &clang);
+    config.cxxflag("-EHsc");
+    config.cflag("-Wno-error=incompatible-pointer-types");
+    config.define("GGML_NATIVE", "OFF");
+    config.define("GGML_CPU_ARM_ARCH", "armv8.6-a+dotprod+i8mm");
 }

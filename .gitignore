@@ -4,7 +4,6 @@
 !/.gitattributes
 !/.containerignore
 !/.github/
-!/.cargo/
 
 # Agent config and personal overrides, at any depth.
 .agents

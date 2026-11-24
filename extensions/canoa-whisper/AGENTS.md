@@ -10,8 +10,8 @@ What a host loads is `library` (below). The host names none of it: it carries th
 
 Compiling the crate compiles whisper.cpp (C and C++), so a build needs a C++ toolchain, **cmake** and **libclang** (bindgen). Nothing is fetched: the sources are in the crate, and `deps` carries them. OpenMP is not used (measured: no gain on Windows on ARM or Linux x86-64, and it would need a runtime beside the program).
 
-- **Linux**: `g++`, `cmake`, `libclang` (Debian: `build-essential cmake libclang-dev`). The container's `host` stage installs them.
-- **Windows on ARM**: ggml refuses `cl.exe`, so the build uses LLVM's `clang-cl` with Ninja. `.cargo/config.toml` names them for the `aarch64-pc-windows-msvc` target alone (`CC`, `CXX`, `CXXFLAGS=-EHsc`, `CMAKE_GENERATOR=Ninja`, and a `CFLAGS` that keeps clang 22 from stopping on libffi's locks); `clang-cl` (LLVM for Windows) and `ninja` have to be on `PATH`. Visual Studio's own is in `Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja`. libclang is LLVM's `libclang.dll`.
+- **Linux**: `g++`, `cmake`, `libclang` (Debian: `build-essential cmake libclang-dev`). The container's `host` stage installs them. ggml is compiled for the build machine's own CPU (`GGML_NATIVE`, its default), so a binary built on one machine may not run on an older one; the container's host stage names a baseline instead (AVX2, FMA, F16C, BMI2 on x86-64).
+- **Windows on ARM**: ggml refuses `cl.exe`, so the vendored `whisper-rs-sys`'s build script uses LLVM's `clang-cl` and Ninja for that target by itself: it takes them from `PATH`, else from LLVM's and Visual Studio's own folders (Visual Studio's copy of ninja is in `Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja`), and needs no environment variable. It also builds for Armv8.6-A with the dot product and int8 matrix multiply instead of the build machine's own CPU (`GGML_NATIVE=OFF`): the native build used SVE and SME and ran 2.4 times slower on a Snapdragon X2 Elite, and would not run on a processor without them. libclang is LLVM's `libclang.dll`.
 - **Windows x64**: Visual Studio's C++ tools and cmake; untested.
 
 ## Exports

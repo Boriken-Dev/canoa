@@ -119,7 +119,8 @@ FROM base AS host
 # whisper.cpp is compiled into the host by cmake (`whisper-rs-sys`), with the C++ compiler the Rust image has and libclang for the
 # bindings. The only fetch of this stage; the build steps below run offline.
 RUN apt-get update     && apt-get install -y --no-install-recommends cmake libclang-dev     && rm -rf /var/lib/apt/lists/*
-ENV CANOA_DEPS=/deps CARGO_NET_OFFLINE=true
+# ggml's baseline for the program built here: not the builder's own CPU, which may have more than the machine it runs on.
+ENV CANOA_DEPS=/deps CARGO_NET_OFFLINE=true GGML_NATIVE=OFF GGML_AVX2=ON GGML_FMA=ON GGML_F16C=ON GGML_BMI2=ON
 WORKDIR /src
 COPY --from=deps /deps /deps
 COPY Cargo.toml Cargo.lock ./
