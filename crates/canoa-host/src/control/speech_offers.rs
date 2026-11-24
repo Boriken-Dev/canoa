@@ -87,7 +87,8 @@ pub(super) fn with_model(table: &Value, params: &Value) -> Result<Value, (i32, S
         return Err(bad("model is a model's name"));
     }
     let mut changed = table.clone();
-    if table.get("provider").and_then(Value::as_str) == Some("speech_endpoint")
+    // A provider that has a `model` setting takes the one asked for; a program's model is in its arguments.
+    if table.get("model").is_some()
         && let Some(map) = changed.as_object_mut()
     {
         map.insert("model".to_owned(), json!(model));
@@ -591,6 +592,8 @@ fn enable(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
     {
         return if how.command {
             enable_program(files, stores, offer, params)
+        } else if let Some(provider) = &how.provider {
+            enable_in_process(files, stores, offer, provider, params)
         } else {
             enable_service(files, offer, params)
         };
@@ -623,6 +626,40 @@ fn enable_program(files: &Files, stores: &Stores, service: &str, params: &Value)
     })?;
     write_table(files, name, program_table(&run, service))?;
     Ok(json!({"name": name, "provider": "speech_command", "model": run.model, "saved": true}))
+}
+
+/// The provider of the library that runs inside this host, made from the settings its library reports for the model asked for when it
+/// is installed and else the first that is.
+fn enable_in_process(
+    files: &Files,
+    stores: &Stores,
+    offer: &str,
+    provider: &str,
+    params: &Value,
+) -> Outcome {
+    let name = name_of(params, offer)?;
+    let asked = text_param(params, "model")?.filter(|model| !model.is_empty());
+    let report = stores
+        .speech_report_of(offer, false, asked)
+        .map_err(|why| (REFUSED, why))?;
+    let settings = report
+        .settings
+        .as_ref()
+        .and_then(|settings| crate::forms::json_of(settings).ok());
+    let Some(Value::Object(settings)) = settings else {
+        return Err((
+            REFUSED,
+            report
+                .unavailable
+                .unwrap_or_else(|| format!("{offer} has no model that can be run")),
+        ));
+    };
+    let model = settings.get("model").cloned().unwrap_or(Value::Null);
+    let mut table = settings;
+    table.insert("provider".to_owned(), json!(provider));
+    table.insert(OFFER_KEY.to_owned(), json!(offer));
+    write_table(files, name, table)?;
+    Ok(json!({"name": name, "provider": provider, "model": model, "saved": true}))
 }
 
 /// The provider that calls the model `model` of the service of the Store type `service`. The model is not loaded, checked or looked

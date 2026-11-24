@@ -516,9 +516,9 @@ pub trait ModelStore: Send + Sync {
 }
 pub const KIND: &str = "model_store";   pub const RESERVED_TABLES: [&str; 29] = [...];   pub const MOST_OUTPUT: usize = 8 MiB;
 // Every model is #[non_exhaustive] with `new` (or Default) and public fields; `include/canoa.model_store.{kinds,schemas}.json` describe them.
-pub struct ModelStoreInfo { pub title, pub catalog, pub publisher, pub missing: String, pub settings: Option<ModelSettings>, pub speech: Option<SpeechService>, pub voice: Option<String> }   // new(title, catalog, publisher, missing); problem()
+pub struct ModelStoreInfo { pub title, pub catalog, pub publisher, pub missing: String, pub settings: Option<ModelSettings>, pub speech: Option<SpeechService>, pub voice: Option<String>, pub endpoints: Vec<String> }   // new(title, catalog, publisher, missing); problem()
 pub struct ModelSettings { pub table: String, pub help: Option<String>, pub schema: Value, pub form: Option<Value> }   // asking::<S: Schema + Screen>(table)
-pub struct SpeechService { pub title, pub summary: String, pub license: Option<String>, pub location, pub route: String, pub local_file: bool, pub command: bool }   // new(title, summary, location, route) for a server; program(title, summary, location) for a program run for each recording
+pub struct SpeechService { pub title, pub summary: String, pub license: Option<String>, pub location, pub route: String, pub local_file: bool, pub command: bool, pub provider: Option<String> }   // new(title, summary, location, route) for a server; program(title, summary, location) for a program run for each recording; in_process(title, summary, location, provider) for a `speech_provider` of the library that transcribes inside the host (ready when `ServiceReport::settings` is set; the host writes that provider with those settings)
 pub struct ModelQuery { pub program: Option<String>, pub home: Option<String>, pub folder: Option<String> }   // `folder`: where the host keeps the models installed on their own
 pub struct ModelFile { pub url: String, pub file: String, pub bytes: Option<u64>, pub sha256: String }   // new(url, file, bytes, sha256); `file` is a plain relative path in that folder
 pub const STEP_FETCH_FILES: &str = "fetch_files";   pub const STEP_DELETE_FILES: &str = "delete_files";   // the two steps of a RowAction the host does itself
@@ -530,7 +530,7 @@ pub struct Section { pub title: String, pub facts: Vec<Fact>, pub paragraphs: Ve
 pub struct Fact { pub label, pub value: String }   pub struct SpeechUse { pub text: String, pub caution: Option<String> }
 pub struct ModelAct { pub program: Option<String>, pub home: Option<String>, pub model: String, pub action: String }   pub struct ModelActed { pub note: Option<String> }
 pub struct ModelKeep { pub home: Option<String>, pub model: String, pub values: String }   pub struct ModelKept { pub values: String, pub note: Option<String> }
-pub struct ServiceQuery { pub home: Option<String>, pub program: Option<String>, pub folder: Option<String>, pub model: Option<String>, pub models: bool }   pub struct ServiceReport { pub address: Option<String>, pub models: Vec<ServedModel>, pub unavailable: Option<String>, pub command: Option<SpeechRun>, pub voice: Option<Value> }
+pub struct ServiceQuery { pub home: Option<String>, pub program: Option<String>, pub folder: Option<String>, pub model: Option<String>, pub models: bool }   pub struct ServiceReport { pub address: Option<String>, pub models: Vec<ServedModel>, pub unavailable: Option<String>, pub command: Option<SpeechRun>, pub voice: Option<Value>, pub settings: Option<Value> }
 pub struct SpeechRun { pub program: String, pub args: Vec<String>, pub input: String, pub model: String }   // new(program, args, input, model)
 pub struct Finished { pub code: Option<i64>, pub out: String, pub err: String }
 pub fn run(spawner: &Object<dyn ProcessSpawner>, program: &str, args: &[String], limit: Duration) -> Result<Finished, ProviderError>;   // to its end, or killed with its tree at `limit` (GONE)

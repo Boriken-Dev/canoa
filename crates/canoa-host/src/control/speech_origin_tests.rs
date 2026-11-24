@@ -125,7 +125,16 @@ fn a_speech_table_that_names_a_source_takes_its_provider_from_it() {
         .iter()
         .filter_map(|each| each["id"].as_str())
         .collect();
-    assert_eq!(types, ["speech_command", "speech_endpoint", "speech_own"]);
+    // The host's own and the carried libraries' kinds, then the table's source's.
+    assert_eq!(
+        types,
+        [
+            "speech_command",
+            "speech_endpoint",
+            "speech_whisper",
+            "speech_own"
+        ]
+    );
 
     let opened = ask(&control, &me, "speech/open", json!({"provider": "own"}));
     let session = opened["result"]["session"].as_str().expect("a session");

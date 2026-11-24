@@ -89,6 +89,13 @@
             "type": "boolean",
             "description": "Whether it is a program run once for each recording, with the audio on its standard input, in place of a server: the offer is then installed through the type's first `program_store`, with a model chosen as that store's channel, and [`ServiceReport::command`] says how the installed copy is run.",
             "default": false
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id of the library's `speech_provider` that transcribes inside the host's process, in place of a server or a program: the models are the type's own files in the models folder, and [`ServiceReport::settings`] says the settings the provider is built from. It is ready when the report names no `unavailable`; there is no program to install."
           }
         },
         "additionalProperties": false,
@@ -105,6 +112,14 @@
           "null"
         ],
         "description": "The id of the library's `speech_output` provider that reads text aloud with the type's installed program, when it can: [`ServiceReport::voice`] says the settings that provider is built from."
+      },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `https` origins the files of a row are downloaded from, for a type that has no `program_store`: the host then keeps the models in a folder of its own for the type and downloads only from these. A type with a program store takes that store's endpoints and this stays empty.",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -180,6 +195,13 @@
         "type": "boolean",
         "description": "Whether it is a program run once for each recording, with the audio on its standard input, in place of a server: the offer is then installed through the type's first `program_store`, with a model chosen as that store's channel, and [`ServiceReport::command`] says how the installed copy is run.",
         "default": false
+      },
+      "provider": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The id of the library's `speech_provider` that transcribes inside the host's process, in place of a server or a program: the models are the type's own files in the models folder, and [`ServiceReport::settings`] says the settings the provider is built from. It is ready when the report names no `unavailable`; there is no program to install."
       }
     },
     "additionalProperties": false,
@@ -1009,6 +1031,9 @@
       },
       "voice": {
         "description": "The settings of the `speech_output` provider [`ModelStoreInfo::voice`] names, when the installed copy can read text aloud: an object that provider's schema accepts."
+      },
+      "settings": {
+        "description": "The settings of the `speech_provider` [`SpeechService::provider`] names, for the model the person asked for when it is installed and else the first that is: an object that provider's schema accepts."
       }
     },
     "additionalProperties": false

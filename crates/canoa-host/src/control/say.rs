@@ -137,7 +137,7 @@ fn kind(id: &str) -> Option<&'static Kind> {
 /// The libraries this build carries, as one registry: the providers of the speech-output kind they offer are kinds a table may name.
 static CARRIED: Mutex<Option<Arc<Registry>>> = Mutex::new(None);
 
-fn carried() -> Option<Arc<Registry>> {
+pub(super) fn carried() -> Option<Arc<Registry>> {
     let mut held = CARRIED.lock().unwrap_or_else(PoisonError::into_inner);
     if held.is_none() {
         let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));

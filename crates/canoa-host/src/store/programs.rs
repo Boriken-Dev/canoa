@@ -527,6 +527,10 @@ impl Programs {
     }
 
     fn tools(&self, info: &StoreInfo) -> LocalTools {
+        self.tools_at(&info.endpoints)
+    }
+
+    fn tools_at(&self, endpoints: &[String]) -> LocalTools {
         let (lookup_connect, lookup_response) =
             *self.lookups.lock().unwrap_or_else(PoisonError::into_inner);
         let limits = ToolsLimits {
@@ -534,7 +538,7 @@ impl Programs {
             lookup_response,
             ..ToolsLimits::default()
         };
-        LocalTools::new(Arc::clone(&self.transport), info.endpoints.clone())
+        LocalTools::new(Arc::clone(&self.transport), endpoints.to_vec())
             .limits(limits)
             .lookup(self.lookup(&self.options.environment))
             .loopback_http(self.options.loopback_http)
@@ -1170,7 +1174,17 @@ impl Programs {
     /// What the shelf refuses.
     pub fn models_folder(&self, store: &dyn ProgramStore) -> Result<PathBuf, StoreError> {
         let info = store.describe()?;
-        Ok(self.shelf.program(&info.program)?.dir().join(MODELS_DIR))
+        self.models_folder_of(&info.program)
+    }
+
+    /// The folder the models of the type that keeps its files under `program` are kept in: a type with no program store names its own
+    /// id, so a type that gains or loses a program keeps its models where they are. It may not exist yet.
+    ///
+    /// # Errors
+    ///
+    /// What the shelf refuses.
+    pub fn models_folder_of(&self, program: &str) -> Result<PathBuf, StoreError> {
+        Ok(self.shelf.program(program)?.dir().join(MODELS_DIR))
     }
 
     /// Downloads `files` into the models folder of the type `store`'s program belongs to, each from an endpoint the store names and
@@ -1187,15 +1201,31 @@ impl Programs {
         cancel: Arc<AtomicBool>,
     ) -> Result<(), StoreError> {
         let info = store.describe()?;
-        let folder = self.shelf.program(&info.program)?.dir().join(MODELS_DIR);
+        self.fetch_models_in(&info.program, &info.endpoints, files, cancel)
+    }
+
+    /// As [`fetch_models`](Self::fetch_models) for the type whose files are kept under `program`, from the origins `endpoints`: the
+    /// way a type with no program store is served.
+    ///
+    /// # Errors
+    ///
+    /// As [`fetch_models`](Self::fetch_models).
+    pub fn fetch_models_in(
+        &self,
+        program: &str,
+        endpoints: &[String],
+        files: &[ModelFile],
+        cancel: Arc<AtomicBool>,
+    ) -> Result<(), StoreError> {
+        let folder = self.models_folder_of(program)?;
         let names = model_names(files)?;
         // One at a time with the installs: a program's install measures this folder's tree, and a download in it is not its change.
         let _one_at_a_time = self.shelf.apply_lock()?;
-        let program = self.shelf.program(&info.program)?;
-        let _lock = program.lock()?;
+        let kept = self.shelf.program(program)?;
+        let _lock = kept.lock()?;
         fs::create_dir_all(&folder).map_err(ShelfError::from)?;
         let tools = self
-            .tools(&info)
+            .tools_at(endpoints)
             .granted(&folder)
             .cancelled_by(cancel)
             .into_object();
@@ -1247,7 +1277,16 @@ impl Programs {
         files: &[ModelFile],
     ) -> Result<(), StoreError> {
         let info = store.describe()?;
-        let folder = self.shelf.program(&info.program)?.dir().join(MODELS_DIR);
+        self.delete_models_in(&info.program, files)
+    }
+
+    /// As [`delete_models`](Self::delete_models) for the type whose files are kept under `program`.
+    ///
+    /// # Errors
+    ///
+    /// As [`delete_models`](Self::delete_models).
+    pub fn delete_models_in(&self, program: &str, files: &[ModelFile]) -> Result<(), StoreError> {
+        let folder = self.models_folder_of(program)?;
         let names = model_names(files)?;
         let _one_at_a_time = self.shelf.apply_lock()?;
         for name in names {

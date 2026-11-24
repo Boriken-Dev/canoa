@@ -313,11 +313,17 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
     let by_id = |id: &str| offers.iter().find(|offer| offer["id"] == id).expect(id);
     let whisper = by_id("whisper");
     assert_eq!(whisper["local"], true);
-    assert_eq!(whisper["store"], "whisper_store");
+    assert_eq!(whisper["service"], "whisper", "it runs inside the host");
+    assert!(whisper["store"].is_null(), "there is no program to install");
     assert_eq!(whisper["installed"], false);
-    assert_eq!(whisper["default_model"], "base");
     assert!(
-        whisper["models"].as_array().expect("models").len() > 3,
+        whisper["models"].as_array().expect("models").is_empty(),
+        "only an installed model is offered: {whisper}"
+    );
+    assert!(
+        whisper["unavailable"]
+            .as_str()
+            .is_some_and(|why| why.contains("no model")),
         "{whisper}"
     );
     assert!(whisper["provider"].is_null(), "{whisper}");
@@ -340,6 +346,36 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
         json!({"offer": "elsewhere"}),
     );
     assert_eq!(answer["error"]["code"], NOT_FOUND, "{answer}");
+    // A model in the host's models folder is what makes it ready: the provider then runs inside the host with that model.
+    let models = tmp.join("programs/whisper/models");
+    fs::create_dir_all(&models).expect("the models folder");
+    fs::write(models.join("ggml-tiny.bin"), b"a stand-in").expect("a model");
+    let answer = ask(&control, &owner, "speech/offers", json!({}));
+    let whisper = answer["result"]["offers"]
+        .as_array()
+        .and_then(|offers| offers.iter().find(|offer| offer["id"] == "whisper"))
+        .cloned()
+        .expect("offered");
+    assert_eq!(whisper["installed"], true, "{whisper}");
+    assert_eq!(
+        whisper["models"],
+        json!([{"id": "tiny", "label": "Tiny, every language (78 MB)"}])
+    );
+    let answer = ask(
+        &control,
+        &owner,
+        "speech/enable",
+        json!({"offer": "whisper", "model": "tiny"}),
+    );
+    assert_eq!(answer["result"]["provider"], "speech_whisper", "{answer}");
+    assert_eq!(answer["result"]["model"], "tiny", "{answer}");
+    let written = fs::read_to_string(tmp.join("canoa.cfg")).expect("canoa.cfg");
+    assert!(
+        written.contains("provider = \"speech_whisper\"")
+            && written.contains("model = \"tiny\"")
+            && written.contains("offer = \"whisper\""),
+        "{written}"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 

@@ -199,10 +199,17 @@ impl Stores {
     }
 
     /// The folder the host keeps the models installed on their own in, for the type: beside its program's versions.
+    ///
+    /// A type with no program store keeps them under its own id on the shelf.
     fn models_folder(&self, type_id: &str) -> Option<String> {
-        let (_, store) = self.type_store(type_id)?;
-        self.programs
-            .models_folder(&*store)
+        let folder = if self.speech_store(type_id).is_some() {
+            let (_, store) = self.type_store(type_id)?;
+            self.programs.models_folder(&*store)
+        } else {
+            self.models.of(type_id)?;
+            self.programs.models_folder_of(type_id)
+        };
+        folder
             .ok()
             .map(|folder| folder.to_string_lossy().into_owned())
     }
@@ -348,6 +355,24 @@ impl Stores {
             })?;
         if row.files.is_empty() {
             return Err((REFUSED, format!("{model} has no files to move")));
+        }
+        if self.speech_store(&held.type_id).is_none() {
+            // A type with no program: its files are fetched from the origins its model store names, and nothing has to be installed.
+            if action == STEP_DELETE_FILES {
+                self.programs
+                    .delete_models_in(&held.type_id, &row.files)
+                    .map_err(|error| super::refusal(&error))?;
+            } else {
+                self.programs
+                    .fetch_models_in(
+                        &held.type_id,
+                        &held.info.endpoints,
+                        &row.files,
+                        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    )
+                    .map_err(|error| super::refusal(&error))?;
+            }
+            return Ok(json!({"ok": true, "model": model, "action": action, "note": null}));
         }
         let (_, store) = self.type_store(&held.type_id).ok_or_else(|| {
             (

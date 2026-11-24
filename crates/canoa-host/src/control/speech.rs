@@ -194,8 +194,14 @@ fn resolve(id: &str, origin: Option<&Arc<Registry>>) -> Result<Resolved, String>
         .map(|registry| Resolved::scripted(&registry))
         .unwrap_or_default()
         .into_iter()
+        .chain(carried_kinds())
         .find(|each| each.id == id)
         .ok_or_else(|| format!("this host has no provider {id}"))
+}
+
+/// The kinds of speech-to-text provider the libraries this build carries offer (whisper.cpp's, which runs inside the host).
+fn carried_kinds() -> Vec<Resolved> {
+    super::say::carried().map_or_else(Vec::new, |registry| Resolved::scripted(&registry))
 }
 
 /// The kind of provider a table names, its origin loaded.
@@ -515,6 +521,7 @@ fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
     for kind in &KINDS {
         kinds.push(Resolved::native(kind).map_err(|why| (REFUSED, why))?);
     }
+    kinds.extend(carried_kinds());
     let mut listed = Vec::new();
     for (name, table) in tables(files)? {
         let mut entry = json!({"name": name, "provider": table.get("provider")});

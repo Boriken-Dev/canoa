@@ -93,6 +93,11 @@ pub struct ModelStoreInfo {
     /// The id of the library's `speech_output` provider that reads text aloud with the type's installed program, when it can:
     /// [`ServiceReport::voice`] says the settings that provider is built from.
     pub voice: Option<String>,
+    /// The `https` origins the files of a row are downloaded from, for a type that has no `program_store`: the host then keeps the
+    /// models in a folder of its own for the type and downloads only from these. A type with a program store takes that store's
+    /// endpoints and this stays empty.
+    #[map(default)]
+    pub endpoints: Vec<String>,
 }
 
 /// The per-model settings a store keeps: a guatiao schema of an object, and beside it an optional guatiao-intake form, drawn by
@@ -113,9 +118,10 @@ pub struct ModelSettings {
     pub form: Option<Value>,
 }
 
-/// The service that runs a store's models, as far as the person's speech-to-text is concerned. It is either a server that
-/// transcribes one recording, at an address that changes and that [`ModelStore::service`] finds (`route` says where), or a program
-/// run once for each recording (`command`), which [`ModelStore::service`] says how to run from the copy the host installed.
+/// The service that runs a store's models, as far as the person's speech-to-text is concerned. It is a server that transcribes
+/// one recording, at an address that changes and that [`ModelStore::service`] finds (`route` says where); a program run once for
+/// each recording (`command`), which [`ModelStore::service`] says how to run from the copy the host installed; or a provider of
+/// the library's own that transcribes inside the host's process (`provider`), which [`ModelStore::service`] says the settings of.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
@@ -139,6 +145,10 @@ pub struct SpeechService {
     /// [`ServiceReport::command`] says how the installed copy is run.
     #[map(default)]
     pub command: bool,
+    /// The id of the library's `speech_provider` that transcribes inside the host's process, in place of a server or a program: the
+    /// models are the type's own files in the models folder, and [`ServiceReport::settings`] says the settings the provider is
+    /// built from. It is ready when the report names no `unavailable`; there is no program to install.
+    pub provider: Option<String>,
 }
 
 /// What a store is asked to list.
@@ -370,6 +380,9 @@ pub struct ServiceReport {
     /// The settings of the `speech_output` provider [`ModelStoreInfo::voice`] names, when the installed copy can read text aloud:
     /// an object that provider's schema accepts.
     pub voice: Option<Value>,
+    /// The settings of the `speech_provider` [`SpeechService::provider`] names, for the model the person asked for when it is
+    /// installed and else the first that is: an object that provider's schema accepts.
+    pub settings: Option<Value>,
 }
 
 /// How a program turns one recording into text, which the host writes as the person's speech provider.
@@ -422,6 +435,7 @@ impl ModelStoreInfo {
             settings: None,
             speech: None,
             voice: None,
+            endpoints: Vec::new(),
         }
     }
 
@@ -458,6 +472,13 @@ impl ModelStoreInfo {
                 return Some(why);
             }
         }
+        if let Some(bad) = self
+            .endpoints
+            .iter()
+            .find(|origin| !origin.starts_with("https://"))
+        {
+            return Some(format!("the endpoint {bad:?} is not an https address"));
+        }
         if self.voice.as_deref().is_some_and(|id| id.trim().is_empty()) {
             return Some("its voice provider has no id".into());
         }
@@ -465,11 +486,25 @@ impl ModelStoreInfo {
             if speech.title.trim().is_empty() {
                 return Some("its speech service has no title".into());
             }
-            if speech.command && !speech.route.is_empty() {
-                return Some("its speech service is a program and has a route".into());
-            }
-            if !speech.command && !speech.route.starts_with('/') {
-                return Some("its speech service has a route that does not start with /".into());
+            if let Some(provider) = &speech.provider {
+                if provider.trim().is_empty() {
+                    return Some("its speech service names a provider with no id".into());
+                }
+                if speech.command || !speech.route.is_empty() {
+                    return Some(
+                        "its speech service runs in the host's process and is also a program or has a route"
+                            .into(),
+                    );
+                }
+            } else {
+                if speech.command && !speech.route.is_empty() {
+                    return Some("its speech service is a program and has a route".into());
+                }
+                if !speech.command && !speech.route.starts_with('/') {
+                    return Some(
+                        "its speech service has a route that does not start with /".into(),
+                    );
+                }
             }
         }
         None
@@ -756,6 +791,7 @@ impl SpeechService {
             route: route.into(),
             local_file: false,
             command: false,
+            provider: None,
         }
     }
 
@@ -774,6 +810,27 @@ impl SpeechService {
             route: String::new(),
             local_file: false,
             command: true,
+            provider: None,
+        }
+    }
+
+    /// The library's own `speech_provider` `provider`, which transcribes inside the host's process, in an offer of `title`.
+    #[must_use]
+    pub fn in_process(
+        title: impl Into<String>,
+        summary: impl Into<String>,
+        location: impl Into<String>,
+        provider: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            summary: summary.into(),
+            license: None,
+            location: location.into(),
+            route: String::new(),
+            local_file: false,
+            command: false,
+            provider: Some(provider.into()),
         }
     }
 }
