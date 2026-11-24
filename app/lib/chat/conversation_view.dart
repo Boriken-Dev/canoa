@@ -11,6 +11,8 @@ import '../desktop/control_client.dart' show hostWords;
 import '../highlight/highlighted.dart' show highlightRenderers;
 import '../history/session_import.dart' show earlierPage;
 import '../l10n/app_text.dart';
+import '../popout/hub_tabs.dart' show HubTabStrip;
+import '../popout/popout_hub.dart' show PopoutHub;
 import '../profile/report.dart';
 import '../rail/session_groups.dart' show rowStateOf;
 import '../selectable.dart';
@@ -366,7 +368,9 @@ class _ConversationViewState extends State<ConversationView> {
       });
     }
 
+    final tabs = widget.chatOnly ? null : widget.handle.popout;
     final conversation = Column(children: [
+      if (tabs != null) HubTabStrip(hub: tabs, windowKey: PopoutHub.mainKey, narrow: widget.narrow),
       Material(
         color: context.look.bar,
         child: Padding(

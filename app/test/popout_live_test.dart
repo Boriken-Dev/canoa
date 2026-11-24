@@ -263,7 +263,8 @@ void main() {
 
     await showLiveWindow(tester, windows.opened.last);
     expect(find.byType(PermissionCard), findsNothing, reason: 'the other conversation\'s request is not here');
-    expect(find.text('Second'), findsOneWidget);
+    expect(find.text('Second'), findsNWidgets(2), reason: 'its header and its tab, which is the only one the window has');
+    expect(find.text('Fix calc'), findsNothing, reason: 'the other conversation is not a tab here');
   });
 
   group('reading aloud', () {
