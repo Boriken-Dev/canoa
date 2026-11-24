@@ -130,6 +130,8 @@ keyring-core = "1"
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "getrandom", "zeroize"] }
 zeroize = "1"
 time = { version = "0.3", default-features = false, features = ["parsing"] }
+# whisper.cpp inside the host's process; its sources are carried by whisper-rs-sys and built with cmake.
+whisper-rs = { version = "=0.16.0", default-features = false }
 rpassword = "7"
 sha2 = { version = "0.11", default-features = false }
 rustix = { version = "1.1", default-features = false, features = ["std"] }

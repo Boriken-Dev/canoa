@@ -1,6 +1,6 @@
 [package]
 name = "canoa-whisper"
-description = "whisper.cpp for Canoa: its speech-to-text program and models as a Store type, and the speech offer that runs them"
+description = "whisper.cpp for Canoa: its models as a Store type, and the speech-to-text provider that runs them inside the host"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,10 +14,17 @@ exclude = [".*", "*.local.*"]
 publish = false
 
 [dependencies]
-canoa = { workspace = true, features = ["store"] }
+canoa = { workspace = true, features = ["store", "speech"] }
 coqui-acp-api.workspace = true
-serde_json.workspace = true
-time.workspace = true
+guatiao.workspace = true
+guatiao-intake.workspace = true
+whisper-rs.workspace = true
+
+[dev-dependencies]
+coqui-acp-harness.workspace = true
+coqui-acp-api.workspace = true
+sha2 = { workspace = true }
+guatiao.workspace = true
 
 [lints]
 workspace = true

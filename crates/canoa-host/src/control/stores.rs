@@ -973,7 +973,6 @@ impl Stores {
 mod programs_tests {
     use super::*;
     use crate::store::runtimes::extension_store_ids;
-    use canoa::store::Launch;
 
     fn stores(name: &str) -> (Stores, std::path::PathBuf) {
         let root =
@@ -1078,11 +1077,6 @@ mod programs_tests {
         assert_eq!(node["library"], canoa_node::LIBRARY);
         assert!(node["type"].is_null(), "a runtime belongs to no type");
         for (provider, library, kind) in [
-            (
-                "whisper_store",
-                canoa_whisper::LIBRARY,
-                canoa_whisper::STORE_TYPE,
-            ),
             ("piper_store", canoa_piper::LIBRARY, canoa_piper::STORE_TYPE),
             (
                 "foundry_store",
@@ -1112,59 +1106,12 @@ mod programs_tests {
             cfg!(any(windows, target_os = "linux"))
         );
         // Nothing is installed: a report asks the shelf and the search path, and each program's store answers it.
-        for provider in ["node_store", "whisper_store", "foundry_store"] {
+        for provider in ["node_store", "piper_store", "foundry_store"] {
             let report = stores.read("store/report", &json!({"provider": provider}), None);
             assert!(report.is_ok(), "{provider}: {report:?}");
         }
         let unknown = stores.read("store/report", &json!({"provider": "bun_store"}), None);
         assert_eq!(unknown.expect_err("unknown").0, NOT_FOUND);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_copy_installed_before_the_programs_were_one_store_is_still_found_and_listed() {
-        let (stores, root) = stores("old");
-        // What an install of whisper.cpp left under its own type: the program's folder on the shelf, whose name is the program's.
-        let shelf = Shelf::unchecked(&root);
-        let dir = shelf.program("whisper").expect("the program's folder");
-        let locked = dir.lock().expect("the lock");
-        let staging = locked.stage("1.8.0").expect("a staging folder");
-        let file = staging.join("bin").join(if cfg!(windows) {
-            "whisper-cli.exe"
-        } else {
-            "whisper-cli"
-        });
-        std::fs::create_dir_all(file.parent().expect("bin")).expect("bin");
-        std::fs::write(&file, b"program").expect("the program");
-        locked
-            .commit(
-                &staging,
-                "1.8.0",
-                &Launch::new(file.to_string_lossy()),
-                Vec::new(),
-                crate::store::shelf::MadeBy {
-                    provider: "whisper_store".to_owned(),
-                    version: "0.0.0".to_owned(),
-                },
-            )
-            .expect("committed");
-        drop(locked);
-        let listed = programs(&stores);
-        assert!(
-            programs_of(&listed)
-                .iter()
-                .any(|(provider, program)| provider == "whisper_store" && program == "whisper"),
-            "the program is listed with the others"
-        );
-        let report = stores
-            .read("store/report", &json!({"provider": "whisper_store"}), None)
-            .expect("a report");
-        let copies = report["copies"].as_array().expect("copies");
-        let own = copies
-            .iter()
-            .find(|copy| copy["managed"] == true)
-            .unwrap_or_else(|| panic!("the host's own copy is found: {report}"));
-        assert_eq!(own["version"], "1.8.0");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -18,7 +18,7 @@ use canoa::store::{InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreI
 use canoa_piper::PiperModels;
 use canoa_piper::store::{Catalog, VoiceFile};
 use canoa_whisper::WhisperModels;
-use canoa_whisper::store::{MODELS_ORIGIN, Model};
+use canoa_whisper::catalog::{MODELS_ORIGIN, Model};
 use coqui_acp_api::Environment;
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
@@ -138,20 +138,6 @@ impl Recipe for Bare {
 }
 
 #[derive(Clone, Debug)]
-struct BareWhisper(Bare);
-
-impl Default for BareWhisper {
-    fn default() -> Self {
-        Self(Bare {
-            program: "whisper",
-            title: "whisper.cpp",
-            command: "whisper-cli",
-            endpoints: vec![MODELS_ORIGIN.to_owned()],
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
 struct BarePiper(Bare);
 
 impl Default for BarePiper {
@@ -209,13 +195,7 @@ macro_rules! delegate_recipe {
     };
 }
 
-delegate_recipe!(BareWhisper);
 delegate_recipe!(BarePiper);
-
-canoa::store_provider!(
-    /// whisper.cpp's program as a test has it.
-    TestWhisperStore, BareWhisper, "test_whisper_store"
-);
 
 canoa::store_provider!(
     /// Piper's program as a test has it.
@@ -228,7 +208,7 @@ struct TestExtension;
 
 impl StoreExtension for TestExtension {
     fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
-        let mut speech = ExtensionType::new("whisper", "whisper.cpp", ["test_whisper_store"]);
+        let mut speech = ExtensionType::new("whisper", "whisper.cpp", [] as [&str; 0]);
         speech.models = Some("test_whisper_models".to_owned());
         let mut voice = ExtensionType::new("piper", "Piper", ["test_piper_store"]);
         voice.models = Some("test_piper_voices".to_owned());
@@ -297,7 +277,6 @@ coqui_acp_api::guatiao::local_providers!(
     id = "test-files-library",
     version = env!("CARGO_PKG_VERSION"),
     providers = [
-        TestWhisperStore,
         TestPiperStore,
         TestExtension,
         TestWhisperModels,
@@ -437,13 +416,12 @@ fn names_in(folder: &Path) -> Vec<String> {
 #[test]
 fn a_whisper_model_is_installed_listed_and_removed_on_its_own() {
     let host = fixture("whisper", world());
-    host.program("whisper-cli");
     let before = host.row("whisper", "tiny.en");
     assert_eq!(before["on"], false);
     assert_eq!(steps(&before), ["fetch_files"]);
-    assert_eq!(
-        host.list("whisper")["program"],
-        json!({"provider": "test_whisper_store", "title": "whisper.cpp", "installed": true})
+    assert!(
+        host.list("whisper")["program"].is_null(),
+        "the type has no program"
     );
 
     let done = host
@@ -476,24 +454,29 @@ fn a_whisper_model_is_installed_listed_and_removed_on_its_own() {
 }
 
 #[test]
-fn a_model_whose_program_is_missing_is_refused_naming_the_program_and_nothing_is_fetched() {
-    let host = fixture("missing", world());
-    let listed = host.list("whisper");
-    assert_eq!(
-        listed["program"],
-        json!({"provider": "test_whisper_store", "title": "whisper.cpp", "installed": false})
-    );
+fn a_whisper_model_needs_no_program_and_comes_only_from_the_origins_its_library_names() {
+    let host = fixture("noprogram", world());
+    host.act("whisper", "base", "fetch_files")
+        .expect("installed with no program anywhere");
+    assert_eq!(host.row("whisper", "base")["on"], true);
+    let outside = [canoa::store::models::ModelFile::new(
+        "https://elsewhere.example/ggml-base.bin",
+        "ggml-other.bin",
+        None,
+        digest(WEIGHTS),
+    )];
     let refused = host
-        .act("whisper", "base", "fetch_files")
-        .expect_err("no program");
-    assert_eq!(refused.0, REFUSED);
-    assert!(refused.1.contains("whisper.cpp"), "{}", refused.1);
-    assert!(refused.1.contains("install"), "{}", refused.1);
-    assert!(
-        host.transport.requests().is_empty(),
-        "nothing was asked for"
-    );
-    assert!(!host.folder("whisper").exists());
+        .stores
+        .programs
+        .fetch_models_in(
+            "whisper",
+            &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
+            &outside,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .expect_err("an address outside the origins");
+    assert!(!refused.to_string().is_empty());
+    assert!(!host.folder("whisper").join("ggml-other.bin").exists());
 }
 
 #[test]
@@ -504,62 +487,12 @@ fn a_file_that_does_not_match_its_digest_is_refused_and_leaves_nothing() {
         b"not the model".to_vec(),
     );
     let host = fixture("mismatch", served);
-    host.program("whisper-cli");
     let refused = host
         .act("whisper", "base", "fetch_files")
         .expect_err("refused");
     assert!(refused.1.contains("checksum"), "{}", refused.1);
     assert!(names_in(&host.folder("whisper")).is_empty());
     assert_eq!(host.row("whisper", "base")["on"], false);
-}
-
-#[test]
-fn a_copy_installed_with_its_model_lists_it_as_installed_and_leaves_it_where_it_is() {
-    let host = fixture("combined", world());
-    host.program("whisper-cli");
-    // The program is on the PATH in `bin`, so the copy's folder is the fixture's root and its models are in `models` there.
-    std::fs::create_dir_all(host.root.join("models")).expect("models");
-    std::fs::write(host.root.join("models/ggml-base.bin"), WEIGHTS).expect("model");
-    let held = host.row("whisper", "base");
-    assert_eq!(held["on"], true);
-    assert_eq!(held["state"], "installed with the program");
-    assert!(
-        held["actions"].as_array().is_some_and(Vec::is_empty),
-        "the program's own copy is not the host's to take away: {held}"
-    );
-    assert_eq!(host.row("whisper", "tiny.en")["on"], false);
-    let before = std::fs::read(host.root.join("models/ggml-base.bin")).expect("model");
-    assert_eq!(before, WEIGHTS);
-}
-
-#[test]
-fn removing_the_program_says_which_models_stay_and_which_go_with_it() {
-    let host = fixture("removal", world());
-    host.program("whisper-cli");
-    host.act("whisper", "tiny.en", "fetch_files")
-        .expect("installed");
-    std::fs::create_dir_all(host.root.join("models")).expect("models");
-    std::fs::write(host.root.join("models/ggml-base.bin"), WEIGHTS).expect("model");
-    let plan = host
-        .stores
-        .read(
-            "store/plan",
-            &json!({"provider": "test_whisper_store", "action": "uninstall"}),
-            None,
-        )
-        .expect("a plan");
-    let notices: Vec<&str> = plan["notices"]
-        .as_array()
-        .expect("notices")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect();
-    let note = notices
-        .iter()
-        .find(|note| note.contains("tiny.en"))
-        .expect("a note about the model installed on its own");
-    assert!(note.contains("stay"), "{note}");
-    assert!(note.contains("go with it: base"), "{note}");
 }
 
 #[test]
@@ -621,20 +554,16 @@ fn a_program_the_library_is_titled_by_its_extension_in_the_programs_list() {
         .as_array()
         .expect("stores")
         .iter()
-        .find(|row| row["provider"] == "test_whisper_store")
+        .find(|row| row["provider"] == "test_piper_store")
         .expect("the store");
     assert_eq!(row["library_title"], "Speech libraries", "{row}");
-    assert_eq!(row["type"], "whisper");
+    assert_eq!(row["type"], "piper");
 }
 
 #[test]
 fn a_name_that_leaves_the_models_folder_is_refused() {
     use canoa::store::models::ModelFile;
     let host = fixture("escape", world());
-    let (_, store) = host
-        .stores
-        .store(&json!({"provider": "test_whisper_store"}))
-        .expect("a store");
     let escaping = [ModelFile::new(
         format!("{MODELS_ORIGIN}ggml-base.bin"),
         "../escaped.bin",
@@ -644,8 +573,9 @@ fn a_name_that_leaves_the_models_folder_is_refused() {
     let refused = host
         .stores
         .programs
-        .fetch_models(
-            &*store,
+        .fetch_models_in(
+            "whisper",
+            &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
             &escaping,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
@@ -658,7 +588,6 @@ fn a_name_that_leaves_the_models_folder_is_refused() {
 #[test]
 fn a_listing_is_kept_until_something_changes_it_or_it_is_read_again() {
     let host = fixture("kept", world());
-    host.program("whisper-cli");
     assert_eq!(host.row("whisper", "base")["on"], false);
     // The model appears outside the host: the kept listing does not know yet.
     std::fs::create_dir_all(host.folder("whisper")).expect("a folder");

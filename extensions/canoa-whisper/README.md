@@ -1,16 +1,18 @@
 # canoa-whisper
 
-Canoa's package for whisper.cpp: the Store program that installs its speech-to-text command line, the Store type that lists it, a page of its models (each
-installed on its own, checked against its publisher's SHA-256), and the speech offer a host makes of the
-installed copy, so dictation runs on the host's own processor and the audio goes nowhere else.
+Canoa's package for whisper.cpp: the Store type that lists its models (each installed on its own, checked against its publisher's
+SHA-256) and the speech provider that runs a model inside the host's own process, so dictation runs on the host's processor and
+the audio goes nowhere else. There is no program to install.
 
-A build that does not carry it has no whisper.cpp program, models or offer. Not published; `canoa-host` carries it. Every export
-is listed in [`AGENTS.md`](AGENTS.md).
+A build that does not carry it has no whisper.cpp models or offer. Compiling it compiles whisper.cpp: cmake, a C++ compiler and
+libclang are needed (see [`AGENTS.md`](AGENTS.md), "Building"). Not published; `canoa-host` carries it. Every export is listed in
+[`AGENTS.md`](AGENTS.md).
 
 ## Development
 
 ```sh
-cargo test -p canoa-whisper --all-features
+cargo test -p canoa-whisper
+cargo test -p canoa-whisper -- --ignored   # downloads the tiny model and a recording
 ```
 
 ## License
