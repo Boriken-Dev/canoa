@@ -10,7 +10,7 @@
 An SDK matches when it is at the mirror's commit or at the upstream commit it mirrors, reports the pinned version and holds
 the pinned engine. `install` needs git and network to github.com only: the engine, the Dart SDK and the web artifacts are the
 assets of the mirror's release `engine-<hash>`, put back in the layout Flutter's storage has by flutter_artifacts.py of
-github.com/Boriken-Dev/flutter-images (--artifacts names a copy of it) and served on loopback while `flutter precache` runs.
+the mirror's `images` branch (--artifacts names a copy of it) and served on loopback while `flutter precache` runs.
 """
 from __future__ import annotations
 
@@ -29,7 +29,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PIN = ROOT / "tools" / "flutter.pin"
 MIRROR = "https://github.com/Boriken-Dev/flutter.git"
-IMAGES = "https://github.com/Boriken-Dev/flutter-images.git"
+#: The branch of the mirror that holds the image tooling, flutter_artifacts.py among it.
+IMAGES_BRANCH = "images"
 KEYS = ("FLUTTER_COMMIT", "FLUTTER_UPSTREAM", "FLUTTER_VERSION", "FLUTTER_ENGINE")
 
 
@@ -117,7 +118,7 @@ def install(directory: Path, platforms: list[str], artifacts: Path | None) -> No
     scratch = Path(tempfile.mkdtemp(prefix="flutter_pin_"))
     try:
         if artifacts is None:
-            git("clone", "--quiet", "--depth", "1", IMAGES, str(scratch / "images"))
+            git("clone", "--quiet", "--depth", "1", "--branch", IMAGES_BRANCH, MIRROR, str(scratch / "images"))
             artifacts = scratch / "images" / "tools" / "flutter_artifacts.py"
         git("clone", "--quiet", "--filter=blob:none", "--no-tags", "--branch", "main", "--single-branch", MIRROR, str(directory))
         git("checkout", "--quiet", "-B", "main", pin["FLUTTER_COMMIT"], cwd=directory)

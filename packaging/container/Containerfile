@@ -50,7 +50,7 @@ RUN apt-get update \
 
 # The Flutter SDK: Boriken Dev's image for the pin, which holds the mirror's checkout with every tag, the engine, the Dart
 # SDK and the web artifacts precached from the mirror's release, so nothing here asks Flutter's storage or flutter/flutter
-# for anything (the image is the Debian toolchain of github.com/Boriken-Dev/flutter-images). Only Debian's python3 is added,
+# for anything (the image is the Debian toolchain of the images branch of github.com/Boriken-Dev/flutter). Only Debian's python3 is added,
 # for the site's build script. The storage address is a dead one: a step that needed Google's storage fails, it does not
 # fetch. Nothing of the app is here, so this layer is reused until FLUTTER_IMAGE_TAG or the image changes.
 FROM ghcr.io/boriken-dev/flutter-web:${FLUTTER_IMAGE_TAG} AS flutter
