@@ -115,6 +115,8 @@ COPY --from=deps /deps /deps
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY extensions extensions
+# The vendored whisper-rs-sys: whisper.cpp 1.9.6, where the published crate carries an older one.
+COPY third_party third_party
 COPY examples examples
 # The host embeds pages and scripts of the browser extension and the Office add-in.
 COPY clients clients
