@@ -305,7 +305,7 @@ class _AccountsSectionState extends State<AccountsSection> {
                   tooltip: 'More',
                   onSelected: (value) {
                     if (value == 'remove') unawaited(_remove(account));
-                    if (value.startsWith('login:'))
+                    if (value.startsWith('login:')) {
                       unawaited(
                         _again(
                           account,
@@ -314,8 +314,10 @@ class _AccountsSectionState extends State<AccountsSection> {
                               .firstOrNull,
                         ),
                       );
-                    if (value.startsWith('offer:'))
+                    }
+                    if (value.startsWith('offer:')) {
                       unawaited(_offer(account, value.substring(6)));
+                    }
                   },
                   itemBuilder: (context) => [
                     for (final login in logins)
