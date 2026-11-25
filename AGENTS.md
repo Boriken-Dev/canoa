@@ -56,7 +56,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `bindings/python/canoa-sdk/`, `bindings/js/canoa-sdk/` | The SDKs for writing a provider in Python or JavaScript: one base class per kind, a settings form from a dataclass or `s` schema; their kinds are written from `crates/canoa/include/canoa.*.kinds.json` (`tools/write_kinds.{py,mjs}`, `--check`); their `AGENTS.md` is the API |
 | `examples/providers/` | One provider per kind in each language, written with the SDKs; `crates/canoa-host/tests/script_providers.rs` loads them through the host |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
-| `tools/` | Offline dependency mirroring (`mirror_*.py`, `cdn_files.py`, `fallback_fonts.py`, `office_js.py`), the Flutter pin (`flutter.pin`, `flutter_pin.py`), and `build.py`, `build.cfg` and `sdk.lock`: the shared build tool copied from Boriken-Dev/agent-overlays (`python tools/build.py help`), which holds the SDK rows and the scan; the deps branch itself is still written by `mirror_*.py` |
+| `tools/` | `build.py`, `build.cfg` and `sdk.lock`: the shared build tool copied from Boriken-Dev/agent-overlays (`python tools/build.py help`), which writes and checks the deps branch (four vendor folders, pub, the CDN files, the Office.js tree), seeds the offline build, checks a Flutter checkout and its fonts, holds the SDK rows and scans; what stays Canoa's: the Flutter pin (`flutter.pin`, `flutter_pin.py get|check`), the pins of the CDN fonts (`cdn_files.json`, `fallback_fonts.py pin`) and of Office.js (`office_js.json`, `office_js.py pin`), `docs_brand.py` and the icon tools |
 
 ## Project identity
 
@@ -95,9 +95,9 @@ cargo test -p canoa-launch --lib -- --ignored a_base_folder_cannot_vouch   # Win
 cargo test -p canoa-host --all-features -- --ignored discover_nearby_reports a_connection_from_another_user   # Linux: passwordless sudo and setpriv
 cargo test -p canoa-host --lib -- --ignored operating_systems_store two_homes_with_the_same_account_id   # Linux: a Secret Service session; the other platforms run these without --ignored
 (cd app && flutter analyze && flutter test)
-# Builds read only the deps checkout and the pinned SDK (`python tools/flutter_pin.py sdk $FLUTTER_ROOT`), with the network off; one that lacks something stops and names it. `--online` is the refresh-the-mirror exception
+# Builds read only the deps checkout and the pinned SDK (`python tools/build.py flutter precache-check --flutter-root $FLUTTER_ROOT --platform web`), with the network off (`offline run`); one that lacks something stops and names it. `--online` is the refresh-the-mirror exception
 python app/tool/build.py pwa   # or chromium, office, desktop [--portable]; CANOA_DEPS names the deps checkout
-(cd app/tool && python -m unittest test_build test_no_network test_portable test_offline_pub test_brand)   # includes the tests that fail when a build falls back to the network
+(cd app/tool && python -m unittest test_build test_no_network test_portable test_envfile test_brand)   # includes the tests that fail when a build falls back to the network
 python app/tool/portable.py fetch   # Linux --portable: appimagetool and its runtime (digests in tools/sdk.lock), the one step of the builds that uses the network
 python tools/build.py self check --from <a Boriken-Dev/agent-overlays checkout>   # tools/build.py is that repository's copy: change it there, then `self update COMMIT --from DIR`; without --from the check downloads the file at the commit its line 3 names
 python tools/build.py sdk check   # tools/sdk.lock against Cargo.lock's rust-version, tools/flutter.pin and app/web_noise/Cargo.toml's wasm-bindgen

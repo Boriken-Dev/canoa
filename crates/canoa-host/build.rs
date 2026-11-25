@@ -79,7 +79,7 @@ fn build_in_office_js() {
         let file = folder.join(name);
         let bytes = std::fs::read(&file).unwrap_or_else(|_| {
             refuse(&format!(
-                "{name} is not in the Office.js mirror {}: refresh the deps branch (tools/mirror_deps.py fills its cdn/office-js), or build with CANOA_OFFICE_JS=cdn",
+                "{name} is not in the Office.js mirror {}: refresh the deps branch (`python tools/build.py deps refresh` fills its cdn/office-js), or build with CANOA_OFFICE_JS=cdn",
                 folder.display()
             ))
         });
