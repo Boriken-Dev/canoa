@@ -6,9 +6,10 @@ copies into the page. With --test-peer it builds a variant with a responder into
 Needs cargo with the wasm32-unknown-unknown target and a wasm-bindgen command line of exactly the version
 app/web_noise/Cargo.toml pins.
 
-With --deps DIR (or CANOA_DEPS), a checkout of the deps branch, nothing comes from crates.io or GitHub: the crates are
-DIR/crates-web_noise, and --install-bindgen builds the command line from DIR/crates-wasm-bindgen-cli with
-`cargo install --offline --locked`, into CARGO_HOME's bin (or ~/.cargo/bin).
+Nothing comes from crates.io or GitHub: the crates are DEPS/crates-web_noise, DEPS being --deps, CANOA_DEPS or the deps
+branch's worktree beside the repository, and --install-bindgen builds the command line from DEPS/crates-wasm-bindgen-cli with
+`cargo install --offline --locked`, into CARGO_HOME's bin (or ~/.cargo/bin). Without a deps checkout the build stops; only
+--online, for refreshing the mirror, reads crates.io and GitHub.
 """
 from __future__ import annotations
 
@@ -58,9 +59,17 @@ def install_bindgen(bindgen: str, deps: Path) -> None:
     subprocess.run(["cargo", "--config", str(config), "install", "--offline", "--locked", BINDGEN, "--version", bindgen], check=True)
 
 
+def require_wasm_target() -> None:
+    """The wasm32 standard library is rustup's, installed once with the toolchain; a build never adds it."""
+    sysroot = Path(subprocess.run(["rustc", "--print", "sysroot"], check=True, capture_output=True, text=True).stdout.strip())
+    if not (sysroot / "lib" / "rustlib" / "wasm32-unknown-unknown").is_dir():
+        raise RuntimeError("the wasm32-unknown-unknown target is not installed (rustup target add wasm32-unknown-unknown)")
+
+
 def require_tools(bindgen: str, deps: Path | None) -> str:
     if shutil.which("cargo") is None:
         raise RuntimeError("cargo is not on PATH")
+    require_wasm_target()
     how = (f"python app/tool/build_noise.py --deps {deps} --install-bindgen" if deps
            else f"cargo install {BINDGEN} --version {bindgen} --locked")
     if shutil.which("wasm-bindgen") is None:
@@ -98,13 +107,21 @@ def main() -> None:
     parser.add_argument("--out", type=Path, help="where the loader and the wasm go (default web/noise, or test/noise with --test-peer)")
     parser.add_argument("--test-peer", action="store_true", help="also build the responder the browser tests use, into test/noise only")
     parser.add_argument("--deps", type=Path, default=os.environ.get("CANOA_DEPS") or None,
-                        help="a checkout of the deps branch: build from its crates, with the network off (default: CANOA_DEPS)")
+                        help="a checkout of the deps branch: build from its crates, with the network off (default: CANOA_DEPS, "
+                             "else the deps branch's worktree beside the repository)")
+    parser.add_argument("--online", action="store_true",
+                        help="build from crates.io and GitHub instead of the deps branch, to refresh the mirror")
     parser.add_argument("--install-bindgen", action="store_true",
                         help="install the wasm-bindgen command line from --deps, offline, and stop")
     opts = parser.parse_args()
-    if opts.install_bindgen:
+    if opts.online and (opts.deps or opts.install_bindgen):
+        parser.error("--online reads no deps branch: not with --deps or --install-bindgen")
+    if not opts.online and opts.deps is None:
+        opts.deps = offline_pub.find_deps(APP.parent, offline_pub.load_settings(APP.parent, os.environ))
         if opts.deps is None:
-            parser.error("--install-bindgen needs --deps or CANOA_DEPS")
+            sys.exit("build_noise.py: no deps checkout (set CANOA_DEPS or --deps, or fetch the deps branch; "
+                     "--online builds from crates.io and GitHub to refresh the mirror)")
+    if opts.install_bindgen:
         try:
             install_bindgen(pinned_bindgen(), opts.deps)
         except (RuntimeError, subprocess.CalledProcessError) as error:

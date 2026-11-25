@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -17,6 +19,7 @@ import offline_pub
 # tools/ is not a package: the fallback-font list and its checks live there, beside the step that mirrors the fonts.
 sys.path.insert(0, str(Path(os.path.abspath(__file__)).parents[2] / "tools"))
 import fallback_fonts
+import flutter_pin
 
 # Not resolve(): a drive made with `subst` (how a long checkout path stays under MSBuild's limit) must stay as typed.
 APP = Path(os.path.abspath(__file__)).parents[1]
@@ -165,31 +168,132 @@ def built_executable(platform: str, debug: bool, app: Path = APP) -> Path | None
     return found[0] if found else None
 
 
-def choose_pub(mode: str) -> offline_pub.Plan | None:
-    """The plan of an offline build (a seeded pub cache, a cargo home), or None for an online one.
+# What a build says when the deps branch cannot supply it: the commands that fill the mirror, never a fetch.
+MIRROR_HINT = ("refresh the deps branch (tools/mirror_deps.py fills pub, fonts and Office.js, tools/mirror_crates.py sync the "
+               "crates) and fetch it, or pass --online to resolve from the network")
 
-    `mode` is auto, offline or online.
+
+@dataclass(frozen=True)
+class Offline:
+    """What an offline build reads: the deps checkout, the pub cache seeded from it and the cargo home that vendors Cargo.lock."""
+
+    deps: Path
+    cache: Path
+    cargo_home: Path | None
+
+
+def choose_pub(online: bool) -> Offline | None:
+    """The offline plan: a seeded pub cache and a cargo home, or None when the build was asked to go online.
+
+    A deps branch that cannot supply a build stops it with what is missing; there is no silent fall back to the network.
     """
-    if mode == "online":
+    if online:
         return None
     result = offline_pub.plan(ROOT, SETTINGS, os.environ, ROOT / LOCK)
-    if result.reason is not None:
-        if mode == "offline":
-            raise RuntimeError(f"an offline build is not possible: {result.reason}")
-        print(f"Building online: {result.reason}")
-    return result if result.cache is not None else None
+    if result.reason is not None or result.cache is None:
+        raise RuntimeError(f"an offline build is not possible: {result.reason}; {MIRROR_HINT}")
+    return Offline(offline_pub.find_deps(ROOT, SETTINGS), result.cache, result.cargo_home)
 
 
-def pub_get_offline(cache: Path, mode: str) -> bool:
-    """Resolve from `cache` with the network off; False means go online (auto), an error means --offline failed."""
+def engine_directories(platform: str) -> list[Path]:
+    """The folders of the SDK's cache a build for `platform` reads, which a Flutter not precached for it would download."""
+    import platform as host
+
+    arch = "arm64" if host.machine().lower() in ("arm64", "aarch64") else "x64"
+    cache = Path("bin") / "cache"
+    return {
+        "web": [cache / "flutter_web_sdk"],
+        "windows": [cache / "artifacts" / "engine" / f"windows-{arch}"],
+        "linux": [cache / "artifacts" / "engine" / f"linux-{arch}"],
+        "macos": [cache / "artifacts" / "engine" / "darwin-x64"],
+    }[platform]
+
+
+def require_pinned_sdk(platform: str) -> None:
+    """Stop unless the Flutter on PATH is tools/flutter.pin's and holds what a `platform` build reads.
+
+    Flutter downloads whatever its cache lacks from FLUTTER_STORAGE_BASE_URL while it builds; the SDK comes from the mirror
+    (Boriken-Dev/flutter, with its engine-<hash> release) already precached, and a build never asks for more.
+    """
+    sdk = Path(flutter_program()).resolve().parents[1]
+    problems = flutter_pin.sdk_problems(sdk, flutter_pin.load())
+    problems += [f"{sdk / folder} is missing: the SDK was not precached for {platform}"
+                 for folder in engine_directories(platform) if not (sdk / folder).is_dir()]
+    if problems:
+        raise RuntimeError(
+            "the Flutter SDK is not the one tools/flutter.pin names, precached for this build:\n  " + "\n  ".join(problems)
+            + f"\nInstall it from the mirror with: python tools/flutter_pin.py install DIR --platforms {platform}")
+
+
+@contextlib.contextmanager
+def environment(changes: dict[str, str | None]):
+    """Set (or, for None, remove) variables for the tools a build starts, and put them back afterwards."""
+    saved = {key: os.environ.get(key) for key in changes}
+    for key, value in changes.items():
+        restore_env(key, value)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            restore_env(key, value)
+
+
+# Where Flutter's cache would download from if it lacked a file: nowhere, so a missing one fails instead of fetching.
+NO_STORAGE = "http://127.0.0.1:9"
+
+
+def network_off(offline: Offline | None) -> dict[str, str | None]:
+    """The environment of an offline build: the seeded pub cache, the vendored cargo home, no telemetry and no storage URL."""
+    if offline is None:
+        return {}
+    changes: dict[str, str | None] = {
+        "PUB_CACHE": str(offline.cache),
+        "FLUTTER_SUPPRESS_ANALYTICS": "true",
+        "DART_SUPPRESS_ANALYTICS": "true",
+        "CARGO_NET_OFFLINE": "true",
+        "FLUTTER_STORAGE_BASE_URL": os.environ.get("FLUTTER_STORAGE_BASE_URL") or NO_STORAGE,
+    }
+    if offline.cargo_home is not None:
+        changes["CARGO_HOME"] = str(offline.cargo_home)
+    return changes
+
+
+@contextlib.contextmanager
+def build_environment(online: bool, platform: str):
+    """The pinned SDK checked, the deps checkout read, the network off: what every kind of build runs inside.
+
+    Yields the Offline plan, or None for `--online` (the one way to resolve from the network; the SDK is still the pin).
+    """
+    require_pinned_sdk(platform)
+    offline = choose_pub(online)
+    with environment(network_off(offline)):
+        yield offline
+
+
+def pub_get_offline(offline: Offline) -> None:
+    """Resolve app/pubspec.lock from the seeded cache with the network off."""
     try:
         subprocess.run([flutter_program(), "pub", "get", "--offline"], check=True, cwd=APP)
     except subprocess.CalledProcessError as error:
-        if mode == "offline":
-            raise RuntimeError(f"pub get --offline failed in {cache}") from error
-        print(f"Building online: pub get --offline failed in {cache}")
-        return False
-    return True
+        raise RuntimeError(f"pub get --offline failed in {offline.cache}") from error
+
+
+def prepare_packages(offline: Offline | None) -> None:
+    """`flutter pub get`, offline from the seeded cache, or online when the build was asked to be."""
+    if offline is None:
+        subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
+    else:
+        pub_get_offline(offline)
+
+
+def build_wasm(offline: Offline | None) -> None:
+    """The web build's WebAssembly (the Noise method and Whisper), from the deps branch's crates-web_noise/ and crates-web_whisper/.
+
+    `--online` reads crates.io and GitHub instead, to refresh the mirror.
+    """
+    where = ["--deps", str(offline.deps)] if offline else ["--online"]
+    for script in ("build_noise.py", "build_whisper.py"):
+        subprocess.run([sys.executable, str(APP / "tool" / script), *where], check=True)
 
 
 def finish_web(dist: Path) -> None:
@@ -209,15 +313,17 @@ def finish_web(dist: Path) -> None:
     print(f"Fallback fonts: {len(pinned)} files, {size} bytes, from the deps mirror")
 
 
-def build_web_for_host(offline: bool = False) -> Path:
+def no_pub(offline: Offline | None) -> list[str]:
+    """`flutter build` and `flutter run` resolve packages themselves unless told not to; an offline build resolved them already."""
+    return ["--no-pub"] if offline is not None else []
+
+
+def build_web_for_host(offline: Offline | None) -> Path:
     """The web app the host serves, built with a CSP (without it the host's policy refuses the page's code)."""
-    subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
-    subprocess.run([sys.executable, str(APP / "tool" / "build_whisper.py")], check=True)
-    if not offline:
-        subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
+    build_wasm(offline)
+    prepare_packages(offline)
     subprocess.run(
-        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn", *BRAND.defines(),
-         *(["--no-pub"] if offline else [])],
+        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn", *BRAND.defines(), *no_pub(offline)],
         check=True, cwd=APP,
     )
     dist = APP / "build" / "web"
@@ -239,10 +345,6 @@ def package_portable(platform: str, exe: Path) -> Path:
     raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
 
 
-# What an offline build sets for the tools it starts: pub's cache, and cargo's home and network switch.
-OFFLINE_ENV = ("PUB_CACHE", "CARGO_HOME", "CARGO_NET_OFFLINE")
-
-
 def restore_env(key: str, value: str | None) -> None:
     if value is None:
         os.environ.pop(key, None)
@@ -261,64 +363,45 @@ def office_js_environment(source: str) -> dict[str, str]:
     return {"CANOA_OFFICE_JS": "bundled", **({"CANOA_DEPS": str(deps)} if deps else {})}
 
 
-def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False, mode: str = "online",
+def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False, online: bool = False,
                   office_js: str = "bundled") -> None:
     require_tools()
     if portable and platform == "macos":
         raise RuntimeError(f"{BRAND.name}.app is already one bundle: ship build/macos/Build/Products/Release/{BRAND.name}.app")
     if portable and BRAND.executable != "CanoaUI":
         raise RuntimeError("--portable packs CanoaUI: the launcher and the AppImage do not follow a brand's executable name yet")
-    env = None
     lock = ROOT / LOCK
     before = lock.read_bytes() if lock.is_file() else None
     flag = "--debug" if debug else "--release"
     # The host's build reads the brand's environment-variable prefix; the app gets the rest as dart definitions.
-    brand_env = BRAND.environment()
-    brand_saved = {key: os.environ.get(key) for key in brand_env}
-    os.environ.update(brand_env)
-    saved = {key: os.environ.get(key) for key in OFFLINE_ENV}
-    office = office_js_environment(office_js)
-    office_saved = {key: os.environ.get(key) for key in office}
-    os.environ.update(office)
+    outer = {**BRAND.environment(), **office_js_environment(office_js)}
+    exe = None
     try:
-        offline = choose_pub(mode)
-        cache = offline.cache if offline else None
-        if offline is not None:
-            os.environ["PUB_CACHE"] = str(cache)
-            if offline.cargo_home is not None:
-                os.environ["CARGO_HOME"] = str(offline.cargo_home)
-                os.environ["CARGO_NET_OFFLINE"] = "true"
-        # The runner first: pub get is what writes a platform's plugin files, so it must run once the runner exists.
-        ensure_runner(platform, offline=cache is not None)
-        if cache is not None and not pub_get_offline(cache, mode):
-            cache = None
-            for key, value in saved.items():
-                restore_env(key, value)
-        no_pub = ["--no-pub"] if cache is not None else []
-        if portable:
-            # The built library carries the web app, which the plugin builds in when CANOA_WEB_DIST names it.
-            env = dict(os.environ, CANOA_WEB_DIST=str(build_web_for_host(cache is not None)))
-        if platform != "macos" and clear_stale_build(platform):
-            print(f"Removed app/build/{platform}, configured before the runner was named")
-        if run:
-            subprocess.run([flutter_program(), "run", "-d", platform, flag, *no_pub, *BRAND.defines()], check=True, cwd=APP)
-            return
-        subprocess.run([flutter_program(), "build", platform, flag, *no_pub, *BRAND.defines()], check=True, cwd=APP, env=env)
+        with environment(outer), build_environment(online, platform) as offline:
+            # The runner first: pub get is what writes a platform's plugin files, so it must run once the runner exists.
+            ensure_runner(platform, offline=offline is not None)
+            if offline is not None:
+                pub_get_offline(offline)
+            env = None
+            if portable:
+                # The built library carries the web app, which the plugin builds in when CANOA_WEB_DIST names it.
+                env = dict(os.environ, CANOA_WEB_DIST=str(build_web_for_host(offline)))
+            if platform != "macos" and clear_stale_build(platform):
+                print(f"Removed app/build/{platform}, configured before the runner was named")
+            if run:
+                subprocess.run([flutter_program(), "run", "-d", platform, flag, *no_pub(offline), *BRAND.defines()], check=True, cwd=APP)
+                return
+            subprocess.run([flutter_program(), "build", platform, flag, *no_pub(offline), *BRAND.defines()], check=True, cwd=APP, env=env)
+            exe = built_executable(platform, debug)
+            if exe is None:
+                raise RuntimeError(f"flutter build {platform} left no {BRAND.executable} under app/build")
+            print(f"Built {exe}")
+            if portable:
+                # Still inside the offline environment: the launcher and the AppImage are built by cargo and from the mirror.
+                print(f"Packaged {package_portable(platform, exe)}")
     finally:
-        for key, value in brand_saved.items():
-            restore_env(key, value)
-        for key, value in saved.items():
-            restore_env(key, value)
-        for key, value in office_saved.items():
-            restore_env(key, value)
         if restore_lock(before):
             print("Restored app/pubspec.lock")
-    exe = built_executable(platform, debug)
-    if exe is None:
-        raise RuntimeError(f"flutter build {platform} left no {BRAND.executable} under app/build")
-    print(f"Built {exe}")
-    if portable:
-        print(f"Packaged {package_portable(platform, exe)}")
 
 
 ICON_SIZES = (16, 32, 64, 80)
@@ -377,23 +460,24 @@ def package_office(web: Path, target: Path, mirror: Path, taskpane: Path | None 
     return target
 
 
-def build_office() -> Path:
+def build_office(online: bool = False) -> Path:
     """The pane's static site: the app built for /office/app/, with the pages and Office.js around it."""
     mirror = office_js_folder()
-    subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
-    subprocess.run([sys.executable, str(APP / "tool" / "build_whisper.py")], check=True)
-    subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
-    subprocess.run(
-        [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn", "--base-href", "/office/app/"],
-        check=True, cwd=APP,
-    )
-    dist = APP / "build" / "web"
-    finish_web(dist)
+    with build_environment(online, "web") as offline:
+        build_wasm(offline)
+        prepare_packages(offline)
+        subprocess.run(
+            [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn", "--base-href", "/office/app/",
+             *no_pub(offline)],
+            check=True, cwd=APP,
+        )
+        dist = APP / "build" / "web"
+        finish_web(dist)
     return package_office(dist, ROOT / "target" / "canoa-office", mirror)
 
 
-def flutter_args(kind: str, wasm: bool) -> list[str]:
-    args = [flutter_program(), "build", "web", "--release", "--no-web-resources-cdn", *BRAND.defines()]
+def flutter_args(kind: str, wasm: bool, offline: Offline | None = None) -> list[str]:
+    args = [flutter_program(), "build", "web", "--release", "--no-web-resources-cdn", *BRAND.defines(), *no_pub(offline)]
     if wasm:
         args.append("--wasm")
     if kind == "chromium":
@@ -452,12 +536,9 @@ def main() -> None:
     parser.add_argument("--portable", action="store_true",
         help="desktop: also make the one-file form of a release build (Windows: the CanoaUI.exe launcher in "
              "target/canoa-windows; Linux: an AppImage in target/canoa-linux)")
-    pub = parser.add_mutually_exclusive_group()
-    pub.add_argument("--online", action="store_true",
-        help="desktop: resolve packages from the network, without looking at the deps branch")
-    pub.add_argument("--offline", action="store_true",
-        help="desktop: resolve from the deps branch, and fail instead of going online (the default is offline, "
-             "falling back to online with the reason when a dependency is missing)")
+    parser.add_argument("--online", action="store_true",
+        help="resolve packages, crates and Flutter's own files from the network, without the deps branch (for refreshing the "
+             "mirror; the default reads only the deps checkout and the pinned SDK, and stops naming what is missing)")
     parser.add_argument("--office-js", choices=("bundled", "cdn"), default="bundled",
         help="desktop: where the Office add-in's pages load Office.js from: the host's own copy, taken from the deps "
              "mirror (the default, nothing is fetched from Microsoft), or Microsoft's CDN")
@@ -472,16 +553,16 @@ def main() -> None:
     configure_environment()
     if opts.debug and opts.kind not in ("chromium", "desktop"):
         parser.error("--debug is only valid for chromium and desktop")
-    desktop_only = opts.run or opts.platform or opts.portable or opts.online or opts.offline or opts.office_js != "bundled"
+    desktop_only = opts.run or opts.platform or opts.portable or opts.office_js != "bundled"
     if desktop_only and opts.kind != "desktop":
-        parser.error("--run, --platform, --portable, --online, --offline and --office-js are only valid for desktop")
+        parser.error("--run, --platform, --portable and --office-js are only valid for desktop")
     if opts.portable and (opts.debug or opts.run):
         parser.error("--portable packages a release build: not with --debug or --run")
     if opts.kind == "office":
         if opts.debug or opts.wasm:
             parser.error("office takes no --debug or --wasm")
         try:
-            print(f"Built the Office pane's static site in {build_office()}")
+            print(f"Built the Office pane's static site in {build_office(opts.online)}")
         except (RuntimeError, subprocess.CalledProcessError) as error:
             sys.exit(f"build.py: {error}")
         return
@@ -490,20 +571,19 @@ def main() -> None:
         if platform != host_platform():
             parser.error(f"a {platform} build needs a {platform} machine")
         try:
-            build_desktop(platform, opts.debug, opts.run, opts.portable,
-                          "online" if opts.online else "offline" if opts.offline else "auto", opts.office_js)
+            build_desktop(platform, opts.debug, opts.run, opts.portable, opts.online, opts.office_js)
         except (RuntimeError, subprocess.CalledProcessError) as error:
             sys.exit(f"build.py: {error}")
         return
-    # The web build carries the Noise method and Whisper as WebAssembly, built from app/web_noise into app/web/noise and from app/web_whisper
-    # into app/web/whisper.
-    subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
-    subprocess.run([sys.executable, str(APP / "tool" / "build_whisper.py")], check=True)
-    subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
-    subprocess.run(flutter_args(opts.kind, opts.wasm), check=True, cwd=APP)
+    # The web build carries the Noise method and Whisper as WebAssembly, built from app/web_noise into app/web/noise and from
+    # app/web_whisper into app/web/whisper.
     try:
-        finish_web(APP / "build" / "web")
-    except RuntimeError as error:
+        with build_environment(opts.online, "web") as offline:
+            build_wasm(offline)
+            prepare_packages(offline)
+            subprocess.run(flutter_args(opts.kind, opts.wasm, offline), check=True, cwd=APP)
+            finish_web(APP / "build" / "web")
+    except (RuntimeError, subprocess.CalledProcessError) as error:
         sys.exit(f"build.py: {error}")
     if opts.kind == "chromium":
         package_ui(

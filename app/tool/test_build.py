@@ -10,10 +10,10 @@ from build import flutter_args, package_ui, package_debug_extension
 
 class DesktopTests(unittest.TestCase):
     def setUp(self):
-        # A deps checkout the environment names is not looked for, which would run git.
-        patcher = patch.dict("build.os.environ", {"CANOA_DEPS": "/deps"})
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # A deps checkout the environment names is not looked for, which would run git; the SDK is not inspected.
+        for patcher in (patch.dict("build.os.environ", {"CANOA_DEPS": "/deps"}), patch("build.require_pinned_sdk")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_runner_detection_follows_the_platform_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -141,20 +141,17 @@ class DesktopTests(unittest.TestCase):
         host = build.host_platform()
         with patch("sys.argv", ["build.py", "desktop", "--debug", "--run"]):
             build.main()
-        desktop.assert_called_once_with(host, True, True, False, "auto", "bundled")
+        desktop.assert_called_once_with(host, True, True, False, False, "bundled")
         with patch("sys.argv", ["build.py", "desktop", "--portable"]):
             build.main()
-        desktop.assert_called_with(host, False, False, True, "auto", "bundled")
+        desktop.assert_called_with(host, False, False, True, False, "bundled")
         with patch("sys.argv", ["build.py", "desktop", "--online"]):
             build.main()
-        desktop.assert_called_with(host, False, False, False, "online", "bundled")
-        with patch("sys.argv", ["build.py", "desktop", "--offline"]):
-            build.main()
-        desktop.assert_called_with(host, False, False, False, "offline", "bundled")
+        desktop.assert_called_with(host, False, False, False, True, "bundled")
         with patch("sys.argv", ["build.py", "desktop", "--office-js", "cdn"]):
             build.main()
-        desktop.assert_called_with(host, False, False, False, "auto", "cdn")
-        for bad in (["desktop", "--online", "--offline"], ["pwa", "--offline"], ["pwa", "--office-js", "cdn"],
+        desktop.assert_called_with(host, False, False, False, False, "cdn")
+        for bad in (["desktop", "--offline"], ["pwa", "--offline"], ["pwa", "--office-js", "cdn"],
                     ["desktop", "--office-js", "elsewhere"]):
             with patch("sys.argv", ["build.py", *bad]), self.assertRaises(SystemExit):
                 build.main()
@@ -174,9 +171,9 @@ class DesktopTests(unittest.TestCase):
     @patch("build.require_tools")
     @patch("build.subprocess.run")
     def test_build_and_run_commands(self, run, _t, _f, _e, _x, restore):
-        build.build_desktop("windows", False, False)
+        build.build_desktop("windows", False, False, online=True)
         self.assertEqual(run.call_args.args[0], ["flutter", "build", "windows", "--release", *build.BRAND.defines()])
-        build.build_desktop("windows", True, True)
+        build.build_desktop("windows", True, True, online=True)
         self.assertEqual(run.call_args.args[0], ["flutter", "run", "-d", "windows", "--debug", *build.BRAND.defines()])
         self.assertEqual(restore.call_count, 2)
 
@@ -189,8 +186,8 @@ class DesktopTests(unittest.TestCase):
     @patch("build.require_tools")
     @patch("build.subprocess.run")
     def test_portable_builds_the_web_app_in_and_packages_the_release_folder(self, run, _t, _f, _e, _x, web, package, _r):
-        build.build_desktop("windows", False, False, portable=True)
-        web.assert_called_once()
+        build.build_desktop("windows", False, False, portable=True, online=True)
+        web.assert_called_once_with(None)
         self.assertEqual(run.call_args.args[0], ["flutter", "build", "windows", "--release", *build.BRAND.defines()])
         self.assertEqual(run.call_args.kwargs["env"]["CANOA_WEB_DIST"], str(Path("app/build/web")))
         package.assert_called_once_with("windows", Path("CanoaUI.exe"))
@@ -209,19 +206,21 @@ class DesktopTests(unittest.TestCase):
 @patch("build.subprocess.run")
 class PubModeTests(unittest.TestCase):
     def setUp(self):
-        patcher = patch.dict("build.os.environ", {"PUB_CACHE": "/user/cache", "CANOA_DEPS": "/deps"})
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (patch.dict("build.os.environ", {"PUB_CACHE": "/user/cache", "CANOA_DEPS": "/deps"}),
+                        patch("build.require_pinned_sdk")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def commands(self, run):
         return [call.args[0] for call in run.call_args_list]
 
+    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
     @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
-    def test_offline_is_chosen_when_deps_matches(self, plan, run, _t, _f, ensure, *_):
+    def test_offline_is_the_default_and_builds_without_resolving_again(self, plan, _d, run, _t, _f, ensure, *_):
         seen = []
         run.side_effect = lambda *a, **k: seen.append(build.os.environ["PUB_CACHE"])
         ensure.side_effect = lambda *a, **k: seen.append("runner")
-        build.build_desktop("windows", False, False, mode="auto")
+        build.build_desktop("windows", False, False)
         self.assertEqual(self.commands(run), [
             ["flutter", "pub", "get", "--offline"], ["flutter", "build", "windows", "--release", "--no-pub", *build.BRAND.defines()],
         ])
@@ -230,65 +229,131 @@ class PubModeTests(unittest.TestCase):
         self.assertEqual(build.os.environ["PUB_CACHE"], "/user/cache", "the cache is put back")
         self.assertEqual(ensure.call_args.kwargs, {"offline": True})
 
+    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
     @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None, Path("/cargo_home")))
-    def test_offline_points_cargo_at_deps_crates_with_the_network_off(self, plan, run, *_):
+    def test_offline_points_cargo_at_deps_crates_and_turns_the_network_off(self, plan, _d, run, *_):
         seen = []
-        run.side_effect = lambda *a, **k: seen.append(
-            (build.os.environ.get("CARGO_HOME"), build.os.environ.get("CARGO_NET_OFFLINE")))
+        run.side_effect = lambda *a, **k: seen.append(tuple(build.os.environ.get(key) for key in (
+            "CARGO_HOME", "CARGO_NET_OFFLINE", "FLUTTER_STORAGE_BASE_URL", "FLUTTER_SUPPRESS_ANALYTICS")))
         with patch.dict("build.os.environ", {"CARGO_HOME": "/mine"}):
-            build.build_desktop("windows", False, False, mode="auto")
+            build.build_desktop("windows", False, False)
             self.assertEqual(build.os.environ["CARGO_HOME"], "/mine")
-        self.assertEqual(seen, [(str(Path("/cargo_home")), "true")] * 2)
-        self.assertNotIn("CARGO_NET_OFFLINE", build.os.environ)
+        self.assertEqual(seen, [(str(Path("/cargo_home")), "true", build.NO_STORAGE, "true")] * 2)
+        for key in ("CARGO_NET_OFFLINE", "FLUTTER_STORAGE_BASE_URL", "FLUTTER_SUPPRESS_ANALYTICS"):
+            self.assertNotIn(key, build.os.environ)
 
     @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "the deps branch's crates/ does not cover Cargo.lock: crates/x-1.0.0: missing"))
-    def test_crates_deps_does_not_cover_falls_back_online_with_cargo_untouched(self, plan, run, *_):
-        seen = []
-        run.side_effect = lambda *a, **k: seen.append(build.os.environ.get("CARGO_NET_OFFLINE"))
-        with patch("builtins.print") as out:
-            build.build_desktop("windows", False, False, mode="auto")
-        self.assertEqual(seen, [None])
-        self.assertIn("crates/x-1.0.0", str(out.call_args_list))
-
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "git dependencies are not in the pub cache"))
-    def test_a_missing_dependency_falls_back_online_and_says_why(self, plan, run, *_):
-        with patch("builtins.print") as out:
-            build.build_desktop("windows", False, False, mode="auto")
-        self.assertEqual(self.commands(run), [["flutter", "build", "windows", "--release", *build.BRAND.defines()]])
-        said = " ".join(str(call.args[0]) for call in out.call_args_list)
-        self.assertIn("online", said)
-        self.assertIn("git dependencies are not in the pub cache", said)
-
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "the deps branch's pubspec.lock differs"))
-    def test_offline_mode_errors_instead_of_falling_back(self, plan, run, *_):
-        with self.assertRaisesRegex(RuntimeError, "pubspec.lock differs"):
-            build.build_desktop("windows", False, False, mode="offline")
+    def test_crates_the_deps_branch_lacks_stop_the_build_and_name_the_fix(self, plan, run, *_):
+        with self.assertRaisesRegex(RuntimeError, r"crates/x-1\.0\.0.*mirror_crates\.py sync"):
+            build.build_desktop("windows", False, False)
         run.assert_not_called()
 
+    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "git dependencies are not in the pub cache"))
+    def test_a_missing_dependency_stops_the_build_instead_of_going_online(self, plan, run, *_):
+        with self.assertRaisesRegex(RuntimeError, "git dependencies are not in the pub cache"):
+            build.build_desktop("windows", False, False)
+        run.assert_not_called()
+
+    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
     @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
-    def test_a_failed_offline_resolution_falls_back_in_auto_but_not_offline(self, plan, run, *_):
+    def test_a_failed_offline_resolution_stops_the_build(self, plan, _d, run, *_):
         def fail_offline(command, **_):
             if "--offline" in command:
                 raise build.subprocess.CalledProcessError(1, command)
 
         run.side_effect = fail_offline
-        with patch("builtins.print"):
-            build.build_desktop("windows", False, False, mode="auto")
-        self.assertEqual(self.commands(run)[-1], ["flutter", "build", "windows", "--release", *build.BRAND.defines()])
-        with self.assertRaisesRegex(RuntimeError, "offline"):
-            build.build_desktop("windows", False, False, mode="offline")
+        with self.assertRaisesRegex(RuntimeError, "pub get --offline failed"):
+            build.build_desktop("windows", False, False)
+        self.assertEqual(self.commands(run), [["flutter", "pub", "get", "--offline"]])
 
     @patch("build.offline_pub.plan")
     def test_online_skips_deps(self, plan, run, *_):
-        build.build_desktop("windows", False, False, mode="online")
+        build.build_desktop("windows", False, False, online=True)
         plan.assert_not_called()
         self.assertEqual(self.commands(run), [["flutter", "build", "windows", "--release", *build.BRAND.defines()]])
+        self.assertNotIn("FLUTTER_STORAGE_BASE_URL", build.os.environ)
+
+
+@patch("build.build_noise")
+@patch("build.finish_web")
+@patch("build.flutter_program", return_value="flutter")
+@patch("build.subprocess.run")
+class WebModeTests(unittest.TestCase):
+    """The PWA, the extension and the Office pane resolve like the desktop: from the deps branch, and never online unasked."""
+
+    def setUp(self):
+        for patcher in (patch.dict("build.os.environ", {"PUB_CACHE": "/user/cache", "CANOA_DEPS": "/deps"}),
+                        patch("build.require_pinned_sdk")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def commands(self, run):
+        return [call.args[0] for call in run.call_args_list]
+
+    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
+    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
+    def test_the_pwa_resolves_offline_and_builds_without_resolving_again(self, plan, _d, run, _f, _fin, noise):
+        for kind in ("pwa", "chromium"):
+            run.reset_mock()
+            with patch("sys.argv", ["build.py", kind]), patch("build.package_ui"):
+                build.main()
+            commands = self.commands(run)
+            self.assertEqual(commands[0], ["flutter", "pub", "get", "--offline"])
+            self.assertIn("--no-pub", commands[1])
+            self.assertEqual(noise.call_args.args[0].deps, Path("/deps"), "the Noise wasm is built from the same deps checkout")
+
+    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "the deps branch lacks hosted packages: web-1.1.1"))
+    def test_a_deps_branch_that_lacks_a_package_stops_every_web_build(self, plan, run, _f, _fin, noise):
+        for kind in ("pwa", "chromium", "office"):
+            with patch("sys.argv", ["build.py", kind]), self.assertRaises(SystemExit) as stopped:
+                build.main()
+            self.assertIn("lacks hosted packages", str(stopped.exception))
+        run.assert_not_called()
+        noise.assert_not_called()
+
+    @patch("build.offline_pub.plan")
+    def test_online_is_the_one_way_to_resolve_from_the_network(self, plan, run, _f, _fin, noise):
+        with patch("sys.argv", ["build.py", "pwa", "--online"]):
+            build.main()
+        plan.assert_not_called()
+        self.assertEqual(self.commands(run)[0], ["flutter", "pub", "get"])
+        self.assertEqual(noise.call_args.args, (None,))
+
+    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
+    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
+    def test_the_host_web_build_resolves_offline_too(self, plan, _d, run, _f, _fin, noise):
+        with patch.object(Path, "is_file", return_value=True):
+            build.build_web_for_host(build.Offline(Path("/deps"), Path("/seeded"), None))
+        commands = self.commands(run)
+        self.assertEqual(commands[0], ["flutter", "pub", "get", "--offline"])
+        self.assertIn("--no-pub", commands[1])
+
+
+class PinnedSdkTests(unittest.TestCase):
+    def test_an_sdk_that_is_not_the_pin_stops_the_build_and_names_the_mirror_install(self):
+        with tempfile.TemporaryDirectory() as tmp, patch("build.flutter_program", return_value=str(Path(tmp) / "bin" / "flutter")):
+            with self.assertRaisesRegex(RuntimeError, r"(?s)is not a Flutter SDK.*flutter_pin\.py install"):
+                build.require_pinned_sdk("web")
+
+    def test_an_sdk_without_the_platforms_engine_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp, patch("build.flutter_program", return_value=str(Path(tmp) / "bin" / "flutter")), \
+                patch.object(build.flutter_pin, "sdk_problems", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "not precached for linux"):
+                build.require_pinned_sdk("linux")
+
+    def test_an_offline_build_has_no_storage_to_download_from(self):
+        self.assertEqual(build.network_off(None), {})
+        with patch.dict("build.os.environ", {"FLUTTER_STORAGE_BASE_URL": "http://127.0.0.1:5000"}):
+            changes = build.network_off(build.Offline(Path("/d"), Path("/c"), None))
+        self.assertEqual(changes["FLUTTER_STORAGE_BASE_URL"], "http://127.0.0.1:5000", "a loopback mirror the person serves is kept")
 
 
 class PackagingTests(unittest.TestCase):
     @patch("build.shutil.which", return_value="/bin/flutter")
     def test_web_wasm_flag(self, _):
         self.assertIn("--wasm", flutter_args("pwa", True))
+        self.assertNotIn("--no-pub", flutter_args("pwa", False))
+        self.assertIn("--no-pub", flutter_args("pwa", False, build.Offline(Path("/d"), Path("/c"), None)))
         self.assertNotIn("--wasm", flutter_args("pwa", False))
         self.assertIn("--base-href", flutter_args("chromium", False))
 
