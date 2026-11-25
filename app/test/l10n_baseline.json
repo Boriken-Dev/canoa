@@ -65,7 +65,7 @@
   "lib/served/folder_dialog.dart": 8,
   "lib/served/host_files.dart": 4,
   "lib/session_store/session_history.dart": 1,
-  "lib/settings/agent_sections.dart": 37,
+  "lib/settings/agent_sections.dart": 36,
   "lib/settings/app_sections.dart": 64,
   "lib/settings/extension_settings.dart": 17,
   "lib/settings/host_sections.dart": 3,

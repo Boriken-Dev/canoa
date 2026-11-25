@@ -676,7 +676,7 @@ class _CanoaAppState extends State<CanoaApp> {
     // The person's file holds [host] as the dialog left it, so a value it took out falls back to a lower layer's.
     final changed = config.withHost(fromDialog.host, source: config.source.withOwn('host', fromDialog.source.own['host']));
     if (changed.hostEntries.isNotEmpty) {
-      final problem = await checkConfig(changed);
+      final problem = await checkConfig(changed, tool: host.tool);
       if (problem != null) return problem;
     }
     await _write(changed);

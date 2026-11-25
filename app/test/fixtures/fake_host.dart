@@ -47,7 +47,9 @@ final class FakeTool implements HostTool {
   final children = <FakeChild>[];
   final ran = <List<String>>[];
   bool leavesOnInput = true;
-  HostOutput Function(List<String>) answer = (_) => const HostOutput(0, '', '');
+  HostOutput Function(List<String>) answer = (args) => args.firstOrNull == 'control'
+      ? const HostOutput(0, '{"jsonrpc":"2.0","id":1,"result":{}}\n', '')
+      : const HostOutput(0, '', '');
 
   @override
   String get path => 'canoa';

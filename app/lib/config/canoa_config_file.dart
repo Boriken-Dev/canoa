@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../desktop/host_tool.dart' show HostTool;
 import 'canoa_config.dart';
 import 'canoa_config_none.dart'
     if (dart.library.io) 'canoa_config_io.dart' as platform;
@@ -28,7 +29,7 @@ final class ConfigUnreadable implements Exception {
 
 /// What the host says is wrong with the configuration [config] would make, in its own words, or null when it would read it: nothing is
 /// written.
-Future<String?> checkConfig(CanoaConfig config) => platform.checkDesktopConfig(config);
+Future<String?> checkConfig(CanoaConfig config, {HostTool? tool}) => platform.checkDesktopConfig(config, tool: tool);
 
 /// Writes what changed to the person's own file, through the host's configuration store (`canoa control`, when no host serves): what
 /// they changed or already had there, never a value from the installed or the system's file. Throws [ConfigUnreadable] for the defaults

@@ -29,7 +29,7 @@ final class AdvancedTable {
 
   factory AdvancedTable.read(Map<Object?, Object?> raw) => AdvancedTable(
     path: [for (final key in raw['path'] as List<Object?>) '$key'],
-    title: '${raw['title']}',
+    title: raw['title'] as String,
     shape: switch (raw['shape']) {
       'entries' => AdvancedShape.entries,
       'list' => AdvancedShape.list,
@@ -378,10 +378,11 @@ class _TableEditorState extends State<_TableEditor> {
         // A value a lower layer gives and the person's file does not.
         for (final MapEntry(:key, :value) in table.inherited.entries) {
           if (mine.containsKey(key)) continue;
+          final shown = '$key = ${jsonEncode(value.value)}';
           rows.add(ListTile(
             key: Key('advanced-${table.id}-inherited-$key'),
             dense: true,
-            title: Text('$key = ${jsonEncode(value.value)}'),
+            title: Text(shown),
             subtitle: Text(text('cfg.from_layer_note', {'layer': value.layer})),
           ));
         }
@@ -393,7 +394,8 @@ class _TableEditorState extends State<_TableEditor> {
       case AdvancedShape.list:
         final mine = table.ownRows;
         for (var at = 0; at < mine.length; at++) {
-          rows.add(_row(context, key: '$at', title: '${mine[at]['label'] ?? mine[at]['id'] ?? at + 1}', subtitle: mine[at].keys.join(', '), own: true));
+          final name = '${mine[at]['label'] ?? mine[at]['id'] ?? at + 1}';
+          rows.add(_row(context, key: '$at', title: name, subtitle: mine[at].keys.join(', '), own: true));
         }
         for (final MapEntry(:value) in table.inherited.entries) {
           rows.add(ListTile(key: Key('advanced-${table.id}-inherited'), dense: true, title: Text(jsonEncode(value.value)), subtitle: Text(text('cfg.from_layer_note', {'layer': value.layer}))));

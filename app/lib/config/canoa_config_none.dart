@@ -1,3 +1,4 @@
+import '../desktop/host_tool.dart' show HostTool;
 import 'canoa_config.dart';
 
 String? desktopConfigPath() => null;
@@ -10,4 +11,4 @@ Future<void> saveDesktopConfig(CanoaConfig config) async =>
 
 List<String> hostConfigArgs(String path) => ['--config', path];
 
-Future<String?> checkDesktopConfig(CanoaConfig config) async => null;
+Future<String?> checkDesktopConfig(CanoaConfig config, {HostTool? tool}) async => null;
