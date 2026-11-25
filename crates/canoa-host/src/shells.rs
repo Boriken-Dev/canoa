@@ -97,7 +97,11 @@ impl Origin {
             .to_string_lossy()
             .replace('\\', "/")
             .to_ascii_lowercase();
-        if text.contains("/windows/system32/") || text.contains("/windows/sysnative/") {
+        // `WindowsApps/bash.exe` is the Store's alias of WSL's launcher.
+        if text.contains("/windows/system32/")
+            || text.contains("/windows/sysnative/")
+            || text.contains("/windowsapps/")
+        {
             Self::Wsl
         } else if text.contains("msys") {
             Self::Msys2
@@ -160,6 +164,8 @@ pub struct Lookup {
     pub git_bash: Option<PathBuf>,
     /// See `git_bash`.
     pub powershell: Option<PathBuf>,
+    /// The WSL distributions installed, the default one first: the one a WSL `bash.exe` starts.
+    pub wsl: Vec<String>,
 }
 
 impl Lookup {
@@ -195,6 +201,11 @@ impl Lookup {
             login: var("SHELL"),
             git_bash: crate::sources::managed_program("git-bash").map(|(path, _)| path),
             powershell: crate::sources::managed_program("powershell").map(|(path, _)| path),
+            wsl: if windows {
+                wsl_distributions()
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -215,6 +226,43 @@ impl Lookup {
             .filter(|path| runs(path))
             .collect()
     }
+}
+
+/// The names of the WSL distributions, the default first, as `wsl.exe --list --quiet` prints them; none when WSL is not there or
+/// does not answer within a few seconds (a frozen WSL VM hangs its commands). Asked once per process.
+fn wsl_distributions() -> Vec<String> {
+    use std::sync::OnceLock;
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            let (send, receive) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let out = std::process::Command::new("wsl.exe")
+                    .args(["--list", "--quiet"])
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .output();
+                let _ = send.send(out);
+            });
+            let Ok(Ok(out)) = receive.recv_timeout(core::time::Duration::from_secs(4)) else {
+                return Vec::new();
+            };
+            if !out.status.success() {
+                return Vec::new();
+            }
+            // `wsl.exe` writes UTF-16LE.
+            let units: Vec<u16> = out
+                .stdout
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect();
+            String::from_utf16_lossy(&units)
+                .lines()
+                .map(|line| line.trim().trim_start_matches('\u{feff}').to_owned())
+                .filter(|line| !line.is_empty())
+                .collect()
+        })
+        .clone()
 }
 
 /// The lower-case name of a program without its extension.
@@ -362,25 +410,25 @@ fn windows_bashes(lookup: &Lookup, found: &mut Found) {
     for path in git {
         if runs(&path) {
             let origin = Origin::of_bash(&path);
-            found.push_bash(&path, origin);
+            found.push_bash(lookup, &path, origin);
         }
     }
     for root in &lookup.msys2 {
         let path = root.join("usr/bin/bash.exe");
         if runs(&path) {
-            found.push_bash(&path, Origin::Msys2);
+            found.push_bash(lookup, &path, Origin::Msys2);
         }
     }
     if let Some(root) = &lookup.system_root {
         for dir in ["System32", "Sysnative"] {
             let path = root.join(dir).join("bash.exe");
             if runs(&path) {
-                found.push_bash(&path, Origin::Wsl);
+                found.push_bash(lookup, &path, Origin::Wsl);
             }
         }
     }
     for path in lookup.on_path("bash") {
-        found.push_bash(&path, Origin::of_bash(&path));
+        found.push_bash(lookup, &path, Origin::of_bash(&path));
     }
 }
 
@@ -406,7 +454,11 @@ const GIT_USR_BASH: &str = "/usr/bin/bash.exe";
 /// package's `WindowsApps/Microsoft.PowerShell_x/pwsh.exe` name one program, as do Git for Windows' `bin/bash.exe` and the
 /// `usr/bin/bash.exe` it starts; any other path names itself.
 fn program_key(path: &Path) -> String {
-    let text = plain(path);
+    // The same file reached through a link, a `..` or another spelling is one program.
+    let text = std::fs::canonicalize(path).map_or_else(
+        |_| plain(path),
+        |real| plain(&real).trim_start_matches("//?/").to_owned(),
+    );
     if let Some(at) = text.find(STORE_ALIASES) {
         let file = text.rsplit('/').next().unwrap_or_default();
         return format!("{}{STORE_ALIASES}{file}", &text[..at]);
@@ -439,6 +491,12 @@ impl Found {
             }
             return;
         }
+        // Two of one kind (two Git for Windows installations, say) are told apart by where each is.
+        let label = if self.0.iter().any(|shell| shell.label == label) {
+            format!("{label} ({})", path.display())
+        } else {
+            label.to_owned()
+        };
         let mut unique = id.to_owned();
         let mut count = 1;
         while self.0.iter().any(|shell| shell.id == unique) {
@@ -447,21 +505,27 @@ impl Found {
         }
         self.0.push(Shell {
             id: unique,
-            label: label.to_owned(),
+            label,
             path: path.to_path_buf(),
             family,
             origin,
         });
     }
 
-    fn push_bash(&mut self, path: &Path, origin: Origin) {
+    fn push_bash(&mut self, lookup: &Lookup, path: &Path, origin: Origin) {
         let (id, label) = match origin {
-            Origin::GitForWindows => ("git-bash", "Git Bash"),
-            Origin::Msys2 => ("msys2", "MSYS2 bash"),
-            Origin::Wsl => ("wsl", "WSL bash"),
-            _ => ("bash", "bash"),
+            Origin::GitForWindows => ("git-bash", "Git Bash".to_owned()),
+            Origin::Msys2 => ("msys2", "MSYS2 bash".to_owned()),
+            Origin::Wsl => (
+                "wsl",
+                lookup.wsl.first().map_or_else(
+                    || "bash in WSL".to_owned(),
+                    |distribution| format!("bash in WSL ({distribution})"),
+                ),
+            ),
+            _ => ("bash", "bash".to_owned()),
         };
-        self.push(id, label, path, Family::Bash, origin);
+        self.push(id, &label, path, Family::Bash, origin);
     }
 }
 
@@ -620,32 +684,48 @@ impl Plan {
             .default
             .as_deref()
             .map(|setting| resolve(setting, lookup, &found));
-        let entries = &self.agents;
-        let agents: Vec<Value> = entries
-            .iter()
-            .map(|agent| {
-                let setting = agent.own.as_deref().or(self.default.as_deref());
-                let mut line = json!({
-                    "entry": agent.entry,
-                    "harness": agent.harness,
-                    "shell": setting,
-                    "own": agent.own.is_some(),
-                });
-                if let Some(setting) = setting {
-                    match resolve(setting, lookup, &found) {
-                        Ok(shell) => {
-                            let applied = for_harness(&agent.harness, &shell, lookup.windows);
-                            line["id"] = json!(shell.id);
-                            line["env"] =
-                                json!(applied.env.iter().map(|(name, _)| name).collect::<Vec<_>>());
-                            line["notice"] = json!(applied.notice);
-                        }
-                        Err(why) => line["problem"] = json!(why),
+        let line_for = |entry: Option<&AgentShell>, harness: &str| {
+            let own = entry.and_then(|agent| agent.own.as_deref());
+            let setting = own.or(self.default.as_deref());
+            let title = crate::vendors::by_agent(harness).map_or(harness, |vendor| vendor.title);
+            let mut line = json!({
+                "entry": entry.map(|agent| agent.entry.as_str()),
+                "harness": harness,
+                "title": title,
+                "hosted": entry.is_some(),
+                "shell": setting,
+                "own": own.is_some(),
+            });
+            if let Some(setting) = setting {
+                match resolve(setting, lookup, &found) {
+                    Ok(shell) => {
+                        let applied = for_harness(harness, &shell, lookup.windows);
+                        line["id"] = json!(shell.id);
+                        line["env"] =
+                            json!(applied.env.iter().map(|(name, _)| name).collect::<Vec<_>>());
+                        line["notice"] = json!(applied.notice);
                     }
+                    Err(why) => line["problem"] = json!(why),
                 }
-                line
-            })
+            }
+            line
+        };
+        // Every agent the host can run has a row: one for each of its entries, then one for each agent no entry runs.
+        let mut agents: Vec<Value> = self
+            .agents
+            .iter()
+            .map(|agent| line_for(Some(agent), &agent.harness))
             .collect();
+        agents.extend(
+            crate::vendors::all()
+                .iter()
+                .filter(|vendor| {
+                    self.agents
+                        .iter()
+                        .all(|agent| agent.harness != vendor.agent)
+                })
+                .map(|vendor| line_for(None, vendor.agent)),
+        );
         let mut report = json!({
             "shells": found.iter().map(Shell::to_json).collect::<Vec<_>>(),
             "setting": self.default,
@@ -932,5 +1012,56 @@ mod tests {
             "{:?}",
             found.0[0].path
         );
+    }
+
+    #[test]
+    fn the_stores_wsl_alias_is_wsl_named_for_its_distribution_and_apart_from_git_bash() {
+        let root = scratch("wsl-alias");
+        let apps = root.join("Local/Microsoft/WindowsApps");
+        let lookup = Lookup {
+            path: vec![root.join("Program Files/Git/usr/bin"), apps.clone()],
+            wsl: vec!["FedoraLinux-44".to_owned(), "Debian".to_owned()],
+            ..windows(&root)
+        };
+        touch(&root.join("Program Files/Git/bin/bash.exe"));
+        touch(&root.join("Program Files/Git/usr/bin/bash.exe"));
+        touch(&apps.join("bash.exe"));
+        let found = detect(&lookup);
+        assert_eq!(ids(&found), ["git-bash", "wsl"], "{found:#?}");
+        assert_eq!(found[0].label, "Git Bash");
+        assert_eq!(found[1].origin, Origin::Wsl);
+        assert_eq!(found[1].label, "bash in WSL (FedoraLinux-44)");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn one_executable_reached_by_two_spellings_is_listed_once() {
+        let root = scratch("spellings");
+        let bin = root.join("tools/bin");
+        touch(&bin.join("bash.exe"));
+        let lookup = Lookup {
+            // The same folder, spelled through `..`.
+            path: vec![bin.clone(), root.join("tools/other/../bin")],
+            ..windows(&root)
+        };
+        let found = detect(&lookup);
+        assert_eq!(ids(&found), ["bash"], "{found:#?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn two_shells_of_one_kind_have_labels_that_differ() {
+        let mut found = Found::default();
+        for path in ["C:/A/Git/bin/bash.exe", "D:/B/Git/bin/bash.exe"] {
+            found.push(
+                "git-bash",
+                "Git Bash",
+                Path::new(path),
+                Family::Bash,
+                Origin::GitForWindows,
+            );
+        }
+        assert_ne!(found.0[0].label, found.0[1].label, "{:?}", found.0);
+        assert!(found.0[1].label.contains("B/Git"), "{:?}", found.0[1].label);
     }
 }

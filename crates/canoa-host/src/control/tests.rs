@@ -538,7 +538,29 @@ fn shell_list_names_the_shells_found_the_choice_and_what_each_agent_is_told() {
         "a host choice that is not here is said: {answer}"
     );
     let agents = report["agents"].as_array().expect("agents");
-    assert_eq!(agents.len(), 2);
+    // The two entries come first; every other agent the host's providers describe has a row of its own, not hosted.
+    let hosted: Vec<_> = agents.iter().filter(|row| row["hosted"] == true).collect();
+    assert_eq!(hosted.len(), 2, "{agents:?}");
+    let vendors = crate::vendors::all();
+    assert!(vendors.len() > 2, "the bundled agents are described");
+    for vendor in &vendors {
+        assert!(
+            agents.iter().any(|row| row["harness"] == vendor.agent),
+            "{} has a row: {agents:?}",
+            vendor.agent
+        );
+    }
+    assert_eq!(
+        agents.len(),
+        2 + vendors
+            .iter()
+            .filter(|v| v.agent != "claude" && v.agent != "codex")
+            .count()
+    );
+    assert!(
+        agents.iter().all(|row| row["title"].is_string()),
+        "{agents:?}"
+    );
     assert_eq!(agents[0]["own"], true);
     assert_eq!(
         agents[0]["id"], "custom",
