@@ -12,7 +12,7 @@ Imports only `guatiao`, `guatiao/kinds`, `guatiao/provide` and its own files by 
 class AgentVendor extends Provider {          // vendor.js
   static agent; static title;                 // required; agent = its acp_harness id, else its source's name
   static program; static vendor; static aos; static model_variable; static tool_name; static skills_folder; static home_variable; static home_folder; static mark; static look;   // optional
-  static standards = []; static names = []; static markers = []; static context_files = []; static home_context_files = []; static modes = []; static endpoints = [];   // {id, title} lists; endpoints: the https addresses the program reaches
+  static standards = []; static names = []; static markers = []; static context_files = []; static home_context_files = []; static login_files = []; static modes = []; static endpoints = [];   // {id, title} lists; endpoints: the https addresses the program reaches
   info()                                      // override to compute the description
 }
 class StoreExtension extends Provider {       // store.js

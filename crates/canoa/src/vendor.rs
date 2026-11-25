@@ -100,6 +100,11 @@ pub struct VendorInfo {
     /// The files in that folder the agent loads as the person's own instructions, as paths below it written with `/` (`CLAUDE.md`).
     #[map(default)]
     pub home_context_files: Vec<String>,
+    /// The files in that folder the agent keeps its own sign-in in (`.credentials.json`), as paths below it written with `/`. The host
+    /// lists the agent's own login as the account `local` only when one of them is there and not empty; an agent that lists none keeps
+    /// it somewhere a file does not say (a keyring), so its `local` account is always listed.
+    #[map(default)]
+    pub login_files: Vec<String>,
     /// The credential standards that are the vendor's own, with their names for people.
     #[map(default)]
     pub standards: Vec<StandardTitle>,
@@ -140,6 +145,7 @@ impl VendorInfo {
             home_variable: None,
             home_folder: None,
             home_context_files: Vec::new(),
+            login_files: Vec::new(),
             standards: Vec::new(),
             names: Vec::new(),
             markers: Vec::new(),

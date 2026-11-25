@@ -69,6 +69,7 @@ impl AgentVendor for CodexVendor {
         info.home_variable = Some("CODEX_HOME".to_owned());
         info.home_folder = Some(".codex".to_owned());
         info.home_context_files = vec!["AGENTS.md".to_owned(), "AGENTS.override.md".to_owned()];
+        info.login_files = vec![crate::acp::accounts::AUTH_FILE.to_owned()];
         info.standards = vec![
             StandardTitle::new("codex", "Codex"),
             StandardTitle::new("openai-api", "OpenAI API"),
