@@ -576,6 +576,36 @@ pub(super) fn layers(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed>
     }
 }
 
+/// `control`: one request of the control channel, answered as the owner over canoa.cfg's files through the configuration store.
+pub(super) fn control(args: &super::args::ControlArgs, front: &dyn Front) -> Result<(), Failed> {
+    let layers = layers_of(&args.config, front, false)?;
+    let request = match args.request.strip_prefix('@') {
+        Some(file) => std::fs::read_to_string(file)
+            .map_err(|error| Failed::usage(format!("{file}: {error}")))?,
+        None => args.request.clone(),
+    };
+    let files = crate::control::Files::new(
+        None,
+        Vec::new(),
+        Some(layers.own.clone()),
+        None,
+        crate::control::UploadLimits::default(),
+    )
+    .with_store(Arc::new(crate::config_store::FileStore::of(&layers)));
+    let control = crate::control::Control::open(
+        None,
+        crate::control::DEFAULT_MAX_RECORDS,
+        crate::control::DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .map_err(Failed::run)?
+    .with_files(files);
+    let answer = control
+        .handle(&crate::control::Caller::Owner, request.trim().as_bytes())
+        .ok_or_else(|| Failed::usage("that is a notification, which has no answer"))?;
+    print(front, &String::from_utf8_lossy(&answer))
+}
+
 pub(super) fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     let config = load(args, front)?;
     for entry in &config.entries {

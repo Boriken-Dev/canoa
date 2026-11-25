@@ -347,9 +347,12 @@ impl Accounts {
         Ok(accounts)
     }
 
-    /// Has the gateways read their own tables from the canoa.cfg at `file`.
-    pub(crate) fn config_from(&self, file: PathBuf) {
-        self.gateways.table_from(file);
+    /// Has the gateways read their own tables from the configuration `store` holds.
+    pub(crate) fn config_from(
+        &self,
+        store: alloc::sync::Arc<dyn canoa::config_store::ConfigStore>,
+    ) {
+        self.gateways.table_from(store);
     }
 
     /// Names the program that starts the host's own helper command, which a gateway runs part of itself in.

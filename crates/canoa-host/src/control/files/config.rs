@@ -228,8 +228,8 @@ impl Files {
             self.change_section(HOST, params.get("value").unwrap_or(&Value::Null), write)?;
         if write {
             done["digest"] = Value::String(host_digest(self.hidden_section(HOST)?.as_ref()));
-            if let Some(path) = self.config.as_deref()
-                && let Ok(cfg) = crate::Config::load(path)
+            if let Ok(store) = self.store()
+                && let Ok(cfg) = crate::Config::from_store(store)
                 && let Ok(mut slot) = self.openers.write()
             {
                 *slot = cfg.openers;
@@ -382,10 +382,9 @@ fn models_in(section: &Value) -> serde_json::Map<String, Value> {
         .collect()
 }
 
-/// The table `name` of the canoa.cfg at `path`, as JSON; an empty object when the file is missing, cannot be read or has no such
-/// table.
-pub(crate) fn table_in(path: &Path, name: &str) -> Value {
-    let table = crate::config_store::FileStore::at(path)
+/// The table `name` the configuration `store` holds, as JSON; an empty object when the store cannot be read or has no such table.
+pub(crate) fn table_in(store: &dyn ConfigStore, name: &str) -> Value {
+    let table = store
         .get(Key::new([name]))
         .ok()
         .and_then(|held| held.value)

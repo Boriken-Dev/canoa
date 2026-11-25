@@ -23,7 +23,6 @@ mod coverage_tests;
 #[cfg(test)]
 mod tests;
 
-use crate::format::formats;
 pub use entries::{
     AccountConfig, CACHE_LIFETIMES, ConfigError, DEFAULT_SHARED_IDLE_SECONDS, Entry, EntryKind,
     HarnessOptions, HostProfile, ImportSearch, Listen, Origin, PoolConfig, SETTING_SOURCES,
@@ -103,43 +102,68 @@ impl Config {
     ///
     /// [`ConfigError::Read`] when the file cannot be read, and as [`Config::from_str_in`].
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let bytes = std::fs::read(path).map_err(|source| ConfigError::Read {
-            path: path.to_owned(),
-            source,
-        })?;
-        let name = path.file_name().and_then(|name| name.to_str());
-        let raw = read_raw(&bytes, name).map_err(|error| config_error(&error, Some(path)))?;
-        let base = path.parent().unwrap_or_else(|| Path::new(""));
-        Self::from_raw(raw, base)
+        Self::load_layers(&Layers::only(path))
     }
 
     /// Reads canoa.cfg's layers, the highest winning key by key (see [`merge_into`]); a layer that does not exist is
-    /// skipped. Relative `library` and `source` paths are taken from the directory of [`Layers::own`].
+    /// skipped. Relative `library` and `source` paths are taken from the directory of [`Layers::own`]. The files are read
+    /// through the host's own configuration store ([`Config::from_store`]).
     ///
     /// # Errors
     ///
     /// [`ConfigError::Read`] for the person's own file when no layer exists, [`ConfigError::Parse`] naming the file of a
     /// layer that is malformed, and as [`Config::from_str_in`].
     pub fn load_layers(layers: &Layers) -> Result<Self, ConfigError> {
-        let existing = layers.existing();
-        if existing.is_empty() {
-            return Self::load(&layers.own);
+        let store = crate::config_store::FileStore::of(layers);
+        if !store.any_present() {
+            return Err(ConfigError::Read {
+                path: layers.own.clone(),
+                source: std::io::Error::from(std::io::ErrorKind::NotFound),
+            });
         }
-        // Each layer on its own first, so that a refusal names its file; the merged document is read after.
-        for file in &existing {
-            formats()
-                .load_typed::<RawFile>(file, anycfg::Options::new())
-                .map_err(|error| config_error(&error, Some(file)))?;
+        Self::from_store(&store)
+    }
+
+    /// Reads the configuration a [`canoa::config_store::ConfigStore`] holds: each layer on its own first, so that a refusal
+    /// names it, and the layers merged by [`merge_into`] after, lowest first. Relative `library` and `source` paths are taken
+    /// from the store's `base_dir`.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::Parse`] when the store cannot be read or a layer is not of the expected shape, and as
+    /// [`Config::from_str_in`].
+    pub fn from_store(store: &dyn canoa::config_store::ConfigStore) -> Result<Self, ConfigError> {
+        let unread = |error: coqui_acp_api::guatiao::library::ProviderError| ConfigError::Parse {
+            file: None,
+            line: None,
+            column: None,
+            what: error.to_string(),
+        };
+        let info = store.describe().map_err(unread)?;
+        let snapshot = store.read().map_err(unread)?;
+        let mut merged = toml::Value::Table(toml::Table::new());
+        for layer in &snapshot.layers {
+            let document = canoa::config_store::json_of(&layer.document)
+                .and_then(|json| serde::Deserialize::deserialize(json).ok())
+                .unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
+            let origin = info
+                .layers
+                .iter()
+                .find(|each| each.id == layer.id)
+                .and_then(|each| each.origin.as_deref());
+            let text = toml::to_string(&document).unwrap_or_default();
+            read_raw(text.as_bytes(), Some("canoa.cfg"))
+                .map_err(|error| config_error(&error, origin.map(Path::new)))?;
+            merge_into(&mut merged, document);
         }
-        let sources: Vec<Option<anycfg::Source<'_>>> = existing
-            .iter()
-            .map(|file| Some(anycfg::Source::path(file)))
-            .collect();
-        let raw = anycfg::Loader::new(formats(), "toml")
-            .load_typed::<_, _, _, RawFile>(sources, &layers::Merging)
-            .map_err(|error| config_error(&error, None))?;
-        let base = layers.own.parent().unwrap_or_else(|| Path::new(""));
-        Self::from_raw(raw, base)
+        let text = toml::to_string(&merged).map_err(|error| ConfigError::Parse {
+            file: None,
+            line: None,
+            column: None,
+            what: error.to_string(),
+        })?;
+        let base = info.base_dir.as_deref().map_or(Path::new(""), Path::new);
+        Self::from_str_named(&text, "canoa.cfg", base)
     }
 
     /// Parses canoa.cfg's text, in TOML, or in YAML or JSON when its first line says `#!yaml` or `#!json`, with relative

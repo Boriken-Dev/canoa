@@ -397,3 +397,61 @@ fn the_page_methods_and_the_advanced_ones_work_over_a_store_that_is_no_file() {
             .is_none()
     );
 }
+
+#[test]
+fn the_layers_are_read_and_ops_are_made_in_the_own_layer_through_the_store() {
+    let rig = Rig::new("advanced-config-change");
+    let low = rig.tmp.join("cfg").join("installed.cfg");
+    std::fs::write(&low, "[sessions]\nkeep = 500\n").expect("low");
+    std::fs::write(&rig.config, "# mine\n[desktop]\nstart_hidden = true\n").expect("own");
+    let layers = crate::config::Layers::from_files(vec![low, rig.config.clone()]);
+    let files = Files::new(
+        None,
+        Vec::new(),
+        Some(rig.config.clone()),
+        None,
+        UploadLimits::default(),
+    )
+    .with_store(Arc::new(crate::config_store::FileStore::of(&layers)));
+    let control = control_with(files);
+    let read = ask(&control, &hosting(), "config/layers", json!({}));
+    let found = read["result"]["layers"].as_array().expect("layers");
+    assert_eq!(found.len(), 2, "{read}");
+    assert_eq!(found[0]["document"]["sessions"]["keep"], 500);
+    assert_eq!(found[1]["writable"], true);
+    assert_eq!(found[1]["document"]["desktop"]["start_hidden"], true);
+
+    let changed = ask(
+        &control,
+        &hosting(),
+        "config/change",
+        json!({"ops": [
+            {"path": ["sessions"], "value": {"keep": 7}},
+            {"path": ["desktop", "start_hidden"]},
+        ], "revision": read["result"]["revision"]}),
+    );
+    assert!(changed["result"]["revision"].is_string(), "{changed}");
+    let text = rig.text();
+    assert!(
+        text.starts_with("# mine\n") && text.contains("keep = 7") && !text.contains("start_hidden"),
+        "{text}"
+    );
+    let stale = ask(
+        &control,
+        &hosting(),
+        "config/change",
+        json!({"ops": [{"path": ["sessions"]}], "revision": read["result"]["revision"]}),
+    );
+    assert_eq!(stale["error"]["code"], super::files::CHANGED, "{stale}");
+    let plain = key("sha256:bb", &[Grant::ConfigWrite, Grant::ConfigRead]);
+    for (method, params) in [
+        ("config/layers", json!({})),
+        ("config/change", json!({"ops": []})),
+    ] {
+        assert_eq!(
+            ask(&control, &plain, method, params)["error"]["code"],
+            DENIED,
+            "{method}"
+        );
+    }
+}

@@ -7,8 +7,6 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use std::path::{Path, PathBuf};
 
-use anycfg::{Error, Merge, MergeValues};
-
 /// The file's name below the user's and the system's configuration directories.
 pub const NAME: &str = "Canoa/canoa.cfg";
 /// The file's name beside the program.
@@ -126,7 +124,7 @@ impl Layers {
 }
 
 /// The installed copy: beside the program, or in the folder the launcher names.
-fn installed_file() -> Option<PathBuf> {
+pub(crate) fn installed_file() -> Option<PathBuf> {
     let named = std::env::var_os(INSTALLED_DIR_VARIABLE)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
@@ -204,23 +202,6 @@ pub fn merge_into(previous: &mut toml::Value, next: toml::Value) {
             tables(&mut Vec::new(), below, above);
         }
         (previous, next) => *previous = next,
-    }
-}
-
-/// The merge anycfg's loader runs over the layers.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct Merging;
-
-impl MergeValues<toml::Value> for Merging {
-    fn merge(
-        &self,
-        previous: &mut toml::Value,
-        next: toml::Value,
-        _strategy: Merge,
-        _max_depth: usize,
-    ) -> Result<(), Error> {
-        merge_into(previous, next);
-        Ok(())
     }
 }
 

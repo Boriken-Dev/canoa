@@ -356,7 +356,9 @@ fn bind_accounts_and_boxes(
         )
     };
     if let (Some(accounts), Some(file)) = (&accounts, &options.config_file) {
-        accounts.config_from(file.clone());
+        accounts.config_from(alloc::sync::Arc::new(crate::config_store::FileStore::at(
+            file,
+        )));
     }
     if let Some(accounts) = &accounts {
         accounts.helper_program(crate::cli::Program::new(

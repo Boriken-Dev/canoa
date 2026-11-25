@@ -510,6 +510,91 @@ fn lookup<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
 }
 
 impl Files {
+    /// `config/layers`: every layer of the configuration, lowest first, each with the document it holds, which one is written, and the
+    /// store's revision. What an application that shows where a value comes from reads, whether or not a host serves it.
+    pub(crate) fn config_layers(&self) -> Outcome {
+        let store = self.store()?;
+        let info = store.describe().map_err(store_failed)?;
+        let snapshot = store.read().map_err(store_failed)?;
+        let layers: Vec<Value> = info
+            .layers
+            .iter()
+            .map(|layer| {
+                let document = snapshot
+                    .layers
+                    .iter()
+                    .find(|read| read.id == layer.id)
+                    .and_then(|read| json_of(&read.document))
+                    .unwrap_or_else(|| json!({}));
+                json!({
+                    "id": layer.id,
+                    "label": layer.label,
+                    "origin": layer.origin,
+                    "writable": layer.writable,
+                    "document": document,
+                })
+            })
+            .collect();
+        Ok(json!({
+            "name": info.name,
+            "base_dir": info.base_dir,
+            "revision": snapshot.revision,
+            "layers": layers,
+        }))
+    }
+
+    /// `config/change` `{ops: [{path, value?}], check?, revision?}`: makes the ops in the person's own layer, all or none, through the
+    /// configuration store: a `value` sets the path, none takes it out. With `check` nothing is written; a `revision` the store has left
+    /// is refused with `-32004`.
+    pub(crate) fn config_change(&self, params: &Value) -> Outcome {
+        let _one = self
+            .writing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let store = self.store()?;
+        let ops: Vec<Op> = params
+            .get("ops")
+            .and_then(Value::as_array)
+            .ok_or_else(|| bad("ops is a list of {path, value}"))?
+            .iter()
+            .map(|op| {
+                let path: Vec<String> = op
+                    .get("path")
+                    .and_then(Value::as_array)
+                    .map(|keys| {
+                        keys.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .filter(|keys: &Vec<String>| !keys.is_empty())
+                    .ok_or_else(|| bad("path is the keys from the top, as a list of text"))?;
+                Ok(match op.get("value").filter(|value| !value.is_null()) {
+                    Some(value) => Op::set(path.iter().map(String::as_str), value_of(value)),
+                    None => Op::remove(path.iter().map(String::as_str)),
+                })
+            })
+            .collect::<Result<_, (i32, String)>>()?;
+        let mut changes = Changes::of(ops);
+        changes.check_only = params.get("check").and_then(Value::as_bool) == Some(true);
+        changes.expect_revision = params
+            .get("revision")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let done = store.change(changes).map_err(|error| {
+            let status = error.to_string();
+            (
+                if status.contains("changed since") {
+                    super::CHANGED
+                } else {
+                    super::REFUSED
+                },
+                status,
+            )
+        })?;
+        Ok(json!({"revision": done.revision, "restart": true}))
+    }
+
     /// `config/advanced`: every table the generic editor offers, with its schema, what the person's own file holds and what a lower layer
     /// gives (`inherited`, each with the label of the layer it comes from).
     pub(crate) fn advanced_list(&self) -> Outcome {

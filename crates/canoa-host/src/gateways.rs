@@ -176,7 +176,7 @@ pub(crate) fn vendor_of(kind: &str) -> Option<&'static str> {
 #[derive(Default)]
 pub(crate) struct Gateways {
     home: Option<PathBuf>,
-    config: OnceLock<PathBuf>,
+    config: OnceLock<alloc::sync::Arc<dyn canoa::config_store::ConfigStore>>,
     helper: OnceLock<Program>,
     /// What a test serves in place of the libraries' gateways.
     #[cfg(test)]
@@ -198,9 +198,9 @@ impl Gateways {
         }
     }
 
-    /// Reads each gateway's own table from the canoa.cfg at `file` whenever it opens one, once.
-    pub(crate) fn table_from(&self, file: PathBuf) {
-        let _ = self.config.set(file);
+    /// Reads each gateway's own table from the configuration `store` holds whenever it opens one, once.
+    pub(crate) fn table_from(&self, store: alloc::sync::Arc<dyn canoa::config_store::ConfigStore>) {
+        let _ = self.config.set(store);
     }
 
     /// Names the program that starts the host's own helper command, once.
@@ -270,7 +270,7 @@ impl Gateways {
             )
             .map_err(|_| "the account's settings are not a table".to_owned())?;
         let table = match (&offer.info.table, self.config.get()) {
-            (Some(name), Some(file)) => crate::control::table_in(file, name),
+            (Some(name), Some(store)) => crate::control::table_in(&**store, name),
             _ => serde_json::Value::Object(serde_json::Map::new()),
         };
         let mut request = GatewayRequest::new(grant.id.clone());

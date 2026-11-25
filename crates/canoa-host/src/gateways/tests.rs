@@ -454,7 +454,9 @@ fn the_gateway_is_asked_for_the_account_its_settings_its_home_its_own_table_and_
     let accounts = accounts(&dir, offer);
     let file = dir.0.join("canoa.cfg");
     std::fs::write(&file, "[stand.windows]\n\"local-model\" = 16384\n").expect("a canoa.cfg");
-    accounts.config_from(file);
+    accounts.config_from(alloc::sync::Arc::new(crate::config_store::FileStore::at(
+        &file,
+    )));
     accounts.helper_program(crate::cli::Program::new(
         PathBuf::from("host-program"),
         vec!["--canoa-child".into()],

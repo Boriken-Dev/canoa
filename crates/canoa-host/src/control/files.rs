@@ -178,8 +178,12 @@ impl Files {
         }
     }
 
+    /// The store the configuration lives in, when this host has one.
+    pub(crate) fn config_store(&self) -> Option<&dyn canoa::config_store::ConfigStore> {
+        self.store.as_ref().map(|kept| &*kept.0)
+    }
+
     /// Keeps the configuration in `store` instead of the file `Files::new` was given.
-    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_store(mut self, store: Arc<dyn canoa::config_store::ConfigStore>) -> Self {
         self.store = Some(Kept(store));

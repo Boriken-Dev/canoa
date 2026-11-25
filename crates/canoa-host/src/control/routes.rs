@@ -158,6 +158,26 @@ impl Control {
         allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(params))
     }
 
+    /// `config/layers`: the configuration's layers and the one written.
+    pub(super) fn r_config_layers(
+        &self,
+        _: &Caller,
+        _: &str,
+        _: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.files.config_layers()
+    }
+
+    /// `config/change`: ops made in the person's own layer.
+    pub(super) fn r_config_change(
+        &self,
+        _: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.files.config_change(params)
+    }
+
     /// `config/advanced`: the tables of canoa.cfg no dedicated page edits, with their schemas and values.
     pub(super) fn r_config_advanced(
         &self,

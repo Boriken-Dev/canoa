@@ -610,11 +610,10 @@ impl Control {
             Some(accounts) => accounts.config(),
             // A host that manages no accounts still reads the canoa.cfg it edits, so what the file says (the providers it leaves
             // off) is what a listing says.
-            None => match self.files.config_file() {
-                Some(file) if file.is_file() => {
-                    crate::config::Config::load(file).map_err(|error| (REFUSED, error.to_string()))
-                }
-                _ => crate::config::Config::from_str_in("", Path::new("."))
+            None => match self.files.config_store() {
+                Some(store) => crate::config::Config::from_store(store)
+                    .map_err(|error| (REFUSED, error.to_string())),
+                None => crate::config::Config::from_str_in("", Path::new("."))
                     .map_err(|error| (REFUSED, error.to_string())),
             },
         }

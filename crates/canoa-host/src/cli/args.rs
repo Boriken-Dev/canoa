@@ -66,6 +66,9 @@ pub(super) enum Command {
     OfficeLauncher(LauncherArgs),
     /// Print the canoa.cfg files in the order they are read, lowest layer first, and the one that is written.
     Layers(ConfigArgs),
+    /// Answer one request of the control channel as this computer's owner, over canoa.cfg's files, with no host running: the way an
+    /// application reads and changes its configuration while none serves. Prints the answer, one JSON-RPC line.
+    Control(ControlArgs),
     /// Print this host's peer id, which a client pins.
     /// A home a host is running on keeps its method: naming another is refused unless --force.
     Id {
@@ -704,6 +707,14 @@ pub(super) struct LauncherArgs {
     /// waits for the launcher to end: have the output go to a file or a terminal.
     #[arg(long, conflicts_with_all = ["install", "uninstall", "status"])]
     pub(super) detach: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct ControlArgs {
+    #[command(flatten)]
+    pub(super) config: ConfigArgs,
+    /// The request, one JSON-RPC line; `@FILE` reads it from the file, which a large one needs on a command line that is short.
+    pub(super) request: String,
 }
 
 #[derive(Debug, Args)]

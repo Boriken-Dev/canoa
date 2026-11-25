@@ -166,6 +166,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::Check(args) => commands::check(&args, front),
         Command::OfficeLauncher(args) => office::office_launcher(&args, front),
         Command::Layers(args) => commands::layers(&args, front),
+        Command::Control(args) => commands::control(&args, front),
         Command::Options(args) => commands::options(&args, front),
         Command::Id {
             method,

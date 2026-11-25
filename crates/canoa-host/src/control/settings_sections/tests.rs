@@ -66,7 +66,7 @@ fn an_extensions_section_is_listed_as_its_own_and_another_as_a_group_under_an_ex
 }
 
 /// The sections the application draws itself, in the order it lists them.
-const BUILT_IN: [&str; 17] = [
+const BUILT_IN: [&str; 18] = [
     "general",
     "appearance",
     "notifications",
@@ -82,6 +82,7 @@ const BUILT_IN: [&str; 17] = [
     "store",
     "extensions",
     "catalog_sources",
+    "advanced",
     "providers",
     "about",
 ];

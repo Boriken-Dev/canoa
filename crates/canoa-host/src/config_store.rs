@@ -71,24 +71,38 @@ impl FileStore {
             .iter()
             .position(|file| *file == layers.own)
             .unwrap_or(layers.files.len().saturating_sub(1));
+        let installed = crate::config::layers::installed_file();
+        let system = anycfg::system_config_path(Some(Path::new(crate::config::layers::NAME)));
         let made: Vec<FileLayer> = layers
             .files
             .iter()
             .enumerate()
-            .map(|(at, path)| FileLayer {
-                id: if at == own {
-                    "own".to_owned()
+            .map(|(at, path)| {
+                let (id, what) = if at == own {
+                    ("own".to_owned(), "your canoa.cfg")
+                } else if installed.as_ref() == Some(path) {
+                    ("installed".to_owned(), "the installed canoa.cfg")
+                } else if *path == system {
+                    ("system".to_owned(), "the system's canoa.cfg")
                 } else {
-                    format!("layer-{at}")
-                },
-                label: format!("canoa.cfg ({})", path.display()),
-                path: path.clone(),
+                    (format!("layer-{at}"), "canoa.cfg")
+                };
+                FileLayer {
+                    id,
+                    label: format!("{what} ({})", path.display()),
+                    path: path.clone(),
+                }
             })
             .collect();
         if made.is_empty() {
             return Self::at(&layers.own);
         }
         Self { layers: made, own }
+    }
+
+    /// Whether any layer's file exists.
+    pub(crate) fn any_present(&self) -> bool {
+        self.layers.iter().any(|layer| layer.path.is_file())
     }
 
     fn own(&self) -> &FileLayer {
@@ -368,6 +382,71 @@ mod tests {
             std::fs::read_to_string(&file).expect("read"),
             "[desktop]\nstart_hidden = true\n"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_host_reads_its_configuration_from_any_store_not_only_files() {
+        use canoa::config_store::MemoryStore;
+        let store = MemoryStore::new().with_lower(
+            "installed",
+            "the installed canoa.cfg",
+            serde_json::json!({"host": {"agents": {"low": {"program": "low-agent"}}}}),
+        );
+        store
+            .change(Changes::of(vec![Op::set(
+                ["host", "agents", "mine"],
+                canoa::config_store::value_of(&serde_json::json!({"program": "my-agent"})),
+            )]))
+            .expect("an own entry");
+        let config = crate::Config::from_store(&store).expect("the host reads it");
+        let names: Vec<&str> = config
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, ["low", "mine"], "the layers merge, lowest first");
+
+        // A layer of a shape the host refuses is refused by name, wherever it is kept.
+        let bad = MemoryStore::new().with_lower(
+            "installed",
+            "the installed canoa.cfg",
+            serde_json::json!({"host": {"web": {"no_such_key": 1}}}),
+        );
+        let refused = crate::Config::from_store(&bad).expect_err("refused");
+        assert!(
+            refused.to_string().contains("no_such_key") || refused.to_string().contains("host.web"),
+            "{refused}"
+        );
+
+        // A gateway's table is read from the same store.
+        store
+            .change(Changes::of(vec![Op::set(
+                ["stand"],
+                canoa::config_store::value_of(&serde_json::json!({"windows": {"x": 1}})),
+            )]))
+            .expect("a table");
+        assert_eq!(
+            crate::control::table_in(&store, "stand"),
+            serde_json::json!({"windows": {"x": 1}})
+        );
+        assert_eq!(
+            crate::control::table_in(&store, "nowhere"),
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn a_missing_own_file_is_the_error_callers_know_and_a_layer_that_is_there_alone_is_read() {
+        let dir = dir("load");
+        let own = dir.join("canoa.cfg");
+        let missing = crate::Config::load(&own).expect_err("no file");
+        assert!(
+            matches!(&missing, crate::ConfigError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound),
+            "{missing}"
+        );
+        std::fs::write(&own, "[host.agents.a]\nprogram = \"x\"\n").expect("write");
+        assert_eq!(crate::Config::load(&own).expect("read").entries.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

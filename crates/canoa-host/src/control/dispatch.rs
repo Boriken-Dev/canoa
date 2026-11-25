@@ -263,6 +263,16 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_config_check,
     ),
     rpc(
+        "config/layers",
+        Access::Require(Grant::Hosting),
+        Control::r_config_layers,
+    ),
+    rpc(
+        "config/change",
+        Access::Require(Grant::Hosting),
+        Control::r_config_change,
+    ),
+    rpc(
         "config/advanced",
         Access::Require(Grant::Hosting),
         Control::r_config_advanced,
