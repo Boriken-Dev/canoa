@@ -48,7 +48,7 @@ const POLL = 100n;
 
 /**
  * Lets go of the host's spawner a call was handed: every call does, whether it runs a program or refuses.
- * @param {Spawner | Fetch | undefined} spawner
+ * @param {{ destroy(): void } | undefined} spawner
  */
 export function release(spawner) {
   if (spawner && typeof spawner.destroy === 'function') spawner.destroy();
@@ -334,7 +334,6 @@ export class CommandCatalogSource extends CatalogSource {
    * The program of `fields` run through `spawner`: the catalog it printed, or why it did not produce one.
    * @param {Record<string, unknown>} fields
    * @param {Spawner} spawner
-   * @param {Fetch} fetch
    */
   #run(fields, spawner) {
     const words = Array.isArray(fields.command) ? fields.command.filter((/** @type {unknown} */ word) => typeof word === 'string') : [];

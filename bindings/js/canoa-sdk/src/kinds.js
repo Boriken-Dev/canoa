@@ -4,6 +4,7 @@
 import { kindsOf } from 'guatiao/kinds';
 
 const described = kindsOf({
+  "format": 1,
   "kinds": [
     {
       "name": "account_provider",
