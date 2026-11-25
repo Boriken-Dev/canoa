@@ -7,14 +7,21 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import '../config/canoa_config.dart' show defaultVoiceBackend;
+import 'record_capture.dart';
 import 'speech_backend.dart';
+import 'web_whisper.dart';
+import 'web_whisper_runtime.dart';
 
-/// The speech backends this build can offer: the operating system's service on Windows and macOS, none elsewhere (a browser's
-/// recognizer sends audio to its vendor, and no Linux desktop has a service to ask).
-List<SpeechBackend> platformSpeechBackends() => [
-  if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.macOS))
-    SystemSpeech(defaultTargetPlatform == TargetPlatform.windows ? 'Windows speech recognition' : 'macOS Speech'),
-];
+/// The speech backends this build can offer: the operating system's service on Windows and macOS, and Whisper in the page on the
+/// web (a browser's own recognizer sends audio to its vendor, and no Linux desktop has a service to ask).
+List<SpeechBackend> platformSpeechBackends() {
+  final whisper = platformWhisperRuntime();
+  return [
+    if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.macOS))
+      SystemSpeech(defaultTargetPlatform == TargetPlatform.windows ? 'Windows speech recognition' : 'macOS Speech'),
+    if (whisper != null) WebWhisper(whisper, const RecordCapture()),
+  ];
+}
 
 /// The operating system's own speech service, through the platform plugin. The plugin is started on the first [start], not
 /// before, so the system asks for the microphone only when the person starts to dictate.
