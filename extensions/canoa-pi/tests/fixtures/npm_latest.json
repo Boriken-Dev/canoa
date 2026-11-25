@@ -1,0 +1,9 @@
+{
+ "name": "@earendil-works/pi-coding-agent",
+ "version": "1.6.0",
+ "dist": {
+  "integrity": "sha512-zX1BVEsshx7A2MRuQ6jfr3RJGWw4Wn+vLq5ZfmlvS1RskhRmByaSZVXH/zcwRrWHO7qPgs98pNCbPOEti/t0fQ==",
+  "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.6.0.tgz",
+  "shasum": "c3503fe1496fd6e9025c3d1b66b343f89dfbfaf4"
+ }
+}

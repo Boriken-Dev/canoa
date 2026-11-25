@@ -1,0 +1,6 @@
+0970016d48209a09c4039139629ed79b4a31c5e3d864e792c043419d98fa6466  codex-package-aarch64-apple-darwin.tar.gz
+6aa686d9ac16cc171b8207273ac20eb9321bf3963f2801722045e906c00ea804  codex-package-aarch64-pc-windows-msvc.tar.gz
+faf17b8071927f33346a805dc8cb45de4e08c0d75cf0e5e68cecddca28b8861e  codex-package-aarch64-unknown-linux-musl.tar.gz
+b5e94828f45171f13d81de2b96cae05c0b7e6a7f2f7d3c9d4e748be3d3906c02  codex-package-x86_64-apple-darwin.tar.gz
+b723674d7caf26a3f55121a02d6cad8f3ac8ddf5860747a6edde1c904cf593af  codex-package-x86_64-pc-windows-msvc.tar.gz
+63e3b00065ed7f62166d0522e17f663cb866a31d80d03e63365482ed34a1d991  codex-package-x86_64-unknown-linux-musl.tar.gz

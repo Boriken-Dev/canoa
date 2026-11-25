@@ -15,14 +15,14 @@ use alloc::string::String;
 pub use coqui_acp_claude as acp;
 
 use canoa::preset::SourcePreset;
-use canoa::status::{bad_value, internal, unsupported};
+use canoa::store::catalog::RELEASES_FORMAT;
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
 use canoa::store::recipe::{
-    HOMEBREW_MARKERS, Part, Recipe, Release, classify_by, dotted, get_json, hex_digest,
-    latest_report, measured_platforms, pinned, platform_names,
+    HOMEBREW_MARKERS, Recipe, Release, classify_by, dotted, measured_platforms,
 };
 use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
+    MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM, MANAGER_WINGET, Platform, Serves, StoreInfo,
+    Updatable,
 };
 use canoa::vendor::{
     AccessTarget, AgentVendor, GatewayRoute, HistoryAnswer, HistoryRequest, HookSupport,
@@ -31,10 +31,10 @@ use canoa::vendor::{
     ToolHook, Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_harness::Target;
 
-const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
+use source::ORIGIN as BASE;
 
 /// Claude's look as the JSON document `looks/list` serves: colour tokens for each brightness, an original palette in the spirit of
 /// the product, with no logo or font of it.
@@ -174,30 +174,21 @@ coqui_acp_api::guatiao::local_providers!(
         acp::ClaudeProvider,
         acp::ClaudeAccounts,
         ClaudeVendor,
-        ClaudeStore
+        ClaudeStore,
+        ClaudeReleases
     ]
 );
+
+mod source;
+
+pub use source::{
+    CHANNELS, ClaudeReleases, ClaudeSettings, FINGERPRINT, KEY, SOURCE, Signed, catalog_of,
+    verified,
+};
 
 /// Claude Code.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ClaudeRecipe;
-
-impl ClaudeRecipe {
-    fn newest(
-        channel: Option<&str>,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<String, ProviderError> {
-        let name = match channel.unwrap_or("latest") {
-            "latest" => "latest",
-            "stable" => "stable",
-            other => {
-                return Err(bad_value(format!("Claude Code has no channel {other:?}")));
-            }
-        };
-        let text = tools.fetch_text(&format!("{BASE}/{name}"), 256)?;
-        pinned(text.trim())
-    }
-}
 
 impl Recipe for ClaudeRecipe {
     fn info(&self) -> StoreInfo {
@@ -205,8 +196,13 @@ impl Recipe for ClaudeRecipe {
         info.homepage = Some("https://code.claude.com".to_owned());
         info.serves = vec![Serves::any("claude")];
         info.platforms = measured_platforms();
-        info.channels = vec!["latest".to_owned(), "stable".to_owned()];
+        info.channels = CHANNELS.map(str::to_owned).to_vec();
         info.endpoints = vec![format!("{BASE}/")];
+        info.catalogs = Some(
+            CatalogWords::new("source", "sources", "releases")
+                .in_format(RELEASES_FORMAT)
+                .registering([DefaultCatalog::new("anthropic", SOURCE)]),
+        );
         info
     }
 
@@ -260,66 +256,9 @@ impl Recipe for ClaudeRecipe {
         BTreeMap::from([("DISABLE_AUTOUPDATER".to_owned(), "1".to_owned())])
     }
 
-    fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        latest_report(
-            Self::newest(channel, tools),
-            Some(channel.unwrap_or("latest")),
-        )
-    }
-
-    fn release(
-        &self,
-        version: Option<&str>,
-        channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError> {
-        let version = match version {
-            Some(version) => pinned(version)?,
-            None => Self::newest(channel, tools)?,
-        };
-        let (os, arch) = platform_names(
-            "Claude Code",
-            platform,
-            &[
-                ("windows", "win32"),
-                ("linux", "linux"),
-                ("macos", "darwin"),
-            ],
-            &[("x86_64", "x64"), ("aarch64", "arm64")],
-        )?;
-        let key = format!("{os}-{arch}");
-        let manifest = get_json(tools, &format!("{BASE}/{version}/manifest.json"))?;
-        if manifest["version"].as_str() != Some(version.as_str()) {
-            return Err(internal("the manifest is for another version"));
-        }
-        let entry = manifest["platforms"]
-            .get(&key)
-            .ok_or_else(|| unsupported(format!("version {version} has no build for {key}")))?;
-        let binary = entry["binary"].as_str().unwrap_or(if os == "win32" {
-            "claude.exe"
-        } else {
-            "claude"
-        });
-        if binary.contains(['/', '\\']) || binary.contains("..") {
-            return Err(internal("the manifest names a binary with a path"));
-        }
-        let checksum = entry["checksum"]
-            .as_str()
-            .and_then(|c| hex_digest(c, 64))
-            .ok_or_else(|| internal("the manifest gives no SHA-256 for this build"))?;
-        let download = Download::new(
-            format!("{BASE}/{version}/{key}/{binary}"),
-            entry["size"].as_u64(),
-            Check::Sha256 { value: checksum },
-        );
-        let mut release = Release::new(
-            version,
-            binary,
-            vec![Part::new(download, binary).executable()],
-        );
+    fn adjust(&self, mut release: Release, _platform: &Platform) -> Result<Release, ProviderError> {
         release.notices.push(
-            "The SHA-256 is Anthropic's, from its manifest; the manifest's signature is not checked by this store."
+            "The SHA-256 is Anthropic's, from its manifest, whose signature by Anthropic's release key was verified."
                 .to_owned(),
         );
         Ok(release)

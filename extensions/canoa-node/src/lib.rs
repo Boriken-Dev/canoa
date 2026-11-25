@@ -1,5 +1,5 @@
-//! Node.js for Canoa: `node_store`, nodejs.org's own builds checked against `SHASUMS256.txt` and unpacked into the Store's
-//! folder. Nothing checks a publisher's signature.
+//! Node.js for Canoa: `node_store`, nodejs.org's own builds checked against `SHASUMS256.txt`, whose signature by the release team is
+//! verified, and unpacked into the Store's folder.
 #![forbid(unsafe_code)]
 #![allow(
     clippy::std_instead_of_core,
@@ -13,15 +13,13 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use std::path::Path;
 
-use canoa::status::{bad_value, internal, unsupported};
-use canoa::store::recipe::{
-    Finish, Part, Recipe, Release, UnpackStep, dotted, get_json, pinned, sha256_from_sums, spell,
-};
-use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
-};
+use canoa::status::internal;
+use canoa::store::catalog::RELEASES_FORMAT;
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
+use canoa::store::recipe::{Finish, Recipe, Release, UnpackStep, dotted};
+use canoa::store::{MANAGER_UNKNOWN, Platform, StoreInfo, Updatable};
 use canoa::store_provider;
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::ProviderError;
 
 /// The name this crate's library is registered under.
 pub const LIBRARY: &str = "canoa-node";
@@ -38,34 +36,18 @@ store_provider!(
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-node",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [NodeStore]
+    providers = [NodeStore, NodeReleases]
 );
+
+mod source;
+
+pub use source::{
+    CHANNELS, KEYS, NodeReleases, NodeSettings, SOURCE, catalog_of, heads, read_catalog, signed,
+};
 
 /// Node.js.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NodeRecipe;
-
-impl NodeRecipe {
-    fn newest(
-        channel: Option<&str>,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<String, ProviderError> {
-        let lts = match channel.unwrap_or("lts") {
-            "lts" => true,
-            "current" => false,
-            other => return Err(bad_value(format!("Node has no channel {other:?}"))),
-        };
-        let doc = get_json(tools, &format!("{NODE_ORIGIN}index.json"))?;
-        let version = doc
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|entry| !lts || entry["lts"].is_string())
-            .and_then(|entry| entry["version"].as_str())
-            .ok_or_else(|| internal("nodejs.org lists no such release"))?;
-        pinned(version.trim_start_matches('v'))
-    }
-}
 
 impl Recipe for NodeRecipe {
     fn info(&self) -> StoreInfo {
@@ -80,9 +62,14 @@ impl Recipe for NodeRecipe {
             .into_iter()
             .flat_map(|os| ["x86_64", "aarch64"].map(|arch| Platform::new(os, arch)))
             .collect();
-        info.channels = vec!["lts".to_owned(), "current".to_owned()];
+        info.channels = CHANNELS.map(str::to_owned).to_vec();
         info.endpoints = vec![NODE_ORIGIN.to_owned()];
         info.services = vec!["https://registry.npmjs.org/".to_owned()];
+        info.catalogs = Some(
+            CatalogWords::new("source", "sources", "releases")
+                .in_format(RELEASES_FORMAT)
+                .registering([DefaultCatalog::new("nodejs", SOURCE)]),
+        );
         info
     }
 
@@ -128,58 +115,22 @@ impl Recipe for NodeRecipe {
         BTreeMap::new()
     }
 
-    fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        let found = Self::newest(channel, tools);
-        match found {
-            Ok(version) => {
-                let mut report = LatestReport::known(version);
-                report.channel = Some(channel.unwrap_or("lts").to_owned());
-                report
-            }
-            Err(error) => LatestReport::unknown(error.message().to_owned()),
-        }
-    }
-
-    fn release(
-        &self,
-        version: Option<&str>,
-        channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError> {
-        let version = match version {
-            Some(version) => pinned(version.trim_start_matches('v'))?,
-            None => Self::newest(channel, tools)?,
-        };
-        let os = spell(
-            &platform.os,
-            &[("windows", "win"), ("linux", "linux"), ("macos", "darwin")],
-        )
-        .ok_or_else(|| unsupported("Node is not published for this system"))?;
-        let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported("Node is not published for this processor"))?;
+    fn adjust(&self, mut release: Release, platform: &Platform) -> Result<Release, ProviderError> {
         let windows = platform.os == "windows";
         let format = if windows { "zip" } else { "tar.gz" };
-        let archive = format!("node-v{version}-{os}-{arch}.{format}");
-        let base = format!("{NODE_ORIGIN}v{version}");
-        let sums = tools.fetch_text(&format!("{base}/SHASUMS256.txt"), 64 * 1024)?;
-        let digest = sha256_from_sums(&sums, &archive)
-            .ok_or_else(|| bad_value(format!("Node {version} lists no {archive}")))?;
-        let download = Download::new(
-            format!("{base}/{archive}"),
-            None,
-            Check::Sha256 { value: digest },
-        );
-        let part =
-            Part::new(download, "node-archive").unpacked(UnpackStep::new(format, "node", 1, true));
-        let launch = if windows {
+        for part in &mut release.parts {
+            part.path = "node-archive".to_owned();
+            part.unpack = Some(UnpackStep::new(format, "node", 1, true));
+        }
+        release.launch = if windows {
             "node/node.exe"
         } else {
             "node/bin/node"
-        };
-        let mut release = Release::new(version.clone(), launch, vec![part]);
+        }
+        .to_owned();
         release.notices.push(format!(
-            "Node {version} is checked against nodejs.org's SHASUMS256.txt, whose signature is not checked by this store."
+            "Node {} is checked against nodejs.org's SHASUMS256.txt, whose signature by one of the release team's keys was verified.",
+            release.version
         ));
         if !windows {
             release.steps.push(

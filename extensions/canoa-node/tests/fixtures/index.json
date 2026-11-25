@@ -1,0 +1,27 @@
+[
+ {
+  "version": "v27.0.0-alpha.0.1.1",
+  "date": "2026-11-16",
+  "lts": false
+ },
+ {
+  "version": "v27.0.0-alpha.0.1.0",
+  "date": "2026-11-12",
+  "lts": false
+ },
+ {
+  "version": "v27.0.0-alpha.0.0.0",
+  "date": "2026-10-29",
+  "lts": false
+ },
+ {
+  "version": "v26.13.1",
+  "date": "2026-11-10",
+  "lts": "Lithium"
+ },
+ {
+  "version": "v26.13.0",
+  "date": "2026-10-28",
+  "lts": "Lithium"
+ }
+]

@@ -252,3 +252,17 @@ impl super::InstallTools for FixedReleases {
         Err(crate::status::unsupported("these tools only list releases"))
     }
 }
+
+/// How two versions order by the numbers in them (`1.5.16` before `1.10.0`), the one with more numbers later when the rest are
+/// the same.
+#[must_use]
+pub fn compare_versions(a: &str, b: &str) -> core::cmp::Ordering {
+    let numbers = |version: &str| -> Vec<u64> {
+        version
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|part| !part.is_empty())
+            .filter_map(|part| part.parse().ok())
+            .collect()
+    };
+    numbers(a).cmp(&numbers(b))
+}

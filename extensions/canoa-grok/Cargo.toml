@@ -17,6 +17,9 @@ publish = false
 canoa = { workspace = true, features = ["store", "vendor"] }
 coqui-acp-api.workspace = true
 coqui-acp-harness.workspace = true
+guatiao.workspace = true
+guatiao-intake.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

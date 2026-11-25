@@ -16,14 +16,14 @@ use alloc::string::String;
 pub use coqui_acp_codex as acp;
 
 use canoa::preset::SourcePreset;
-use canoa::status::{internal, unsupported};
+use canoa::store::catalog::RELEASES_FORMAT;
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
 use canoa::store::recipe::{
-    HOMEBREW_MARKERS, Part, Recipe, Release, UnpackStep, classify_by, dotted, exe_suffix, get_json,
-    latest_report, measured_platforms, pinned, platform_names, sha256_from_sums,
+    HOMEBREW_MARKERS, Recipe, Release, UnpackStep, classify_by, dotted, exe_suffix,
+    measured_platforms,
 };
 use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    Platform, Serves, StoreInfo, Updatable,
+    MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
     AccessTarget, AgentVendor, DeliveredFile, GatewayRoute, HistoryAnswer, HistoryRequest,
@@ -31,11 +31,10 @@ use canoa::vendor::{
     ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_harness::Target;
 
 const ORIGIN: &str = "https://releases.openai.com";
-const LATEST: &str = "https://releases.openai.com/codex/channels/latest";
 
 /// ChatGPT's look as the JSON document `looks/list` serves: colour tokens for each brightness, an original palette in the spirit of
 /// the product, with no logo or font of it.
@@ -173,27 +172,18 @@ coqui_acp_api::guatiao::local_providers!(
         acp::CodexProvider,
         acp::CodexAccounts,
         CodexVendor,
-        CodexStore
+        CodexStore,
+        CodexReleases
     ]
 );
+
+mod source;
+
+pub use source::{CodexReleases, CodexSettings, SOURCE, catalog_of};
 
 /// Codex.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CodexRecipe;
-
-impl CodexRecipe {
-    /// The channel document's version and, for `asset`, its digest.
-    fn channel(
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<(String, serde_json::Value), ProviderError> {
-        let document = get_json(tools, LATEST)?;
-        let tag = document["tag_name"]
-            .as_str()
-            .ok_or_else(|| internal("the channel document names no release"))?;
-        let version = tag.strip_prefix("rust-v").unwrap_or(tag);
-        Ok((pinned(version)?, document))
-    }
-}
 
 impl Recipe for CodexRecipe {
     fn info(&self) -> StoreInfo {
@@ -202,6 +192,11 @@ impl Recipe for CodexRecipe {
         info.serves = vec![Serves::any("codex")];
         info.platforms = measured_platforms();
         info.endpoints = vec![format!("{ORIGIN}/codex/")];
+        info.catalogs = Some(
+            CatalogWords::new("source", "sources", "releases")
+                .in_format(RELEASES_FORMAT)
+                .registering([DefaultCatalog::new("openai", SOURCE)]),
+        );
         info
     }
 
@@ -258,62 +253,12 @@ impl Recipe for CodexRecipe {
         BTreeMap::new()
     }
 
-    fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        latest_report(Self::channel(tools).map(|(version, _)| version), None)
-    }
-
-    fn release(
-        &self,
-        version: Option<&str>,
-        _channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError> {
-        let (newest, document) = Self::channel(tools)?;
-        let version = match version {
-            Some(version) => pinned(version)?,
-            None => newest.clone(),
-        };
-        let (os, arch) = platform_names(
-            "Codex",
-            platform,
-            &[
-                ("windows", "pc-windows-msvc"),
-                ("linux", "unknown-linux-musl"),
-                ("macos", "apple-darwin"),
-            ],
-            &[("x86_64", "x86_64"), ("aarch64", "aarch64")],
-        )?;
-        let asset = format!("codex-package-{arch}-{os}.tar.gz");
-        let base = format!("{ORIGIN}/codex/releases/{version}");
-        let sums = tools.fetch_text(&format!("{base}/codex-package_SHA256SUMS"), 64 * 1024)?;
-        let digest = sha256_from_sums(&sums, &asset)
-            .ok_or_else(|| unsupported(format!("release {version} lists no {asset}")))?;
-        if version == newest {
-            let published = document["assets"]
-                .as_array()
-                .and_then(|assets| {
-                    assets
-                        .iter()
-                        .find(|a| a["name"].as_str() == Some(asset.as_str()))
-                })
-                .and_then(|a| a["digest"].as_str())
-                .and_then(|d| d.strip_prefix("sha256:"));
-            if published.is_some_and(|d| !d.eq_ignore_ascii_case(&digest)) {
-                return Err(internal(
-                    "the channel's digest and the release's checksums disagree",
-                ));
-            }
+    fn adjust(&self, mut release: Release, platform: &Platform) -> Result<Release, ProviderError> {
+        for part in &mut release.parts {
+            part.path = "codex-package.tar.gz".to_owned();
+            part.unpack = Some(UnpackStep::new("tar.gz", "pkg", 0, false));
         }
-        let download = Download::new(
-            format!("{base}/{asset}"),
-            None,
-            Check::Sha256 { value: digest },
-        );
-        let launch = format!("pkg/bin/codex{}", exe_suffix(&platform.os));
-        let part = Part::new(download, "codex-package.tar.gz")
-            .unpacked(UnpackStep::new("tar.gz", "pkg", 0, false));
-        let mut release = Release::new(version, launch, vec![part]);
+        release.launch = format!("pkg/bin/codex{}", exe_suffix(&platform.os));
         release.notices.push(
             "Codex has no setting that stops its own updater; this copy may replace itself."
                 .to_owned(),

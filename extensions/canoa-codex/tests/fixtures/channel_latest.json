@@ -1,0 +1,40 @@
+{
+ "tag_name": "rust-v0.172.0",
+ "assets": [
+  {
+   "name": "codex-package-aarch64-apple-darwin.tar.gz",
+   "digest": "sha256:0970016d48209a09c4039139629ed79b4a31c5e3d864e792c043419d98fa6466",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.172.0/codex-package-aarch64-apple-darwin.tar.gz"
+  },
+  {
+   "name": "codex-package-aarch64-pc-windows-msvc.tar.gz",
+   "digest": "sha256:6aa686d9ac16cc171b8207273ac20eb9321bf3963f2801722045e906c00ea804",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.172.0/codex-package-aarch64-pc-windows-msvc.tar.gz"
+  },
+  {
+   "name": "codex-package-aarch64-unknown-linux-musl.tar.gz",
+   "digest": "sha256:faf17b8071927f33346a805dc8cb45de4e08c0d75cf0e5e68cecddca28b8861e",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.172.0/codex-package-aarch64-unknown-linux-musl.tar.gz"
+  },
+  {
+   "name": "codex-package-x86_64-apple-darwin.tar.gz",
+   "digest": "sha256:b5e94828f45171f13d81de2b96cae05c0b7e6a7f2f7d3c9d4e748be3d3906c02",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.172.0/codex-package-x86_64-apple-darwin.tar.gz"
+  },
+  {
+   "name": "codex-package-x86_64-pc-windows-msvc.tar.gz",
+   "digest": "sha256:b723674d7caf26a3f55121a02d6cad8f3ac8ddf5860747a6edde1c904cf593af",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.172.0/codex-package-x86_64-pc-windows-msvc.tar.gz"
+  },
+  {
+   "name": "codex-package-x86_64-unknown-linux-musl.tar.gz",
+   "digest": "sha256:63e3b00065ed7f62166d0522e17f663cb866a31d80d03e63365482ed34a1d991",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.172.0/codex-package-x86_64-unknown-linux-musl.tar.gz"
+  },
+  {
+   "name": "codex-package_SHA256SUMS",
+   "digest": "sha256:a8ec955bfa912219452807052e2e590f86f794a2969741cba7b479f9cafb7b3e",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.172.0/codex-package_SHA256SUMS"
+  }
+ ]
+}

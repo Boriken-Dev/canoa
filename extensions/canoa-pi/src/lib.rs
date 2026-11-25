@@ -15,24 +15,28 @@ use alloc::string::String;
 pub use coqui_acp_pi as acp;
 
 use canoa::preset::SourcePreset;
+use canoa::store::catalog::RELEASES_FORMAT;
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
 use canoa::store::recipe::{Finish, Recipe, Release};
 use canoa::store::{
-    InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM, MANAGER_UNKNOWN, Platform,
-    Serves, StoreInfo, Updatable,
+    Launch, MANAGER_NATIVE, MANAGER_NPM, MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
     AccessTarget, AgentVendor, DeliveredFile, EntrySettingsRequest, GatewayRoute, ModeTitle,
     ShellAdvice, ShellRequest, StandardTitle, Variable, VendorInfo,
 };
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::{Map, ToValue as _, Value};
 use coqui_acp_harness::Target;
 
 use canoa::status::internal;
-use canoa::store::recipe::{dotted, get_json, measured_platforms, path_has, pinned};
+use canoa::store::recipe::{dotted, measured_platforms, path_has};
 
-const PACKAGE: &str = "@earendil-works/pi-coding-agent";
-const REGISTRY: &str = "https://registry.npmjs.org";
+use source::{PACKAGE, REGISTRY};
+
+mod source;
+
+pub use source::{PiReleases, PiSettings, SOURCE, catalog_of};
 
 /// Where Pi's own installer leaves it beyond `PATH`, which the Store's copy and the source preset both look in.
 const DIRS: &[&str] = &["~/.pi/agent/bin", "~/.local/bin"];
@@ -149,7 +153,13 @@ canoa::store_provider!(
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-pi",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [acp::PiProvider, acp::PiAccounts, PiVendor, PiStore]
+    providers = [
+        acp::PiProvider,
+        acp::PiAccounts,
+        PiVendor,
+        PiStore,
+        PiReleases
+    ]
 );
 
 /// Pi.
@@ -170,6 +180,11 @@ impl Recipe for PiRecipe {
         info.serves = vec![Serves::any("pi")];
         info.platforms = measured_platforms();
         info.endpoints = vec![canoa_node::NODE_ORIGIN.to_owned(), format!("{REGISTRY}/")];
+        info.catalogs = Some(
+            CatalogWords::new("source", "sources", "releases")
+                .in_format(RELEASES_FORMAT)
+                .registering([DefaultCatalog::new("npm", SOURCE)]),
+        );
         info
     }
 
@@ -218,49 +233,20 @@ impl Recipe for PiRecipe {
         BTreeMap::from([("PI_SKIP_VERSION_CHECK".to_owned(), "1".to_owned())])
     }
 
-    fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        match get_json(tools, &format!("{REGISTRY}/{PACKAGE}/latest")).and_then(|doc| {
-            doc["version"]
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| internal("the registry names no version"))
-        }) {
-            Ok(version) => LatestReport::known(version),
-            Err(error) => LatestReport::unknown(error.message().to_owned()),
-        }
-    }
-
-    fn release(
-        &self,
-        version: Option<&str>,
-        _channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError> {
-        let version = match version {
-            Some(version) => pinned(version)?,
-            None => {
-                let doc = get_json(tools, &format!("{REGISTRY}/{PACKAGE}/latest"))?;
-                pinned(
-                    doc["version"]
-                        .as_str()
-                        .ok_or_else(|| internal("the registry names no version"))?,
-                )?
-            }
-        };
-        let node_release = canoa_node::NodeRecipe.release(None, Some("lts"), platform, tools)?;
+    fn adjust(&self, mut release: Release, platform: &Platform) -> Result<Release, ProviderError> {
+        // The files are Node's: unpacked as Node's store unpacks them, and nothing else of Node's is taken.
+        release.parts = canoa_node::NodeRecipe
+            .adjust(release.clone(), platform)?
+            .parts;
         let windows = platform.os == "windows";
-        let script = "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js";
-        let mut release = Release::new(version.clone(), script, node_release.parts);
+        release.launch =
+            "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js".to_owned();
         let (node, npm) = relative(windows);
         release.facts.insert("node".to_owned(), node.to_owned());
         release.facts.insert("npm".to_owned(), npm.to_owned());
         release.steps.push(format!(
-            "Run the downloaded Node's npm to install {PACKAGE}@{version} with install scripts off"
-        ));
-        release.notices.push(format!(
-            "npm fetches Pi's packages from {REGISTRY} itself and checks each against the registry's integrity; the host does not see those bytes. Node {} is checked against nodejs.org's SHASUMS256.txt, whose signature is not checked by this store.",
-            node_release.version
+            "Run the downloaded Node's npm to install {PACKAGE}@{} with install scripts off",
+            release.version
         ));
         Ok(release)
     }

@@ -17,21 +17,17 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 use canoa::preset::{ContextDelivery, SourcePreset};
-use canoa::store::recipe::{Part, Recipe, Release, UnpackStep};
-use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, Platform,
-    StoreInfo, Updatable,
-};
+use canoa::store::catalog::RELEASES_FORMAT;
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
+use canoa::store::recipe::{Recipe, Release, UnpackStep};
+use canoa::store::{MANAGER_NATIVE, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable};
 use canoa::vendor::{
     AccessTarget, AgentVendor, ModeTitle, SkillsDelivery, SkillsRequest, StandardTitle, VendorInfo,
 };
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_harness::Target;
 
-use canoa::status::{bad_value, internal, unsupported};
-use canoa::store::recipe::{
-    dotted, exe_suffix, get_json, measured_platforms, path_has, pinned, serves_when, spell,
-};
+use canoa::store::recipe::{dotted, measured_platforms, path_has, serves_when};
 
 const MANIFESTS: &str =
     "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests";
@@ -156,26 +152,18 @@ coqui_acp_api::guatiao::local_providers!(
         AgyVendor,
         GeminiVendor,
         AgyStore,
-        AgyUsage
+        AgyUsage,
+        AgyReleases
     ]
 );
+
+mod source;
+
+pub use source::{AgyReleases, AgyReleasesSettings, SOURCE, catalog_of};
 
 /// Antigravity.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AgyRecipe;
-
-impl AgyRecipe {
-    fn manifest(
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<serde_json::Value, ProviderError> {
-        let os = spell(&platform.os, &[("windows", "windows"), ("linux", "linux")])
-            .ok_or_else(|| unsupported("Antigravity is not published for this system"))?;
-        let arch = spell(&platform.arch, &[("x86_64", "amd64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported("Antigravity is not published for this processor"))?;
-        get_json(tools, &format!("{MANIFESTS}/{os}_{arch}.json"))
-    }
-}
 
 impl Recipe for AgyRecipe {
     fn info(&self) -> StoreInfo {
@@ -187,6 +175,11 @@ impl Recipe for AgyRecipe {
             format!("{MANIFESTS}/"),
             "https://storage.googleapis.com/antigravity-public/antigravity-cli/".to_owned(),
         ];
+        info.catalogs = Some(
+            CatalogWords::new("source", "sources", "releases")
+                .in_format(RELEASES_FORMAT)
+                .registering([DefaultCatalog::new("google", SOURCE)]),
+        );
         info
     }
 
@@ -228,65 +221,15 @@ impl Recipe for AgyRecipe {
         BTreeMap::from([("AGY_CLI_DISABLE_AUTO_UPDATE".to_owned(), "1".to_owned())])
     }
 
-    fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        let platform = Platform::new(std::env::consts::OS, std::env::consts::ARCH);
-        match Self::manifest(&platform, tools).and_then(|m| {
-            m["version"]
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| internal("the manifest names no version"))
-        }) {
-            Ok(version) => LatestReport::known(version),
-            Err(error) => LatestReport::unknown(error.message().to_owned()),
+    fn adjust(&self, mut release: Release, platform: &Platform) -> Result<Release, ProviderError> {
+        if platform.os != "windows" {
+            // The Linux download is an archive of one file, named `antigravity`.
+            for part in &mut release.parts {
+                part.unpack = Some(UnpackStep::new("tar.gz", "bin", 0, false));
+            }
+            release.launch = "bin/antigravity".to_owned();
         }
-    }
-
-    fn release(
-        &self,
-        version: Option<&str>,
-        _channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError> {
-        let manifest = Self::manifest(platform, tools)?;
-        let newest = manifest["version"]
-            .as_str()
-            .ok_or_else(|| internal("the manifest names no version"))?;
-        let newest = pinned(newest)?;
-        if let Some(asked) = version
-            && asked != newest
-        {
-            return Err(unsupported("only the newest build is served"));
-        }
-        let url = manifest["url"]
-            .as_str()
-            .ok_or_else(|| internal("the manifest names no file"))?;
-        let sha512 = manifest["sha512"]
-            .as_str()
-            .filter(|c| c.len() == 128 && c.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| internal("the manifest gives no SHA-512"))?;
-        if !url.starts_with("https://") {
-            return Err(bad_value("the manifest names a file that is not https"));
-        }
-        let download = Download::new(
-            url.to_owned(),
-            None,
-            Check::Sha512 {
-                value: sha512.to_ascii_lowercase(),
-            },
-        );
-        if platform.os == "windows" {
-            let name = format!("agy{}", exe_suffix(&platform.os));
-            return Ok(Release::new(
-                newest,
-                name.clone(),
-                vec![Part::new(download, name).executable()],
-            ));
-        }
-        // The Linux download is an archive of one file, named `antigravity`.
-        let part =
-            Part::new(download, "agy.tar.gz").unpacked(UnpackStep::new("tar.gz", "bin", 0, false));
-        Ok(Release::new(newest, "bin/antigravity", vec![part]))
+        Ok(release)
     }
 }
 

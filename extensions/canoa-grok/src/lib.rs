@@ -9,21 +9,16 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 use canoa::preset::SourcePreset;
-use canoa::store::recipe::{Part, Recipe, Release};
-use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, MANAGER_WINGET,
-    Platform, StoreInfo, Updatable,
-};
+use canoa::store::catalog::RELEASES_FORMAT;
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
+use canoa::store::recipe::Recipe;
+use canoa::store::{MANAGER_NATIVE, MANAGER_UNKNOWN, MANAGER_WINGET, StoreInfo, Updatable};
 use canoa::vendor::{AccessTarget, AgentVendor, StandardTitle, VendorInfo};
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_harness::Target;
 
-use canoa::status::{bad_value, unsupported};
-use canoa::store::recipe::{
-    dotted, exe_suffix, measured_platforms, path_has, pinned, serves_when, spell,
-};
+use canoa::store::recipe::{dotted, measured_platforms, path_has, serves_when};
 
-const BASE: &str = "https://x.ai/cli";
 /// How an access setting is said in Grok's own words, under the AOS harness id `grok`.
 pub const ACCESS: Target = coqui_acp_harness::vendors::grok::TARGET;
 
@@ -80,42 +75,34 @@ coqui_acp_api::guatiao::local_providers!(
         coqui_acp_harness::vendors::grok::GrokProvider,
         coqui_acp_harness::vendors::grok::GrokAccounts,
         GrokVendor,
-        GrokStore
+        GrokStore,
+        GrokReleases
     ]
 );
+
+mod source;
+
+pub use source::{CHANNELS, GrokReleases, GrokSettings, SOURCE, catalog_of};
 
 /// Grok.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GrokRecipe;
-
-impl GrokRecipe {
-    fn newest(
-        channel: Option<&str>,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<String, ProviderError> {
-        let name = match channel.unwrap_or("stable") {
-            name @ ("stable" | "alpha" | "enterprise") => name,
-            other => return Err(bad_value(format!("Grok has no channel {other:?}"))),
-        };
-        let text = tools.fetch_text(&format!("{BASE}/{name}"), 256)?;
-        pinned(text.trim())
-    }
-}
 
 impl Recipe for GrokRecipe {
     fn info(&self) -> StoreInfo {
         let mut info = StoreInfo::new("grok", "Grok", "xAI");
         info.serves = vec![serves_when("stdio", "harness", "grok")];
         info.platforms = measured_platforms();
-        info.channels = vec![
-            "stable".to_owned(),
-            "alpha".to_owned(),
-            "enterprise".to_owned(),
-        ];
+        info.channels = CHANNELS.map(str::to_owned).to_vec();
         info.endpoints = vec![
             "https://x.ai/cli/".to_owned(),
             "https://storage.googleapis.com/grok-build-public-artifacts/".to_owned(),
         ];
+        info.catalogs = Some(
+            CatalogWords::new("source", "sources", "releases")
+                .in_format(RELEASES_FORMAT)
+                .registering([DefaultCatalog::new("xai", SOURCE)]),
+        );
         info
     }
 
@@ -162,51 +149,6 @@ impl Recipe for GrokRecipe {
 
     fn launch_environment(&self) -> BTreeMap<String, String> {
         BTreeMap::from([("GROK_DISABLE_AUTOUPDATER".to_owned(), "1".to_owned())])
-    }
-
-    fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        match Self::newest(channel, tools) {
-            Ok(version) => {
-                let mut report = LatestReport::known(version);
-                report.channel = Some(channel.unwrap_or("stable").to_owned());
-                report
-            }
-            Err(error) => LatestReport::unknown(error.message().to_owned()),
-        }
-    }
-
-    fn release(
-        &self,
-        version: Option<&str>,
-        channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError> {
-        let version = match version {
-            Some(version) => pinned(version)?,
-            None => Self::newest(channel, tools)?,
-        };
-        let os = spell(&platform.os, &[("windows", "windows"), ("linux", "linux")])
-            .ok_or_else(|| unsupported("Grok is not published for this system"))?;
-        let arch = spell(
-            &platform.arch,
-            &[("x86_64", "x86_64"), ("aarch64", "aarch64")],
-        )
-        .ok_or_else(|| unsupported("Grok is not published for this processor"))?;
-        let suffix = exe_suffix(&platform.os);
-        let download = Download::new(
-            format!("{BASE}/grok-{version}-{os}-{arch}{suffix}"),
-            None,
-            Check::Unverified {
-                why: "xAI publishes no checksum for Grok".to_owned(),
-            },
-        );
-        let name = format!("grok{suffix}");
-        Ok(Release::new(
-            version,
-            name.clone(),
-            vec![Part::new(download, name).executable()],
-        ))
     }
 }
 
