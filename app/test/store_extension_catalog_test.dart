@@ -3,6 +3,7 @@
 // writes of canoa.cfg are what a real host answers. Names, URLs and digests are made up.
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/desktop/host_control.dart';
+import 'package:canoa/l10n/app_text.dart';
 import 'package:canoa/served/host_files.dart';
 import 'package:canoa/settings/extension_settings.dart';
 import 'package:canoa/store/store_extension.dart' show ExtensionBody;
@@ -103,6 +104,25 @@ void main() {
     expect(items.first.install, isNotNull);
     expect(items.first.remove, isNull, reason: 'nothing to remove of what is not installed');
     expect(items.last.remove, isNotNull);
+    extensions.dispose();
+  });
+
+  test('catalogs the host could not read are a notice with Retry, never a tile', () async {
+    final host = FakeStoreHost([])
+      ..catalogIndex = _index()
+      ..failures['extension/catalogs'] = ControlFailed(-32002, 'the catalog source was not reachable: no network');
+    final extensions = _store(host);
+    final type = extensions.types.firstWhere((each) => each.id == extensionsTypeId);
+    await type.load!();
+    expect(type.items(), isEmpty);
+    final notice = type.notices!().single;
+    expect(notice.problem, isTrue);
+    expect(notice.words(AppText.base), 'Extensions: the catalog source was not reachable: no network');
+    host.failures.clear();
+    await notice.retry!();
+    expect(type.notices!(), isEmpty);
+    expect(type.items(), hasLength(2));
+    expect(host.params['extension/catalogs']!.last, {'refresh': true}, reason: 'Retry has the host ask its sources again');
     extensions.dispose();
   });
 

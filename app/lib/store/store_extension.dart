@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../config/canoa_config.dart';
+import '../l10n/app_text.dart';
 import '../selectable.dart';
 import 'store_banner.dart';
 import 'store_cards.dart';
@@ -34,6 +35,29 @@ final class ExtensionStoreItem {
   final Widget Function(BuildContext context, CanoaConfig? config)? details;
 }
 
+/// What a store type says in place of items when it cannot list any: the host could not read it (a problem, with a retry) or the
+/// program it lists is not there (quieter, with the action that fixes it when there is one). It is drawn above the items and is never
+/// one of them.
+final class ExtensionStoreNotice {
+  const ExtensionStoreNotice({required this.id, required this.words, this.problem = false, this.retry, this.actionLabel, this.action});
+
+  /// Names the notice in keys; the id of the type's library.
+  final String id;
+
+  /// What it says, from the person's text (the host's or the library's own words go in as they are).
+  final String Function(AppText text) words;
+
+  /// Whether it is an error (drawn in the error colour, with Retry) rather than a note.
+  final bool problem;
+
+  /// Asks the host again; null leaves the notice without a Retry.
+  final Future<void> Function()? retry;
+
+  /// The label of the action that fixes what it says, and what the action does given the context its dialogs are shown in.
+  final String Function(AppText text)? actionLabel;
+  final Future<void> Function(BuildContext context)? action;
+}
+
 /// A store type an extension adds, listed in the Store's index after the built-in ones. Its page is the same as theirs: a banner,
 /// "Top …" and a tile for each item with a +, and a filter for the catalogs the items come from.
 final class ExtensionStoreType {
@@ -45,6 +69,7 @@ final class ExtensionStoreType {
     this.image,
     this.changes,
     this.load,
+    this.notices,
   });
 
   /// A word of letters and digits that no built-in type uses; the index keeps its choice by it.
@@ -65,6 +90,9 @@ final class ExtensionStoreType {
 
   /// Asks where the items come from; run when the page opens.
   final Future<void> Function()? load;
+
+  /// What the type says besides its items, asked when the page is drawn: a listing that failed, a program that is not there.
+  final List<ExtensionStoreNotice> Function()? notices;
 }
 
 /// The page of a store type an extension adds.
@@ -155,6 +183,7 @@ class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveCl
               ),
           ]),
         ),
+        for (final notice in type.notices?.call() ?? const <ExtensionStoreNotice>[]) _NoticeRow(notice: notice),
         if (shown.isEmpty) Text(filtered ? 'Nothing listed matches.' : 'No catalog lists any $noun.', key: const Key('store-type-nothing')),
       ],
       cards: [
@@ -189,5 +218,58 @@ class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveCl
     } finally {
       if (mounted) setState(() => _installing.remove(key));
     }
+  }
+}
+
+/// One notice of a type: its words, in the error colour when it is a problem, with the Retry and the action it has.
+class _NoticeRow extends StatefulWidget {
+  const _NoticeRow({required this.notice});
+
+  final ExtensionStoreNotice notice;
+
+  @override
+  State<_NoticeRow> createState() => _NoticeRowState();
+}
+
+class _NoticeRowState extends State<_NoticeRow> {
+  bool _busy = false;
+
+  Future<void> _do(Future<void> Function() what) async {
+    setState(() => _busy = true);
+    try {
+      await what();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notice = widget.notice;
+    final text = AppText.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final color = notice.problem ? scheme.error : scheme.onSurfaceVariant;
+    final retry = notice.retry;
+    final action = notice.action;
+    final label = notice.actionLabel;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(notice.problem ? Icons.error_outline : Icons.info_outline, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: SelectableText(notice.words(text), key: Key('store-type-notice-${notice.id}'), style: TextStyle(color: color))),
+          if (retry != null)
+            TextButton(key: Key('store-type-notice-retry-${notice.id}'), onPressed: _busy ? null : () => unawaited(_do(retry)), child: Text(text('store.retry'))),
+          if (action != null && label != null)
+            TextButton(
+              key: Key('store-type-notice-action-${notice.id}'),
+              onPressed: _busy ? null : () => unawaited(_do(() => action(context))),
+              child: Text(label(text)),
+            ),
+        ],
+      ),
+    );
   }
 }

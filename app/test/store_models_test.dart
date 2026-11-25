@@ -3,8 +3,10 @@
 // the library described, and a model that may be the person's speech-to-text has a button for it. The type here is `runner`: the app
 // names no vendor's, so nothing in it can depend on one.
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
+import 'package:canoa/l10n/app_text.dart';
 import 'package:canoa/store/store_extension.dart';
 import 'package:canoa/store/store_models.dart';
+import 'package:canoa/store/store_view.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -169,9 +171,10 @@ void main() {
     final none = _models(missing);
     final nothing = _typeOf(none);
     await nothing.load!();
-    final only = nothing.items().single;
-    expect(only.install, isNull, reason: 'there is nothing to download or load');
-    expect(only.summary, contains('Runner list'));
+    expect(nothing.items(), isEmpty, reason: 'a library that lists none is a note, never a row');
+    final note = nothing.notices!().single;
+    expect(note.problem, isFalse);
+    expect(note.words(AppText.base), contains('Runner list'));
     none.dispose();
   });
 
@@ -202,11 +205,77 @@ void main() {
     final shown = _models(host);
     final type = _typeOf(shown);
     await type.load!();
-    expect(type.items().single.summary, 'the model catalog was not listed: no network');
+    expect(type.items(), isEmpty, reason: 'an error is not a model');
+    final notice = type.notices!().single;
+    expect(notice.problem, isTrue);
+    expect(notice.words(AppText.base), 'Runner models: the model catalog was not listed: no network');
     host.failures.clear();
-    await type.load!();
+    await notice.retry!();
+    expect(type.notices!(), isEmpty);
     expect(type.items().single.name, 'm');
     expect(host.params['store/models']!.first, {'type': _type});
+    shown.dispose();
+  });
+
+  testWidgets('a type that failed shows a notice with Retry next to the models of one that worked, and no row of its own', (tester) async {
+    var down = true;
+    final host = FakeStoreHost([])
+      ..modelsAnswer = (given) {
+        if (given['type'] == 'runner' && down) {
+          throw ControlFailed(-32002, 'the model catalog was not listed: runner exited 1: no network');
+        }
+        return {
+          'type': given['type'],
+          'catalog': given['type'] == 'runner' ? 'Runner' : 'Speaker',
+          'publisher': 'Acme',
+          'models': [
+            {'id': '${given['type']}-one', 'summary': 'one', 'tags': <String>[], 'actions': <Object?>[]},
+          ],
+        };
+      };
+    final shared = host.client();
+    final broken = TypeModels(type: 'runner', title: 'Runner models', control: () async => shared, open: () async => host.client());
+    final working = TypeModels(type: 'speaker', title: 'Speaker voices', control: () async => shared, open: () async => host.client());
+    final page = modelsStoreType(models: [broken, working]);
+    await tester.binding.setSurfaceSize(const Size(900, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: page, view: StoreView(modelsTypeId)))));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('store-type-notice-runner')), findsOneWidget);
+    expect(find.text('Runner models: the model catalog was not listed: runner exited 1: no network'), findsOneWidget);
+    expect(find.byKey(const Key('store-entry-Runner models-Runner models')), findsNothing, reason: 'the error is not an item');
+    expect(find.byKey(const Key('store-entry-Runner-Runner')), findsNothing);
+    expect(find.byKey(const Key('store-entry-Speaker-speaker-one')), findsOneWidget, reason: 'the type that worked lists its model');
+    expect(find.byKey(const Key('store-count')), findsOneWidget);
+    expect(tester.widget<Chip>(find.byKey(const Key('store-count'))).label, isA<Text>().having((text) => text.data, 'count', '1'));
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_type_problem_desktop.png'));
+
+    down = false;
+    await tester.tap(find.byKey(const Key('store-type-notice-retry-runner')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('store-type-notice-runner')), findsNothing, reason: 'Retry listed it again');
+    expect(find.byKey(const Key('store-entry-Runner-runner-one')), findsOneWidget);
+    expect(host.params['store/models']!.last, {'type': 'runner', 'refresh': true});
+    broken.dispose();
+    working.dispose();
+  });
+
+  testWidgets('a type whose program is not there shows a quiet note, not a row', (tester) async {
+    final host = _host([], unavailable: 'Not installed: install it from the Runner list, and its models are listed here.');
+    final shown = _models(host);
+    final page = _typeOf(shown);
+    await tester.binding.setSurfaceSize(const Size(900, 500));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: page, view: StoreView(modelsTypeId)))));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('store-type-notice-runner')), findsOneWidget);
+    expect(find.textContaining('Runner list'), findsOneWidget);
+    expect(find.byKey(const Key('store-type-notice-retry-runner')), findsNothing, reason: 'a note has nothing to ask again');
+    expect(find.byKey(const Key('store-entry-Runner-Runner')), findsNothing);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_type_unavailable_desktop.png'));
     shown.dispose();
   });
 

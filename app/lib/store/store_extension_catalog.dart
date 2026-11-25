@@ -218,6 +218,29 @@ class ExtensionCatalogs extends ChangeNotifier {
     }
   }
 
+  /// What the page says besides its tiles: the catalogs the host could not read, as a problem with a Retry, and never as a tile.
+  List<ExtensionStoreNotice> notices() {
+    Future<void> again() => load(refresh: true);
+    final problem = _problem;
+    return [
+      if (problem != null)
+        ExtensionStoreNotice(
+          id: extensionsTypeId,
+          problem: true,
+          words: (text) => text('store.type_problem', {'type': extensionsTypeLabel, 'why': problem}),
+          retry: again,
+        ),
+      for (final loaded in _catalogs)
+        if (loaded.problem case final why?)
+          ExtensionStoreNotice(
+            id: '$extensionsTypeId-${loaded.label}',
+            problem: true,
+            words: (text) => text('store.type_problem', {'type': loaded.label, 'why': why}),
+            retry: again,
+          ),
+    ];
+  }
+
   /// A tile for each extension each catalog lists.
   List<ExtensionStoreItem> items() {
     final may = mayInstall?.call() ?? true;
@@ -415,4 +438,5 @@ ExtensionStoreType extensionsStoreType(ExtensionCatalogs catalogs) =>
       items: catalogs.items,
       changes: catalogs,
       load: catalogs.load,
+      notices: catalogs.notices,
     );

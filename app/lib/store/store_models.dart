@@ -298,19 +298,49 @@ ExtensionStoreType modelsStoreType({required List<TypeModels> models, IconData i
   id: modelsTypeId,
   label: modelsTypeLabel,
   icon: icon,
-  changes: Listenable.merge(models),
+  changes: Listenable.merge([...models, ...{for (final each in models) ?each.programs}]),
   load: () => Future.wait([for (final each in models) each.load()]),
   items: () => [
     for (final of in models)
       if (of.loaded) ..._itemsOf(of),
   ],
+  notices: () => [
+    for (final of in models)
+      if (of.loaded) ?_noticeOf(of),
+  ],
 );
 
-List<ExtensionStoreItem> _itemsOf(TypeModels models) {
-  final why = models.problem ?? models.unavailable;
-  if (why != null) {
-    return [ExtensionStoreItem(catalog: models.catalog, name: models.catalog, by: models.publisher, summary: why)];
+/// What a type says in place of its models when the host could not list them or the program is not there: never an item.
+ExtensionStoreNotice? _noticeOf(TypeModels models) {
+  final problem = models.problem;
+  if (problem != null) {
+    return ExtensionStoreNotice(
+      id: models.type,
+      problem: true,
+      words: (text) => text('store.type_problem', {'type': models.title, 'why': problem}),
+      retry: models.refresh,
+    );
   }
+  final unavailable = models.unavailable;
+  if (unavailable == null) return null;
+  final program = models.program;
+  final programs = models.programs;
+  final status = program == null || program.installed ? null : programs?.status(program.provider);
+  return ExtensionStoreNotice(
+    id: models.type,
+    words: (_) => unavailable,
+    actionLabel: status == null ? null : (text) => text('store.install_program', {'program': status.info.title}),
+    action: status == null || programs == null
+        ? null
+        : (context) async {
+            final done = await runProgramAction(context, programs, status, 'install');
+            if (done) await models.refresh();
+          },
+  );
+}
+
+List<ExtensionStoreItem> _itemsOf(TypeModels models) {
+  if (models.problem != null || models.unavailable != null) return const [];
   return [
     for (final model in models.models)
       ExtensionStoreItem(
