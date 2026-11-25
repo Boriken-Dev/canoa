@@ -95,6 +95,10 @@ cargo test -p canoa-launch --lib -- --ignored a_base_folder_cannot_vouch   # Win
 cargo test -p canoa-host --all-features -- --ignored discover_nearby_reports a_connection_from_another_user   # Linux: passwordless sudo and setpriv
 cargo test -p canoa-host --lib -- --ignored operating_systems_store two_homes_with_the_same_account_id   # Linux: a Secret Service session; the other platforms run these without --ignored
 (cd app && flutter analyze && flutter test)
+# Builds read only the deps checkout and the pinned SDK (`python tools/flutter_pin.py sdk $FLUTTER_ROOT`), with the network off; one that lacks something stops and names it. `--online` is the refresh-the-mirror exception
+python app/tool/build.py pwa   # or chromium, office, desktop [--portable]; CANOA_DEPS names the deps checkout
+(cd app/tool && python -m unittest test_build test_no_network test_portable test_offline_pub test_brand)   # includes the tests that fail when a build falls back to the network
+python app/tool/portable.py fetch   # Linux --portable: appimagetool and its runtime, the one step of the builds that uses the network
 (cd app && flutter test integration_test/desktop_test.dart -d windows)   # or -d linux; needs CANOA_TEST_HOST
 # the chat's connection code against the real host
 cargo build -p canoa-host --bin canoa --examples
