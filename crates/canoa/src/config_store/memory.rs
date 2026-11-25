@@ -126,17 +126,16 @@ impl ConfigStore for MemoryStore {
 
     fn read(&self) -> Result<Snapshot, ProviderError> {
         let state = self.lock();
-        Ok(Snapshot {
-            revision: state.revision.to_string(),
-            layers: state
+        Ok(Snapshot::new(
+            state.revision.to_string(),
+            state
                 .layers
                 .iter()
-                .map(|(info, document)| Layer {
-                    id: info.id.clone(),
-                    document: value_of(&Json::Object(document.clone())),
+                .map(|(info, document)| {
+                    Layer::new(&info.id, value_of(&Json::Object(document.clone())))
                 })
                 .collect(),
-        })
+        ))
     }
 
     fn get(&self, key: Key) -> Result<Held, ProviderError> {
@@ -146,10 +145,7 @@ impl ConfigStore for MemoryStore {
         let state = self.lock();
         for (info, document) in state.layers.iter().rev() {
             if let Some(found) = at(document, &key.path) {
-                return Ok(Held {
-                    value: Some(value_of(found)),
-                    layer: Some(info.id.clone()),
-                });
+                return Ok(Held::of(value_of(found), &info.id));
             }
         }
         Ok(Held::none())
@@ -196,10 +192,7 @@ impl ConfigStore for MemoryStore {
             state.layers[own].1 = document;
             state.revision += 1;
         }
-        Ok(Changed {
-            revision: state.revision.to_string(),
-            document: now,
-        })
+        Ok(Changed::new(state.revision.to_string(), now))
     }
 
     fn revision(&self) -> Result<String, ProviderError> {

@@ -129,6 +129,17 @@ pub struct Layer {
     pub document: Value,
 }
 
+impl Layer {
+    /// The layer `id` holding `document`.
+    #[must_use]
+    pub fn new(id: impl Into<String>, document: Value) -> Self {
+        Self {
+            id: id.into(),
+            document,
+        }
+    }
+}
+
 /// Everything a store holds now, from [`ConfigStore::read`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
@@ -138,6 +149,17 @@ pub struct Snapshot {
     pub revision: String,
     /// Each layer, lowest first.
     pub layers: Vec<Layer>,
+}
+
+impl Snapshot {
+    /// These layers at this revision.
+    #[must_use]
+    pub fn new(revision: impl Into<String>, layers: Vec<Layer>) -> Self {
+        Self {
+            revision: revision.into(),
+            layers,
+        }
+    }
 }
 
 /// A path in the configuration: `["host", "agents", "claude"]`.
@@ -171,6 +193,15 @@ pub struct Held {
 }
 
 impl Held {
+    /// `value`, from the layer `layer`.
+    #[must_use]
+    pub fn of(value: Value, layer: impl Into<String>) -> Self {
+        Self {
+            value: Some(value),
+            layer: Some(layer.into()),
+        }
+    }
+
     /// Nothing held.
     #[must_use]
     pub fn none() -> Self {
@@ -248,6 +279,17 @@ pub struct Changed {
     pub revision: String,
     /// What the writable layer holds after the change, or would hold for a check: the host reads it before it lets a change stand.
     pub document: Value,
+}
+
+impl Changed {
+    /// A change that left the store at `revision`, with `document` in the writable layer.
+    #[must_use]
+    pub fn new(revision: impl Into<String>, document: Value) -> Self {
+        Self {
+            revision: revision.into(),
+            document,
+        }
+    }
 }
 
 /// Where the configuration lives. One instance is one store.
