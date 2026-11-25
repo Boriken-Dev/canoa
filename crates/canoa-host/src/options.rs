@@ -151,7 +151,7 @@ impl Choices {
     /// `cache_lifetime` (the provider's sentence on what it does with the prompt-cache lifetime),
     /// `cache_choices` (`[{id, label}]`, the lifetimes it honours beyond the default; absent when none) and
     /// `modes` (`[{id, name}]`, with `default_mode`, for a program that lists them in its session) and
-    /// `models`, each `{id, name?, description?, resolved?, version?, efforts, default_effort?, is_default?}`.
+    /// `models`, each `{id, name?, description?, resolved?, version?, efforts, default_effort?, capabilities?, is_default?}`.
     #[must_use]
     pub fn to_json(&self) -> Value {
         let mut out = Map::new();
@@ -235,6 +235,10 @@ fn model_json(model: &ModelInfo) -> Value {
         }
     }
     out.insert("efforts".into(), json!(model.efforts));
+    // What the model can do; absent when the provider reports none, which is not the same as none.
+    if !model.capabilities.is_empty() {
+        out.insert("capabilities".into(), json!(model.capabilities));
+    }
     if model.is_default {
         out.insert("is_default".into(), json!(true));
     }

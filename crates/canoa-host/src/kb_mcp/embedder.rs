@@ -1,142 +1,154 @@
-//! The embeddings endpoint the person names (`[host.kb] embeddings`): an OpenAI-compatible `/v1/embeddings`, reached through
-//! [`Network`] like every other fetch, so a server beyond the system's proxy is found as it would be from a browser.
+//! The embedder of the knowledge index (`[host.kb.embedder]`): texts to vectors through the host's `assist` service, so whatever the
+//! person chose serves it (an account's API, a server by address) and the host names none of them.
 
 use alloc::sync::Arc;
 use core::time::Duration;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, PoisonError};
 
 use canoa::network::Network;
+use canoa::sdk::EmbedRequest;
 use coqui_aos::index::{Embedder, Error};
-use serde_json::{Value, json};
+
+use crate::assist::Assist;
 
 /// How long one request may take.
 const TIMEOUT: Duration = Duration::from_secs(120);
-/// The most bytes read from an answer.
-const MAX_ANSWER: u64 = 256 * 1024 * 1024;
 
-/// An OpenAI-compatible embeddings endpoint.
-#[derive(Clone, Debug)]
-pub(crate) struct NetworkEmbedder {
-    url: String,
-    model: String,
-    bearer: Option<String>,
+/// The embeddings by text, and the order they came in.
+type Held = (HashMap<String, Vec<f32>>, VecDeque<String>);
+
+/// The query embeddings the host remembers, oldest dropped first, for the repeated searches an agent makes in one turn.
+#[derive(Debug, Default)]
+pub(crate) struct QueryCache {
+    limit: usize,
+    held: Mutex<Held>,
+}
+
+impl QueryCache {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            held: Mutex::default(),
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<Vec<f32>> {
+        self.held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .0
+            .get(key)
+            .cloned()
+    }
+
+    fn put(&self, key: String, vector: Vec<f32>) {
+        if self.limit == 0 {
+            return;
+        }
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.0.insert(key.clone(), vector).is_none() {
+            held.1.push_back(key);
+            while held.1.len() > self.limit {
+                if let Some(old) = held.1.pop_front() {
+                    held.0.remove(&old);
+                }
+            }
+        }
+    }
+}
+
+/// An embedder served by `assist`.
+#[derive(Clone)]
+pub(crate) struct AssistEmbedder {
+    assist: Arc<Assist>,
+    choice: String,
+    asked: String,
+    dimensions: Option<u32>,
+    /// What an index stores and names its variant by: the backend, the model and the length asked for.
+    name: String,
+    cache: Arc<QueryCache>,
     /// The network a session's requests go through; the process's when none.
     network: Option<Arc<Network>>,
 }
 
-impl NetworkEmbedder {
-    /// The endpoint of the server at `base` (`http://127.0.0.1:60570`, with or without a trailing `/v1`) for `model`, the exact id
-    /// the server loaded.
-    pub(crate) fn new(base: &str, model: impl Into<String>) -> Self {
-        let base = base.trim_end_matches('/');
-        let url = if base.ends_with("/v1") {
-            format!("{base}/embeddings")
-        } else {
-            format!("{base}/v1/embeddings")
+impl core::fmt::Debug for AssistEmbedder {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("AssistEmbedder")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AssistEmbedder {
+    /// The embedder for `model` under `choice` (a backend id or `default`).
+    pub(crate) fn new(
+        assist: Arc<Assist>,
+        choice: &str,
+        model: &str,
+        dimensions: Option<u32>,
+        cache: Arc<QueryCache>,
+    ) -> Self {
+        let backend = assist
+            .first(crate::assist::Operation::Embed, choice)
+            .unwrap_or_else(|| choice.to_owned());
+        let name = match dimensions {
+            Some(length) => format!("{backend}/{model}@{length}"),
+            None => format!("{backend}/{model}"),
         };
         Self {
-            url,
-            model: model.into(),
-            bearer: None,
+            assist,
+            choice: choice.to_owned(),
+            asked: model.to_owned(),
+            dimensions,
+            name,
+            cache,
             network: None,
         }
     }
 
-    /// The same endpoint reached through `network`, as one session's profile chose it; the process's when `None`.
+    /// The same embedder reached through `network`, as one session's profile chose it; the process's when `None`.
     pub(crate) fn on(mut self, network: Option<Arc<Network>>) -> Self {
         self.network = network;
         self
     }
-
-    /// Sends `token` as the request's bearer, for an endpoint that asks for a key.
-    pub(crate) fn with_bearer(mut self, token: impl Into<String>) -> Self {
-        self.bearer = Some(token.into());
-        self
-    }
-
-    fn failed(&self, why: impl core::fmt::Display) -> Error {
-        Error::Embed(format!("{}: {why}", self.url))
-    }
 }
 
-impl Embedder for NetworkEmbedder {
+impl Embedder for AssistEmbedder {
     fn model(&self) -> &str {
-        &self.model
+        &self.name
     }
 
     fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, Error> {
-        let config = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .timeout_global(Some(TIMEOUT))
-            .build();
-        let agent = self
-            .network
-            .clone()
-            .unwrap_or_else(Network::current)
-            .agent(config)
-            .map_err(|error| self.failed(error))?;
-        let body = json!({"model": self.model, "input": inputs}).to_string();
-        let mut request = agent
-            .post(&self.url)
-            .header("content-type", "application/json");
-        if let Some(token) = &self.bearer {
-            request = request.header("authorization", format!("Bearer {token}"));
+        let single = match inputs {
+            [one] => Some(format!("{}\0{one}", self.name)),
+            _ => None,
+        };
+        if let Some(vector) = single.as_deref().and_then(|key| self.cache.get(key)) {
+            return Ok(vec![vector]);
         }
-        let response = request
-            .send(body.as_str())
-            .map_err(|error| self.failed(error))?;
-        let text = response
-            .into_body()
-            .with_config()
-            .limit(MAX_ANSWER)
-            .read_to_string()
-            .map_err(|error| self.failed(error))?;
-        parse(&text, inputs.len())
-    }
-}
-
-/// The vectors an embeddings response holds, ordered by their `index`.
-fn parse(text: &str, expected: usize) -> Result<Vec<Vec<f32>>, Error> {
-    let value: Value = serde_json::from_str(text)
-        .map_err(|error| Error::Embed(format!("the response is not JSON: {error}")))?;
-    let data = value
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or_else(|| Error::Embed("the response has no `data` list".into()))?;
-    if data.len() != expected {
-        return Err(Error::Embed(format!(
-            "{} vectors for {expected} inputs",
-            data.len()
-        )));
-    }
-    let mut slots: Vec<Option<Vec<f32>>> = vec![None; expected];
-    for (position, item) in data.iter().enumerate() {
-        let index = item
-            .get("index")
-            .and_then(Value::as_u64)
-            .map_or(position, |index| {
-                usize::try_from(index).unwrap_or(usize::MAX)
-            });
-        let vector = item
-            .get("embedding")
-            .and_then(Value::as_array)
-            .ok_or_else(|| Error::Embed("an item has no `embedding` list".into()))?
-            .iter()
-            .map(|number| {
-                #[allow(clippy::cast_possible_truncation)]
-                number.as_f64().map(|number| number as f32)
-            })
-            .collect::<Option<Vec<f32>>>()
-            .ok_or_else(|| {
-                Error::Embed("an embedding holds a value that is not a number".into())
-            })?;
-        let slot = slots
-            .get_mut(index)
-            .ok_or_else(|| Error::Embed(format!("an item's index {index} is out of range")))?;
-        if slot.replace(vector).is_some() {
-            return Err(Error::Embed(format!("two items have index {index}")));
+        let network = self.network.clone().unwrap_or_else(Network::current);
+        let mut request = EmbedRequest::new(&self.asked, inputs.to_vec());
+        request.dimensions = self.dimensions;
+        let done = self
+            .assist
+            .embed(&network, &self.choice, request, TIMEOUT)
+            .map_err(Error::Embed)?;
+        let vectors = done.value.vectors;
+        if vectors.len() != inputs.len() {
+            return Err(Error::Embed(format!(
+                "{} answered {} vectors for {} inputs",
+                done.backend,
+                vectors.len(),
+                inputs.len()
+            )));
         }
+        if let (Some(key), [vector]) = (single, vectors.as_slice()) {
+            self.cache.put(key, vector.clone());
+        }
+        Ok(vectors)
     }
-    Ok(slots.into_iter().flatten().collect())
 }
 
 #[cfg(test)]
@@ -144,25 +156,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_url_takes_a_base_with_or_without_v1() {
-        assert_eq!(
-            NetworkEmbedder::new("http://127.0.0.1:1/", "m").url,
-            "http://127.0.0.1:1/v1/embeddings"
-        );
-        assert_eq!(
-            NetworkEmbedder::new("http://127.0.0.1:1/v1", "m").url,
-            "http://127.0.0.1:1/v1/embeddings"
-        );
-    }
-
-    #[test]
-    fn a_response_is_ordered_by_index_and_checked() {
-        let text = r#"{"data":[{"index":1,"embedding":[3,4]},{"index":0,"embedding":[1,2]}]}"#;
-        assert_eq!(
-            parse(text, 2).unwrap(),
-            vec![vec![1.0, 2.0], vec![3.0, 4.0]]
-        );
-        assert!(parse(text, 3).is_err());
-        assert!(parse("{}", 1).is_err());
+    fn the_cache_keeps_the_newest_and_drops_the_oldest() {
+        let cache = QueryCache::new(2);
+        cache.put("a".to_owned(), vec![1.0]);
+        cache.put("b".to_owned(), vec![2.0]);
+        cache.put("c".to_owned(), vec![3.0]);
+        assert!(cache.get("a").is_none());
+        assert_eq!(cache.get("b"), Some(vec![2.0]));
+        assert_eq!(cache.get("c"), Some(vec![3.0]));
+        let off = QueryCache::new(0);
+        off.put("a".to_owned(), vec![1.0]);
+        assert!(off.get("a").is_none());
     }
 }

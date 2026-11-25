@@ -84,7 +84,26 @@ fn hostile() -> Source {
 }
 
 fn hub_in(state: &Path, config: &KbConfig) -> Arc<Hub> {
-    Hub::new(config, Some(state.to_path_buf()), bridge())
+    Hub::new(
+        config,
+        Some(state.to_path_buf()),
+        bridge(),
+        crate::assist::Assist::none(),
+    )
+}
+
+/// The hub of a whole configuration: its `[sdk.NAME]` servers and `[host.kb]` tables, with the backends they make.
+fn hub_of(state: &Path, config: &crate::Config) -> Arc<Hub> {
+    Hub::new(
+        &config.kb,
+        Some(state.to_path_buf()),
+        bridge(),
+        crate::assist::Assist::of(config, None),
+    )
+}
+
+fn config_of(text: &str) -> crate::Config {
+    crate::Config::from_str_in(text, Path::new(".")).expect("a configuration")
 }
 
 fn initialize(meta: bool) -> Vec<u8> {
@@ -219,7 +238,7 @@ fn the_tools_are_given_only_to_a_connection_that_asked_and_can_keep_indexes() {
             .is_none()
     );
     assert!(
-        Hub::new(&config, None, bridge())
+        Hub::new(&config, None, bridge(), crate::assist::Assist::none())
             .for_connection(vec![team("sha256:aa")], &Caller::default(), None, true)
             .is_none()
     );
@@ -688,11 +707,12 @@ fn embeddings_stub() -> (Stub, Arc<AtomicUsize>) {
     (stub, embedded)
 }
 
-fn with_embeddings(address: &str) -> KbConfig {
-    let mut config = KbConfig::default();
-    config.embeddings = Some(address.to_owned());
-    config.model = Some("test-model".to_owned());
-    config
+/// A server at `address` that embeds, chosen as the embedder.
+fn with_embeddings(address: &str) -> crate::Config {
+    config_of(&format!(
+        "[sdk.stub]\nprovider = \"server\"\naddress = \"{address}\"\ncapabilities = [\"embed\"]\n\
+         [host.kb.embedder]\nuse = \"stub\"\nmodel = \"test-model\"\n"
+    ))
 }
 
 #[test]
@@ -700,7 +720,7 @@ fn with_an_embeddings_server_the_search_is_by_meaning_and_a_new_version_embeds_o
     let scratch = Scratch::new();
     let (server, embedded) = embeddings_stub();
     let config = with_embeddings(&server.address);
-    let hub = hub_in(&scratch.0, &config);
+    let hub = hub_of(&scratch.0, &config);
     let (_link, url, token) = session(&hub, vec![team("sha256:aa")]);
     let list = said(&call(&url, &token, "kb_list", &json!({})));
     assert_eq!(list["search"]["modes"], json!(["words", "meaning"]));
@@ -743,7 +763,7 @@ fn with_an_embeddings_server_the_search_is_by_meaning_and_a_new_version_embeds_o
     next.tree = next
         .tree
         .with_text("rules/style.md", "Prefer long functions.\n");
-    let hub2 = hub_in(&scratch.0, &config);
+    let hub2 = hub_of(&scratch.0, &config);
     let (_link2, url2, token2) = session(&hub2, vec![next]);
     let _ = said(&call(&url2, &token2, "kb_list", &json!({})));
     let again = said(&call(
@@ -774,7 +794,7 @@ fn an_embeddings_server_that_is_down_leaves_the_knowledge_searchable_by_words_an
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         format!("http://{}", listener.local_addr().unwrap())
     };
-    let hub = hub_in(&scratch.0, &with_embeddings(&closed));
+    let hub = hub_of(&scratch.0, &with_embeddings(&closed));
     let (_link, url, token) = session(&hub, vec![team("sha256:aa")]);
     let found = said(&call(&url, &token, "kb_search", &json!({"query": "pip"})));
     assert_eq!(found["results"][0]["mode"], "words");
@@ -795,11 +815,17 @@ fn an_embeddings_server_that_is_down_leaves_the_knowledge_searchable_by_words_an
     assert_eq!(asked["results"][0]["error"]["class"], "mode-unavailable");
 }
 
-fn with_llm(address: &str) -> KbConfig {
-    let mut config = KbConfig::default();
-    config.llm_endpoint = Some(address.to_owned());
-    config.llm_model = Some("tiny-chat".to_owned());
-    config
+/// A server at `address` that does `capabilities`, chosen as the ranker, which waits `timeout_seconds` for an order.
+fn ranker_config(address: &str, capabilities: &str, timeout_seconds: u64) -> crate::Config {
+    config_of(&format!(
+        "[sdk.stub]\nprovider = \"server\"\naddress = \"{address}\"\ncapabilities = [{capabilities}]\n\
+         [host.kb.ranker]\nuse = \"stub\"\nmodel = \"tiny-chat\"\ntimeout_seconds = {timeout_seconds}\n"
+    ))
+}
+
+/// A server that answers a chat, chosen as the ranker.
+fn with_llm(address: &str) -> crate::Config {
+    ranker_config(address, "\"chat\"", 30)
 }
 
 /// The tool server's answer to `kb_search` of the `team` overlay for `query` by `mode`.
@@ -825,7 +851,7 @@ fn paths_of(entry: &Value) -> Vec<&str> {
 #[test]
 fn the_llm_mode_orders_what_words_found_by_a_chat_model_and_says_it_did() {
     let scratch = Scratch::new();
-    // No `/v1/rank` here; the chat model puts the second candidate first.
+    // Only a chat model here; it puts the second candidate first.
     let model = Stub::start(Box::new(|path, request| {
         if path == "/v1/chat/completions" {
             let prompt = request["messages"][1]["content"].as_str().unwrap_or("");
@@ -838,7 +864,7 @@ fn the_llm_mode_orders_what_words_found_by_a_chat_model_and_says_it_did() {
             (404, json!({"error": "no such endpoint"}))
         }
     }));
-    let hub = hub_in(&scratch.0, &with_llm(&model.address));
+    let hub = hub_of(&scratch.0, &with_llm(&model.address));
     let (_link, url, token) = session(&hub, vec![team("sha256:aa")]);
     let list = said(&call(&url, &token, "kb_list", &json!({})));
     assert_eq!(list["search"]["modes"], json!(["words", "llm"]));
@@ -867,24 +893,10 @@ fn the_llm_mode_orders_what_words_found_by_a_chat_model_and_says_it_did() {
         .collect();
     assert!(scores[0] > scores[1]);
 
-    // The rank endpoint was tried once and, being absent, not again.
+    // The same search again is answered from what was remembered: the model is asked once.
     let _ = searched(&url, &token, "cargo", "llm");
     let paths = model.paths();
-    assert_eq!(
-        paths
-            .iter()
-            .filter(|path| path.as_str() == "/v1/rank")
-            .count(),
-        1,
-        "{paths:?}"
-    );
-    assert_eq!(
-        paths
-            .iter()
-            .filter(|path| path.as_str() == "/v1/chat/completions")
-            .count(),
-        2
-    );
+    assert_eq!(paths, ["/v1/chat/completions"], "{paths:?}");
 
     // With no mode named the model orders too, since the person named one.
     let auto = said(&call(&url, &token, "kb_search", &json!({"query": "cargo"})));
@@ -892,20 +904,20 @@ fn the_llm_mode_orders_what_words_found_by_a_chat_model_and_says_it_did() {
 }
 
 #[test]
-fn the_llm_mode_uses_the_rank_endpoint_where_the_server_has_it() {
+fn the_llm_mode_uses_a_rerank_model_where_the_server_has_one() {
     let scratch = Scratch::new();
     let model = Stub::start(Box::new(|path, request| {
-        assert_eq!(path, "/v1/rank");
+        assert_eq!(path, "/v1/rerank");
         assert_eq!(request["model"], "tiny-chat");
         assert_eq!(request["query"], "cargo");
-        let count = request["answers"].as_array().unwrap().len();
+        let count = request["documents"].as_array().unwrap().len();
         // The last passage scores best.
-        let scores: Vec<f64> = (0..count)
-            .map(|number| f64::from(u32::try_from(number).unwrap()))
+        let results: Vec<Value> = (0..count)
+            .map(|number| json!({"index": number, "relevance_score": number}))
             .collect();
-        (200, json!({"scores": scores}))
+        (200, json!({"results": results}))
     }));
-    let hub = hub_in(&scratch.0, &with_llm(&model.address));
+    let hub = hub_of(&scratch.0, &ranker_config(&model.address, "\"rerank\"", 30));
     let (_link, url, token) = session(&hub, vec![team("sha256:aa")]);
     let by_words = searched(&url, &token, "cargo", "words");
     let by_model = searched(&url, &token, "cargo", "llm");
@@ -914,14 +926,14 @@ fn the_llm_mode_uses_the_rank_endpoint_where_the_server_has_it() {
         by_model["passages"][0]["from_line"],
         by_words["passages"][1]["from_line"]
     );
-    assert_eq!(model.paths(), ["/v1/rank"]);
+    assert_eq!(model.paths(), ["/v1/rerank"]);
 }
 
 #[test]
 fn a_model_that_cannot_order_is_refused_by_name_and_skipped_by_auto_with_a_note() {
     let scratch = Scratch::new();
     let model = Stub::start(Box::new(|_, _| (500, json!({"error": "overloaded"}))));
-    let hub = hub_in(&scratch.0, &with_llm(&model.address));
+    let hub = hub_of(&scratch.0, &with_llm(&model.address));
     let (_link, url, token) = session(&hub, vec![team("sha256:aa")]);
     // A named mode is never answered by another.
     let named = searched(&url, &token, "cargo", "llm");
@@ -944,9 +956,7 @@ fn a_model_that_answers_too_late_is_not_waited_for() {
         std::thread::sleep(Duration::from_millis(2500));
         (200, json!({"choices": [{"message": {"content": "[1]"}}]}))
     }));
-    let mut config = with_llm(&model.address);
-    config.llm_timeout_secs = Some(1);
-    let hub = hub_in(&scratch.0, &config);
+    let hub = hub_of(&scratch.0, &ranker_config(&model.address, "\"chat\"", 1));
     let (_link, url, token) = session(&hub, vec![team("sha256:aa")]);
     let started = Instant::now();
     let auto = said(&call(&url, &token, "kb_search", &json!({"query": "cargo"})));
@@ -965,57 +975,86 @@ fn a_model_that_answers_too_late_is_not_waited_for() {
 }
 
 #[test]
-fn the_configuration_names_an_embeddings_server_a_model_or_none() {
+fn the_configuration_names_an_embedder_a_ranker_and_the_servers_they_use_or_none() {
     let raw = |text: &str| crate::Config::from_str_in(text, std::path::Path::new("."));
+    let both = raw(
+        "[sdk.local]\nprovider = \"server\"\naddress = \"http://127.0.0.1:60570\"\nkey_env = \"LOCAL_KEY\"\ncapabilities = [\"embed\", \"chat\"]\n\
+         [assist.embed]\nuse = \"local\"\nfallback = [\"openai:work\"]\n\
+         [host.kb]\nchunk_bytes = 512\n\
+         [host.kb.embedder]\nuse = \"default\"\nmodel = \"m\"\ndimensions = 256\n\
+         [host.kb.ranker]\nuse = \"local\"\nmodel = \"q\"\ncandidates = 6\ntimeout_seconds = 9\npassage_chars = 300\n\
+         [host.kb.search]\nuse = \"company\"\n",
+    )
+    .unwrap();
+    let embedder = both.kb.embedder.as_ref().unwrap();
     assert_eq!(
-        raw(
-            "[host.kb]\nembeddings = \"http://127.0.0.1:60570\"\nmodel = \"m\"\nchunk_bytes = 512\n"
-        )
-        .unwrap()
-        .kb
-        .model
-        .as_deref(),
-        Some("m")
+        (
+            embedder.choice.as_str(),
+            embedder.model.as_str(),
+            embedder.dimensions
+        ),
+        ("default", "m", Some(256))
     );
+    let ranker = both.kb.ranker.as_ref().unwrap();
+    assert_eq!(
+        (
+            ranker.choice.as_str(),
+            ranker.model.as_str(),
+            ranker.candidates,
+            ranker.timeout_seconds,
+            ranker.passage_chars
+        ),
+        ("local", "q", Some(6), Some(9), Some(300))
+    );
+    assert_eq!(both.kb.search.as_ref().unwrap().choice, "company");
+    let table = &both.assist.sdk["local"];
+    assert_eq!(
+        (
+            table.provider.as_str(),
+            table.address.as_deref(),
+            table.key_env.as_deref()
+        ),
+        ("server", Some("http://127.0.0.1:60570"), Some("LOCAL_KEY"))
+    );
+    assert_eq!(table.settings["capabilities"], json!(["embed", "chat"]));
+    let embed = &both.assist.operations["embed"];
+    assert_eq!(embed.choice.as_deref(), Some("local"));
+    assert_eq!(embed.fallback, ["openai:work"]);
+
     assert!(
         raw("[host.kb]\ntools = false\n")
             .unwrap()
             .kb
-            .embeddings
+            .embedder
             .is_none()
     );
-    assert!(raw("[host.kb]\nembeddings = \"http://127.0.0.1:1\"\n").is_err());
-    assert!(raw("[host.kb]\nmodel = \"m\"\n").is_err());
-    assert!(raw("[host.kb]\nembeddings = \"ftp://x\"\nmodel = \"m\"\n").is_err());
+    let omitted = raw("[host.kb.embedder]\nmodel = \"m\"\n").unwrap();
+    assert_eq!(omitted.kb.embedder.unwrap().choice, "default");
+    assert!(
+        raw("[host.kb.embedder]\nuse = \"x\"\n").is_err(),
+        "an embedder needs its model"
+    );
+    assert!(raw("[host.kb.embedder]\nmodel = \"m\"\ndimensions = 0\n").is_err());
+    assert!(
+        raw("[host.kb.ranker]\nuse = \"x\"\n").is_err(),
+        "a ranker needs its model"
+    );
+    assert!(raw("[host.kb.ranker]\nmodel = \"q\"\ncandidates = 0\n").is_err());
+    assert!(raw("[host.kb.ranker]\nmodel = \"q\"\ntimeout_seconds = 0\n").is_err());
+    assert!(raw("[host.kb.ranker]\nmodel = \"q\"\npassage_chars = 0\n").is_err());
     assert!(raw("[host.kb]\nchunk_bytes = 2\n").is_err());
     assert!(raw("[host.kb]\nsurprise = 1\n").is_err());
-
-    let llm = raw(
-        "[host.kb]\nllm_endpoint = \"http://127.0.0.1:60570\"\nllm_model = \"q\"\nllm_candidates = 6\nllm_timeout_secs = 9\nllm_api_key_env = \"KEY\"\n",
-    )
-    .unwrap()
-    .kb;
-    assert_eq!(
-        (
-            llm.llm_model.as_deref(),
-            llm.llm_candidates,
-            llm.llm_timeout_secs,
-            llm.llm_api_key_env.as_deref()
-        ),
-        (Some("q"), Some(6), Some(9), Some("KEY"))
-    );
+    // The keys before the rename are refused like any other unknown key.
+    assert!(raw("[host.kb]\nembeddings = \"http://127.0.0.1:1\"\nmodel = \"m\"\n").is_err());
     assert!(raw("[host.kb]\nllm_endpoint = \"http://127.0.0.1:1\"\n").is_err());
-    assert!(raw("[host.kb]\nllm_model = \"q\"\n").is_err());
-    assert!(raw("[host.kb]\nllm_api_key_env = \"K\"\n").is_err());
-    assert!(raw("[host.kb]\nllm_endpoint = \"ftp://x\"\nllm_model = \"q\"\n").is_err());
     assert!(
-        raw("[host.kb]\nllm_endpoint = \"http://h\"\nllm_model = \"q\"\nllm_candidates = 0\n")
-            .is_err()
+        raw("[sdk.x]\naddress = \"http://h\"\n").is_err(),
+        "an offer names its provider"
     );
-    assert!(
-        raw("[host.kb]\nllm_endpoint = \"http://h\"\nllm_model = \"q\"\nllm_timeout_secs = 0\n")
-            .is_err()
-    );
+    assert!(raw("[sdk.x]\nprovider = \"server\"\naddress = \"ftp://h\"\n").is_err());
+    assert!(raw("[sdk.Bad Name]\nprovider = \"server\"\n").is_err());
+    assert!(raw("[assist.embed]\nuse = \"\"\n").is_err());
+    assert!(raw("[assist.embed]\nsurprise = 1\n").is_err());
 
     let profiles =
         raw("[overlays.team]\nkb = \"index\"\n[overlays.plain]\nkb = \"files\"\n[overlays.none]\n")
@@ -1058,7 +1097,7 @@ fn the_model_that_orders_passages_is_reached_through_the_network_the_connections
     }));
     // The model is at a name that exists nowhere else: a request that reached it by any other way would fail.
     let (proxy, network) = behind_proxy(&model);
-    let hub = hub_in(&scratch.0, &with_llm("http://kb-model.example.test:8080"));
+    let hub = hub_of(&scratch.0, &with_llm("http://kb-model.example.test:8080"));
     let link = hub
         .for_connection(
             vec![team("sha256:aa")],
@@ -1071,7 +1110,7 @@ fn the_model_that_orders_passages_is_reached_through_the_network_the_connections
     let (url, token) = given(&link.client_said(session_new(2)));
     let by_model = searched(&url, &token, "cargo", "llm");
     assert_eq!(by_model["mode"], "llm", "{by_model}");
-    // The rank endpoint is tried first and the chat one after it: each is a tunnel through the proxy, with its login.
+    // Each request is a tunnel through the proxy, with its login.
     let tunnels = proxy.allowed("alice", "s3cret");
     assert!(
         !tunnels.is_empty() && tunnels.iter().all(|to| to == "kb-model.example.test:8080"),
@@ -1079,7 +1118,8 @@ fn the_model_that_orders_passages_is_reached_through_the_network_the_connections
     );
     // A connection whose profile chose no network reaches the model as the process does, which cannot find that name.
     let (_other, url, token) = session(&hub, vec![team("sha256:aa")]);
-    let without = searched(&url, &token, "cargo", "llm");
+    // Another query, since an ordering already made is remembered whoever asked.
+    let without = searched(&url, &token, "cargo test", "llm");
     assert_eq!(without["error"]["class"], "mode-unavailable", "{without}");
 }
 
@@ -1087,8 +1127,15 @@ fn the_model_that_orders_passages_is_reached_through_the_network_the_connections
 fn a_query_is_embedded_through_the_network_the_connections_profile_chose() {
     let (origin, embedded) = embeddings_stub();
     let (proxy, network) = behind_proxy(&origin);
-    let through =
-        embedder::NetworkEmbedder::new("http://embeddings.example.test:9", "m").on(Some(network));
+    let config = with_embeddings("http://embeddings.example.test:9");
+    let through = embedder::AssistEmbedder::new(
+        crate::assist::Assist::of(&config, None),
+        "stub",
+        "m",
+        None,
+        Arc::new(embedder::QueryCache::new(0)),
+    )
+    .on(Some(network));
     let vectors = coqui_aos::index::Embedder::embed(&through, &["cargo".to_owned()])
         .expect("embedded through the proxy");
     assert_eq!(vectors.len(), 1);
@@ -1098,4 +1145,94 @@ fn a_query_is_embedded_through_the_network_the_connections_profile_chose() {
         ["embeddings.example.test:9"]
     );
     assert_eq!(origin.paths(), ["/v1/embeddings"]);
+}
+
+fn water() -> Source {
+    Source {
+        identity: "water".to_owned(),
+        digest: "sha256:cc".to_owned(),
+        tree: tree(&[
+            ("kb/water.md", "# Water\n\nA canoe waits on the river.\n"),
+            ("kb/food.md", "# Food\n\nBread and soup from the kitchen.\n"),
+        ]),
+        served: false,
+        options: coqui_aos::Document::new(),
+    }
+}
+
+/// The hub of a stand-in backend that does everything: no server, no account, no network.
+fn hub_with_stand_in(state: &Path, stand: &Arc<crate::assist::testing::StandIn>) -> Arc<Hub> {
+    let config = config_of(
+        "[host.kb.embedder]\nuse = \"stand\"\nmodel = \"m\"\n[host.kb.ranker]\nuse = \"stand\"\nmodel = \"q\"\n",
+    );
+    let assist = crate::assist::Assist::new(
+        vec![Arc::clone(stand) as Arc<dyn crate::assist::Backend>],
+        indexmap::IndexMap::new(),
+        Duration::from_secs(60),
+    );
+    Hub::new(&config.kb, Some(state.to_path_buf()), bridge(), assist)
+}
+
+#[test]
+fn a_stand_in_backend_matches_by_meaning_and_orders_and_the_index_is_named_by_it() {
+    use crate::assist::Operation;
+    let scratch = Scratch::new();
+    let stand = crate::assist::testing::StandIn::new(
+        "stand",
+        &[Operation::Embed, Operation::Complete, Operation::Rerank],
+    );
+    let hub = hub_with_stand_in(&scratch.0, &stand);
+    let (_link, url, token) = session(&hub, vec![water()]);
+    let list = said(&call(&url, &token, "kb_list", &json!({})));
+    assert_eq!(list["search"]["modes"], json!(["words", "meaning", "llm"]));
+    // Nothing in the water file says `paddle`, so words find nothing; the stand-in's topics put it with the canoe.
+    let by_words = searched(&url, &token, "paddle", "words");
+    assert!(
+        by_words["passages"].as_array().is_none_or(Vec::is_empty),
+        "{by_words}"
+    );
+    let by_meaning = searched(&url, &token, "paddle", "meaning");
+    assert_eq!(by_meaning["mode"], "meaning", "{by_meaning}");
+    assert_eq!(paths_of(&by_meaning)[0], "kb/water.md");
+    // The stand-in reranks, so it orders the candidates and no chat model is asked.
+    let ordered = searched(&url, &token, "paddle", "llm");
+    assert_eq!(ordered["mode"], "llm", "{ordered}");
+    assert_eq!(paths_of(&ordered)[0], "kb/water.md");
+    let variants: Vec<String> = std::fs::read_dir(scratch.0.join("kb").join("water"))
+        .unwrap()
+        .flatten()
+        .flat_map(|version| std::fs::read_dir(version.path()).unwrap().flatten())
+        .map(|variant| variant.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        variants.iter().any(|name| name == "m-stand%2fm"),
+        "an index is named by the backend and the model: {variants:?}"
+    );
+}
+
+#[test]
+fn a_backend_that_cannot_answer_leaves_the_search_by_words_with_the_reason() {
+    use crate::assist::Operation;
+    use core::sync::atomic::Ordering;
+    let scratch = Scratch::new();
+    let stand =
+        crate::assist::testing::StandIn::new("stand", &[Operation::Embed, Operation::Complete]);
+    stand.failing.store(true, Ordering::SeqCst);
+    let hub = hub_with_stand_in(&scratch.0, &stand);
+    let (_link, url, token) = session(&hub, vec![water()]);
+    let found = said(&call(&url, &token, "kb_search", &json!({"query": "canoe"})));
+    let entry = &found["results"][0];
+    assert_eq!(entry["mode"], "words", "{entry}");
+    assert_eq!(entry["passages"][0]["path"], "kb/water.md");
+    let note = entry["note"].as_str().unwrap();
+    assert!(
+        note.contains("could not order") || note.contains("embeddings are not available"),
+        "{note}"
+    );
+    assert!(
+        note.contains("stand"),
+        "the reason names the backend: {note}"
+    );
+    let meaning = searched(&url, &token, "canoe", "meaning");
+    assert_eq!(meaning["error"]["class"], "mode-unavailable", "{meaning}");
 }

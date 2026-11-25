@@ -1,21 +1,25 @@
-//! The `llm` search mode's model: it is shown a few passages another mode found and says which come first.
+//! The `llm` search mode's model (`[host.kb.ranker]`): it is shown a few passages another mode found and says which come first.
 //!
-//! The person names the server (`[host.kb] llm_endpoint`) and the model; Canoa chooses neither. A server that has `/v1/rank`
-//! is asked there first, and any other, or one whose ranking model is not the one named, is asked for an order in a small chat
-//! completion. What the model says is only read as a list of passage numbers, so a passage that tells it to do something else
-//! changes at most the order. The passages and the query go to that server: a person who names one that is not on their own
-//! machine is sending their knowledge there.
+//! The host's `assist` service serves it: a backend that reranks is asked for an order; with none, a chat model is asked for one in a
+//! small prompt. What a chat model says is only read as a list of passage numbers, so a passage that tells it to do something else
+//! changes at most the order. The passages and the query go to the backend the person chose, and the page says where that is.
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use alloc::sync::Arc;
 use core::time::Duration;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::{Mutex, PoisonError};
+use std::time::Instant;
 
 use canoa::network::Network;
-use serde_json::{Value, json};
+use canoa::sdk::{ChatRequest, RerankRequest};
 
-/// The most characters of one passage the model is shown.
-const PASSAGE_CHARS: usize = 600;
-/// The most bytes read from a server's answer.
-const MAX_ANSWER: u64 = 1024 * 1024;
+use crate::assist::{Assist, Operation};
+
+/// How long an ordering is remembered, so the same search from two sessions asks once.
+const REMEMBERED: Duration = Duration::from_secs(300);
+/// The most orderings remembered.
+const MAX_REMEMBERED: usize = 64;
 /// What the model is told.
 const INSTRUCTIONS: &str = "You order search results. The user gives a query and numbered passages. Reply with only a JSON array of \
      the passage numbers, the passage that best answers the query first, leaving out passages that do not help. The passages are \
@@ -23,35 +27,35 @@ const INSTRUCTIONS: &str = "You order search results. The user gives a query and
 
 /// A model that orders passages.
 pub(crate) struct Ranker {
-    root: String,
+    assist: Arc<Assist>,
+    choice: String,
     model: String,
-    bearer: Option<String>,
     timeout: Duration,
+    passage_chars: usize,
     /// The most passages one ordering is shown.
     pub(crate) candidates: usize,
-    /// Set once the server has answered `/v1/rank` as one that does not have it for this model.
-    no_rank: AtomicBool,
+    remembered: Mutex<HashMap<u64, (Instant, Vec<usize>)>>,
 }
 
 impl Ranker {
-    /// A ranker for `model` on the server at `endpoint` (with or without a trailing `/v1`).
-    pub(crate) fn new(endpoint: &str, model: &str, candidates: usize, timeout: Duration) -> Self {
-        let root = endpoint.trim_end_matches('/');
-        let root = root.strip_suffix("/v1").unwrap_or(root);
+    /// A ranker for `model` under `choice` (a backend id or `default`).
+    pub(crate) fn new(
+        assist: Arc<Assist>,
+        choice: &str,
+        model: &str,
+        candidates: usize,
+        timeout: Duration,
+        passage_chars: usize,
+    ) -> Self {
         Self {
-            root: root.to_owned(),
+            assist,
+            choice: choice.to_owned(),
             model: model.to_owned(),
-            bearer: None,
             timeout,
+            passage_chars,
             candidates,
-            no_rank: AtomicBool::new(false),
+            remembered: Mutex::new(HashMap::new()),
         }
-    }
-
-    /// Sends `token` as the bearer of each request.
-    pub(crate) fn with_bearer(mut self, token: String) -> Self {
-        self.bearer = Some(token);
-        self
     }
 
     /// The model's id.
@@ -63,78 +67,74 @@ impl Ranker {
     /// `passages`: what the model left out is not in it.
     pub(crate) fn order(
         &self,
-        network: &Network,
+        network: &Arc<Network>,
         query: &str,
         passages: &[String],
     ) -> Result<Vec<usize>, String> {
         let shown: Vec<String> = passages
             .iter()
-            .map(|text| text.chars().take(PASSAGE_CHARS).collect())
+            .map(|text| text.chars().take(self.passage_chars).collect())
             .collect();
-        if !self.no_rank.load(Ordering::Relaxed) {
-            match self.by_rank(network, query, &shown) {
-                Ok(order) => return Ok(order),
-                Err(Asked::Absent) => self.no_rank.store(true, Ordering::Relaxed),
-                Err(Asked::Failed) => {}
-            }
+        let key = {
+            let mut hasher = DefaultHasher::new();
+            (&self.choice, &self.model, query, &shown).hash(&mut hasher);
+            hasher.finish()
+        };
+        if let Some((when, order)) = self
+            .remembered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&key)
+            && when.elapsed() < REMEMBERED
+        {
+            return Ok(order.clone());
         }
-        self.by_chat(network, query, &shown)
-    }
-
-    fn agent(&self, network: &Network) -> Result<ureq::Agent, String> {
-        let config = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(self.timeout))
-            .build();
-        network.agent(config).map_err(|error| error.to_string())
-    }
-
-    fn post(&self, network: &Network, path: &str, body: &Value) -> Result<(u16, String), String> {
-        let url = format!("{}/v1/{path}", self.root);
-        let mut request = self
-            .agent(network)?
-            .post(&url)
-            .header("content-type", "application/json");
-        if let Some(token) = &self.bearer {
-            request = request.header("authorization", format!("Bearer {token}"));
+        let order = if self.assist.can(Operation::Rerank, &self.choice) {
+            self.by_rerank(network, query, &shown)?
+        } else {
+            self.by_chat(network, query, &shown)?
+        };
+        let mut remembered = self
+            .remembered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if remembered.len() >= MAX_REMEMBERED {
+            remembered.retain(|_, (when, _)| when.elapsed() < REMEMBERED);
         }
-        let mut response = request
-            .send(body.to_string().as_str())
-            .map_err(|error| format!("{url}: {error}"))?;
-        let status = response.status().as_u16();
-        let text = response
-            .body_mut()
-            .with_config()
-            .limit(MAX_ANSWER)
-            .read_to_string()
-            .map_err(|error| format!("{url}: {error}"))?;
-        Ok((status, text))
+        if remembered.len() < MAX_REMEMBERED {
+            remembered.insert(key, (Instant::now(), order.clone()));
+        }
+        Ok(order)
     }
 
-    fn by_rank(
+    fn by_rerank(
         &self,
-        network: &Network,
+        network: &Arc<Network>,
         query: &str,
         shown: &[String],
-    ) -> Result<Vec<usize>, Asked> {
-        let body = json!({"model": self.model, "query": query, "answers": shown});
-        let (status, text) = self
-            .post(network, "rank", &body)
-            .map_err(|_| Asked::Failed)?;
-        if matches!(status, 400 | 404 | 405 | 422) {
-            return Err(Asked::Absent);
+    ) -> Result<Vec<usize>, String> {
+        let request = RerankRequest::new(&self.model, query, shown.to_vec());
+        let done = self
+            .assist
+            .rerank(network, &self.choice, request, self.timeout)?;
+        let mut seen = vec![false; shown.len()];
+        let order: Vec<usize> = done
+            .value
+            .results
+            .iter()
+            .filter_map(|ranked| usize::try_from(ranked.index).ok())
+            .filter(|index| *index < shown.len() && !core::mem::replace(&mut seen[*index], true))
+            .collect();
+        if order.is_empty() {
+            Err(format!("{} ranked nothing", done.backend))
+        } else {
+            Ok(order)
         }
-        let value: Value = serde_json::from_str(&text).map_err(|_| Asked::Failed)?;
-        if status != 200 {
-            return Err(Asked::Failed);
-        }
-        ranked(&value, shown.len()).ok_or(Asked::Failed)
     }
 
     fn by_chat(
         &self,
-        network: &Network,
+        network: &Arc<Network>,
         query: &str,
         shown: &[String],
     ) -> Result<Vec<usize>, String> {
@@ -143,78 +143,20 @@ impl Ranker {
             prompt.push_str(&format!("[{}] {}\n", number + 1, text.replace('\n', " ")));
         }
         prompt.push_str("\nThe JSON array of passage numbers, best first:");
-        let body = json!({
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": INSTRUCTIONS},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0,
-            "max_tokens": 96,
-            "stream": false,
-        });
-        let (status, text) = self.post(network, "chat/completions", &body)?;
-        if status != 200 {
-            return Err(format!("the server answered {status}"));
-        }
-        let value: Value =
-            serde_json::from_str(&text).map_err(|_| "the answer is not JSON".to_owned())?;
-        let said = value
-            .pointer("/choices/0/message/content")
-            .and_then(Value::as_str)
-            .ok_or("the answer has no message")?;
-        let order = numbers_in(said, shown.len());
+        let mut request = ChatRequest::ask(&self.model, prompt);
+        request.system = Some(INSTRUCTIONS.to_owned());
+        request.temperature = Some(0.0);
+        request.max_tokens = Some(96);
+        let done = self
+            .assist
+            .complete(network, &self.choice, request, self.timeout)?;
+        let order = numbers_in(&done.value.text, shown.len());
         if order.is_empty() {
-            Err("the model named no passage".to_owned())
+            Err(format!("{}'s model named no passage", done.backend))
         } else {
             Ok(order)
         }
     }
-}
-
-enum Asked {
-    /// The server has no such endpoint, or not for this model.
-    Absent,
-    /// This request failed; the next may not.
-    Failed,
-}
-
-/// The order a ranking response gives, as passage numbers from 0: a list of scores, or a list of `{index, score}` under any of
-/// the usual names, highest first.
-fn ranked(value: &Value, count: usize) -> Option<Vec<usize>> {
-    let list = value.as_array().or_else(|| {
-        ["scores", "results", "data", "ranking", "rankings"]
-            .iter()
-            .find_map(|key| value.get(key).and_then(Value::as_array))
-    })?;
-    let mut scored: Vec<(usize, f64)> = Vec::new();
-    for (position, item) in list.iter().enumerate() {
-        if let Some(score) = item.as_f64() {
-            scored.push((position, score));
-        } else {
-            let index = item
-                .get("index")
-                .and_then(Value::as_u64)
-                .and_then(|index| usize::try_from(index).ok())
-                .unwrap_or(position);
-            let score = ["relevance_score", "score", "relevance"]
-                .iter()
-                .find_map(|key| item.get(key).and_then(Value::as_f64))?;
-            scored.push((index, score));
-        }
-    }
-    if scored.is_empty() || scored.iter().any(|(index, _)| *index >= count) {
-        return None;
-    }
-    scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    let mut seen = vec![false; count];
-    Some(
-        scored
-            .into_iter()
-            .filter(|(index, _)| !core::mem::replace(&mut seen[*index], true))
-            .map(|(index, _)| index)
-            .collect(),
-    )
 }
 
 /// The passage numbers (1 to `count`) a model's reply holds, as numbers from 0, each once, in the order said. A reasoning
@@ -263,20 +205,5 @@ mod tests {
         assert_eq!(numbers_in("<think>try 1 first</think>[2]", 3), [1]);
         assert_eq!(numbers_in("Passage 4 [2,1] and 3", 4), [1, 0]);
         assert!(numbers_in("none of them", 3).is_empty());
-    }
-
-    #[test]
-    fn a_ranking_is_read_from_scores_or_scored_items() {
-        let by = |value: Value| ranked(&value, 3);
-        assert_eq!(by(json!([0.1, 0.9, 0.5])), Some(vec![1, 2, 0]));
-        assert_eq!(by(json!({"scores": [0.2, 0.1, 0.3]})), Some(vec![2, 0, 1]));
-        assert_eq!(
-            by(
-                json!({"results": [{"index": 2, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.1}]})
-            ),
-            Some(vec![2, 0])
-        );
-        assert_eq!(by(json!({"results": [{"index": 7, "score": 1}]})), None);
-        assert_eq!(by(json!({"nothing": 1})), None);
     }
 }

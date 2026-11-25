@@ -1220,6 +1220,13 @@ impl Serving {
                     &config.kb,
                     options.state_dir.clone(),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
+                    crate::assist::Assist::of(
+                        config,
+                        options
+                            .account_layers
+                            .as_ref()
+                            .zip(options.state_dir.as_deref()),
+                    ),
                 ),
                 env_tools: crate::environments::mcp::Hub::new(
                     Arc::clone(&environments),

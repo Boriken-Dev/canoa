@@ -10,7 +10,10 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 use super::entries_parse::TransportSpec;
-use super::{ConfigError, DelegateConfig, KbConfig, NetworkConfig, OpenerConfig};
+use super::{
+    AssistChoice, AssistConfig, ConfigError, DEFAULT_CHOICE, DelegateConfig, KbConfig, KbEmbedder,
+    KbRanker, KbSearch, NetworkConfig, OpenerConfig, SdkTable,
+};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,6 +141,12 @@ pub(super) struct RawFile {
     /// `[secrets]`: the secret providers' table, which they read; the host keeps it for who keeps the accounts' credentials.
     #[serde(default)]
     pub(super) secrets: Option<toml::Table>,
+    /// `[assist.OPERATION]`: which backend serves each operation.
+    #[serde(default)]
+    pub(super) assist: IndexMap<String, toml::Value>,
+    /// `[sdk.NAME]`: the offers the person makes by address.
+    #[serde(default)]
+    pub(super) sdk: IndexMap<String, toml::Value>,
 }
 
 /// `[settings]`: each section's table is the section's; the host reads the Power group's.
@@ -325,18 +334,45 @@ pub(super) fn network_of(raw: RawNetwork, directory: &Path) -> Result<NetworkCon
 #[serde(deny_unknown_fields)]
 pub(super) struct RawKb {
     pub(super) tools: Option<bool>,
-    pub(super) embeddings: Option<String>,
-    pub(super) model: Option<String>,
-    pub(super) api_key_env: Option<String>,
-    pub(super) document_prefix: Option<String>,
-    pub(super) query_prefix: Option<String>,
     pub(super) chunk_bytes: Option<usize>,
     pub(super) overlap_bytes: Option<usize>,
-    pub(super) llm_endpoint: Option<String>,
-    pub(super) llm_model: Option<String>,
-    pub(super) llm_api_key_env: Option<String>,
-    pub(super) llm_candidates: Option<usize>,
-    pub(super) llm_timeout_secs: Option<u64>,
+    pub(super) retry_seconds: Option<u64>,
+    pub(super) query_cache: Option<usize>,
+    pub(super) embedder: Option<RawKbEmbedder>,
+    pub(super) ranker: Option<RawKbRanker>,
+    pub(super) search: Option<RawKbSearch>,
+}
+
+/// `[host.kb.embedder]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawKbEmbedder {
+    #[serde(rename = "use")]
+    pub(super) choice: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) dimensions: Option<u32>,
+    pub(super) document_prefix: Option<String>,
+    pub(super) query_prefix: Option<String>,
+}
+
+/// `[host.kb.ranker]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawKbRanker {
+    #[serde(rename = "use")]
+    pub(super) choice: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) candidates: Option<usize>,
+    pub(super) timeout_seconds: Option<u64>,
+    pub(super) passage_chars: Option<usize>,
+}
+
+/// `[host.kb.search]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawKbSearch {
+    #[serde(rename = "use")]
+    pub(super) choice: Option<String>,
 }
 
 impl RawKb {
@@ -345,44 +381,78 @@ impl RawKb {
             entry: None,
             what: format!("[host.kb] {what}"),
         };
-        if let Some(address) = &self.embeddings {
-            let parsed =
-                url::Url::parse(address).map_err(|_| invalid("embeddings is not an address"))?;
-            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-                return Err(invalid("embeddings is an http or https address"));
+        let choice = |text: Option<String>, table: &str| -> Result<String, ConfigError> {
+            match text {
+                None => Ok(DEFAULT_CHOICE.to_owned()),
+                Some(text) if text.trim().is_empty() => {
+                    Err(invalid(&format!("{table} use is empty")))
+                }
+                Some(text) => Ok(text),
             }
-            if self.model.as_deref().is_none_or(str::is_empty) {
-                return Err(invalid("embeddings needs the model its server loaded"));
-            }
-        } else if self.model.is_some() || self.api_key_env.is_some() {
-            return Err(invalid("model and api_key_env need embeddings"));
-        }
-        if let Some(address) = &self.llm_endpoint {
-            let parsed =
-                url::Url::parse(address).map_err(|_| invalid("llm_endpoint is not an address"))?;
-            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-                return Err(invalid("llm_endpoint is an http or https address"));
-            }
-            if self.llm_model.as_deref().is_none_or(str::is_empty) {
-                return Err(invalid("llm_endpoint needs the model its server loaded"));
-            }
-        } else if self.llm_model.is_some() || self.llm_api_key_env.is_some() {
-            return Err(invalid("llm_model and llm_api_key_env need llm_endpoint"));
-        }
-        if self
-            .llm_candidates
-            .is_some_and(|count| !(1..=100).contains(&count))
-        {
-            return Err(invalid("llm_candidates is 1 to 100"));
-        }
-        if self.llm_timeout_secs == Some(0) {
-            return Err(invalid("llm_timeout_secs is at least 1"));
-        }
+        };
+        let embedder = self
+            .embedder
+            .map(|raw| -> Result<KbEmbedder, ConfigError> {
+                let model = raw
+                    .model
+                    .filter(|model| !model.trim().is_empty())
+                    .ok_or_else(|| invalid("embedder needs the model that makes the vectors"))?;
+                if raw.dimensions == Some(0) {
+                    return Err(invalid("embedder dimensions is at least 1"));
+                }
+                Ok(KbEmbedder {
+                    choice: choice(raw.choice, "embedder")?,
+                    model,
+                    dimensions: raw.dimensions,
+                    document_prefix: raw.document_prefix,
+                    query_prefix: raw.query_prefix,
+                })
+            })
+            .transpose()?;
+        let ranker = self
+            .ranker
+            .map(|raw| -> Result<KbRanker, ConfigError> {
+                let model = raw
+                    .model
+                    .filter(|model| !model.trim().is_empty())
+                    .ok_or_else(|| invalid("ranker needs the model that orders the passages"))?;
+                if raw
+                    .candidates
+                    .is_some_and(|count| !(1..=100).contains(&count))
+                {
+                    return Err(invalid("ranker candidates is 1 to 100"));
+                }
+                if raw.timeout_seconds == Some(0) {
+                    return Err(invalid("ranker timeout_seconds is at least 1"));
+                }
+                if raw.passage_chars == Some(0) {
+                    return Err(invalid("ranker passage_chars is at least 1"));
+                }
+                Ok(KbRanker {
+                    choice: choice(raw.choice, "ranker")?,
+                    model,
+                    candidates: raw.candidates,
+                    timeout_seconds: raw.timeout_seconds,
+                    passage_chars: raw.passage_chars,
+                })
+            })
+            .transpose()?;
+        let search = self
+            .search
+            .map(|raw| -> Result<KbSearch, ConfigError> {
+                Ok(KbSearch {
+                    choice: choice(raw.choice, "search")?,
+                })
+            })
+            .transpose()?;
         let chunk = self.chunk_bytes.unwrap_or(1024);
         if !(4..=65536).contains(&chunk) {
             return Err(invalid("chunk_bytes is 4 to 65536"));
         }
-        let prefix = self.document_prefix.as_deref().map_or(0, str::len);
+        let prefix = embedder
+            .as_ref()
+            .and_then(|each| each.document_prefix.as_deref())
+            .map_or(0, str::len);
         if chunk.saturating_sub(prefix) < 4
             || self.overlap_bytes.unwrap_or(0) >= chunk - prefix.min(chunk)
         {
@@ -392,20 +462,119 @@ impl RawKb {
         }
         Ok(KbConfig {
             tools: self.tools,
-            embeddings: self.embeddings,
-            model: self.model,
-            api_key_env: self.api_key_env,
-            document_prefix: self.document_prefix,
-            query_prefix: self.query_prefix,
             chunk_bytes: self.chunk_bytes,
             overlap_bytes: self.overlap_bytes,
-            llm_endpoint: self.llm_endpoint,
-            llm_model: self.llm_model,
-            llm_api_key_env: self.llm_api_key_env,
-            llm_candidates: self.llm_candidates,
-            llm_timeout_secs: self.llm_timeout_secs,
+            retry_seconds: self.retry_seconds,
+            query_cache: self.query_cache,
+            embedder,
+            ranker,
+            search,
         })
     }
+}
+
+/// `[assist.OPERATION]`: which backend serves an operation, and which come after it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawAssist {
+    #[serde(rename = "use")]
+    pub(super) choice: Option<String>,
+    #[serde(default)]
+    pub(super) fallback: Vec<String>,
+}
+
+/// The `[assist.*]` and `[sdk.*]` tables, read from the top level of the file.
+pub(super) fn assist_of(
+    assist: &IndexMap<String, toml::Value>,
+    sdk: &IndexMap<String, toml::Value>,
+) -> Result<AssistConfig, ConfigError> {
+    let invalid = |what: String| ConfigError::Invalid { entry: None, what };
+    let word = |text: &str, extra: &[char]| {
+        (1..=32).contains(&text.len())
+            && text
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || extra.contains(&c))
+    };
+    let mut out = AssistConfig::default();
+    for (operation, value) in assist {
+        if !word(operation, &['_']) {
+            return Err(invalid(format!(
+                "[assist.{operation}] is not an operation name (lower-case letters, digits and _)"
+            )));
+        }
+        let raw: RawAssist = value.clone().try_into().map_err(|error: toml::de::Error| {
+            invalid(format!("[assist.{operation}] {}", error.message()))
+        })?;
+        if raw
+            .choice
+            .as_deref()
+            .is_some_and(|text| text.trim().is_empty())
+            || raw.fallback.iter().any(|text| text.trim().is_empty())
+        {
+            return Err(invalid(format!(
+                "[assist.{operation}] names an empty backend"
+            )));
+        }
+        out.operations.insert(
+            operation.clone(),
+            AssistChoice {
+                choice: raw.choice,
+                fallback: raw.fallback,
+            },
+        );
+    }
+    for (name, value) in sdk {
+        if !word(name, &['_', '-']) {
+            return Err(invalid(format!(
+                "[sdk.{name}] is not an offer name (lower-case letters, digits, _ and -)"
+            )));
+        }
+        let Some(table) = value.as_table() else {
+            return Err(invalid(format!("[sdk.{name}] is not a table")));
+        };
+        let text = |key: &str| -> Result<Option<String>, ConfigError> {
+            match table.get(key) {
+                None => Ok(None),
+                Some(toml::Value::String(text)) if !text.trim().is_empty() => {
+                    Ok(Some(text.clone()))
+                }
+                Some(_) => Err(invalid(format!("[sdk.{name}] {key} is a non-empty text"))),
+            }
+        };
+        let provider =
+            text("provider")?.ok_or_else(|| invalid(format!("[sdk.{name}] names no provider")))?;
+        let address = text("address")?;
+        if let Some(address) = &address {
+            let parsed = url::Url::parse(address)
+                .map_err(|_| invalid(format!("[sdk.{name}] address is not an address")))?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+                return Err(invalid(format!(
+                    "[sdk.{name}] address is an http or https address"
+                )));
+            }
+        }
+        let key_env = text("key_env")?;
+        let mut settings = serde_json::Map::new();
+        for (key, value) in table {
+            if !matches!(key.as_str(), "provider" | "address" | "key_env") {
+                settings.insert(
+                    key.clone(),
+                    serde_json::to_value(value)
+                        .map_err(|_| invalid(format!("[sdk.{name}] {key} cannot be read")))?,
+                );
+            }
+        }
+        out.sdk.insert(
+            name.clone(),
+            SdkTable {
+                provider,
+                address,
+                key_env,
+                settings: serde_json::Value::Object(settings),
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// `[host.native]`.

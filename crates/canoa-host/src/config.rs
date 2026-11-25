@@ -46,7 +46,7 @@ use profiles::{
 };
 use raw::{
     RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawEnvironment, RawExtension, RawFile,
-    RawHost, RawKb, RawLines, RawPool, RawProvider, network_of,
+    RawHost, RawKb, RawLines, RawPool, RawProvider, assist_of, network_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
@@ -54,11 +54,12 @@ use sections::{
 };
 pub(crate) use sections::{check_label, check_name, plain_absolute};
 pub use types::{
-    AgentProfile, Config, ControlConfig, DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS,
-    DEFAULT_MAX_SESSIONS, DEFAULT_PRESET, DelegateConfig, Extension, ExtensionCheck, HistoryConfig,
-    KbConfig, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig, NativeConfig,
-    NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, StoreConfig, UnknownLoadout,
-    UnknownPreset, UsageConfig, WorktreeConfig,
+    AgentProfile, AssistChoice, AssistConfig, Config, ControlConfig, DEFAULT_CHOICE,
+    DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS, DEFAULT_MAX_SESSIONS, DEFAULT_PRESET,
+    DelegateConfig, Extension, ExtensionCheck, HistoryConfig, KbConfig, KbEmbedder, KbRanker,
+    KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig, NativeConfig,
+    NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable, StoreConfig,
+    UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
@@ -185,7 +186,14 @@ impl Config {
         Self::from_raw(raw, base)
     }
 
-    fn from_raw(mut raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
+    fn from_raw(raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
+        let assist = assist_of(&raw.assist, &raw.sdk)?;
+        let mut config = Self::from_raw_tables(raw, base)?;
+        config.assist = assist;
+        Ok(config)
+    }
+
+    fn from_raw_tables(mut raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
         let top = resolve_top_level(&mut raw, base)?;
         let Some(mut host) = raw.host else {
             return Ok(Self {
@@ -274,6 +282,7 @@ impl Config {
             disabled: crate::disabled::Disabled::new(disabled),
             network: sub.network,
             kb: sub.kb,
+            assist: AssistConfig::default(),
             mcp_list: sub.mcp_list,
             services: sub.services,
             delegate: sub.delegate,

@@ -35,6 +35,7 @@ use serde_json::{Value, json};
 pub(crate) use self::library::Source;
 use self::library::{Builder, Library, Slot};
 use self::rank::Ranker;
+use crate::assist::Assist;
 use crate::config::KbConfig;
 use crate::delegate::BridgeCommand;
 
@@ -47,26 +48,16 @@ pub(crate) const SKILL_NAME: &str = "canoa-kb";
 const SKILL: &str = include_str!("kb_mcp/canoa-kb.md");
 /// The most passages the model of the `llm` mode is shown, when `[host.kb]` does not say.
 const DEFAULT_CANDIDATES: usize = 10;
+/// The most characters of a passage the model of the `llm` mode is shown, when `[host.kb]` does not say.
+const DEFAULT_PASSAGE_CHARS: usize = 600;
+/// The query embeddings remembered, when `[host.kb]` does not say.
+const DEFAULT_QUERY_CACHE: usize = 256;
 /// How long the model of the `llm` mode has to order them, when `[host.kb]` does not say.
 const DEFAULT_LLM_SECS: u64 = 30;
 /// Requests the host remembers an answer for.
 const MAX_PENDING: usize = 64;
 /// Sessions of one connection that hold a bearer.
 const MAX_SESSIONS: usize = 256;
-
-/// The key held in the variable `[host.kb] <setting>` names, for the server of `what`.
-fn key_from(setting: &str, name: Option<&str>, what: &str) -> Option<String> {
-    let name = name?;
-    match std::env::var(name) {
-        Ok(key) if !key.is_empty() => Some(key),
-        _ => {
-            tracing::warn!(
-                "[host.kb] {setting} names {name}, which is not set: the {what} server is asked with no key"
-            );
-            None
-        }
-    }
-}
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -168,6 +159,7 @@ impl Hub {
         config: &KbConfig,
         state: Option<PathBuf>,
         bridge: BridgeCommand,
+        assist: Arc<Assist>,
     ) -> Arc<Self> {
         let mut settings = Settings::default();
         // The knowledge of a served overlay is every file the tools serve, whatever its name.
@@ -178,39 +170,47 @@ impl Hub {
         if let Some(bytes) = config.overlap_bytes {
             settings.overlap_bytes = bytes;
         }
-        settings.document_prefix = config.document_prefix.clone().unwrap_or_default();
-        settings.query_prefix = config.query_prefix.clone().unwrap_or_default();
-        let embedder = config
-            .embeddings
-            .as_deref()
-            .zip(config.model.as_deref())
-            .map(|(address, model)| {
-                let mut embedder = embedder::NetworkEmbedder::new(address, model);
-                if let Some(key) =
-                    key_from("api_key_env", config.api_key_env.as_deref(), "embeddings")
-                {
-                    embedder = embedder.with_bearer(key);
-                }
-                embedder
-            });
-        let ranker = config
-            .llm_endpoint
-            .as_deref()
-            .zip(config.llm_model.as_deref())
-            .map(|(address, model)| {
-                let mut ranker = Ranker::new(
-                    address,
-                    model,
-                    config.llm_candidates.unwrap_or(DEFAULT_CANDIDATES),
-                    Duration::from_secs(config.llm_timeout_secs.unwrap_or(DEFAULT_LLM_SECS)),
-                );
-                if let Some(key) =
-                    key_from("llm_api_key_env", config.llm_api_key_env.as_deref(), "llm")
-                {
-                    ranker = ranker.with_bearer(key);
-                }
-                ranker
-            });
+        settings.document_prefix = config
+            .embedder
+            .as_ref()
+            .and_then(|embedder| embedder.document_prefix.clone())
+            .unwrap_or_default();
+        settings.query_prefix = config
+            .embedder
+            .as_ref()
+            .and_then(|embedder| embedder.query_prefix.clone())
+            .unwrap_or_default();
+        let cache = Arc::new(embedder::QueryCache::new(
+            config.query_cache.unwrap_or(DEFAULT_QUERY_CACHE),
+        ));
+        let embedder = config.embedder.as_ref().map(|each| {
+            embedder::AssistEmbedder::new(
+                Arc::clone(&assist),
+                &each.choice,
+                &each.model,
+                each.dimensions,
+                Arc::clone(&cache),
+            )
+        });
+        let ranker = config.ranker.as_ref().map(|each| {
+            Ranker::new(
+                Arc::clone(&assist),
+                &each.choice,
+                &each.model,
+                each.candidates.unwrap_or(DEFAULT_CANDIDATES),
+                Duration::from_secs(each.timeout_seconds.unwrap_or(DEFAULT_LLM_SECS)),
+                each.passage_chars.unwrap_or(DEFAULT_PASSAGE_CHARS),
+            )
+        });
+        let search_note = config.search.as_ref().map(|each| {
+            format!(
+                "[host.kb.search] names {}, and no knowledge provider is loaded: searched by the host's own index",
+                each.choice
+            )
+        });
+        if let Some(note) = &search_note {
+            tracing::warn!("{note}");
+        }
         let builder = state.map(|state| {
             Arc::new(Builder {
                 state,
@@ -218,6 +218,7 @@ impl Hub {
                 embedder,
                 knowledge: KnowledgeSettings::default(),
                 ranker,
+                search_note,
             })
         });
         Arc::new(Self {

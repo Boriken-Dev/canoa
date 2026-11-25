@@ -273,7 +273,9 @@ fn with_a_real_embeddings_server_the_agent_finds_a_passage_by_meaning() {
     let model = std::env::var("CANOA_TEST_EMBED_MODEL").expect("CANOA_TEST_EMBED_MODEL");
     let dir = Scratch::new();
     let work = work(&dir);
-    let more = format!("[host.kb]\nembeddings = \"{url}\"\nmodel = \"{model}\"\n");
+    let more = format!(
+        "[sdk.real]\nprovider = \"server\"\naddress = \"{url}\"\ncapabilities = [\"embed\"]\n[host.kb.embedder]\nuse = \"real\"\nmodel = \"{model}\"\n"
+    );
     let host = Hosted::start_with_setup(|dir| config(dir, "index", &more), &[]);
     let link = host.local.open("agent").expect("a link");
     let (_, bearer) = session_of(&link, true, &work);
@@ -322,11 +324,7 @@ fn with_a_real_model_the_llm_mode_orders_the_passages_words_found() {
     let dir = Scratch::new();
     let work = work(&dir);
     let more = format!(
-        "[host.kb]
-llm_endpoint = \"{url}\"
-llm_model = \"{model}\"
-llm_timeout_secs = 120
-"
+        "[sdk.real]\nprovider = \"server\"\naddress = \"{url}\"\ncapabilities = [\"chat\"]\n[host.kb.ranker]\nuse = \"real\"\nmodel = \"{model}\"\ntimeout_seconds = 120\n"
     );
     let host = Hosted::start_with_setup(|dir| config(dir, "index", &more), &[]);
     let link = host.local.open("agent").expect("a link");

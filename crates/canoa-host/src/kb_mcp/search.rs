@@ -54,7 +54,7 @@ impl Backend<'_> {
     ) -> Result<SearchAnswer, SearchFailure> {
         let ranker = self.0.builder.ranker.as_ref().ok_or_else(|| {
             SearchFailure::mode_unavailable(
-                "the host names no model to order passages: [host.kb] llm_endpoint",
+                "the host names no model to order passages: [host.kb.ranker]",
             )
         })?;
         let (search, note) = self.index_search(overlay)?;
@@ -153,7 +153,7 @@ impl SearchBackend for Backend<'_> {
         }
         let (search, note) = self.index_search(overlay)?;
         let mut answer = search.search(overlay, request)?;
-        if let Some(note) = note
+        if let Some(note) = note.or_else(|| self.0.builder.search_note.clone())
             && answer.note.is_none()
         {
             answer.note = Some(note);

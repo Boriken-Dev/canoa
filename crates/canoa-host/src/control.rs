@@ -1122,7 +1122,7 @@ mod secrets_tests;
 mod services_tests;
 pub(crate) mod settings_sections;
 mod speech;
-mod speech_accounts;
+pub(crate) mod speech_accounts;
 #[cfg(test)]
 mod speech_lend_tests;
 mod speech_offers;

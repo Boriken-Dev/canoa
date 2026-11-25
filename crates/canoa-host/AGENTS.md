@@ -41,6 +41,15 @@ The host's seam for `session_service` providers (`canoa::session_service`), the 
 - **What it reaches.** `HostServices` is the `ServiceHost` of a host: `[host.services.ID]` of canoa.cfg (`Config::services`, each table as JSON text in the file's order; changed in place through `accounts::commands::set_table`, the file checked to be read again), the secrets of the host's account store (`Accounts`) and the loaded registries. A host with no canoa.cfg on disk (a test's) keeps the tables in memory. The host registers it (`canoa::session_service::register`) and every provider call carries the handle.
 - **Pages.** An admitted Office page holds `services` when any service has something to give (`serve::admission::page_grants`); a host run for a portal gives no key `services` or `services.setup`.
 
+## `assist`: the host's own model work (`src/assist.rs`)
+
+One service the host's consumers ask for an operation (`complete`, `embed`, `rerank`; `transcribe` and `speak` come with Voice), which it fulfils from a backend. Knowledge search (`kb_mcp`) is the first consumer; none calls an account's API, an agent or a program itself.
+
+- **Backends** (`trait Backend`): an `sdk_provider` on one of the person's accounts (`ID:ACCOUNT`, `openai:work`: every account whose kind provides a standard the provider serves, at the address the kind's `model_api` setting says, the key read from the account store when a request is made) and one for each `[sdk.NAME]` (the provider named, at `address`, the key from the variable `key_env` names, the provider's operations narrowed by the table's `capabilities`); the `server` provider is the host's own. The key is written onto the request by `assist::http::HostHttp`, which is all a provider is given: bound to one address, a path is the only thing a provider names, redirects are refused, the credential headers are the host's.
+- **Choosing** (`Assist::chain`): a backend id asks that one alone; `default` asks `[assist.OPERATION] use` then its `fallback`, or every backend that can when the table names none. An operation no backend can serve fails with the reason; a backend that failed is left alone for `[host.kb] retry_seconds` (60).
+- **The seam for state.** A `Backend` has `&self` methods, `reap` (called to end what has been idle too long) and `close`, so a backend that holds sessions open can be one: the harness backend (a pool keyed by harness, account and profile settings, started on first use, a new conversation for each request, an idle timeout and a cap, a broken session replaced) is not built yet.
+- **`assist::testing::StandIn`** answers deterministically with no network (a vector of how much a text says of four topics) and can be told to fail.
+
 ## Errors
 
 - `ConfigError` (`#[non_exhaustive]`): `Read { path, source }`; `Parse { line, column, what }`, 1-based, `what` in the schema's words; `Invalid { entry, what }`. No variant quotes a value from the file; an entry's name is quoted.

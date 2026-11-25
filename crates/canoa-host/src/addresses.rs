@@ -30,13 +30,10 @@ pub(crate) fn mail_and_kb_warnings(config: &Config) -> Vec<String> {
             plain_http_in(&format!("host.services.{service}"), &table, &mut notes);
         }
     }
-    for (key, address) in [
-        ("embeddings", &config.kb.embeddings),
-        ("llm_endpoint", &config.kb.llm_endpoint),
-    ] {
-        if let Some(address) = address {
+    for (name, table) in &config.assist.sdk {
+        if let Some(address) = &table.address {
             notes.extend(canoa::address::plain_http_note(
-                &format!("[host.kb] {key}"),
+                &format!("[sdk.{name}] address"),
                 address,
             ));
         }
@@ -88,12 +85,12 @@ mod tests {
         let quiet = config_of(
             "[host.services.mail.accounts.a]\nbackend = \"ews\"\nserver = \"https://mail.example/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
              [host.services.mail.accounts.b]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://127.0.0.1:9/v1.0\"\n\
-             [host.kb]\nembeddings = \"http://localhost:60570\"\nmodel = \"m\"\n",
+             [sdk.local]\nprovider = \"server\"\naddress = \"http://localhost:60570\"\n",
         );
         assert!(warnings(&quiet).is_empty(), "{:?}", warnings(&quiet));
         let loud = config_of(
             "[host.services.mail.accounts.a]\nbackend = \"ews\"\nserver = \"http://192.0.2.9/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
-             [host.kb]\nembeddings = \"http://192.0.2.9:60570\"\nmodel = \"m\"\n",
+             [sdk.remote]\nprovider = \"server\"\naddress = \"http://192.0.2.9:60570\"\n",
         );
         let notes = warnings(&loud);
         assert_eq!(notes.len(), 2, "{notes:?}");
@@ -103,7 +100,7 @@ mod tests {
             "{notes:?}"
         );
         assert!(
-            notes[1].starts_with("[host.kb] embeddings is plain http to 192.0.2.9"),
+            notes[1].starts_with("[sdk.remote] address is plain http to 192.0.2.9"),
             "{notes:?}"
         );
     }

@@ -78,6 +78,8 @@ pub struct Config {
     pub network: NetworkConfig,
     /// `[host.kb]`: the knowledge index tools and where their embeddings come from.
     pub kb: KbConfig,
+    /// `[assist]` and `[sdk]`: the backends that serve the host's own model work.
+    pub assist: AssistConfig,
     /// `[host.mcp_list]`: how long and how much listing a session's MCP servers takes.
     pub mcp_list: McpListConfig,
     /// `[host.services.ID]`: the table of each session service as the text of a JSON object whose members keep the file's order,
@@ -136,6 +138,7 @@ impl Default for Config {
             disabled: Default::default(),
             network: Default::default(),
             kb: Default::default(),
+            assist: Default::default(),
             mcp_list: Default::default(),
             services: IndexMap::new(),
             delegate: Default::default(),
@@ -916,39 +919,105 @@ impl NetworkConfig {
     }
 }
 
-/// `[host.kb]`: the `canoa-kb` tools, which search the knowledge an overlay ships. With no `embeddings` an index holds words only
-/// (BM25); with one, passages are also embedded by the endpoint the person names, which Canoa never chooses for them.
+/// What a choice of backend says when the table does not name one: the operation's own choice in `[assist.OPERATION]`.
+pub const DEFAULT_CHOICE: &str = "default";
+
+/// `[host.kb]`: the `canoa-kb` tools, which search the knowledge an overlay ships. With no `embedder` an index holds words only
+/// (BM25); with one, passages are also embedded by the backend the person chose, which Canoa never chooses for them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct KbConfig {
     /// `tools`: whether the host offers the `canoa-kb` tools to a session whose client asks for them (default true).
     pub tools: Option<bool>,
-    /// `embeddings`: the address of an OpenAI-compatible embeddings server (`http://127.0.0.1:60570`, with or without `/v1`).
-    pub embeddings: Option<String>,
-    /// `model`: the exact model id that server loaded; required with `embeddings`, and saved with each index.
-    pub model: Option<String>,
-    /// `api_key_env`: the name of a variable holding a key the server asks for, sent as a bearer; the key itself is never in
-    /// canoa.cfg.
-    pub api_key_env: Option<String>,
-    /// `document_prefix`: text put before each passage when it is embedded, for models that ask for one.
-    pub document_prefix: Option<String>,
-    /// `query_prefix`: text put before a query when it is embedded.
-    pub query_prefix: Option<String>,
     /// `chunk_bytes`: the most bytes of a passage, its prefix included (4 to 65536; default 1024).
     pub chunk_bytes: Option<usize>,
     /// `overlap_bytes`: the most bytes of whole lines adjacent passages share (default 0).
     pub overlap_bytes: Option<usize>,
-    /// `llm_endpoint`: the address of an OpenAI-compatible server whose model orders the best passages of a search (the `llm`
-    /// mode); the passages and the query are sent to it.
-    pub llm_endpoint: Option<String>,
-    /// `llm_model`: the exact model id that server loaded; required with `llm_endpoint`.
-    pub llm_model: Option<String>,
-    /// `llm_api_key_env`: the name of a variable holding a key that server asks for, sent as a bearer.
-    pub llm_api_key_env: Option<String>,
-    /// `llm_candidates`: the most passages the model is shown (default 10, 1 to 100).
-    pub llm_candidates: Option<usize>,
-    /// `llm_timeout_secs`: how long one ordering may take before the search answers without it (default 30).
-    pub llm_timeout_secs: Option<u64>,
+    /// `retry_seconds`: how long a backend that failed is left alone before it is asked again (default 60).
+    pub retry_seconds: Option<u64>,
+    /// `query_cache`: how many query embeddings are remembered (default 256).
+    pub query_cache: Option<usize>,
+    /// `[host.kb.embedder]`: what matches by meaning.
+    pub embedder: Option<KbEmbedder>,
+    /// `[host.kb.ranker]`: what puts the best passages first.
+    pub ranker: Option<KbRanker>,
+    /// `[host.kb.search]`: a provider that does the whole search its own way; read, and used from the knowledge provider kind on.
+    pub search: Option<KbSearch>,
+}
+
+/// `[host.kb.embedder]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct KbEmbedder {
+    /// `use`: a backend id (`openai:work`, `local`), or `default` for what `[assist.embed]` chooses.
+    pub choice: String,
+    /// `model`: the exact model that makes the vectors; saved with each index.
+    pub model: String,
+    /// `dimensions`: the vector length asked for, where the model allows it.
+    pub dimensions: Option<u32>,
+    /// `document_prefix`: text put before each passage when it is embedded, for models that ask for one.
+    pub document_prefix: Option<String>,
+    /// `query_prefix`: text put before a query when it is embedded.
+    pub query_prefix: Option<String>,
+}
+
+/// `[host.kb.ranker]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct KbRanker {
+    /// `use`: a backend id, or `default` for what `[assist.rerank]` chooses (a chat model by `[assist.complete]` where no
+    /// backend reranks).
+    pub choice: String,
+    /// `model`: the exact model that orders the passages.
+    pub model: String,
+    /// `candidates`: the most passages the model is shown (default 10, 1 to 100).
+    pub candidates: Option<usize>,
+    /// `timeout_seconds`: how long one ordering may take before the search answers without it (default 30).
+    pub timeout_seconds: Option<u64>,
+    /// `passage_chars`: the most characters of one passage the model is shown (default 600).
+    pub passage_chars: Option<usize>,
+}
+
+/// `[host.kb.search]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct KbSearch {
+    /// `use`: the provider that searches.
+    pub choice: String,
+}
+
+/// `[assist.OPERATION]`: which backend serves an operation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AssistChoice {
+    /// `use`: the backend that serves it; absent, the first that can.
+    pub choice: Option<String>,
+    /// `fallback`: the backends asked, in order, when it cannot.
+    pub fallback: Vec<String>,
+}
+
+/// `[sdk.NAME]`: a server the person offers by address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SdkTable {
+    /// `provider`: the `sdk_provider` that speaks to it (`server`).
+    pub provider: String,
+    /// `address`: where it is.
+    pub address: Option<String>,
+    /// `key_env`: the name of a variable holding the key it asks for; the key itself is never in canoa.cfg.
+    pub key_env: Option<String>,
+    /// The rest of the table: the provider's own settings, as JSON.
+    pub settings: serde_json::Value,
+}
+
+/// `[assist]` and `[sdk]`: which backends serve the host's own model work, and the offers the person makes by address.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AssistConfig {
+    /// `[assist.OPERATION]`, by operation name, in the file's order.
+    pub operations: IndexMap<String, AssistChoice>,
+    /// `[sdk.NAME]`, by name, in the file's order.
+    pub sdk: IndexMap<String, SdkTable>,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a

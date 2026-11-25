@@ -58,9 +58,11 @@ impl Source {
 pub(crate) struct Builder {
     pub(crate) state: PathBuf,
     pub(crate) settings: index::Settings,
-    pub(crate) embedder: Option<super::embedder::NetworkEmbedder>,
+    pub(crate) embedder: Option<super::embedder::AssistEmbedder>,
     pub(crate) knowledge: KnowledgeSettings,
     pub(crate) ranker: Option<Ranker>,
+    /// What the answers say when `[host.kb.search]` names a provider that is not loaded.
+    pub(crate) search_note: Option<String>,
 }
 
 /// An overlay version's index as the tools read it.
