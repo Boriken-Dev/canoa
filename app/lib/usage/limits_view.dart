@@ -72,6 +72,11 @@ class LimitsView extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(child: Text(each.name, style: text.titleMedium)),
                     ]),
+                    if (each.loginNote case final why?)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text('Not checked whether it is signed in: $why', key: Key('usage-login-note ${each.id}'), style: small),
+                      ),
                     if (each.who case final who?)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),

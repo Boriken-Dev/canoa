@@ -388,6 +388,7 @@ AccountInfo account(
   List<String> provides = const [],
   bool automatic = false,
   String? via,
+  String? note,
   List<String> warnings = const [],
 }) {
   final maker = provider != null;
@@ -402,10 +403,11 @@ AccountInfo account(
     if (provides.isNotEmpty) 'types': provides,
     if (automatic) 'automatic': true,
     'via': ?via,
+    'note': ?note,
     if (warnings.isNotEmpty) 'warnings': warnings,
   })!;
 }
 
 /// The automatic account of [harness] as the host lists it: `local`, of the kind a login the harness has where it runs is, under an id
 /// that names the harness.
-AccountInfo harnessLogin(String harness, {String? via}) =>    account('local', kind: 'harness-login', state: 'signed in where it runs', harness: harness, id: 'local:$harness', automatic: true, via: via);
+AccountInfo harnessLogin(String harness, {String? via, String? note}) =>    account('local', kind: 'harness-login', state: 'signed in where it runs', harness: harness, id: 'local:$harness', automatic: true, via: via, note: note);

@@ -111,6 +111,7 @@ final class AccountLimits {
     this.note,
     this.who,
     this.automatic = false,
+    this.loginNote,
   });
 
   /// Who the account is, when its agent said.
@@ -118,6 +119,9 @@ final class AccountLimits {
 
   /// Whether it is the login a harness has where it runs, which the host makes itself.
   final bool automatic;
+
+  /// Why the host could not tell whether that login is there, when its provider could not say; null when it could.
+  final String? loginNote;
 
   /// Why there are no figures, when a host was asked and gave none; null when figures show or no host was asked.
   final ReadNote? note;
@@ -296,7 +300,7 @@ class UsageController extends ChangeNotifier {
       for (final source in sources) {
         note ??= _notes[source.name]?[each.id];
       }
-      merged.add(AccountLimits(id: each.id, name: _label(each), provider: each.groupId, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note, who: _whoOf(each.id), automatic: each.automatic));
+      merged.add(AccountLimits(id: each.id, name: _label(each), provider: each.groupId, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note, who: _whoOf(each.id), automatic: each.automatic, loginNote: each.note));
     }
     for (final MapEntry(:key, :value) in byId.entries) {
       var newest = value.first.$2;
@@ -314,6 +318,7 @@ class UsageController extends ChangeNotifier {
           readAt: newest.readAt,
           who: _whoOf(key),
           automatic: resolved.automatic,
+          loginNote: resolved.note,
         ),
       );
     }
@@ -340,13 +345,13 @@ class UsageController extends ChangeNotifier {
     return via == null ? machineLoginLabel : '${via[0].toUpperCase()}${via.substring(1)}';
   }
 
-  ({String name, String provider, bool automatic}) _resolveAccount(
+  ({String name, String provider, bool automatic, String? note}) _resolveAccount(
     String key,
     List<(String, _Heard)> heard,
   ) {
     final info = accounts?.listed.where((each) => each.id == key).firstOrNull;
     if (info != null) {
-      return (name: _label(info), provider: info.groupId, automatic: info.automatic);
+      return (name: _label(info), provider: info.groupId, automatic: info.automatic, note: info.note);
     }
     final localHarness = _localHarnessOf(key);
     final heardProvider = _heardProvider(heard);
@@ -365,6 +370,7 @@ class UsageController extends ChangeNotifier {
           name: _label(localInfo),
           provider: localInfo.groupId,
           automatic: true,
+          note: localInfo.note,
         );
       }
       final provider =
@@ -372,20 +378,21 @@ class UsageController extends ChangeNotifier {
           _canonicalProvider(localHarness) ??
           heardProvider ??
           localHarness;
-      return (name: machineLoginLabel, provider: provider, automatic: true);
+      return (name: machineLoginLabel, provider: provider, automatic: true, note: null);
     }
     if (heardProvider != null) {
       return (
         name: key,
         provider: _canonicalProvider(heardProvider) ?? heardProvider,
         automatic: false,
+        note: null,
       );
     }
     final byKey = _canonicalProvider(key);
     if (byKey != null) {
-      return (name: key, provider: byKey, automatic: false);
+      return (name: key, provider: byKey, automatic: false, note: null);
     }
-    return (name: key, provider: otherProvider, automatic: false);
+    return (name: key, provider: otherProvider, automatic: false, note: null);
   }
 
   static String? _localHarnessOf(String key) {

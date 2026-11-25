@@ -470,6 +470,7 @@ final class AccountInfo {
     this.automatic = false,
     this.warnings = const [],
     this.via,
+    this.note,
   });
 
   /// One object of `accounts list --format json`, or null when it is not one.
@@ -499,6 +500,7 @@ final class AccountInfo {
       automatic: map['automatic'] == true,
       warnings: _texts(map['warnings']),
       via: map['via'] as String?,
+      note: map['note'] as String?,
     );
   }
 
@@ -522,6 +524,10 @@ final class AccountInfo {
   /// How the automatic account signs in when it is an environment key (`environment key (ANTHROPIC_API_KEY)`: the variable's name,
   /// never its value); null for the login the program keeps for itself.
   final String? via;
+
+  /// Why the program's own account provider could not say whether the login is there (a keyring that did not answer, a place it cannot
+  /// look at): the account is listed all the same. Null for any other account and for a login that is there.
+  final String? note;
 
   /// The credential standards the account works for (`claude-code`, `anthropic-api`), as its provider answers them for this account.
   final List<String> types;

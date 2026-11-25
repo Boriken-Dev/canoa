@@ -151,6 +151,39 @@ void main() {
     expect(usage.all.firstWhere((each) => each.id == 'local:claude').name, "This machine's login");
   });
 
+  testWidgets('a login the provider could not look for is listed with its reason, and one it found has no such note', (tester) async {
+    const reason = 'the keyring did not answer in time';
+    final accounts = AccountsController(
+      host: FakeAccountsHost(accounts: [harnessLogin('claude', note: reason), harnessLogin('codex')]),
+      config: () => const CanoaConfig(),
+      change: (_) async {},
+    );
+    await accounts.refresh();
+    expect([for (final each in accounts.logins) each.id], ['local:claude', 'local:codex']);
+    expect(accounts.logins.first.note, reason);
+    expect(accounts.logins.last.note, isNull);
+    final host = _Host()
+      ..rows['local/claude'] = {'supported': true, 'account': 'local:claude', 'buckets': <Object?>[]}
+      ..rows['local/codex'] = {'supported': true, 'account': 'local:codex', 'buckets': <Object?>[]};
+    final usage = UsageController(sources: [host], accounts: accounts, now: () => _noon);
+    tester.view
+      ..physicalSize = const Size(1280, 1800)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: UsagePage(controller: usage, warnPermille: 800, onWarnChanged: (_) {})),
+    ));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(usage.all.firstWhere((each) => each.id == 'local:claude').loginNote, reason);
+    expect(find.byKey(const Key('usage-account local:claude')), findsOneWidget);
+    expect(find.text('Not checked whether it is signed in: $reason'), findsOneWidget);
+    expect(find.byKey(const Key('usage-login-note local:claude')), findsOneWidget);
+    // The login that was found says nothing of the sort, and the account is listed as any other.
+    expect(find.byKey(const Key('usage-account local:codex')), findsOneWidget);
+    expect(find.byKey(const Key('usage-login-note local:codex')), findsNothing);
+  });
+
   testWidgets('what sessions heard on a harness\'s login is shown on that harness\'s login only', (tester) async {
     final (usage, _) = await _open(tester, (host) {
       host.heard.add({
