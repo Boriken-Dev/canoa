@@ -241,12 +241,37 @@ pub(crate) fn search_path_in(
     std::env::join_paths(held.into_iter().chain(extra)).unwrap_or_else(|_| base.to_owned())
 }
 
-/// [`search_path_in`] over this process's `PATH` and this user's programs folder.
+/// [`search_path_in`] over this process's `PATH` and this user's programs folder, then the folders the built-in sources look their
+/// program up in (`Preset::search`), so a name resolves as it does for a session: a program installed by its own installer is
+/// found when the process's `PATH` does not hold its folder.
 pub(crate) fn search_path() -> std::ffi::OsString {
     let base = std::env::var_os("PATH").unwrap_or_default();
-    Shelf::default_root().map_or(base.clone(), |root| {
+    let stored = Shelf::default_root().map_or(base.clone(), |root| {
         search_path_in(&Shelf::unchecked(root), &base, copies_verified())
-    })
+    });
+    with_folders(&stored, &preset_folders())
+}
+
+/// The folders the built-in sources look in beside `PATH` that exist here, each once.
+fn preset_folders() -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = Vec::new();
+    for dir in presets()
+        .flat_map(|preset| preset.search.iter())
+        .filter_map(|dir| expand(dir))
+        .map(PathBuf::from)
+    {
+        if dir.is_dir() && !folders.contains(&dir) {
+            folders.push(dir);
+        }
+    }
+    folders
+}
+
+/// `base` (a `PATH`) followed by each of `folders` it does not already hold.
+fn with_folders(base: &std::ffi::OsStr, folders: &[PathBuf]) -> std::ffi::OsString {
+    let held: Vec<PathBuf> = std::env::split_paths(base).collect();
+    let extra: Vec<&PathBuf> = folders.iter().filter(|dir| !held.contains(dir)).collect();
+    std::env::join_paths(held.iter().chain(extra)).unwrap_or_else(|_| base.to_owned())
 }
 
 /// [`program_dirs_in`] over this user's programs folder.
@@ -974,6 +999,34 @@ mod tests {
         assert_eq!(folders[0], std::env::split_paths(&own).next().expect("one"));
         // A folder the person already has is not added again.
         assert_eq!(search_path_in(&shelf, &searched, true), searched);
+    }
+
+    #[test]
+    fn the_folders_a_source_looks_in_follow_the_path_and_none_is_added_twice() {
+        let own = scratch("with-folders-own");
+        let install = scratch("with-folders-install");
+        let name = "canoa-stand-in-installed";
+        let binary = install.join(if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_owned()
+        });
+        std::fs::write(&binary, b"stand-in").expect("a program");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
+                .expect("runnable");
+        }
+        let base = std::env::join_paths([&own]).expect("joined");
+        let find = |path: &std::ffi::OsStr| canoa::search::find_in(path, "", name);
+        // The control: the person's own path does not hold the install folder.
+        assert_eq!(find(&base), None);
+        let searched = with_folders(&base, std::slice::from_ref(&install));
+        assert_eq!(find(&searched).as_deref(), Some(binary.as_path()));
+        let folders: Vec<_> = std::env::split_paths(&searched).collect();
+        assert_eq!(folders, [own, install.clone()]);
+        assert_eq!(with_folders(&searched, &[install]), searched);
     }
 
     #[test]
