@@ -1,5 +1,6 @@
 // An account's usage as Claude's and Codex's usage pages say it: how much is left, a countdown to the reset and a sentence on the
 // pace, from what the sessions on the account last heard. Settings shows it under the account.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/accounts/accounts_controller.dart';
@@ -164,6 +165,28 @@ void main() {
     expect(find.byKey(const Key('account-models oauth_apps')), findsNothing);
     expect(find.byKey(const Key('account-models five_hour')), findsOneWidget);
     expect(find.byKey(const Key('account-models seven_day_opus')), findsOneWidget);
+  });
+
+  // Reports as the harnesses answer them today, recorded with made-up figures: Claude's weekly window of the Fable model, which
+  // the plan lists beside the plain weekly one, and Antigravity's Gemini pool that names Argon among its models, with the group of
+  // its own that earlier answers gave it.
+  testWidgets('the view shows the Fable window of Claude and the Argon models of Antigravity', (tester) async {
+    final recorded = jsonDecode(File('test/fixtures/usage_fable_and_argon.json').readAsStringSync()) as Map<String, Object?>;
+    final claude = UsageReport.parse(recorded['claude'])!;
+    final agy = UsageReport.parse(recorded['antigravity'])!;
+
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: AccountUsageView(report: claude, now: _noon)))));
+    expect(find.text('Weekly, Fable'), findsOneWidget);
+    expect(find.text('Models: Fable'), findsOneWidget);
+    expect(find.text('39% left'), findsOneWidget);
+    expect(find.text('Models: All models'), findsOneWidget);
+
+    expect([for (final section in usageSections(agy, _noon)) section.$1], ['Gemini Models', 'Gemini 4 Argon']);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: AccountUsageView(report: agy, now: _noon)))));
+    expect(find.byKey(const Key('account-group Gemini 4 Argon')), findsOneWidget);
+    expect(find.text('Models: Gemini 4 Neon, Gemini 4 Argon, Gemini 3.8 Flash'), findsOneWidget);
+    expect(find.text('Models: Gemini 4 Argon'), findsOneWidget);
+    expect(find.text('7% left'), findsOneWidget);
   });
 
   testWidgets('Settings shows the usage the sessions on an account last heard, by the account\'s id', (tester) async {

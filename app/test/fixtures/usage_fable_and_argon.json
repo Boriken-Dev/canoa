@@ -1,0 +1,72 @@
+{
+  "claude": {
+    "supported": true,
+    "account": "owner",
+    "observed_at": 1794850000,
+    "buckets": [
+      {
+        "id": "seven_day",
+        "label": "Weekly",
+        "models": {"kind": "all"},
+        "unit": "permille",
+        "used": 340,
+        "limit": 1000,
+        "refill": {"kind": "fixed_window", "length": [604800, 0], "resets_at": 1795300000},
+        "status": "ok"
+      },
+      {
+        "id": "seven_day_model_fable",
+        "label": "Weekly, Fable",
+        "model_names": ["Fable"],
+        "models": {"kind": "only", "models": ["fable"]},
+        "unit": "permille",
+        "used": 610,
+        "limit": 1000,
+        "refill": {"kind": "fixed_window", "length": [604800, 0], "resets_at": 1795400000},
+        "status": "ok"
+      }
+    ]
+  },
+  "antigravity": {
+    "supported": true,
+    "observed_at": 1794850000,
+    "buckets": [
+      {
+        "id": "agy:gemini-weekly",
+        "label": "Weekly Limit Remaining",
+        "group": "Gemini Models",
+        "model_names": ["Gemini 4 Neon", "Gemini 4 Argon", "Gemini 3.8 Flash"],
+        "models": {"kind": "only", "models": ["gemini-4-neon-high", "gemini-4-argon-medium", "gemini-3.8-flash-low"]},
+        "unit": "permille",
+        "limit": 1000,
+        "remaining": 420,
+        "refill": {"kind": "fixed_window", "length": [604800, 0], "resets_at": 1795300000},
+        "status": "ok"
+      },
+      {
+        "id": "agy:gemini-5h",
+        "label": "Five Hour Limit Remaining",
+        "group": "Gemini Models",
+        "model_names": ["Gemini 4 Neon", "Gemini 4 Argon", "Gemini 3.8 Flash"],
+        "models": {"kind": "only", "models": ["gemini-4-neon-high", "gemini-4-argon-medium", "gemini-3.8-flash-low"]},
+        "unit": "permille",
+        "limit": 1000,
+        "remaining": 1000,
+        "refill": {"kind": "fixed_window", "length": [18000, 0]},
+        "status": "ok"
+      },
+      {
+        "id": "agy:gemini-argon-wtu-weekly",
+        "label": "Gemini 4 Argon Weekly Limit",
+        "group": "Gemini 4 Argon",
+        "model_names": ["Gemini 4 Argon"],
+        "models": {"kind": "only", "models": ["gemini-4-argon-medium"]},
+        "unit": "permille",
+        "limit": 1000,
+        "remaining": 70,
+        "refill": {"kind": "fixed_window", "length": [604800, 0], "resets_at": 1795280000},
+        "status": "ok"
+      }
+    ]
+  }
+}
