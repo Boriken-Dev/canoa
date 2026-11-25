@@ -479,3 +479,31 @@ fn a_mail_backend_from_another_library_registers_and_opens_through_the_catalog()
         .expect("opens");
     assert_eq!(opened.folders().expect("folders").len(), 1);
 }
+
+#[test]
+fn a_backend_the_host_turns_off_is_not_offered_and_the_library_s_others_are() {
+    let host = FakeHost::new();
+    let ids = |host: &Arc<FakeHost>| -> Vec<String> {
+        BackendCatalog::of(&**host)
+            .list()
+            .into_iter()
+            .map(|info| info.id.clone())
+            .collect()
+    };
+    let before = ids(&host);
+    assert!(before.iter().any(|id| id == "ews") && before.iter().any(|id| id == "graph"));
+    host.turn_off("mail_backend", "ews");
+    let after = ids(&host);
+    assert!(!after.iter().any(|id| id == "ews"), "{after:?}");
+    assert!(
+        after.iter().any(|id| id == "graph"),
+        "the library's other backends stay"
+    );
+    let refused = add_to(&host, "work", &exchange_new(SERVER, Some("secret")))
+        .expect_err("an account of a backend that is off");
+    assert!(refused.contains("ews"), "{refused}");
+    // Another kind's provider of the same id is no backend of this one.
+    let other = FakeHost::new();
+    other.turn_off("speech_provider", "ews");
+    assert!(ids(&other).iter().any(|id| id == "ews"));
+}

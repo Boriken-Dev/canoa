@@ -18,6 +18,7 @@ use canoa::mail_backend::{
 use canoa::network::Secret as AccountSecret;
 use canoa::session_service::ServiceHost;
 use coqui_acp_api::guatiao::Secret;
+use coqui_acp_api::guatiao::library::kind::Kind;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use serde_json::{Map, Value};
 
@@ -130,8 +131,15 @@ impl core::fmt::Debug for BackendCatalog {
 
 impl BackendCatalog {
     /// Providers of the host's loaded libraries (carried libraries plus configured extensions).
+    ///
+    /// A provider `[host.disabled] mail_backend` names is left out: the library's other backends stay, and the accounts of the
+    /// one that is off stay in canoa.cfg, listed with the reason.
     pub(crate) fn of(host: &dyn ServiceHost) -> Self {
-        Self::from_registries(host.registries())
+        let mut catalog = Self::from_registries(host.registries());
+        catalog
+            .entries
+            .retain(|entry| !host.is_off(<dyn MailBackend as Kind>::NAME, &entry.key));
+        catalog
     }
 
     /// Collects valid, unique `mail_backend` offers from `registries` in order.

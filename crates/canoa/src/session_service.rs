@@ -504,6 +504,12 @@ pub trait ServiceHost: Send + Sync {
     /// The registries of providers this host loaded: the libraries it carries and the ones canoa.cfg adds.
     fn registries(&self) -> Vec<Arc<Registry>>;
 
+    /// Whether canoa.cfg's `[host.disabled]` turns off the provider `id` of the kind `kind` (`mail_backend`, say): a service that
+    /// loads providers of a kind itself leaves it out, and the library's other providers stay. None is off unless the host says so.
+    fn is_off(&self, _kind: &str, _id: &str) -> bool {
+        false
+    }
+
     /// A new id for a secret: a random UUID in lower-case hex.
     ///
     /// # Errors

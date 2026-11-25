@@ -31,6 +31,8 @@ pub(crate) struct FakeHost {
     next: AtomicU64,
     /// Whether the host keeps no secrets at all, as one with no home does.
     pub(crate) no_store: bool,
+    /// The providers `[host.disabled]` names, as `(kind, id)`.
+    off: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeHost {
@@ -57,7 +59,16 @@ impl FakeHost {
             registries: vec![Arc::new(registry)],
             next: AtomicU64::new(1),
             no_store: false,
+            off: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Turns the provider `id` of the kind `kind` off, as `[host.disabled]` does.
+    pub(crate) fn turn_off(&self, kind: &str, id: &str) {
+        self.off
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((kind.to_owned(), id.to_owned()));
     }
 
     /// The table as the host answers it.
@@ -81,6 +92,14 @@ impl FakeHost {
 }
 
 impl ServiceHost for FakeHost {
+    fn is_off(&self, kind: &str, id: &str) -> bool {
+        self.off
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|(off_kind, off_id)| off_kind == kind && off_id == id)
+    }
+
     fn config(&self, service: &str) -> Result<String, String> {
         assert_eq!(service, "mail");
         #[derive(serde::Serialize)]

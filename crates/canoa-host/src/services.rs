@@ -157,6 +157,10 @@ impl ServiceHost for HostServices {
         self.registries.clone()
     }
 
+    fn is_off(&self, kind: &str, id: &str) -> bool {
+        crate::disabled::is_off(kind, id)
+    }
+
     fn new_id(&self) -> Result<String, String> {
         crate::accounts::commands::new_id().map_err(|failed| failed.why)
     }
@@ -539,6 +543,10 @@ pub(crate) mod standin {
             self.inner.registries()
         }
 
+        fn is_off(&self, kind: &str, id: &str) -> bool {
+            self.inner.is_off(kind, id)
+        }
+
         fn new_id(&self) -> Result<String, String> {
             self.inner.new_id()
         }
@@ -567,5 +575,30 @@ pub(crate) mod standin {
             secrets.push((*name, *password));
         }
         Services::new(TestHost::over(&text, &secrets))
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use super::standin::TestHost;
+    use crate::disabled::{Disabled, naming};
+
+    #[test]
+    fn a_service_asks_the_host_which_providers_of_a_kind_canoa_cfg_turns_off() {
+        let host = TestHost::over("", &[]);
+        assert!(!host.is_off("mail_backend", "ews"));
+        let _named = naming(Disabled::new([(
+            "mail_backend".to_owned(),
+            vec!["ews".to_owned()],
+        )]));
+        assert!(host.is_off("mail_backend", "ews"));
+        assert!(
+            !host.is_off("mail_backend", "graph"),
+            "its other providers stay"
+        );
+        assert!(
+            !host.is_off("speech_provider", "ews"),
+            "another kind's is not it"
+        );
     }
 }
