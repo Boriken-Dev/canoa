@@ -66,7 +66,7 @@ Configuration tables:
 - [permissions] default_mode: the mode a new session starts in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`, such as `default_mode = "plan"`; unset leaves each agent's own. A session keeps its own choice after that; see [modes](acp-client.md#permission-requests-in-the-chat). An older `full_access` list is read and dropped.
 - Rules made by "Always allow here" are not in {{ config_file }}: they are `permissions.json` beside it (the origin's IndexedDB in a browser) with a `permissions-log.jsonl` beside it (desktop only), edited in Settings, Permissions; see [acp-client](acp-client.md#permission-requests-in-the-chat).
 - [permissions] allow_once_only: `true` makes Bypass answer only with an answer that allows once, so a request that offers only an "always" is left to the person; default `false`.
-- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600; it also keeps what the host found of each installed overlay's source, see [overlay updates](#overlay-updates)), `source_ttl` (3600, a catalog read through a source), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what has gone stale.
+- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600; it also keeps what the host found of each installed overlay's source, see [overlay updates](#overlay-updates)), `source_ttl` (3600, a catalog read through a source), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what is past its time (see [what the Store keeps fresh](#what-the-store-keeps-fresh)).
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Antigravity, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [agents.NAME] program and args: a source of your own, an ACP agent the app starts on its standard streams; Settings → Sources adds and removes them. See [a new session](#a-new-session).
 - [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Antigravity"]`. A preset is never changed, only hidden.
@@ -704,7 +704,7 @@ installs them with the overlay:
 MCP servers are found, installed and chosen. It has four types, **Agents** (where the host grants programs),
 **Overlays**, **Skills** and **MCPs**, behind one toolbar: the type tabs with a count each (a badge on Agents when a
 program has a newer version), **Installed** and **Discover**, a search, **Refresh**, **Store settings** and a line that
-says how old the catalogs' index is ("Cached · updated 3 min ago", "Stale" when a source could not be refreshed). Each
+says how old the catalogs' index is ("Cached · updated 3 min ago", "Checking…" while the host asks again, "Stale" with the reason only when a source could not be refreshed; see [What the Store keeps fresh](#what-the-store-keeps-fresh)). Each
 type keeps its own query, switch and place in the list while you read an entry's details. Every card says where it comes
 from (the catalog's label, the repository, the commit and digest it is pinned to), what it needs, and whether it is
 installed, and opens its details: what it holds (skills, MCP servers), what it requires, the hooks and environment scripts
@@ -1181,6 +1181,35 @@ tree digest or the SHA-256 the entry gives. It then writes `library`, `provider`
 the file is opened, and an extension whose bytes changed is skipped and logged. Settings, Extensions lists what is installed (marking
 what the Store installed) and removes an extension with its files; one you name there by hand has no digest and is loaded as it is.
 
+### What the Store keeps fresh
+
+The host keeps what the Store lists up to date, so opening it asks nobody. Each thing has a time in `[host.store]`, in seconds
+(0 asks every time), and one thread asks again whatever is past its time, every `refresh_every` seconds while a client is
+connected. It asks again only what was asked for before, and only what is past its time, so `refresh_every` decides how late
+a renewal can be and never how often a publisher or a repository is asked: that is the time of each thing.
+
+| Key | Default | What it keeps |
+| --- | --- | --- |
+| `index_ttl` | 300 | The index of each overlay, skill and extension catalog (a catalog in git: `ls-remote` for the ref, a fetch only when it moved) |
+| `latest_ttl` | 3600 | A publisher's newest version of each program, and whether an installed overlay's source holds a newer commit |
+| `models_ttl` | 300 | A Store type's list of models (an install, update or removal empties it) |
+| `catalog_ttl` | 300 | The entries of a skills or MCP servers catalog, as the app lists them |
+| `source_ttl` | 3600 | A catalog read through a source provider (an entry's own `ttl` replaces it) |
+| `refresh_every` | 300 | How often the renewal runs while a client is connected; 0 never |
+| `connect_timeout`, `lookup_timeout` | 10, 15 | How long one lookup waits to connect and for the answer |
+
+The line under the Store's toolbar and each catalog say where the answer stands, from what the host reports:
+
+- **Cached · updated 3 min ago**: the last refresh worked, then.
+- **Checking… · updated 5 h ago**: the answer is past its time and the host is asking again. The app reads the host again
+  every few seconds until it is done, and every minute otherwise, so the line follows the host.
+- **Stale · it cannot be fetched: offline · updated 2 h ago**: the last refresh failed, with the reason; the last answer that
+  worked is still listed. Only a failed refresh makes a catalog stale, and "updated" is always when one last worked, never when
+  it was last tried. The next renewal tries again.
+
+The default `refresh_every` is five minutes, the shortest time of the things it renews: a longer one only makes a
+renewal late, and a shorter one finds nothing past its time.
+
 ### Overlay updates
 
 The host tells the app which installed overlays have something newer (`overlay/updates`). It asks each overlay's source, as
@@ -1194,7 +1223,7 @@ named is asked as you would from a shell, through the same proxy and certificate
 What the host found is kept for `[host.store] latest_ttl` seconds (3600), the same time the Store keeps a program's newest
 version; a source that could not be asked is tried again after a minute at most. The host asks in the background when it
 starts and, while a client is connected, every `[host.store] refresh_every` seconds (300; 0 never) for what has gone
-stale, so opening the Store waits for nobody. **Update** shows the same plan an install shows (what changes, from and to)
+past its time, so opening the Store waits for nobody. **Update** shows the same plan an install shows (what changes, from and to)
 and pins the new digest in {{ config_file }} on the yes.
 
 ### The overlay store
