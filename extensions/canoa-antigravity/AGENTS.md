@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-antigravity`: everything Canoa offers for Antigravity in one crate, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (features `store`, `vendor`, `usage`), `coqui-acp-api`, `coqui-acp-harness` (feature `antigravity`), `serde_json`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (features `store`, `vendor`, `usage`), `coqui-acp-api`, `coqui-acp-harness` (feature `antigravity`), `guatiao`, `guatiao-intake`, `serde_json`.
 
 ## Exports
 
@@ -32,7 +32,7 @@ pub struct AgySettings { executable, search_path, renew_poll_ms, command_timeout
 pub const SIGN_IN: &str = "sign_in";
 pub const NOT_SIGNED_IN: &str;         // a stored-login reading's failure when no login is stored
 pub struct AgyVendor;                  // an `agent_vendor` provider (id `antigravity_vendor`): title, program, vendor, registry id, model variable, credential standards, reported names, modes, mark
-pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: AntigravityProvider (`acp_harness`, id `antigravity`), AgyAccounts (`account_provider`, id `antigravity_accounts`), AgyVendor, GeminiVendor, AgyStore, and AgyUsage
+pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: AntigravityProvider (`acp_harness`, id `antigravity`), AgyAccounts (`account_provider`, id `antigravity_accounts`), AgyVendor, GeminiVendor, AgyStore, AgyUsage, and AgyReleases
 ```
 
 The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("antigravity")`).
@@ -45,3 +45,7 @@ The host lists the crate in `bundled.rs` and nowhere else names the agent: its n
 - A recipe fetches only through the `InstallTools` it is handed, so a download is bounded and checked by the host, and starts no process of its own (a test in `canoa-host` scans this crate for `std::process::Command`).
 - The preset's name is what a client lists; a name `canoa.cfg` already uses is left to the config. Its program is `AgyRecipe`'s first name, which a test keeps true.
 - The host starts the program with the profile's access: `--sandbox` for a workspace or read-only sandbox and `--dangerously-skip-permissions` for `approvals = "never"`, appended after the preset's arguments by `canoa launch`.
+
+## Where its releases are listed
+
+`AgyRecipe` holds no URL, version or digest. The releases are the catalog of its scope (`agy`): `AgyReleases` (a `catalog_source`, id `agy_releases`, default label `google`) reads the publisher's updater manifest for each platform (`<origin>/<os>_<arch>.json`: version, address, SHA-512) and lists a release for each version they name, newest first. Only the newest build is served, so a version that is not listed cannot be named; a Linux archive is unpacked as `bin`, and its program is `bin/antigravity`. `catalog_of(manifests)` is what the source does, for a test.

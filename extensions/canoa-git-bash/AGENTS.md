@@ -18,6 +18,6 @@ impl canoa::store::recipe::Recipe for GitBashRecipe { /* every required method *
 pub fn library(...);   // the Guatiao library that offers `GitBashStore`, the provider `git_bash_store` over `GitBashRecipe`
 ```
 
-- `GitBashRecipe`: Git for Windows' portable release as a Store program, `git_bash_store` (Windows only): `bin/bash.exe`, `sh.exe` and `git.exe` kept as `git-bash`, each file checked against the SHA-256 GitHub lists for it.
+- `GitBashRecipe`: Git for Windows' portable release as a Store program, `git_bash_store` (Windows only): `bin/bash.exe`, `sh.exe` and `git.exe` kept as `git-bash`. The releases are the catalog of its scope (`git-bash`): `GitBashReleases` (a `catalog_source`, id `git_bash_releases`, default label `github`, `repo = "git-for-windows/git"`) reads the repository's release listing and lists each stable release's `PortableGit-<version>-<64-bit|arm64>.7z.exe` with the SHA-256 GitHub lists for it.
 - `GitBashStore` is made by `canoa::store_provider!` and offered by this crate's library under the name `git_bash_store`; `canoa-host` names the library in one line of `bundled.rs` and derives its runtime, `PATH`, command and secret-program lists from what the registered stores describe.
-- Nothing checks a publisher's signature: the digest is the one GitHub lists.
+- The digest is the one GitHub lists: the publisher's signature is not checked.

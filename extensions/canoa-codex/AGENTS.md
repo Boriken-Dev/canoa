@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-codex`: everything Canoa offers for Codex in one crate, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `serde_json`, `coqui-acp-codex`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `coqui-acp-codex`.
 
 `CodexVendor` also answers `AgentVendor`'s per-agent methods: `account_variables`, `login_file`, `shell_advice` and `sessions`/`session_history` (the program's own session folder, read for the host's `history/importable` and `history/import`).
 
@@ -25,7 +25,7 @@ pub use coqui_acp_codex as acp;   // the provider crate, whole: `acp::CodexProvi
 
 - `PRESET`: how the host starts Codex when `canoa.cfg` does not name it: run in process as the `codex` harness.
 - `ACCESS`: how an access setting (sandbox, network, approvals) is said in Codex's own words, under the AOS harness id `codex`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
-- `CodexRecipe`: Codex's Store recipe: the `codex-package` tar.gz from the release site, SHA-256 from the release's checksums and the channel's digest; no setting stops its own updater.
+- `CodexRecipe`: Codex's Store recipe: the `codex-package` tar.gz, unpacked as `pkg`; no setting stops its own updater. The releases are the catalog of its scope (`codex`): `CodexReleases` (a `catalog_source`, id `codex_releases`, default label `openai`) reads the channel document and the release's `codex-package_SHA256SUMS` and lists the newest release, each file with the SHA-256 the two agree on (a disagreement refuses the catalog).
 - `acp`: the `coqui-acp-codex` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
 
 Each item is public at this one path. `CodexRecipe` is made a Store provider by `canoa::store_provider!`: `CodexStore` is the guatiao provider `codex_store` over it, offered by this crate's library.

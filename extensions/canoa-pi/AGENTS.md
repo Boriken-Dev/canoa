@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-pi`: everything Canoa offers for Pi in one crate, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `coqui-acp-pi`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `coqui-acp-pi`, `canoa-node`.
 
 ## Exports
 
@@ -42,3 +42,7 @@ The host lists the crate in `bundled.rs` and nowhere else names the agent: its n
 - The recipe only describes: where the publisher serves the program, how a download is checked and how its version is read. It never runs a publisher's installer and changes nothing outside the version's folder; the host's engine downloads, checks, places and reads the version back.
 - A recipe fetches only through the `InstallTools` it is handed, so a download is bounded and checked by the host, and starts no process of its own (a test in `canoa-host` scans this crate for `std::process::Command`).
 - The preset's name is what a client lists; a name `canoa.cfg` already uses is left to the config. Its program is `PiRecipe`'s first name, which a test keeps true.
+
+## Where its releases are listed
+
+`PiRecipe` holds no version or digest. The releases are the catalog of its scope (`pi`): `PiReleases` (a `catalog_source`, id `pi_releases`, default label `npm`) reads the npm registry's `latest` of the package for the version, and Node's long-term-support archive through `canoa_node::read_catalog` (signature verified) for the files the host downloads: the release is Pi's version, its files are Node's. npm installs the package itself with install scripts off and checks it by the integrity the registry lists, which the plan's notice repeats; the host does not see those bytes. `PiSettings { node }` names a mirror of Node's distribution.

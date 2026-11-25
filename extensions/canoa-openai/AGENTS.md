@@ -45,3 +45,5 @@ pub struct OpenAiVoiceSettings { pub api_key: Option<Secret<String>>, pub model:
 
 - A ChatGPT sign-in and a key that a setting moves to another address are listed by the host as not offered, with the reason: Canoa has not measured sending audio to OpenAI with either.
 - The description holds no network call: `describe` runs with nothing opened.
+
+- The lists here (`MODELS`, `SPEECH_MODELS`, `VOICES`, `STYLES`, with their end dates) are the one thing in the extensions that stays shipped data with no source: OpenAI's documentation is their only upstream (`GET /v1/models` needs a key and lists neither voices nor end dates), so a change in them is a release of this crate.

@@ -872,10 +872,10 @@ mine = { provider = "read", source = "D:/models/whisper.json", trusted = true } 
 other = false                                 # a default turned off
 ```
 
-Four keys of an entry are the host's, whatever the provider: `pin` (a pinned catalog is read once and never goes stale by time; a
+Five keys of an entry are the host's, whatever the provider: `pin` (a pinned catalog is read once and never goes stale by time; a
 `sha256:` pin must match the text the source answers with), `trusted`, `ttl` (seconds before it is read again; `[host.store] source_ttl`,
-3600, otherwise) and `keys` (the publisher key fingerprints the entry demands a signature from). A provider's own form may not use these
-names. Type catalogs that list models answer in `canoa.models/1` and a program's releases in `canoa.releases/1`
+3600, otherwise), `keys` (the publisher key fingerprints the entry demands a signature from) and `endpoints` (see below). A provider's
+own form may not use these names. Type catalogs that list models answer in `canoa.models/1` and a program's releases in `canoa.releases/1`
 (`crates/canoa/include/canoa.models.schema.json`, `canoa.releases.schema.json`); every item says which catalog it came from and carries a
 badge: **verified** (a digest the publisher gives for every file), **pinned** (a digest derived at a pinned commit) or **unverified**. A file
 with no digest, or one weaker than SHA-256 or SHA-512, is not offered unless the entry says `trusted = true`, and then it is drawn unverified
@@ -883,6 +883,54 @@ and the download of a program from that scope may take it. What was last read is
 (`cache/store/catalogs/<scope>/<label>.json`) and a catalog that cannot be reached shows its last answer with the reason; a pinned default
 ships a copy and needs no network the first time. Settings, Catalog sources lists every scope's catalogs with their origin, pin, badge and last
 read, and replaces, adds, turns off and removes them through `store/catalog_set`.
+
+#### Where the files of a catalog come from
+
+A Store type, and each program, downloads only from the places its extension names (the `endpoints` it declares), whatever a catalog
+says: an item whose file is anywhere else is refused, with the address and the places it may have come from. A catalog that lives
+elsewhere (a mirror, a fork's repository) names its own places with `endpoints`, a list of `https` origins or prefixes, and only an entry
+that is `trusted = true` or pinned may: whoever wrote it has said where the files are, and each file is still checked by its digest.
+
+```toml
+[store.whisper.catalogs.ggerganov]
+provider = "whisper_hf"
+repo = "myorg/whisper.cpp-models"
+pin = "0f3c9d1a5b7e2c4d6f8091a2b3c4d5e6f7a8b9c0"
+endpoints = ["https://huggingface.co/myorg/whisper.cpp-models/resolve/"]   # where its files are; the pin makes it allowed
+```
+
+#### The releases of a program
+
+A program the Store installs lists its releases from catalogs of its own, written the same way: `[store.PROGRAM.catalogs.LABEL]` where
+`PROGRAM` is the program's id. Its extension registers one default, which follows the publisher, and nothing about a release (an
+address, a version, a digest) is held in code:
+
+| Program | Default label and source | Reads | Checked by |
+| --- | --- | --- | --- |
+| `claude` | `anthropic`, `claude_releases` | the channels (`latest`, `stable`) and each version's manifest | the manifest's SHA-256, after its signature by Anthropic's release key verifies |
+| `codex` | `openai`, `codex_releases` | the newest release's channel document and checksums | SHA-256, which the two must agree on |
+| `grok` | `xai`, `grok_releases` | the channels (`stable`, `alpha`, `enterprise`) | nothing: the publisher gives no checksum |
+| `agy` | `google`, `agy_releases` | the updater's manifest for each platform | SHA-512 |
+| `opencode`, `git-bash`, `powershell`, `bw` | `github`, `opencode_releases`, `git_bash_releases`, `powershell_releases`, `bitwarden_releases` | the stable releases of a GitHub repository (`repo = "owner/name"`) | the SHA-256 GitHub lists for each file |
+| `node` | `nodejs`, `node_releases` | the index and each channel's checksums (`lts`, `current`) | SHA-256, read only from the text a signature by the Node.js release team verifies |
+| `python` | `astral`, `python_releases` | the standalone builds' checksums (a channel for each minor series) | SHA-256 |
+| `pi` | `npm`, `pi_releases` | the newest version in the npm registry, with Node's long-term-support build | SHA-256 for Node's archive; npm checks the package by the registry's integrity |
+
+A version you name must be one a catalog lists. A signature that does not verify refuses the whole catalog; there is no fallback to the
+digest alone. An entry's `keys` list the fingerprints a signature must come from, in place of the publisher's. A program with no
+checksum is installed only from an entry that says `trusted = true`:
+
+```toml
+[store.grok.catalogs.xai]                        # the default's label: this replaces it, and takes the builds as they are
+provider = "grok_releases"
+trusted = true
+
+[store.codex.catalogs.internal]                  # a mirror that serves the publisher's layout
+provider = "codex_releases"
+origin = "https://mirror.example.com/openai-releases"
+trusted = true                                   # a trusted or pinned entry may name places; the digests are still checked
+endpoints = ["https://mirror.example.com/openai-releases/"]
+```
 
 #### Turning off a provider
 
@@ -894,10 +942,11 @@ providers alone:
 account_provider = ["claude_accounts"]   # Claude's accounts are not offered; the claude harness still runs on any other provider's account
 store_extension = ["whisper_extension"]  # the Whisper type leaves the Store
 catalog_source = ["command"]             # entries that name this source show that it is off
+mail_backend = ["ews"]                   # the mail service leaves this backend out; its other backends stay
 ```
 
 A provider that is off is not listed or started (account makers, harnesses, program stores, Store types, catalog sources, session services,
-settings sections, panel tabs, profile items, secret providers, and the speech kinds the scripts offer). The accounts of an account provider
+settings sections, panel tabs, profile items, secret providers, the speech kinds the scripts offer, and the mail backends the mail service loads). The accounts of an account provider
 that is off stay in {{ config_file }}, are shown as off in Settings, Accounts and `accounts/list` (`disabled`), and are back when it is turned on.
 The host reads `[host]` when it starts; a kind or an id no library offers is a warning that lists the ones it knows, not a refusal.
 Settings, Providers lists every registered provider by kind with a switch that writes this table (`providers/switch`).

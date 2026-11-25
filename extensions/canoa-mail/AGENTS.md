@@ -49,3 +49,5 @@ Answered to a key holding the host's `services.setup` grant; an answer never car
 ## Tests
 
 `cargo test -p canoa-mail` runs the service against a host kept in memory (`testkit.rs`) and the loopback Exchange stand-in of `canoa-microsoft-mail` (feature `standin`). The host's own tests (`cargo test -p canoa-host --lib -- store::mcp::extra_tests control::services_tests serve::tests`) drive the same library through the MCP link, the grants and the approval the person gives.
+
+- `[host.disabled] mail_backend = ["ews"]` turns a backend off inside this service: the catalog of backends (`BackendCatalog::of`) leaves out each id `ServiceHost::is_off("mail_backend", id)` answers for, so the library's other backends stay, an account of the one that is off cannot be added, and the accounts already in canoa.cfg are kept and listed.

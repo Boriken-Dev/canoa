@@ -18,6 +18,6 @@ impl canoa::store::recipe::Recipe for PowerShellRecipe { /* every required metho
 pub fn library(...);   // the Guatiao library that offers `PowerShellStore`, the provider `powershell_store` over `PowerShellRecipe`
 ```
 
-- `PowerShellRecipe`: PowerShell 7 as a Store program, `powershell_store` (Windows and Linux): the zip or `tar.gz` of the newest release that is no prerelease, kept as `powershell` with `pwsh` on the `PATH`, checked against the SHA-256 GitHub lists for the file.
+- `PowerShellRecipe`: PowerShell 7 as a Store program, `powershell_store` (Windows and Linux), kept as `powershell` with `pwsh` on the `PATH`. The releases are the catalog of its scope (`powershell`): `PowerShellReleases` (a `catalog_source`, id `powershell_releases`, default label `github`, `repo = "PowerShell/PowerShell"`) reads the repository's release listing and lists each stable release's zip or `tar.gz` with the SHA-256 GitHub lists for it.
 - `PowerShellStore` is made by `canoa::store_provider!` and offered by this crate's library under the name `powershell_store`; `canoa-host` names the library in one line of `bundled.rs` and derives its runtime, `PATH`, command and secret-program lists from what the registered stores describe.
-- Nothing checks a publisher's signature: the digest is the one GitHub lists.
+- The digest is the one GitHub lists: the publisher's signature is not checked.

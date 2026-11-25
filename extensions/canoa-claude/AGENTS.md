@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-claude`: everything Canoa offers for Claude Code in one crate, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `coqui-acp-claude`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `coqui-acp-claude`.
 
 `ClaudeVendor` also answers `AgentVendor`'s per-agent methods: `account_variables`, `login_file`, `shell_advice` and `sessions`/`session_history` (the program's own session folder, read for the host's `history/importable` and `history/import`), and how the host gives a session what Claude Code takes as a local plugin loaded through `_meta`: `skills_delivery` (the `canoa-profile` plugin), `hooks_delivery` (the hooks plugin whose commands run the host's forwarder; for a `pre-tool` command the plugin `canoa-environment`, a `PreToolUse` hook on every tool (matcher `*`) written `"onFailure": "block"` (Claude Code 2.1.295 and later) and whose command ends `|| exit 2`, since Claude Code otherwise lets a call go on when a hook fails, times out or cannot start; a `start` command beside it is a `SessionStart` hook), `hook_support`, `tool_hook` (`Bash` and `PowerShell` by their `command`, `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep`, `Glob` and `LS` as file tools, the tools that act on nothing of the computer's as passing (tasks and subagents, `TodoWrite`, questions, plan mode, `WebFetch`, `WebSearch`, background output, MCP resources) and the prefix `mcp__`; every other tool is refused; the payload's `tool_name`, `tool_input` and `permission_mode`, whose `dontAsk` is `dont_ask`; a deny with `permissionDecisionReason`, and a rewrite as `updatedInput` with no `permissionDecision`, so Claude Code's own rules and mode still decide), and `access_target` (`claude-code`, applied per session).
 
@@ -26,7 +26,7 @@ pub use coqui_acp_claude as acp;   // the provider crate, whole: `acp::ClaudePro
 
 - `PRESET`: how the host starts Claude Code when `canoa.cfg` does not name it: run in process as the `claude` harness.
 - `ACCESS`: how an access setting (sandbox, network, approvals) is said in Claude Code's own words, under the AOS harness id `claude-code`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
-- `ClaudeRecipe`: Claude Code's Store recipe: one binary per platform from the publisher's release bucket, named by its manifest with a SHA-256 (the manifest's detached signature is not checked); channels `latest` and `stable`.
+- `ClaudeRecipe`: Claude Code's Store recipe: one binary per platform from the publisher's release bucket; channels `latest` and `stable`. It holds no URL, version or digest: the releases are the catalog of its scope (`claude`), which `ClaudeReleases` (a `catalog_source`, id `claude_releases`, default label `anthropic`) reads from the publisher's channel files and each version's manifest, after the manifest's detached signature verifies with Anthropic's release key (`KEY`, `keys/claude-code.asc`, fingerprint `FINGERPRINT`); a signature that fails, or is by a key an entry's `keys` do not name, refuses the whole catalog. `catalog_of(origin, channels, manifests)` and `verified(manifest, signature, demanded)` are what the source does, for a test.
 - `acp`: the `coqui-acp-claude` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
 
 Each item is public at this one path. `ClaudeRecipe` is made a Store provider by `canoa::store_provider!`: `ClaudeStore` is the guatiao provider `claude_store` over it, offered by this crate's library.
@@ -36,7 +36,7 @@ Each item is public at this one path. `ClaudeRecipe` is made a Store provider by
 ```rust
 pub const MARK: &str;                 // the contents of mark.svg: the vendor's mark as SVG paths
 pub struct ClaudeVendor;                  // an `agent_vendor` provider (id `claude_vendor`): title, program, vendor, registry id, model variable, credential standards, reported names, modes, mark, and its look
-pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: `acp::ClaudeProvider`, `acp::ClaudeAccounts` and the vendor description
+pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: `acp::ClaudeProvider`, `acp::ClaudeAccounts` and the vendor description, `ClaudeStore` and `ClaudeReleases`
 ```
 
 The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("claude")`).
