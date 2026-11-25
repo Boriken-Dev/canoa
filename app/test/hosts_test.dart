@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'fixtures/sample_render.dart' show sampleBrightness;
 import 'fixtures/app_fixture.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
@@ -87,7 +88,7 @@ Future<(HostsController, List<CanoaConfig>)> _show(
   addTearDown(controller.dispose);
   await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: themeFor(LookId.canoa, Brightness.dark),
+    theme: themeFor(LookId.canoa, sampleBrightness),
     home: Scaffold(
       body: overviewOnly
           ? HostsOverview(controller: controller, localDetail: (_) => const Text('Agents this computer hosts'))

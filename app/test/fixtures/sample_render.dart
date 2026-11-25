@@ -88,3 +88,7 @@ Future<void> renderSamplesIfAsked(FutureOr<void> Function() testMain) async {
   }
   await testMain();
 }
+
+/// The brightness the sample scenes that choose one themselves draw in: CANOA_SAMPLES_BRIGHTNESS=light, else dark.
+Brightness get sampleBrightness =>
+    !kIsWeb && Platform.environment['CANOA_SAMPLES_BRIGHTNESS'] == 'light' ? Brightness.light : Brightness.dark;

@@ -25,6 +25,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/catalog_standin.dart';
+import 'fixtures/sample_render.dart';
 import 'fixtures/store_fixtures.dart';
 
 const reviewManifest = '''
@@ -275,7 +276,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: themeFor(LookId.canoa, Brightness.dark),
+        theme: themeFor(LookId.canoa, sampleBrightness),
         home: StoreSection(readAhead: false, config: config, home: MemoryHome(overlays), index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last), onSave: (changed) async {
           saved.add(changed);
           return changed;

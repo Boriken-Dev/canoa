@@ -20,6 +20,7 @@ import 'package:canoa/voice/speech_backend.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'sample_render.dart';
 import 'sections_fixture.dart';
 
 /// Settings as a page on its own, with every configuration it applies kept: Settings has no Save, so what a test reads is
@@ -66,7 +67,7 @@ Future<SettingsHarness> openSettings(
   final harness = SettingsHarness();
   await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: theme ?? themeFor(LookId.canoa, Brightness.dark),
+    theme: theme ?? themeFor(LookId.canoa, sampleBrightness),
     home: SettingsPage(
       config: config,
       apply: (changed) async {
