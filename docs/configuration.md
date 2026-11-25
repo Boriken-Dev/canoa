@@ -809,7 +809,7 @@ digest = "sha256:..."         # of the server.json that was shown
 
 ### The network
 
-With no `[host.network]` table every fetch the host makes (the Store's downloads and release lists, `registry/fetch`, the endpoints of `[host.kb]` and of the speech providers, the Foundry Local service) and every program it starts follows the computer's own settings, as a browser on it would:
+With no `[host.network]` table every fetch the host makes (the Store's downloads and release lists, `registry/fetch`, the servers of `[sdk.NAME]` and the endpoints of the speech providers, the Foundry Local service) and every program it starts follows the computer's own settings, as a browser on it would:
 
 - the proxy: the `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` variables of the host's environment, else the operating system's (Windows Internet Options through WinHTTP, `scutil --proxy` on a Mac, GNOME, KDE and NetworkManager settings elsewhere), PAC scripts and WPAD included, with its bypass list; loopback is never sent through a proxy;
 - the proxy's login: Negotiate or NTLM with the logon session on Windows, when the proxy asks for it (`negotiate = false` turns it off); Basic with the login below, when one is given;
@@ -1359,8 +1359,8 @@ copy command where the clipboard API is not there.
 something is told instead of refused, it is in the log as `non-default:`, in `{{ program }} check`, and where the app shows the account.
 
 - **Plain http.** Any `http` or `https` address is accepted for an account's address (the API-gateway and LiteLLM kinds, and any
-  kind's endpoint setting), a mail account's `server` and `autodiscover`, `[store] skills_search`, an MCP registry, `[host.kb]`'s
-  `embeddings` and `llm_endpoint`, and the address of an MCP server a paired client hands a session. One that goes over plain `http`
+  kind's endpoint setting), a mail account's `server` and `autodiscover`, `[store] skills_search`, an MCP registry, the `address` of an `[sdk.NAME]` server,
+  and the address of an MCP server a paired client hands a session. One that goes over plain `http`
   to somewhere other than this computer is told of: `{{ program }} check` and `{{ program }} accounts list` print it, the host logs it when it
   starts, and the account's row in Settings shows it. An address that holds a login is still refused.
 - **Messages.** `[host] max_message_bytes` (16 MiB) is the longest ACP message, as one line, either way on a connection: a prompt

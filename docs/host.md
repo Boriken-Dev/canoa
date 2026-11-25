@@ -367,13 +367,29 @@ credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an inst
 # refresh_every = 300   # while a client is connected, how often what is past its time is asked again (every catalog above, in the background); 0 never
 # verify_copies = false # true: read every file of an installed program against its install record at start and at each lookup; false: trust the copy, its launch file must exist
 
-# The tools that search the knowledge an overlay ships (`canoa-kb`). Without `embeddings` they match words; with it, meaning too, by the
-# server you name. `[overlays.NAME] kb = "index"` serves that overlay's rules and context as a search instead of in the agent's context.
-[host.kb]
-embeddings = "http://127.0.0.1:60570"   # an OpenAI-compatible embeddings server; optional
-model = "qwen3-embedding-0.6b-generic-cpu:1"   # the exact id it loaded; required with embeddings
-llm_endpoint = "http://127.0.0.1:60570"       # a chat model that puts the best passages first (the llm search mode); optional
-llm_model = "qwen2.5-1.5b-instruct-generic-cpu:4"   # the exact id it loaded; required with llm_endpoint
+# The tools that search the knowledge an overlay ships (`canoa-kb`). They match words; name a backend to match what is meant
+# (an embedder) and one to put the best passages first (a ranker). `[overlays.NAME] kb = "index"` serves that overlay's rules and
+# context as a search instead of in the agent's context. The backends are the ones {{ name }} offers for the operations it asks of
+# a model (`embed`, `rerank`, `complete`): an account's API such as `openai:work`, or a server of your own named below.
+# Every passage of the knowledge goes to the embedder once (and again when it changes), and each query goes to both.
+[host.kb.embedder]
+use = "local"                                     # a backend, or "default": what [assist.embed] chooses
+model = "qwen3-embedding-0.6b-generic-cpu:1"      # the exact id; required
+[host.kb.ranker]
+use = "default"
+model = "qwen2.5-1.5b-instruct-generic-cpu:4"     # the exact id; required
+
+# A server of your own that speaks the OpenAI API, offered as a backend named `local`; its key is the one in the variable it names.
+[sdk.local]
+provider = "server"
+address = "http://127.0.0.1:60570"
+# key_env = "LOCAL_KEY"
+capabilities = ["embed", "chat"]                  # what it does: embed, chat, rerank
+
+# Which backend serves an operation (complete, embed, rerank), then which follow it; with none named, the first that can.
+# [assist.embed]
+# use = "local"
+# fallback = ["openai:work"]
 
 # The person's mail as a source (`canoa-mail`): see "Mail as a source".
 # [host.services.mail.accounts.work]
