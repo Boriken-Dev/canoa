@@ -1204,6 +1204,7 @@ mod programs_tests {
         let types = types["types"].as_array().expect("a list");
         for (kind, models) in [
             (canoa_whisper::STORE_TYPE, "whisper_models"),
+            (canoa_whisper_candle::STORE_TYPE, "whispercandle_models"),
             (canoa_piper::STORE_TYPE, "piper_voices"),
         ] {
             let added = types
