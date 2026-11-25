@@ -102,7 +102,7 @@ void main() {
     test('a recorded WAV streamed through the chosen provider comes back as its transcript', () async {
       await catalog.refresh();
       expect(catalog.problem, isNull);
-      expect([for (final kind in catalog.types) kind.id], ['speech_command', 'speech_endpoint', 'speech_whisper']);
+      expect([for (final kind in catalog.types) kind.id], ['speech_command', 'speech_endpoint', 'speech_whisper', 'speech_whisper_candle']);
       final backend = catalog.backends.single;
       expect(backend.id, 'host:says');
       expect(backend.where.place, SpeechPlace.host);
