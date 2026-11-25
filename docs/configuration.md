@@ -58,7 +58,7 @@ Configuration tables:
 - [permissions] default_mode: the mode a new session starts in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`, such as `default_mode = "plan"`; unset leaves each agent's own. A session keeps its own choice after that; see [modes](acp-client.md#permission-requests-in-the-chat). An older `full_access` list is read and dropped.
 - Rules made by "Always allow here" are not in {{ config_file }}: they are `permissions.json` beside it (the origin's IndexedDB in a browser) with a `permissions-log.jsonl` beside it (desktop only), edited in Settings, Permissions; see [acp-client](acp-client.md#permission-requests-in-the-chat).
 - [permissions] allow_once_only: `true` makes Bypass answer only with an answer that allows once, so a request that offers only an "always" is left to the person; default `false`.
-- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what has gone stale.
+- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600; it also keeps what the host found of each installed overlay's source, see [overlay updates](#overlay-updates)), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what has gone stale.
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Antigravity, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [agents.NAME] program and args: a source of your own, an ACP agent the app starts on its standard streams; Settings → Sources adds and removes them. See [a new session](#a-new-session).
 - [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Antigravity"]`. A preset is never changed, only hidden.
@@ -706,7 +706,10 @@ adds one.
 
 - **Overlays.** Installed: each overlay's icon, summary, source, pin, what it applies (environment variables, skills, MCP
   servers, context) and what {{ name }} does not apply yet, a switch for whether **new sessions** start with it, an update
-  check and Remove (for one the store installed). Discover: the overlays of the catalogs below, filterable by catalog,
+  check and Remove (for one the store installed). The host asks each overlay's source whether it holds something newer
+  (see [updates](#overlay-updates)); one that does shows an **Update available** mark, its check becomes an **Update**
+  button with the update icon, the same icon replaces the check on its tile in Discover, and the Store's index (or the
+  tab, on a page of its own) counts how many have an update. **Check for updates** asks every source now. Discover: the overlays of the catalogs below, filterable by catalog,
   tag and text. With no catalog it offers a known one and a spec to paste.
 - **Loadouts.** A loadout is a named collection a session starts with: whole overlays, skills you chose, and MCP
   servers of `[profile.mcp]`, written as `[loadouts.NAME]` (`description`, `overlays`, `skills`, `mcp`; a name has 1
@@ -1073,6 +1076,22 @@ tree digest or the SHA-256 the entry gives. It then writes `library`, `provider`
 `library`), and the host restarts to load it. The digest is checked again each time the host loads the extension, before
 the file is opened, and an extension whose bytes changed is skipped and logged. Settings, Extensions lists what is installed (marking
 what the Store installed) and removes an extension with its files; one you name there by hand has no digest and is loaded as it is.
+
+### Overlay updates
+
+The host tells the app which installed overlays have something newer (`overlay/updates`). It asks each overlay's source, as
+the record of its install names it: a source that follows a branch has an update when the branch's head is not the
+installed commit **and** the overlay's folder holds other files there (a commit elsewhere in a shared repository is no
+update); a source that names a tag has one when the tag names another commit; a source named by a whole commit id has
+none, and says it is pinned. A source that cannot be asked is reported as unreachable with the reason, never as an update.
+An overlay chosen from a catalog is asked as it is fetched, with none of your git settings, credentials or keys; one you
+named is asked as you would from a shell, through the same proxy and certificate settings as every other fetch.
+
+What the host found is kept for `[host.store] latest_ttl` seconds (3600), the same time the Store keeps a program's newest
+version; a source that could not be asked is tried again after a minute at most. The host asks in the background when it
+starts and, while a client is connected, every `[host.store] refresh_every` seconds (300; 0 never) for what has gone
+stale, so opening the Store waits for nobody. **Update** shows the same plan an install shows (what changes, from and to)
+and pins the new digest in {{ config_file }} on the yes.
 
 ### The overlay store
 

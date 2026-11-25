@@ -358,7 +358,7 @@ protected = ["~/.ssh", "~/.gnupg", "~/.config/autostart"]   # places a declared 
 credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an install is never given
 # What the Store keeps so that opening it asks nobody, each in seconds (0 asks every time). The newest versions are kept on disk and a stale one is answered at once and asked again in the background.
 # index_ttl = 300       # the catalog index
-# latest_ttl = 3600     # a publisher's newest version of a program
+# latest_ttl = 3600     # a publisher's newest version of a program, and whether an installed overlay's source holds a newer commit
 # models_ttl = 300      # a Store type's list of models (an install, update or removal empties it)
 # catalog_ttl = 300     # the entries of a skills or MCP servers catalog
 # connect_timeout = 10 # a lookup (a release list, a checksum file) waits this long to connect to a publisher; a download waits 60
