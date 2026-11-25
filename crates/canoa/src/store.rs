@@ -24,6 +24,7 @@ pub mod exec;
 pub mod extension;
 pub mod feed;
 pub mod models;
+pub mod openpgp;
 pub mod protect;
 mod provider;
 pub mod recipe;

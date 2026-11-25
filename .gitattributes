@@ -1,2 +1,6 @@
 * text=auto eol=lf
 crates/canoa-host/tests/vectors/aos/*.json -text
+# What a publisher signed is checked byte for byte.
+extensions/*/tests/fixtures/manifest_*.json -text
+extensions/*/tests/fixtures/*.sig -text
+extensions/*/tests/fixtures/*.asc -text

@@ -909,15 +909,18 @@ dependencies = [
  "coqui-acp-harness",
  "coqui-syshttp",
  "data-encoding",
+ "ed25519-dalek",
  "guatiao",
  "guatiao-intake",
  "guatiao-serde",
  "httparse",
  "percent-encoding",
  "regex",
+ "rsa",
  "rustix",
  "rustls",
  "serde_json",
+ "sha1 0.11.0",
  "sha2 0.11.1",
  "tracing",
  "ureq",
@@ -931,6 +934,8 @@ dependencies = [
  "canoa",
  "coqui-acp-api",
  "coqui-acp-harness",
+ "guatiao",
+ "guatiao-intake",
  "serde_json",
 ]
 
@@ -952,6 +957,8 @@ dependencies = [
  "coqui-acp-claude",
  "coqui-acp-harness",
  "coqui-acp-history",
+ "guatiao",
+ "guatiao-intake",
  "serde_json",
 ]
 
@@ -964,6 +971,8 @@ dependencies = [
  "coqui-acp-codex",
  "coqui-acp-harness",
  "coqui-acp-history",
+ "guatiao",
+ "guatiao-intake",
  "serde_json",
 ]
 
@@ -1024,6 +1033,9 @@ dependencies = [
  "canoa",
  "coqui-acp-api",
  "coqui-acp-harness",
+ "guatiao",
+ "guatiao-intake",
+ "serde_json",
 ]
 
 [[package]]
@@ -1210,6 +1222,9 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "canoa",
  "coqui-acp-api",
+ "guatiao",
+ "guatiao-intake",
+ "serde_json",
 ]
 
 [[package]]
@@ -1255,6 +1270,8 @@ dependencies = [
  "coqui-acp-api",
  "coqui-acp-harness",
  "coqui-acp-pi",
+ "guatiao",
+ "guatiao-intake",
  "serde_json",
 ]
 
@@ -1286,6 +1303,9 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "canoa",
  "coqui-acp-api",
+ "guatiao",
+ "guatiao-intake",
+ "serde_json",
 ]
 
 [[package]]

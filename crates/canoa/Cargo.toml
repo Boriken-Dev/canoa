@@ -19,7 +19,7 @@ workspace = true
 
 [features]
 # The `program_store` kind: how a program is found, checked for updates and installed into a folder the host owns.
-store = ["dep:coqui-acp-api", "dep:data-encoding", "dep:serde_json", "dep:guatiao", "dep:guatiao-intake", "dep:sha2"]
+store = ["dep:coqui-acp-api", "dep:data-encoding", "dep:serde_json", "dep:guatiao", "dep:guatiao-intake", "dep:sha2", "dep:sha1", "dep:rsa", "dep:ed25519-dalek"]
 # The `agent_vendor` kind: who an agent's vendor is and how it is shown.
 vendor = ["dep:coqui-acp-api"]
 # The `usage_reader` kind: how an agent's own quota is read, which the host asks for.
@@ -66,6 +66,9 @@ rustls = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+sha1 = { workspace = true, optional = true }
+rsa = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true, optional = true }
 httparse = { workspace = true, optional = true }
 guatiao-serde = { workspace = true, optional = true }
 percent-encoding = { workspace = true, optional = true }
