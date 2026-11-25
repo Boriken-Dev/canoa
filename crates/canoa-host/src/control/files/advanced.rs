@@ -169,19 +169,38 @@ pub(crate) const TABLES: &[Table] = &[
         shape: Shape::Flat,
         fields: &[
             ("tools", Bool),
-            ("embeddings", Text),
-            ("model", Text),
-            ("api_key_env", Text),
-            ("document_prefix", Text),
-            ("query_prefix", Text),
             ("chunk_bytes", Int),
             ("overlap_bytes", Int),
-            ("llm_endpoint", Text),
-            ("llm_model", Text),
-            ("llm_api_key_env", Text),
-            ("llm_candidates", Int),
-            ("llm_timeout_secs", Int),
+            ("retry_seconds", Int),
+            ("query_cache", Int),
         ],
+    },
+    Table {
+        path: &["host", "kb", "embedder"],
+        shape: Shape::Flat,
+        fields: &[
+            ("use", Text),
+            ("model", Text),
+            ("dimensions", Int),
+            ("document_prefix", Text),
+            ("query_prefix", Text),
+        ],
+    },
+    Table {
+        path: &["host", "kb", "ranker"],
+        shape: Shape::Flat,
+        fields: &[
+            ("use", Text),
+            ("model", Text),
+            ("candidates", Int),
+            ("timeout_seconds", Int),
+            ("passage_chars", Int),
+        ],
+    },
+    Table {
+        path: &["host", "kb", "search"],
+        shape: Shape::Flat,
+        fields: &[("use", Text)],
     },
     Table {
         path: &["host", "mcp_list"],
@@ -281,6 +300,9 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "defaults",
             "profiles",
             "secrets",
+            // The knowledge search page edits the server it keeps; `[assist.OPERATION]` is edited as JSON until its own page.
+            "assist",
+            "sdk",
         ],
     ),
     (

@@ -38,22 +38,20 @@ void main() {
       expect(body, isNotNull, reason: struct);
       return {
         for (final field in RegExp(
-          r'^\s*(?:pub(?:\([a-z]+\))?\s+)?(\w+):',
+          r'^\s*(?:pub(?:\([a-z]+\))?\s+)?(?:r#)?(\w+):',
           multiLine: true,
         ).allMatches(body!.group(1)!))
           field.group(1)!,
       };
     }
 
-    // `use` is written `choice` in the host's struct and renamed by serde.
-    expect(fieldsOf('RawKb').containsAll(['embedder', 'ranker']), isTrue);
+        expect(fieldsOf('RawKb').containsAll(['embedder', 'ranker']), isTrue);
     for (final role in ['RawKbEmbedder', 'RawKbRanker']) {
       expect(
-        fieldsOf(role).containsAll(['choice', 'model']),
+        fieldsOf(role).containsAll(['use', 'model']),
         isTrue,
         reason: role,
       );
-      expect(raw, contains('#[serde(rename = "use")]'));
     }
     for (final key in CanoaConfig.hostKbKeys.where((key) => key != 'server')) {
       expect(

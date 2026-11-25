@@ -347,8 +347,7 @@ pub(super) struct RawKb {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawKbEmbedder {
-    #[serde(rename = "use")]
-    pub(super) choice: Option<String>,
+    pub(super) r#use: Option<String>,
     pub(super) model: Option<String>,
     pub(super) dimensions: Option<u32>,
     pub(super) document_prefix: Option<String>,
@@ -359,8 +358,7 @@ pub(super) struct RawKbEmbedder {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawKbRanker {
-    #[serde(rename = "use")]
-    pub(super) choice: Option<String>,
+    pub(super) r#use: Option<String>,
     pub(super) model: Option<String>,
     pub(super) candidates: Option<usize>,
     pub(super) timeout_seconds: Option<u64>,
@@ -371,8 +369,7 @@ pub(super) struct RawKbRanker {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawKbSearch {
-    #[serde(rename = "use")]
-    pub(super) choice: Option<String>,
+    pub(super) r#use: Option<String>,
 }
 
 impl RawKb {
@@ -401,7 +398,7 @@ impl RawKb {
                     return Err(invalid("embedder dimensions is at least 1"));
                 }
                 Ok(KbEmbedder {
-                    choice: choice(raw.choice, "embedder")?,
+                    choice: choice(raw.r#use, "embedder")?,
                     model,
                     dimensions: raw.dimensions,
                     document_prefix: raw.document_prefix,
@@ -429,7 +426,7 @@ impl RawKb {
                     return Err(invalid("ranker passage_chars is at least 1"));
                 }
                 Ok(KbRanker {
-                    choice: choice(raw.choice, "ranker")?,
+                    choice: choice(raw.r#use, "ranker")?,
                     model,
                     candidates: raw.candidates,
                     timeout_seconds: raw.timeout_seconds,
@@ -441,7 +438,7 @@ impl RawKb {
             .search
             .map(|raw| -> Result<KbSearch, ConfigError> {
                 Ok(KbSearch {
-                    choice: choice(raw.choice, "search")?,
+                    choice: choice(raw.r#use, "search")?,
                 })
             })
             .transpose()?;
@@ -477,8 +474,7 @@ impl RawKb {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawAssist {
-    #[serde(rename = "use")]
-    pub(super) choice: Option<String>,
+    pub(super) r#use: Option<String>,
     #[serde(default)]
     pub(super) fallback: Vec<String>,
 }
@@ -506,7 +502,7 @@ pub(super) fn assist_of(
             invalid(format!("[assist.{operation}] {}", error.message()))
         })?;
         if raw
-            .choice
+            .r#use
             .as_deref()
             .is_some_and(|text| text.trim().is_empty())
             || raw.fallback.iter().any(|text| text.trim().is_empty())
@@ -518,7 +514,7 @@ pub(super) fn assist_of(
         out.operations.insert(
             operation.clone(),
             AssistChoice {
-                choice: raw.choice,
+                choice: raw.r#use,
                 fallback: raw.fallback,
             },
         );

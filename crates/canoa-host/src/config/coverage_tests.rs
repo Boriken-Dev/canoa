@@ -16,7 +16,7 @@ fn keys_of(name: &str) -> Vec<String> {
     body.lines()
         .filter_map(|line| line.trim().strip_prefix("pub(super) "))
         .filter_map(|field| field.split_once(':'))
-        .map(|(field, _)| field.trim().to_owned())
+        .map(|(field, _)| field.trim().trim_start_matches("r#").to_owned())
         .filter(|field| field != "rest")
         .collect()
 }
@@ -43,6 +43,9 @@ fn tables() -> Vec<(&'static str, Vec<String>)> {
         ("host.store", keys_of("RawStore")),
         ("host.delegate", keys_of("RawDelegate")),
         ("host.kb", keys_of("RawKb")),
+        ("host.kb.embedder", keys_of("RawKbEmbedder")),
+        ("host.kb.ranker", keys_of("RawKbRanker")),
+        ("host.kb.search", keys_of("RawKbSearch")),
         ("host.mcp_list", keys_of("RawMcpList")),
         ("host.usage", keys_of("RawHostUsage")),
         ("host.worktrees", keys_of("RawWorktrees")),
