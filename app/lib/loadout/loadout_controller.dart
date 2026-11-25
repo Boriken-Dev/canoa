@@ -14,7 +14,7 @@ import '../surfaces/a2ui/overlay_views.dart' show OpenOverlayView;
 import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
-import '../profile/overlays.dart' show OverlayException, ScannedSkill, SkillHit, SkillScan;
+import '../profile/overlays.dart' show OverlayAvailability, OverlayException, ScannedSkill, SkillHit, SkillScan;
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
@@ -225,9 +225,51 @@ class LoadoutController extends ChangeNotifier {
   String? busy, problem;
   bool _disposed = false;
 
+  /// Whether each installed overlay's source holds something newer, by name, as the host last said.
+  Map<String, OverlayAvailability> availability = const {};
+
+  /// The overlays canoa.cfg names whose source holds something newer than what is installed.
+  List<String> get updatable => [
+    for (final name in config.overlays.keys)
+      if (availability[name]?.available ?? false) name,
+  ];
+
+  Timer? _asking;
+  int _asks = 0;
+
+  /// Reads what the host knows of each source's newest commit. The host answers at once from what it kept and asks the sources on
+  /// its own, so an overlay it has not looked at yet is asked for again a few seconds later, a few times.
+  Future<void> readUpdates() async {
+    final home = this.home;
+    if (home == null || _disposed) return;
+    try {
+      availability = await home.overlays.updates();
+    } on Object {
+      // A host that does not answer leaves what was known; the badges only appear on an answer.
+    }
+    _asking?.cancel();
+    if (availability.values.any((each) => each.checking) && _asks < 10) {
+      _asks++;
+      _asking = Timer(const Duration(seconds: 3), () => unawaited(readUpdates()));
+    } else {
+      _asks = 0;
+    }
+    notifyListeners();
+  }
+
+  /// Asks every source now, and shows what each holds. Says why on the page when the host cannot.
+  Future<void> checkForUpdates(String what) async {
+    final home = this.home;
+    if (home == null) return;
+    await run(what, () async {
+      availability = await home.overlays.updates(refresh: true);
+    });
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    _asking?.cancel();
     contents?.dispose();
     super.dispose();
   }
@@ -349,6 +391,7 @@ class LoadoutController extends ChangeNotifier {
           skillPins: config.skillPins,
         );
         needs = await _readNeeds();
+        unawaited(readUpdates());
       } on Object catch (error) {
         skills = const {};
         layers = null;

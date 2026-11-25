@@ -74,6 +74,29 @@ void main() {
       await File('${config.path}/canoa.cfg').writeAsString(installed.encode());
       // No restart: the host reads canoa.cfg again when a session starts, so the one opened next has the overlay.
 
+      // The host looks at the overlay's source: nothing is newer, then the source's folder changes and the host says so, and a commit
+      // elsewhere in the repository would not be an update.
+      final before = await home.overlays.updates(refresh: true);
+      expect(before['review']?.state, 'current', reason: '${before['review']?.problem}');
+      catalog
+        ..write('catalog.toml', '[overlays.review]
+source = "./overlays/review"
+# elsewhere
+')
+        ..commit('elsewhere');
+      expect((await home.overlays.updates(refresh: true))['review']?.state, 'current');
+      catalog
+        ..write('overlays/review/overlay.cfg', '[about]
+summary = "Review conventions, newer."
+
+[env]
+REVIEW_MODE = "strict"
+')
+        ..commit('newer');
+      final after = await home.overlays.updates(refresh: true);
+      expect(after['review']?.available, isTrue, reason: '${after['review']?.state} ${after['review']?.problem}');
+      expect(after['review']?.latest, isNotNull);
+
       Future<ProfileReport> reportChoosing(Map<String, Object?> meta) async {
         final link = host!.openLink('Profiled');
         final client = VerifiedAgent.fromChild(

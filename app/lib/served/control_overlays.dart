@@ -108,6 +108,18 @@ final class ControlOverlayManager implements OverlayManager {
   }
 
   @override
+  Future<Map<String, OverlayAvailability>> updates({bool refresh = false}) async {
+    final answer = await _call('overlay/updates', {if (refresh) 'refresh': true});
+    final found = <String, OverlayAvailability>{};
+    for (final MapEntry(:key, :value) in (answer['overlays'] as Map<Object?, Object?>? ?? const {}).entries) {
+      if (key is String) {
+        if (OverlayAvailability.fromJson(value) case final each?) found[key] = each;
+      }
+    }
+    return found;
+  }
+
+  @override
   Future<void> remove(String name) async {
     await _call('overlay/remove', {'name': name});
     _installed.remove(name);

@@ -12,7 +12,7 @@ final class StoreMarkImage {
 
 /// One store type the Store section's index lists: its id, its name, its icon and how much of it there is.
 final class StoreTypeRow {
-  const StoreTypeRow({required this.id, required this.label, required this.icon, required this.installed, this.available, this.image});
+  const StoreTypeRow({required this.id, required this.label, required this.icon, required this.installed, this.available, this.image, this.updates = 0});
 
   final String id, label;
   final IconData icon;
@@ -24,8 +24,11 @@ final class StoreTypeRow {
   final int installed;
   final int? available;
 
+  /// How many of the installed ones hold an update.
+  final int updates;
+
   bool same(StoreTypeRow other) =>
-      id == other.id && label == other.label && icon == other.icon && identical(image, other.image) && installed == other.installed && available == other.available;
+      id == other.id && label == other.label && icon == other.icon && identical(image, other.image) && installed == other.installed && available == other.available && updates == other.updates;
 }
 
 /// The store type chosen in the Store section's index, which the section's content shows.

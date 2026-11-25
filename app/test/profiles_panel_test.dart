@@ -48,6 +48,9 @@ final class FakeOverlays implements OverlayManager {
   final prepared = <String>[];
 
   @override
+  Future<Map<String, OverlayAvailability>> updates({bool refresh = false}) async => const {};
+
+  @override
   InstalledOverlay? installed(String name) => records[name];
 
   @override

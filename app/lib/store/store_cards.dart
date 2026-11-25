@@ -43,7 +43,7 @@ class CardList extends StatelessWidget {
 /// An installed item's card: an icon, a title, lines under it, and what the person can do.
 class LoadoutCard extends StatelessWidget {
   const LoadoutCard({super.key, required this.leading, required this.title, this.lines = const [], this.provenance,
-      this.trailing, this.footer, this.onTap});
+      this.trailing, this.footer, this.onTap, this.badge});
 
   final Widget leading;
   final String title;
@@ -54,6 +54,9 @@ class LoadoutCard extends StatelessWidget {
   final Widget? trailing;
   final Widget? footer;
   final VoidCallback? onTap;
+
+  /// A mark beside the title, such as "Update available".
+  final Widget? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +74,13 @@ class LoadoutCard extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(oneLine(title), style: text.titleSmall),
+                  if (badge == null)
+                    Text(oneLine(title), style: text.titleSmall)
+                  else
+                    Wrap(spacing: 8, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                      Text(oneLine(title), style: text.titleSmall),
+                      badge!,
+                    ]),
                   for (final line in lines) Text(oneLine(line), style: text.bodyMedium),
                   if (provenance != null)
                     Text(oneLine(provenance!), key: const Key('provenance'),

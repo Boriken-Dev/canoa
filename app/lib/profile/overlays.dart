@@ -83,6 +83,39 @@ final class OverlayUpdate {
       removed.isEmpty;
 }
 
+/// What the host found when it asked an installed overlay's source whether it holds something newer.
+final class OverlayAvailability {
+  const OverlayAvailability({required this.state, this.installed, this.latest, this.follows, this.problem});
+
+  /// `current`, `available`, `pinned` (the source names one commit), `unreachable`, `unknown`, or `checking` (not asked yet).
+  final String state;
+
+  /// The commit installed, and the one the source's ref names now when it is not that one.
+  final String? installed, latest;
+
+  /// What the source's ref is: `branch`, `tag` or `commit`.
+  final String? follows;
+
+  /// Why the source could not be asked.
+  final String? problem;
+
+  /// Whether the source holds something other than what is installed.
+  bool get available => state == 'available';
+
+  bool get checking => state == 'checking';
+
+  static OverlayAvailability? fromJson(Object? json) {
+    if (json is! Map<Object?, Object?> || json['state'] is! String) return null;
+    return OverlayAvailability(
+      state: json['state']! as String,
+      installed: json['installed'] as String?,
+      latest: json['latest'] as String?,
+      follows: json['follows'] as String?,
+      problem: json['problem'] as String?,
+    );
+  }
+}
+
 /// A git operation or an overlay's content that was refused. Never quotes a file's content.
 final class OverlayException implements Exception {
   const OverlayException(this.message);
@@ -108,6 +141,10 @@ abstract interface class OverlayManager {
   /// Installs exactly what [update] showed. [catalog] records that the store installed it from the catalog so labelled; a
   /// record already made for the same source keeps its own when none is given, so a sync from Settings leaves it.
   Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog});
+
+  /// Whether the source of each installed overlay holds something newer, by name, as the host last looked: it answers at once from
+  /// what it kept and asks the sources in the background. [refresh] makes it ask them all now.
+  Future<Map<String, OverlayAvailability>> updates({bool refresh = false});
 
   /// Removes what [name] installed and fetched.
   Future<void> remove(String name);
@@ -263,6 +300,9 @@ class NoOverlays implements OverlayManager {
 
   @override
   Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async => throw _none;
+
+  @override
+  Future<Map<String, OverlayAvailability>> updates({bool refresh = false}) async => const {};
 
   @override
   Future<void> remove(String name) async => throw _none;

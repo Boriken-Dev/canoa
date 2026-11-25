@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/app_text.dart';
 import '../shell/index_pane.dart';
 import 'store_icon.dart';
 import 'store_selection.dart';
@@ -36,6 +37,13 @@ class StoreIndex extends StatelessWidget {
               title: type.label,
               subtitle: '${type.installed} installed${type.available == null ? '' : ' · ${type.available} to discover'}',
               selected: chosen == type.id,
+              trailing: [
+                if (type.updates > 0)
+                  Tooltip(
+                    message: context.t('overlays.updates_badge', {'count': type.updates}),
+                    child: Badge(key: Key('store-index-${type.id}-updates'), label: Text('${type.updates}')),
+                  ),
+              ],
               onTap: () => _choose(context, type.id),
             ),
         ]),

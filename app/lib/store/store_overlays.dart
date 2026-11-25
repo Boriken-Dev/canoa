@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../config/canoa_config.dart';
+import '../l10n/app_text.dart';
 import '../loadout/loadout_controller.dart';
 import '../loadout/overlay_knowledge.dart';
 import '../loadout/overlay_options.dart';
@@ -20,6 +21,7 @@ import 'store_cards.dart';
 import 'store_catalogs.dart';
 import 'store_icon.dart';
 import 'store_runtimes.dart' show programsTypeId;
+import 'update_badge.dart';
 import 'store_view.dart';
 
 /// The Overlays type: the overlays canoa.cfg names, and the overlays the catalogs list.
@@ -92,14 +94,40 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         ...head,
         const Text('Each overlay a new session starts with, unless you turn it off here. A session already started keeps what it started with.'),
         const SizedBox(height: 8),
+        if (c.home != null && c.config.overlays.values.any((source) => source is GitOverlay)) _updatesBar(context),
         if (shown.isEmpty) const Text('No installed overlay matches.', key: Key('overlays-installed-nothing')),
       ],
       cards: [for (final (name, source) in shown) _installedCard(context, name, source)],
     );
   }
 
+  /// How many installed overlays hold an update, and the button that asks every source now.
+  Widget _updatesBar(BuildContext context) {
+    final count = c.updatable.length;
+    final settled = c.availability.isNotEmpty && !c.availability.values.any((each) => each.checking);
+    final summary = count > 0
+        ? (count == 1 ? context.t('overlays.updates_one') : context.t('overlays.updates_many', {'count': count}))
+        : settled
+            ? context.t('overlays.updates_none')
+            : '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(children: [
+        Expanded(child: Text(summary, key: const Key('overlays-updates-summary'))),
+        TextButton.icon(
+          key: const Key('overlays-check-updates'),
+          onPressed: c.busy != null ? null : () => unawaited(c.checkForUpdates(context.t('overlays.checking_sources'))),
+          icon: const Icon(Icons.refresh, size: 18),
+          label: Text(context.t('overlays.check_all_updates')),
+        ),
+      ]),
+    );
+  }
+
   Widget _installedCard(BuildContext context, String name, OverlaySource source) {
     final record = c.home?.overlays.installed(name);
+    final found = c.availability[name];
+    final hasUpdate = (found?.available ?? false) && source is GitOverlay;
     final layer = c.layerOf(name);
     final aosLayer = layer?.aos;
     final report = c.reportOf(name);
@@ -113,6 +141,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         source.spec,
         if (record != null) 'commit ${record.commit.substring(0, record.commit.length < 8 ? record.commit.length : 8)}',
         if (source.pin != null) 'pinned ${_short(source.pin!)}' else 'not pinned',
+        if (found?.state == 'pinned') context.t('overlays.pinned'),
       ].join(' · '),
     };
     final profile = layer?.profile;
@@ -139,8 +168,13 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
           ? OverlayIcon(name: name, path: icon, bytes: iconBytes, limits: c.config.store.iconLimits)
           : OverlayPlaceholder(name: name, size: 32),
       title: name,
+      badge: hasUpdate ? UpdateBadge(key: Key('overlay-update-badge-$name')) : null,
       lines: [
         ?aosLayer?.about['summary'],
+        if (hasUpdate && found!.latest != null && record != null)
+          context.t('overlays.update_newer', {'latest': shortCommit(found.latest!), 'installed': shortCommit(record.commit)}),
+        if (found?.state == 'unreachable')
+          context.t('overlays.unreachable', {'why': found?.problem ?? ''}),
         if (left != null) 'Left out: $left',
         if (applies.isNotEmpty) 'Applies: ${applies.join(' · ')}',
         if (left == null && layer != null && applies.isEmpty) 'Applies nothing of its own',
@@ -205,11 +239,19 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
               child: const Text('Prepare…'),
             ),
           if (source is GitOverlay && c.home != null)
-            TextButton(
-              key: Key('overlay-update-$name'),
-              onPressed: c.busy != null ? null : () => unawaited(_update(name, source)),
-              child: const Text('Check for updates…'),
-            ),
+            if (hasUpdate)
+              FilledButton.icon(
+                key: Key('overlay-update-$name'),
+                onPressed: c.busy != null ? null : () => unawaited(_update(name, source)),
+                icon: const Icon(Icons.arrow_circle_up, size: 18),
+                label: Text(context.t('overlays.update')),
+              )
+            else
+              TextButton(
+                key: Key('overlay-update-$name'),
+                onPressed: c.busy != null ? null : () => unawaited(_update(name, source)),
+                child: Text(context.t('overlays.check_updates')),
+              ),
           if (source is GitOverlay && fromStore && c.home != null)
             TextButton(
               key: Key('overlay-remove-$name'),
@@ -237,7 +279,8 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
 
   Future<void> _update(String name, GitOverlay source) async {
     final home = c.home!;
-    final update = await c.run('Checking $name', () => home.overlays.check(name, source, catalog: home.overlays.installed(name)?.catalog));
+    // The pin is the digest of what is installed; the newer tree has another, and applying pins it.
+    final update = await c.run('Checking $name', () => home.overlays.check(name, source.pinnedTo(null), catalog: home.overlays.installed(name)?.catalog));
     if (update == null || !mounted) return;
     final apply = await showSelectableDialog<bool>(context: context, builder: (_) => OverlayUpdateDialog(update: update));
     if (apply != true) return;
@@ -378,6 +421,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     final entry = listed.entry;
     final icon = catalog.icons[entry.name];
     final key = '${listed.label}/${entry.name}';
+    final updating = _updatingOf(entry);
     return StoreTile(
       key: Key('store-entry-${listed.label}-${entry.name}'),
       leading: StillIcon(name: entry.name, path: entry.about['icon'] as String?, bytes: icon?.bytes, size: 48,
@@ -387,11 +431,26 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
       by: '${publisherOf(listed)} · ${listed.label}',
       needs: needsOf(catalog.facts['overlay:${entry.name}']),
       installed: isInstalled(c.config, entry),
-      busy: _installing.contains(key),
+      busy: _installing.contains(key) || (updating != null && c.busy != null),
       installKey: Key('store-entry-install-${listed.label}-${entry.name}'),
+      updateKey: Key('store-entry-update-${listed.label}-${entry.name}'),
+      onUpdate: updating == null || c.busy != null ? null : () => unawaited(_update(updating.$1, updating.$2)),
       onOpen: () => unawaited(_open(listed)),
       onInstall: c.home == null || c.busy != null ? null : () => unawaited(_quickInstall(listed)),
     );
+  }
+
+  /// The name and source of the installed overlay this catalog entry is, when its source holds an update; null otherwise.
+  (String, GitOverlay)? _updatingOf(CatalogEntry entry) {
+    final String? name;
+    try {
+      name = isInstalled(c.config, entry) ? namedAs(c.config, installName(entry)) : null;
+    } on StoreRefusal {
+      return null;
+    }
+    final source = name == null ? null : c.config.overlays[name];
+    if (name == null || source is! GitOverlay || !(c.availability[name]?.available ?? false)) return null;
+    return (name, source);
   }
 
   /// Installs from the tile, through the path the page takes. What needs a look first (a pin that moved or does not match,

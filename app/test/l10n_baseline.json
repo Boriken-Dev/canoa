@@ -94,7 +94,7 @@
   "lib/store/store_index_view.dart": 2,
   "lib/store/store_mcps.dart": 22,
   "lib/store/store_models.dart": 10,
-  "lib/store/store_overlays.dart": 17,
+  "lib/store/store_overlays.dart": 16,
   "lib/store/store_section.dart": 6,
   "lib/store/store_skills.dart": 40,
   "lib/surfaces/files_surface.dart": 13,

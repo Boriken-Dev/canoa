@@ -249,6 +249,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
         image: _extension(id)?.image,
         installed: _installedCount(id),
         available: _discoverCount(id),
+        updates: _builtin(id) == StoreType.overlays ? controller.updatable.length : 0,
       ),
   ]);
 
@@ -434,6 +435,16 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
                             label: Text('$_updates'),
                             offset: const Offset(10, -6),
                             child: Text('Agents ${_installedCount(each)}'),
+                          ),
+                        )
+                      else if (each == StoreType.overlays.id && controller.updatable.isNotEmpty)
+                        Tab(
+                          key: Key('store-tab-$each'),
+                          child: Badge(
+                            key: const Key('overlays-updates-badge'),
+                            label: Text('${controller.updatable.length}'),
+                            offset: const Offset(10, -6),
+                            child: Text('${_labelOf(each)} ${_installedCount(each)}'),
                           ),
                         )
                       else

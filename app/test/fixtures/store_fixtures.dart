@@ -193,6 +193,17 @@ final class MemoryOverlays implements OverlayManager {
     for (final MapEntry(:key, :value) in files.entries) key: value is String ? utf8.encode(value) : value as List<int>,
   };
 
+  /// What the host says of each installed overlay's source; the overlays not named have none.
+  final availability = <String, OverlayAvailability>{};
+  var asked = 0, forced = 0;
+
+  @override
+  Future<Map<String, OverlayAvailability>> updates({bool refresh = false}) async {
+    asked++;
+    if (refresh) forced++;
+    return Map.of(availability);
+  }
+
   @override
   InstalledOverlay? installed(String name) => records[name];
 
@@ -236,6 +247,7 @@ final class MemoryOverlays implements OverlayManager {
   @override
   Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async {
     installedFiles[update.name] = await read(update);
+    availability.remove(update.name);
     final before = records[update.name];
     return records[update.name] = InstalledOverlay(name: update.name, source: update.source.spec, commit: update.commit,
         digest: update.digest, files: update.files,

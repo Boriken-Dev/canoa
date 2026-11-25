@@ -54,6 +54,31 @@ void main() {
     expect(manager.directoryOf('x'), 'overlays/x');
   });
 
+  test('the host says which installed overlays have an update, and a refresh asks it to look now', () async {
+    final host = _Host((method, params) => switch (method) {
+      'overlay/updates' => {
+        'overlays': {
+          'team': {'state': 'available', 'installed': 'a' * 40, 'latest': 'b' * 40, 'follows': 'branch'},
+          'old': {'state': 'unreachable', 'installed': 'c' * 40, 'problem': 'no route'},
+          'odd': 3,
+        },
+        'available': 1,
+      },
+      _ => {},
+    });
+    final manager = ControlOverlayManager(HostControl.dialing(() async => host));
+    final found = await manager.updates();
+    expect(host.params.last, <String, Object?>{});
+    expect(found.keys, ['team', 'old']);
+    expect(found['team']!.available, isTrue);
+    expect(found['team']!.latest, 'b' * 40);
+    expect(found['old']!.available, isFalse);
+    expect(found['old']!.problem, 'no route');
+    await manager.updates(refresh: true);
+    expect(host.asked, ['overlay/updates', 'overlay/updates']);
+    expect(host.params.last, {'refresh': true});
+  });
+
   test('a page reviews, keeps and removes skills through the host, and reads each digest\'s files once', () async {
     final files = {'SKILL.md': utf8.encode(_skillText), 'run.sh': utf8.encode('echo hi\n')};
     final digest = '${treeOfFiles(files).digest.digest}';

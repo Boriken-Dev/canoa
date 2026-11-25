@@ -1,3 +1,4 @@
+import '../l10n/app_text.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:material_ui/material_ui.dart';
 
@@ -216,7 +217,7 @@ class _StoreBannerState extends State<StoreBanner> {
 class StoreTile extends StatelessWidget {
   const StoreTile({super.key, required this.leading, required this.title, required this.by, required this.installed,
       required this.onOpen, required this.onInstall, this.summary, this.needs, this.busy = false, this.installKey, this.onRemove,
-      this.removeKey});
+      this.removeKey, this.onUpdate, this.updateKey});
 
   final Widget leading;
   final String title;
@@ -232,6 +233,10 @@ class StoreTile extends StatelessWidget {
 
   /// Takes an installed item away, shown beside the check; null for an item that has no copy of the host's to remove.
   final VoidCallback? onRemove;
+
+  /// Brings an installed item up to what its source holds now; when set, the check becomes an update button.
+  final VoidCallback? onUpdate;
+  final Key? updateKey;
 
   @override
   Widget build(BuildContext context) {
@@ -253,6 +258,9 @@ class StoreTile extends StatelessWidget {
                 if (summary != null) Text(oneLine(summary!), style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
                 Text(oneLine(by), key: const Key('provenance'),
                     style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (installed && onUpdate != null)
+                  Text(context.t('overlays.update_available'), key: const Key('update-available'),
+                      style: text.bodySmall?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600)),
                 if (needs != null)
                   Text(oneLine(needs!), key: const Key('compatibility'),
                       style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -278,11 +286,15 @@ class StoreTile extends StatelessWidget {
               child: busy
                   ? const Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator(strokeWidth: 2))
                   : IconButton.filledTonal(
-                      key: installKey,
-                      tooltip: installed ? 'Installed' : 'Install',
-                      style: IconButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                      onPressed: installed ? null : onInstall,
-                      icon: Icon(installed ? Icons.check : Icons.add, size: 20),
+                      key: installed && onUpdate != null ? updateKey : installKey,
+                      tooltip: installed && onUpdate != null ? context.t('overlays.update') : installed ? 'Installed' : 'Install',
+                      style: IconButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        backgroundColor: installed && onUpdate != null ? scheme.primary : null,
+                        foregroundColor: installed && onUpdate != null ? scheme.onPrimary : null,
+                      ),
+                      onPressed: installed ? onUpdate : onInstall,
+                      icon: Icon(installed ? (onUpdate != null ? Icons.arrow_circle_up : Icons.check) : Icons.add, size: 20),
                     ),
             ),
           ]),
