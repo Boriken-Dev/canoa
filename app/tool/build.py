@@ -212,6 +212,7 @@ def finish_web(dist: Path) -> None:
 def build_web_for_host(offline: bool = False) -> Path:
     """The web app the host serves, built with a CSP (without it the host's policy refuses the page's code)."""
     subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
+    subprocess.run([sys.executable, str(APP / "tool" / "build_whisper.py")], check=True)
     if not offline:
         subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(
@@ -380,6 +381,7 @@ def build_office() -> Path:
     """The pane's static site: the app built for /office/app/, with the pages and Office.js around it."""
     mirror = office_js_folder()
     subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
+    subprocess.run([sys.executable, str(APP / "tool" / "build_whisper.py")], check=True)
     subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(
         [flutter_program(), "build", "web", "--release", "--csp", "--no-web-resources-cdn", "--base-href", "/office/app/"],
@@ -493,8 +495,10 @@ def main() -> None:
         except (RuntimeError, subprocess.CalledProcessError) as error:
             sys.exit(f"build.py: {error}")
         return
-    # The web build carries the Noise method as WebAssembly, built from app/web_noise into app/web/noise.
+    # The web build carries the Noise method and Whisper as WebAssembly, built from app/web_noise into app/web/noise and from app/web_whisper
+    # into app/web/whisper.
     subprocess.run([sys.executable, str(APP / "tool" / "build_noise.py")], check=True)
+    subprocess.run([sys.executable, str(APP / "tool" / "build_whisper.py")], check=True)
     subprocess.run([flutter_program(), "pub", "get"], check=True, cwd=APP)
     subprocess.run(flutter_args(opts.kind, opts.wasm), check=True, cwd=APP)
     try:

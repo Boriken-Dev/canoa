@@ -4,7 +4,8 @@
 The deps branch holds one cargo vendor directory per VENDORS entry: each package a lock names, from crates.io or git,
 is a directory `<name>-<version>/` of unpacked source with a `.cargo-checksum.json`. A directory holds one copy of a
 name and version, so the locks that need different sources of one package each have a directory: `crates/` for the
-workspace's Cargo.lock, `crates-web_noise/` for app/web_noise/Cargo.lock, and `crates-wasm-bindgen-cli/` for the
+workspace's Cargo.lock, `crates-web_noise/` for app/web_noise/Cargo.lock, `crates-web_whisper/` for app/web_whisper/Cargo.lock,
+and `crates-wasm-bindgen-cli/` for the
 wasm-bindgen command line (the crate and the Cargo.lock it is packaged with), which `cargo install --locked` builds.
 Tests, examples, benchmarks, fixtures and anything an archive scanner would refuse are left out, since compiling
 reads none of them; a binary a build does read is written as text (see `inline_bytes` and `patch_ring`).
@@ -77,9 +78,11 @@ class Vendor(NamedTuple):
 
 
 WEB_NOISE_LOCK = "app/web_noise/Cargo.lock"
+WEB_WHISPER_LOCK = "app/web_whisper/Cargo.lock"
 VENDORS = (
     Vendor("crates", "Cargo.lock"),
     Vendor("crates-web_noise", WEB_NOISE_LOCK),
+    Vendor("crates-web_whisper", WEB_WHISPER_LOCK),
     Vendor("crates-wasm-bindgen-cli", None, "wasm-bindgen-cli"),
 )
 # The command line is installed at the version of the library it reads the output of, which the web bridge's lock pins.

@@ -1,0 +1,31 @@
+[package]
+name = "canoa-whisper-web"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/canoa"
+description = "Whisper in the browser: canoa-whisper-candle's engine compiled to WebAssembly"
+publish = false
+
+# Its own workspace: it builds only for wasm32-unknown-unknown, which the repository's
+# `cargo test --workspace` does not target.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+canoa-whisper-candle = { path = "../../extensions/canoa-whisper-candle", default-features = false }
+# Exactly the wasm-bindgen command line's version, which has to match it.
+wasm-bindgen = "=0.2.130"
+serde_json = "1"
+# The browser backend of the random generator Candle's dependencies use: the page's crypto.getRandomValues.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
