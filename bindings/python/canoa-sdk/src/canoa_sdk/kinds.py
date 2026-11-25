@@ -838,7 +838,7 @@ class SpeechOutput(KindProtocol, Protocol, kind="speech_output", floor_hash=1826
         ...
 
 
-class InstallTools(KindProtocol, Protocol, kind="install_tools", floor_hash=821327524, is_object=True):
+class InstallTools(KindProtocol, Protocol, kind="install_tools", floor_hash=446272040, is_object=True):
     """What the host does for a store on the machine its spawner runs on: the checked fetch, the safe unpack and the look for
     files. A store never opens a connection or writes a file by itself.
     """
@@ -855,6 +855,15 @@ class InstallTools(KindProtocol, Protocol, kind="install_tools", floor_hash=8213
     @fallible
     def fetch_text(self, url: str, max_bytes: U64) -> str:
         """A small text document: a version file, a manifest. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes`."""
+        ...
+
+    @required
+    @fallible
+    def releases(self) -> str:
+        """The releases this program's catalogs list, read and merged by the host: the text of one `canoa.releases/1` document
+        ([`crate::store::catalog::RELEASES_FORMAT`]). `GUATIAO_ERR_UNSUPPORTED` for a store that registers no catalogs, and the
+        reason when none of its catalogs could be read.
+        """
         ...
 
     @required

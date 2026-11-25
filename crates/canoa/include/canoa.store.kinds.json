@@ -185,7 +185,7 @@
     },
     {
       "name": "install_tools",
-      "floor_hash": 821327524,
+      "floor_hash": 446272040,
       "object": true,
       "doc": "What the host does for a store on the machine its spawner runs on: the checked fetch, the safe unpack and the look for\nfiles. A store never opens a connection or writes a file by itself.",
       "slots": [
@@ -223,6 +223,16 @@
             "type": "text"
           },
           "doc": "A small text document: a version file, a manifest. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes`."
+        },
+        {
+          "name": "releases",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "The releases this program's catalogs list, read and merged by the host: the text of one `canoa.releases/1` document\n([`crate::store::catalog::RELEASES_FORMAT`]). `GUATIAO_ERR_UNSUPPORTED` for a store that registers no catalogs, and the\nreason when none of its catalogs could be read."
         },
         {
           "name": "fetch",

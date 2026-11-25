@@ -1,0 +1,104 @@
+{
+ "en/en_US/ljspeech/medium": [
+  {
+   "type": "directory",
+   "oid": "ba2f5b27d145c3e70fc4398f7355dd85e67d446b",
+   "size": 0,
+   "path": "en/en_US/ljspeech/medium/samples"
+  },
+  {
+   "type": "file",
+   "oid": "324d7470296a501e3c6396310f9b218fdbd7ed1e",
+   "size": 517,
+   "path": "en/en_US/ljspeech/medium/MODEL_CARD"
+  },
+  {
+   "type": "file",
+   "oid": "cac20d8f96f39dcd35e695a1aa83311443c7218f",
+   "size": 63531379,
+   "lfs": {
+    "oid": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+    "size": 63531379,
+    "pointerSize": 133
+   },
+   "xetHash": "f36d229490fc8f92b4152f214353881d30997fe235f9bbf5897b6662c023ee4c",
+   "path": "en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx"
+  },
+  {
+   "type": "file",
+   "oid": "73ecdec4f6ab17a437936652dfe3a925bb19e098",
+   "size": 4972,
+   "path": "en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx.json"
+  }
+ ],
+ "es/es_MX/claude/high": [
+  {
+   "type": "directory",
+   "oid": "49d59d00655d0f59e76f839e2ea8b8cc839a4a7c",
+   "size": 0,
+   "path": "es/es_MX/claude/high/samples"
+  },
+  {
+   "type": "file",
+   "oid": "6f5160c4d63ec36f9f50012f789274505b556807",
+   "size": 247,
+   "path": "es/es_MX/claude/high/MODEL_CARD"
+  },
+  {
+   "type": "file",
+   "oid": "181e1b544064cf5558db5f4324c833be5d3ce7a4",
+   "size": 63122309,
+   "lfs": {
+    "oid": "3ef40a71ea63852cd8ab7e6fa7d2ecdcfa67a0b47c9c48e3f10e02ee02083ea0",
+    "size": 63122309,
+    "pointerSize": 133
+   },
+   "xetHash": "6a515487f014ad2b4808518b134fecf331246d549cebdcea3ec3240c047df681",
+   "path": "es/es_MX/claude/high/es_MX-claude-high.onnx"
+  },
+  {
+   "type": "file",
+   "oid": "4a98b7593bd91a1522f893b66d5bab1f517d5068",
+   "size": 4963,
+   "path": "es/es_MX/claude/high/es_MX-claude-high.onnx.json"
+  }
+ ],
+ "en/en_GB/alan/low": [
+  {
+   "type": "directory",
+   "oid": "0410cf96b4567d44edfdf6f386337cef9ad2ff7e",
+   "size": 0,
+   "path": "en/en_GB/alan/low/samples"
+  },
+  {
+   "type": "file",
+   "oid": "db4a13dd52ddb23c0546204bd3531383cc52f146",
+   "size": 15,
+   "path": "en/en_GB/alan/low/ALIASES"
+  },
+  {
+   "type": "file",
+   "oid": "44ebf1a5833f34a4976476b65f7ff27797f5eff9",
+   "size": 309,
+   "path": "en/en_GB/alan/low/MODEL_CARD"
+  },
+  {
+   "type": "file",
+   "oid": "4fbb7895c9414b5cf929461c92ce2f7673b41cce",
+   "size": 63104526,
+   "lfs": {
+    "oid": "a1f60584620a2bed203de823d08f5abb336fb15f3d6f33f8c341e3e2cabf5dde",
+    "size": 63104526,
+    "pointerSize": 133
+   },
+   "xetHash": "fb1ec545db994817c6ef03e1435039966d88fce4fff25f2d5440c97b92a52c2c",
+   "path": "en/en_GB/alan/low/en_GB-alan-low.onnx"
+  },
+  {
+   "type": "file",
+   "oid": "5646c5b51dbcd1709fe5826e1c97ed1f710a287b",
+   "size": 4170,
+   "path": "en/en_GB/alan/low/en_GB-alan-low.onnx.json"
+  }
+ ]
+}

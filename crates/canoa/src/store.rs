@@ -399,6 +399,12 @@ pub enum Check {
         /// The digest.
         value: String,
     },
+    /// Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL
+    /// names the 40-digit commit it is read at.
+    GitBlob {
+        /// The id.
+        value: String,
+    },
     /// The publisher gives nothing to check it against; the plan says so.
     Unverified {
         /// Why.
@@ -713,6 +719,11 @@ pub trait InstallTools: Send + Sync {
 
     /// A small text document: a version file, a manifest. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes`.
     fn fetch_text(&self, url: &str, max_bytes: u64) -> Result<String, ProviderError>;
+
+    /// The releases this program's catalogs list, read and merged by the host: the text of one `canoa.releases/1` document
+    /// ([`crate::store::catalog::RELEASES_FORMAT`]). `GUATIAO_ERR_UNSUPPORTED` for a store that registers no catalogs, and the
+    /// reason when none of its catalogs could be read.
+    fn releases(&self) -> Result<String, ProviderError>;
 
     /// A file into the granted folder, checked as it is written. A mismatch deletes it and answers
     /// `GUATIAO_ERR_BAD_VALUE` with `checksum mismatch`. The executable bit is set only after the check passes.

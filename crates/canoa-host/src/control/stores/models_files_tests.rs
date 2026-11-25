@@ -10,15 +10,15 @@ use std::sync::Arc;
 
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
 use canoa::store::models::{
-    ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelStore, ModelStoreInfo,
-    ServiceQuery, ServiceReport,
+    ModelAct, ModelActed, ModelFile, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
+    ModelStore, ModelStoreInfo, RowAction, STEP_DELETE_FILES, STEP_FETCH_FILES, ServiceQuery,
+    ServiceReport,
 };
 use canoa::store::recipe::{Recipe, Release};
 use canoa::store::{InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable};
 use canoa_piper::PiperModels;
-use canoa_piper::store::{Catalog, VoiceFile};
+use canoa_piper::store::Catalog;
 use canoa_whisper::WhisperModels;
-use canoa_whisper::catalog::{MODELS_ORIGIN, Model};
 use coqui_acp_api::Environment;
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
@@ -40,39 +40,19 @@ fn digest(bytes: &[u8]) -> String {
     data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
 }
 
-fn leak(text: String) -> &'static str {
-    Box::leak(text.into_boxed_str())
-}
+/// Where the stand-in models are downloaded from: the publisher's repository at a revision, as the default catalog's files are.
+const MODELS_ORIGIN: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/";
 
-fn whisper_models() -> &'static [Model] {
-    static MODELS: std::sync::OnceLock<Vec<Model>> = std::sync::OnceLock::new();
-    MODELS.get_or_init(|| {
-        [("base", "ggml-base.bin"), ("tiny.en", "ggml-tiny.en.bin")]
-            .into_iter()
-            .map(|(id, file)| Model {
-                id,
-                label: "a stand-in",
-                file,
-                bytes: WEIGHTS.len() as u64,
-                sha256: leak(digest(WEIGHTS)),
-            })
-            .collect()
-    })
-}
+/// The two stand-in models: id and file.
+const WHISPER_MODELS: [(&str, &str); 2] =
+    [("base", "ggml-base.bin"), ("tiny.en", "ggml-tiny.en.bin")];
 
-fn piper_catalog() -> Catalog {
-    Catalog {
-        voices: vec![VoiceFile {
-            name: "en_US-test-medium",
-            folder: "en/en_US/test/medium/",
-            language: "en",
-            licence: "public domain",
-            onnx: (leak(digest(VOICE)), VOICE.len() as u64),
-            json: (leak(digest(VOICE_JSON)), VOICE_JSON.len() as u64),
-        }],
-        ..Catalog::default()
-    }
-}
+/// Where the stand-in voice is downloaded from, and its files.
+const VOICES_ORIGIN: &str = "https://huggingface.co/rhasspy/piper-voices/resolve/4a409e3cbfd0a189930b38f127a38e107677e8ac/en/en_US/test/medium/";
+const VOICE_FILES: [(&str, &[u8]); 2] = [
+    ("en_US-test-medium.onnx", VOICE),
+    ("en_US-test-medium.onnx.json", VOICE_JSON),
+];
 
 /// A program that is nobody's but a test's: who it is and where it downloads from, and nothing it can install.
 #[derive(Clone, Debug)]
@@ -262,16 +242,145 @@ macro_rules! delegate_models {
     };
 }
 
-delegate_models!(
-    TestWhisperModels,
-    "test_whisper_models",
-    WhisperModels::over(whisper_models())
-);
-delegate_models!(
-    TestPiperVoices,
-    "test_piper_voices",
-    PiperModels::over(piper_catalog())
-);
+/// Whisper's `model_store` as it answers in a host: the type's rows come from catalogs, so a test that has no source lists two
+/// stand-in rows of its own over the real description and speech offer.
+#[derive(Default, Debug, Clone, Copy, Provider)]
+#[provider(ModelStore, id = "test_whisper_models", crate = ::coqui_acp_api::guatiao)]
+struct TestWhisperModels;
+
+impl ModelStore for TestWhisperModels {
+    fn describe(&self) -> Result<ModelStoreInfo, ProviderError> {
+        WhisperModels.describe()
+    }
+    fn list(
+        &self,
+        query: ModelQuery,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ModelList, ProviderError> {
+        let folder = query.folder.as_deref().map(Path::new);
+        let mut list = ModelList::default();
+        list.models = WHISPER_MODELS
+            .iter()
+            .map(|(id, file)| {
+                let on = folder.is_some_and(|folder| folder.join(file).is_file());
+                let mut row = ModelRow::new(*id, "a stand-in");
+                row.on = on;
+                row.state = on.then(|| "installed".to_owned());
+                row.files = vec![ModelFile::new(
+                    format!("{MODELS_ORIGIN}{file}"),
+                    *file,
+                    Some(WEIGHTS.len() as u64),
+                    digest(WEIGHTS),
+                )];
+                if folder.is_some() {
+                    row.actions.push(RowAction::new(
+                        "Install or remove",
+                        "a stand-in",
+                        "Go",
+                        [if on {
+                            STEP_DELETE_FILES
+                        } else {
+                            STEP_FETCH_FILES
+                        }],
+                    ));
+                }
+                row
+            })
+            .collect();
+        Ok(list)
+    }
+    fn act(
+        &self,
+        request: ModelAct,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ModelActed, ProviderError> {
+        WhisperModels.act(request, spawner)
+    }
+    fn keep(
+        &self,
+        request: ModelKeep,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ModelKept, ProviderError> {
+        WhisperModels.keep(request, spawner)
+    }
+    fn service(
+        &self,
+        query: ServiceQuery,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ServiceReport, ProviderError> {
+        WhisperModels.service(query, spawner)
+    }
+}
+
+/// Piper's `model_store` as it answers in a host: the type's rows come from catalogs, so a test that has no source lists one
+/// stand-in voice of its own over the real description.
+#[derive(Default, Debug, Clone, Copy, Provider)]
+#[provider(ModelStore, id = "test_piper_voices", crate = ::coqui_acp_api::guatiao)]
+struct TestPiperVoices;
+
+impl ModelStore for TestPiperVoices {
+    fn describe(&self) -> Result<ModelStoreInfo, ProviderError> {
+        PiperModels.describe()
+    }
+    fn list(
+        &self,
+        query: ModelQuery,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ModelList, ProviderError> {
+        let folder = query.folder.as_deref().map(Path::new);
+        let on = folder.is_some_and(|folder| folder.join(VOICE_FILES[0].0).is_file());
+        let mut row = ModelRow::new("en_US-test-medium", "a stand-in voice");
+        row.on = on;
+        row.state = on.then(|| "installed".to_owned());
+        row.files = VOICE_FILES
+            .iter()
+            .map(|(file, bytes)| {
+                ModelFile::new(
+                    format!("{VOICES_ORIGIN}{file}"),
+                    *file,
+                    Some(bytes.len() as u64),
+                    digest(bytes),
+                )
+            })
+            .collect();
+        if folder.is_some() {
+            row.actions.push(RowAction::new(
+                "Install or remove",
+                "a stand-in",
+                "Go",
+                [if on {
+                    STEP_DELETE_FILES
+                } else {
+                    STEP_FETCH_FILES
+                }],
+            ));
+        }
+        let mut list = ModelList::default();
+        list.models = vec![row];
+        Ok(list)
+    }
+    fn act(
+        &self,
+        request: ModelAct,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ModelActed, ProviderError> {
+        PiperModels.act(request, spawner)
+    }
+    fn keep(
+        &self,
+        request: ModelKeep,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ModelKept, ProviderError> {
+        PiperModels.keep(request, spawner)
+    }
+    fn service(
+        &self,
+        query: ServiceQuery,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<ServiceReport, ProviderError> {
+        PiperModels.service(query, spawner)
+    }
+}
 
 coqui_acp_api::guatiao::local_providers!(
     id = "test-files-library",
@@ -295,14 +404,12 @@ struct Fixture {
 
 fn world() -> World {
     let mut world = World::new();
-    for model in whisper_models() {
-        world.put(format!("{MODELS_ORIGIN}{}", model.file), WEIGHTS);
+    for (_, file) in WHISPER_MODELS {
+        world.put(format!("{MODELS_ORIGIN}{file}"), WEIGHTS);
     }
-    let catalog = piper_catalog();
-    let voice = &catalog.voices[0];
-    let [onnx, json] = catalog.files_of(voice);
-    world.put(onnx.url, VOICE);
-    world.put(json.url, VOICE_JSON);
+    for (file, bytes) in VOICE_FILES {
+        world.put(format!("{VOICES_ORIGIN}{file}"), bytes);
+    }
     world
 }
 
@@ -482,6 +589,49 @@ fn a_whisper_model_needs_no_program_and_comes_only_from_the_origins_its_library_
     assert!(!host.folder("whisper").join("ggml-other.bin").exists());
 }
 
+/// The git blob id of `bytes`: the SHA-1 of `blob <size>`, a NUL and the bytes.
+fn blob_id(bytes: &[u8]) -> String {
+    use sha1::Digest as _;
+    let mut hash = sha1::Sha1::new();
+    hash.update(format!("blob {}\0", bytes.len()).as_bytes());
+    hash.update(bytes);
+    data_encoding::HEXLOWER.encode(&hash.finalize())
+}
+
+#[test]
+fn a_file_checked_by_its_git_blob_id_is_kept_when_the_id_matches_and_refused_when_it_does_not() {
+    let host = fixture("blob", world());
+    let file = canoa::store::models::ModelFile::new(
+        format!("{VOICES_ORIGIN}{}", VOICE_FILES[1].0),
+        "kept.onnx.json",
+        None,
+        "",
+    );
+    let fetch = |check: canoa::store::Check| {
+        host.stores.programs.fetch_models_in(
+            "piper",
+            &[VOICES_ORIGIN.to_owned()],
+            std::slice::from_ref(&file),
+            Some(&[check]),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+    };
+    let refused = fetch(canoa::store::Check::GitBlob {
+        value: blob_id(b"another file"),
+    })
+    .expect_err("another file's id");
+    assert!(refused.to_string().contains("checksum"), "{refused}");
+    assert!(!host.folder("piper").join("kept.onnx.json").exists());
+    fetch(canoa::store::Check::GitBlob {
+        value: blob_id(VOICE_JSON),
+    })
+    .expect("the file's own id");
+    assert_eq!(
+        std::fs::read(host.folder("piper").join("kept.onnx.json")).expect("kept"),
+        VOICE_JSON
+    );
+}
+
 #[test]
 fn a_file_that_does_not_match_its_digest_is_refused_and_leaves_nothing() {
     let mut served = world();
@@ -528,8 +678,10 @@ fn a_piper_voice_is_installed_with_its_two_files_listed_and_removed_on_its_own()
 #[test]
 fn a_voice_with_one_file_wrong_installs_neither_and_a_voice_with_no_program_is_refused() {
     let mut served = world();
-    let [_, json] = piper_catalog().files_of(&piper_catalog().voices[0]);
-    served.put(json.url, b"wrong".to_vec());
+    served.put(
+        format!("{VOICES_ORIGIN}{}", VOICE_FILES[1].0),
+        b"wrong".to_vec(),
+    );
     let host = fixture("piper-half", served);
     let refused = host
         .act("piper", "en_US-test-medium", "fetch_files")

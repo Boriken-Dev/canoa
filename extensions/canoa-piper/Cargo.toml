@@ -22,6 +22,7 @@ serde_json.workspace = true
 
 [dev-dependencies]
 coqui-acp-harness.workspace = true
+sha2.workspace = true
 
 [lints.rust]
 missing_docs = "warn"

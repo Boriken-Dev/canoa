@@ -353,7 +353,11 @@ pub struct LocalTools {
     anywhere: bool,
     cancel: Arc<AtomicBool>,
     deadline: Option<std::time::Instant>,
+    releases: Option<ReleasesReader>,
 }
+
+/// What reads and merges the releases catalogs of one program's scope: the text of a `canoa.releases/1` document, or why none.
+pub(crate) type ReleasesReader = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
 impl fmt::Debug for LocalTools {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -380,7 +384,14 @@ impl LocalTools {
             anywhere: false,
             cancel: Arc::new(AtomicBool::new(false)),
             deadline: None,
+            releases: None,
         }
+    }
+
+    /// These tools answering `releases` with what `reader` makes of the program's catalogs.
+    pub(crate) fn releases_from(mut self, reader: Option<ReleasesReader>) -> Self {
+        self.releases = reader;
+        self
     }
 
     /// Makes every call answer `GUATIAO_ERR_GONE` with `install timed out` once `deadline` has passed.
@@ -537,22 +548,29 @@ impl LocalTools {
                 ),
             ));
         }
-        let reaches = |endpoint: &String| {
-            let after_scheme = endpoint.split_once("://").map_or("", |(_, rest)| rest);
-            if after_scheme.contains('/') {
-                // An endpoint with a path is a prefix: the bucket, not the whole host.
-                url.starts_with(endpoint.as_str()) && !url[endpoint.len()..].contains("..")
-            } else {
-                endpoint.eq_ignore_ascii_case(&origin)
-            }
-        };
-        if !self.anywhere && !self.endpoints.iter().any(reaches) {
+        if !self.anywhere
+            && !self
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint_reaches(endpoint, url, &origin))
+        {
             return Err(refused(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 &format!("{origin} is not one of the store's endpoints"),
             ));
         }
         Ok(())
+    }
+}
+
+/// Whether `url`, whose origin is `origin`, is at the endpoint `endpoint`: an origin allows every path of its host, and an endpoint
+/// with a path is a prefix, the bucket and not the whole host.
+pub(crate) fn endpoint_reaches(endpoint: &str, url: &str, origin: &str) -> bool {
+    let after_scheme = endpoint.split_once("://").map_or("", |(_, rest)| rest);
+    if after_scheme.contains('/') {
+        url.starts_with(endpoint) && !url[endpoint.len()..].contains("..")
+    } else {
+        endpoint.eq_ignore_ascii_case(origin)
     }
 }
 
@@ -744,6 +762,23 @@ impl Hashes {
     }
 }
 
+/// The git blob id of the file at `path`, which holds `size` bytes: the SHA-1 of `blob <size>`, a NUL and the bytes.
+fn git_blob_of(path: &Path, size: u64) -> io::Result<String> {
+    use sha1::{Digest as _, Sha1};
+    let mut file = fs::File::open(path)?;
+    let mut hash = Sha1::new();
+    hash.update(format!("blob {size}\0").as_bytes());
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    Ok(data_encoding::HEXLOWER.encode(&hash.finalize()))
+}
+
 impl InstallTools for LocalTools {
     fn find(&self, request: FindRequest) -> Result<Vec<Found>, ProviderError> {
         self.gone()?;
@@ -790,6 +825,17 @@ impl InstallTools for LocalTools {
             }
         }
         Ok(found)
+    }
+
+    fn releases(&self) -> Result<String, ProviderError> {
+        self.gone()?;
+        let Some(reader) = &self.releases else {
+            return Err(refused(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "this program registers no catalogs of releases",
+            ));
+        };
+        reader().map_err(|why| refused(Status::GUATIAO_ERR_INTERNAL, &why))
     }
 
     fn fetch_text(&self, url: &str, max_bytes: u64) -> Result<String, ProviderError> {
@@ -866,7 +912,10 @@ impl InstallTools for LocalTools {
             let _ = fs::remove_file(&target);
             return Err(error);
         }
-        let (sha256, matches) = hashes.finish(&request.check);
+        let (sha256, mut matches) = hashes.finish(&request.check);
+        if let Check::GitBlob { value } = &request.check {
+            matches = git_blob_of(&target, written).is_ok_and(|id| id.eq_ignore_ascii_case(value));
+        }
         if !matches {
             let _ = fs::remove_file(&target);
             return Err(refused(

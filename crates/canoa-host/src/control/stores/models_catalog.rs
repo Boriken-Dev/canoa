@@ -34,6 +34,8 @@ pub(super) struct FromCatalogs {
     pub(super) checks: BTreeMap<String, Vec<Check>>,
     /// For each row that cannot be installed, why.
     pub(super) refused: BTreeMap<String, String>,
+    /// For each row, the further origins its catalog's entry says its files are downloaded from.
+    pub(super) endpoints: BTreeMap<String, Vec<String>>,
     /// Each catalog of the type, whether it could be read or why not.
     pub(super) sources: Vec<Value>,
 }
@@ -46,11 +48,13 @@ fn check_of(file: &canoa::store::catalog::CatalogFile) -> Option<Check> {
         Some(FileCheck::Sha512(value)) => Some(Check::Sha512 {
             value: value.clone(),
         }),
+        Some(FileCheck::GitBlob(value)) => Some(Check::GitBlob {
+            value: value.clone(),
+        }),
         Some(FileCheck::Unverified(why)) => Some(Check::Unverified { why: why.clone() }),
         None => Some(Check::Unverified {
             why: "the catalog gives no checksum".to_owned(),
         }),
-        // A git blob id says what a file holds only through its own hash, which the host's downloads do not compute.
         Some(_) => None,
     }
 }
@@ -145,7 +149,7 @@ fn row_of(
             row.state = Some("not installable".to_owned());
             row.facts.push(Fact::new(
                 "Not installable",
-                "its files are checked by git blob id, which this host does not verify yet",
+                "its files are checked in a way this host does not know",
             ));
         }
     }
@@ -193,6 +197,7 @@ impl Stores {
                 "enabled": entry.enabled,
                 "trust": entry.trust(),
                 "pin": entry.pin,
+                "endpoints": entry.endpoints,
             });
             if !entry.enabled {
                 made.sources.push(status);
@@ -245,10 +250,12 @@ impl Stores {
                     (Ok(_), None) => {
                         made.refused.insert(
                             id.clone(),
-                            "its files are checked by git blob id, which this host does not verify yet"
-                                .to_owned(),
+                            "its files are checked in a way this host does not know".to_owned(),
                         );
                     }
+                }
+                if !entry.endpoints.is_empty() {
+                    made.endpoints.insert(id.clone(), entry.endpoints.clone());
                 }
                 made.meta
                     .insert(id, json!({"catalog": info.clone(), "trust": shown}));

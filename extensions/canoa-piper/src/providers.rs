@@ -1,12 +1,14 @@
 //! What this crate offers a Canoa host as a library: the Store's program that installs Piper, the Store type that lists it, the
 //! voices page of that type and the provider that speaks with the installed copy. The host holds no word of any of them.
 
-use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
+use canoa::store::catalog::MODELS_FORMAT;
+use canoa::store::extension::{CatalogWords, ExtensionInfo, ExtensionType, StoreExtension};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
 
 use crate::STORE_TYPE;
 use crate::model_store::PiperModels;
+use crate::source::PiperVoices;
 use crate::speech::PiperSpeech;
 
 canoa::store_provider!(
@@ -24,6 +26,11 @@ impl StoreExtension for PiperExtension {
         let mut local = ExtensionType::new(STORE_TYPE, "Piper", ["piper_store"]);
         local.icon = Some("speaker".to_owned());
         local.models = Some("piper_voices".to_owned());
+        local.catalogs = Some(
+            CatalogWords::new("catalog", "catalogs", "voices")
+                .in_format(MODELS_FORMAT)
+                .registering([crate::catalog::default_catalog()]),
+        );
         Ok(ExtensionInfo::new("Piper", "Boriken Dev", vec![local]))
     }
 }
@@ -32,7 +39,13 @@ impl StoreExtension for PiperExtension {
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-piper",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [PiperStore, PiperExtension, PiperModels, PiperSpeech]
+    providers = [
+        PiperStore,
+        PiperExtension,
+        PiperModels,
+        PiperVoices,
+        PiperSpeech
+    ]
 );
 
 #[cfg(test)]

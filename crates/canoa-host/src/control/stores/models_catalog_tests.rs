@@ -220,6 +220,7 @@ fn fixture(name: &str) -> Fixture {
     let mut world = World::new();
     world.put(format!("{ORIGIN}base.bin"), WEIGHTS);
     world.put(format!("{ORIGIN}bare.bin"), WEIGHTS);
+    world.put("https://mirror.example/models/m.bin".to_owned(), WEIGHTS);
     let programs = Programs::new(Shelf::unchecked(root.join("shelf")), Arc::clone(&registry))
         .transport(WorldTransport::new(world))
         .options(options);
@@ -389,4 +390,58 @@ fn a_catalog_that_cannot_be_read_is_listed_with_the_reason_and_the_others_stay()
         .and_then(|all| all.iter().find(|source| source["label"] == "gone"))
         .expect("listed");
     assert!(gone["problem"].is_string(), "{gone}");
+}
+
+#[test]
+fn a_file_outside_the_places_the_type_downloads_from_is_refused_until_a_trusted_entry_names_them() {
+    let host = fixture("endpoints");
+    let mirrored = host.file(
+        "mirror.json",
+        &json!({"format": "canoa.models/1", "items": [
+            {"id": "mirrored", "label": "Mirrored", "files": [{"url": "https://mirror.example/models/m.bin", "file": "m.bin",
+                "check": {"sha256": digest(WEIGHTS)}}]},
+        ]})
+        .to_string(),
+    );
+    host.catalogs(
+        &json!({"mirror": {"provider": "read", "source": mirrored.clone(), "trusted": true}}),
+    );
+    let refused = host
+        .act("mirrored", "fetch_files")
+        .expect_err("not one of the type's places");
+    assert!(
+        refused.1.contains("none of the places") && refused.1.contains("endpoints"),
+        "{refused:?}"
+    );
+    assert!(!host.root.join("shelf/stand/models/m.bin").exists());
+
+    host.catalogs(
+        &json!({"mirror": {"provider": "read", "source": mirrored.clone(), "trusted": true,
+        "endpoints": ["https://mirror.example/models/"]}}),
+    );
+    assert_eq!(
+        host.list()["sources"][1]["endpoints"],
+        json!(["https://mirror.example/models/"])
+    );
+    host.act("mirrored", "fetch_files")
+        .expect("installed from the mirror");
+    assert_eq!(
+        std::fs::read(host.root.join("shelf/stand/models/m.bin")).expect("the file"),
+        WEIGHTS
+    );
+
+    // An entry that is neither trusted nor pinned may not widen where files come from: it is listed with the reason.
+    host.catalogs(&json!({"mirror": {"provider": "read", "source": mirrored,
+        "endpoints": ["https://mirror.example/models/"]}}));
+    let page = host.list();
+    let row = page["sources"]
+        .as_array()
+        .and_then(|all| all.iter().find(|source| source["label"] == "mirror"))
+        .expect("listed");
+    assert!(
+        row["problem"]
+            .as_str()
+            .is_some_and(|why| why.contains("trusted or pinned")),
+        "{row}"
+    );
 }

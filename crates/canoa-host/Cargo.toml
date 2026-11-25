@@ -39,6 +39,7 @@ serde_json.workspace = true
 sha2.workspace = true
 
 [dependencies]
+sha1 = { version = "0.11", default-features = false }
 coqui-access = { workspace = true, optional = true }
 coqui-access-system = { workspace = true, optional = true }
 coqui-access-signin = { workspace = true, optional = true }
@@ -230,7 +231,6 @@ coqui-access-passkey-plugin.workspace = true
 coqui-access-signin = { workspace = true, features = ["test-support"] }
 # The tests compute the code an authenticator app shows (RFC 6238) without the provider's help.
 hmac = "0.13"
-sha1 = { version = "0.11", default-features = false }
 # A software passkey device (1Password's authenticator, and a client that checks the origin as a browser does) signs the tests' ceremonies.
 passkey-authenticator = { version = "0.6", features = ["testable"] }
 passkey-client = "0.6"

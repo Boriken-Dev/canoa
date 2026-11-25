@@ -1,0 +1,104 @@
+{
+  "format": "canoa.models/1",
+  "revision": "4a409e3cbfd0a189930b38f127a38e107677e8ac",
+  "items": [
+    {
+      "id": "en_US-ljspeech-medium",
+      "label": "ljspeech (English, United States, medium)",
+      "tags": [
+        "en",
+        "medium"
+      ],
+      "license": "public domain (the LJ Speech recordings)",
+      "facts": [
+        {
+          "label": "Language",
+          "value": "English, United States"
+        },
+        {
+          "label": "Quality",
+          "value": "medium"
+        },
+        {
+          "label": "Size",
+          "value": "64 MB"
+        },
+        {
+          "label": "SHA-256",
+          "value": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+        },
+        {
+          "label": "Speakers",
+          "value": "1"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/rhasspy/piper-voices/resolve/4a409e3cbfd0a189930b38f127a38e107677e8ac/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx",
+          "file": "en_US-ljspeech-medium.onnx",
+          "bytes": 63531379,
+          "check": {
+            "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+          }
+        },
+        {
+          "url": "https://huggingface.co/rhasspy/piper-voices/raw/4a409e3cbfd0a189930b38f127a38e107677e8ac/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx.json",
+          "file": "en_US-ljspeech-medium.onnx.json",
+          "bytes": 4972,
+          "check": {
+            "git_blob": "73ecdec4f6ab17a437936652dfe3a925bb19e098"
+          }
+        }
+      ]
+    },
+    {
+      "id": "es_MX-claude-high",
+      "label": "claude (Spanish, Mexico, high)",
+      "tags": [
+        "es",
+        "high"
+      ],
+      "license": "Apache License 2.0",
+      "facts": [
+        {
+          "label": "Language",
+          "value": "Spanish, Mexico"
+        },
+        {
+          "label": "Quality",
+          "value": "high"
+        },
+        {
+          "label": "Size",
+          "value": "63 MB"
+        },
+        {
+          "label": "SHA-256",
+          "value": "3ef40a71ea63852cd8ab7e6fa7d2ecdcfa67a0b47c9c48e3f10e02ee02083ea0"
+        },
+        {
+          "label": "Speakers",
+          "value": "1"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/rhasspy/piper-voices/resolve/4a409e3cbfd0a189930b38f127a38e107677e8ac/es/es_MX/claude/high/es_MX-claude-high.onnx",
+          "file": "es_MX-claude-high.onnx",
+          "bytes": 63122309,
+          "check": {
+            "sha256": "3ef40a71ea63852cd8ab7e6fa7d2ecdcfa67a0b47c9c48e3f10e02ee02083ea0"
+          }
+        },
+        {
+          "url": "https://huggingface.co/rhasspy/piper-voices/raw/4a409e3cbfd0a189930b38f127a38e107677e8ac/es/es_MX/claude/high/es_MX-claude-high.onnx.json",
+          "file": "es_MX-claude-high.onnx.json",
+          "bytes": 4963,
+          "check": {
+            "git_blob": "4a98b7593bd91a1522f893b66d5bab1f517d5068"
+          }
+        }
+      ]
+    }
+  ]
+}

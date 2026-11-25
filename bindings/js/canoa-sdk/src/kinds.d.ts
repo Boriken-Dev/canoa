@@ -1407,6 +1407,12 @@ export interface InstallTools {
   /** A small text document: a version file, a manifest. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes`. */
   fetchText(url: string, maxBytes: bigint): string;
   /**
+   * The releases this program's catalogs list, read and merged by the host: the text of one `canoa.releases/1` document
+   * ([`crate::store::catalog::RELEASES_FORMAT`]). `GUATIAO_ERR_UNSUPPORTED` for a store that registers no catalogs, and the
+   * reason when none of its catalogs could be read.
+   */
+  releases(): string;
+  /**
    * A file into the granted folder, checked as it is written. A mismatch deletes it and answers
    * `GUATIAO_ERR_BAD_VALUE` with `checksum mismatch`. The executable bit is set only after the check passes.
    */
@@ -1427,6 +1433,12 @@ export interface InstallToolsRemote extends k.RemoteBase<typeof InstallTools> {
   find(request: unknown): g.Value;
   /** A small text document: a version file, a manifest. `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes`. */
   fetchText(url: string, maxBytes: number | bigint): string;
+  /**
+   * The releases this program's catalogs list, read and merged by the host: the text of one `canoa.releases/1` document
+   * ([`crate::store::catalog::RELEASES_FORMAT`]). `GUATIAO_ERR_UNSUPPORTED` for a store that registers no catalogs, and the
+   * reason when none of its catalogs could be read.
+   */
+  releases(): string;
   /**
    * A file into the granted folder, checked as it is written. A mismatch deletes it and answers
    * `GUATIAO_ERR_BAD_VALUE` with `checksum mismatch`. The executable bit is set only after the check passes.

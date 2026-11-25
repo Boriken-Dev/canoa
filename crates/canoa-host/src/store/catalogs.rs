@@ -46,7 +46,7 @@ pub(crate) fn schema() -> Result<GuatiaoValue, ValueError> {
 pub(crate) const READ: &str = "read";
 
 /// The keys of a catalog's table that the host owns.
-const HOST_KEYS: [&str; 4] = ["pin", "trusted", "ttl", "keys"];
+const HOST_KEYS: [&str; 5] = ["pin", "trusted", "ttl", "keys", "endpoints"];
 
 /// Where a catalog of a type comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,6 +85,9 @@ pub(crate) struct Entry {
     pub(crate) ttl: Option<u64>,
     /// The publisher key fingerprints it demands a signature from, in place of its provider's.
     pub(crate) keys: Vec<String>,
+    /// Further `https` origins or prefixes its files may be downloaded from, beyond the ones its type names. Taken only from an entry
+    /// that is `trusted` or pinned: a person who wrote one has said where the files are, and what is fetched is checked by its digest.
+    pub(crate) endpoints: Vec<String>,
     pub(crate) origin: Origin,
     /// False for a catalog turned off with `label = false`.
     pub(crate) enabled: bool,
@@ -105,18 +108,20 @@ impl Entry {
             && self.pin.is_none()
             && !self.trusted
             && self.keys.is_empty()
+            && self.endpoints.is_empty()
             && let Some(source) = self.source().filter(|_| self.fields.len() == 1)
         {
             return source.to_owned();
         }
         let sorted: alloc::collections::BTreeMap<_, _> = self.fields.iter().collect();
         format!(
-            "{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}",
             self.provider,
             serde_json::to_string(&sorted).unwrap_or_default(),
             self.pin.as_deref().unwrap_or_default(),
             self.trusted,
-            self.keys.join(",")
+            self.keys.join(","),
+            self.endpoints.join(",")
         )
     }
 
@@ -139,6 +144,7 @@ impl Entry {
             trusted: false,
             ttl: None,
             keys: Vec::new(),
+            endpoints: Vec::new(),
             origin,
             enabled: true,
             snapshot: None,
@@ -311,6 +317,30 @@ pub(crate) fn read_all(table: &Value) -> Vec<Parsed> {
                             .collect::<Option<Vec<_>>>()
                             .ok_or_else(|| problem("keys is a list of key fingerprints"))?,
                         Some(_) => return Err(problem("keys is a list of key fingerprints")),
+                    };
+                    entry.endpoints = match table.get("endpoints") {
+                        None | Some(Value::Null) => Vec::new(),
+                        Some(Value::Array(places)) => {
+                            let places = places
+                                .iter()
+                                .map(|place| place.as_str().map(str::to_owned))
+                                .collect::<Option<Vec<_>>>()
+                                .filter(|places| {
+                                    places
+                                        .iter()
+                                        .all(|place| canoa::store::source::is_endpoint(place))
+                                })
+                                .ok_or_else(|| {
+                                    problem("endpoints is a list of https origins or prefixes")
+                                })?;
+                            if !places.is_empty() && !entry.trusted && entry.pin.is_none() {
+                                return Err(problem(
+                                    "endpoints names where files are downloaded from, which an entry may do when it is trusted or pinned",
+                                ));
+                            }
+                            places
+                        }
+                        Some(_) => return Err(problem("endpoints is a list of https origins or prefixes")),
                     };
                     Ok(entry)
                 }
@@ -558,6 +588,9 @@ pub(crate) fn row_of(kind: &TypeCatalogs, merged: &Merged) -> Value {
     }
     if !entry.keys.is_empty() {
         row["keys"] = json!(entry.keys);
+    }
+    if !entry.endpoints.is_empty() {
+        row["endpoints"] = json!(entry.endpoints);
     }
     if kind.format.is_some() {
         row["trust"] = json!(entry.trust());

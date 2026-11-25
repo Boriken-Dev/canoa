@@ -7,13 +7,16 @@
 
 extern crate alloc;
 
+pub mod catalog;
 mod model_store;
 mod providers;
+mod source;
 mod speech;
 pub mod store;
 
 pub use model_store::PiperModels;
 pub use providers::{PiperExtension, PiperStore, library};
+pub use source::{PiperVoices, PiperVoicesSettings, SOURCE, catalog_of};
 pub use speech::{PROVIDER, PiperSettings, PiperSpeech};
 
 /// The name this crate's library is registered under.

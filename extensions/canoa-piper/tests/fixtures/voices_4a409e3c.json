@@ -1,0 +1,94 @@
+{
+ "en_US-ljspeech-medium": {
+  "key": "en_US-ljspeech-medium",
+  "name": "ljspeech",
+  "language": {
+   "code": "en_US",
+   "family": "en",
+   "region": "US",
+   "name_native": "English",
+   "name_english": "English",
+   "country_english": "United States"
+  },
+  "quality": "medium",
+  "num_speakers": 1,
+  "speaker_id_map": {},
+  "files": {
+   "en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx": {
+    "size_bytes": 63531379,
+    "md5_digest": "109d552e9dd78d92d1169a7edd6de38d"
+   },
+   "en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx.json": {
+    "size_bytes": 4972,
+    "md5_digest": "0668112b8b3ac5bb4b12c2b1a366776a"
+   },
+   "en/en_US/ljspeech/medium/MODEL_CARD": {
+    "size_bytes": 517,
+    "md5_digest": "5ad31d314786587d4f97effb0b716d61"
+   }
+  },
+  "aliases": []
+ },
+ "es_MX-claude-high": {
+  "key": "es_MX-claude-high",
+  "name": "claude",
+  "language": {
+   "code": "es_MX",
+   "family": "es",
+   "region": "MX",
+   "name_native": "Español",
+   "name_english": "Spanish",
+   "country_english": "Mexico"
+  },
+  "quality": "high",
+  "num_speakers": 1,
+  "speaker_id_map": {},
+  "files": {
+   "es/es_MX/claude/high/es_MX-claude-high.onnx": {
+    "size_bytes": 63122309,
+    "md5_digest": "cb1966e0ff20ca3aa010f6c9a0ce296a"
+   },
+   "es/es_MX/claude/high/es_MX-claude-high.onnx.json": {
+    "size_bytes": 4963,
+    "md5_digest": "36882201922fabb409f18d284af3eddd"
+   },
+   "es/es_MX/claude/high/MODEL_CARD": {
+    "size_bytes": 247,
+    "md5_digest": "bca99dc9b9a6c8f2f8563d73d52c4a3b"
+   }
+  },
+  "aliases": []
+ },
+ "en_GB-alan-low": {
+  "key": "en_GB-alan-low",
+  "name": "alan",
+  "language": {
+   "code": "en_GB",
+   "family": "en",
+   "region": "GB",
+   "name_native": "English",
+   "name_english": "English",
+   "country_english": "Great Britain"
+  },
+  "quality": "low",
+  "num_speakers": 1,
+  "speaker_id_map": {},
+  "files": {
+   "en/en_GB/alan/low/en_GB-alan-low.onnx": {
+    "size_bytes": 63104526,
+    "md5_digest": "2acae8c79395ab109a7572f0afa61fff"
+   },
+   "en/en_GB/alan/low/en_GB-alan-low.onnx.json": {
+    "size_bytes": 4170,
+    "md5_digest": "4c0fa2c6763bf49b343cbb4f655a147b"
+   },
+   "en/en_GB/alan/low/MODEL_CARD": {
+    "size_bytes": 309,
+    "md5_digest": "b116c3cbdebac99ade9af03807cb9301"
+   }
+  },
+  "aliases": [
+   "en-gb-alan-low"
+  ]
+ }
+}

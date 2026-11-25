@@ -390,6 +390,32 @@ impl Stores {
         {
             return Err((REFUSED, format!("{model} cannot be installed: {why}")));
         }
+        let extra = from.endpoints.get(model).cloned().unwrap_or_default();
+        if action == STEP_FETCH_FILES && from.meta.contains_key(model) {
+            let own = match self
+                .type_store(&held.type_id)
+                .filter(|_| self.speech_store(&held.type_id).is_some())
+            {
+                Some((_, store)) => store
+                    .describe()
+                    .map(|info| info.endpoints)
+                    .unwrap_or_default(),
+                None => held.info.endpoints.clone(),
+            };
+            if let Some(file) = row
+                .files
+                .iter()
+                .find(|file| !is_reached(&own, &extra, &file.url))
+            {
+                return Err((
+                    REFUSED,
+                    format!(
+                        "{model} cannot be installed: its file {} is at {}, which is none of the places {} downloads from; a catalog entry that is trusted or pinned names more with endpoints = [\"https://...\"]",
+                        file.file, file.url, held.info.title
+                    ),
+                ));
+            }
+        }
         if self.speech_store(&held.type_id).is_none() {
             // A type with no program: its files are fetched from the origins its model store names, and nothing has to be installed.
             if action == STEP_DELETE_FILES {
@@ -400,7 +426,7 @@ impl Stores {
                 self.programs
                     .fetch_models_in(
                         &held.type_id,
-                        &held.info.endpoints,
+                        &[held.info.endpoints.clone(), extra].concat(),
                         &row.files,
                         from.checks.get(model).map(Vec::as_slice),
                         Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -432,9 +458,13 @@ impl Stores {
                 ),
             ));
         }
+        let info = store
+            .describe()
+            .map_err(|error| (REFUSED, error.message().to_owned()))?;
         self.programs
-            .fetch_models(
-                &*store,
+            .fetch_models_in(
+                &info.program,
+                &[info.endpoints.clone(), extra].concat(),
                 &row.files,
                 from.checks.get(model).map(Vec::as_slice),
                 Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -601,4 +631,15 @@ impl<V: Clone> Drop for Forget<'_, V> {
     fn drop(&mut self) {
         self.0.clear();
     }
+}
+
+/// Whether `url` is at one of `own` (the places the type downloads from) or `extra` (the ones a catalog's entry adds).
+fn is_reached(own: &[String], extra: &[String], url: &str) -> bool {
+    let origin = url
+        .split_once("://")
+        .map(|(scheme, rest)| format!("{scheme}://{}", rest.split('/').next().unwrap_or_default()))
+        .unwrap_or_default();
+    own.iter()
+        .chain(extra)
+        .any(|endpoint| crate::store::tools::endpoint_reaches(endpoint, url, &origin))
 }

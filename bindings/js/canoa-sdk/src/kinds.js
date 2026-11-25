@@ -1390,7 +1390,7 @@ const described = kindsOf({
     },
     {
       "name": "install_tools",
-      "floor_hash": 821327524,
+      "floor_hash": 446272040,
       "object": true,
       "slots": [
         {
@@ -1422,6 +1422,15 @@ const described = kindsOf({
               "type": "u64"
             }
           ],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "releases",
+          "required": true,
+          "fallible": true,
+          "args": [],
           "answer": {
             "type": "text"
           }

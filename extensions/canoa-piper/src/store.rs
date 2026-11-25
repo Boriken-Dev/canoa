@@ -1,15 +1,12 @@
-//! The Piper store: a local neural text-to-speech engine, with a voice for English and one for Spanish, so
-//! the host can read replies aloud with nothing leaving the computer.
+//! The Piper store: a local neural text-to-speech engine, so the host can read replies aloud with nothing leaving the computer.
 //!
 //! Piper's last binary release is `2023.11.14-2` (the program prints `1.2.0`): the project was archived in 2025 and its successor
 //! is a Python package under another licence. The release is MIT licensed and publishes no checksums, so the digests here are the
-//! SHA-256 of the published files, measured once and pinned, and each voice is a file of one commit of the voices repository, so
-//! what is downloaded is what was measured. Every voice has the licence of its own data, which the plan names.
+//! SHA-256 of the published files, measured once and pinned.
 //!
-//! The program is installed alone, in `piper/`; the voices are installed on their own from the Models page, each `NAME.onnx` with its
-//! `NAME.onnx.json` in the host's models folder. A channel (`standard`, `english` or `spanish`) still installs the voices of its
-//! language with the program, in the copy's own `voices/` folder; the type's `speech_say_piper` provider is given both through
-//! `PiperModels::service`. A Linux archive carries its libraries' short names
+//! The program is installed alone, in `piper/`. The voices are the type's catalogs ([`crate::source`]) and are installed on their
+//! own from the Models page, each `NAME.onnx` with its `NAME.onnx.json` in the host's models folder; the type's `speech_say_piper`
+//! provider is given that folder through `PiperModels::service`. A Linux archive carries its libraries' short names
 //! as links, which the unpack leaves out, so the install writes them as copies.
 #![allow(
     clippy::std_instead_of_core,
@@ -22,41 +19,32 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
-use canoa::status::{bad_value, internal, unsupported};
+use canoa::status::{internal, unsupported};
 use canoa::store::recipe::{
     Finish, Part, Recipe, Release, UnpackStep, dotted, measured_platforms, pinned,
 };
 use canoa::store::{
-    Check, Download, InstallPlan, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo,
-    Updatable,
+    Check, Download, InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 /// The folder of a version's copy that holds the program and its libraries.
 pub const PROGRAM_DIR: &str = "piper";
 
-/// The folder of a version's copy that holds the voices.
-pub const VOICES_DIR: &str = "voices";
-
 /// The version Piper prints, and the one this store offers.
 pub const VERSION: &str = "1.2.0";
 
-/// Where the release's files are, and the commit of the voices repository the voices are pinned to.
+/// Where the release's files are.
 pub const RELEASE: &str = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/";
-const VOICES: &str =
-    "https://huggingface.co/rhasspy/piper-voices/resolve/4a409e3cbfd0a189930b38f127a38e107677e8ac/";
-/// The same commit's small files, which Hugging Face answers where they are rather than through a redirect.
-const VOICES_RAW: &str =
-    "https://huggingface.co/rhasspy/piper-voices/raw/4a409e3cbfd0a189930b38f127a38e107677e8ac/";
 
-/// The origins a download or a redirect may reach: the release, GitHub's asset hosts, the voices repository and the hosts
-/// Hugging Face sends a model on to.
+/// The origins a download or a redirect may reach: the release, GitHub's asset hosts, the voices repository (at any commit) and
+/// the hosts Hugging Face sends a model on to.
 const ENDPOINTS: [&str; 8] = [
     RELEASE,
     "https://release-assets.githubusercontent.com",
     "https://objects.githubusercontent.com",
-    VOICES,
-    VOICES_RAW,
+    "https://huggingface.co/rhasspy/piper-voices/resolve/",
+    "https://huggingface.co/rhasspy/piper-voices/raw/",
     "https://us.aws.cdn.hf.co",
     "https://cdn-lfs.hf.co",
     "https://cas-bridge.xethub.hf.co",
@@ -77,76 +65,17 @@ pub struct Engine {
     pub bytes: u64,
 }
 
-/// One voice: a model and its description.
-#[derive(Debug, Clone)]
-pub struct VoiceFile {
-    /// The voice's id, `en_US-ljspeech-medium`.
-    pub name: &'static str,
-    /// The folder of its files under the voices repository.
-    pub folder: &'static str,
-    /// The language it speaks: `en` or `es`, which the channels choose by.
-    pub language: &'static str,
-    /// What its data's licence is, for the plan.
-    pub licence: &'static str,
-    /// The model's SHA-256 and size.
-    pub onnx: (&'static str, u64),
-    /// The model's description file, its SHA-256 and size.
-    pub json: (&'static str, u64),
-}
-
-/// One file of a voice: where it is served from, its name beside the other voices and what it must match.
-#[derive(Debug, Clone)]
-pub struct VoiceDownload {
-    /// The address it is downloaded from.
-    pub url: String,
-    /// Its name in a voices folder.
-    pub file: String,
-    /// Its size.
-    pub bytes: u64,
-    /// Its SHA-256.
-    pub sha256: &'static str,
-}
-
-/// What a Piper release is made of: the archives and the voices it is offered with.
+/// What a Piper release is made of: the archives.
 #[derive(Debug, Clone)]
 pub struct Catalog {
     /// The version the program prints.
     pub version: String,
     /// Where the archives are, ending in a slash.
     pub release: String,
-    /// Where the voices' models are, ending in a slash.
-    pub voices_at: String,
-    /// Where their description files are, ending in a slash.
-    pub raw_at: String,
     /// The origins the downloads may come from.
     pub endpoints: Vec<String>,
     /// The archives.
     pub engines: Vec<Engine>,
-    /// The voices.
-    pub voices: Vec<VoiceFile>,
-}
-
-impl Catalog {
-    /// The two files of `voice`: its model and its description.
-    #[must_use]
-    pub fn files_of(&self, voice: &VoiceFile) -> [VoiceDownload; 2] {
-        let base = format!("{}{}{}", self.voices_at, voice.folder, voice.name);
-        let raw = format!("{}{}{}", self.raw_at, voice.folder, voice.name);
-        [
-            VoiceDownload {
-                url: format!("{base}.onnx"),
-                file: format!("{}.onnx", voice.name),
-                bytes: voice.onnx.1,
-                sha256: voice.onnx.0,
-            },
-            VoiceDownload {
-                url: format!("{raw}.onnx.json"),
-                file: format!("{}.onnx.json", voice.name),
-                bytes: voice.json.1,
-                sha256: voice.json.0,
-            },
-        ]
-    }
 }
 
 impl Default for Catalog {
@@ -161,8 +90,6 @@ impl Default for Catalog {
         Self {
             version: VERSION.to_owned(),
             release: RELEASE.to_owned(),
-            voices_at: VOICES.to_owned(),
-            raw_at: VOICES_RAW.to_owned(),
             endpoints: ENDPOINTS.map(str::to_owned).to_vec(),
             // Windows on ARM runs the x64 build under the system's emulation, which was measured.
             engines: vec![
@@ -181,36 +108,6 @@ impl Default for Catalog {
                     file: "piper_linux_aarch64.tar.gz",
                     sha256: "fea0fd2d87c54dbc7078d0f878289f404bd4d6eea6e7444a77835d1537ab88eb",
                     bytes: 26_004_717,
-                },
-            ],
-            voices: vec![
-                VoiceFile {
-                    name: "en_US-ljspeech-medium",
-                    folder: "en/en_US/ljspeech/medium/",
-                    language: "en",
-                    licence: "public domain (the LJ Speech recordings)",
-                    onnx: (
-                        "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
-                        63_531_379,
-                    ),
-                    json: (
-                        "141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860",
-                        4972,
-                    ),
-                },
-                VoiceFile {
-                    name: "es_MX-claude-high",
-                    folder: "es/es_MX/claude/high/",
-                    language: "es",
-                    licence: "Apache License 2.0",
-                    onnx: (
-                        "3ef40a71ea63852cd8ab7e6fa7d2ecdcfa67a0b47c9c48e3f10e02ee02083ea0",
-                        63_122_309,
-                    ),
-                    json: (
-                        "1afc81f703c0e4cb3b4d7c0dca096b8b54a98806807f0170cf5eb5557723c12d",
-                        4963,
-                    ),
                 },
             ],
         }
@@ -284,7 +181,7 @@ impl Recipe for PiperRecipe {
     fn release(
         &self,
         version: Option<&str>,
-        channel: Option<&str>,
+        _channel: Option<&str>,
         platform: &Platform,
         _tools: &Object<dyn InstallTools>,
     ) -> Result<Release, ProviderError> {
@@ -298,24 +195,6 @@ impl Recipe for PiperRecipe {
                 )));
             }
         }
-        // No channel installs the program alone; one names the language whose voices come with it.
-        let voices: Vec<&VoiceFile> = match channel {
-            None => Vec::new(),
-            Some("standard") => catalog.voices.iter().collect(),
-            Some(named @ ("english" | "spanish")) => {
-                let language = if named == "english" { "en" } else { "es" };
-                catalog
-                    .voices
-                    .iter()
-                    .filter(|voice| voice.language == language)
-                    .collect()
-            }
-            Some(other) => {
-                return Err(bad_value(format!(
-                    "Piper has no channel {other:?}: standard, english or spanish"
-                )));
-            }
-        };
         let engine = catalog
             .engines
             .iter()
@@ -330,7 +209,7 @@ impl Recipe for PiperRecipe {
             },
         );
         let format = if windows { "zip" } else { "tar.gz" };
-        let mut parts = vec![
+        let parts = vec![
             Part::new(archive, "piper-archive").unpacked(UnpackStep::new(
                 format,
                 PROGRAM_DIR,
@@ -347,30 +226,10 @@ impl Recipe for PiperRecipe {
                 "Piper has no build for Windows on ARM: it runs the x64 build under the system's emulation.".to_owned(),
             );
         }
-        for voice in voices {
-            for file in catalog.files_of(voice) {
-                parts.push(Part::new(
-                    Download::new(
-                        file.url,
-                        Some(file.bytes),
-                        Check::Sha256 {
-                            value: file.sha256.to_owned(),
-                        },
-                    ),
-                    format!("{VOICES_DIR}/{}", file.file),
-                ));
-            }
-            notices.push(format!(
-                "The voice {} is installed with it and licensed as {}; a voice carries the licence of the recordings it learned from.",
-                voice.name, voice.licence
-            ));
-        }
-        if parts.len() == 1 {
-            notices.push(
-                "No voice comes with the program: install one from the Models page, which downloads it on its own."
-                    .to_owned(),
-            );
-        }
+        notices.push(
+            "No voice comes with the program: install one from the Models page, which downloads it on its own."
+                .to_owned(),
+        );
         let launch = if windows {
             "piper/piper.exe"
         } else {
@@ -385,52 +244,6 @@ impl Recipe for PiperRecipe {
             );
         }
         Ok(release)
-    }
-
-    fn channel_of(&self, plan: &InstallPlan) -> Option<String> {
-        let present: Vec<&VoiceFile> = self
-            .catalog
-            .voices
-            .iter()
-            .filter(|voice| {
-                let [model, _] = self.catalog.files_of(voice);
-                plan.downloads
-                    .iter()
-                    .any(|download| download.url == model.url)
-            })
-            .collect();
-        let language = |wanted: &str| present.iter().all(|voice| voice.language == wanted);
-        if present.is_empty() {
-            None
-        } else if present.len() < self.catalog.voices.len() && language("en") {
-            Some("english".to_owned())
-        } else if present.len() < self.catalog.voices.len() && language("es") {
-            Some("spanish".to_owned())
-        } else {
-            Some("standard".to_owned())
-        }
-    }
-
-    fn channel_held(&self, dir: &str) -> Option<String> {
-        let held = |language: &str| {
-            self.catalog
-                .voices
-                .iter()
-                .filter(|voice| voice.language == language)
-                .any(|voice| {
-                    Path::new(dir)
-                        .join(VOICES_DIR)
-                        .join(format!("{}.onnx", voice.name))
-                        .is_file()
-                })
-        };
-        match (held("en"), held("es")) {
-            (true, true) => Some("standard"),
-            (true, false) => Some("english"),
-            (false, true) => Some("spanish"),
-            (false, false) => None,
-        }
-        .map(str::to_owned)
     }
 
     fn finish(&self, finish: &Finish<'_>) -> Result<(), ProviderError> {

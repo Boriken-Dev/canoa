@@ -999,6 +999,23 @@
                   ]
                 },
                 {
+                  "description": "Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL names the 40-digit commit it is read at.",
+                  "properties": {
+                    "kind": {
+                      "const": "git_blob"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "The id."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "value"
+                  ]
+                },
+                {
                   "description": "The publisher gives nothing to check it against; the plan says so.",
                   "properties": {
                     "kind": {
@@ -1153,6 +1170,23 @@
             ]
           },
           {
+            "description": "Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL names the 40-digit commit it is read at.",
+            "properties": {
+              "kind": {
+                "const": "git_blob"
+              },
+              "value": {
+                "type": "string",
+                "description": "The id."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
             "description": "The publisher gives nothing to check it against; the plan says so.",
             "properties": {
               "kind": {
@@ -1210,6 +1244,23 @@
           "value": {
             "type": "string",
             "description": "The digest."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "value"
+        ]
+      },
+      {
+        "description": "Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL names the 40-digit commit it is read at.",
+        "properties": {
+          "kind": {
+            "const": "git_blob"
+          },
+          "value": {
+            "type": "string",
+            "description": "The id."
           }
         },
         "additionalProperties": false,
@@ -1350,6 +1401,23 @@
                         "value": {
                           "type": "string",
                           "description": "The digest."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL names the 40-digit commit it is read at.",
+                      "properties": {
+                        "kind": {
+                          "const": "git_blob"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The id."
                         }
                       },
                       "additionalProperties": false,
@@ -1711,6 +1779,23 @@
               "value": {
                 "type": "string",
                 "description": "The digest."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "description": "Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL names the 40-digit commit it is read at.",
+            "properties": {
+              "kind": {
+                "const": "git_blob"
+              },
+              "value": {
+                "type": "string",
+                "description": "The id."
               }
             },
             "additionalProperties": false,
