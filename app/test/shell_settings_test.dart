@@ -32,7 +32,13 @@ const _canoaBash = {
   'family': 'bash',
   'origin': 'canoa',
 };
-const _wsl = {'id': 'wsl', 'label': 'WSL bash', 'path': r'C:\Windows\System32\bash.exe', 'family': 'bash', 'origin': 'wsl'};
+const _wsl = {
+  'id': 'wsl',
+  'label': 'bash in WSL (FedoraLinux-44)',
+  'path': r'C:\Users\me\AppData\Local\Microsoft\WindowsApps\bash.exe',
+  'family': 'bash',
+  'origin': 'wsl',
+};
 const _pwsh = {'id': 'pwsh', 'label': 'PowerShell 7', 'path': r'C:\Program Files\PowerShell\7\pwsh.exe', 'family': 'powershell', 'origin': 'system'};
 
 Map<String, Object?> _report({String? setting, Map<String, Object?>? chosen, String? problem}) => {
@@ -59,6 +65,8 @@ Map<String, Object?> _report({String? setting, Map<String, Object?>? chosen, Str
       'env': <String>[],
       'notice': 'Codex has no setting that names its shell: it looks for pwsh or powershell on the PATH on Windows and uses the account\'s login shell elsewhere',
     },
+    // An agent the host's providers describe that no entry runs.
+    {'entry': null, 'harness': 'pi', 'title': 'Pi', 'hosted': false, 'shell': setting, 'own': false, 'env': <String>[], 'notice': null},
   ],
 };
 
@@ -77,8 +85,10 @@ void main() {
       expect(report.chosen?.id, 'git-bash');
       expect(report.agents.first.env, ['CLAUDE_CODE_GIT_BASH_PATH']);
       expect(report.agents.first.own, isTrue);
-      expect(report.agents.last.own, isFalse);
-      expect(report.agents.last.notice, contains('no setting'));
+      expect(report.agents[1].own, isFalse);
+      expect(report.agents[1].notice, contains('no setting'));
+      expect(report.agents.last.hosted, isFalse, reason: 'an agent no entry runs still has a row');
+      expect(report.agents.last.name, 'Pi');
       expect(settings.problem, isNull);
       settings.dispose();
     });
@@ -180,7 +190,7 @@ void main() {
   });
 
   group('the Shells page', () {
-    Future<(FakeStoreHost, ShellSettings)> open(WidgetTester tester, {Map<String, Object?>? report, Future<bool> Function()? restart}) async {
+    Future<(FakeStoreHost, ShellSettings)> open(WidgetTester tester, {Map<String, Object?>? report, Future<bool> Function()? restart, Size size = const Size(900, 700)}) async {
       final host = FakeStoreHost([])
         ..shellReport = report ?? _report(setting: 'git-bash', chosen: _gitBash)
         ..hostTable = {
@@ -191,7 +201,7 @@ void main() {
           },
         };
       final settings = _settings(host, restart: restart);
-      await tester.binding.setSurfaceSize(const Size(900, 700));
+      await tester.binding.setSurfaceSize(size);
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(debugShowCheckedModeBanner: false, home: Scaffold(body: SingleChildScrollView(child: Padding(padding: const EdgeInsets.all(16), child: ShellsSection(settings: settings))))));
       await tester.pumpAndSettle();
@@ -201,13 +211,29 @@ void main() {
 
     testWidgets('says which shell the host uses and how each agent is told its own, or why it cannot be', (tester) async {
       await open(tester);
-      expect(find.descendant(of: find.byKey(const Key('shell-host')), matching: find.textContaining(r'Git Bash: C:\Program Files\Git\bin\bash.exe')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('shell-host')), matching: find.textContaining(r'Git for Windows: C:\Program Files\Git\bin\bash.exe')), findsOneWidget);
       expect(
-        find.descendant(of: find.byKey(const Key('shell-agent-Claude')), matching: find.textContaining('told to claude as CLAUDE_CODE_GIT_BASH_PATH')),
+        find.descendant(of: find.byKey(const Key('shell-agent-Claude')), matching: find.textContaining('told to Claude as CLAUDE_CODE_GIT_BASH_PATH')),
         findsOneWidget,
       );
       expect(find.descendant(of: find.byKey(const Key('shell-agent-Codex')), matching: find.textContaining('Codex has no setting that names its shell')), findsOneWidget);
       expect(find.byKey(const Key('shells-restart-note')), findsNothing);
+    });
+
+    testWidgets('lists every agent, says which are not hosted, and tells each shell apart by where it comes from and its path', (tester) async {
+      await open(tester);
+      final unhosted = find.byKey(const Key('shell-agent-unhosted-pi'));
+      expect(find.descendant(of: unhosted, matching: find.text('Pi')), findsOneWidget);
+      expect(find.descendant(of: unhosted, matching: find.textContaining('not hosted on this computer')), findsOneWidget);
+      expect(find.byKey(const Key('shell-agent-menu-Pi')), findsNothing, reason: 'there is no entry to write a shell to');
+      for (final (id, origin, path) in [
+        ('git-bash', 'Git for Windows', r'C:\Program Files\Git\bin\bash.exe'),
+        ('wsl', 'Windows Subsystem for Linux', r'C:\Users\me\AppData\Local\Microsoft\WindowsApps\bash.exe'),
+        ('canoa-git-bash', 'installed by Canoa', r'D:\canoa\programs\git-bash\2.56.1\git\bin\bash.exe'),
+      ]) {
+        expect(find.descendant(of: find.byKey(Key('shell-found-$id')), matching: find.text('$origin: $path')), findsOneWidget, reason: id);
+      }
+      expect(find.text('bash in WSL (FedoraLinux-44)'), findsOneWidget, reason: 'a WSL bash is named for its distribution');
     });
 
     testWidgets('choosing a shell for the host writes it and says the host reads it when it restarts', (tester) async {
@@ -218,7 +244,7 @@ void main() {
       });
       await tester.tap(find.byKey(const Key('shell-host-menu')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('PowerShell 7').last);
+      await tester.tap(find.text('PowerShell 7 · this computer\'s own').last);
       await tester.pumpAndSettle();
       expect(host.hostTable!['shell'], 'pwsh');
       expect(find.byKey(const Key('shells-restart-note')), findsOneWidget);
@@ -232,7 +258,7 @@ void main() {
       final (host, _) = await open(tester);
       await tester.tap(find.byKey(const Key('shell-agent-menu-Codex')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('WSL bash').last);
+      await tester.tap(find.text('bash in WSL (FedoraLinux-44) · Windows Subsystem for Linux').last);
       await tester.pumpAndSettle();
       expect((host.hostTable!['agents'] as Map)['Codex'], {'harness': 'codex', 'shell': 'wsl'});
       await tester.tap(find.byKey(const Key('shell-agent-menu-Claude')));
@@ -248,9 +274,11 @@ void main() {
       expect(find.textContaining('Programs'), findsOneWidget);
     });
 
-    testWidgets('the page as the person sees it', (tester) async {
-      await open(tester);
-      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/shells_settings_desktop.png'));
-    });
+    for (final (label, size) in [('desktop', const Size(900, 900)), ('phone', const Size(390, 1500))]) {
+      testWidgets('the page as the person sees it at $label width', (tester) async {
+        await open(tester, size: size);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/shells_settings_$label.png'));
+      });
+    }
   });
 }

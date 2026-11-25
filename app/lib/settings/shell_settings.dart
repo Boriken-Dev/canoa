@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../desktop/control_client.dart' show ControlFailed;
+import '../l10n/app_text.dart';
 import '../served/host_files.dart';
 import 'settings_row.dart';
 
@@ -39,15 +40,17 @@ final class HostShell {
     );
   }
 
-  /// A person's words for it: the label and where it is.
-  String get text => '$label ($path)';
+  /// The key of the words that say where it comes from.
+  String get originKey => 'shells.origin.$origin';
 }
 
 /// One agent entry of the host and how it is told its shell, as `shell/list` words it.
 final class AgentShell {
   const AgentShell({
-    required this.entry,
+    this.entry,
     required this.harness,
+    this.title,
+    this.hosted = true,
     this.setting,
     this.own = false,
     this.id,
@@ -56,7 +59,18 @@ final class AgentShell {
     this.problem,
   });
 
-  final String entry, harness;
+  /// The entry that runs it; null for an agent no entry runs yet.
+  final String? entry;
+
+  /// The agent's id, and its name for people when the host gives one.
+  final String harness;
+  final String? title;
+
+  /// Whether an entry of canoa.cfg runs it, which is what a shell setting is written to.
+  final bool hosted;
+
+  /// What the agent is called.
+  String get name => entry ?? title ?? harness;
 
   /// What names its shell: its own `shell`, else the host's; null when neither is set.
   final String? setting;
@@ -72,10 +86,12 @@ final class AgentShell {
   final String? notice, problem;
 
   static AgentShell? parse(Object? json) {
-    if (json is! Map || json['entry'] is! String) return null;
+    if (json is! Map || json['harness'] is! String) return null;
     return AgentShell(
-      entry: json['entry']! as String,
-      harness: json['harness'] is String ? json['harness']! as String : '',
+      entry: json['entry'] is String ? json['entry'] as String : null,
+      harness: json['harness']! as String,
+      title: json['title'] is String ? json['title'] as String : null,
+      hosted: json['hosted'] != false,
       setting: json['shell'] is String ? json['shell'] as String : null,
       own: json['own'] == true,
       id: json['id'] is String ? json['id'] as String : null,
@@ -138,6 +154,10 @@ class ShellSettings extends ChangeNotifier {
   /// Runs after canoa.cfg was written, so what the app holds of it is read again.
   final Future<void> Function()? saved;
 
+  /// Says a word of this page in the person's language; the page sets it, and the base English is used before it does.
+  String Function(String key, [Map<String, Object?> args]) say =
+      AppText.base.call;
+
   bool _disposed = false;
 
   @override
@@ -173,10 +193,10 @@ class ShellSettings extends ChangeNotifier {
       _loaded = true;
     } on ControlFailed catch (error) {
       _problem = error.code == -32001
-          ? 'This key may not list the shells of this host.'
+          ? say('shells.denied_list')
           : error.message;
     } on Object catch (error) {
-      _problem = 'The host could not be reached: $error';
+      _problem = say('shells.unreachable', {'why': '$error'});
     } finally {
       _loading = false;
       notifyListeners();
@@ -200,7 +220,7 @@ class ShellSettings extends ChangeNotifier {
         final agents = host['agents'];
         final table = agents is Map ? agents[entry] : null;
         if (table is! Map) {
-          return 'There is no agent called $entry in the host\'s canoa.cfg.';
+          return say('shells.no_entry', {'name': entry});
         }
         final next = {
           for (final MapEntry(:key, :value) in table.entries) '$key': value,
@@ -236,11 +256,9 @@ class ShellSettings extends ChangeNotifier {
       await load();
       return null;
     } on ControlFailed catch (error) {
-      return error.code == -32001
-          ? "This key may not change the host's own settings."
-          : error.message;
+      return error.code == -32001 ? say('shells.denied_write') : error.message;
     } on Object catch (error) {
-      return 'The host could not be reached to save that: $error';
+      return say('shells.save_unreachable', {'why': '$error'});
     }
   }
 
@@ -277,6 +295,12 @@ class _ShellsSectionState extends State<ShellsSection> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    settings.say = context.t;
+  }
+
+  @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: settings,
     builder: (context, _) {
@@ -287,8 +311,7 @@ class _ShellsSectionState extends State<ShellsSection> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Agents run their commands with a bash or a PowerShell. Choose which of the shells found on this computer the host starts a '
-            'terminal with and tells each agent to use, whether Canoa installed it or not. Nothing here changes a program\'s own settings.',
+            context.t('shells.intro'),
             style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
@@ -308,16 +331,12 @@ class _ShellsSectionState extends State<ShellsSection> {
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    const Expanded(
-                      child: Text(
-                        'Saved. The host reads its shells when it starts; the sessions open on it end when it restarts.',
-                      ),
-                    ),
+                    Expanded(child: Text(context.t('shells.restart_note'))),
                     if (settings.restart != null)
                       FilledButton(
                         key: const Key('shells-restart'),
                         onPressed: () => unawaited(settings.restartHost()),
-                        child: const Text('Restart the host'),
+                        child: Text(context.t('shells.restart')),
                       ),
                   ],
                 ),
@@ -330,40 +349,74 @@ class _ShellsSectionState extends State<ShellsSection> {
             ),
           if (settings.loaded) ...[
             if (report.shells.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  'The host found no shell it knows. Install Git Bash or PowerShell from the Store, under Programs.',
-                  key: Key('shells-none'),
+                  context.t('shells.none'),
+                  key: const Key('shells-none'),
                 ),
               ),
-            SettingsRow(
-              key: const Key('shell-host'),
-              title: 'Host shell',
-              description: _hostDescription(report),
-              control: _menu(
-                key: const Key('shell-host-menu'),
-                report: report,
-                value: report.setting,
-                inherit: 'The system\'s own',
-                onChanged: (value) =>
-                    unawaited(_save(context, settings.chooseForHost(value))),
-              ),
-            ),
-            for (final agent in report.agents)
-              SettingsRow(
-                key: Key('shell-agent-${agent.entry}'),
-                title: agent.entry,
-                description: _agentDescription(agent),
-                control: _menu(
-                  key: Key('shell-agent-menu-${agent.entry}'),
-                  report: report,
-                  value: agent.own ? agent.setting : null,
-                  inherit: 'The host\'s shell',
-                  onChanged: (value) => unawaited(
-                    _save(context, settings.chooseForAgent(agent.entry, value)),
+            SettingsGroup(
+              children: [
+                SettingsRow(
+                  key: const Key('shell-host'),
+                  title: context.t('shells.host'),
+                  description: _hostDescription(context, report),
+                  control: _menu(
+                    context,
+                    key: const Key('shell-host-menu'),
+                    report: report,
+                    value: report.setting,
+                    inherit: context.t('shells.host_inherit'),
+                    onChanged: (value) => unawaited(
+                      _save(context, settings.chooseForHost(value)),
+                    ),
                   ),
                 ),
+              ],
+            ),
+            if (report.agents.isNotEmpty)
+              SettingsGroup(
+                title: context.t('shells.agents'),
+                children: [
+                  for (final agent in report.agents)
+                    SettingsRow(
+                      key: Key(
+                        agent.entry == null
+                            ? 'shell-agent-unhosted-${agent.harness}'
+                            : 'shell-agent-${agent.entry}',
+                      ),
+                      title: agent.name,
+                      description: _agentDescription(context, agent),
+                      control: agent.entry == null
+                          ? null
+                          : _menu(
+                              context,
+                              key: Key('shell-agent-menu-${agent.entry}'),
+                              report: report,
+                              value: agent.own ? agent.setting : null,
+                              inherit: context.t('shells.agent_inherit'),
+                              onChanged: (value) => unawaited(
+                                _save(
+                                  context,
+                                  settings.chooseForAgent(agent.entry!, value),
+                                ),
+                              ),
+                            ),
+                    ),
+                ],
+              ),
+            if (report.shells.isNotEmpty)
+              SettingsGroup(
+                title: context.t('shells.found'),
+                children: [
+                  for (final shell in report.shells)
+                    SettingsRow(
+                      key: Key('shell-found-${shell.id}'),
+                      title: shell.label,
+                      description: _where(context, shell),
+                    ),
+                ],
               ),
           ],
         ],
@@ -371,7 +424,14 @@ class _ShellsSectionState extends State<ShellsSection> {
     },
   );
 
-  Widget _menu({
+  /// Where a shell comes from and its program, in the person's words.
+  static String _where(BuildContext context, HostShell shell) => context.t(
+    'shells.where',
+    {'origin': context.t(shell.originKey), 'path': shell.path},
+  );
+
+  Widget _menu(
+    BuildContext context, {
     required Key key,
     required ShellReport report,
     required String? value,
@@ -380,44 +440,61 @@ class _ShellsSectionState extends State<ShellsSection> {
   }) {
     // A setting that names a program, or a shell that is gone, is still what is chosen.
     final known = report.shells.any((shell) => shell.id == value);
-    return DropdownButton<String>(
-      key: key,
-      value: value ?? _inherit,
-      items: [
-        DropdownMenuItem(value: _inherit, child: Text(inherit)),
-        for (final shell in report.shells)
-          DropdownMenuItem(
-            value: shell.id,
-            child: Text(shell.label, overflow: TextOverflow.ellipsis),
-          ),
-        if (value != null && !known)
-          DropdownMenuItem(
-            value: value,
-            child: Text(value, overflow: TextOverflow.ellipsis),
-          ),
-      ],
-      onChanged: (chosen) =>
-          onChanged(chosen == null || chosen == _inherit ? null : chosen),
+    return SizedBox(
+      width: 260,
+      child: DropdownButton<String>(
+        key: key,
+        isExpanded: true,
+        value: value ?? _inherit,
+        items: [
+          DropdownMenuItem(value: _inherit, child: Text(inherit)),
+          for (final shell in report.shells)
+            DropdownMenuItem(
+              value: shell.id,
+              child: Text(
+                context.t('shells.choice', {
+                  'label': shell.label,
+                  'origin': context.t(shell.originKey),
+                }),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          if (value != null && !known)
+            DropdownMenuItem(
+              value: value,
+              child: Text(value, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+        onChanged: (chosen) =>
+            onChanged(chosen == null || chosen == _inherit ? null : chosen),
+      ),
     );
   }
 
-  static String _hostDescription(ShellReport report) {
+  static String _hostDescription(BuildContext context, ShellReport report) {
     if (report.problem case final problem?) return problem;
     final chosen = report.chosen;
-    if (chosen != null) return '${chosen.label}: ${chosen.path}';
+    if (chosen != null) return '${chosen.label}. ${_where(context, chosen)}';
     return report.setting == null
-        ? 'None chosen: terminals start the person\'s own shell.'
+        ? context.t('shells.host_none')
         : report.setting!;
   }
 
-  static String _agentDescription(AgentShell agent) {
+  static String _agentDescription(BuildContext context, AgentShell agent) {
     if (agent.problem case final problem?) return problem;
-    if (agent.setting == null) {
-      return 'No shell is chosen: ${agent.harness} uses its own.';
+    if (!agent.hosted) {
+      return context.t('shells.unhosted', {'agent': agent.name});
     }
-    final from = agent.own ? 'Its own choice' : 'The host\'s shell';
+    if (agent.setting == null) {
+      return context.t('shells.unset', {'agent': agent.name});
+    }
+    final from = context.t(agent.own ? 'shells.own' : 'shells.from_host');
     if (agent.env.isNotEmpty) {
-      return '$from, told to ${agent.harness} as ${agent.env.join(', ')}.';
+      return context.t('shells.told', {
+        'from': from,
+        'agent': agent.name,
+        'env': agent.env.join(', '),
+      });
     }
     return '$from. ${agent.notice ?? ''}'.trim();
   }
@@ -425,9 +502,8 @@ class _ShellsSectionState extends State<ShellsSection> {
   Future<void> _save(BuildContext context, Future<String?> change) async {
     final problem = await change;
     if (problem != null && context.mounted) {
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(problem)));
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(problem)));
     }
   }
 }
