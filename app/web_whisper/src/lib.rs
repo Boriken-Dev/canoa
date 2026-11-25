@@ -43,13 +43,18 @@ impl Whisper {
     }
 }
 
-/// The models the engine reads, as JSON: `{"models": [{"id", "label", "bytes", "files": [{"name", "url", "bytes", "sha256"}]}]}`.
+/// The most a model's files may weigh for a page to hold it: the page's memory is 4 GiB, and the weights are held as the bytes that
+/// were fetched, then again as 32-bit numbers (twice their size) while the model loads.
+const LARGEST: u64 = 1_200_000_000;
+
+/// The models the engine reads that fit a page, as JSON: `{"models": [{"id", "label", "bytes", "files": [{"name", "url", "bytes", "sha256"}]}]}`.
 /// The page fetches each file from its `url` and checks it against its `sha256`; these are the files the host's Store installs.
 #[wasm_bindgen]
 #[must_use]
 pub fn catalog() -> String {
     let models: Vec<_> = MODELS
         .iter()
+        .filter(|model| model.bytes() <= LARGEST)
         .map(|model| {
             let files: Vec<_> = model
                 .files
