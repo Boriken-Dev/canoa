@@ -307,3 +307,35 @@ fn the_real_listings_at_the_pinned_commit_give_the_snapshot_and_the_blob_ids_mat
         assert_eq!(hex, sha256, "{}", file.file);
     }
 }
+
+#[test]
+#[ignore = "needs CANOA_DEPS to hold catalogs/ (tools/catalog_documents.py sync)"]
+fn the_snapshot_is_what_the_source_makes_of_the_documents_the_deps_branch_keeps() {
+    let deps = std::env::var("CANOA_DEPS").expect("CANOA_DEPS names a deps checkout");
+    let read = |name: &str| {
+        std::fs::read_to_string(format!("{deps}/catalogs/canoa-piper/{name}_4a409e3c.json"))
+            .expect("the document, synced")
+    };
+    let voices = read("voices");
+    let ljspeech = read("tree_en_US_ljspeech_medium");
+    let claude = read("tree_es_MX_claude_high");
+    let include: Vec<String> = DEFAULT_VOICES.map(str::to_owned).to_vec();
+    let made = catalog_of(
+        DEFAULT_REPO,
+        REVISION,
+        &voices,
+        &include,
+        &[],
+        |folder| match folder {
+            "en/en_US/ljspeech/medium" => Ok(ljspeech.clone()),
+            "es/es_MX/claude/high" => Ok(claude.clone()),
+            other => Err(ProviderError::new(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                format!("no document for {other}").as_str(),
+            )),
+        },
+    )
+    .expect("a catalog")
+    .to_json();
+    assert_eq!(made, SNAPSHOT.trim_end());
+}

@@ -25,6 +25,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
+import catalog_documents
 import cdn_files
 import fallback_fonts
 import office_js
@@ -231,6 +232,12 @@ def main():
         if "cdn/office-js/**" not in text:
             attributes.write_text(text+("" if not text or text.endswith("\n") else "\n")+"cdn/office-js/** -text\n",encoding="utf-8",newline="\n")
         (target/"cdn"/"README.md").write_text(cdn_files.README,encoding="utf-8",newline="\n")
+        # The documents the extensions' shipped catalog snapshots are made from, pinned by tools/catalog_documents.json: an offline
+        # build regenerates each snapshot from them. They are kept as published, so git must not convert their line endings.
+        catalog_documents.mirror(target,catalog_documents.read_list())
+        text=attributes.read_text(encoding="utf-8")
+        if "catalogs/**" not in text:
+            attributes.write_text(text+("" if text.endswith("\n") else "\n")+"catalogs/** -text\n",encoding="utf-8",newline="\n")
     else:
         office=[]
         office_pin=None

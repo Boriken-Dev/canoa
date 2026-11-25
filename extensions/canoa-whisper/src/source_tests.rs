@@ -255,3 +255,17 @@ fn the_real_listing_at_the_pinned_revision_gives_the_shipped_snapshot() {
         .expect("a catalog");
     assert_eq!(answer.trim_end(), SNAPSHOT.trim_end());
 }
+
+#[test]
+#[ignore = "needs CANOA_DEPS to hold catalogs/ (tools/catalog_documents.py sync)"]
+fn the_snapshot_is_what_the_source_makes_of_the_document_the_deps_branch_keeps() {
+    let deps = std::env::var("CANOA_DEPS").expect("CANOA_DEPS names a deps checkout");
+    let listing = std::fs::read_to_string(format!(
+        "{deps}/catalogs/canoa-whisper/hf_tree_5359861c.json"
+    ))
+    .expect("the document, synced");
+    let made = catalog_of(DEFAULT_REPO, REVISION, &listing, &default_include(), &[])
+        .expect("a catalog")
+        .to_json();
+    assert_eq!(made, SNAPSHOT.trim_end());
+}

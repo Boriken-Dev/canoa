@@ -1,0 +1,28 @@
+{
+ "documents": [
+  {
+   "path": "canoa-whisper/hf_tree_5359861c.json",
+   "url": "https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1",
+   "sha256": "60abbffad17f7968e4163743e40b2922bcbcaad95a919fa59a6227b1c1b575cb",
+   "bytes": 14063
+  },
+  {
+   "path": "canoa-piper/voices_4a409e3c.json",
+   "url": "https://huggingface.co/rhasspy/piper-voices/raw/4a409e3cbfd0a189930b38f127a38e107677e8ac/voices.json",
+   "sha256": "794b0a88086c2fc9b537fe83fadf58cff1e758649f3c6bdf622241e502fa37cf",
+   "bytes": 252070
+  },
+  {
+   "path": "canoa-piper/tree_en_US_ljspeech_medium_4a409e3c.json",
+   "url": "https://huggingface.co/api/models/rhasspy/piper-voices/tree/4a409e3cbfd0a189930b38f127a38e107677e8ac/en/en_US/ljspeech/medium",
+   "sha256": "b7c4f53102fcd6edc64479955c741dbb3b1cd20a0077650bd9dad5eb2189eafc",
+   "bytes": 720
+  },
+  {
+   "path": "canoa-piper/tree_es_MX_claude_high_4a409e3c.json",
+   "url": "https://huggingface.co/api/models/rhasspy/piper-voices/tree/4a409e3cbfd0a189930b38f127a38e107677e8ac/es/es_MX/claude/high",
+   "sha256": "42b308a1761a138ca56f3df2629aca362875acce396ef37c6f8067c9691cbefd",
+   "bytes": 696
+  }
+ ]
+}
