@@ -1,11 +1,15 @@
+import 'dart:convert';
 import 'dart:io';
 
+import '../desktop/control_client.dart' show ControlFailed;
+import '../desktop/host_tool.dart' show HostTool, findHostTool;
+import 'canoa_config.dart';
 import 'config_layers.dart';
-import '../brand.dart';
 
-/// Where canoa.cfg is read from and written, as the host finds it: the installed copy beside the program, the system's file
-/// and the person's own, or the files `CANOA_CONFIG` lists. Throws [FormatException] for an empty entry or a listed file
-/// that is missing.
+/// Where canoa.cfg is, as the host finds it: the installed copy beside the program, the system's file and the person's own, or the
+/// files `CANOA_CONFIG` lists. Only the names are worked out here, to start the host with the same files and to keep the app's other
+/// files beside the person's own; the file's contents are asked of the host (see [loadDesktopConfig] and [saveDesktopConfig]). Throws
+/// [FormatException] for an empty entry or a listed file that is missing.
 ConfigFiles configFiles() => ConfigFiles.resolve(
   env: Platform.environment,
   windows: Platform.isWindows,
@@ -13,52 +17,13 @@ ConfigFiles configFiles() => ConfigFiles.resolve(
   exists: (path) => File(path).existsSync(),
 );
 
-/// The person's own file: where the app writes, and beside which it keeps its other files; null when no place can be named.
+/// The person's own file: where the host writes, and beside which the app keeps its other files; null when no place can be named.
 String? desktopConfigPath() {
   try {
     return configFiles().own;
   } on FormatException {
     return null;
   }
-}
-
-/// What reading canoa.cfg found: the person's own file (its text, and the name that fixes its format) and the layers
-/// below it, lowest first. Null when no file exists.
-typedef ReadLayers = ({String? ownText, String ownName, List<ConfigLayer> below});
-
-Future<ReadLayers?> readDesktopLayers() async {
-  final files = configFiles();
-  _adoptLegacyName(files.own);
-  final below = <ConfigLayer>[];
-  String? ownText;
-  var any = false;
-  for (final file in files.files) {
-    final entry = File(file.path);
-    if (!entry.existsSync()) continue;
-    any = true;
-    final text = await entry.readAsString();
-    if (file.path == files.own) {
-      ownText = text;
-      continue;
-    }
-    try {
-      final read = decodeConfig(text, name: file.path);
-      below.add((origin: file.origin, data: read.data));
-    } on FormatException catch (error) {
-      throw FormatException('${file.path}: ${error.message}');
-    }
-  }
-  if (!any) return null;
-  return (ownText: ownText, ownName: files.own, below: below);
-}
-
-Future<void> writeDesktopConfig(String source) async {
-  final path = desktopConfigPath();
-  if (path == null) throw StateError('canoa.cfg location unavailable');
-  _adoptLegacyName(path);
-  final file = File(path);
-  await file.parent.create(recursive: true);
-  await file.writeAsString(source, flush: true);
 }
 
 /// The arguments that make `canoa` read the files the app reads, for the config at [path]: those of [configFiles] when it is
@@ -73,37 +38,99 @@ List<String> hostConfigArgs(String path) {
   return ['--config', path];
 }
 
-/// What `canoa check --config` takes to check [candidate] as the content of the config at [path].
-String hostCheckSpec(String path, String candidate) {
+/// One request of the host's control channel, answered by `canoa control` with no host serving: the same methods, the same grants as the
+/// owner, over the same configuration store. The request goes in a file of its own, since a table can be longer than a command line.
+/// A failure of the program is a [StateError]; a refusal is a [ControlFailed] in the host's words.
+Future<Object?> _control(String method, Map<String, Object?> params, {HostTool? tool, ConfigFiles? files}) async {
+  final host = tool ?? findHostTool();
+  if (host == null) throw StateError('this app carries no canoa to read and write its configuration with');
+  final directory = await Directory.systemTemp.createTemp('canoa-control-');
   try {
-    final files = configFiles();
-    if (files.own == path) return files.checkSpec(candidate);
-  } on FormatException {
-    // As above.
+    final request = File('${directory.path}${Platform.pathSeparator}request.json');
+    await request.writeAsString(jsonEncode({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}));
+    final output = await host.run(['control', ...(files ?? configFiles()).hostArgs, '@${request.path}']);
+    final line = const LineSplitter().convert(output.stdout).where((each) => each.trim().isNotEmpty).lastOrNull;
+    if (output.exitCode != 0 || line == null) {
+      throw StateError('canoa control failed (${output.exitCode}): ${output.stderr.trim()}');
+    }
+    final answer = jsonDecode(line);
+    if (answer is Map && answer['error'] is Map) {
+      final error = answer['error'] as Map;
+      throw ControlFailed((error['code'] as num?)?.toInt() ?? -32603, '${error['message']}');
+    }
+    return answer is Map ? answer['result'] : null;
+  } finally {
+    try {
+      await directory.delete(recursive: true);
+    } on FileSystemException {
+      // A temporary folder that stays is the system's to clear.
+    }
   }
-  return candidate;
 }
 
-// Only the default place is adopted: a file CANOA_CONFIG names is the person's own choice of name.
-void _adoptLegacyName(String path) {
-  final named = Platform.environment[Brand.env('CONFIG')];
-  if (named == null || named.isEmpty) adoptLegacyConfigName(path, log: stderr.writeln);
+ConfigOrigin _originOf(String id) => switch (id) {
+  'installed' => ConfigOrigin.installed,
+  'system' => ConfigOrigin.system,
+  _ => ConfigOrigin.listed,
+};
+
+/// What [saveDesktopConfig] last knew the person's own layer to hold, by table, so that the next write sends only a table that changed.
+Map<String, dynamic>? _held;
+
+/// canoa.cfg's layers as the host's store holds them (through `canoa control`, with no host serving): the person's own layer and the
+/// ones below it, lowest first. A file that is not there yet is an empty layer. Throws where the app has no `canoa` to ask, which
+/// [loadConfig] says as the reason the configuration could not be read.
+Future<CanoaConfig?> loadDesktopConfig({HostTool? tool, ConfigFiles? files}) async {
+  final answer = await _control('config/layers', const {}, tool: tool, files: files);
+  final layers = answer is Map && answer['layers'] is List ? answer['layers'] as List : const [];
+  final below = <ConfigLayer>[];
+  var own = <String, dynamic>{};
+  for (final layer in layers.whereType<Map>()) {
+    final data = {for (final MapEntry(:key, :value) in ((layer['document'] as Map?) ?? const {}).entries) '$key': value};
+    if (layer['writable'] == true) {
+      own = data;
+    } else {
+      below.add((origin: _originOf('${layer['id']}'), data: data));
+    }
+  }
+  _held = _canonical(own) as Map<String, dynamic>;
+  return CanoaConfig.fromLayers((format: ConfigFormat.toml, marked: false, data: own), below);
 }
 
-/// Gives a `Canoa.cfg` beside [path] the name [path], once, and says so through [log]. A file already at [path] is
-/// never replaced, and where names ignore case the two are one file, so nothing is renamed. Returns whether it renamed.
-bool adoptLegacyConfigName(String path, {required void Function(String line) log}) {
-  if (Platform.isWindows) return false;
-  // A link counts as an entry, so a dangling one is not written through.
-  if (FileSystemEntity.typeSync(path, followLinks: false) != FileSystemEntityType.notFound) return false;
-  final old = File('${File(path).parent.path}${Platform.pathSeparator}Canoa.cfg');
-  if (FileSystemEntity.typeSync(old.path, followLinks: false) != FileSystemEntityType.file) return false;
+/// The `config/change` ops that make the person's own layer what [config] writes: one for each table whose content differs from what the
+/// layer held, or that is gone, and none for a table that is the same.
+List<Map<String, Object?>> _opsFor(CanoaConfig config, Map<String, dynamic> before, Map<String, dynamic> now) => [
+  for (final table in {...before.keys, ...now.keys})
+    if (jsonEncode(before[table]) != jsonEncode(now[table])) {'path': [table], 'value': now[table]},
+];
+
+/// What the host says is wrong with the configuration [config] would make, in its own words, or null when its reader would take it. The
+/// host reads the result as it would after the change; nothing is written.
+Future<String?> checkDesktopConfig(CanoaConfig config, {HostTool? tool, ConfigFiles? files}) async {
+  final before = _held ?? _canonical(config.source.own) as Map<String, dynamic>;
+  final ops = _opsFor(config, before, _canonical(config.documentToWrite) as Map<String, dynamic>);
+  if (ops.isEmpty) return null;
   try {
-    old.renameSync(path);
-  } on FileSystemException catch (error) {
-    log('Canoa.cfg was not renamed to canoa.cfg: ${error.message}');
-    return false;
+    await _control('config/change', {'ops': ops, 'check': true}, tool: tool, files: files);
+    return null;
+  } on ControlFailed catch (error) {
+    return error.message;
   }
-  log('renamed ${old.path} to canoa.cfg');
-  return true;
 }
+
+/// Writes what [config] changed to the person's own layer, as one `config/change` the host makes through its store: a table whose
+/// content differs from what the layer held, or is gone, and no other, so the rest of the file stays as the person wrote it.
+Future<void> saveDesktopConfig(CanoaConfig config, {HostTool? tool, ConfigFiles? files}) async {
+  final before = _held ?? _canonical(config.source.own) as Map<String, dynamic>;
+  final now = _canonical(config.documentToWrite) as Map<String, dynamic>;
+  final ops = _opsFor(config, before, now);
+  if (ops.isNotEmpty) await _control('config/change', {'ops': ops}, tool: tool, files: files);
+  _held = now;
+}
+
+/// [value] with every table's keys in order, so two spellings of one table compare equal.
+Object? _canonical(Object? value) => switch (value) {
+  final Map<dynamic, dynamic> map => {for (final key in (map.keys.map((each) => '$each').toList()..sort())) key: _canonical(map[key])},
+  final List<dynamic> list => [for (final each in list) _canonical(each)],
+  _ => value,
+};

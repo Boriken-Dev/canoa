@@ -53,7 +53,7 @@ You never have to edit the file by hand. Each table has a page: the tables of th
 
 Every list in the app removes an entry the same way: it asks first, and says what goes out of {{ config_file }} and what stays. An entry that comes from the installed or the system's file is shown with where it comes from and how to change it there ("Defined in the system file. {{ name }} does not write that file: remove it there."), because your file holds nothing to take out; when your own entry replaces one of a lower layer, removing it brings the lower one back.
 
-The host keeps the configuration in a *store* (the `config_store` kind): {{ config_file }}'s layers are the store it carries, and a store that keeps it somewhere else can replace it without the host or the app knowing. The app and the host never open the file themselves.
+The host keeps the configuration in a *store* (the `config_store` kind): {{ config_file }}'s layers are the store it carries, and a store that keeps it somewhere else can replace it without the host or the app knowing. The app and the host never open the file themselves: the app asks the host it runs (or, before that host is up and where none starts, `{{ program }} control`, which answers the same requests over the same store), and the host reads and writes through the store.
 
 Configuration tables:
 

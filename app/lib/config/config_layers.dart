@@ -406,13 +406,4 @@ final class ConfigFiles {
   /// The arguments that make `canoa` read these same files: none by default (it finds them as the app did), the value of
   /// `CANOA_CONFIG` when that named them.
   List<String> get hostArgs => spec == null ? const [] : ['--config', spec!];
-
-  /// What `canoa check --config` takes to check the file [candidate] as the person's own, in place of the one the app writes.
-  String checkSpec(String candidate) {
-    final value = spec;
-    if (value == null) return '+$candidate';
-    final plus = value.startsWith('+');
-    final entries = parseConfigList(value, windows: windows).entries;
-    return '${plus ? '+' : ''}${[...entries.take(entries.length - 1), candidate].join(windows ? ';' : ':')}';
-  }
 }

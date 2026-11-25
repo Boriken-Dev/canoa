@@ -10,9 +10,6 @@ String? desktopConfigPath() => platform.desktopConfigPath();
 /// The arguments that make `canoa` read the files the app reads, for the config at [path].
 List<String> hostConfigArgs(String path) => platform.hostConfigArgs(path);
 
-/// What `canoa check --config` takes to check [candidate] as the config at [path].
-String hostCheckSpec(String path, String candidate) => platform.hostCheckSpec(path, candidate);
-
 /// What [saveConfig] throws for a configuration that is the defaults standing in for a canoa.cfg that could not be read: writing
 /// them would replace the person's file.
 final class ConfigUnreadable implements Exception {
@@ -29,19 +26,24 @@ final class ConfigUnreadable implements Exception {
   String toString() => message;
 }
 
-/// Writes the person's own file, in its own format: what they changed or already had there, never a value from the installed
-/// or the system's file. Throws [ConfigUnreadable] for the defaults of a file that could not be read.
+/// What the host says is wrong with the configuration [config] would make, in its own words, or null when it would read it: nothing is
+/// written.
+Future<String?> checkConfig(CanoaConfig config) => platform.checkDesktopConfig(config);
+
+/// Writes what changed to the person's own file, through the host's configuration store (`canoa control`, when no host serves): what
+/// they changed or already had there, never a value from the installed or the system's file. Throws [ConfigUnreadable] for the defaults
+/// of a file that could not be read.
 Future<void> saveConfig(CanoaConfig config) async {
   if (config.unreadable case final reason?) throw ConfigUnreadable(reason);
-  await platform.writeDesktopConfig(config.encode());
+  await platform.saveDesktopConfig(config);
 }
 
 /// canoa.cfg as the app reads it. A file that cannot be read gives the defaults with [CanoaConfig.unreadable] saying why, which the
 /// app shows and which no save overwrites the file with.
 Future<CanoaConfig> loadConfig() async {
   try {
-    final read = await platform.readDesktopLayers();
-    if (read != null) return CanoaConfig.parse(read.ownText ?? '', name: read.ownName, below: read.below);
+    final read = await platform.loadDesktopConfig();
+    if (read != null) return read;
     if (kIsWeb) {
       final response = await http.get(Uri.base.resolve('canoa.cfg'));
       if (response.statusCode == 200) return CanoaConfig.parse(response.body);

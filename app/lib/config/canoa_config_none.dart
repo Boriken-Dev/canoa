@@ -1,9 +1,13 @@
-import 'config_layers.dart';
+import 'canoa_config.dart';
 
 String? desktopConfigPath() => null;
-typedef ReadLayers = ({String? ownText, String ownName, List<ConfigLayer> below});
-Future<ReadLayers?> readDesktopLayers() async => null;
-Future<void> writeDesktopConfig(String source) async =>
-    throw UnsupportedError('Web settings are read-only deployment config');
+
+/// A web build has no program to ask: its configuration is the host's, which the served page reads through the control channel.
+Future<CanoaConfig?> loadDesktopConfig() async => null;
+
+Future<void> saveDesktopConfig(CanoaConfig config) async =>
+    throw UnsupportedError('a web build writes its configuration through the host that serves it');
+
 List<String> hostConfigArgs(String path) => ['--config', path];
-String hostCheckSpec(String path, String candidate) => candidate;
+
+Future<String?> checkDesktopConfig(CanoaConfig config) async => null;

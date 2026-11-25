@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:canoa_native/canoa_native.dart';
@@ -39,37 +38,6 @@ Future<int> freeLoopbackPort() async {
   final port = socket.port;
   await socket.close();
   return port;
-}
-
-Future<T> withFileBeside<T>(String path, String text, Future<T> Function(String file) use) async {
-  final directory = File(path).parent;
-  await directory.create(recursive: true);
-  // A name of its own, created only if nothing is there: in a shared directory someone else could have put a file or a
-  // link at a name known in advance.
-  final random = Random.secure();
-  final suffix = List.generate(16, (_) => random.nextInt(16).toRadixString(16)).join();
-  // The name keeps the config's extension (.cfg, .yaml, .json...), which is what tells the host its format.
-  final base = path.split(RegExp(r'[/\\]')).last;
-  final dot = base.lastIndexOf('.');
-  final extension = dot > 0 ? base.substring(dot) : '.cfg';
-  final file = File('${directory.path}${Platform.pathSeparator}.canoa.$suffix.check$extension');
-  await file.create(exclusive: true);
-  final writing = await file.open(mode: FileMode.writeOnlyAppend);
-  try {
-    await writing.writeString(text);
-    await writing.flush();
-  } finally {
-    await writing.close();
-  }
-  try {
-    return await use(file.path);
-  } finally {
-    try {
-      await file.delete();
-    } on FileSystemException {
-      // Already gone.
-    }
-  }
 }
 
 /// `canoa` commands run in this process, through the library.

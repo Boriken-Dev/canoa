@@ -171,10 +171,6 @@ String? browserLaunch(HostTool? tool) => platform.browserLaunch(tool);
 /// A port on loopback that nothing listens on at this moment.
 Future<int> freeLoopbackPort() => platform.freeLoopbackPort();
 
-/// Runs [use] on a file holding [text] in the directory of [path], so names relative to it read the same, and removes it.
-Future<T> withFileBeside<T>(String path, String text, Future<T> Function(String file) use) =>
-    platform.withFileBeside(path, text, use);
-
 /// What a line of a host's standard error says after its `canoa: ` prefix (a host built before the rename wrote
 /// `canoa-host: `), or null for any other line.
 String? hostSaid(String line) {

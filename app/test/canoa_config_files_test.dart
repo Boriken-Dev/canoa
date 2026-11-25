@@ -44,7 +44,6 @@ void main() {
       final two = resolve('$a$sep$b');
       expect(two.files.map((f) => f.path), [a, b]);
       expect(two.own, b);
-      expect(two.checkSpec('X'), '$a${sep}X');
     });
 
     test('$label: a leading + puts them over the installed, system and user files', () {
@@ -53,8 +52,6 @@ void main() {
           [ConfigOrigin.installed, ConfigOrigin.system, ConfigOrigin.user, ConfigOrigin.listed, ConfigOrigin.own]);
       expect(plus.files.map((f) => f.path).skip(3), [a, b]);
       expect(plus.own, b);
-      expect(plus.checkSpec('X'), '+$a${sep}X');
-      expect(resolve(null).checkSpec('X'), '+X');
     });
 
     test('$label: an empty entry and a missing file are refused naming the entry', () {

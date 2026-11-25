@@ -1721,6 +1721,10 @@ args = ${jsonEncode(agent.args)}
 
   static final _ownDocuments = Expando<Map<String, dynamic>>('own document');
 
+  /// The tables of the person's own file as this configuration writes it: the keys the person changed or already had there, and none
+  /// that a lower layer gives the same.
+  Map<String, dynamic> get documentToWrite => _ownDocument();
+
   Map<String, dynamic> _ownDocument() => _ownDocuments[this] ??=
       ownDocument(_modelDocument(), _lowerModel, source.own, _defaults);
 
