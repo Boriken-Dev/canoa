@@ -401,7 +401,7 @@ AccountInfo account(
     'state': state,
     if (provides.isNotEmpty) 'types': provides,
     if (automatic) 'automatic': true,
-    if (via != null) 'via': via,
+    'via': ?via,
     if (warnings.isNotEmpty) 'warnings': warnings,
   })!;
 }

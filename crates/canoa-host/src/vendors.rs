@@ -221,9 +221,14 @@ pub(crate) fn by_agent(agent: &str) -> Option<Vendor> {
 /// How the login the agent `agent` keeps for itself stands on this computer, as its description says where it is kept (the process's
 /// own environment and the person's home); `None` when it says nothing, or the agent is not known.
 pub(crate) fn login(agent: &str) -> Option<Login> {
-    by_agent(agent)?.login(std::env::home_dir().as_deref(), &|name| {
+    // A unit test never looks at the person's home or environment: an agent that lists login files has its login there.
+    #[cfg(test)]
+    let found = by_agent(agent)?.login_files.first().map(|_| Login::File);
+    #[cfg(not(test))]
+    let found = by_agent(agent)?.login(std::env::home_dir().as_deref(), &|name| {
         std::env::var_os(name)
-    })
+    });
+    found
 }
 
 /// `file`, written with `/`, below `dir`.

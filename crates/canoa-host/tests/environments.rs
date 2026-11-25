@@ -470,6 +470,7 @@ fn a_harness_entry_in_an_environment_has_its_program_started_through_the_environ
     std::fs::copy(example("harness_standin", false), &claude).expect("the stand-in is copied");
     let home = dir.0.join("claude-home");
     std::fs::create_dir_all(&home).expect("a folder");
+    std::fs::write(home.join(".credentials.json"), "{\"fixture\":true}").expect("a login");
     // SAFETY: set before any host of this test starts, and no other test reads it.
     unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &home) };
     let host = Hosted::start_with_setup(
