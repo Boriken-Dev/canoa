@@ -33,7 +33,7 @@ use coqui_acp_harness::LocalSpawner;
 
 use super::footprint::{Footprint, Watch, uncovered};
 use super::programs::install_environment;
-use super::tools::{LocalTools, Lookup, Reply, ToolsLimits, Transport};
+use super::tools::{LocalTools, Lookup, ReleasesReader, Reply, ToolsLimits, Transport};
 use canoa::store::exec::GuardedSpawner;
 
 /// The variable the suite puts a canary secret in, which must appear nowhere a store writes.
@@ -87,6 +87,11 @@ pub trait Fixture {
     fn world(&self, variant: Variant) -> World;
     /// The variable the launch environment must set to keep the program's own updater off; `None` when it has no switch.
     fn auto_update_var(&self) -> Option<String>;
+    /// The `canoa.releases/1` document the catalogs of the program's scope make together, as `variant` says its files are, for a
+    /// store that reads its releases from catalogs (`install_tools.releases`); `None` for one that reads its publisher itself.
+    fn releases(&self, _variant: Variant) -> Option<String> {
+        None
+    }
 }
 
 /// URLs and what they answer.
@@ -108,6 +113,14 @@ impl World {
     pub fn put(&mut self, url: impl Into<String>, bytes: impl Into<Vec<u8>>) -> &mut Self {
         self.docs.insert(url.into(), bytes.into());
         self
+    }
+
+    /// What is served at `url`, as text, or none when nothing is.
+    #[must_use]
+    pub fn text_at(&self, url: &str) -> Option<String> {
+        self.docs
+            .get(url)
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
     }
 
     /// Makes `url` fail to connect.
@@ -456,8 +469,16 @@ impl Runner<'_> {
         });
     }
 
-    fn tools(&self, transport: Arc<WorldTransport>) -> LocalTools {
-        LocalTools::new(transport, self.info.endpoints.clone()).allow_unverified(true)
+    fn tools(&self, transport: Arc<WorldTransport>, variant: Variant) -> LocalTools {
+        LocalTools::new(transport, self.info.endpoints.clone())
+            .allow_unverified(true)
+            .releases_from(self.reader(variant))
+    }
+
+    /// What reads the releases of the fixture's catalog in `variant`, none for a store that has none.
+    fn reader(&self, variant: Variant) -> Option<ReleasesReader> {
+        let text = self.fixture.releases(variant)?;
+        Some(Arc::new(move || Ok(text.clone())))
     }
 
     fn describe(&mut self) {
@@ -535,7 +556,7 @@ impl Runner<'_> {
         let transport = WorldTransport::new(self.fixture.world(Variant::Normal));
         let result = self.store.latest(
             LatestQuery::default(),
-            self.tools(transport.clone()).into_object(),
+            self.tools(transport.clone(), Variant::Normal).into_object(),
         );
         match result {
             Ok(report) if report.known && report.version.is_some() => {}
@@ -564,10 +585,17 @@ impl Runner<'_> {
         let mut world = self.fixture.world(Variant::Normal);
         world.fail_big(0);
         let transport = WorldTransport::new(world);
-        if let Ok(report) = self
-            .store
-            .latest(LatestQuery::default(), self.tools(transport).into_object())
-            && report.known
+        // A store that reads catalogs is given what a host gives it when none could be read.
+        let unreachable: Option<ReleasesReader> = self
+            .fixture
+            .releases(Variant::Normal)
+            .map(|_| -> ReleasesReader { Arc::new(|| Err("the publisher is down".to_owned())) });
+        if let Ok(report) = self.store.latest(
+            LatestQuery::default(),
+            self.tools(transport, Variant::Normal)
+                .releases_from(unreachable)
+                .into_object(),
+        ) && report.known
         {
             self.fail(
                 "latest.failure_is_unknown",
@@ -597,7 +625,7 @@ impl Runner<'_> {
         request.version = version;
         request.managed = managed;
         self.store
-            .plan(request, self.tools(transport).into_object())
+            .plan(request, self.tools(transport, variant).into_object())
     }
 
     fn plan(&mut self) {
@@ -666,6 +694,7 @@ impl Runner<'_> {
         let deadline = Instant::now() + timeout;
         let tools = LocalTools::new(transport.clone(), self.info.endpoints.clone())
             .allow_unverified(true)
+            .releases_from(self.reader(variant))
             .granted(&staging)
             .lookup(sandbox.lookup(&env))
             .cancelled_by(cancel)
@@ -831,10 +860,10 @@ impl Runner<'_> {
             let transport = WorldTransport::new(self.fixture.world(Variant::Normal));
             let mut request = PlanRequest::new(Action::Uninstall, self.fixture.platform());
             request.managed = None;
-            match self
-                .store
-                .plan(request, self.tools(transport).into_object())
-            {
+            match self.store.plan(
+                request,
+                self.tools(transport, Variant::Normal).into_object(),
+            ) {
                 Ok(plan) if plan.changes.is_empty() => {}
                 Ok(_) => self.fail(
                     "uninstall.declares",
@@ -980,6 +1009,7 @@ impl Runner<'_> {
             let transport = WorldTransport::new(moved);
             let tools = LocalTools::new(transport, self.info.endpoints.clone())
                 .allow_unverified(true)
+                .releases_from(self.reader(Variant::Moved))
                 .granted(&staging)
                 .lookup(sandbox.lookup(&env));
             let spawner = GuardedSpawner::new(

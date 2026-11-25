@@ -129,6 +129,26 @@ impl NodeFixture {
 }
 
 impl Fixture for NodeFixture {
+    fn releases(&self, variant: Variant) -> Option<String> {
+        let world = self.world(variant);
+        let index: serde_json::Value =
+            serde_json::from_str(&world.text_at(&format!("{NODE_ORIGIN}index.json"))?).ok()?;
+        let heads = canoa_node::heads(&index).ok()?;
+        let mut sums = std::collections::BTreeMap::new();
+        for (_, version) in &heads {
+            sums.insert(
+                version.clone(),
+                world.text_at(&format!("{NODE_ORIGIN}v{version}/SHASUMS256.txt"))?,
+            );
+        }
+        let origin = NODE_ORIGIN.trim_end_matches('/');
+        Some(
+            canoa_node::catalog_of(origin, &heads, &sums)
+                .ok()?
+                .to_json(),
+        )
+    }
+
     fn older(&self) -> String {
         "1.0.0".to_owned()
     }
@@ -211,6 +231,14 @@ impl PythonFixture {
 }
 
 impl Fixture for PythonFixture {
+    fn releases(&self, variant: Variant) -> Option<String> {
+        let sums = self
+            .world(variant)
+            .text_at(&format!("{PYTHON_RELEASES}latest/download/SHA256SUMS"))?;
+        let origin = PYTHON_RELEASES.trim_end_matches('/');
+        Some(canoa_python::catalog_of(origin, &sums).ok()?.to_json())
+    }
+
     fn older(&self) -> String {
         "3.13.1".to_owned()
     }
@@ -402,6 +430,16 @@ impl GitBashFixture {
 }
 
 impl Fixture for GitBashFixture {
+    fn releases(&self, variant: Variant) -> Option<String> {
+        let listing: serde_json::Value = serde_json::from_str(
+            &self
+                .world(variant)
+                .text_at(&format!("{GIT_RELEASES_API}?per_page=30"))?,
+        )
+        .ok()?;
+        Some(canoa_git_bash::catalog_of(&listing).ok()?.to_json())
+    }
+
     fn older(&self) -> String {
         "2.55.0".to_owned()
     }
@@ -488,6 +526,16 @@ impl PowerShellFixture {
 }
 
 impl Fixture for PowerShellFixture {
+    fn releases(&self, variant: Variant) -> Option<String> {
+        let listing: serde_json::Value = serde_json::from_str(
+            &self
+                .world(variant)
+                .text_at(&format!("{POWERSHELL_RELEASES_API}?per_page=30"))?,
+        )
+        .ok()?;
+        Some(canoa_powershell::catalog_of(&listing).ok()?.to_json())
+    }
+
     fn older(&self) -> String {
         "7.6.1".to_owned()
     }
@@ -573,6 +621,16 @@ impl BitwardenFixture {
 }
 
 impl Fixture for BitwardenFixture {
+    fn releases(&self, variant: Variant) -> Option<String> {
+        let listing: serde_json::Value = serde_json::from_str(
+            &self
+                .world(variant)
+                .text_at(&format!("{BITWARDEN_RELEASES_API}?per_page=100"))?,
+        )
+        .ok()?;
+        Some(canoa_bitwarden::catalog_of(&listing).ok()?.to_json())
+    }
+
     fn older(&self) -> String {
         "2026.9.0".to_owned()
     }

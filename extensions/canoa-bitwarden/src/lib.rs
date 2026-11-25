@@ -44,7 +44,7 @@ pub const DOWNLOADS: &str = "https://github.com/bitwarden/clients/releases/downl
 
 mod source;
 
-pub use source::{BitwardenReleases, SOURCE};
+pub use source::{BitwardenReleases, SOURCE, catalog_of};
 
 store_provider!(
     /// The Bitwarden command line's store.

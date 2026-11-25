@@ -35,7 +35,7 @@ pub const DOWNLOADS: &str = "https://github.com/PowerShell/PowerShell/releases/d
 
 mod source;
 
-pub use source::{PowerShellReleases, SOURCE};
+pub use source::{PowerShellReleases, SOURCE, catalog_of};
 
 store_provider!(
     /// The PowerShell store.

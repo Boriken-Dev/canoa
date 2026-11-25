@@ -357,7 +357,7 @@ pub struct LocalTools {
 }
 
 /// What reads and merges the releases catalogs of one program's scope: the text of a `canoa.releases/1` document, or why none.
-pub(crate) type ReleasesReader = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+pub type ReleasesReader = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
 impl fmt::Debug for LocalTools {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -389,7 +389,7 @@ impl LocalTools {
     }
 
     /// These tools answering `releases` with what `reader` makes of the program's catalogs.
-    pub(crate) fn releases_from(mut self, reader: Option<ReleasesReader>) -> Self {
+    pub fn releases_from(mut self, reader: Option<ReleasesReader>) -> Self {
         self.releases = reader;
         self
     }

@@ -424,7 +424,11 @@ pub fn catalog_release(
         Some(version) => {
             let named = pinned(version)?;
             let bare = named.strip_prefix('v').unwrap_or(&named);
-            if catalog.releases.iter().any(|release| release.version == bare) {
+            if catalog
+                .releases
+                .iter()
+                .any(|release| release.version == bare)
+            {
                 bare.to_owned()
             } else {
                 named

@@ -61,6 +61,17 @@ fn feed(repo: &str) -> GithubFeed<'_, 4> {
     }
 }
 
+/// The catalog of the releases in `listing`, which GitHub's releases API answered for the default repository.
+///
+/// # Errors
+///
+/// Why the listing offers no release.
+pub fn catalog_of(
+    listing: &Value,
+) -> Result<canoa::store::catalog::ReleasesCatalog, ProviderError> {
+    feed(REPO).catalog_of(listing)
+}
+
 fn read(request: &ReadRequest, fetch: &Object<dyn SourceFetch>) -> Result<String, ProviderError> {
     let repo = text_of(&request.values()?, "repo", REPO);
     let feed = feed(&repo);

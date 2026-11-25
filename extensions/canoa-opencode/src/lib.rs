@@ -86,7 +86,7 @@ impl AgentVendor for OpenCodeVendor {
 
 mod source;
 
-pub use source::{OpenCodeReleases, SOURCE};
+pub use source::{OpenCodeReleases, SOURCE, catalog_of};
 
 canoa::store_provider!(
     /// The OpenCode store: the program the recipe installs, offered with the agent's other providers.

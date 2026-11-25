@@ -36,7 +36,7 @@ const SELF_EXTRACTING: &str = "PortableGit.7z.exe";
 
 mod source;
 
-pub use source::{GitBashReleases, SOURCE};
+pub use source::{GitBashReleases, SOURCE, catalog_of};
 
 store_provider!(
     /// The Git Bash store.

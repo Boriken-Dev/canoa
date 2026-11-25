@@ -260,7 +260,12 @@ fn the_keys_shipped_are_the_release_teams_and_the_source_names_each_by_its_finge
 fn a_version_may_be_named_with_the_v_a_tag_has() {
     let tools = FixedReleases(catalog().to_json()).object();
     let named = NodeRecipe
-        .release(Some("v26.13.1"), None, &Platform::new("linux", "x86_64"), &tools)
+        .release(
+            Some("v26.13.1"),
+            None,
+            &Platform::new("linux", "x86_64"),
+            &tools,
+        )
         .expect("the release the catalog lists as 26.13.1");
     assert_eq!(named.version, "26.13.1");
 }

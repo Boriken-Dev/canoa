@@ -113,6 +113,66 @@ fn finish(world: &mut World, variant: Variant) {
     }
 }
 
+/// One file of a release the fixture's catalog lists, for the platform `key` (the suite's own when none).
+struct Listed {
+    version: &'static str,
+    channels: &'static [&'static str],
+    key: Option<String>,
+    url: String,
+    path: String,
+    launch: String,
+    executable: bool,
+    bytes: usize,
+    check: serde_json::Value,
+}
+
+/// The `canoa.releases/1` document of `files` (the newest first), a release listing each platform its files are for.
+fn releases_doc(files: &[Listed]) -> String {
+    let own = format!(
+        "{}-{}",
+        if windows() { "windows" } else { "linux" },
+        if std::env::consts::ARCH == "aarch64" {
+            "aarch64"
+        } else {
+            "x86_64"
+        }
+    );
+    let mut channels = serde_json::Map::new();
+    let mut releases: Vec<serde_json::Value> = Vec::new();
+    for file in files {
+        for channel in file.channels {
+            channels.insert((*channel).to_owned(), file.version.into());
+        }
+        let mut part = serde_json::json!({"url": file.url, "path": file.path, "bytes": file.bytes, "check": file.check});
+        if file.executable {
+            part["executable"] = true.into();
+        }
+        let mut platform = serde_json::json!({"parts": [part]});
+        if !file.launch.is_empty() {
+            platform["launch"] = file.launch.clone().into();
+        }
+        let key = file.key.clone().unwrap_or_else(|| own.clone());
+        match releases
+            .iter_mut()
+            .find(|release| release["version"] == file.version)
+        {
+            Some(release) => release["platforms"][key] = platform,
+            None => releases.push(serde_json::json!({
+                "version": file.version,
+                "channels": file.channels,
+                "platforms": {key: platform},
+            })),
+        }
+    }
+    serde_json::json!({"format": "canoa.releases/1", "channels": channels, "releases": releases})
+        .to_string()
+}
+
+/// What reads `document` as a store's catalogs do.
+fn reader(document: String) -> canoa_host::store::tools::ReleasesReader {
+    Arc::new(move || Ok(document.clone()))
+}
+
 fn suite(fixture: &dyn Fixture, store: Arc<dyn ProgramStore>) {
     let failures = run(store, fixture);
     assert!(failures.is_empty(), "{failures:#?}");
@@ -148,8 +208,19 @@ impl Fixture for ClaudeFixture {
     }
 
     fn world(&self, variant: Variant) -> World {
+        self.build(variant).0
+    }
+
+    fn releases(&self, variant: Variant) -> Option<String> {
+        Some(releases_doc(&self.build(variant).1))
+    }
+}
+
+impl ClaudeFixture {
+    fn build(&self, variant: Variant) -> (World, Vec<Listed>) {
         let base = "https://downloads.claude.ai/claude-code-releases";
         let mut world = World::new();
+        let mut listed = Vec::new();
         world.put(format!("{base}/latest"), b"2.0.0\n".to_vec());
         world.put(format!("{base}/stable"), b"1.0.0\n".to_vec());
         for version in ["1.0.0", "2.0.0"] {
@@ -174,10 +245,26 @@ impl Fixture for ClaudeFixture {
                 format!("{base}/{version}/manifest.json"),
                 manifest.to_string().into_bytes(),
             );
+            listed.push(Listed {
+                version,
+                key: None,
+                channels: if version == "2.0.0" {
+                    &["latest"]
+                } else {
+                    &["stable"]
+                },
+                url: format!("{base}/{version}/{}/{binary}", Self::key()),
+                path: binary.to_owned(),
+                launch: binary.to_owned(),
+                executable: true,
+                bytes: served.len(),
+                check: serde_json::json!({"sha256": sha256(&digested)}),
+            });
             world.put(format!("{base}/{version}/{}/{binary}", Self::key()), served);
         }
         finish(&mut world, variant);
-        world
+        listed.reverse();
+        (world, listed)
     }
 }
 
@@ -224,7 +311,18 @@ impl Fixture for CodexFixture {
     }
 
     fn world(&self, variant: Variant) -> World {
+        self.build(variant).0
+    }
+
+    fn releases(&self, variant: Variant) -> Option<String> {
+        Some(releases_doc(&self.build(variant).1))
+    }
+}
+
+impl CodexFixture {
+    fn build(&self, variant: Variant) -> (World, Vec<Listed>) {
         let mut world = World::new();
+        let mut listed = Vec::new();
         let asset = format!("codex-package-{}.tar.gz", Self::triple());
         let mut channel_assets = Vec::new();
         for version in ["1.0.0", "2.0.0"] {
@@ -255,6 +353,17 @@ impl Fixture for CodexFixture {
                 format!("{base}/codex-package_SHA256SUMS"),
                 format!("{digest}  {asset}\n").into_bytes(),
             );
+            listed.push(Listed {
+                version,
+                key: None,
+                channels: if version == "2.0.0" { &["latest"] } else { &[] },
+                url: format!("{base}/{asset}"),
+                path: asset.clone(),
+                launch: String::new(),
+                executable: false,
+                bytes: served.len(),
+                check: serde_json::json!({"sha256": digest}),
+            });
             world.put(format!("{base}/{asset}"), served);
             if version == "2.0.0" {
                 channel_assets
@@ -267,7 +376,8 @@ impl Fixture for CodexFixture {
             channel.to_string().into_bytes(),
         );
         finish(&mut world, variant);
-        world
+        listed.reverse();
+        (world, listed)
     }
 }
 
@@ -298,7 +408,18 @@ impl Fixture for GrokFixture {
     }
 
     fn world(&self, variant: Variant) -> World {
+        self.build(variant).0
+    }
+
+    fn releases(&self, variant: Variant) -> Option<String> {
+        Some(releases_doc(&self.build(variant).1))
+    }
+}
+
+impl GrokFixture {
+    fn build(&self, variant: Variant) -> (World, Vec<Listed>) {
         let mut world = World::new();
+        let mut listed = Vec::new();
         world.put("https://x.ai/cli/stable", b"2.0.0\n".to_vec());
         let os = if windows() { "windows" } else { "linux" };
         let arch = if std::env::consts::ARCH == "aarch64" {
@@ -319,13 +440,25 @@ impl Fixture for GrokFixture {
                 exit,
                 Some("GROK_DISABLE_AUTOUPDATER"),
             );
+            listed.push(Listed {
+                version,
+                key: None,
+                channels: if version == "2.0.0" { &["stable"] } else { &[] },
+                url: format!("https://x.ai/cli/grok-{version}-{os}-{arch}{suffix}"),
+                path: format!("grok{suffix}"),
+                launch: format!("grok{suffix}"),
+                executable: true,
+                bytes: bytes.len(),
+                check: serde_json::json!({"unverified": "xAI publishes no checksum for Grok"}),
+            });
             world.put(
                 format!("https://x.ai/cli/grok-{version}-{os}-{arch}{suffix}"),
                 bytes,
             );
         }
         finish(&mut world, variant);
-        world
+        listed.reverse();
+        (world, listed)
     }
 }
 
@@ -336,8 +469,11 @@ fn the_grok_store_passes_every_check_and_says_its_download_is_not_verified() {
         Arc::new(Direct::<GrokStore>::new()),
     );
     let store = GrokStore::default_instance();
-    let transport = WorldTransport::new(GrokFixture(standin()).world(Variant::Normal));
-    let tools = LocalTools::new(transport, store.describe().expect("info").endpoints).into_object();
+    let fixture = GrokFixture(standin());
+    let transport = WorldTransport::new(fixture.world(Variant::Normal));
+    let tools = LocalTools::new(transport, store.describe().expect("info").endpoints)
+        .releases_from(fixture.releases(Variant::Normal).map(reader))
+        .into_object();
     let plan = store
         .plan(PlanRequest::new(Action::Install, host()), tools)
         .expect("plan");
@@ -384,6 +520,16 @@ impl Fixture for AgyFixture {
     }
 
     fn world(&self, variant: Variant) -> World {
+        self.build(variant).0
+    }
+
+    fn releases(&self, variant: Variant) -> Option<String> {
+        Some(releases_doc(&self.build(variant).1))
+    }
+}
+
+impl AgyFixture {
+    fn build(&self, variant: Variant) -> (World, Vec<Listed>) {
         let mut world = World::new();
         let exit = exit_of(variant);
         let exe = standin_bytes(&self.0, "2.0.0", exit, Some("AGY_CLI_DISABLE_AUTO_UPDATE"));
@@ -400,9 +546,20 @@ impl Fixture for AgyFixture {
         let manifest =
             serde_json::json!({"version": "2.0.0", "url": url, "sha512": sha512(&digested)});
         world.put(format!("https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/{}.json", Self::manifest_name()), manifest.to_string().into_bytes());
+        let listed = vec![Listed {
+            version: "2.0.0",
+            key: None,
+            channels: &["stable"],
+            url: url.clone(),
+            path: if windows() { "agy.exe" } else { "agy.tar.gz" }.to_owned(),
+            launch: if windows() { "agy.exe" } else { "" }.to_owned(),
+            executable: windows(),
+            bytes: served.len(),
+            check: serde_json::json!({"sha512": sha512(&digested)}),
+        }];
         world.put(url, served);
         finish(&mut world, variant);
-        world
+        (world, listed)
     }
 }
 
@@ -410,13 +567,20 @@ impl Fixture for AgyFixture {
 fn the_agy_store_passes_every_check_and_refuses_a_version_the_publisher_no_longer_serves() {
     suite(&AgyFixture(standin()), Arc::new(Direct::<AgyStore>::new()));
     let store = AgyStore::default_instance();
-    let transport = WorldTransport::new(AgyFixture(standin()).world(Variant::Normal));
-    let tools = LocalTools::new(transport, store.describe().expect("info").endpoints).into_object();
+    let fixture = AgyFixture(standin());
+    let transport = WorldTransport::new(fixture.world(Variant::Normal));
+    let tools = LocalTools::new(transport, store.describe().expect("info").endpoints)
+        .releases_from(fixture.releases(Variant::Normal).map(reader))
+        .into_object();
     let mut request = PlanRequest::new(Action::Install, host());
     request.version = Some("1.0.0".to_owned());
     let error = store.plan(request, tools).expect_err("pinned");
     assert_eq!(error.status, Status::GUATIAO_ERR_UNSUPPORTED);
-    assert!(error.message().contains("only the newest build is served"));
+    assert!(
+        error.message().contains("lists the release 1.0.0"),
+        "only the build the catalog lists can be named: {}",
+        error.message()
+    );
 }
 
 // --- Pi ----------------------------------------------------------------------------------------
@@ -438,6 +602,16 @@ impl Fixture for PiFixture {
     }
 
     fn world(&self, variant: Variant) -> World {
+        self.build(variant).0
+    }
+
+    fn releases(&self, variant: Variant) -> Option<String> {
+        Some(releases_doc(&self.build(variant).1))
+    }
+}
+
+impl PiFixture {
+    fn build(&self, variant: Variant) -> (World, Vec<Listed>) {
         let mut world = World::new();
         world.put(
             "https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest",
@@ -488,9 +662,21 @@ impl Fixture for PiFixture {
             format!("{base}/SHASUMS256.txt"),
             format!("{}  {name}\n", sha256(&digested)).into_bytes(),
         );
+        // Pi's release is the package's version; its file is the Node archive the catalog takes from Node's own.
+        let listed = vec![Listed {
+            version: "2.0.0",
+            key: None,
+            channels: &["latest"],
+            url: format!("{base}/{name}"),
+            path: name.clone(),
+            launch: String::new(),
+            executable: false,
+            bytes: served.len(),
+            check: serde_json::json!({"sha256": sha256(&digested)}),
+        }];
         world.put(format!("{base}/{name}"), served);
         finish(&mut world, variant);
-        world
+        (world, listed)
     }
 }
 
@@ -531,9 +717,11 @@ impl OpenCodeFixture {
         )
     }
 
-    /// A world that serves `versions` for every platform the store is measured on, the newest as GitHub's latest release.
-    fn world_of(&self, variant: Variant, versions: &[&str]) -> World {
+    /// A world that serves `versions` for every platform the store is measured on, and the catalog that lists them for the platform
+    /// the suite runs on.
+    fn world_of(&self, variant: Variant, versions: &[&'static str]) -> (World, Vec<Listed>) {
         let mut world = World::new();
+        let mut listed = Vec::new();
         let newest = versions.last().copied().expect("a version");
         for version in versions {
             let exit = if *version == newest {
@@ -564,6 +752,19 @@ impl OpenCodeFixture {
                         "size": served.len(),
                         "digest": format!("sha256:{}", sha256(&digested)),
                     }));
+                    {
+                        listed.push(Listed {
+                            version,
+                            key: Some(format!("{os}-{arch}")),
+                            channels: if *version == newest { &["stable"] } else { &[] },
+                            url: format!("{}/v{version}/{name}", Self::DOWNLOADS),
+                            path: name.clone(),
+                            launch: String::new(),
+                            executable: false,
+                            bytes: served.len(),
+                            check: serde_json::json!({"sha256": sha256(&digested)}),
+                        });
+                    }
                     world.put(format!("{}/v{version}/{name}", Self::DOWNLOADS), served);
                 }
             }
@@ -576,7 +777,8 @@ impl OpenCodeFixture {
             }
         }
         finish(&mut world, variant);
-        world
+        listed.reverse();
+        (world, listed)
     }
 }
 
@@ -595,7 +797,11 @@ impl Fixture for OpenCodeFixture {
     }
 
     fn world(&self, variant: Variant) -> World {
-        self.world_of(variant, &["1.0.0", "2.0.0"])
+        self.world_of(variant, &["1.0.0", "2.0.0"]).0
+    }
+
+    fn releases(&self, variant: Variant) -> Option<String> {
+        Some(releases_doc(&self.world_of(variant, &["1.0.0", "2.0.0"]).1))
     }
 }
 
@@ -614,8 +820,10 @@ fn the_opencode_store_plans_the_archive_and_digest_the_release_lists_for_each_pl
     let info = store.describe().expect("info");
     assert!(!info.platforms.is_empty());
     let tools = || {
-        let transport = WorldTransport::new(fixture.world_of(Variant::Normal, &["1.0.0", "2.0.0"]));
-        LocalTools::new(transport, info.endpoints.clone()).into_object()
+        let (world, listed) = fixture.world_of(Variant::Normal, &["1.0.0", "2.0.0"]);
+        LocalTools::new(WorldTransport::new(world), info.endpoints.clone())
+            .releases_from(Some(reader(releases_doc(&listed))))
+            .into_object()
     };
     for platform in info.platforms.clone() {
         let (name, _) = OpenCodeFixture::asset(&platform);
