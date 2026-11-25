@@ -313,10 +313,15 @@ fn the_real_listings_at_the_pinned_commit_give_the_snapshot_and_the_blob_ids_mat
 fn the_snapshot_is_what_the_source_makes_of_the_documents_the_deps_branch_keeps() {
     let deps = std::env::var("CANOA_DEPS").expect("CANOA_DEPS names a deps checkout");
     let read = |path: String| {
-        std::fs::read_to_string(format!("{deps}/cdn/huggingface.co/{path}")).expect("the document, synced")
+        std::fs::read_to_string(format!("{deps}/cdn/huggingface.co/{path}"))
+            .expect("the document, synced")
     };
     let voices = read(format!("{DEFAULT_REPO}/raw/{REVISION}/voices.json"));
-    let tree = |folder: &str| read(format!("api/models/{DEFAULT_REPO}/tree/{REVISION}/{folder}"));
+    let tree = |folder: &str| {
+        read(format!(
+            "api/models/{DEFAULT_REPO}/tree/{REVISION}/{folder}"
+        ))
+    };
     let ljspeech = tree("en/en_US/ljspeech/medium");
     let claude = tree("es/es_MX/claude/high");
     let include: Vec<String> = DEFAULT_VOICES.map(str::to_owned).to_vec();

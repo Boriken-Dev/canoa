@@ -77,7 +77,7 @@ def build(out: Path, deps: Path | None = None) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, help="where the loader and the wasm go (default web/whisper)")
-    parser.add_argument("--deps", type=Path, default=os.environ.get("CANOA_DEPS") or None,
+    parser.add_argument("--deps", type=Path,
                         help="a checkout of the deps branch: build from its crates, with the network off (default: CANOA_DEPS, "
                              "else the deps branch's worktree beside the repository)")
     parser.add_argument("--online", action="store_true",
@@ -86,7 +86,9 @@ def main() -> None:
     if opts.online and opts.deps:
         parser.error("--online reads no deps branch: not with --deps")
     if not opts.online and opts.deps is None:
-        opts.deps = shared_build.deps_checkout()
+        # CANOA_DEPS is a default, read only when the build reads the deps branch: it never refuses --online.
+        env = os.environ.get("CANOA_DEPS")
+        opts.deps = Path(env) if env else shared_build.deps_checkout()
         if opts.deps is None:
             sys.exit("build_whisper.py: no deps checkout (set CANOA_DEPS or --deps, or fetch the deps branch; "
                      "--online builds from crates.io and GitHub to refresh the mirror)")
