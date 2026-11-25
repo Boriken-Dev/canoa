@@ -34,7 +34,9 @@ class _AccountsSectionState extends State<AccountsSection> {
     super.initState();
     _accounts.addListener(_changed);
     // Asking notifies, which a build in progress cannot take: ask once this frame is done.
-    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_accounts.refresh()));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_accounts.refresh()),
+    );
   }
 
   @override
@@ -48,13 +50,20 @@ class _AccountsSectionState extends State<AccountsSection> {
   }
 
   Future<void> _add(String provider) async {
-    await showDialog<AccountInfo>(context: context, builder: (_) => AddAccountDialog(accounts: _accounts, provider: provider));
+    await showDialog<AccountInfo>(
+      context: context,
+      builder: (_) => AddAccountDialog(accounts: _accounts, provider: provider),
+    );
     if (mounted) unawaited(_accounts.refresh());
   }
 
   Future<void> _again(AccountInfo account, LoginMethodInfo? method) async {
     final run = _accounts.signInAgain(account, method: method?.id);
-    await showDialog<void>(context: context, builder: (_) => SignInDialog(run: run, title: 'Sign in to ${account.name}'));
+    await showDialog<void>(
+      context: context,
+      builder: (_) =>
+          SignInDialog(run: run, title: 'Sign in to ${account.name}'),
+    );
   }
 
   /// Offers [account] to [entry], or stops. An entry no `peers` restricts is open to every paired key (the extension, a phone,
@@ -75,8 +84,15 @@ class _AccountsSectionState extends State<AccountsSection> {
             'Add the keys that may use it to its peers in canoa.cfg, or keep ${account.name} to an entry only this computer reaches.',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Do not offer it')),
-            FilledButton(key: const Key('offer-open-entry-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Offer it to every paired key')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Do not offer it'),
+            ),
+            FilledButton(
+              key: const Key('offer-open-entry-confirm'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Offer it to every paired key'),
+            ),
           ],
         ),
       );
@@ -90,7 +106,8 @@ class _AccountsSectionState extends State<AccountsSection> {
     if (!await confirmRemoval(
       context,
       title: 'Remove ${account.name}?',
-      body: 'Canoa forgets the login it stored for ${account.name} on this computer'
+      body:
+          'Canoa forgets the login it stored for ${account.name} on this computer'
           '${offered.isEmpty ? '' : ' and stops offering it in ${offered.join(', ')}'}. '
           'It does not sign out at ${_accounts.providerNamed(account.provider)?.label ?? account.provider}: a login there stays until you end it.',
       dialogKey: const Key('remove-account'),
@@ -103,55 +120,80 @@ class _AccountsSectionState extends State<AccountsSection> {
       await _accounts.remove(account);
     } on Object catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not remove ${account.name}: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not remove ${account.name}: $error')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final muted = Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
-        child: Text(
-          'Several logins of one provider can be signed in at once. A source offers the accounts you choose, and each session '
-          'runs on one of them. Credentials stay in this computer\'s credential store, never in canoa.cfg.',
-          style: muted,
-        ),
-      ),
-      if (_accounts.problem case final problem?)
-        Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(problem, key: const Key('accounts-problem'), style: TextStyle(color: scheme.error))),
-      for (final provider in _accounts.providers)
-        SettingsGroup(
-          key: Key('accounts-${provider.id}'),
-          title: provider.label,
-          leading: SourceMark.provider(provider.groupId, size: 20),
-          trailing: TextButton.icon(
-            key: Key('add-account-${provider.id}'),
-            onPressed: () => unawaited(_add(provider.id)),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Add account'),
+    final muted = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
+          child: Text(
+            'Several logins of one provider can be signed in at once. A source offers the accounts you choose, and each session '
+            'runs on one of them. Credentials stay in this computer\'s credential store, never in canoa.cfg.',
+            style: muted,
           ),
-          children: [
-            if (_accounts.of(provider.id).isEmpty)
-              SettingsRow(
-                title: 'No account',
-                description: provider.agent != null
-                    ? '${provider.label} runs on the login it has where it runs, as before.'
-                    : provider.description,
-              ),
-            for (final account in _accounts.of(provider.id)) _row(account),
-          ],
         ),
-      PoolsGroup(controller: _accounts),
-    ]);
+        if (_accounts.problem case final problem?)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              problem,
+              key: const Key('accounts-problem'),
+              style: TextStyle(color: scheme.error),
+            ),
+          ),
+        for (final provider in _accounts.providers)
+          SettingsGroup(
+            key: Key('accounts-${provider.id}'),
+            title: provider.label,
+            leading: SourceMark.provider(provider.groupId, size: 20),
+            trailing: TextButton.icon(
+              key: Key('add-account-${provider.id}'),
+              onPressed: () => unawaited(_add(provider.id)),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add account'),
+            ),
+            children: [
+              if (_accounts.of(provider.id).isEmpty &&
+                  _loginsOf(provider.id).isEmpty)
+                SettingsRow(
+                  title: 'No account',
+                  description: provider.agent != null
+                      ? '${provider.label} runs on the login it has where it runs, as before.'
+                      : provider.description,
+                ),
+              // The login an agent has where it runs is an account too: the Usage page lists it, so this page does.
+              for (final account in _loginsOf(provider.id)) _row(account),
+              for (final account in _accounts.of(provider.id)) _row(account),
+            ],
+          ),
+        PoolsGroup(controller: _accounts),
+      ],
+    );
   }
 
+  /// The automatic `local` accounts of [provider]: nothing is offered, signed in again or removed for them.
+  List<AccountInfo> _loginsOf(String provider) => [
+    for (final each in _accounts.logins)
+      if (each.provider == provider) each,
+  ];
+
   Widget _row(AccountInfo account) {
+    // Every agent's automatic account is named `local`, so the host's id tells them apart.
+    final tag = account.automatic ? account.id : account.name;
     final catalog = _accounts.catalogIfKnown(account.provider);
     final kind = catalog?.kind(account.kind);
-    final held = _accounts.heldBy(account.name);
+    final held = account.automatic ? null : _accounts.heldBy(account.name);
     final scheme = Theme.of(context).colorScheme;
     final detail = [
       kind?.title ?? account.kind,
@@ -160,103 +202,169 @@ class _AccountsSectionState extends State<AccountsSection> {
       if (held != null) 'held by "$held"',
     ].join(' · ');
     final entries = _accounts.entriesFor(account);
-    final logins = [if (catalog != null) for (final login in catalog.logins) if (login.produces == account.kind) login];
+    final logins = [
+      if (catalog != null)
+        for (final login in catalog.logins)
+          if (login.produces == account.kind) login,
+    ];
     final report = _accounts.usageOf(account);
-    final open = _usageOpen.contains(account.name);
-    return Column(key: Key('account ${account.name}'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SettingsRow(
-        title: account.name,
-        leading: SourceMark.provider(accountMarkId(account.groupId, account.kind), size: 24, key: Key('account-mark ${account.name}')),
-        description: detail,
-        // The standards it supports say which agents can run on it; the usage opens under them.
-        below: account.types.isEmpty && account.fits.isEmpty && !open && account.warnings.isEmpty
-            ? null
-            : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                for (var i = 0; i < account.warnings.length; i++)
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Icon(Icons.warning_amber_rounded, size: 16, color: scheme.error),
-                    const SizedBox(width: 4),
-                    Expanded(
+    final open = _usageOpen.contains(tag);
+    return Column(
+      key: Key('account $tag'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SettingsRow(
+          title: account.name,
+          leading: SourceMark.provider(
+            accountMarkId(account.groupId, account.kind),
+            size: 24,
+            key: Key('account-mark $tag'),
+          ),
+          description: detail,
+          // The standards it supports say which agents can run on it; the usage opens under them.
+          below:
+              account.types.isEmpty &&
+                  account.fits.isEmpty &&
+                  !open &&
+                  account.warnings.isEmpty
+              ? null
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < account.warnings.length; i++)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            size: 16,
+                            color: scheme.error,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              account.warnings[i],
+                              key: Key('account-warning $tag $i'),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: scheme.error),
+                            ),
+                          ),
+                        ],
+                      ),
+                    if (account.types.isNotEmpty)
+                      Text(
+                        'Supports ${standardsText(account.types)}',
+                        key: Key('account-supports $tag'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    if (account.fits.isNotEmpty)
+                      Text(
+                        'Agents: ${account.fits.map(harnessTitle).join(', ')}',
+                        key: Key('account-agents $tag'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    if (open)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: AccountUsageView(
+                          key: Key('account-usage-view $tag'),
+                          report: report,
+                        ),
+                      ),
+                  ],
+                ),
+          control: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (account.status == AccountStatus.needsSignIn)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilledButton.tonal(
+                    key: Key('account-sign-in ${account.name}'),
+                    onPressed: held != null
+                        ? null
+                        : () => unawaited(_again(account, logins.firstOrNull)),
+                    child: const Text('Sign in'),
+                  ),
+                ),
+              IconButton(
+                key: Key('account-usage-toggle $tag'),
+                tooltip: open ? 'Hide usage' : 'Show usage',
+                icon: Icon(open ? Icons.expand_less : Icons.speed, size: 20),
+                onPressed: () => setState(
+                  () => open ? _usageOpen.remove(tag) : _usageOpen.add(tag),
+                ),
+              ),
+              if (!account.automatic)
+                PopupMenuButton<String>(
+                  key: Key('account-menu ${account.name}'),
+                  tooltip: 'More',
+                  onSelected: (value) {
+                    if (value == 'remove') unawaited(_remove(account));
+                    if (value.startsWith('login:'))
+                      unawaited(
+                        _again(
+                          account,
+                          logins
+                              .where((each) => 'login:${each.id}' == value)
+                              .firstOrNull,
+                        ),
+                      );
+                    if (value.startsWith('offer:'))
+                      unawaited(_offer(account, value.substring(6)));
+                  },
+                  itemBuilder: (context) => [
+                    for (final login in logins)
+                      PopupMenuItem(
+                        key: Key('account-login ${account.name} ${login.id}'),
+                        value: 'login:${login.id}',
+                        enabled: held == null,
+                        child: Text(
+                          logins.length == 1
+                              ? 'Sign in again'
+                              : 'Sign in again with ${login.title}',
+                        ),
+                      ),
+                    if (entries.isNotEmpty) ...[
+                      if (logins.isNotEmpty) const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        enabled: false,
+                        height: 28,
+                        child: Text('Offered by'),
+                      ),
+                      for (final entry in entries)
+                        CheckedPopupMenuItem(
+                          key: Key('account-offer ${account.name} $entry'),
+                          value: 'offer:$entry',
+                          checked: _accounts
+                              .offering(account.name)
+                              .contains(entry),
+                          child: Text(entry),
+                        ),
+                      const PopupMenuDivider(),
+                    ],
+                    PopupMenuItem(
+                      key: Key('account-remove ${account.name}'),
+                      value: 'remove',
+                      enabled: held == null,
                       child: Text(
-                        account.warnings[i],
-                        key: Key('account-warning ${account.name} $i'),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.error),
+                        held == null ? 'Remove' : 'Remove (a session holds it)',
+                        style: TextStyle(
+                          color: held == null ? scheme.error : null,
+                        ),
                       ),
                     ),
-                  ]),
-                if (account.types.isNotEmpty)
-                  Text(
-                    'Supports ${standardsText(account.types)}',
-                    key: Key('account-supports ${account.name}'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                if (account.fits.isNotEmpty)
-                  Text(
-                    'Agents: ${account.fits.map(harnessTitle).join(', ')}',
-                    key: Key('account-agents ${account.name}'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                if (open)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: AccountUsageView(key: Key('account-usage-view ${account.name}'), report: report),
-                  ),
-              ]),
-        control: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (account.status == AccountStatus.needsSignIn)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilledButton.tonal(
-                key: Key('account-sign-in ${account.name}'),
-                onPressed: held != null ? null : () => unawaited(_again(account, logins.firstOrNull)),
-                child: const Text('Sign in'),
-              ),
-            ),
-          IconButton(
-            key: Key('account-usage-toggle ${account.name}'),
-            tooltip: open ? 'Hide usage' : 'Show usage',
-            icon: Icon(open ? Icons.expand_less : Icons.speed, size: 20),
-            onPressed: () => setState(() => open ? _usageOpen.remove(account.name) : _usageOpen.add(account.name)),
-          ),
-          PopupMenuButton<String>(
-            key: Key('account-menu ${account.name}'),
-            tooltip: 'More',
-            onSelected: (value) {
-              if (value == 'remove') unawaited(_remove(account));
-              if (value.startsWith('login:')) unawaited(_again(account, logins.where((each) => 'login:${each.id}' == value).firstOrNull));
-              if (value.startsWith('offer:')) unawaited(_offer(account, value.substring(6)));
-            },
-            itemBuilder: (context) => [
-              for (final login in logins)
-                PopupMenuItem(
-                  key: Key('account-login ${account.name} ${login.id}'),
-                  value: 'login:${login.id}',
-                  enabled: held == null,
-                  child: Text(logins.length == 1 ? 'Sign in again' : 'Sign in again with ${login.title}'),
+                  ],
                 ),
-              if (entries.isNotEmpty) ...[
-                if (logins.isNotEmpty) const PopupMenuDivider(),
-                const PopupMenuItem(enabled: false, height: 28, child: Text('Offered by')),
-                for (final entry in entries)
-                  CheckedPopupMenuItem(
-                    key: Key('account-offer ${account.name} $entry'),
-                    value: 'offer:$entry',
-                    checked: _accounts.offering(account.name).contains(entry),
-                    child: Text(entry),
-                  ),
-                const PopupMenuDivider(),
-              ],
-              PopupMenuItem(
-                key: Key('account-remove ${account.name}'),
-                value: 'remove',
-                enabled: held == null,
-                child: Text(held == null ? 'Remove' : 'Remove (a session holds it)', style: TextStyle(color: held == null ? scheme.error : null)),
-              ),
             ],
           ),
-        ]),
-      ),
-    ]);
+        ),
+      ],
+    );
   }
 }
 
@@ -292,7 +400,13 @@ class _SignInDialogState extends State<SignInDialog> {
   Widget build(BuildContext context) => AlertDialog(
     key: const Key('sign-in-dialog'),
     title: Text(widget.title),
-    content: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 460), child: SizedBox(width: double.maxFinite, child: SignInPanel(run: widget.run))),
+    content: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 460),
+      child: SizedBox(
+        width: double.maxFinite,
+        child: SignInPanel(run: widget.run),
+      ),
+    ),
     actions: [
       if (widget.run.running)
         TextButton(
@@ -304,7 +418,11 @@ class _SignInDialogState extends State<SignInDialog> {
           child: const Text('Cancel'),
         )
       else
-        FilledButton(key: const Key('sign-in-close'), onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        FilledButton(
+          key: const Key('sign-in-close'),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
     ],
   );
 }
