@@ -6,6 +6,7 @@ import 'package:canoa/popout/hub_tabs.dart';
 import 'package:canoa/popout/popout_hub.dart';
 import 'package:canoa/popout/popout_view.dart' show PopoutChat;
 import 'package:canoa/session_store.dart';
+import 'package:canoa/tabs/session_tab_strip.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -80,8 +81,10 @@ void main() {
     expect(hub.mainTabs.current, sessions[1].id);
   });
 
-  testWidgets('a lone tab draws no strip, and the last tab of the main window cannot be closed', (tester) async {
+  testWidgets('a lone tab draws no strip; closing the last tab of the main window shows the start screen, with no strip', (tester) async {
     final (:store, :hub, :windows, :sessions, :agents) = await _scene(tester, count: 1);
+    ChatSession? start;
+    hub.onNewSession = () => start = store.createDraft();
     expect(_tab(sessions[0]), findsNothing);
 
     final second = ScriptedAgent();
@@ -92,8 +95,62 @@ void main() {
     hub.closeTab(PopoutHub.mainKey, other);
     await tester.pump();
     expect(hub.mainTabs.sessions, [sessions[0].id]);
+    expect(store.selectedId, sessions[0].id);
+
     hub.closeTab(PopoutHub.mainKey, sessions[0]);
-    expect(hub.mainTabs.sessions, [sessions[0].id], reason: 'the window keeps the one tab it has');
+    await tester.pump();
+    expect(hub.mainTabs.isEmpty, isTrue, reason: 'the last tab closes too');
+    expect(start, isNotNull);
+    expect(store.selectedId, start!.id, reason: 'the window shows the start screen of a new session');
+    expect(find.byType(SessionTabStrip), findsNothing);
+    expect(hub.mainTabs.contains(start!.id), isFalse);
+  });
+
+  testWidgets('the start screen of a new session is no tab: the strip keeps the sessions, shows none as current, and adds nothing', (tester) async {
+    final (:store, :hub, :windows, :sessions, :agents) = await _scene(tester, count: 2);
+    expect(find.byType(SessionTabStrip), findsOneWidget);
+    final draft = store.createDraft();
+    await tester.pump();
+    expect(store.selectedId, draft.id);
+    expect(hub.mainTabs.sessions, [for (final s in sessions) s.id], reason: 'no tab for the start screen');
+    expect(hub.currentIn(PopoutHub.mainKey), isNull);
+    expect(find.byType(SessionTabStrip), findsOneWidget);
+    expect(tester.widget<SessionTabStrip>(find.byType(SessionTabStrip)).sessions, hasLength(2));
+    expect(find.text(draft.title), findsNothing, reason: 'no New tab, and so no close button for it');
+
+    await tester.tap(_tab(sessions[0]));
+    await tester.pump();
+    expect(store.selectedId, sessions[0].id);
+    expect(hub.currentIn(PopoutHub.mainKey), sessions[0].id);
+  });
+
+  testWidgets('with a start screen over one session, the strip is drawn to go back to it; with no session it is not', (tester) async {
+    final (:store, :hub, :windows, :sessions, :agents) = await _scene(tester, count: 1);
+    expect(find.byType(SessionTabStrip), findsNothing);
+    store.createDraft();
+    await tester.pump();
+    expect(_tab(sessions[0]), findsOneWidget);
+    await tester.tap(find.byKey(Key('tab-close-${sessions[0].id}')));
+    await tester.pump();
+    expect(find.byType(SessionTabStrip), findsNothing, reason: 'no session is open: the start screen alone');
+    expect(hub.mainTabs.isEmpty, isTrue);
+  });
+
+  testWidgets('a session moved out of the main window and back keeps its tab; the main window shows the start screen meanwhile', (tester) async {
+    final (:store, :hub, :windows, :sessions, :agents) = await _scene(tester, count: 1);
+    hub.onNewSession = store.createDraft;
+    await tester.runAsync(() => hub.moveToNewWindow(sessions[0]));
+    await _settle(tester);
+    expect(hub.mainTabs.isEmpty, isTrue);
+    expect(store.selected!.isDraft, isTrue, reason: 'the start screen');
+    expect(find.byType(SessionTabStrip), findsNothing);
+    expect(hub.placeOf(sessions[0]), isNot(PopoutHub.mainKey));
+
+    await tester.runAsync(() => hub.moveBack(sessions[0]));
+    await _settle(tester);
+    expect(hub.mainTabs.sessions, [sessions[0].id]);
+    expect(store.selectedId, sessions[0].id);
+    expect(hub.placeOf(sessions[0]), PopoutHub.mainKey);
   });
 
   testWidgets('closing a tab shows the next one, and leaves the conversation where it is', (tester) async {

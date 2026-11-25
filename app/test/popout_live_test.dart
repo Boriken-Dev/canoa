@@ -204,12 +204,13 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(windows.opened, hasLength(1));
-    expect(find.byTooltip('Bring back from its own window'), findsOneWidget);
+    expect(find.byTooltip('Open in new window'), findsNothing, reason: 'the main window shows the start screen of a new session, which has no header');
+    expect(find.byTooltip('Bring back from its own window'), findsNothing);
 
-    await tester.tap(find.byTooltip('Bring back from its own window'));
+    await tester.runAsync(() => windows.opened.single.close());
     await _settle(tester);
     expect(windows.opened.single.isClosed, isTrue);
-    expect(find.byTooltip('Open in new window'), findsOneWidget);
+    expect(find.byTooltip('Open in new window'), findsOneWidget, reason: 'its tab is back in the main window');
     expect(session.status, SessionStatus.connected);
   });
 
@@ -244,6 +245,9 @@ void main() {
     final words = AppText.of(tester.element(find.byType(PopoutChat).first));
     expect(words.language, 'es', reason: 'a window reads in the language the main window does');
 
+    // With the session in a window and the start screen shown, the list keeps it under its collapsed group.
+    await tester.tap(find.textContaining('Settled'));
+    await tester.pumpAndSettle();
     await openFromList(first.title);
     expect(windows.opened, hasLength(2), reason: 'the session is out already');
     expect(windows.opened.first.focused, 1);

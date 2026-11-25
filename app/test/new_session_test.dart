@@ -202,7 +202,8 @@ void main() {
   testWidgets('a new session closed before its first message leaves nothing', (tester) async {
     final (store, starts, worktrees, _) = await _app(tester);
     await newSession(tester);
-    await tester.tap(find.byTooltip('Close conversation'));
+    expect(find.byTooltip('Close conversation'), findsNothing, reason: 'the start screen has no header, title or close button');
+    await store.close(store.selected!);
     await tester.pumpAndSettle();
     expect(store.listed, isEmpty);
     expect(store.sessions.single.isDraft, isTrue, reason: 'the window lands on a fresh page of choices');
