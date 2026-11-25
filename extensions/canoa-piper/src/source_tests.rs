@@ -309,16 +309,16 @@ fn the_real_listings_at_the_pinned_commit_give_the_snapshot_and_the_blob_ids_mat
 }
 
 #[test]
-#[ignore = "needs CANOA_DEPS to hold catalogs/ (tools/catalog_documents.py sync)"]
+#[ignore = "needs CANOA_DEPS to hold cdn/huggingface.co/ (python tools/build.py deps sync)"]
 fn the_snapshot_is_what_the_source_makes_of_the_documents_the_deps_branch_keeps() {
     let deps = std::env::var("CANOA_DEPS").expect("CANOA_DEPS names a deps checkout");
-    let read = |name: &str| {
-        std::fs::read_to_string(format!("{deps}/catalogs/canoa-piper/{name}_4a409e3c.json"))
-            .expect("the document, synced")
+    let read = |path: String| {
+        std::fs::read_to_string(format!("{deps}/cdn/huggingface.co/{path}")).expect("the document, synced")
     };
-    let voices = read("voices");
-    let ljspeech = read("tree_en_US_ljspeech_medium");
-    let claude = read("tree_es_MX_claude_high");
+    let voices = read(format!("{DEFAULT_REPO}/raw/{REVISION}/voices.json"));
+    let tree = |folder: &str| read(format!("api/models/{DEFAULT_REPO}/tree/{REVISION}/{folder}"));
+    let ljspeech = tree("en/en_US/ljspeech/medium");
+    let claude = tree("es/es_MX/claude/high");
     let include: Vec<String> = DEFAULT_VOICES.map(str::to_owned).to_vec();
     let made = catalog_of(
         DEFAULT_REPO,

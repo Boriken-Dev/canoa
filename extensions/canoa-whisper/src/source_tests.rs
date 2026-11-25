@@ -257,11 +257,11 @@ fn the_real_listing_at_the_pinned_revision_gives_the_shipped_snapshot() {
 }
 
 #[test]
-#[ignore = "needs CANOA_DEPS to hold catalogs/ (tools/catalog_documents.py sync)"]
+#[ignore = "needs CANOA_DEPS to hold cdn/huggingface.co/ (python tools/build.py deps sync)"]
 fn the_snapshot_is_what_the_source_makes_of_the_document_the_deps_branch_keeps() {
     let deps = std::env::var("CANOA_DEPS").expect("CANOA_DEPS names a deps checkout");
     let listing = std::fs::read_to_string(format!(
-        "{deps}/catalogs/canoa-whisper/hf_tree_5359861c.json"
+        "{deps}/cdn/huggingface.co/api/models/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1"
     ))
     .expect("the document, synced");
     let made = catalog_of(DEFAULT_REPO, REVISION, &listing, &default_include(), &[])

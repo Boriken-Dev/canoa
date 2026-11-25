@@ -73,7 +73,7 @@ def pin(root: Path, deps: Path | None, index: Path = LIST) -> tuple[int, int, in
         local = None if deps is None else deps / "cdn" / HOST / PREFIX.strip("/") / name
         body = local.read_bytes() if local is not None and local.is_file() else _download(name)
         fonts.append(dict(host=HOST, path=PREFIX + name, sha256=hashlib.sha256(body).hexdigest(), bytes=len(body), licence=LICENCE))
-    data["files"] = others + sorted(fonts, key=lambda e: e["path"])
+    data["files"] = sorted(others + fonts, key=lambda e: (e["host"], e["path"]))
     index.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8", newline="\n")
     names = {e["path"][len(PREFIX):] for e in fonts}
     return len(fonts), len(names - old), len(old - names)
