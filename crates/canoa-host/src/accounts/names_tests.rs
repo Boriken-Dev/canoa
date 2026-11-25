@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use super::commands::{append_table, remove_table};
 use crate::config::Config;
 
+fn file(path: &std::path::Path) -> crate::config_store::FileStore {
+    crate::config_store::FileStore::at(path)
+}
+
 fn dir(name: &str) -> PathBuf {
     static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
@@ -37,7 +41,7 @@ fn an_account_called_anything_a_person_can_read_is_written_found_and_removed() {
     ];
     for name in names {
         append_table(
-            &path,
+            &file(&path),
             &["host", "accounts"],
             name,
             &table(&format!("kind = \"api\"\nid = \"id-{}\"\n", name.len())),
@@ -55,7 +59,7 @@ fn an_account_called_anything_a_person_can_read_is_written_found_and_removed() {
     }
     assert!(
         append_table(
-            &path,
+            &file(&path),
             &["host", "accounts"],
             "café",
             &table("harness = \"claude\"\n")
@@ -64,7 +68,13 @@ fn an_account_called_anything_a_person_can_read_is_written_found_and_removed() {
         "a name taken is not written over"
     );
     for name in names {
-        remove_table(&path, &["host", "accounts"], name, "canoa accounts add").expect(name);
+        remove_table(
+            &file(&path),
+            &["host", "accounts"],
+            name,
+            "canoa accounts add",
+        )
+        .expect(name);
     }
     let after = fs::read_to_string(&path).expect("read");
     assert_eq!(

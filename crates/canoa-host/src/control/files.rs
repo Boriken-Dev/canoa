@@ -6,6 +6,7 @@
     reason = "files and locks are std's"
 )]
 
+use alloc::sync::Arc;
 use std::fs;
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
@@ -101,6 +102,16 @@ impl Default for UploadLimits {
     }
 }
 
+/// A configuration store, held where a page's reads and writes of canoa.cfg go through it.
+#[derive(Clone)]
+struct Kept(Arc<dyn canoa::config_store::ConfigStore>);
+
+impl core::fmt::Debug for Kept {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("a configuration store")
+    }
+}
+
 /// Where a page's files are, and what it may do there.
 #[derive(Debug, Default)]
 pub(crate) struct Files {
@@ -108,8 +119,10 @@ pub(crate) struct Files {
     home: Option<PathBuf>,
     /// The working roots of each entry, and the keys that may use it.
     roots: Vec<EntryRoots>,
-    /// The person's own canoa.cfg, the one file a page writes.
+    /// The folder beside the person's own canoa.cfg, where overlays install and trust is kept.
     config: Option<PathBuf>,
+    /// Where the configuration lives: the one place a page's reads and writes of it go through.
+    store: Option<Kept>,
     /// Where uploads are kept, a directory for each owner.
     uploads: Option<PathBuf>,
     limits: UploadLimits,
@@ -127,6 +140,7 @@ pub(crate) struct Files {
     protected: Option<Vec<String>>,
 }
 
+pub(crate) mod advanced;
 mod config;
 mod folders;
 mod instructions;
@@ -135,7 +149,6 @@ mod profiles;
 mod uploads;
 pub(crate) mod workspace;
 pub(crate) use config::table_in;
-use config::{parse, read_cfg};
 pub(crate) use folders::Scratch;
 
 impl Files {
@@ -146,10 +159,14 @@ impl Files {
         uploads: Option<PathBuf>,
         limits: UploadLimits,
     ) -> Self {
+        let store = config
+            .as_deref()
+            .map(|path| Kept(Arc::new(crate::config_store::FileStore::at(path))));
         Self {
             home,
             roots,
             config,
+            store,
             uploads,
             limits,
             writing: Mutex::new(()),
@@ -159,6 +176,14 @@ impl Files {
             openers: RwLock::new(None),
             protected: None,
         }
+    }
+
+    /// Keeps the configuration in `store` instead of the file `Files::new` was given.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_store(mut self, store: Arc<dyn canoa::config_store::ConfigStore>) -> Self {
+        self.store = Some(Kept(store));
+        self
     }
 
     /// Takes the person's list of protected paths, which `fs/write` never writes; `None` is the recommended list.

@@ -17,7 +17,7 @@ use coqui_aos::{self as aos, Limit, Settings, StdFs};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
-use super::{Files, Outcome, parse, plain, read_cfg, refused, text_of};
+use super::{Files, Outcome, plain, refused, text_of};
 use crate::control::{Caller, bad, text_param};
 
 /// The project profile file in a working directory.
@@ -55,13 +55,7 @@ impl Files {
 
     /// The folders `[overlays]` names with `dir`, resolved.
     fn configured_dirs(&self) -> Vec<PathBuf> {
-        let Some(path) = self.config.as_deref() else {
-            return Vec::new();
-        };
-        let Ok((text, _)) = read_cfg(path) else {
-            return Vec::new();
-        };
-        let Ok(table) = parse(path, &text) else {
+        let Ok(table) = self.own_tables() else {
             return Vec::new();
         };
         let Some(overlays) = table.get("overlays").and_then(toml::Value::as_table) else {

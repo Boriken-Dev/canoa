@@ -41,12 +41,13 @@ impl<'a> From<&'a Listed> for Signing<'a> {
 
 #[cfg(test)]
 pub(crate) use cfg::append_table;
-#[cfg(test)]
-pub(crate) use cfg::remove_entry;
-use cfg::{append_account, remove_account};
 pub(crate) use cfg::{
-    config_writes, read_cfg, remove_table, set_offered, set_pool, set_table, write_cfg,
+    Change, check_cfg, config_writes, edit_cfg, read_cfg, remove_table, set_offered, set_pool,
+    set_table, toml_value,
 };
+use cfg::{append_account, remove_account};
+#[cfg(test)]
+pub(crate) use cfg::{remove_entry, write_cfg};
 pub(crate) use interact::{Event, Relay};
 use interact::{cancel_on_input_closing, sign_in};
 
@@ -548,7 +549,11 @@ pub(crate) fn add_with(
         id: id.clone(),
         settings: (!settings.is_empty()).then(|| Settings::new(settings)),
     };
-    if let Err(failed) = append_account(cfg.config_path, name, &account) {
+    if let Err(failed) = append_account(
+        &crate::config_store::FileStore::at(cfg.config_path),
+        name,
+        &account,
+    ) {
         let _ = accounts.forget_credentials(&id);
         let _ = accounts.forget_directory(&id);
         return Err(failed);
@@ -711,11 +716,21 @@ pub(crate) fn remove_with(cfg: Cfg<'_>, name: &str) -> Result<(), Failed> {
     }
     let accounts = accounts_of(cfg)?;
     let lease = accounts.exclusive(&account.id).map_err(refused)?;
-    let before = read_cfg(cfg.config_path)?;
-    remove_account(cfg.config_path, name)?;
+    use canoa::config_store::ConfigStore as _;
+    let store = crate::config_store::FileStore::at(cfg.config_path);
+    let key = canoa::config_store::Key::new(["host", "accounts", name]);
+    let before = store
+        .get(key)
+        .map_err(|error| Failed::run(error.to_string()))?
+        .value;
+    remove_account(&store, name)?;
     // The stored credential goes with the account; were it to stay, nothing would name it any more.
     if let Err(error) = accounts.forget_credentials(&account.id) {
-        let _ = write_cfg(cfg.config_path, &before);
+        if let Some(before) = before {
+            let _ = store.change(canoa::config_store::Changes::of(vec![
+                canoa::config_store::Op::set(["host", "accounts", name], before),
+            ]));
+        }
         return Err(Failed::run(error.to_string()));
     }
     if let Err(error) = accounts.forget_directory(&account.id) {

@@ -9,6 +9,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
+use canoa::config_store::{Changes, ConfigStore, Key, Op};
+
 use crate::cli::Failed;
 use crate::config::{AccountConfig, Config};
 
@@ -32,6 +34,7 @@ pub(crate) fn check_cfg(path: &Path, text: &str) -> Result<(), Failed> {
 }
 
 /// Writes `text` as the whole of the file at `path`, and only if it is a canoa.cfg this host reads.
+#[cfg(test)]
 pub(crate) fn write_cfg(path: &Path, text: &str) -> Result<(), Failed> {
     check_cfg(path, text)?;
     crate::replace::write_file(path, text.as_bytes(), 0o600)
@@ -101,8 +104,9 @@ pub(crate) fn edit_document(
     String::from_utf8(bytes).map_err(|error| Failed::run(error.to_string()))
 }
 
+/// Adds the account `name` as `[host.accounts.NAME]`.
 pub(super) fn append_account(
-    path: &Path,
+    store: &dyn ConfigStore,
     name: &str,
     account: &AccountConfig,
 ) -> Result<(), Failed> {
@@ -114,7 +118,7 @@ pub(super) fn append_account(
     {
         block.insert("settings".into(), value);
     }
-    append_table(path, &["host", "accounts"], name, &block)
+    append_table(store, &["host", "accounts"], name, &block)
 }
 
 /// One change to canoa.cfg, made in whatever format the file is in.
@@ -222,61 +226,52 @@ fn change_tree(root: &mut toml::Table, change: &Change<'_>) -> Result<bool, Fail
     })
 }
 
-/// Whether the file's text has a table at `path`, in whatever format it is written.
-fn has_table(path: &Path, text: &str, at: &[&str]) -> Result<bool, Failed> {
-    if text.trim().is_empty() {
-        return Ok(false);
-    }
-    let value = crate::format::formats()
-        .from_slice(
-            text.as_bytes(),
-            anycfg::Options::new().name(file_name(path)),
-        )
-        .map_err(|error| Failed::run(format!("{}: {error}", path.display())))?;
-    let mut here = &value;
-    for key in at {
-        match here.get(*key) {
-            Some(next) => here = next,
-            None => return Ok(false),
-        }
-    }
-    Ok(here.is_table())
-}
-
-/// The text of canoa.cfg with the table `[section.NAME]` added: made in place for a file in TOML, which keeps its comments and
-/// layout, and as a document for one in another format.
+/// Adds the table `[section.NAME]` to the configuration.
 ///
 /// # Errors
 ///
-/// The file already has a table of that name, or is not a file this host reads.
-pub(crate) fn with_table(
-    path: &Path,
-    text: &str,
+/// The configuration already has a table of that name, or the store refuses it.
+pub(crate) fn append_table(
+    store: &dyn ConfigStore,
     section: &[&str],
     name: &str,
     table: &toml::Table,
-) -> Result<String, Failed> {
+) -> Result<(), Failed> {
     let mut at = section.to_vec();
     at.push(name);
-    if has_table(path, text, &at)? {
+    if holds(store, &at)? {
         return Err(Failed::usage(format!(
             "canoa.cfg has a table [{}] already",
             at.join(".")
         )));
     }
-    Ok(edit_cfg(path, text, &[Change::Replace(&at, table)])?.0)
+    apply(store, vec![set_op(&at, table)])
 }
 
-/// Adds the table `[section.NAME]` to the file at `path`; see [`with_table`].
-pub(crate) fn append_table(
-    path: &Path,
-    section: &[&str],
-    name: &str,
-    table: &toml::Table,
-) -> Result<(), Failed> {
-    let _one = config_writes();
-    let text = read_cfg(path)?;
-    write_cfg(path, &with_table(path, &text, section, name, table)?)
+/// Whether the store holds a table at `at`.
+fn holds(store: &dyn ConfigStore, at: &[&str]) -> Result<bool, Failed> {
+    let held = store
+        .get(Key::new(at.iter().copied()))
+        .map_err(|error| Failed::run(error.to_string()))?;
+    Ok(held
+        .value
+        .as_ref()
+        .and_then(canoa::config_store::json_of)
+        .is_some_and(|value| value.is_object()))
+}
+
+/// An op that makes the table at `at` hold `table`.
+fn set_op(at: &[&str], table: &toml::Table) -> Op {
+    let json = serde_json::to_value(table).unwrap_or(serde_json::Value::Null);
+    Op::set(at.iter().copied(), canoa::config_store::value_of(&json))
+}
+
+/// Makes `ops` in the store, all or none.
+fn apply(store: &dyn ConfigStore, ops: Vec<Op>) -> Result<(), Failed> {
+    store
+        .change(Changes::of(ops))
+        .map(|_| ())
+        .map_err(|error| Failed::usage(error.to_string()))
 }
 
 /// Held while canoa.cfg is read, changed and written back, so that an offer, an account added or removed and a setting saved never
@@ -288,20 +283,15 @@ pub(crate) fn config_writes() -> std::sync::MutexGuard<'static, ()> {
     CONFIG_WRITES.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Makes the agent entry `entry`, which runs `harness`, offer exactly `accounts` in the file at `path`, in the file's own format: an
-/// entry the file does not have yet is written with its `harness` and `made` (the other keys it starts with), and none left takes
-/// the key out.
 pub(crate) fn set_offered(
-    path: &Path,
+    store: &dyn ConfigStore,
     entry: &str,
     harness: &str,
     accounts: &[String],
     made: &[(&str, toml::Value)],
 ) -> Result<(), Failed> {
-    let _one = config_writes();
-    let text = read_cfg(path)?;
     let at = ["host", "agents", entry];
-    let fresh = !has_table(path, &text, &at)?;
+    let fresh = !holds(store, &at)?;
     if fresh && accounts.is_empty() {
         return Ok(());
     }
@@ -312,31 +302,30 @@ pub(crate) fn set_offered(
             table.insert((*key).to_owned(), value.clone());
         }
     }
-    table.insert(
-        "accounts".into(),
-        toml::Value::Array(
-            accounts
-                .iter()
-                .map(|name| toml::Value::String(name.clone()))
-                .collect(),
-        ),
+    let list = toml::Value::Array(
+        accounts
+            .iter()
+            .map(|name| toml::Value::String(name.clone()))
+            .collect(),
     );
-    let change = if accounts.is_empty() {
-        Change::RemoveKey(&at, "accounts")
+    table.insert("accounts".into(), list.clone());
+    let key = ["host", "agents", entry, "accounts"];
+    let ops = if accounts.is_empty() {
+        vec![Op::remove(key)]
+    } else if fresh {
+        vec![set_op(&at, &table)]
     } else {
-        Change::Merge(&at, &table)
+        let json = serde_json::to_value(&list).unwrap_or(serde_json::Value::Null);
+        vec![Op::set(key, canoa::config_store::value_of(&json))]
     };
-    write_cfg(path, &edit_cfg(path, &text, &[change])?.0)
+    apply(store, ops)
 }
 
-/// Writes the pool `name` as `[host.pools.NAME]` in the file at `path`, in the file's own format, replacing the one it has.
 pub(crate) fn set_pool(
-    path: &Path,
+    store: &dyn ConfigStore,
     name: &str,
     pool: &crate::config::PoolConfig,
 ) -> Result<(), Failed> {
-    let _one = config_writes();
-    let text = read_cfg(path)?;
     let mut table = toml::Table::new();
     table.insert(
         "standard".into(),
@@ -352,84 +341,71 @@ pub(crate) fn set_pool(
         ),
     );
     let at = ["host", "pools", name];
-    write_cfg(
-        path,
-        &edit_cfg(path, &text, &[Change::Replace(&at, &table)])?.0,
-    )
+    apply(store, vec![set_op(&at, &table)])
 }
 
-/// Replaces the table at `at` with `table`, made when the file has none, or takes it out for `None`, in the file's own format. The
-/// rest of the file, its comments included, stays as it is.
 pub(crate) fn set_table(
-    path: &Path,
+    store: &dyn ConfigStore,
     at: &[&str],
     table: Option<&toml::Table>,
 ) -> Result<(), Failed> {
-    let _one = config_writes();
-    let text = read_cfg(path)?;
-    let change = match table {
-        Some(table) => Change::Replace(at, table),
-        None => Change::RemoveTable(at),
-    };
-    let (edited, found) = edit_cfg(path, &text, &[change])?;
-    if table.is_none() && !found {
-        return Err(Failed::usage(format!(
-            "canoa.cfg does not hold [{}] as a table of its own: change it by hand",
-            at.join(".")
-        )));
+    match table {
+        Some(table) => apply(store, vec![set_op(at, table)]),
+        None => {
+            if !holds(store, at)? {
+                return Err(Failed::usage(format!(
+                    "canoa.cfg does not hold [{}] as a table of its own: change it by hand",
+                    at.join(".")
+                )));
+            }
+            apply(store, vec![Op::remove(at.iter().copied())])
+        }
     }
-    write_cfg(path, &edited)
 }
 
-/// Takes the block `add` wrote for `name` out of the file. An account written some other way is for its writer to remove.
-pub(super) fn remove_account(path: &Path, name: &str) -> Result<(), Failed> {
-    remove_table(path, &["host", "accounts"], name, "canoa accounts add")
+pub(super) fn remove_account(store: &dyn ConfigStore, name: &str) -> Result<(), Failed> {
+    remove_table(store, &["host", "accounts"], name, "canoa accounts add")
 }
 
-/// Takes the table `[section.NAME]`, as `writer` wrote it, out of the file at `path`.
 pub(crate) fn remove_table(
-    path: &Path,
+    store: &dyn ConfigStore,
     section: &[&str],
     name: &str,
     writer: &str,
 ) -> Result<(), Failed> {
-    let _one = config_writes();
-    let text = read_cfg(path)?;
     let mut at = section.to_vec();
     at.push(name);
-    let (edited, found) = edit_cfg(path, &text, &[Change::RemoveTable(&at)])?;
-    if !found {
+    if !holds(store, &at)? {
         return Err(Failed::usage(format!(
             "canoa.cfg does not hold [{}] as `{writer}` writes it: remove it from the file by hand",
             at.join(".")
         )));
     }
-    write_cfg(path, &edited)
+    apply(store, vec![Op::remove(at.iter().copied())])
 }
 
-/// Takes the agent entry `name` out of the file at `path`, whole. Refused when the file spells it with tables of their own
-/// (`[host.agents.NAME.x]`), which a caller that only means to drop a plain entry never meant.
 #[cfg(test)]
-pub(crate) fn remove_entry(path: &Path, name: &str) -> Result<(), Failed> {
-    let _one = config_writes();
-    let text = read_cfg(path)?;
+pub(crate) fn remove_entry(store: &dyn ConfigStore, name: &str) -> Result<(), Failed> {
     let at = ["host", "agents", name];
-    if format_of(path, &text)? == "toml" {
-        let document = crate::cfg_edit::parse(&text)
-            .map_err(|error| Failed::run(format!("{}: {error}", path.display())))?;
-        if crate::cfg_edit::has_subtable(&document, &at) {
+    let held = store
+        .get(Key::new(at))
+        .map_err(|error| Failed::run(error.to_string()))?;
+    let json = held.value.as_ref().and_then(canoa::config_store::json_of);
+    match json {
+        Some(serde_json::Value::Object(entry)) => {
+            if entry.values().any(serde_json::Value::is_object) {
+                return Err(Failed::usage(format!(
+                    "[host.agents.{name}] has tables of its own: change canoa.cfg by hand"
+                )));
+            }
+        }
+        _ => {
             return Err(Failed::usage(format!(
-                "[host.agents.{name}] has tables of its own: change canoa.cfg by hand"
+                "canoa.cfg has no [host.agents.{name}] as a table of its own: change it by hand"
             )));
         }
     }
-    let (edited, found) = edit_cfg(path, &text, &[Change::RemoveTable(&at)])?;
-    if !found {
-        return Err(Failed::usage(format!(
-            "canoa.cfg has no [host.agents.{name}] as a table of its own: change it by hand"
-        )));
-    }
-    write_cfg(path, &edited)
+    apply(store, vec![Op::remove(at)])
 }
 
 #[cfg(all(feature = "yaml", feature = "json"))]
@@ -481,7 +457,12 @@ mod format_tests {
         ] {
             let path = dir.join(name);
             fs::write(&path, text).expect("write");
-            append_account(&path, "work", &account()).expect(name);
+            append_account(
+                &crate::config_store::FileStore::at(&path),
+                "work",
+                &account(),
+            )
+            .expect(name);
             let written = fs::read_to_string(&path).expect("read");
             let marker = text.lines().next().filter(|line| line.starts_with("#!"));
             if let Some(marker) = marker {
@@ -495,7 +476,7 @@ mod format_tests {
                 written.contains("start_hidden"),
                 "{name}: the other tables stay"
             );
-            remove_account(&path, "work").expect(name);
+            remove_account(&crate::config_store::FileStore::at(&path), "work").expect(name);
             let after = fs::read_to_string(&path).expect("read");
             assert!(!after.contains("work"), "{name}: {after}");
             assert!(after.contains("start_hidden"), "{name}: {after}");
@@ -537,10 +518,17 @@ mod format_tests {
             for who in ["work", "other"] {
                 let mut made = account();
                 made.id = format!("id-{who}");
-                append_account(&path, who, &made).expect(name);
+                append_account(&crate::config_store::FileStore::at(&path), who, &made).expect(name);
             }
             let both = vec!["other".to_owned(), "work".to_owned()];
-            set_offered(&path, "Claude", "claude", &both, &[]).expect(name);
+            set_offered(
+                &crate::config_store::FileStore::at(&path),
+                "Claude",
+                "claude",
+                &both,
+                &[],
+            )
+            .expect(name);
             let written = fs::read_to_string(&path).expect("read");
             assert_eq!(
                 offered(&written, name),
@@ -554,14 +542,28 @@ mod format_tests {
             if name == "f.cfg" {
                 assert!(written.contains("# the person's own") && written.contains("Mine"));
             }
-            set_offered(&path, "Claude", "claude", &["work".to_owned()], &[]).expect(name);
+            set_offered(
+                &crate::config_store::FileStore::at(&path),
+                "Claude",
+                "claude",
+                &["work".to_owned()],
+                &[],
+            )
+            .expect(name);
             let written = fs::read_to_string(&path).expect("read");
             assert_eq!(
                 offered(&written, name).map(|each| each.1),
                 Some(vec!["work".to_owned()]),
                 "{name}: {written}"
             );
-            set_offered(&path, "Claude", "claude", &[], &[]).expect(name);
+            set_offered(
+                &crate::config_store::FileStore::at(&path),
+                "Claude",
+                "claude",
+                &[],
+                &[],
+            )
+            .expect(name);
             let written = fs::read_to_string(&path).expect("read");
             assert_eq!(
                 offered(&written, name).map(|each| each.1),
@@ -581,13 +583,13 @@ mod format_tests {
         fs::write(&path, "[desktop]\nstart_hidden = true\n").expect("write");
         std::thread::scope(|scope| {
             for index in 0..12 {
-                let path = &path;
+                let store = crate::config_store::FileStore::at(&path);
                 scope.spawn(move || {
                     let mut made = account();
                     made.id = format!("id-{index}");
-                    append_account(path, &format!("a{index}"), &made).expect("added");
+                    append_account(&store, &format!("a{index}"), &made).expect("added");
                     set_offered(
-                        path,
+                        &store,
                         &format!("E{index}"),
                         "claude",
                         &[format!("a{index}")],

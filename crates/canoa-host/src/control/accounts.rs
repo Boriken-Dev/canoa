@@ -146,7 +146,7 @@ fn made_keys(entry: &str, built_in: bool, portal: bool) -> Vec<(&'static str, to
 }
 
 fn offer(
-    own: &std::path::Path,
+    own: &dyn canoa::config_store::ConfigStore,
     config: &Config,
     portal: bool,
     params: &Value,
@@ -340,10 +340,23 @@ impl Accounts {
                 Ok(json!({"removed": true}))
             }
             "accounts/entries" => Ok(json!({"entries": entries_of(&config, self.portal)})),
-            "accounts/offer" => offer(&self.layers.own, &config, self.portal, params),
+            "accounts/offer" => offer(
+                &crate::config_store::FileStore::of(&self.layers),
+                &config,
+                self.portal,
+                params,
+            ),
             "pools/list" => Ok(super::pools::list(&config)),
-            "pools/set" => super::pools::set(&self.layers.own, &config, params),
-            "pools/remove" => super::pools::remove(&self.layers.own, &config, params),
+            "pools/set" => super::pools::set(
+                &crate::config_store::FileStore::of(&self.layers),
+                &config,
+                params,
+            ),
+            "pools/remove" => super::pools::remove(
+                &crate::config_store::FileStore::of(&self.layers),
+                &config,
+                params,
+            ),
             "pools/turn" => super::pools::turn(self, params),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
         }
@@ -639,7 +652,12 @@ mod offer_tests {
         let path = dir.join("canoa.cfg");
         std::fs::write(&path, text).expect("written");
         let config = Config::from_str_in(text, &dir).expect("parses");
-        let answer = offer(&path, &config, portal, params);
+        let answer = offer(
+            &crate::config_store::FileStore::at(&path),
+            &config,
+            portal,
+            params,
+        );
         let written = std::fs::read_to_string(&path).expect("read");
         let after = Config::from_str_in(&written, &dir).expect("the edited file reads");
         std::fs::remove_dir_all(&dir).expect("cleanup");

@@ -47,6 +47,14 @@ A higher layer is merged over the lower ones, key by key:
 
 Settings shows the merged values, says on a row which come from a lower layer ("From the system file") and which of yours override one ("Overrides the system file", with **Reset**, which takes the value out of your file so the lower one shows). The app writes your own file only, and only the keys you changed or already had there; a value from the installed or the system's file is never copied into it. If your file does not exist yet, the first change creates it.
 
+### Everything in {{ config_file }} is managed in the app
+
+You never have to edit the file by hand. Each table has a page: the tables of the app's own settings have theirs (General, Appearance, Voice, Sources, Permissions and the rest), and **Settings, Advanced** lists every other table the host reads (`[host.web]`, `[host.control]`, `[host.native]`, `[host.network]`, `[host.store]`, `[host.delegate]`, `[host.kb]`, `[host.mcp_list]`, `[host.usage]`, `[host.worktrees]`, `[host.history]`, `[host.tools.NAME]`, `[host.environments.NAME]`, `[[host.openers]]`, the settings directly under `[host]` and `[harnesses]`). Each is a form made from the settings the host reads, with add, change and remove, and the host refuses a change it would not read, saying why.
+
+Every list in the app removes an entry the same way: it asks first, and says what goes out of {{ config_file }} and what stays. An entry that comes from the installed or the system's file is shown with where it comes from and how to change it there ("Defined in the system file. {{ name }} does not write that file: remove it there."), because your file holds nothing to take out; when your own entry replaces one of a lower layer, removing it brings the lower one back.
+
+The host keeps the configuration in a *store* (the `config_store` kind): {{ config_file }}'s layers are the store it carries, and a store that keeps it somewhere else can replace it without the host or the app knowing. The app and the host never open the file themselves.
+
 Configuration tables:
 
 - [desktop] start_hidden, close_to_tray, minimize_to_tray, start_at_login (absent until the first run turns it on; true registers the app to start hidden in the tray when you sign in, for your user only; false removes that), local_host (default true: the app runs its own host; false, or `--no-local-host`, leaves it off)

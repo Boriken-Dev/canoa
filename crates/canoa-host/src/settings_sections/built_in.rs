@@ -60,6 +60,7 @@ built_in_sections! {
     Store("store", "Store", "Store", "storefront", "catalog catalogs sources registries overlays skills mcp servers types limits icons size");
     Extensions("extensions", "Extensions", "Store", "extension", "store types runtimes add library provider host restart");
     CatalogSources("catalog_sources", "Catalog sources", "Store", "hub", "catalogs sources models releases default replace add off pin trust verified pinned unverified checksum digest mirror");
+    Advanced("advanced", "Advanced", "Store", "wrench", "configuration canoa.cfg tables keys web control native network delegate kb history worktrees tools environments openers limits advanced edit add remove");
     Providers("providers", "Providers", "Store", "wrench", "providers libraries kinds account harness vendor off disable switch turn disabled host restart");
     About("about", "About", "About", "info", "version canoa boriken licence");
 }

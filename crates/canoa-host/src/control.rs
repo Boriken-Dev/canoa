@@ -22,6 +22,8 @@ use crate::terminal::{self, Terminals};
 #[cfg(test)]
 use dispatch::ROUTES;
 pub(crate) use extension_install::ExtensionInstall;
+#[cfg(test)]
+pub(crate) use files::advanced;
 pub use files::{
     DEFAULT_LIST, DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS,
     MAX_CHUNK, MAX_SECTION_BYTES, SECTIONS,
@@ -1056,6 +1058,8 @@ pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 pub(crate) mod accounts;
+#[cfg(test)]
+mod advanced_tests;
 mod agent_entries;
 mod catalog_read;
 #[cfg(test)]

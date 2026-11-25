@@ -108,7 +108,12 @@ impl ServiceHost for HostServices {
             Source::Files(layers) => {
                 let mut at = vec!["host", "services", service];
                 at.extend_from_slice(path);
-                set_table(&layers.own, &at, table.as_ref()).map_err(|failed| failed.why)
+                set_table(
+                    &crate::config_store::FileStore::of(layers),
+                    &at,
+                    table.as_ref(),
+                )
+                .map_err(|failed| failed.why)
             }
             Source::Memory(config) => {
                 let mut root: toml::Table =

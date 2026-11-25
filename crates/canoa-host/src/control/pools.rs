@@ -2,8 +2,6 @@
 //! provide one credential standard, written as `[host.pools.NAME]`; the host's own `any-<standard>` pools are listed beside them
 //! and are in no file.
 
-use std::path::Path;
-
 use serde_json::{Value, json};
 
 use super::accounts::Accounts;
@@ -40,7 +38,11 @@ pub(super) fn list(config: &Config) -> Value {
 /// `pools/set` `{"name", "standard", "accounts"}`: makes the pool `name`, or changes it to hold exactly those accounts, in that
 /// order. Every account has to provide the standard; one that does not is refused, naming the account, its kind's standards and
 /// the pool's. The host reads its pools when it starts, so the answer says it has to start again.
-pub(super) fn set(own: &Path, config: &Config, params: &Value) -> Result<Value, Refusal> {
+pub(super) fn set(
+    own: &dyn canoa::config_store::ConfigStore,
+    config: &Config,
+    params: &Value,
+) -> Result<Value, Refusal> {
     let name = text(params, "name")?;
     let standard = text(params, "standard")?;
     let members = string_list(params, "accounts")?;
@@ -83,7 +85,11 @@ pub(super) fn set(own: &Path, config: &Config, params: &Value) -> Result<Value, 
 
 /// `pools/remove` `{"name"}`: takes the pool out of canoa.cfg. An entry that offers it has to stop first; the accounts in it are
 /// not touched.
-pub(super) fn remove(own: &Path, config: &Config, params: &Value) -> Result<Value, Refusal> {
+pub(super) fn remove(
+    own: &dyn canoa::config_store::ConfigStore,
+    config: &Config,
+    params: &Value,
+) -> Result<Value, Refusal> {
     let name = text(params, "name")?;
     if pools::automatic_standard(name).is_some() {
         return Err((

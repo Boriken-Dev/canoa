@@ -19,6 +19,8 @@ mod sections;
 mod types;
 
 #[cfg(test)]
+mod coverage_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::format::formats;

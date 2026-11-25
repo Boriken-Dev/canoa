@@ -158,6 +158,26 @@ impl Control {
         allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(params))
     }
 
+    /// `config/advanced`: the tables of canoa.cfg no dedicated page edits, with their schemas and values.
+    pub(super) fn r_config_advanced(
+        &self,
+        _: &Caller,
+        _: &str,
+        _: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.files.advanced_list()
+    }
+
+    /// `config/advanced_set`: one of those tables or entries made, changed or taken out.
+    pub(super) fn r_config_advanced_set(
+        &self,
+        _: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.files.advanced_set(params)
+    }
+
     pub(super) fn r_config_set(
         &self,
         caller: &Caller,

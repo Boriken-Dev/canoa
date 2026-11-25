@@ -9,6 +9,10 @@ use super::commands::append_table;
 use super::commands::{remove_entry, remove_table, set_offered, set_pool, write_cfg};
 use crate::config::PoolConfig;
 
+fn file(path: &std::path::Path) -> crate::config_store::FileStore {
+    crate::config_store::FileStore::at(path)
+}
+
 fn dir(name: &str) -> PathBuf {
     static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
@@ -65,7 +69,7 @@ fn only_changed(before: &str, after: &str, from: &str, to: &str) {
 #[test]
 fn an_offer_edits_the_entry_whatever_its_header_looks_like() {
     let (dir, path) = person("offer");
-    set_offered(&path, "Claude", "claude", &["work".to_owned()], &[]).expect("offered");
+    set_offered(&file(&path), "Claude", "claude", &["work".to_owned()], &[]).expect("offered");
     let written = fs::read_to_string(&path).expect("read");
     assert_eq!(
         written.matches("[host.agents.Claude]").count(),
@@ -78,7 +82,7 @@ fn an_offer_edits_the_entry_whatever_its_header_looks_like() {
         "title = \"Mine\"\n",
         "title = \"Mine\"\naccounts = [\"work\"]\n",
     );
-    set_offered(&path, "Claude", "claude", &[], &[]).expect("withdrawn");
+    set_offered(&file(&path), "Claude", "claude", &[], &[]).expect("withdrawn");
     assert_eq!(fs::read_to_string(&path).expect("read"), PERSON);
     let _ = fs::remove_dir_all(dir);
 }
@@ -91,7 +95,7 @@ fn a_pool_changed_stays_where_it_is_with_the_text_around_it() {
         standard: "anthropic-api".to_owned(),
         accounts: vec!["work".to_owned(), "spare".to_owned()],
     };
-    set_pool(&path, "team", &pool).expect("set");
+    set_pool(&file(&path), "team", &pool).expect("set");
     let written = fs::read_to_string(&path).expect("read");
     only_changed(
         PERSON,
@@ -100,7 +104,7 @@ fn a_pool_changed_stays_where_it_is_with_the_text_around_it() {
         "accounts = [\"work\", \"spare\"]\n",
     );
     // A new pool goes after the others and leaves everything the person wrote.
-    set_pool(&path, "other", &pool).expect("made");
+    set_pool(&file(&path), "other", &pool).expect("made");
     let made = fs::read_to_string(&path).expect("read");
     assert!(made.starts_with(&written), "{made}");
     assert!(
@@ -114,7 +118,13 @@ fn a_pool_changed_stays_where_it_is_with_the_text_around_it() {
 #[test]
 fn a_table_removed_leaves_the_rest_of_the_text_as_written() {
     let (dir, path) = person("remove");
-    remove_table(&path, &["host", "accounts"], "spare", "canoa accounts add").expect("removed");
+    remove_table(
+        &file(&path),
+        &["host", "accounts"],
+        "spare",
+        "canoa accounts add",
+    )
+    .expect("removed");
     let written = fs::read_to_string(&path).expect("read");
     assert_eq!(
         written,
@@ -125,9 +135,17 @@ fn a_table_removed_leaves_the_rest_of_the_text_as_written() {
         ),
         "{written}"
     );
-    assert!(remove_table(&path, &["host", "accounts"], "spare", "canoa accounts add").is_err());
+    assert!(
+        remove_table(
+            &file(&path),
+            &["host", "accounts"],
+            "spare",
+            "canoa accounts add"
+        )
+        .is_err()
+    );
     // The header of the table in front of it carries a comment, and is found all the same.
-    remove_table(&path, &["host", "pools"], "team", "pools/set").expect("a pool");
+    remove_table(&file(&path), &["host", "pools"], "team", "pools/set").expect("a pool");
     assert!(!fs::read_to_string(&path).expect("read").contains("team"));
     let _ = fs::remove_dir_all(dir);
 }
@@ -142,10 +160,10 @@ fn an_entry_with_tables_of_its_own_is_not_dropped_and_a_plain_one_is() {
     )
     .expect("written");
     assert!(
-        remove_entry(&path, "B").is_err(),
+        remove_entry(&file(&path), "B").is_err(),
         "it holds a table of its own"
     );
-    remove_entry(&path, "A").expect("a plain entry goes");
+    remove_entry(&file(&path), "A").expect("a plain entry goes");
     let written = fs::read_to_string(&path).expect("read");
     assert!(
         !written.contains("[host.agents.A]") && written.contains("[host.agents.B.source_settings]"),
@@ -192,7 +210,7 @@ fn a_canoa_cfg_that_is_a_link_is_written_through_by_the_accounts_commands() {
     let link = dir.join("canoa.cfg");
     std::os::unix::fs::symlink(&target, &link).expect("a link");
     append_table(
-        &link,
+        &file(&link),
         &["host", "accounts"],
         "work",
         &table("kind = \"api\"\nid = \"i\"\n"),

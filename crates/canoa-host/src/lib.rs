@@ -12,6 +12,7 @@ mod child;
 pub mod cli;
 mod client_tools;
 pub mod config;
+mod config_store;
 pub mod control;
 mod delegate;
 mod descriptions;
