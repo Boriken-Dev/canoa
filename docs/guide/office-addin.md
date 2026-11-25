@@ -5,7 +5,7 @@ The add-in puts {{ name }}'s chat in a task pane beside a mail in Outlook, or a 
 ![The pane's session list beside an open mail conversation](../assets/screens/office-pane-dark.png#only-dark)
 ![The pane's session list beside an open mail conversation](../assets/screens/office-pane-light.png#only-light)
 
-The picture is the pane's own page, drawn with sample data outside Office: sessions tied to a conversation called "Quarterly numbers", each with **Resume**, and **New session** for another one on the same conversation.
+**This picture is an illustration, not a capture from Office.** It is the pane's own page, drawn with sample data outside Office: sessions tied to a conversation called "Quarterly numbers", each with **Resume**, and **New session** for another one on the same conversation.
 
 What belongs to the item is a note kept with each session in {{ name }}'s own list. It is never sent to an agent: an agent sees a message or a document only when you attach it.
 
@@ -42,7 +42,3 @@ The add-in's folder in the repository, `clients/office/`, has the exact steps fo
 ## Signing in
 
 On a host of your own the pane connects to the host that served it. A computer several people use runs the [portal](../portal.md), where the pane signs in through a dialog Office opens: see [the web app and the portal](web-and-portal.md#the-portal).
-
-## About the picture
-
-The pane has not been captured inside Outlook or Word. The picture above is the pane's page drawn by {{ name }}'s own widgets with sample data.

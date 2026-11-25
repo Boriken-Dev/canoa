@@ -16,7 +16,8 @@ Everything in the Store is listed in a catalog, and a catalog is a source you ch
 
 Each type has **Installed** and **Discover** tabs and a search box. Open an entry to see what it says about itself, what it carries (rules, requirements, scripts it runs), where it comes from and the digest it was checked against.
 
-![An overlay's page: what the catalog says, and what the overlay says about itself](../assets/screens/store-overlay-dark.png)
+![An overlay's page: what the catalog says, and what the overlay says about itself](../assets/screens/store-overlay-dark.png#only-dark)
+![An overlay's page: what the catalog says, and what the overlay says about itself](../assets/screens/store-overlay-light.png#only-light)
 
 !!! example "Worked example: give an agent a team's review rules"
     1. Open the Store, choose **Overlays**, and open that type's settings with the button at the top of the page. Under its catalogs, add your team's catalog by the address it gives. The Store reads it; nothing is installed yet.
@@ -28,6 +29,7 @@ Each type has **Installed** and **Discover** tabs and a search box. Open an entr
 
 **Settings, Store** explains where the catalogs are kept: each type lists its own, and you add one in that type's settings.
 
-![Settings, Store, which opens the Store](../assets/screens/store-catalogs-dark.png)
+![Settings, Store, which opens the Store](../assets/screens/store-catalogs-dark.png#only-dark)
+![Settings, Store, which opens the Store](../assets/screens/store-catalogs-light.png#only-light)
 
 Catalogs and what they may install are also settings of the host, which [the host's page](../host.md) describes for people who run one.

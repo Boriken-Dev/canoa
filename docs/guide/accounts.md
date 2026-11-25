@@ -11,9 +11,11 @@ Open **Settings, Accounts**. Each provider (Claude, Codex, OpenCode and the othe
 3. Give it a name. That is what the session picker calls it.
 4. Press **Sign in**. A subscription or single sign-on opens the provider's page in your browser; an API key is typed into a form that only the host reads.
 
-![The Add account dialog](../assets/screens/accounts-add-dark.png)
+![The Add account dialog](../assets/screens/accounts-add-dark.png#only-dark)
+![The Add account dialog](../assets/screens/accounts-add-light.png#only-light)
 
-![The Add account dialog at phone width](../assets/screens/accounts-add-phone-dark.png)
+![The Add account dialog at phone width](../assets/screens/accounts-add-phone-dark.png#only-dark)
+![The Add account dialog at phone width](../assets/screens/accounts-add-phone-light.png#only-light)
 
 !!! example "Worked example: a work account and a personal one"
     1. Add a Claude account named after your own subscription and sign in.

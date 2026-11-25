@@ -54,17 +54,21 @@ The box at the bottom of a conversation is the composer.
 - Type **`@`** to mention a file or folder from the session's workspace.
 - The model button opens the model and effort picker, and the **Mode** button chooses what the agent may do without asking (see [Permissions](permissions.md)).
 
-![Typing a slash lists the commands](../assets/screens/window-slash-dark.png)
+![Typing a slash lists the commands](../assets/screens/window-slash-dark.png#only-dark)
+![Typing a slash lists the commands](../assets/screens/window-slash-light.png#only-light)
 
-![Typing an at sign lists files to mention](../assets/screens/window-mention-dark.png)
+![Typing an at sign lists files to mention](../assets/screens/window-mention-dark.png#only-dark)
+![Typing an at sign lists files to mention](../assets/screens/window-mention-light.png#only-light)
 
-![The model and effort picker](../assets/screens/window-models-dark.png)
+![The model and effort picker](../assets/screens/window-models-dark.png#only-dark)
+![The model and effort picker](../assets/screens/window-models-light.png#only-light)
 
 ## The panels beside a conversation
 
 The buttons at the right of the conversation's header open panels: **Files** for the folder the agent works in, a **Terminal** in that folder, and **Details**. Details shows the machine, folder, branch and worktree, how much of the model's context is used, and the changes so far (uncommitted, in the last turn, or in the whole session) with the files they touch and **Open diff**.
 
-![The details panel of a session](../assets/screens/window-details-dark.png)
+![The details panel of a session](../assets/screens/window-details-dark.png#only-dark)
+![The details panel of a session](../assets/screens/window-details-light.png#only-light)
 
 !!! example "Back to the example"
     The agent reads `src/calc.js`, proposes the one-line fix and asks before it writes. You answer the card (see [Permissions](permissions.md)), the agent runs the test again, and the Details panel lists `src/calc.js` among the changed files. Open the diff to review it, then merge the worktree's branch as you would any other.

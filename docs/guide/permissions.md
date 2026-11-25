@@ -42,12 +42,14 @@ Each session has a mode, chosen from the **Mode** button under the composer or w
 
 **Default** leaves the choice to the agent's own setting. Which modes exist, and what each does, comes from the agent: these are the ones the agents {{ name }} ships with offer.
 
-![The mode menu of a new session](../assets/screens/window-modes-dark.png)
+![The mode menu of a new session](../assets/screens/window-modes-dark.png#only-dark)
+![The mode menu of a new session](../assets/screens/window-modes-light.png#only-light)
 
 ## Settings, Permissions
 
 **Settings, Permissions** sets the mode a new session starts in, whether **Bypass** answers with "allow once" only, a log of the rules made, used or revoked, and the list of remembered rules with their **Revoke** buttons.
 
-![The Permissions page of Settings](../assets/screens/settings-permissions-dark.png)
+![The Permissions page of Settings](../assets/screens/settings-permissions-dark.png#only-dark)
+![The Permissions page of Settings](../assets/screens/settings-permissions-light.png#only-light)
 
 The browser extension and the Office add-in have permissions of their own, for tabs and documents: see [the browser extension](browser-extension.md) and [the Office add-in](office-addin.md). They are separate on purpose: allowing an agent to edit a file never lets it read a tab, and the other way round.

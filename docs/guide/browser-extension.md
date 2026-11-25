@@ -4,7 +4,7 @@ The {{ name }} extension for Chrome, Edge and Chromium puts the chat in the brow
 
 ![The extension's panel when {{ name }} is not installed on this computer](../assets/screens/ext-panel-dark.png)
 
-The picture shows the panel before {{ name }} is paired: it says so, offers the Store and **Manage sources**, and its own agents still work.
+The extension's own pages are drawn in one dark scheme whatever the browser prefers, so their pictures have no light copy. The picture shows the panel before {{ name }} is paired: it says so, offers the Store and **Manage sources**, and its own agents still work.
 
 ## Get it and pair it
 

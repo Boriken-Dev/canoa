@@ -12,7 +12,8 @@ The chat also runs in a browser tab. It is the same app as the desktop window, b
 3. The **Hosts** section lists the host that served the page, with its peer id, the method it proves itself by and the agents it offers. That is only what the host says of itself: connecting still proves it holds that id's key.
 4. The host turns the browser away the first time, because its key is not paired. Accept it: **Hosting** in the desktop app lists the key as waiting, or run `{{ program }} accept <id>`. Compare the whole id with the one the browser shows before you do. Connect again.
 
-![The Hosts section: the host that served the page, with its id and the agents it offers](../assets/screens/web-hosts-dark.png)
+![The Hosts section: the host that served the page, with its id and the agents it offers](../assets/screens/web-hosts-dark.png#only-dark)
+![The Hosts section: the host that served the page, with its id and the agents it offers](../assets/screens/web-hosts-light.png#only-light)
 
 !!! example "Worked example: a session from a second computer"
     1. On your desktop, start the host with `[host.web] mode = "remote"` and HTTPS (`cert` and `key`), so a browser elsewhere can reach it.

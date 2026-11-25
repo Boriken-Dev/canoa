@@ -13,7 +13,8 @@ The pages, in the order of the list at the left:
 
 A setting that only means something on one machine carries a **This computer** tag. Some pages also appear when an agent or a Store type adds them.
 
-![General settings](../assets/screens/settings-general-dark.png)
+![General settings](../assets/screens/settings-general-dark.png#only-dark)
+![General settings](../assets/screens/settings-general-light.png#only-light)
 
 ## Appearance
 
@@ -32,12 +33,14 @@ Appearance chooses the **Family** (the look: Canoa's own, a terminal's lines, or
 
 **Sources** is where a session's agent comes from: Claude, Codex, Pi and the rest of the agents {{ name }} knows, each with a switch, its version, and what it needs when it cannot start ("needs npx and pi on PATH"). **Add a source** at the bottom adds an agent of your own by the command that starts it, anything that speaks the Agent Client Protocol. Adding or removing one restarts {{ name }}'s host, which ends the sessions open at that moment.
 
-![Sources: the agents a new session can use](../assets/screens/settings-sources-dark.png)
+![Sources: the agents a new session can use](../assets/screens/settings-sources-dark.png#only-dark)
+![Sources: the agents a new session can use](../assets/screens/settings-sources-light.png#only-light)
 
 ## On a phone-sized window
 
 Settings keeps the same pages: the list becomes the first page, and each section opens as a page of its own.
 
-![Settings at phone width](../assets/screens/settings-general-phone-dark.png)
+![Settings at phone width](../assets/screens/settings-general-phone-dark.png#only-dark)
+![Settings at phone width](../assets/screens/settings-general-phone-light.png#only-light)
 
 For what every setting does, and the file's format, see [Desktop and configuration](../configuration.md).
