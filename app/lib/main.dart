@@ -139,6 +139,7 @@ import 'shell/layout_state.dart';
 import 'shell/surface.dart';
 import 'usage/usage_model.dart';
 import 'usage/usage_section.dart';
+import 'usage/usage_warn.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/source_checks.dart';
@@ -1101,7 +1102,10 @@ class _CanoaAppState extends State<CanoaApp> {
       return MaterialApp(
         title: Brand.name,
         debugShowCheckedModeBanner: false,
-        builder: (context, child) => AppTextHost(language: config.language.isEmpty ? null : config.language, child: child ?? const SizedBox.shrink()),
+        builder: (context, child) => UsageWarn(
+          permille: config.warnPermille,
+          child: AppTextHost(language: config.language.isEmpty ? null : config.language, child: child ?? const SizedBox.shrink()),
+        ),
         theme: _theme(family, Brightness.light),
         darkTheme: _theme(family, Brightness.dark),
         themeMode: config.themeMode,
@@ -3362,7 +3366,6 @@ class _CanoaAppState extends State<CanoaApp> {
     onProfiles: () => unawaited(_showSettings(section: 'profiles')),
     pasteAsFile: config.pasteAsFile,
     enterSteers: config.sessions.whileWorking == WhileWorking.steer,
-    warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(section: 'sources')),
     onSettings: () => unawaited(_showSettings()),
     dictation: _dictation,
@@ -3480,7 +3483,7 @@ class _CanoaAppState extends State<CanoaApp> {
       ..look = config.look.name
       ..density = config.density.name
       ..openInNewWindows = config.openIn == OpenIn.newWindows;
-    final style = (config.look, config.density, config.language, config.themeMode, config.followProvider);
+    final style = (config.look, config.density, config.language, config.themeMode, config.followProvider, config.warnPermille);
     if (_windowStyleShown != null && _windowStyleShown != style) {
       // The windows are not built by this state, so they are told once this frame is over.
       WidgetsBinding.instance.addPostFrameCallback((_) => _windowStyle.value++);
@@ -3500,9 +3503,12 @@ class _CanoaAppState extends State<CanoaApp> {
       scaffoldMessengerKey: _messenger,
       title: Brand.name,
       debugShowCheckedModeBanner: false,
-      builder: (context, child) => AppTextHost(
-        language: config.language.isEmpty ? null : config.language,
-        child: TrayFollower(shell: widget.shell, child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => UsageWarn(
+        permille: config.warnPermille,
+        child: AppTextHost(
+          language: config.language.isEmpty ? null : config.language,
+          child: TrayFollower(shell: widget.shell, child: child ?? const SizedBox.shrink()),
+        ),
       ),
       theme: _theme(family, Brightness.light),
       darkTheme: _theme(family, Brightness.dark),

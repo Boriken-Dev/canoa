@@ -25,6 +25,7 @@ import 'palette.dart' show dictationKeys;
 import 'reply_voice.dart';
 import 'composer_controls.dart';
 import 'source_trouble.dart';
+import '../usage/usage_warn.dart';
 import 'mentions.dart';
 import 'session_options.dart';
 import 'session_views.dart' show appName;
@@ -66,7 +67,6 @@ final class ComposerKit {
     this.onProfiles,
     this.pasteAsFile = Composer.defaultPasteAsFile,
     this.enterSteers = false,
-    this.warnPermille = defaultWarnPermille,
     this.onSourceSettings,
     this.onSettings,
     this.onProfile,
@@ -218,8 +218,6 @@ final class ComposerKit {
   final List<String> overlays;
   final int pasteAsFile;
 
-  /// From this many thousandths used, the usage control shows a status.
-  final int warnPermille;
 
   /// Opens Settings at its sources.
   final VoidCallback? onSourceSettings;
@@ -550,7 +548,7 @@ class SessionComposer extends StatelessWidget {
         if (draft) CacheChooser(store: store, session: session),
         if (kit.overlays.isNotEmpty || kit.loadouts.isNotEmpty || session.profile != null) OverlaysChooser(store: store, session: session, kit: kit),
         if (session.status != SessionStatus.preview && session.reportsUsage)
-          UsagePill(report: session.usageReport, warnPermille: kit.warnPermille),
+          UsagePill(report: session.usageReport, warnPermille: UsageWarn.of(context)),
         if (!draft)
           ContextComposerPill(
             usage: session.usage,

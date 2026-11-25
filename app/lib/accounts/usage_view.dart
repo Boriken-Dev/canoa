@@ -3,6 +3,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../l10n/app_text.dart';
+import '../usage/usage_warn.dart';
 
 /// How much of [bucket] is left, as Claude's and Codex's usage pages say it: `38% left`, to the nearest percent. Some is never said
 /// as none and some used is never said as none used. Null when the bucket gives no fraction, and for a window that has ended,
@@ -131,13 +132,14 @@ const staleAfter = Duration(minutes: 30);
 /// What an account's reports say: each bucket with how much is left, a bar, when it resets and the pace. The report is what the
 /// sessions on the account last heard, so a figure says when it was observed.
 class AccountUsageView extends StatelessWidget {
-  const AccountUsageView({super.key, required this.report, this.now, this.warnPermille = defaultWarnPermille, this.large = false, this.readAt});
+  const AccountUsageView({super.key, required this.report, this.now, this.warnPermille, this.large = false, this.readAt});
 
   final UsageReport? report;
 
   /// Unix seconds; the clock's when null.
   final int? now;
-  final int warnPermille;
+  /// From this many thousandths used a bucket shows as running low; the threshold of [UsageWarn] when null.
+  final int? warnPermille;
 
   /// A page's view rather than a list row's: the figure big, a word for how it stands that colour does not carry, and when it was
   /// read.
@@ -166,7 +168,7 @@ class AccountUsageView extends StatelessWidget {
       child: _Bucket(
         bucket: bucket,
         now: at,
-        warnPermille: warnPermille,
+        warnPermille: warnPermille ?? UsageWarn.of(context),
         large: large,
         readAt: bucket.observedAt > 0 ? bucket.observedAt : (readAt ?? report?.observedAt ?? 0),
         models: models,
@@ -212,6 +214,7 @@ class _Bucket extends StatelessWidget {
 
   final UsageBucket bucket;
   final int now;
+  /// From this many thousandths used a bucket shows as running low; the threshold of [UsageWarn] when null.
   final int warnPermille;
   final bool large;
   final int readAt;
