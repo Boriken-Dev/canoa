@@ -87,8 +87,21 @@ fn clis(listing: &serde_json::Value) -> Vec<Cli> {
         .collect()
 }
 
+/// What the Store says when the publisher's release listing answers 404: winget's manifest and Homebrew's formula name the same
+/// files, and the SDK packages on NuGet, PyPI and npm carry the native library only, never the `foundry` command line.
+pub const NOT_PUBLISHED: &str = "Microsoft no longer publishes Foundry Local where Canoa can install it: its GitHub releases (github.com/microsoft/Foundry-Local) answer 404, and the winget package and the Homebrew formula still point there. A copy installed another way is found on the PATH and used as it is.";
+
+/// The error of a listing that answered 404 is [`NOT_PUBLISHED`]; any other error is its own.
+fn listing_error(error: ProviderError) -> ProviderError {
+    if error.message().contains("answered 404") {
+        unsupported(NOT_PUBLISHED)
+    } else {
+        error
+    }
+}
+
 fn listing(tools: &Object<dyn InstallTools>) -> Result<serde_json::Value, ProviderError> {
-    get_json(tools, &format!("{RELEASES_API}?per_page={LISTED}"))
+    get_json(tools, &format!("{RELEASES_API}?per_page={LISTED}")).map_err(listing_error)
 }
 
 fn newest(all: Vec<Cli>) -> Option<Cli> {
@@ -98,7 +111,7 @@ fn newest(all: Vec<Cli>) -> Option<Cli> {
 impl Recipe for FoundryRecipe {
     fn info(&self) -> StoreInfo {
         let mut info = StoreInfo::new("foundry", "Foundry Local", "Microsoft");
-        info.homepage = Some("https://github.com/microsoft/Foundry-Local".to_owned());
+        info.homepage = Some("https://learn.microsoft.com/en-us/azure/foundry-local/".to_owned());
         info.summary = Some(
             "Runs language models on this computer, for the agents that use a Foundry Local account.".to_owned(),
         );
@@ -315,6 +328,19 @@ mod tests {
         let newest = found.iter().find(|cli| cli.version == "0.14.0").unwrap();
         assert_eq!(newest.assets.len(), 1, "{:?}", newest.assets);
         assert_eq!(newest.assets[0].0, "foundry-0.14.0-linux-x64.tar.gz");
+    }
+
+    #[test]
+    fn a_listing_that_answers_404_says_the_program_is_no_longer_published() {
+        let recorded = include_str!("../tests/fixtures/release_listing_404.txt").trim();
+        let gone = listing_error(internal(recorded));
+        assert_eq!(gone.message(), NOT_PUBLISHED);
+        assert!(
+            gone.message()
+                .starts_with("Microsoft no longer publishes Foundry Local")
+        );
+        let down = listing_error(internal("download failed: the server answered 503"));
+        assert_eq!(down.message(), "download failed: the server answered 503");
     }
 
     #[test]
