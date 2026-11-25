@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Office.js as Microsoft publishes it in github.com/OfficeDev/office-js, pinned by commit and mirrored whole and unmodified.
+"""Pin the Office.js files Canoa's pane carries, from github.com/OfficeDev/office-js.
 
-`office_js.json` names one commit of the repository and the SHA-256 of every file in its tree. Two steps use it:
+`office_js.json` names one commit of the repository, the SHA-256 of every file in its tree and the files the add-in's pane
+loads. Two steps use it:
 
-  mirror   (tools/mirror_deps.py, or this script) downloads that commit's source archive over HTTPS, checks the tree against the
-           list, and writes every file, LICENSE.md included, to the deps branch's cdn/office-js/ exactly as published: nothing is
-           renamed, filtered or rewritten, since the license lets the library be distributed only in its original form. This is
-           the one place the mirror keeps files it does not compile. The only step that uses the network.
-  build    (crates/canoa-host/build.rs) reads the files the add-in's pane loads, and LICENSE.md, from cdn/office-js/ and
+  deps     (python tools/build.py deps sync) carries that commit's whole tree, unmodified, on the deps branch under
+           cdn/office-js/ as [[deps.tree]] `office-js` of tools/build.cfg: the license lets the library be distributed only
+           in its original form. The only step that uses the network.
+  build    (crates/canoa-host/build.rs) reads the files the pane loads, and LICENSE.md, from cdn/office-js/ and
            checks each against the list. It never fetches.
 
 The pane loads, from the folder office.js is served from, the file of each Office application and platform, the strings of each
-language, and two helpers, all named by the loader in dist/office.js; `pin` derives that set from the loader of the commit it pins.
+language, and two helpers, all named by the loader in dist/office.js; `pin` derives that set from the loader of the commit it pins:
+
+    python tools/office_js.py pin [--commit SHA]
 """
 from __future__ import annotations
 
@@ -123,44 +125,15 @@ def pin(commit: str) -> tuple[dict, list[str]]:
     return data, absent
 
 
-def mirror(deps: Path, data: dict) -> list[dict]:
-    """Write the pinned tree to deps/cdn/office-js/, downloading only when something there is missing or differs."""
-    base = deps / "cdn" / "office-js"
-    files: dict[str, bytes] | None = None
-    wanted = data["files"]
-    for name, sha in wanted.items():
-        target = base / name
-        if target.is_file() and digest(target.read_bytes()) == sha:
-            continue
-        if files is None:
-            files = tree_of(data["commit"])
-            if set(files) != set(wanted) or any(digest(files[n]) != wanted[n] for n in wanted):
-                raise OfficeJsError(
-                    f"commit {data['commit']} of {REPOSITORY} is not the tree office_js.json pins: run `office_js.py pin`")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(files[name])
-    present = {p.relative_to(base).as_posix() for p in base.rglob("*") if p.is_file()}
-    if present != set(wanted):
-        raise OfficeJsError(f"cdn/office-js holds files the list does not pin: {sorted(present - set(wanted))[:3]}")
-    return [dict(path=name, sha256=sha, bytes=(base / name).stat().st_size) for name, sha in wanted.items()]
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("mirror", "pin"))
-    parser.add_argument("deps", nargs="?", type=Path, help="mirror: the deps checkout to fill")
-    parser.add_argument("--commit", help="pin: the commit to pin (default: the head of the release branch)")
+    parser.add_argument("command", choices=("pin",))
+    parser.add_argument("--commit", help="the commit to pin (default: the head of the release branch)")
     args = parser.parse_args()
     try:
-        if args.command == "mirror":
-            if args.deps is None:
-                parser.error("mirror needs the deps checkout")
-            done = mirror(args.deps, read_list())
-            print(f"mirrored {len(done)} files, {sum(item['bytes'] for item in done)} bytes")
-        else:
-            data, absent = pin(args.commit or head_of())
-            write_list(data)
-            print(f"pinned {data['commit']}: {len(data['files'])} files, {len(data['carried'])} carried; not in the tree: {absent or 'none'}")
+        data, absent = pin(args.commit or head_of())
+        write_list(data)
+        print(f"pinned {data['commit']}: {len(data['files'])} files, {len(data['carried'])} carried; not in the tree: {absent or 'none'}")
     except (OfficeJsError, OSError, KeyError) as error:
         sys.exit(f"office_js.py: {error}")
 

@@ -1,6 +1,7 @@
 // The web build must draw text under the host's strict policy, which allows the site's own origin alone: CanvasKit
 // fetches Roboto and its fallback fonts from fonts.gstatic.com unless the app carries Roboto and names its own base,
-// and the build then puts the fallback fonts there (tools/fallback_fonts.py). It registers no service worker.
+// and the build then puts the fallback fonts there (`flutter fonts-install` of tools/build.py). It registers no service worker.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -32,14 +33,16 @@ void main() {
     expect(splash, contains('unregister'));
   });
 
-  test('the fallback fonts are pinned by digest, one line each, at the paths the engine requests', () {
-    final lines = File('../tools/fallback_fonts.sha256').readAsLinesSync().where((l) => !l.startsWith('#') && l.isNotEmpty);
-    expect(lines, isNotEmpty);
-    final line = RegExp(r'^[0-9a-f]{64}  [a-z0-9]+/v[0-9]+/[A-Za-z0-9._-]+\.woff2$');
-    for (final entry in lines) {
-      expect(line.hasMatch(entry), isTrue, reason: entry);
+  test('the fallback fonts are pinned by digest in the CDN index, at the paths the engine requests', () {
+    final index = jsonDecode(File('../tools/cdn_files.json').readAsStringSync()) as Map<String, dynamic>;
+    final fonts = (index['files'] as List).cast<Map<String, dynamic>>().where((e) => e['host'] == 'fonts.gstatic.com').toList();
+    expect(fonts, isNotEmpty);
+    final path = RegExp(r'^/s/[a-z0-9]+/v[0-9]+/[A-Za-z0-9._-]+\.woff2$');
+    for (final font in fonts) {
+      expect(path.hasMatch(font['path'] as String), isTrue, reason: '${font['path']}');
+      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch(font['sha256'] as String), isTrue, reason: '${font['path']}');
     }
-    expect(lines.any((l) => l.contains('notosanssymbols/')), isTrue);
-    expect(lines.any((l) => l.contains('notocoloremoji/')), isTrue);
+    expect(fonts.any((f) => (f['path'] as String).contains('notosanssymbols/')), isTrue);
+    expect(fonts.any((f) => (f['path'] as String).contains('notocoloremoji/')), isTrue);
   });
 }

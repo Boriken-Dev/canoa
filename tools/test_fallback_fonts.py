@@ -1,4 +1,5 @@
 import hashlib
+import json
 import sys
 import tempfile
 import unittest
@@ -10,45 +11,55 @@ import fallback_fonts as ff
 NAME = "notosanssymbols/v43/abc.woff2"
 
 
-def deps_with(root: Path, data: bytes) -> Path:
-    target = root / "deps" / "cdn" / ff.HOST / "s" / NAME
+def sdk_asking_for(root: Path, *names: str) -> Path:
+    data = root / "sdk" / ff.ENGINE_DATA
+    data.parent.mkdir(parents=True)
+    data.write_text("".join(f"NotoFont('A', '{name}'),\n" for name in names), encoding="utf-8")
+    return root / "sdk"
+
+
+def deps_holding(root: Path, name: str, body: bytes) -> Path:
+    target = root / "deps" / "cdn" / ff.HOST / "s" / name
     target.parent.mkdir(parents=True)
-    target.write_bytes(data)
+    target.write_bytes(body)
     return root / "deps"
 
 
 class FallbackFontTests(unittest.TestCase):
-    def test_the_committed_list_is_well_formed(self):
-        pinned = ff.read_list()
-        self.assertGreater(len(pinned), 700)
-        self.assertTrue(any(name.startswith("notocoloremoji/") for name in pinned))
+    def test_the_committed_index_holds_the_fonts_with_licences(self):
+        entries = [e for e in json.loads(ff.LIST.read_text(encoding="utf-8"))["files"] if e["host"] == ff.HOST]
+        self.assertGreater(len(entries), 700)
+        self.assertTrue(any(e["path"].startswith("/s/notocoloremoji/") for e in entries))
+        self.assertEqual({e["licence"] for e in entries}, {ff.LICENCE})
 
-    def test_the_list_must_match_the_engine(self):
+    def test_the_engine_names_the_fonts(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            data = root / ff.ENGINE_DATA
-            data.parent.mkdir(parents=True)
-            data.write_text(f"NotoFont(\n 'A',\n '{NAME}',\n),\nNotoFont('B', 'x/v1/y.woff2'),", encoding="utf-8")
-            ff.check_engine({NAME: "0" * 64, "x/v1/y.woff2": "0" * 64}, root)
-            with self.assertRaisesRegex(ff.FontError, "does not match"):
-                ff.check_engine({NAME: "0" * 64}, root)
+            sdk = sdk_asking_for(Path(tmp), NAME, "x/v1/y.woff2")
+            self.assertEqual(ff.engine_paths(sdk), [NAME, "x/v1/y.woff2"])
+            with self.assertRaisesRegex(ff.FontError, "is missing"):
+                ff.engine_paths(Path(tmp) / "none")
 
-    def test_install_copies_a_pinned_file_and_refuses_a_missing_or_changed_one(self):
+    def test_a_path_that_is_not_a_plain_woff2_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sdk = sdk_asking_for(Path(tmp), "../escape.woff2")
+            with self.assertRaisesRegex(ff.FontError, "not a plain woff2"):
+                ff.engine_paths(sdk)
+
+    def test_pin_rewrites_the_font_entries_and_keeps_the_others(self):
         body = b"wOF2font"
-        pinned = {NAME: hashlib.sha256(body).hexdigest()}
+        other = dict(host="example.test", path="/lib.js", sha256="1" * 64)
+        stale = dict(host=ff.HOST, path="/s/gone/v1/old.woff2", sha256="2" * 64, bytes=1, licence=ff.LICENCE)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            deps = deps_with(root, body)
-            dist = root / "dist"
-            self.assertEqual(ff.install(deps, dist, pinned), len(body))
-            self.assertEqual((dist / "assets" / "fonts" / "fallback" / NAME).read_bytes(), body)
-            with self.assertRaisesRegex(ff.FontError, "not in the deps mirror"):
-                ff.install(deps, dist, {**pinned, "x/v1/y.woff2": "0" * 64})
-            with self.assertRaisesRegex(ff.FontError, "not in the deps mirror"):
-                ff.install(None, dist, pinned)
-            (deps / "cdn" / ff.HOST / "s" / NAME).write_bytes(b"changed")
-            with self.assertRaisesRegex(ff.FontError, "differs"):
-                ff.install(deps, dist, pinned)
+            index = root / "cdn_files.json"
+            index.write_text(json.dumps({"files": [other, stale]}), encoding="utf-8")
+            counts = ff.pin(sdk_asking_for(root, NAME), deps_holding(root, NAME, body), index)
+            self.assertEqual(counts, (1, 1, 1))
+            files = json.loads(index.read_text(encoding="utf-8"))["files"]
+            self.assertEqual(files[0], other)
+            self.assertEqual(files[1], dict(host=ff.HOST, path="/s/" + NAME, sha256=hashlib.sha256(body).hexdigest(),
+                                            bytes=len(body), licence=ff.LICENCE))
+            self.assertEqual(len(files), 2)
 
 
 if __name__ == "__main__":
