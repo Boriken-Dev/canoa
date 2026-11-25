@@ -185,9 +185,15 @@ final class ProgramCopy {
 
 /// The newest version, or why it is not known.
 final class ProgramLatest {
-  const ProgramLatest({this.known = false, this.version, this.unknownBecause, this.notesUrl, this.note});
+  const ProgramLatest({this.known = false, this.version, this.unknownBecause, this.notesUrl, this.note, this.staleBecause, this.refreshing = false});
 
   final bool known;
+
+  /// Why the host's last ask of the publisher failed, so what is shown is the last answer that worked; null when it did not fail.
+  final String? staleBecause;
+
+  /// Whether the host is asking the publisher again because this answer is past its time.
+  final bool refreshing;
 
   /// [note] is a caveat to read next to the version, such as a newer release the store cannot install.
   final String? version, unknownBecause, notesUrl, note;
@@ -200,6 +206,8 @@ final class ProgramLatest {
       unknownBecause: _text(map['unknown_because']),
       notesUrl: _text(map['notes_url']),
       note: _text(map['note']),
+      staleBecause: map['stale'] == true ? _text(map['problem']) ?? 'the publisher could not be asked' : null,
+      refreshing: map['refreshing'] == true,
     );
   }
 }
@@ -575,7 +583,7 @@ class ProgramStores extends ChangeNotifier {
         var hostFresh = false;
         if (row['latest'] is Map) {
           final kept = _map(row['latest']);
-          hostFresh = kept['stale'] != true;
+          hostFresh = kept['stale'] != true && kept['refreshing'] != true;
           next = next.copyWith(
             latest: ProgramLatest.parse(kept),
             latestAt: kept['checked'] is int ? DateTime.fromMillisecondsSinceEpoch(kept['checked'] as int) : _now(),

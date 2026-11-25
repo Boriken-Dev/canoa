@@ -129,6 +129,7 @@ List<LoadedCatalog> catalogsFromIndex(Object? answer) {
           ? DateTime.fromMillisecondsSinceEpoch(each['checked']! as int)
           : null,
       stale: each['stale'] == true,
+      refreshing: each['refreshing'] == true,
       staleBecause: problem is String && !failed ? problem : null,
       facts: facts,
     ));

@@ -13,7 +13,7 @@ import '../profile/profile_home.dart';
 import '../selectable.dart';
 import '../shell/layout_controls.dart';
 import '../shell/shell.dart' show ShellScope;
-import 'overlay_page.dart' show SaveConfig, shownTags;
+import 'overlay_page.dart' show SaveConfig, oneLine, shownTags;
 import 'programs.dart';
 import 'overlay_needs.dart';
 import 'programs_view.dart';
@@ -57,7 +57,12 @@ class StoreSection extends StatefulWidget {
     this.readAhead = true,
     this.extensionTypes = const [],
     this.runtimes,
+    this.rereadEvery = const Duration(minutes: 1),
+    this.rereadWhileChecking = const Duration(seconds: 3),
   });
+
+  /// How often the page reads the host's index again, and how soon again while a source is being asked; see [LoadoutController].
+  final Duration rereadEvery, rereadWhileChecking;
 
   /// Whether the page is a section of the shell, which never pops: what it changes is saved as it is changed.
   final bool embedded;
@@ -133,6 +138,8 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     onOpenView: widget.onOpenView,
     now: widget.now,
     readAhead: widget.readAhead,
+    rereadEvery: widget.rereadEvery,
+    rereadWhileChecking: widget.rereadWhileChecking,
   )..addListener(_changed);
 
   /// What each type's toolbar holds, by the type's id.
@@ -181,6 +188,10 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     for (final id in types) {
       viewOf(id);
     }
+    // The host asks the publishers again by itself; this reads what it holds, so the line under the toolbar follows it.
+    _programsWatch = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (widget.programs case final programs? when !programs.loading) unawaited(programs.refresh());
+    });
     widget.programs?.addListener(_changed);
     // What holds an update is counted in the index before its page is opened, so the newest versions are asked for now (the host
     // answers from what it kept, and asks a publisher only when that is old).
@@ -195,6 +206,8 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
       if (mounted) _publish();
     });
   }
+
+  Timer? _programsWatch;
 
   /// Tells when what any extension type lists changed.
   Listenable? _typeChanges;
@@ -290,6 +303,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
 
   @override
   void dispose() {
+    _programsWatch?.cancel();
     widget.programs?.removeListener(_changed);
     _typeChanges?.removeListener(_changed);
     selection?.removeListener(_selectionChanged);
@@ -356,7 +370,12 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
         final times = [for (final status in programs.statuses) ?status.latestAt];
         if (times.isEmpty) return 'Newest versions not asked yet';
         final oldest = times.reduce((a, b) => a.isBefore(b) ? a : b);
-        return 'Cached · updated ${ageText(_now().difference(oldest))}';
+        final latest = [for (final status in programs.statuses) ?status.latest];
+        return _lineOf(
+          oldest,
+          failed: latest.map((each) => each.staleBecause).nonNulls.firstOrNull,
+          checking: latest.any((each) => each.refreshing),
+        );
       case StoreType.mcps:
         return 'Read live from ${registryShown(c.selectedRegistry)}, not kept';
       case StoreType.overlays:
@@ -368,11 +387,23 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
         final times = [for (final catalog in shown) ?catalog.checked];
         if (times.isEmpty) return 'Not read yet';
         final oldest = times.reduce((a, b) => a.isBefore(b) ? a : b);
-        final stale = shown.any((catalog) => catalog.stale || catalog.staleBecause != null);
-        return '${stale ? 'Stale' : 'Cached'} · updated ${ageText(_now().difference(oldest))}';
+        return _lineOf(
+          oldest,
+          failed: shown.map((catalog) => catalog.staleBecause).nonNulls.firstOrNull ??
+              (shown.any((catalog) => catalog.stale) ? '' : null),
+          checking: shown.any((catalog) => catalog.refreshing),
+        );
       case null:
         return 'Listed by an extension';
     }
+  }
+
+  /// The line for what was last read at [at]: stale with the reason when the last refresh failed ([failed], empty when the host gave no
+  /// reason), "checking" while it is asked again, else how old it is. [at] is when it last worked, never when it was last tried.
+  String _lineOf(DateTime at, {String? failed, required bool checking}) {
+    final age = ageText(_now().difference(at));
+    if (failed != null) return context.t('store.status_stale', {'why': failed.isEmpty ? '?' : oneLine(failed), 'age': age});
+    return context.t(checking ? 'store.status_checking' : 'store.status_cached', {'age': age});
   }
 
   /// The catalogs the type [id]'s page is about: the one its filter chose, or every one.

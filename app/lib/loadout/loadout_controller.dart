@@ -116,6 +116,8 @@ class LoadoutController extends ChangeNotifier {
     this.onOpenView,
     DateTime Function()? now,
     bool readAhead = true,
+    this.rereadEvery = const Duration(minutes: 1),
+    this.rereadWhileChecking = const Duration(seconds: 3),
   }) {
     final home = this.home;
     if (home != null && index != null && readAhead && contentsReader != null) {
@@ -131,6 +133,11 @@ class LoadoutController extends ChangeNotifier {
 
   /// The host's catalog index, which every catalog the store lists is read from; none where the app has no host.
   final CatalogIndex? index;
+
+  /// How often the host's index is read again while the page is open, with no request to the sources (the host keeps them
+  /// fresh on its own schedule), and how soon again when a source is being asked; zero reads only when told.
+  final Duration rereadEvery, rereadWhileChecking;
+  Timer? _reread;
 
   /// Asks the host which Store types read catalogs, what each calls them, which it lists and which sources can add one; none where
   /// the app has no host.
@@ -269,6 +276,7 @@ class LoadoutController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _reread?.cancel();
     _asking?.cancel();
     contents?.dispose();
     super.dispose();
@@ -299,7 +307,32 @@ class LoadoutController extends ChangeNotifier {
     listing = StoreListing(found);
     await loadTypes();
     loadingCatalogs = false;
+    _watchIndex();
     await refresh();
+  }
+
+  /// Reads the host's index again after a while, so what the page says of each catalog follows what the host has done since: it
+  /// asks again by itself once a catalog is past its time, and a source that was being asked is read again soon.
+  void _watchIndex() {
+    _reread?.cancel();
+    final index = this.index;
+    final wait = loaded.any((catalog) => catalog.refreshing) ? rereadWhileChecking : rereadEvery;
+    if (_disposed || index == null || wait == Duration.zero) return;
+    _reread = Timer(wait, () async {
+      if (_disposed) return;
+      if (!loadingCatalogs && busy == null) {
+        try {
+          final found = await index();
+          if (_disposed) return;
+          loaded = found;
+          listing = StoreListing(found);
+          notifyListeners();
+        } on Object {
+          // The host not answering now leaves what is shown; the next read tries again.
+        }
+      }
+      _watchIndex();
+    });
   }
 
   /// Reads what [listed] provides, as its page opens: the host fetches that one entry, and nothing the person has not looked at. An

@@ -85,17 +85,20 @@ final class StoreCatalog {
 /// One catalog as the store read it, or why it could not.
 final class LoadedCatalog {
   const LoadedCatalog({required this.label, required this.source, this.commit, this.catalog, this.problem,
-      this.icons = const {}, this.leftOut = 0, this.checked, this.stale = false, this.staleBecause,
+      this.icons = const {}, this.leftOut = 0, this.checked, this.stale = false, this.staleBecause, this.refreshing = false,
       this.facts = const {}});
 
   /// How many entries past `[store] catalog_max_entries` were left out.
   final int leftOut;
 
-  /// When the host last asked this source, and whether what it answers is older than its time to live (it is being
-  /// refreshed) or could not be refreshed ([staleBecause]).
+  /// When the host last read this source successfully, whether it could not be refreshed since ([stale], and [staleBecause] says why)
+  /// and whether it is being asked again now ([refreshing]; what is shown is older than its time to live).
   final DateTime? checked;
   final bool stale;
   final String? staleBecause;
+
+  /// Whether the host is asking the source again because its answer is past its time.
+  final bool refreshing;
 
   /// What the index says of each entry beyond what the catalog lists, by `kind:name`.
   final Map<String, EntryFacts> facts;

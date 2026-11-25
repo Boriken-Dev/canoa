@@ -18,7 +18,7 @@ import 'fixtures/store_link.dart';
 import 'loadout_test.dart' show catalogRepo, withCatalog, world;
 
 /// What the index adds to [catalog] when the host has read it: how old it is, and its entries' manifests.
-LoadedCatalog _aged(LoadedCatalog catalog, {required DateTime checked, bool stale = false, String? because}) => LoadedCatalog(
+LoadedCatalog _aged(LoadedCatalog catalog, {required DateTime checked, bool stale = false, String? because, bool refreshing = false}) => LoadedCatalog(
   label: catalog.label,
   source: catalog.source,
   commit: catalog.commit,
@@ -28,6 +28,7 @@ LoadedCatalog _aged(LoadedCatalog catalog, {required DateTime checked, bool stal
   checked: checked,
   stale: stale,
   staleBecause: because,
+  refreshing: refreshing,
   facts: {
     'overlay:review': const EntryFacts(
       id: 'main:overlay:review',
@@ -73,6 +74,8 @@ void main() {
     DateTime? checked,
     bool stale = false,
     String? because,
+    bool refreshing = false,
+    Duration rereadWhileChecking = const Duration(seconds: 3),
     String text = withCatalog,
     CatalogIndex? index,
     Size size = const Size(1280, 1600),
@@ -83,6 +86,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: StoreSection(
         readAhead: false,
+        rereadWhileChecking: rereadWhileChecking,
         config: config,
         home: MemoryHome(overlays),
         now: () => clock,
@@ -92,7 +96,7 @@ void main() {
               asks.add(refresh);
               return [
                 for (final catalog in await standInCatalogs(overlays, config))
-                  _aged(catalog, checked: checked ?? clock.subtract(const Duration(minutes: 3)), stale: stale, because: because),
+                  _aged(catalog, checked: checked ?? clock.subtract(const Duration(minutes: 3)), stale: stale, because: because, refreshing: refreshing),
               ];
             },
         agents: const ['Claude'],
@@ -229,11 +233,37 @@ void main() {
 
   testWidgets('a stale index says so, is still listed, and the source says why it could not be refreshed', (tester) async {
     await open(tester, checked: clock.subtract(const Duration(hours: 2)), stale: true, because: 'it cannot be fetched: offline');
-    expect(statusText(tester), 'Stale · updated 2 h ago');
+    expect(statusText(tester), 'Stale · it cannot be fetched: offline · updated 2 h ago');
     await tapKey(tester, 'overlays-discover');
     expect(find.byKey(const Key('store-entry-main-review')), findsOneWidget, reason: 'the last copy is shown');
     expect(find.textContaining('showing the last copy'), findsOneWidget);
-    expect(find.textContaining('offline'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('store-source-note-main')), matching: find.textContaining('offline')), findsOneWidget);
+  });
+
+  testWidgets('a catalog past its time is "checking" while the host asks again, not stale, and the page reads the host again to follow it', (tester) async {
+    var reads = 0;
+    await open(
+      tester,
+      rereadWhileChecking: const Duration(seconds: 1),
+      index: ({bool refresh = false}) async {
+        reads += 1;
+        final config = CanoaConfig.parse(withCatalog);
+        return [
+          for (final catalog in await standInCatalogs(overlays, config))
+            _aged(
+              catalog,
+              checked: clock.subtract(const Duration(hours: 5)),
+              refreshing: reads == 1,
+            ),
+        ];
+      },
+    );
+    expect(statusText(tester), 'Checking… · updated 5 h ago');
+    expect(find.textContaining('Stale'), findsNothing);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(reads, 2, reason: 'the page read the host again by itself');
+    expect(statusText(tester), 'Cached · updated 5 h ago');
   });
 
   testWidgets('a catalog the host could not read has its reason shown and lists nothing', (tester) async {

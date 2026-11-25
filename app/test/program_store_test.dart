@@ -41,6 +41,18 @@ Future<void> _until(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
+  group('what the host says of a newest version it kept', () {
+    test('is stale only when asking the publisher failed, and checking while it is past its time and asked again', () {
+      final past = ProgramLatest.parse({'known': true, 'version': '1.0.0', 'checked': 1, 'stale': false, 'refreshing': true});
+      expect(past.staleBecause, isNull, reason: 'past its time is not a failure');
+      expect(past.refreshing, isTrue);
+      final failed = ProgramLatest.parse({'known': true, 'version': '1.0.0', 'checked': 1, 'stale': true, 'refreshing': false, 'problem': 'offline'});
+      expect(failed.staleBecause, 'offline');
+      expect(failed.refreshing, isFalse);
+      expect(ProgramLatest.parse({'known': true, 'version': '1.0.0', 'stale': false}).staleBecause, isNull);
+    });
+  });
+
   group('a publisher that does not answer', () {
     test('ends only its own row: the others show their newest versions and the page is told as each answer arrives', () async {
       final host = FakeStoreHost([
