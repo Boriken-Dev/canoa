@@ -8,8 +8,8 @@ app/web_noise/Cargo.toml pins.
 
 Nothing comes from crates.io or GitHub: the crates are DEPS/crates-web_noise, DEPS being --deps, CANOA_DEPS or the deps
 branch's worktree beside the repository, and --install-bindgen builds the command line from DEPS/crates-wasm-bindgen-cli with
-`cargo install --offline --locked`, into CARGO_HOME's bin (or ~/.cargo/bin). Without a deps checkout the build stops; only
---online, for refreshing the mirror, reads crates.io and GitHub.
+`cargo install --offline --locked`, into CARGO_HOME's bin (or ~/.cargo/bin), as the shared tools/build.py's `sdk install`
+does. Without a deps checkout the build stops; only --online, for refreshing the mirror, reads crates.io and GitHub.
 """
 from __future__ import annotations
 
@@ -19,12 +19,11 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import offline_pub  # noqa: E402
+import shared_build  # noqa: E402
 
 CRATE = APP / "web_noise"
 BINDGEN = "wasm-bindgen-cli"
@@ -38,24 +37,8 @@ def pinned_bindgen() -> str:
     return match.group(1)
 
 
-def deps_config(deps: Path, folder: str) -> Path:
-    """The cargo config that builds from deps/<folder> alone, or an error naming what the folder lacks."""
-    crates = offline_pub._mirror_crates()
-    try:
-        vendor = next(v for v in crates.VENDORS if v.folder == folder)
-        lock, text = crates.vendor_lock(vendor, deps)
-        found = crates.problems(lock, crates.read_dir(deps / folder, deep=False), deep=False, folder=folder)
-        if found:
-            more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
-            raise crates.Problem(found[0] + more)
-        home = Path(tempfile.gettempdir()) / f"canoa-cargo-{folder}"
-        return crates.use(deps, lock, text, home, folder=folder) / "config.toml"
-    except crates.Problem as problem:
-        raise RuntimeError(f"the deps branch's {folder}/ cannot build this: {problem}") from problem
-
-
 def install_bindgen(bindgen: str, deps: Path) -> None:
-    config = deps_config(deps, "crates-wasm-bindgen-cli")
+    config = shared_build.vendor_config(deps, "crates-wasm-bindgen-cli")
     subprocess.run(["cargo", "--config", str(config), "install", "--offline", "--locked", BINDGEN, "--version", bindgen], check=True)
 
 
@@ -85,8 +68,7 @@ def build(out: Path, test_peer: bool, deps: Path | None = None) -> Path:
     target = Path(os.environ.get("CARGO_TARGET_DIR", CRATE / "target"))
     command = ["cargo", "build", "--release", "--locked", "--target", "wasm32-unknown-unknown", "--manifest-path", str(CRATE / "Cargo.toml")]
     if deps is not None:
-        config = deps_config(deps, "crates-web_noise")
-        command = [command[0], "--config", str(config), *command[1:], "--offline"]
+        command = shared_build.offline_command(deps, "crates-web_noise", [*command, "--offline"])
     if test_peer:
         command += ["--features", "test-peer"]
     subprocess.run(command, check=True)
@@ -117,7 +99,7 @@ def main() -> None:
     if opts.online and (opts.deps or opts.install_bindgen):
         parser.error("--online reads no deps branch: not with --deps or --install-bindgen")
     if not opts.online and opts.deps is None:
-        opts.deps = offline_pub.find_deps(APP.parent, offline_pub.load_settings(APP.parent, os.environ))
+        opts.deps = shared_build.deps_checkout()
         if opts.deps is None:
             sys.exit("build_noise.py: no deps checkout (set CANOA_DEPS or --deps, or fetch the deps branch; "
                      "--online builds from crates.io and GitHub to refresh the mirror)")

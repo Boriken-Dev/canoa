@@ -14,12 +14,8 @@ import subprocess
 import sys
 
 import brand as brand_file
-import offline_pub
-
-# tools/ is not a package: the fallback-font list and its checks live there, beside the step that mirrors the fonts.
-sys.path.insert(0, str(Path(os.path.abspath(__file__)).parents[2] / "tools"))
-import fallback_fonts
-import flutter_pin
+import envfile
+import shared_build
 
 # Not resolve(): a drive made with `subst` (how a long checkout path stays under MSBuild's limit) must stay as typed.
 APP = Path(os.path.abspath(__file__)).parents[1]
@@ -35,8 +31,8 @@ SETTINGS: dict[str, str] = {}
 
 
 def configure_environment() -> None:
-    SETTINGS.update(offline_pub.load_settings(ROOT, os.environ))
-    offline_pub.apply_settings(SETTINGS, os.environ)
+    SETTINGS.update(envfile.load_settings(ROOT, os.environ))
+    envfile.apply_settings(SETTINGS, os.environ)
 
 
 def flutter_program() -> str:
@@ -168,18 +164,15 @@ def built_executable(platform: str, debug: bool, app: Path = APP) -> Path | None
     return found[0] if found else None
 
 
-# What a build says when the deps branch cannot supply it: the commands that fill the mirror, never a fetch.
-MIRROR_HINT = ("refresh the deps branch (tools/mirror_deps.py fills pub, fonts and Office.js, tools/mirror_crates.py sync the "
-               "crates) and fetch it, or pass --online to resolve from the network")
-
-
 @dataclass(frozen=True)
 class Offline:
-    """What an offline build reads: the deps checkout, the pub cache seeded from it and the cargo home that vendors Cargo.lock."""
+    """What an offline build reads, from `tools/build.py offline env`: the deps checkout, the pub cache seeded from it and
+    the cargo home that vendors Cargo.lock, with every variable the build's tools run under."""
 
     deps: Path
     cache: Path
     cargo_home: Path | None
+    env: dict[str, str]
 
 
 def choose_pub(online: bool) -> Offline | None:
@@ -189,24 +182,16 @@ def choose_pub(online: bool) -> Offline | None:
     """
     if online:
         return None
-    result = offline_pub.plan(ROOT, SETTINGS, os.environ, ROOT / LOCK)
-    if result.reason is not None or result.cache is None:
-        raise RuntimeError(f"an offline build is not possible: {result.reason}; {MIRROR_HINT}")
-    return Offline(offline_pub.find_deps(ROOT, SETTINGS), result.cache, result.cargo_home)
-
-
-def engine_directories(platform: str) -> list[Path]:
-    """The folders of the SDK's cache a build for `platform` reads, which a Flutter not precached for it would download."""
-    import platform as host
-
-    arch = "arm64" if host.machine().lower() in ("arm64", "aarch64") else "x64"
-    cache = Path("bin") / "cache"
-    return {
-        "web": [cache / "flutter_web_sdk"],
-        "windows": [cache / "artifacts" / "engine" / f"windows-{arch}"],
-        "linux": [cache / "artifacts" / "engine" / f"linux-{arch}"],
-        "macos": [cache / "artifacts" / "engine" / "darwin-x64"],
-    }[platform]
+    deps = shared_build.deps_checkout()
+    if deps is None:
+        raise RuntimeError(f"an offline build is not possible: no deps checkout (set CANOA_DEPS, or fetch the deps branch); "
+                           f"{shared_build.MIRROR_HINT}")
+    try:
+        plan = shared_build.offline_environment(deps)
+    except RuntimeError as error:
+        raise RuntimeError(f"an offline build is not possible: {error}; {shared_build.MIRROR_HINT}") from error
+    env = {key: value for key, value in plan.items() if key not in ("cache", "cargo_home")}
+    return Offline(deps, Path(plan["cache"]), Path(plan["cargo_home"]) if plan.get("cargo_home") else None, env)
 
 
 def require_pinned_sdk(platform: str) -> None:
@@ -216,13 +201,12 @@ def require_pinned_sdk(platform: str) -> None:
     (Boriken-Dev/flutter, with its engine-<hash> release) already precached, and a build never asks for more.
     """
     sdk = Path(flutter_program()).resolve().parents[1]
-    problems = flutter_pin.sdk_problems(sdk, flutter_pin.load())
-    problems += [f"{sdk / folder} is missing: the SDK was not precached for {platform}"
-                 for folder in engine_directories(platform) if not (sdk / folder).is_dir()]
-    if problems:
+    try:
+        shared_build.precache_check(sdk, platform)
+    except RuntimeError as error:
         raise RuntimeError(
-            "the Flutter SDK is not the one tools/flutter.pin names, precached for this build:\n  " + "\n  ".join(problems)
-            + f"\nInstall it from the mirror with: python tools/flutter_pin.py install DIR --platforms {platform}")
+            f"the Flutter SDK is not the one tools/sdk.lock names, precached for this build:\n  {error}"
+            "\nInstall it from the mirror with: python tools/build.py sdk install --groups app --prefix DIR") from error
 
 
 @contextlib.contextmanager
@@ -238,24 +222,9 @@ def environment(changes: dict[str, str | None]):
             restore_env(key, value)
 
 
-# Where Flutter's cache would download from if it lacked a file: nowhere, so a missing one fails instead of fetching.
-NO_STORAGE = "http://127.0.0.1:9"
-
-
 def network_off(offline: Offline | None) -> dict[str, str | None]:
     """The environment of an offline build: the seeded pub cache, the vendored cargo home, no telemetry and no storage URL."""
-    if offline is None:
-        return {}
-    changes: dict[str, str | None] = {
-        "PUB_CACHE": str(offline.cache),
-        "FLUTTER_SUPPRESS_ANALYTICS": "true",
-        "DART_SUPPRESS_ANALYTICS": "true",
-        "CARGO_NET_OFFLINE": "true",
-        "FLUTTER_STORAGE_BASE_URL": os.environ.get("FLUTTER_STORAGE_BASE_URL") or NO_STORAGE,
-    }
-    if offline.cargo_home is not None:
-        changes["CARGO_HOME"] = str(offline.cargo_home)
-    return changes
+    return dict(offline.env) if offline is not None else {}
 
 
 @contextlib.contextmanager
@@ -273,7 +242,7 @@ def build_environment(online: bool, platform: str):
 def pub_get_offline(offline: Offline) -> None:
     """Resolve app/pubspec.lock from the seeded cache with the network off."""
     try:
-        subprocess.run([flutter_program(), "pub", "get", "--offline"], check=True, cwd=APP)
+        subprocess.run([flutter_program(), "pub", "get", "--offline", "--enforce-lockfile"], check=True, cwd=APP)
     except subprocess.CalledProcessError as error:
         raise RuntimeError(f"pub get --offline failed in {offline.cache}") from error
 
@@ -299,18 +268,15 @@ def build_wasm(offline: Offline | None) -> None:
 def finish_web(dist: Path) -> None:
     """What a web build gets after Flutter: no service worker, and the fallback fonts the engine asks for.
 
-    The fonts come from the deps checkout's mirror (tools/mirror_deps.py fills it); this never fetches. A missing or
-    changed font stops the build, since a page without them cannot draw a symbol, an emoji or CJK.
+    The fonts come from the deps checkout's mirror (`python tools/build.py deps refresh` fills it); this never fetches. A
+    missing or changed font stops the build, since a page without them cannot draw a symbol, an emoji or CJK.
     """
     (dist / "flutter_service_worker.js").unlink(missing_ok=True)
-    pinned = fallback_fonts.read_list()
-    try:
-        fallback_fonts.check_engine(pinned, fallback_fonts.flutter_root())
-        deps = offline_pub.find_deps(ROOT, SETTINGS)
-        size = fallback_fonts.install(deps, dist, pinned)
-    except fallback_fonts.FontError as error:
-        raise RuntimeError(str(error)) from error
-    print(f"Fallback fonts: {len(pinned)} files, {size} bytes, from the deps mirror")
+    deps = shared_build.deps_checkout()
+    if deps is None:
+        raise RuntimeError("the fallback fonts come from the deps checkout: set CANOA_DEPS, or fetch the deps branch")
+    shared_build.fonts_check(Path(flutter_program()).resolve().parents[1])
+    print(shared_build.fonts_install(dist, deps))
 
 
 def no_pub(offline: Offline | None) -> list[str]:
@@ -359,7 +325,7 @@ def office_js_environment(source: str) -> dict[str, str]:
     """
     if source == "cdn":
         return {"CANOA_OFFICE_JS": "cdn"}
-    deps = None if os.environ.get("CANOA_DEPS") else offline_pub.find_deps(ROOT, SETTINGS)
+    deps = None if os.environ.get("CANOA_DEPS") else shared_build.deps_checkout()
     return {"CANOA_OFFICE_JS": "bundled", **({"CANOA_DEPS": str(deps)} if deps else {})}
 
 
@@ -414,7 +380,7 @@ def office_js_folder() -> Path:
     if own:
         return Path(own)
     deps = os.environ.get("CANOA_DEPS")
-    found = Path(deps) if deps else offline_pub.find_deps(ROOT, SETTINGS)
+    found = Path(deps) if deps else shared_build.deps_checkout()
     if found is None:
         raise RuntimeError("Office.js comes from the deps mirror: set CANOA_DEPS to a checkout of the deps branch")
     return Path(found) / "cdn" / "office-js"

@@ -1,8 +1,7 @@
 """No build in this folder goes online unless it is asked to with --online.
 
-The mirror's own tools (tools/mirror_*.py, cdn_files.py, fallback_fonts.py, office_js.py, flutter_pin.py install) are the
-only code that fetches; these tests hold the builds to the deps checkout and the pinned SDK, so a fallback to the network
-that comes back fails here.
+The deps branch is filled by `python tools/build.py deps refresh` and the SDK by `sdk install`, the only code that fetches;
+these tests hold the builds to the deps checkout and the pinned SDK, so a fallback to the network that comes back fails here.
 """
 import ast
 import os
@@ -16,7 +15,7 @@ from unittest.mock import patch
 import build
 import build_noise
 import build_whisper
-import offline_pub
+import shared_build
 
 HERE = Path(__file__).resolve().parent
 NETWORK_MODULES = {"urllib", "http", "socket", "ssl", "ftplib", "smtplib", "requests", "aiohttp", "httpx"}
@@ -79,14 +78,16 @@ class OfflineInvariantTests(unittest.TestCase):
     """Whatever kind is built, an offline run starts only commands that cannot reach the network."""
 
     def setUp(self):
-        plan = offline_pub.Plan(Path("/seeded"), None, Path("/cargo_home"))
+        plan = {"PUB_CACHE": str(Path("/seeded")), "CARGO_HOME": str(Path("/cargo_home")), "CARGO_NET_OFFLINE": "true",
+                "FLUTTER_SUPPRESS_ANALYTICS": "true", "DART_SUPPRESS_ANALYTICS": "true",
+                "FLUTTER_STORAGE_BASE_URL": "http://127.0.0.1:9", "cache": str(Path("/seeded")), "cargo_home": str(Path("/cargo_home"))}
         for patcher in (
             patch.dict("build.os.environ", {"PUB_CACHE": "/user/cache", "CANOA_DEPS": "/deps"}),
             patch("build.require_pinned_sdk"),
             patch("build.require_tools"),
             patch("build.flutter_program", return_value="flutter"),
-            patch("build.offline_pub.plan", return_value=plan),
-            patch("build.offline_pub.find_deps", return_value=Path("/deps")),
+            patch("build.shared_build.offline_environment", return_value=plan),
+            patch("build.shared_build.deps_checkout", return_value=Path("/deps")),
             patch("build.finish_web"),
             patch("build.package_ui"),
             patch("build.package_office"),
@@ -137,7 +138,7 @@ class OfflineInvariantTests(unittest.TestCase):
             self.assert_offline()
 
     def test_the_host_web_build(self):
-        offline = build.Offline(Path("/deps"), Path("/seeded"), Path("/cargo_home"))
+        offline = build.choose_pub(False)
         with patch.object(Path, "is_file", return_value=True), build.environment(build.network_off(offline)):
             build.build_web_for_host(offline)
         self.assert_offline()
@@ -154,7 +155,7 @@ class OfflineInvariantTests(unittest.TestCase):
 class NoiseTests(unittest.TestCase):
     def test_without_a_deps_checkout_the_build_stops_and_does_not_reach_for_crates_io(self):
         with patch("sys.argv", ["build_noise.py"]), patch.dict("os.environ", {}, clear=False) as env, \
-                patch("build_noise.offline_pub.find_deps", return_value=None), patch("build_noise.build") as built:
+                patch("build_noise.shared_build.deps_checkout", return_value=None), patch("build_noise.build") as built:
             env.pop("CANOA_DEPS", None)
             with self.assertRaises(SystemExit) as stopped:
                 build_noise.main()
@@ -171,7 +172,7 @@ class NoiseTests(unittest.TestCase):
         self.assertIsNone(built.call_args.args[2])
 
     def test_whisper_stops_without_a_deps_checkout_and_online_is_explicit(self):
-        with patch("sys.argv", ["build_whisper.py"]), patch.dict("os.environ", {}, clear=False) as env,                 patch("build_whisper.offline_pub.find_deps", return_value=None), patch("build_whisper.build") as built:
+        with patch("sys.argv", ["build_whisper.py"]), patch.dict("os.environ", {}, clear=False) as env,                 patch("build_whisper.shared_build.deps_checkout", return_value=None), patch("build_whisper.build") as built:
             env.pop("CANOA_DEPS", None)
             with self.assertRaises(SystemExit) as stopped:
                 build_whisper.main()
@@ -185,11 +186,27 @@ class NoiseTests(unittest.TestCase):
 
     def test_the_wasm_builds_run_both_scripts_from_the_deps_checkout(self):
         with patch("build.subprocess.run") as run:
-            build.build_wasm(build.Offline(Path("/deps"), Path("/c"), None))
+            build.build_wasm(build.Offline(Path("/deps"), Path("/c"), None, {}))
             build.build_wasm(None)
         commands = [[Path(part).name for part in call.args[0][1:]] for call in run.call_args_list]
         self.assertEqual(commands, [["build_noise.py", "--deps", "deps"], ["build_whisper.py", "--deps", "deps"],
                                     ["build_noise.py", "--online"], ["build_whisper.py", "--online"]])
+
+    def test_each_wasm_build_runs_cargo_under_its_vendors_offline_plan(self):
+        for module, folder, build_it in ((build_noise, "crates-web_noise", lambda: build_noise.build(Path("/out"), False, Path("/deps"))),
+                                         (build_whisper, "crates-web_whisper", lambda: build_whisper.build(Path("/out"), Path("/deps")))):
+            with self.subTest(folder), patch.object(module, "require_tools"), patch.object(module, "pinned_bindgen", return_value="0"), \
+                    patch(f"{module.__name__}.subprocess.run", side_effect=RuntimeError("stop")) as run, \
+                    patch.object(module.shutil, "rmtree"):
+                with self.assertRaisesRegex(RuntimeError, "stop"):
+                    build_it()
+            command = [str(part) for part in run.call_args_list[0].args[0]]
+            self.assertEqual(Path(command[1]), shared_build.TOOL)
+            tail = command[command.index("offline"):]
+            self.assertEqual(tail[:2], ["offline", "run"])
+            self.assertEqual(tail[tail.index("--vendor") + 1], folder)
+            self.assertEqual(tail[tail.index("--") + 1:][:2], ["cargo", "build"])
+            self.assertIn("--offline", tail)
 
     def test_a_missing_wasm_target_is_named_not_installed(self):
         with tempfile.TemporaryDirectory() as tmp, patch("build_noise.subprocess.run") as run:

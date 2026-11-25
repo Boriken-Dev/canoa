@@ -4,8 +4,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 import build
-import offline_pub
 from build import flutter_args, package_ui, package_debug_extension
+
+
+def seeded(cache: str = str(Path("/seeded")), cargo_home: str | None = None) -> dict[str, str]:
+    """What `tools/build.py offline env --json` prints for a deps checkout that covers the locks."""
+    env = {"PUB_CACHE": cache, "CARGO_NET_OFFLINE": "true", "FLUTTER_SUPPRESS_ANALYTICS": "true",
+           "DART_SUPPRESS_ANALYTICS": "true", "FLUTTER_STORAGE_BASE_URL": "http://127.0.0.1:9"}
+    if cargo_home:
+        env["CARGO_HOME"] = cargo_home
+    return {**env, "cache": cache, "cargo_home": cargo_home}
 
 
 class DesktopTests(unittest.TestCase):
@@ -214,23 +222,24 @@ class PubModeTests(unittest.TestCase):
     def commands(self, run):
         return [call.args[0] for call in run.call_args_list]
 
-    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
+    @patch("build.shared_build.deps_checkout", return_value=Path("/deps"))
+    @patch("build.shared_build.offline_environment", return_value=seeded())
     def test_offline_is_the_default_and_builds_without_resolving_again(self, plan, _d, run, _t, _f, ensure, *_):
         seen = []
         run.side_effect = lambda *a, **k: seen.append(build.os.environ["PUB_CACHE"])
         ensure.side_effect = lambda *a, **k: seen.append("runner")
         build.build_desktop("windows", False, False)
         self.assertEqual(self.commands(run), [
-            ["flutter", "pub", "get", "--offline"], ["flutter", "build", "windows", "--release", "--no-pub", *build.BRAND.defines()],
+            ["flutter", "pub", "get", "--offline", "--enforce-lockfile"],
+            ["flutter", "build", "windows", "--release", "--no-pub", *build.BRAND.defines()],
         ])
         seen = ["cache" if s == str(Path("/seeded")) else s for s in seen]
         self.assertEqual(seen, ["runner", "cache", "cache"], "the runner exists before pub get writes its plugin files")
         self.assertEqual(build.os.environ["PUB_CACHE"], "/user/cache", "the cache is put back")
         self.assertEqual(ensure.call_args.kwargs, {"offline": True})
 
-    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None, Path("/cargo_home")))
+    @patch("build.shared_build.deps_checkout", return_value=Path("/deps"))
+    @patch("build.shared_build.offline_environment", return_value=seeded(cargo_home=str(Path("/cargo_home"))))
     def test_offline_points_cargo_at_deps_crates_and_turns_the_network_off(self, plan, _d, run, *_):
         seen = []
         run.side_effect = lambda *a, **k: seen.append(tuple(build.os.environ.get(key) for key in (
@@ -238,24 +247,26 @@ class PubModeTests(unittest.TestCase):
         with patch.dict("build.os.environ", {"CARGO_HOME": "/mine"}):
             build.build_desktop("windows", False, False)
             self.assertEqual(build.os.environ["CARGO_HOME"], "/mine")
-        self.assertEqual(seen, [(str(Path("/cargo_home")), "true", build.NO_STORAGE, "true")] * 2)
+        self.assertEqual(seen, [(str(Path("/cargo_home")), "true", "http://127.0.0.1:9", "true")] * 2)
         for key in ("CARGO_NET_OFFLINE", "FLUTTER_STORAGE_BASE_URL", "FLUTTER_SUPPRESS_ANALYTICS"):
             self.assertNotIn(key, build.os.environ)
 
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "the deps branch's crates/ does not cover Cargo.lock: crates/x-1.0.0: missing"))
-    def test_crates_the_deps_branch_lacks_stop_the_build_and_name_the_fix(self, plan, run, *_):
-        with self.assertRaisesRegex(RuntimeError, r"crates/x-1\.0\.0.*mirror_crates\.py sync"):
+    @patch("build.shared_build.deps_checkout", return_value=Path("/deps"))
+    @patch("build.shared_build.offline_environment",
+           side_effect=RuntimeError("offline is not possible: the deps branch's crates/ does not cover Cargo.lock: crates/x-1.0.0: missing"))
+    def test_crates_the_deps_branch_lacks_stop_the_build_and_name_the_fix(self, plan, _d, run, *_):
+        with self.assertRaisesRegex(RuntimeError, r"crates/x-1\.0\.0.*python tools/build\.py deps refresh"):
             build.build_desktop("windows", False, False)
         run.assert_not_called()
 
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "git dependencies are not in the pub cache"))
-    def test_a_missing_dependency_stops_the_build_instead_of_going_online(self, plan, run, *_):
-        with self.assertRaisesRegex(RuntimeError, "git dependencies are not in the pub cache"):
+    @patch("build.shared_build.deps_checkout", return_value=None)
+    def test_no_deps_checkout_stops_the_build_instead_of_going_online(self, _d, run, *_):
+        with self.assertRaisesRegex(RuntimeError, "no deps checkout"):
             build.build_desktop("windows", False, False)
         run.assert_not_called()
 
-    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
+    @patch("build.shared_build.deps_checkout", return_value=Path("/deps"))
+    @patch("build.shared_build.offline_environment", return_value=seeded())
     def test_a_failed_offline_resolution_stops_the_build(self, plan, _d, run, *_):
         def fail_offline(command, **_):
             if "--offline" in command:
@@ -264,9 +275,9 @@ class PubModeTests(unittest.TestCase):
         run.side_effect = fail_offline
         with self.assertRaisesRegex(RuntimeError, "pub get --offline failed"):
             build.build_desktop("windows", False, False)
-        self.assertEqual(self.commands(run), [["flutter", "pub", "get", "--offline"]])
+        self.assertEqual(self.commands(run), [["flutter", "pub", "get", "--offline", "--enforce-lockfile"]])
 
-    @patch("build.offline_pub.plan")
+    @patch("build.shared_build.offline_environment")
     def test_online_skips_deps(self, plan, run, *_):
         build.build_desktop("windows", False, False, online=True)
         plan.assert_not_called()
@@ -290,20 +301,21 @@ class WebModeTests(unittest.TestCase):
     def commands(self, run):
         return [call.args[0] for call in run.call_args_list]
 
-    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
+    @patch("build.shared_build.deps_checkout", return_value=Path("/deps"))
+    @patch("build.shared_build.offline_environment", return_value=seeded())
     def test_the_pwa_resolves_offline_and_builds_without_resolving_again(self, plan, _d, run, _f, _fin, noise):
         for kind in ("pwa", "chromium"):
             run.reset_mock()
             with patch("sys.argv", ["build.py", kind]), patch("build.package_ui"):
                 build.main()
             commands = self.commands(run)
-            self.assertEqual(commands[0], ["flutter", "pub", "get", "--offline"])
+            self.assertEqual(commands[0], ["flutter", "pub", "get", "--offline", "--enforce-lockfile"])
             self.assertIn("--no-pub", commands[1])
             self.assertEqual(noise.call_args.args[0].deps, Path("/deps"), "the Noise wasm is built from the same deps checkout")
 
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(None, "the deps branch lacks hosted packages: web-1.1.1"))
-    def test_a_deps_branch_that_lacks_a_package_stops_every_web_build(self, plan, run, _f, _fin, noise):
+    @patch("build.shared_build.deps_checkout", return_value=Path("/deps"))
+    @patch("build.shared_build.offline_environment", side_effect=RuntimeError("the deps branch lacks hosted packages: web-1.1.1"))
+    def test_a_deps_branch_that_lacks_a_package_stops_every_web_build(self, plan, _d, run, _f, _fin, noise):
         for kind in ("pwa", "chromium", "office"):
             with patch("sys.argv", ["build.py", kind]), self.assertRaises(SystemExit) as stopped:
                 build.main()
@@ -311,7 +323,7 @@ class WebModeTests(unittest.TestCase):
         run.assert_not_called()
         noise.assert_not_called()
 
-    @patch("build.offline_pub.plan")
+    @patch("build.shared_build.offline_environment")
     def test_online_is_the_one_way_to_resolve_from_the_network(self, plan, run, _f, _fin, noise):
         with patch("sys.argv", ["build.py", "pwa", "--online"]):
             build.main()
@@ -319,33 +331,27 @@ class WebModeTests(unittest.TestCase):
         self.assertEqual(self.commands(run)[0], ["flutter", "pub", "get"])
         self.assertEqual(noise.call_args.args, (None,))
 
-    @patch("build.offline_pub.find_deps", return_value=Path("/deps"))
-    @patch("build.offline_pub.plan", return_value=offline_pub.Plan(Path("/seeded"), None))
-    def test_the_host_web_build_resolves_offline_too(self, plan, _d, run, _f, _fin, noise):
+    def test_the_host_web_build_resolves_offline_too(self, run, _f, _fin, noise):
         with patch.object(Path, "is_file", return_value=True):
-            build.build_web_for_host(build.Offline(Path("/deps"), Path("/seeded"), None))
+            build.build_web_for_host(build.Offline(Path("/deps"), Path("/seeded"), None, seeded()))
         commands = self.commands(run)
-        self.assertEqual(commands[0], ["flutter", "pub", "get", "--offline"])
+        self.assertEqual(commands[0], ["flutter", "pub", "get", "--offline", "--enforce-lockfile"])
         self.assertIn("--no-pub", commands[1])
 
 
 class PinnedSdkTests(unittest.TestCase):
-    def test_an_sdk_that_is_not_the_pin_stops_the_build_and_names_the_mirror_install(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("build.flutter_program", return_value=str(Path(tmp) / "bin" / "flutter")):
-            with self.assertRaisesRegex(RuntimeError, r"(?s)is not a Flutter SDK.*flutter_pin\.py install"):
-                build.require_pinned_sdk("web")
-
-    def test_an_sdk_without_the_platforms_engine_stops_the_build(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("build.flutter_program", return_value=str(Path(tmp) / "bin" / "flutter")), \
-                patch.object(build.flutter_pin, "sdk_problems", return_value=[]):
-            with self.assertRaisesRegex(RuntimeError, "not precached for linux"):
+    def test_an_sdk_the_shared_tool_refuses_stops_the_build_and_names_the_mirror_install(self):
+        with patch("build.flutter_program", return_value=str(Path("/sdk/bin/flutter"))), \
+                patch("build.shared_build.precache_check", side_effect=RuntimeError("no bin/cache/engine.stamp")) as check:
+            with self.assertRaisesRegex(RuntimeError, r"(?s)engine\.stamp.*python tools/build\.py sdk install --groups app"):
                 build.require_pinned_sdk("linux")
+        self.assertEqual(check.call_args.args[1], "linux", "the platform's engine files are checked, not only the web's")
 
-    def test_an_offline_build_has_no_storage_to_download_from(self):
+    def test_an_offline_build_runs_under_the_variables_the_shared_tool_printed(self):
         self.assertEqual(build.network_off(None), {})
-        with patch.dict("build.os.environ", {"FLUTTER_STORAGE_BASE_URL": "http://127.0.0.1:5000"}):
-            changes = build.network_off(build.Offline(Path("/d"), Path("/c"), None))
-        self.assertEqual(changes["FLUTTER_STORAGE_BASE_URL"], "http://127.0.0.1:5000", "a loopback mirror the person serves is kept")
+        offline = build.Offline(Path("/d"), Path("/c"), None, {"PUB_CACHE": "/c", "FLUTTER_STORAGE_BASE_URL": "http://127.0.0.1:9"})
+        self.assertEqual(build.network_off(offline), offline.env)
+        self.assertIsNot(build.network_off(offline), offline.env)
 
 
 class PackagingTests(unittest.TestCase):
@@ -353,7 +359,7 @@ class PackagingTests(unittest.TestCase):
     def test_web_wasm_flag(self, _):
         self.assertIn("--wasm", flutter_args("pwa", True))
         self.assertNotIn("--no-pub", flutter_args("pwa", False))
-        self.assertIn("--no-pub", flutter_args("pwa", False, build.Offline(Path("/d"), Path("/c"), None)))
+        self.assertIn("--no-pub", flutter_args("pwa", False, build.Offline(Path("/d"), Path("/c"), None, {})))
         self.assertNotIn("--wasm", flutter_args("pwa", False))
         self.assertIn("--base-href", flutter_args("chromium", False))
 
@@ -416,12 +422,27 @@ class FinishWebTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dist = Path(tmp)
             (dist / "flutter_service_worker.js").write_text("")
-            with patch.object(build.fallback_fonts, "read_list", return_value={"a/v1/b.woff2": "0" * 64}), \
-                    patch.object(build.fallback_fonts, "check_engine"), \
-                    patch.object(build.offline_pub, "find_deps", return_value=None):
-                with self.assertRaisesRegex(RuntimeError, "not all in the deps mirror"):
+            with patch("build.shared_build.deps_checkout", return_value=Path("/deps")), \
+                    patch("build.flutter_program", return_value=str(Path("/sdk/bin/flutter"))), \
+                    patch("build.shared_build.fonts_check"), \
+                    patch("build.shared_build.fonts_install", side_effect=RuntimeError("2 files are missing")):
+                with self.assertRaisesRegex(RuntimeError, "2 files are missing"):
                     build.finish_web(dist)
             self.assertFalse((dist / "flutter_service_worker.js").exists())
+
+    def test_fonts_the_engine_asks_for_and_the_index_lacks_stop_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp, patch("build.shared_build.deps_checkout", return_value=Path("/deps")), \
+                patch("build.flutter_program", return_value=str(Path("/sdk/bin/flutter"))), \
+                patch("build.shared_build.fonts_check", side_effect=RuntimeError("3 unlisted")), \
+                patch("build.shared_build.fonts_install") as install:
+            with self.assertRaisesRegex(RuntimeError, "3 unlisted"):
+                build.finish_web(Path(tmp))
+        install.assert_not_called()
+
+    def test_without_a_deps_checkout_there_are_no_fonts_to_install(self):
+        with tempfile.TemporaryDirectory() as tmp, patch("build.shared_build.deps_checkout", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "deps checkout"):
+                build.finish_web(Path(tmp))
 
 
 class OfficeJsTests(unittest.TestCase):
@@ -429,7 +450,7 @@ class OfficeJsTests(unittest.TestCase):
         self.assertEqual(build.office_js_environment("cdn"), {"CANOA_OFFICE_JS": "cdn"})
 
     def test_the_default_carries_office_js_from_the_deps_checkout_found(self):
-        with patch.dict("os.environ", {}, clear=False) as env, patch("build.offline_pub.find_deps", return_value=Path("/deps")):
+        with patch.dict("os.environ", {}, clear=False) as env, patch("build.shared_build.deps_checkout", return_value=Path("/deps")):
             env.pop("CANOA_DEPS", None)
             self.assertEqual(
                 build.office_js_environment("bundled"),
@@ -437,7 +458,7 @@ class OfficeJsTests(unittest.TestCase):
             )
 
     def test_a_deps_checkout_the_environment_names_is_left_as_it_is(self):
-        with patch.dict("os.environ", {"CANOA_DEPS": "/mine"}), patch("build.offline_pub.find_deps") as find:
+        with patch.dict("os.environ", {"CANOA_DEPS": "/mine"}), patch("build.shared_build.deps_checkout") as find:
             self.assertEqual(build.office_js_environment("bundled"), {"CANOA_OFFICE_JS": "bundled"})
             find.assert_not_called()
 

@@ -42,7 +42,7 @@ ARG DEPS_COMMIT=9bd63bf2ddb3e0f6462bc5104e0c61a017398095
 
 FROM ${BASE_IMAGE} AS base
 ENV DEBIAN_FRONTEND=noninteractive
-# git and python3 (3.11 or later, for tools/mirror_crates.py) are in the Rust image; unzip and xz are Flutter's.
+# git and python3 (3.11 or later, for tools/build.py) are in the Rust image; unzip and xz are Flutter's.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git python3 unzip xz-utils \
     && rm -rf /var/lib/apt/lists/* \
@@ -82,7 +82,7 @@ ENV CANOA_DEPS=/deps CARGO_NET_OFFLINE=true
 WORKDIR /src
 COPY --from=deps /deps /deps
 COPY tools tools
-COPY app/tool/build_noise.py app/tool/offline_pub.py app/tool/
+COPY app/tool/build_noise.py app/tool/shared_build.py app/tool/
 COPY app/web_noise app/web_noise
 RUN --network=none python3 app/tool/build_noise.py --install-bindgen
 RUN --network=none CARGO_TARGET_DIR=/tmp/noise-target python3 app/tool/build_noise.py --out /out/noise \
@@ -124,8 +124,8 @@ COPY tools tools
 COPY --from=site /src/app/build/web /site
 # The cargo home whose config replaces crates.io and every git source by /deps/crates; it refuses a lock the folder
 # does not cover.
-RUN --network=none python3 tools/mirror_crates.py use /deps --out /opt/cargo-offline
-RUN --network=none CANOA_WEB_DIST=/site cargo --config /opt/cargo-offline/config.toml build --release --locked --offline -p canoa-host --bin canoa \
+RUN --network=none python3 tools/build.py deps use --deps /deps --out /opt/cargo-offline
+RUN --network=none CANOA_WEB_DIST=/site cargo --config /opt/cargo-offline/cargo-home/config.toml build --release --locked --offline -p canoa-host --bin canoa \
     && strip target/release/canoa \
     && target/release/canoa --version
 
