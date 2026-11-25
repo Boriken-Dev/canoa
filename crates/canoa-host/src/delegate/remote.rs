@@ -12,13 +12,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use cabuya::auth::{self, Proof, Sealed};
+use cabuya::mux::{Heartbeat, Limits, Mux, Side};
 use coqui_a2a::model::{
     Artifact, CancelTaskRequest, Message, Part, Role, SendMessageRequest, StreamResponse,
     TaskState, TaskStatus,
 };
 use coqui_a2a::{Client, ClientError};
-use coqui_link::auth::{self, Proof, Sealed};
-use coqui_link::mux::{Heartbeat, Limits, Mux, Side};
 use coqui_transport::Channel;
 use coqui_transport_web::websocket::{self, Frames};
 use coqui_transport_web::{Dialer as _, Kind};

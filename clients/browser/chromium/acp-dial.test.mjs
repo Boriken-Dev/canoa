@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { MAX_MESSAGE_META, createDeframer, dialAgent, frame, hostLimit, maxRecord } from "./acp-dial.js";
-import { createMux } from "./vendor/coqui-link/mux.mjs";
+import { createMux } from "./vendor/cabuya/mux.mjs";
 import { createResponder, generateIdentity } from "./vendor/coqui-peer-webcrypto.mjs";
 
 const text = (buffer) => new TextDecoder().decode(buffer);

@@ -1141,7 +1141,7 @@ fn an_offer_no_description_names_is_not_found_and_an_account_of_another_kind_is_
 }
 
 fn say_control(home: &Home) -> super::Control {
-    use coqui_link::auth::{Identity, Method};
+    use cabuya::auth::{Identity, Method};
     use std::sync::Arc;
 
     let store = Arc::new(super::TrustStore::open(&home.root).expect("a trust store"));

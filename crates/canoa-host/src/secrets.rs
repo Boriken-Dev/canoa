@@ -37,12 +37,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use cabuya::auth::Identity;
 use coqui_acp::secret::{
     BINDING_DH, BINDING_ECDSA, BINDING_LINK, IdentityId, LinkKey, LinkRole, Prover, Verifier,
     unprotected,
 };
 use coqui_acp_secrets::{Secrets, SessionTools};
-use coqui_link::auth::Identity;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use zeroize::Zeroizing;
 

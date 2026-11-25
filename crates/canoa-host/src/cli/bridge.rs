@@ -3,12 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
+use cabuya::auth::{self, Method};
 use clap::Args as _;
 use coqui_acp_bridge::helper::Helper;
 use coqui_acp_bridge::{
     MethodArgs, dial, discover, forward, grant, keygen, mcp_shim, pairing, serve,
 };
-use coqui_link::auth::{self, Method};
 use url::Url;
 
 use crate::config::Config;

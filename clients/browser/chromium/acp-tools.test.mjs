@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createMux } from "./vendor/coqui-link/mux.mjs";
+import { createMux } from "./vendor/cabuya/mux.mjs";
 import { createGateway } from "./acp-gateway.js";
 import { createTools, OFFER, SERVER_NAME } from "./acp-tools.js";
 import { handleMcpRequest } from "./mcp.js";

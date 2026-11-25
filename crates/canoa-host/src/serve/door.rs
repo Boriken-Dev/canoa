@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 
-use coqui_link::auth;
+use cabuya::auth;
 use coqui_transport::Channel as _;
 use serde_json::{Value, json};
 

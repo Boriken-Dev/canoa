@@ -1103,7 +1103,7 @@ fn open<C: Channel>(
         thread::Builder::new()
             .name("canoa-session-agent".to_owned())
             .spawn(move || {
-                let prefilled = coqui_link::link::Prefilled::new(&host, first.clone());
+                let prefilled = cabuya::link::Prefilled::new(&host, first.clone());
                 super::connection::give_agent_flow(
                     &shared,
                     &served,

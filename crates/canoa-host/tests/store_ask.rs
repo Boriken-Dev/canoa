@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use cabuya::auth::Identity;
 use canoa::store::engine::Engine;
 use canoa::store::{
     ApplyOutcome, ApplyRequest, InstallPrompter, InstallTools, ProgramQuery, ProgramReport,
@@ -28,7 +29,6 @@ use canoa_host::{Config, Home, Link, ServeOptions, Serving};
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::guatiao::{Alloc, Value as Gv};
 use coqui_acp_api::{LoginForm, ProcessSpawner};
-use coqui_link::auth::Identity;
 use sealed::{App, Typed, found_in};
 use serde_json::{Value, json};
 use support::{Scratch, WAIT, example, host_binary, quoted};

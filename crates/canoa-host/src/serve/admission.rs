@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 
-use coqui_link::auth::{Proof, Trust};
+use cabuya::auth::{Proof, Trust};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 
 use super::connection::{Reach, serve_proven};
@@ -318,7 +318,7 @@ pub(super) struct DelegationHost {
     pub(super) shared: alloc::sync::Weak<Shared>,
     pub(super) served: Vec<Arc<Served>>,
     pub(super) agents: Vec<delegate::Source>,
-    pub(super) identity: coqui_link::auth::Identity,
+    pub(super) identity: cabuya::auth::Identity,
     pub(super) usage: Option<Arc<crate::usage_log::UsageLog>>,
 }
 

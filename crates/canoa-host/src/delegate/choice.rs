@@ -266,7 +266,7 @@ mod tests {
         fn prover(
             &self,
             _peer: &coqui_peer_webcrypto::PeerId,
-        ) -> Result<coqui_link::auth::Proof, String> {
+        ) -> Result<cabuya::auth::Proof, String> {
             Err(String::new())
         }
     }

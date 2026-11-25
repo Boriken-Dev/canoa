@@ -10,7 +10,7 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use coqui_link::auth::Identity;
+use cabuya::auth::Identity;
 use serde_json::{Value, json};
 use support::{
     Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, with_link,
@@ -59,7 +59,7 @@ fn new_session(
 /// Noise's finishes on its last message and hears it as the link ending before anything is answered.
 fn refused_link<T: core::fmt::Debug>(link: &Result<Result<T, Value>, String>) -> bool {
     match support::method() {
-        coqui_link::auth::Method::WebCrypto => link.is_err(),
+        cabuya::auth::Method::WebCrypto => link.is_err(),
         _ => !matches!(link, Ok(Ok(_))),
     }
 }
@@ -532,7 +532,7 @@ fn what_a_provider_prints_goes_to_the_hosts_log_and_never_to_the_client() {
 
 #[test]
 fn a_client_of_the_other_method_is_refused_and_the_host_says_why() {
-    use coqui_link::auth::Method;
+    use cabuya::auth::Method;
     let (host, log) = Host::start_logged(Scratch::new(), &agent_entry("fixture", ""), 1, &[]);
     let other = Method::ALL
         .into_iter()
@@ -658,7 +658,7 @@ fn a_source_that_inherits_the_hosts_environment_is_said_as_configuration() {
 
 #[test]
 fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
-    use coqui_link::auth::Method;
+    use cabuya::auth::Method;
     let host = Host::start(&agent_entry("fixture", ""), 1);
     let other = Method::ALL
         .into_iter()
@@ -718,7 +718,7 @@ fn a_fresh_home_serves_by_the_default_method() {
     let _ = child.kill();
     let _ = child.wait();
     let value: Value = serde_json::from_str(&line).expect("JSON");
-    assert_eq!(value["method"], coqui_link::auth::Method::DEFAULT.name());
+    assert_eq!(value["method"], cabuya::auth::Method::DEFAULT.name());
 }
 
 #[test]

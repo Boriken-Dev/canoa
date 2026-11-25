@@ -8,9 +8,9 @@ use core::sync::atomic::AtomicBool;
 use std::ffi::OsString;
 use std::sync::Mutex;
 
+use cabuya::auth::{Identity, Proof, Trust};
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_api::guatiao::library::Registry as GuatiaoRegistry;
-use coqui_link::auth::{Identity, Proof, Trust};
 use coqui_peer_webcrypto::TrustStore;
 use indexmap::IndexMap;
 

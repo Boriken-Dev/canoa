@@ -13,6 +13,8 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use cabuya::auth::{self, Identity, Proof, Sealed, Trust};
+use cabuya::mux::{Limits, Mux, Side};
 use canoa_host::{Link, LinkError};
 use coqui_a2a::model::{
     GetTaskRequest, Message, Role, SendMessageConfiguration, SendMessageRequest,
@@ -20,8 +22,6 @@ use coqui_a2a::model::{
 };
 use coqui_a2a::{Client, ClientError};
 use coqui_agentic_peer::home::identity_file;
-use coqui_link::auth::{self, Identity, Proof, Sealed, Trust};
-use coqui_link::mux::{Limits, Mux, Side};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport::Channel as _;
 use coqui_transport_web::Dialer as _;

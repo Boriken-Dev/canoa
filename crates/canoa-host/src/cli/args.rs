@@ -9,9 +9,9 @@ use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use cabuya::auth;
+use cabuya::auth::Method;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use coqui_link::auth;
-use coqui_link::auth::Method;
 
 use super::bridge;
 use super::{Failed, STATUS_HELD};

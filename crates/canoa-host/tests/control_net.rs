@@ -14,7 +14,7 @@ use support::{Host, key, with_link};
 /// The answer to `method`, whole: `{"result"}` or `{"error"}`.
 fn call(
     url: &str,
-    who: &coqui_link::auth::Identity,
+    who: &cabuya::auth::Identity,
     host: &Host,
     method: &str,
     params: Value,

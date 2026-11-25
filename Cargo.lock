@@ -840,6 +840,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cabuya"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/cabuya?rev=40123baab01440c0522a27baa7321a31892b3735#40123baab01440c0522a27baa7321a31892b3735"
+dependencies = [
+ "coqui-builder",
+ "coqui-peer",
+ "coqui-peer-noise",
+ "coqui-peer-webcrypto",
+ "coqui-transport",
+ "serde_json",
+ "socket2",
+]
+
+[[package]]
 name = "candle-core"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1046,6 +1060,7 @@ dependencies = [
  "anycfg",
  "apple-native-keyring-store",
  "async-trait",
+ "cabuya",
  "canoa",
  "canoa-antigravity",
  "canoa-bitwarden",
@@ -1087,7 +1102,6 @@ dependencies = [
  "coqui-agentic-peer",
  "coqui-aos",
  "coqui-builder",
- "coqui-link",
  "coqui-peer",
  "coqui-peer-noise",
  "coqui-peer-tls",
@@ -1587,7 +1601,7 @@ name = "coqui-a2a"
 version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-a2a?rev=e1d6216467190043a622069c9879e399d760dad4#e1d6216467190043a622069c9879e399d760dad4"
 dependencies = [
- "coqui-link",
+ "cabuya",
  "coqui-transport",
  "serde",
  "serde_json",
@@ -1811,9 +1825,9 @@ name = "coqui-acp-bridge"
 version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0244aca97b7d779fc00bc0f8103e4f73fcc25640#0244aca97b7d779fc00bc0f8103e4f73fcc25640"
 dependencies = [
+ "cabuya",
  "clap",
  "coqui-agentic-peer",
- "coqui-link",
  "coqui-net-acl",
  "coqui-peer",
  "coqui-peer-tls",
@@ -1952,7 +1966,7 @@ name = "coqui-agentic-peer"
 version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-agentic-peer?rev=161307f9ebc216a56e21d7407688baa80f442823#161307f9ebc216a56e21d7407688baa80f442823"
 dependencies = [
- "coqui-link",
+ "cabuya",
  "coqui-peer-webcrypto",
  "coqui-transport",
  "mdns-sd",
@@ -1994,20 +2008,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "coqui-link"
-version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-link?rev=40123baab01440c0522a27baa7321a31892b3735#40123baab01440c0522a27baa7321a31892b3735"
-dependencies = [
- "coqui-builder",
- "coqui-peer",
- "coqui-peer-noise",
- "coqui-peer-webcrypto",
- "coqui-transport",
- "serde_json",
- "socket2",
 ]
 
 [[package]]

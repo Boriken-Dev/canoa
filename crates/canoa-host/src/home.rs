@@ -18,9 +18,9 @@ use std::fs::{self, File, TryLockError};
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
+use cabuya::Error;
+use cabuya::auth::{Identity, Method};
 use coqui_agentic_peer::home::{self, METHOD_FILE, identity_file};
-use coqui_link::Error;
-use coqui_link::auth::{Identity, Method};
 use coqui_peer_webcrypto::TrustStore;
 use serde_json::{Value, json};
 

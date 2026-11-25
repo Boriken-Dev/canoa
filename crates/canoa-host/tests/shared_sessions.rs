@@ -282,11 +282,7 @@ fn an_unshared_entry_gives_each_connection_an_agent_of_its_own() {
     assert!(!running(pid), "the agent ended with its connection");
 }
 
-fn running_sessions(
-    url: &str,
-    key: &coqui_link::auth::Identity,
-    host: &Host,
-) -> Result<Value, Value> {
+fn running_sessions(url: &str, key: &cabuya::auth::Identity, host: &Host) -> Result<Value, Value> {
     with_link(url, key, host.peer, |rpc| {
         rpc.request("sessions/running", json!({}))
     })

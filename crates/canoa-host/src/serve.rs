@@ -13,9 +13,9 @@ use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 
+use cabuya::auth::{Method, Proof};
 use canoa::{Capability, ClientId, Registry, ServiceId};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
-use coqui_link::auth::{Method, Proof};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport_web::websocket;
 use door::Door;

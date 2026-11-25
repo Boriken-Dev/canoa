@@ -8,11 +8,11 @@
 
 use std::sync::atomic::AtomicBool;
 
+use cabuya::auth::{Identity, Method};
 use coqui_acp::secret::{
     DEFAULT_LIFETIME, LinkKey, LinkRole, Method as WireMethod, Prover, RequestParams, RequestReply,
     Verifier,
 };
-use coqui_link::auth::{Identity, Method};
 
 use super::*;
 use crate::delegate::BridgeCommand;

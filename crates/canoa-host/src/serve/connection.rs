@@ -9,10 +9,10 @@ use core::sync::atomic::Ordering;
 use std::ffi::OsString;
 use std::thread;
 
+use cabuya::auth::{self, Sealed};
+use cabuya::link::Prefilled;
+use cabuya::mux;
 use coqui_builder::builder::BuildError;
-use coqui_link::auth::{self, Sealed};
-use coqui_link::link::Prefilled;
-use coqui_link::mux;
 use coqui_peer_webcrypto::PeerId;
 use coqui_transport::{Channel, Failure};
 use coqui_transport_web::Limits;
@@ -224,10 +224,10 @@ pub(super) fn connection<C: Channel>(
         shared.method.method().record_length(shared.max_line),
     ) {
         Ok(established) => established,
-        Err(error @ coqui_link::Error::OtherMethod { .. }) => {
+        Err(error @ cabuya::Error::OtherMethod { .. }) => {
             return tracing::info!(entry = served.name, "a client was refused: {error}");
         }
-        Err(error @ coqui_link::Error::Proof(_)) => {
+        Err(error @ cabuya::Error::Proof(_)) => {
             return tracing::info!(
                 entry = served.name,
                 "a key was refused: {error}; a key that proved itself and is not paired waits for `canoa accept`"

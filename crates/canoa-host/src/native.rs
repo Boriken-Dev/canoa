@@ -166,7 +166,7 @@ pub fn accept_pairing(channel: &pipe::PipeChannel) -> Option<String> {
     let first = channel.receive(Some(DOOR_WAIT)).ok().flatten()?;
     let wanted = read_preamble(&first).filter(|wanted| wanted.open == PAIR)?;
     channel.send(br#"{"opened":true}"#).ok()?;
-    channel.set_max_message(coqui_link::auth::MAX_PROOF_MESSAGE);
+    channel.set_max_message(cabuya::auth::MAX_PROOF_MESSAGE);
     Some(wanted.origin)
 }
 

@@ -11,8 +11,8 @@ mod support;
 use std::path::Path;
 use std::process::{Command, Output};
 
+use cabuya::auth::Method;
 use canoa_host::Home;
-use coqui_link::auth::Method;
 use support::{Host, Scratch, example, host_binary, quoted};
 
 fn agent_entry() -> String {

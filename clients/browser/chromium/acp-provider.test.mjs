@@ -47,8 +47,8 @@ test("the vendored modules are the recorded ones", () => {
   };
   const meta = JSON.parse(readFileSync(new URL("./vendor/coqui-acp/SOURCE.json", import.meta.url), "utf8"));
   for (const [name, sha] of Object.entries(meta.files)) assert.equal(blob(`./vendor/coqui-acp/${name}`), sha, name);
-  const link = JSON.parse(readFileSync(new URL("./vendor/coqui-link/SOURCE.json", import.meta.url), "utf8"));
-  for (const [name, sha] of Object.entries(link.files)) assert.equal(blob(`./vendor/coqui-link/${name}`), sha, name);
+  const link = JSON.parse(readFileSync(new URL("./vendor/cabuya/SOURCE.json", import.meta.url), "utf8"));
+  for (const [name, sha] of Object.entries(link.files)) assert.equal(blob(`./vendor/cabuya/${name}`), sha, name);
   const methods = JSON.parse(readFileSync(new URL("./vendor/COQUI-SOURCE.json", import.meta.url), "utf8"));
   for (const [name, source] of Object.entries(methods)) assert.equal(blob(`./vendor/${name}`), source.git_blob_sha1, name);
 });

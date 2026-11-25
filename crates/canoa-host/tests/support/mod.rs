@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
-use coqui_link::auth::{self, Identity, Method, Proof, Sealed, Trust};
+use cabuya::auth::{self, Identity, Method, Proof, Sealed, Trust};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport::Channel;
 use coqui_transport_web::Dialer as _;

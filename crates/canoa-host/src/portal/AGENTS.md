@@ -105,10 +105,10 @@ pub fn ServeOptions::with_portal(self, sockets: PortalSockets) -> ServeOptions
 
 ```rust
 pub fn Home::at(dir: impl Into<PathBuf>) -> Home
-pub fn Home::of_user() -> Result<Home, coqui_link::Error>   // COQUI_AGENTIC_PEER_HOME, else ~/.canoa (%USERPROFILE%\.canoa on Windows)
+pub fn Home::of_user() -> Result<Home, cabuya::Error>   // COQUI_AGENTIC_PEER_HOME, else ~/.canoa (%USERPROFILE%\.canoa on Windows)
 pub fn Home::dir(&self) -> &Path
-pub fn Home::identity(&self, method: Option<Method>) -> Result<Identity, coqui_link::Error>   // as coqui_agentic_peer::home, in this directory
-pub fn Home::store(&self) -> Result<TrustStore, coqui_link::Error>
+pub fn Home::identity(&self, method: Option<Method>) -> Result<Identity, cabuya::Error>   // as coqui_agentic_peer::home, in this directory
+pub fn Home::store(&self) -> Result<TrustStore, cabuya::Error>
 pub fn Home::lock(&self, name: &str) -> Result<HomeLock, LockError>
 pub fn Home::holder(&self) -> Option<Holder>   // by what it wrote; proves nothing about the lock
 #[non_exhaustive] pub struct Holder { pub name: String, pub pid: u32 }
