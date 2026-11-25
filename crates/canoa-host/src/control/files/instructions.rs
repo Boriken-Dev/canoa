@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use super::{Files, Outcome, links, plain, shown_name, text_of, visible_name};
 use crate::control::{Caller, bad, text_param};
-use crate::vendors::Vendor;
+use crate::vendors::{Vendor, below};
 
 impl Files {
     /// `fs/instructions` `{"path"}`: for the folder `path`, each existing instruction file of each agent, from the folder up to its
@@ -112,23 +112,8 @@ impl Files {
         vendor: &Vendor,
         env: &dyn Fn(&str) -> Option<OsString>,
     ) -> Option<PathBuf> {
-        let named = vendor
-            .home_variable
-            .and_then(env)
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute());
-        named.or_else(|| {
-            let folder = vendor.home_folder?;
-            Some(below(self.home.as_deref()?, folder))
-        })
+        vendor.folder(self.home.as_deref(), env)
     }
-}
-
-/// `file`, written with `/`, below `dir`.
-fn below(dir: &Path, file: &str) -> PathBuf {
-    file.split('/')
-        .filter(|part| !part.is_empty())
-        .fold(dir.to_path_buf(), |path, part| path.join(part))
 }
 
 /// How a file of an agent's folder is shown: below the person's home as `~/...`, else as its path.
@@ -160,6 +145,7 @@ mod tests {
             home_variable: None,
             home_folder: None,
             home_context_files: Vec::new(),
+            login_files: Vec::new(),
             standards: Vec::new(),
             names: Vec::new(),
         }

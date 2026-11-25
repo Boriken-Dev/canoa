@@ -6,6 +6,8 @@
 //! the few agents a host loads, and a description already kept is not kept again.
 
 use alloc::sync::Arc;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use canoa::store::ProgramStore;
@@ -37,6 +39,8 @@ pub(crate) struct Vendor {
     pub(crate) home_folder: Option<&'static str>,
     /// The files in that folder it loads as the person's own instructions.
     pub(crate) home_context_files: Vec<&'static str>,
+    /// The files in that folder it keeps its own sign-in in.
+    pub(crate) login_files: Vec<&'static str>,
     /// The credential standards that are the vendor's own.
     pub(crate) standards: Vec<&'static str>,
     /// The names it reports in `initialize`.
@@ -48,6 +52,37 @@ fn keep(text: &str) -> &'static str {
 }
 
 impl Vendor {
+    /// The folder the agent keeps its own files in: where its variable names an absolute one, else its folder below `home`.
+    pub(crate) fn folder(
+        &self,
+        home: Option<&Path>,
+        env: &dyn Fn(&str) -> Option<OsString>,
+    ) -> Option<PathBuf> {
+        let named = self
+            .home_variable
+            .and_then(env)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute());
+        named.or_else(|| Some(below(home?, self.home_folder?)))
+    }
+
+    /// Whether the agent's own login is on this computer, by the files its description says it keeps it in. `None` when it lists
+    /// none or has no folder to look in: nothing says, so nothing is hidden. A file that is empty is no login.
+    pub(crate) fn signed_in(
+        &self,
+        home: Option<&Path>,
+        env: &dyn Fn(&str) -> Option<OsString>,
+    ) -> Option<bool> {
+        if self.login_files.is_empty() {
+            return None;
+        }
+        let folder = self.folder(home, env)?;
+        Some(self.login_files.iter().any(|file| {
+            std::fs::metadata(below(&folder, file))
+                .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
+        }))
+    }
+
     fn of(info: &VendorInfo) -> Self {
         Self {
             agent: keep(&info.agent),
@@ -65,6 +100,7 @@ impl Vendor {
                 .iter()
                 .map(|path| keep(path))
                 .collect(),
+            login_files: info.login_files.iter().map(|path| keep(path)).collect(),
             standards: info.standards.iter().map(|each| keep(&each.id)).collect(),
             names: info.names.iter().map(|name| keep(name)).collect(),
         }
@@ -158,6 +194,21 @@ pub(crate) fn by_agent(agent: &str) -> Option<Vendor> {
     all().into_iter().find(|each| each.agent == agent)
 }
 
+/// Whether the login the agent `agent` keeps for itself is on this computer, as its description says where it is kept (the process's
+/// own environment and the person's home); `None` when it says nothing, or the agent is not known.
+pub(crate) fn signed_in(agent: &str) -> Option<bool> {
+    by_agent(agent)?.signed_in(std::env::home_dir().as_deref(), &|name| {
+        std::env::var_os(name)
+    })
+}
+
+/// `file`, written with `/`, below `dir`.
+pub(crate) fn below(dir: &Path, file: &str) -> PathBuf {
+    file.split('/')
+        .filter(|part| !part.is_empty())
+        .fold(dir.to_path_buf(), |path, part| path.join(part))
+}
+
 /// The agent that reports itself as `name` in `initialize`.
 pub(crate) fn by_name(name: &str) -> Option<Vendor> {
     all().into_iter().find(|each| each.names.contains(&name))
@@ -243,4 +294,103 @@ pub(crate) fn behave<T>(agent: &str, f: impl FnOnce(&dyn AgentVendor) -> T) -> O
             .map(|(_, vendor)| Arc::clone(vendor))
     }?;
     Some(f(&*vendor))
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::BTreeMap;
+
+    use super::*;
+
+    /// A folder of the test's own, removed when it goes.
+    struct Folder(PathBuf);
+
+    impl Folder {
+        fn new(name: &str) -> Self {
+            let path =
+                std::env::temp_dir().join(format!("canoa-vendors-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("a folder");
+            Self(path)
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn signed_in(agent: &str, home: &Path, set: &[(&str, &Path)]) -> Option<bool> {
+        let set: BTreeMap<String, OsString> = set
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), value.as_os_str().to_owned()))
+            .collect();
+        by_agent(agent)?.signed_in(Some(home), &|name| set.get(name).cloned())
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn claude_is_signed_in_where_its_login_file_is_and_not_empty() {
+        let home = Folder::new("claude-home");
+        let there = home.0.join(".claude");
+        assert_eq!(signed_in("claude", &home.0, &[]), Some(false));
+        std::fs::create_dir_all(&there).expect("its folder");
+        std::fs::write(there.join(".credentials.json"), "").expect("empty");
+        assert_eq!(
+            signed_in("claude", &home.0, &[]),
+            Some(false),
+            "an empty file"
+        );
+        std::fs::write(there.join(".credentials.json"), "{}").expect("a login");
+        assert_eq!(signed_in("claude", &home.0, &[]), Some(true));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn the_variable_that_moves_an_agents_folder_is_where_its_login_is_looked_for() {
+        let home = Folder::new("moved-home");
+        let moved = Folder::new("moved-folder");
+        std::fs::create_dir_all(home.0.join(".claude")).expect("its folder");
+        std::fs::write(home.0.join(".claude").join(".credentials.json"), "{}").expect("a login");
+        // The login below the home is not the one the variable points at.
+        assert_eq!(
+            signed_in("claude", &home.0, &[("CLAUDE_CONFIG_DIR", &moved.0)]),
+            Some(false)
+        );
+        std::fs::write(moved.0.join(".credentials.json"), "{}").expect("a login");
+        assert_eq!(
+            signed_in("claude", &home.0, &[("CLAUDE_CONFIG_DIR", &moved.0)]),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn codex_is_signed_in_where_its_auth_file_is() {
+        let home = Folder::new("codex-home");
+        let codex = Folder::new("codex-folder");
+        assert_eq!(
+            signed_in("codex", &home.0, &[("CODEX_HOME", &codex.0)]),
+            Some(false)
+        );
+        // Claude's file is not Codex's.
+        std::fs::write(codex.0.join(".credentials.json"), "{}").expect("a file");
+        assert_eq!(
+            signed_in("codex", &home.0, &[("CODEX_HOME", &codex.0)]),
+            Some(false)
+        );
+        std::fs::write(codex.0.join("auth.json"), "{}").expect("a login");
+        assert_eq!(
+            signed_in("codex", &home.0, &[("CODEX_HOME", &codex.0)]),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn an_agent_that_lists_no_login_file_is_never_said_to_be_signed_out() {
+        let home = Folder::new("none-home");
+        for agent in ["pi", "antigravity"] {
+            assert_eq!(signed_in(agent, &home.0, &[]), None, "{agent}");
+        }
+    }
 }

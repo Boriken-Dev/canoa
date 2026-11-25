@@ -25,8 +25,28 @@ use support::{WAIT, example, host_binary, quoted};
 
 const KEY: &str = "sk-ant-CANARY/+=q\"\\z-0123456789";
 
+/// Puts a login where Claude Code and Codex each keep theirs, in folders of the test's own that the variables the programs read name,
+/// before any host starts: a host asks this process's environment where the logins are, and never looks in the person's.
+fn signed_in_programs() {
+    static HOMES: std::sync::Once = std::sync::Once::new();
+    HOMES.call_once(|| {
+        let root = std::env::temp_dir().join(format!("canoa-logins-{}", std::process::id()));
+        for (variable, file) in [
+            ("CLAUDE_CONFIG_DIR", ".credentials.json"),
+            ("CODEX_HOME", "auth.json"),
+        ] {
+            let home = root.join(variable);
+            std::fs::create_dir_all(&home).expect("a home");
+            std::fs::write(home.join(file), "{\"fixture\":true}").expect("a login");
+            // SAFETY: set once, before any host of this process starts.
+            unsafe { std::env::set_var(variable, &home) };
+        }
+    });
+}
+
 /// The host on a home of its own, serving a Claude entry that runs the stand-in, with the file store.
 fn host() -> Hosted {
+    signed_in_programs();
     let claude = example("harness_standin", false);
     Hosted::start_with_setup(
         |dir| {
@@ -949,6 +969,7 @@ fn a_pool_is_made_edited_and_removed_over_the_link_and_an_entry_offers_it() {
 
 /// As [`host`], with every provider's usage read from a port nothing listens on, so no usage is ever asked of the real services.
 fn host_without_usage() -> Hosted {
+    signed_in_programs();
     let claude = example("harness_standin", false);
     Hosted::start_with_setup(
         |dir| {

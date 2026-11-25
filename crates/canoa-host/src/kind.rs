@@ -315,6 +315,12 @@ impl Harness {
         Some((LOCAL_ACCOUNT.to_owned(), config, info))
     }
 
+    /// Whether it offers its own login as the account `local`, and its description says the login is not on this computer: nobody is
+    /// signed in to it here, which is not the same as a login the description cannot look for.
+    pub(crate) fn local_signed_out(&self) -> bool {
+        self.local && crate::vendors::signed_in(&self.id) == Some(false)
+    }
+
     /// This harness as an account is held for it.
     fn runs(&self) -> Runs<'_> {
         Runs {
@@ -503,6 +509,12 @@ impl Harness {
                 why.unwrap_or_default()
             )
         })?;
+        if picked.1.kind == HARNESS_LOGIN && picked.0 == LOCAL_ACCOUNT && self.local_signed_out() {
+            return Err(format!(
+                "nobody is signed in to {} on this computer: sign in to it from Accounts, or choose an account that is signed in",
+                self.id
+            ));
+        }
         Ok(Some(picked))
     }
 

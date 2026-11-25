@@ -399,7 +399,7 @@ A session runs on one account, with a model that account lists, or on a pool: a 
 ```sh
 {{ program }} accounts providers                                         # the account providers: each agent's own and each maker (a proxy, a gateway, a model service), with its own ways to sign in
 {{ program }} accounts add work --provider claude_accounts --method subscription   # signs in; asks for the code the page shows, with no echo
-{{ program }} accounts list                                              # name, provider, kind, state; never a credential. {{ config_file }}'s accounts, then `local` of each harness that has a login of its own
+{{ program }} accounts list                                              # name, provider, kind, state; never a credential. {{ config_file }}'s accounts, then `local` of each harness that has a login of its own on this computer (one signed out has none, and a session that would have run on it is told nobody is signed in)
 {{ program }} accounts login work                                        # sign in again when a login was lost
 {{ program }} accounts remove work                                       # forgets the stored credential and the account's directory
 ```

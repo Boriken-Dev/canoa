@@ -38,11 +38,16 @@ pub(super) fn call(
         let harness = text_param(params, "harness")?.ok_or_else(|| {
             bad("harness is missing: local is the login of each harness that has one, so say whose")
         })?;
-        if Catalogs::new(&config).local_kind(harness).is_none() {
-            return Err((
-                NOT_FOUND,
-                format!("{harness} has no login of its own to offer as the account {name}"),
-            ));
+        let catalogs = Catalogs::new(&config);
+        if catalogs.local_kind(harness).is_none() {
+            let why = if catalogs.signed_out(harness) {
+                format!(
+                    "nobody is signed in to {harness} on this computer, so it has no account {name}"
+                )
+            } else {
+                format!("{harness} has no login of its own to offer as the account {name}")
+            };
+            return Err((NOT_FOUND, why));
         }
         AccountConfig::local(harness)
     } else {

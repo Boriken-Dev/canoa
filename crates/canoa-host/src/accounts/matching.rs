@@ -25,17 +25,21 @@ struct Known {
     listing: AccountCatalog,
     /// The id of the harness's account provider, when it has one.
     provider: Option<String>,
-    /// Whether the provider offers the harness's own login as the automatic `local` account.
+    /// Whether the provider offers the harness's own login as the automatic `local` account and that login is on this computer.
     local: bool,
+    /// Whether the provider offers that login but the agent's description says it is not on this computer, so nobody is signed in.
+    signed_out: bool,
 }
 
 impl Known {
     fn of(harness: &Harness) -> Option<Self> {
+        let signed_out = harness.local_signed_out();
         Some(Self {
             catalog: harness.catalog().cloned()?,
             listing: harness.listing().clone(),
             provider: harness.account_provider_id().map(str::to_owned),
-            local: harness.local_account().is_some(),
+            local: harness.local_account().is_some() && !signed_out,
+            signed_out,
         })
     }
 }
@@ -91,6 +95,7 @@ impl<'a> Catalogs<'a> {
                 listing: listing.clone(),
                 provider: provider.map(str::to_owned),
                 local,
+                signed_out: false,
             }),
         );
         catalogs
@@ -225,7 +230,8 @@ impl<'a> Catalogs<'a> {
         self.known(harness)?.provider
     }
 
-    /// The kind of the automatic `local` account of `harness`; `None` when its provider does not offer its own login.
+    /// The kind of the automatic `local` account of `harness`; `None` when its provider does not offer its own login, or the login is
+    /// not on this computer.
     pub(crate) fn local_kind(&self, harness: &str) -> Option<AccountKindInfo> {
         let known = self.known(harness)?;
         if !known.local {
@@ -234,7 +240,13 @@ impl<'a> Catalogs<'a> {
         known.listing.kind(coqui_acp_api::HARNESS_LOGIN).cloned()
     }
 
-    /// The automatic `local` account of every harness whose provider offers its own login: the harness and the kind that login is.
+    /// Whether `harness` has a login of its own to offer as the account `local` that is not on this computer: nobody is signed in to it.
+    pub(crate) fn signed_out(&self, harness: &str) -> bool {
+        self.known(harness).is_some_and(|known| known.signed_out)
+    }
+
+    /// The automatic `local` account of every harness whose provider offers its own login: the harness and the kind that login is. Only a login that
+    /// is there is listed: where the agent says its login is kept, and it is not, there is no account.
     pub(crate) fn locals(&self) -> Vec<(String, AccountKindInfo)> {
         self.harnesses()
             .into_iter()

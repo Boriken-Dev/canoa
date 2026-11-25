@@ -112,6 +112,8 @@ impl Fixture {
             .arg("--config")
             .arg(&self.config)
             .env("COQUI_AGENTIC_PEER_HOME", self.home())
+            .env("CLAUDE_CONFIG_DIR", self.claude_home())
+            .env("CODEX_HOME", self.codex_home())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -147,6 +149,26 @@ impl Fixture {
         rows
     }
 
+    /// Where Claude Code keeps its own login for the programs these tests run: a folder of the test's, never the person's.
+    fn claude_home(&self) -> PathBuf {
+        self.scratch.0.join("claude_home")
+    }
+
+    fn codex_home(&self) -> PathBuf {
+        self.scratch.0.join("codex_home")
+    }
+
+    /// Puts a login where Claude Code and Codex each keep theirs, so both are signed in on this computer.
+    fn sign_in_programs(&self) {
+        for (home, file) in [
+            (self.claude_home(), ".credentials.json"),
+            (self.codex_home(), "auth.json"),
+        ] {
+            std::fs::create_dir_all(&home).expect("a home");
+            std::fs::write(home.join(file), "{\"fixture\":true}").expect("a login");
+        }
+    }
+
     fn rows(&self) -> Vec<Value> {
         let listed = self.canoa(&["accounts", "list", "--format", "json"], None);
         assert!(listed.status.success(), "{}", text(&listed.stderr));
@@ -165,6 +187,8 @@ impl Fixture {
         let config = std::fs::read_to_string(&self.config).expect("canoa.cfg");
         let record = self.record.clone();
         let env = vec![
+            ("CLAUDE_CONFIG_DIR", self.claude_home().into_os_string()),
+            ("CODEX_HOME", self.codex_home().into_os_string()),
             ("STANDIN_RECORD", record.clone().into_os_string()),
             ("STANDIN_ENV", "ANTHROPIC_API_KEY".into()),
             ("ANTHROPIC_API_KEY", "a-key-the-account-must-clear".into()),
@@ -546,6 +570,7 @@ fn signing_in_makes_an_account_whose_credential_is_in_the_store_and_not_in_canoa
 #[test]
 fn the_login_each_harness_has_is_listed_after_the_accounts_of_canoa_cfg() {
     let fixture = Fixture::signed_in();
+    fixture.sign_in_programs();
     let rows = fixture.rows();
     assert_eq!(rows[0]["name"], "work", "{rows:?}");
     assert_eq!(rows[0]["automatic"], false);
@@ -572,6 +597,76 @@ fn the_login_each_harness_has_is_listed_after_the_accounts_of_canoa_cfg() {
         "{}",
         text(&removed.stderr)
     );
+}
+
+#[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "Claude Code keeps its login in the Keychain there, so its local account is always listed"
+)]
+fn a_harness_nobody_is_signed_in_to_has_no_local_account_and_one_that_keeps_its_login_elsewhere_still_does()
+ {
+    let fixture = Fixture::signed_in();
+    let named = |rows: &[Value], harness: &str| {
+        rows.iter()
+            .any(|row| row["automatic"] == true && row["fits"] == json!([harness]))
+    };
+    let rows = fixture.rows();
+    assert!(
+        !named(&rows, "claude") && !named(&rows, "codex"),
+        "{rows:?}"
+    );
+    // Pi describes no file its login is in, so nothing says it is signed out.
+    assert!(named(&rows, "pi"), "{rows:?}");
+    let listing = fixture.canoa(&["accounts", "list"], None);
+    assert!(
+        !text(&listing.stdout).contains("claude_accounts harness-login"),
+        "{}",
+        text(&listing.stdout)
+    );
+    // An empty file is no login.
+    std::fs::create_dir_all(fixture.claude_home()).expect("a home");
+    std::fs::write(fixture.claude_home().join(".credentials.json"), "").expect("empty");
+    assert!(!named(&fixture.rows(), "claude"));
+    // Signing in is seen the next time the list is read.
+    fixture.sign_in_programs();
+    let rows = fixture.rows();
+    assert!(named(&rows, "claude") && named(&rows, "codex"), "{rows:?}");
+}
+
+#[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "Claude Code keeps its login in the Keychain there, so its local account is always listed"
+)]
+fn a_session_that_would_run_on_local_is_told_nobody_is_signed_in_until_someone_is() {
+    let fixture = Fixture::unlisted();
+    let claude_home = fixture.claude_home();
+    let (host, _log, _record, _cfg) = fixture.serve();
+    let client = support::key();
+    host.pair(&client);
+    let start = |rpc: &support::Rpc<'_, coqui_transport_web::websocket::Channel>| {
+        rpc.request(
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}}),
+        )
+    };
+    let refused = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        start(rpc).expect_err("no login to run on")
+    })
+    .expect("served");
+    let why = refused["message"].as_str().expect("a reason");
+    assert!(
+        why.contains("nobody is signed in to claude") && why.contains("Accounts"),
+        "{refused}"
+    );
+    // The host looks again at each start, so a login made meanwhile is used without restarting it.
+    std::fs::create_dir_all(&claude_home).expect("a home");
+    std::fs::write(claude_home.join(".credentials.json"), "{\"fixture\":true}").expect("a login");
+    with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        start(rpc).expect("starts on the login that is there now")
+    })
+    .expect("served");
 }
 
 #[test]
