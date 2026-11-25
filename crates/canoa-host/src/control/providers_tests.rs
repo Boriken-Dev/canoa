@@ -138,6 +138,13 @@ mod standin {
             Err(unsupported())
         }
 
+        fn signed_in(
+            &self,
+            _: coqui_acp_api::SignedInQuery,
+        ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
+            Err(unsupported())
+        }
+
         fn models(
             &self,
             _: AccountModelsQuery,
@@ -213,6 +220,13 @@ mod standin {
             _: Object<dyn ProcessSpawner>,
             _: Object<dyn AccountKeeper>,
         ) -> Result<AccountUsage, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn signed_in(
+            &self,
+            _: coqui_acp_api::SignedInQuery,
+        ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
             Err(unsupported())
         }
 

@@ -667,6 +667,17 @@ def test_account_provider_and_model_gateway_describe_and_answer_defaults() -> No
     with pytest.raises(Unsupported):
         provider.renew({}, DummyHandle("s3"))
     assert destroyed == ["s", "k", "s2", "k2", "s3"]
+    with pytest.raises(Unsupported):
+        provider.signed_in({"environment": {"DEMO_KEY": "CANARY"}})
+
+    class LocalAccounts(DemoAccounts):
+        local = True
+
+    assert LocalAccounts().signed_in({})["state"] == "unknown"
+    assert sdk.login_present() == {"state": "signed_in", "variable": None}
+    assert sdk.login_present("DEMO_KEY") == {"state": "signed_in", "variable": "DEMO_KEY"}
+    assert sdk.login_absent("no file") == {"state": "signed_out", "reason": "no file"}
+    assert sdk.login_unknown("no keyring") == {"state": "unknown", "reason": "no keyring"}
     assert provide.library("demo_accounts", "1", providers=[DemoAccounts]).kinds == ("account_provider",)
 
     class LocalLease(sdk.GatewayLease):

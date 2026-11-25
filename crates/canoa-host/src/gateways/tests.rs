@@ -282,6 +282,16 @@ impl AccountProvider for Plain {
         Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
     }
 
+    fn signed_in(
+        &self,
+        _: coqui_acp_api::SignedInQuery,
+    ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
+        Err(ProviderError::new(
+            coqui_acp_api::guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+            "a stand-in",
+        ))
+    }
+
     fn models(
         &self,
         _query: coqui_acp_api::AccountModelsQuery,

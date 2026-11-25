@@ -185,6 +185,15 @@ impl AccountProvider for LiteLlmAccounts {
         usage::read(&base, &key, &query.account.id)
     }
 
+    fn signed_in(
+        &self,
+        _: coqui_acp_api::SignedInQuery,
+    ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
+        Err(unsupported(
+            "a LiteLLM proxy has no login the program keeps for itself",
+        ))
+    }
+
     fn models(
         &self,
         query: AccountModelsQuery,

@@ -103,6 +103,32 @@ export function modelsUnknown(reason, unknownKind) {
 }
 
 /**
+ * The answer of `signedIn` when the program's own login is there; `variable` names, never gives the value of, the environment
+ * variable that signs it in when that is what was found.
+ * @param {string} [variable]
+ */
+export function loginPresent(variable) {
+  return dataOf({ state: 'signed_in', variable });
+}
+
+/**
+ * The answer of `signedIn` when every place the program keeps a login was looked at and none holds one. `reason` says what was
+ * looked at, holds no value of the environment and no path.
+ * @param {string} reason
+ */
+export function loginAbsent(reason) {
+  return dataOf({ state: 'signed_out', reason });
+}
+
+/**
+ * The answer of `signedIn` when the provider could not tell (a place it cannot look at, one that did not answer in time).
+ * @param {string} reason
+ */
+export function loginUnknown(reason) {
+  return dataOf({ state: 'unknown', reason });
+}
+
+/**
  * An answer for an account kind whose plan usage is not offered.
  * @param {string} reason
  * @param {string} [account]
@@ -228,5 +254,18 @@ export class AccountProvider extends Provider {
   models(_query, spawner, keeper) {
     release(/** @type {any} */ (spawner), /** @type {any} */ (keeper));
     return modelsUnknown('this account provider does not list models');
+  }
+
+  /**
+   * Whether the program's own login (the automatic `local` account) exists, asked with no program started and no network call:
+   * `loginPresent`, `loginAbsent` or `loginUnknown`. `query.environment` holds the variables the login is read with, over the
+   * process's; no answer or refusal holds one of them. Default: unsupported when `local` is false, else unknown.
+   * @param {unknown} _query
+   */
+  signedIn(_query) {
+    if (!/** @type {typeof AccountProvider} */ (this.constructor).local) {
+      throw new Unsupported('this account provider offers no local account');
+    }
+    return loginUnknown("this account provider does not say whether the program's own login exists");
   }
 }

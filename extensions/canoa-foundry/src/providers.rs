@@ -129,6 +129,13 @@ impl AccountProvider for FoundryAccounts {
         Ok(usage)
     }
 
+    fn signed_in(
+        &self,
+        _: coqui_acp_api::SignedInQuery,
+    ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
+        Err(unsupported("Foundry Local keeps no login of its own"))
+    }
+
     fn models(
         &self,
         query: AccountModelsQuery,

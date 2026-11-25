@@ -309,6 +309,13 @@ mod declared_link {
             Err(unsupported())
         }
 
+        fn signed_in(
+            &self,
+            _: coqui_acp_api::SignedInQuery,
+        ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
+            Err(unsupported())
+        }
+
         fn models(
             &self,
             _: AccountModelsQuery,

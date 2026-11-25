@@ -45,6 +45,9 @@ __all__ = [
     "ModelInfo",
     "OpenUrl",
     "credential_schema",
+    "login_absent",
+    "login_present",
+    "login_unknown",
     "models_listed",
     "models_unknown",
     "release",
@@ -86,6 +89,23 @@ def models_unknown(reason: str, *, unknown_kind: Optional[str] = None) -> Dict[s
     if unknown_kind is not None:
         result["unknown_kind"] = unknown_kind
     return result
+
+
+def login_present(variable: Optional[str] = None) -> Dict[str, Any]:
+    """The answer of `signed_in` when the program's own login is there; `variable` names, never gives the value of, the environment
+    variable that signs it in when that is what was found."""
+    return {"state": "signed_in", "variable": variable}
+
+
+def login_absent(reason: str) -> Dict[str, Any]:
+    """The answer of `signed_in` when every place the program keeps a login was looked at and none holds one. `reason` says what was
+    looked at, holds no value of the environment and no path."""
+    return {"state": "signed_out", "reason": reason}
+
+
+def login_unknown(reason: str) -> Dict[str, Any]:
+    """The answer of `signed_in` when the provider could not tell (a place it cannot look at, one that did not answer in time)."""
+    return {"state": "unknown", "reason": reason}
 
 
 def usage_unsupported(reason: str, *, account: Optional[str] = None) -> Dict[str, Any]:
@@ -301,3 +321,11 @@ class AccountProvider(WithForm, provide.Provider, kinds.AccountProvider, abstrac
         """Lists the models an account may use; default destroys handles and answers unknown."""
         release(spawner, keeper)
         return models_unknown("this account provider does not list models")
+
+    def signed_in(self, query: Ref) -> ValueAnswer:
+        """Whether the program's own login (the automatic `local` account) exists, asked with no program started and no network call:
+        `login_present`, `login_absent` or `login_unknown`. `query["environment"]` holds the variables the login is read with, over the
+        process's; no answer or refusal holds one of them. Default: unsupported when `local` is false, else unknown."""
+        if not self.local:
+            raise Unsupported("this account provider offers no local account")
+        return login_unknown("this account provider does not say whether the program's own login exists")

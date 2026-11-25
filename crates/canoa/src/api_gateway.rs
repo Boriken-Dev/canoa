@@ -734,6 +734,15 @@ impl AccountProvider for ApiGatewayAccounts {
         Ok(usage)
     }
 
+    fn signed_in(
+        &self,
+        _: coqui_acp_api::SignedInQuery,
+    ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
+        Err(crate::status::unsupported(
+            "an address keeps no login of its own: it is signed in by its key",
+        ))
+    }
+
     fn models(
         &self,
         query: AccountModelsQuery,

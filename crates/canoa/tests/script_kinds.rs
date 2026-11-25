@@ -61,8 +61,8 @@ use coqui_acp_api::{
     AccountProviderInfo, AccountProviderVtable, AccountRenewal, AccountUsage, AccountUsageQuery,
     AccountWatchVtable, Bucket, EndpointSlot, LoginAnswer, LoginForm, LoginMethodInfo,
     LoginOutcome, LoginPrompterVtable, LoginRequest, ModelInfo, ModelListing, OpenUrl,
-    ProcessSpawnerVtable, RenewReport, RenewRequest, SpawnedProcessVtable, UnknownKind,
-    WatchRequest,
+    ProcessSpawnerVtable, RenewReport, RenewRequest, SignedInCheck, SignedInQuery, SignedInState,
+    SpawnedProcessVtable, UnknownKind, WatchRequest,
 };
 use guatiao_serde::Serializable;
 use serde_json::Value as Json;
@@ -429,6 +429,9 @@ fn the_committed_account_provider_schemas_are_what_this_build_describes() {
             ("ModelListing", schema_of::<ModelListing>()),
             ("ModelInfo", schema_of::<ModelInfo>()),
             ("UnknownKind", schema_of::<UnknownKind>()),
+            ("SignedInQuery", schema_of::<SignedInQuery>()),
+            ("SignedInState", schema_of::<SignedInState>()),
+            ("SignedInCheck", schema_of::<SignedInCheck>()),
         ]),
     );
 }

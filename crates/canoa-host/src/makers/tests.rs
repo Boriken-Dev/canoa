@@ -141,6 +141,16 @@ impl AccountProvider for Two {
         Ok(usage)
     }
 
+    fn signed_in(
+        &self,
+        _: coqui_acp_api::SignedInQuery,
+    ) -> Result<coqui_acp_api::SignedInCheck, ProviderError> {
+        Err(ProviderError::new(
+            coqui_acp_api::guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+            "a stand-in",
+        ))
+    }
+
     fn models(
         &self,
         query: AccountModelsQuery,

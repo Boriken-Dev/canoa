@@ -14,12 +14,16 @@ use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{
     ASK, AccountKeeper, AccountModelsQuery, AccountOffer, AccountProvider, AccountProviderInfo,
-    AccountRef, AccountUsage, AccountUsageQuery, AccountWatch, Credentials, HARNESS_LOGIN,
-    LoginForm, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest, ModelListing, OPEN_URL,
-    OpenUrl, ProcessSpawner, RenewReport, RenewRequest, WatchRequest,
+    AccountRef, AccountUsage, AccountUsageQuery, AccountWatch, Credentials, Environment,
+    HARNESS_LOGIN, LoginForm, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest,
+    ModelListing, OPEN_URL, OpenUrl, ProcessSpawner, RenewReport, RenewRequest, SignedInCheck,
+    SignedInQuery, WatchRequest,
 };
 use coqui_acp_harness::ThroughSpawner;
-use coqui_acp_harness::antigravity::{AgyLogin, LoginReading, SignedIn, list_models};
+use coqui_acp_harness::antigravity::{
+    AgyLogin, Cause, Keyring, LoginReading, LoginSettings, SignedIn, Step, has_stored_login,
+    list_models,
+};
 use coqui_acp_harness::cli::{Cli, Next, address_in, plain};
 use coqui_acp_harness::process::Launch;
 use coqui_acp_harness::stdio::login::{self, Ctx};
@@ -185,6 +189,50 @@ impl AccountProvider for AgyAccounts {
             *held = Some((Instant::now(), listing.clone()));
         }
         Ok(listing)
+    }
+
+    fn signed_in(&self, query: SignedInQuery) -> Result<SignedInCheck, ProviderError> {
+        Ok(stored_login(&self.settings, query.environment.expose()))
+    }
+}
+
+/// Whether a whole sign-in is stored where `settings` say it is read (its home, its `.gemini` folder, its keyring), with the home the
+/// query's environment names when the settings name none. Nothing is refreshed, requested or started, and the answer names no path.
+fn stored_login(settings: &AgySettings, environment: &Environment) -> SignedInCheck {
+    let mut reading = LoginSettings::new()
+        .keyring(if settings.keyring {
+            Keyring::Os
+        } else {
+            Keyring::Off
+        })
+        .keyring_timeout(Duration::from_millis(settings.keyring_timeout_ms));
+    match (&settings.home, &settings.gemini_dir) {
+        (Some(home), _) => reading = reading.home(home),
+        (None, Some(_)) => {}
+        (None, None) => match coqui_acp_harness::signed_in::home(environment) {
+            Some(home) => reading = reading.home(home),
+            None => {
+                return SignedInCheck::unknown(
+                    "the home folder Antigravity keeps its login under could not be worked out",
+                );
+            }
+        },
+    }
+    if let Some(dir) = &settings.gemini_dir {
+        reading = reading.gemini_dir(dir);
+    }
+    match has_stored_login(&reading) {
+        Ok(true) => SignedInCheck::signed_in(),
+        Ok(false) => SignedInCheck::signed_out(
+            "Antigravity's keyring entry and its login files under .gemini hold no whole sign-in",
+        ),
+        Err(error) => SignedInCheck::unknown(match (error.step, error.cause) {
+            (Step::Keyring, Cause::Io(std::io::ErrorKind::TimedOut)) => {
+                "the keyring did not answer in time"
+            }
+            (Step::Keyring, _) => "the keyring could not be read",
+            _ => "a login file could not be read",
+        }),
     }
 }
 
@@ -402,5 +450,27 @@ mod tests {
         assert!(asks_for_code("Enter the authorization code: "));
         assert!(!asks_for_code("Waiting for you to sign in..."));
         assert!(!asks_for_code("Authorization code submission timed out."));
+    }
+    #[test]
+    fn a_stored_login_is_looked_for_where_the_settings_say_and_the_answer_names_no_path() {
+        let folder =
+            std::env::temp_dir().join(format!("canoa-agy-signed-in-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let settings = AgySettings {
+            gemini_dir: Some(folder.to_string_lossy().into_owned()),
+            keyring: false,
+            ..AgySettings::default()
+        };
+        let answer = AgyAccounts::new(settings)
+            .signed_in(SignedInQuery::new())
+            .expect("an answer");
+        assert_eq!(answer.state, coqui_acp_api::SignedInState::SignedOut);
+        let reason = answer.reason.expect("a reason");
+        assert!(
+            !reason.contains(&*folder.to_string_lossy()),
+            "the answer says where it looked: {reason}"
+        );
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

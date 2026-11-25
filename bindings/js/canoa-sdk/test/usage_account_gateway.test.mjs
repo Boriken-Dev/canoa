@@ -21,8 +21,11 @@ import {
   credentialSchema,
   endpointSlot,
   failed,
+  loginAbsent,
   loginMethod,
   loginOutcome,
+  loginPresent,
+  loginUnknown,
   modelsListed,
   modelsUnknown,
   reading,
@@ -131,6 +134,14 @@ test('AccountProvider, ModelGateway, and helpers build valid answers and destroy
   assert.throws(() => accounts.renew({}, handle('s4')), Unsupported);
   assert.throws(() => accounts.watch({}, handle('s5'), handle('k5')), Unsupported);
   assert.deepEqual(destroyed, ['s1', 'k1', 's2', 'k2', 's3', 'p3', 's4', 's5', 'k5']);
+  assert.throws(() => accounts.signedIn({ environment: { DEMO_KEY: 'CANARY' } }), Unsupported);
+  class LocalAccounts extends DemoAccounts {
+    static local = true;
+  }
+  assert.equal(new LocalAccounts().signedIn({}).state, 'unknown');
+  assert.deepEqual(loginPresent('DEMO_KEY'), { state: 'signed_in', variable: 'DEMO_KEY' });
+  assert.deepEqual(loginAbsent('no file'), { state: 'signed_out', reason: 'no file' });
+  assert.deepEqual(loginUnknown('no keyring'), { state: 'unknown', reason: 'no keyring' });
   assert.deepEqual(loginOutcome({ kind: 'demo-key', credentials: { api_key: 'k' } }), {
     kind: 'demo-key',
     settings: {},
