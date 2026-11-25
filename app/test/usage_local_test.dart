@@ -138,6 +138,19 @@ void main() {
     expect(usage.all.where((each) => each.id == 'local:codex'), isEmpty);
   });
 
+  testWidgets('a login that is a key of the environment says so, naming the variable, and has its own card', (tester) async {
+    final accounts = AccountsController(
+      host: FakeAccountsHost(accounts: [harnessLogin('claude'), harnessLogin('codex', via: 'environment key (OPENAI_API_KEY)')]),
+      config: () => const CanoaConfig(),
+      change: (_) async {},
+    );
+    await accounts.refresh();
+    final usage = UsageController(sources: [_Host()], accounts: accounts, now: () => _noon);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    expect(usage.all.firstWhere((each) => each.id == 'local:codex').name, 'Environment key (OPENAI_API_KEY)');
+    expect(usage.all.firstWhere((each) => each.id == 'local:claude').name, "This machine's login");
+  });
+
   testWidgets('what sessions heard on a harness\'s login is shown on that harness\'s login only', (tester) async {
     final (usage, _) = await _open(tester, (host) {
       host.heard.add({

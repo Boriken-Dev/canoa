@@ -469,6 +469,7 @@ final class AccountInfo {
     this.types = const [],
     this.automatic = false,
     this.warnings = const [],
+    this.via,
   });
 
   /// One object of `accounts list --format json`, or null when it is not one.
@@ -497,6 +498,7 @@ final class AccountInfo {
       types: _texts(map['types']),
       automatic: map['automatic'] == true,
       warnings: _texts(map['warnings']),
+      via: map['via'] as String?,
     );
   }
 
@@ -516,6 +518,10 @@ final class AccountInfo {
   /// has one. No canoa.cfg names it, so it is neither removed, offered nor signed in again, and its name alone does not tell
   /// one harness's from another's: its [id] does.
   final bool automatic;
+
+  /// How the automatic account signs in when it is an environment key (`environment key (ANTHROPIC_API_KEY)`: the variable's name,
+  /// never its value); null for the login the program keeps for itself.
+  final String? via;
 
   /// The credential standards the account works for (`claude-code`, `anthropic-api`), as its provider answers them for this account.
   final List<String> types;

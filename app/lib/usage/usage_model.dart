@@ -334,7 +334,11 @@ class UsageController extends ChangeNotifier {
   }
 
   /// What the account is called on the page: the harness's own login is `local` for each harness, which says nothing.
-  static String _label(AccountInfo account) => account.automatic ? machineLoginLabel : account.name;
+  static String _label(AccountInfo account) {
+    if (!account.automatic) return account.name;
+    final via = account.via;
+    return via == null ? machineLoginLabel : '${via[0].toUpperCase()}${via.substring(1)}';
+  }
 
   ({String name, String provider, bool automatic}) _resolveAccount(
     String key,
