@@ -15,8 +15,10 @@ import urllib.request
 
 APP_PROGRAM = "CanoaUI"
 
-# appimagetool and the AppImage runtime it embeds, downloaded by a build and checked against these digests (a GitHub
-# release's own, confirmed by hashing the download). Bumping either is a deliberate edit of this table.
+# appimagetool and the AppImage runtime it embeds are programs, so the deps branch cannot carry them: they are toolchain,
+# put in target/appimage-tools by `python app/tool/portable.py fetch` (the only code here that uses the network) and checked
+# against these digests (a GitHub release's own, confirmed by hashing the download) by every build, which never fetches.
+# Bumping either is a deliberate edit of this table.
 APPIMAGETOOL_RELEASE = "https://github.com/AppImage/appimagetool/releases/download/1.9.1"
 APPIMAGETOOL = {
     "x86_64": ("appimagetool-x86_64.AppImage", "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"),
@@ -75,6 +77,25 @@ def fetch_pinned(url: str, sha256: str, dest: Path) -> Path:
     finally:
         partial.unlink(missing_ok=True)
     return dest
+
+
+def pinned_tool(url: str, sha256: str, dest: Path) -> Path:
+    """`dest` when it is the pinned file; an error naming how to get it when it is missing or differs. Never downloads."""
+    if not dest.is_file() or sha256_file(dest) != sha256:
+        raise RuntimeError(
+            f"{dest} is not the pinned file (SHA-256 {sha256}, from {url}): "
+            f"install it with `python app/tool/portable.py fetch`, the one step that uses the network")
+    return dest
+
+
+def fetch_tools(root: Path, arch: str | None = None) -> list[Path]:
+    """Download appimagetool and the runtime for `arch` into target/appimage-tools, each checked against its pin."""
+    arch = arch or machine()
+    if arch not in APPIMAGETOOL:
+        raise RuntimeError(f"no pinned appimagetool for {arch}")
+    tools = root / "target" / "appimage-tools"
+    return [fetch_pinned(f"{release}/{name}", sha, tools / name)
+            for release, (name, sha) in ((APPIMAGETOOL_RELEASE, APPIMAGETOOL[arch]), (RUNTIME_RELEASE, RUNTIME[arch]))]
 
 
 def cargo_program() -> str:
@@ -138,15 +159,15 @@ def machine() -> str:
 
 
 def build_appimage(bundle: Path, root: Path, out_dir: Path, arch: str | None = None) -> Path:
-    """Make out_dir/Canoa-<arch>.AppImage from Flutter's Linux release bundle, with appimagetool fetched by digest."""
+    """Make out_dir/Canoa-<arch>.AppImage from Flutter's Linux release bundle, with appimagetool installed by `fetch`."""
     arch = arch or machine()
     if arch not in APPIMAGETOOL:
         raise RuntimeError(f"no pinned appimagetool for {arch}")
     tools = root / "target" / "appimage-tools"
     tool_name, tool_sha = APPIMAGETOOL[arch]
     runtime_name, runtime_sha = RUNTIME[arch]
-    tool = fetch_pinned(f"{APPIMAGETOOL_RELEASE}/{tool_name}", tool_sha, tools / tool_name)
-    runtime = fetch_pinned(f"{RUNTIME_RELEASE}/{runtime_name}", runtime_sha, tools / runtime_name)
+    tool = pinned_tool(f"{APPIMAGETOOL_RELEASE}/{tool_name}", tool_sha, tools / tool_name)
+    runtime = pinned_tool(f"{RUNTIME_RELEASE}/{runtime_name}", runtime_sha, tools / runtime_name)
     tool.chmod(0o755)
     appdir = root / "target" / "appimage" / "Canoa.AppDir"
     make_appdir(bundle, appdir, root / "app" / "assets" / "icons" / "canoa.svg")
@@ -163,3 +184,17 @@ def build_appimage(bundle: Path, root: Path, out_dir: Path, arch: str | None = N
         check=True, env=env,
     )
     return image
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Install the pinned AppImage tools a Linux `--portable` build reads.")
+    parser.add_argument("command", choices=("fetch",))
+    parser.add_argument("--arch", choices=sorted(APPIMAGETOOL), help="default: this machine's")
+    options = parser.parse_args()
+    try:
+        for installed in fetch_tools(Path(__file__).resolve().parents[2], options.arch):
+            print(installed)
+    except (RuntimeError, OSError) as error:
+        raise SystemExit(f"portable.py: {error}")

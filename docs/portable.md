@@ -81,9 +81,10 @@ not appended, so signing the finished exe does not invalidate it.
 
 `python app/tool/build.py desktop --portable` on Linux builds the release bundle (`flutter build linux`, with the web app inside
 the host library), lays it out as an AppDir (the bundle under `usr/bin`, `AppRun`, `{{ program }}.desktop`, the icon) and runs
-`appimagetool` to write `target/canoa-linux/{{ name }}-<arch>.AppImage`. appimagetool and the AppImage runtime are downloaded into
-`target/appimage-tools/` and each is checked against a SHA-256 pinned in `app/tool/portable.py`; a download that differs is
-deleted and the build stops. They run with `APPIMAGE_EXTRACT_AND_RUN=1`, so the build needs no FUSE. The Flutter Linux build needs
+`appimagetool` to write `target/canoa-linux/{{ name }}-<arch>.AppImage`. appimagetool and the AppImage runtime are programs, which the
+`deps` branch does not carry, so they are installed once with `python app/tool/portable.py fetch` into `target/appimage-tools/` (the one
+step that uses the network) and the build checks each against a SHA-256 pinned in `app/tool/portable.py`; one that is missing or differs
+stops the build, which never downloads. They run with `APPIMAGE_EXTRACT_AND_RUN=1`, so the build needs no FUSE. The Flutter Linux build needs
 `clang`, `cmake`, `ninja`, `pkg-config` and the GTK 3 development files.
 
 To run it: `chmod +x {{ name }}-x86_64.AppImage && ./{{ name }}-x86_64.AppImage`. It mounts itself through FUSE 2 (`libfuse2`, or `fuse-libs`

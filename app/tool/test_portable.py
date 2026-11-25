@@ -108,7 +108,7 @@ class PinTests(unittest.TestCase):
 class AppImageBuildTests(unittest.TestCase):
     @patch("portable.subprocess.run")
     @patch("portable.make_appdir")
-    @patch("portable.fetch_pinned", side_effect=lambda url, sha, dest: dest)
+    @patch("portable.pinned_tool", side_effect=lambda url, sha, dest: dest)
     def test_appimagetool_gets_a_private_temporary_folder_under_target(self, _fetch, _appdir, run):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -124,11 +124,30 @@ class AppImageBuildTests(unittest.TestCase):
             root = Path(tmp)
             (root / "target" / "appimage-tmp").mkdir(parents=True, mode=0o755)
             with patch("portable.subprocess.run"), patch("portable.make_appdir"), patch(
-                "portable.fetch_pinned", side_effect=lambda url, sha, dest: dest
+                "portable.pinned_tool", side_effect=lambda url, sha, dest: dest
             ), patch("portable.Path.chmod", autospec=True) as chmod:
                 portable.build_appimage(root / "bundle", root, root / "out", "x86_64")
             modes = {(call.args[0].name, call.args[1]) for call in chmod.call_args_list}
             self.assertIn(("appimage-tmp", 0o700), modes)
+
+
+class ToolsAreNotFetchedByABuildTests(unittest.TestCase):
+    def test_a_missing_tool_stops_the_build_naming_the_fetch_command(self):
+        with tempfile.TemporaryDirectory() as tmp, patch("portable.make_appdir") as appdir, patch("portable.subprocess.run") as run:
+            with self.assertRaisesRegex(RuntimeError, r"portable\.py fetch"):
+                portable.build_appimage(Path(tmp) / "bundle", Path(tmp), Path(tmp) / "out", "x86_64")
+            appdir.assert_not_called()
+            run.assert_not_called()
+
+    def test_a_tool_that_is_not_the_pinned_file_is_refused_not_replaced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = Path(tmp) / "tool"
+            tool.write_bytes(b"tampered")
+            with self.assertRaisesRegex(RuntimeError, "not the pinned file"):
+                portable.pinned_tool("https://example.invalid/tool", hashlib.sha256(b"tool bytes").hexdigest(), tool)
+            self.assertEqual(tool.read_bytes(), b"tampered")
+            tool.write_bytes(b"tool bytes")
+            self.assertEqual(portable.pinned_tool("https://example.invalid/tool", hashlib.sha256(b"tool bytes").hexdigest(), tool), tool)
 
 
 class WindowsLauncherTests(unittest.TestCase):
