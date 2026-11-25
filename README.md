@@ -38,6 +38,7 @@
 | `extensions/canoa-litellm/` | LiteLLM proxy account provider (one virtual key for OpenAI and Anthropic APIs, SSO or key, budget reporting) |
 | `extensions/canoa-openai/` | OpenAI `account_speech` provider for accounts that hold an OpenAI API key |
 | `extensions/canoa-whisper/` | whisper.cpp models as a Store type, and the `speech_provider` that runs them inside the host |
+| `extensions/canoa-whisper-candle/` | Whisper in pure Rust (Candle): its models as a Store type, and the `speech_provider` that runs them inside the host |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI |
 | `crates/canoa-launch/` | The portable `CanoaUI.exe` launcher and `canoa-pack` |
 | `bindings/python/canoa-sdk/`, `bindings/js/canoa-sdk/` | Python and JavaScript SDKs for writing Canoa providers (`UsageReader`, `ProfileItem`, `ProgramStore`, etc.) |
