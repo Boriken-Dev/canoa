@@ -11,13 +11,13 @@
 Every build of {{ name }} uses the SDK `tools/sdk.lock` names (the rows `app flutter`, `flutter-upstream`, `flutter-version`, `flutter-engine` and `dart`, which `tools/flutter.pin` repeats for `build.sh` and `sdk check` holds equal), and none of them fetches it, or its engine, from Google. The framework is [`Boriken-Dev/flutter`](https://github.com/Boriken-Dev/flutter), a mirror of Flutter `main` with the blobs a scanner refuses removed, at `33d7f282aa` (upstream `c0205700e0`); the engine, the Dart SDK and the web artifacts are the assets of that repository's release `engine-<hash>`, Google's files unchanged with a SHA-256 manifest.
 
 ```sh
-python tools/build.py sdk install --groups app --prefix ~/sdk   # the mirror's checkout at the pin, precached from the release, in ~/sdk/git/flutter/<commit>
+python tools/build.py sdk install --groups app --prefix ~/sdk [--precache web,linux]   # the mirror's checkout at the pin, precached from the release, in ~/sdk/git/flutter/<commit>; the toolchain's wasm-bindgen is built offline too
 python tools/build.py flutter precache-check --flutter-root ~/sdk/git/flutter/33d7f282aaef --platform web,linux   # fails when an SDK is not the pin or lacks a platform's engine files
 python tools/build.py sdk check                                  # fails when tools/flutter.pin, the Containerfile or another file disagrees with tools/sdk.lock
 python tools/flutter_pin.py check                                # fails when a workflow or this page names another SDK
 ```
 
-`sdk install` needs `git`, Python and the network to github.com only; `[flutter] precache` of `tools/build.cfg` names the platforms it precaches (web, windows and linux). An SDK already at upstream's `c0205700e0` is the pin too, when its engine is the pinned one. The same SDK is in the images `ghcr.io/boriken-dev/flutter-web`, `flutter-linux` and `flutter-windows` (tag `33d7f282aa`, the first ten digits of the mirror's commit), which `packaging/container/Containerfile` and the workflows use: `FROM` one to build in a container, or start from it as a development environment. To move to another Flutter, change `tools/flutter.pin` and the rows of `tools/sdk.lock`, publish the new engine's release, build the images, and let `sdk check` and `flutter_pin.py check` name what is left.
+`sdk install` needs `git`, Python and the network to github.com only; `--precache` names the platforms it precaches for the call (default `[flutter] precache` of `tools/build.cfg`: web). An SDK already at upstream's `c0205700e0` is the pin too, when its engine is the pinned one. The same SDK is in the images `ghcr.io/boriken-dev/flutter-web`, `flutter-linux` and `flutter-windows` (tag `33d7f282aa`, the first ten digits of the mirror's commit), which `packaging/container/Containerfile` and the workflows use: `FROM` one to build in a container, or start from it as a development environment. To move to another Flutter, change `tools/flutter.pin` and the rows of `tools/sdk.lock`, publish the new engine's release, build the images, and let `sdk check` and `flutter_pin.py check` name what is left.
 
 ## Rust crates
 

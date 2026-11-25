@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/flutter
+        with:
+          platforms: web
       - run: flutter config --enable-windowing
       - name: Get packages
         run: flutter pub get

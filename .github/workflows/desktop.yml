@@ -31,6 +31,8 @@ jobs:
           path: deps-cache
           sparse-checkout: cdn/officeapis.public.onecdn.static.microsoft
       - uses: ./.github/actions/flutter
+        with:
+          platforms: web,${{ matrix.platform }}
       - run: flutter config --enable-windowing
       - uses: dtolnay/rust-toolchain@stable
       - name: Linux native dependencies

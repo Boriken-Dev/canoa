@@ -15,6 +15,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/flutter
+        with:
+          platforms: web
       - run: flutter config --enable-windowing
       - name: Resolve Dart packages
         env:
