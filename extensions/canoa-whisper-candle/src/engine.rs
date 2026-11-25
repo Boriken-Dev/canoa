@@ -300,18 +300,18 @@ impl Engine {
                 .model
                 .decoder
                 .forward(&input, audio, step == 0 && !cached)?;
-            if step == 0 {
-                if let Some(token) = self.tokens.no_speech {
-                    let here = self
-                        .model
-                        .decoder
-                        .final_linear(&states.i((..1, start_at..=start_at))?)?
-                        .i(0)?
-                        .i(0)?;
-                    no_speech = softmax(&here, D::Minus1)?
-                        .i(token as usize)?
-                        .to_scalar::<f32>()?;
-                }
+            if step == 0
+                && let Some(token) = self.tokens.no_speech
+            {
+                let here = self
+                    .model
+                    .decoder
+                    .final_linear(&states.i((..1, start_at..=start_at))?)?
+                    .i(0)?
+                    .i(0)?;
+                no_speech = softmax(&here, D::Minus1)?
+                    .i(token as usize)?
+                    .to_scalar::<f32>()?;
             }
             let length = states.dim(1)?;
             let logits = self
