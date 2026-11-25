@@ -796,7 +796,7 @@ pub struct StoreConfig {
     pub models_ttl: Option<u64>,
     /// `catalog_ttl`: seconds the entries of a skills or MCP servers catalog answer with no network (default 300; 0 every time).
     pub catalog_ttl: Option<u64>,
-    /// `refresh_every`: seconds between the host asking again what the Store keeps that has gone stale (the newest versions and
+    /// `refresh_every`: seconds between the host asking again what the Store keeps that is past its time (the newest versions, the models of each type, the
     /// the catalogs' index), while at least one client is connected (default 300; 0 never).
     pub refresh_every: Option<u64>,
     /// `connect_timeout`: seconds a lookup (a release list, a checksum file, a model catalog) waits to connect to a publisher

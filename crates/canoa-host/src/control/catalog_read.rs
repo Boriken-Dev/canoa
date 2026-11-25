@@ -84,6 +84,12 @@ impl Control {
             cursor.unwrap_or_default(),
             entry.source().unwrap_or_default()
         );
+        // The app's own list of a catalog (no search, no page) is asked again in the background once it is past its time.
+        if matches!(caller, Caller::Owner) && search.is_empty() && cursor.is_none() {
+            self.caches
+                .catalog
+                .note(&key, &json!({"type": id, "label": label, "refresh": true}));
+        }
         self.caches.catalog.get(&key, refresh, || {
             let mut answer = if entry.provider == READ {
                 match id {

@@ -891,7 +891,7 @@ impl Drop for Connected<'_> {
 
 impl Control {
     /// Starts the thread that, every `[host.store] refresh_every` while a link is being served, asks again what the Store keeps
-    /// that has gone stale: the publishers' newest versions and the catalogs' index. Nothing is asked that was never asked
+    /// that is past its time: the publishers' newest versions, the overlays' looks, the catalogs' index, the models of each type and the catalogs read through a source. Nothing is asked that was never asked
     /// before, and nothing while no client is connected. The thread ends with the host. Zero starts none.
     pub(crate) fn keep_fresh(self: &Arc<Self>) -> Option<std::thread::JoinHandle<()>> {
         let every = self.caches.refresh_every;
@@ -936,11 +936,16 @@ impl Control {
     /// Asks again, on this thread, what the Store keeps that is past its time.
     pub(crate) fn renew_stale(&self) {
         let _ = self.overlays.look_at_all(self.caches.latest.ttl(), false);
+        let section = self.store_section();
         if let Some(Ok(stores)) = self.stores.get() {
             stores.refresh_latest();
+            stores.refresh_models();
+            stores.refresh_sources(&section);
+            for request in self.caches.catalog.due() {
+                let _ = self.store_catalog(&Caller::Owner, &request);
+            }
         }
         self.index.use_sources(self.catalog_sources());
-        let section = self.store_section();
         self.index.keep_fresh(
             &self.overlays,
             &crate::store::index::catalog_rows(crate::store::catalogs::table_of(

@@ -44,6 +44,11 @@ struct Fixture {
 }
 
 fn fixture(name: &str, installed: bool) -> Fixture {
+    fixture_keeping(name, installed, Duration::ZERO)
+}
+
+/// As [`fixture`], with the models listed again only after `models_ttl`.
+fn fixture_keeping(name: &str, installed: bool, models_ttl: Duration) -> Fixture {
     let root = std::env::temp_dir().join(format!("canoa-models-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let bin = root.join("bin");
@@ -72,7 +77,7 @@ fn fixture(name: &str, installed: bool) -> Fixture {
     let kept = crate::store::caches::StoreCaches::new(
         None,
         crate::store::caches::DEFAULT_LATEST_TTL,
-        Duration::ZERO,
+        models_ttl,
         crate::store::caches::DEFAULT_CATALOG_TTL,
         Duration::ZERO,
     );
@@ -701,4 +706,29 @@ fn a_library_of_no_vendor_adds_a_type_and_its_models_and_a_type_naming_no_provid
             .0,
         super::super::NOT_FOUND
     );
+}
+
+#[test]
+fn the_renewal_lists_the_models_of_a_type_again_once_their_time_is_past_with_no_request() {
+    let rig = fixture_keeping("renewal", true, Duration::from_millis(400));
+    rig.list().expect("listed");
+    assert!(
+        rig.stores.caches.models.expired().is_empty(),
+        "within its time"
+    );
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(rig.stores.caches.models.expired(), [TYPE]);
+    // No request for the list: the renewal alone asks the program again.
+    rig.stores.refresh_models();
+    assert!(
+        rig.stores.caches.models.expired().is_empty(),
+        "the renewal kept a new list"
+    );
+    let kept = rig
+        .stores
+        .caches
+        .models
+        .get(TYPE, false, || Err((REFUSED, "asked again".to_owned())))
+        .expect("answered from what the renewal kept");
+    assert!(kept.models.iter().any(|row| row.id == ID));
 }

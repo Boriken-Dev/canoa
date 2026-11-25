@@ -222,7 +222,7 @@ impl Stores {
     }
 
     /// As [`model_rows`](Self::model_rows); `refresh` lists them again whatever is kept.
-    fn model_rows_asked(&self, held: &Held, refresh: bool) -> Result<ModelList, Failed> {
+    pub(super) fn model_rows_asked(&self, held: &Held, refresh: bool) -> Result<ModelList, Failed> {
         self.caches.models.get(&held.type_id, refresh, || {
             held.ask(|store, spawner| {
                 let mut query = ModelQuery::default();

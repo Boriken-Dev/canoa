@@ -24,7 +24,7 @@ pub const DEFAULT_LATEST_TTL: Duration = Duration::from_secs(60 * 60);
 pub const DEFAULT_MODELS_TTL: Duration = Duration::from_secs(5 * 60);
 /// How long a catalog's entries answer without asking the source, unless `[host.store] catalog_ttl` says otherwise.
 pub const DEFAULT_CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
-/// How often, while a client is connected, the host asks again what has gone stale, unless `[host.store] refresh_every` says
+/// How often, while a client is connected, the host asks again what is past its time, unless `[host.store] refresh_every` says
 /// otherwise. Zero never does.
 pub const DEFAULT_REFRESH_EVERY: Duration = Duration::from_secs(5 * 60);
 /// How long a lookup waits to connect to a publisher, unless `[host.store] connect_timeout` says otherwise.
@@ -64,7 +64,7 @@ pub(crate) struct StoreCaches {
     pub(crate) latest: Arc<LatestCache>,
     pub(crate) models: TtlCache<canoa::store::models::ModelList>,
     pub(crate) catalog: TtlCache<Value>,
-    /// How often the host asks again what has gone stale while a client is connected; zero never does.
+    /// How often the host asks again what is past its time while a client is connected; zero never does.
     pub(crate) refresh_every: Duration,
     /// How long a lookup (a release list, a checksum file) waits to connect, and for the answer.
     pub(crate) lookup_connect: Duration,
@@ -149,6 +149,8 @@ impl Default for StoreCaches {
 pub(crate) struct TtlCache<V> {
     ttl: Duration,
     held: Mutex<BTreeMap<String, (u64, V)>>,
+    /// The request that made each key, for the keys that are renewed with no one asking.
+    notes: Mutex<BTreeMap<String, Value>>,
 }
 
 impl<V: Clone> TtlCache<V> {
@@ -156,7 +158,32 @@ impl<V: Clone> TtlCache<V> {
         Self {
             ttl,
             held: Mutex::new(BTreeMap::new()),
+            notes: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Remembers `request` as what makes `key`, so that [`due`](Self::due) can name it.
+    pub(crate) fn note(&self, key: &str, request: &Value) {
+        lock(&self.notes).insert(key.to_owned(), request.clone());
+    }
+
+    /// The keys kept past the time. A time of zero keeps nothing.
+    pub(crate) fn expired(&self) -> Vec<String> {
+        let now = now_millis();
+        lock(&self.held)
+            .iter()
+            .filter(|(_, (at, _))| now.saturating_sub(*at) >= millis(self.ttl))
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
+    /// The requests [`note`](Self::note) was given for the keys kept past the time.
+    pub(crate) fn due(&self) -> Vec<Value> {
+        let notes = lock(&self.notes);
+        self.expired()
+            .into_iter()
+            .filter_map(|key| notes.get(&key).cloned())
+            .collect()
     }
 
     /// The answer kept under `key` if it is within the time and `refresh` is not asked; else `ask`'s, which is kept when it
@@ -195,6 +222,8 @@ struct Entry {
     checked: u64,
     /// When the publisher was last asked, whether it answered or not.
     attempted: u64,
+    /// Why the last ask did not give a version, kept in memory only: it makes the answer stale until one works.
+    problem: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -271,6 +300,7 @@ impl LatestCache {
                         report: report.clone(),
                         checked,
                         attempted: checked,
+                        problem: None,
                     },
                 );
             }
@@ -300,11 +330,22 @@ impl LatestCache {
         let _ = crate::replace::write_file_in_folder(file, &bytes, crate::replace::SHARED);
     }
 
-    /// `entry`'s report with when it was said and whether that is past the time.
-    fn shown(&self, entry: &Entry, now: u64) -> Value {
+    /// Whether `entry` is past the time.
+    fn expired(&self, entry: &Entry, now: u64) -> bool {
+        now.saturating_sub(entry.checked) >= millis(self.ttl)
+    }
+
+    /// `entry`'s report with when it was said, and where the answer stands: `stale` when the last ask failed (`problem` says
+    /// why), `refreshing` when it is past the time and being asked again.
+    fn shown(&self, entry: &Entry, now: u64, running: bool) -> Value {
         let mut shown = entry.report.clone();
         shown["checked"] = json!(entry.checked);
-        shown["stale"] = json!(now.saturating_sub(entry.checked) >= millis(self.ttl));
+        shown["stale"] = json!(entry.problem.is_some());
+        shown["refreshing"] =
+            json!(self.expired(entry, now) && (entry.problem.is_none() || running));
+        if let Some(why) = &entry.problem {
+            shown["problem"] = json!(why);
+        }
         shown
     }
 
@@ -313,7 +354,11 @@ impl LatestCache {
         let mut state = lock(&self.state);
         self.load(&mut state);
         let entry = state.entries.get(&key_of(provider, channel))?;
-        Some(self.shown(entry, now_millis()))
+        Some(self.shown(
+            entry,
+            now_millis(),
+            state.running.contains(&key_of(provider, channel)),
+        ))
     }
 
     /// The newest version of the program: what is kept while it is fresh, what is kept at once when it is stale (the publisher
@@ -332,8 +377,8 @@ impl LatestCache {
             self.load(&mut state);
             if let Some(entry) = state.entries.get(&key) {
                 let now = now_millis();
-                let shown = self.shown(entry, now);
-                if shown["stale"] == json!(true)
+                let shown = self.shown(entry, now, state.running.contains(&key));
+                if self.expired(entry, now)
                     && now.saturating_sub(entry.attempted) >= millis(self.ttl.min(RETRY))
                     && state.running.insert(key.clone())
                 {
@@ -358,8 +403,9 @@ impl LatestCache {
                     report,
                     checked: now,
                     attempted: now,
+                    problem: None,
                 };
-                let shown = self.shown(&entry, now);
+                let shown = self.shown(&entry, now, false);
                 state.entries.insert(key.to_owned(), entry);
                 self.save(&state);
                 Ok(shown)
@@ -367,6 +413,14 @@ impl LatestCache {
             other => {
                 if let Some(entry) = state.entries.get_mut(key) {
                     entry.attempted = now;
+                    entry.problem = Some(match &other {
+                        Err((_, why)) => why.clone(),
+                        Ok(report) => report
+                            .get("unknown_because")
+                            .and_then(Value::as_str)
+                            .unwrap_or("the publisher named no version")
+                            .to_owned(),
+                    });
                 }
                 other
             }

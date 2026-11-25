@@ -1,8 +1,9 @@
 //! The index of every catalog this host lists: one normalized entry per overlay and skill, kept on disk under the host's own
 //! home and answered from there while it is fresh. Nothing from a source runs; a source is read out of git's object store.
 //!
-//! A source is fetched at most once per refresh. A fresh index answers with no process started; a stale one answers at once
-//! and is refreshed in the background, first by asking the remote which commit the ref names and fetching only when it moved.
+//! A source is fetched at most once per refresh. A fresh index answers with no process started; one past its time answers at once
+//! as `refreshing` and is refreshed in the background, first by asking the remote which commit the ref names and fetching only
+//! when it moved. `stale` means the last refresh failed, and `problem` says why.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -343,8 +344,10 @@ impl StoreIndex {
             Some(cached) if !refresh => {
                 let due = now.saturating_sub(cached.attempted) >= ttl;
                 let started = due && self.refresh_in_background(&slot, overlays, source);
-                let running = started || slot.background.load(Ordering::SeqCst);
-                answer_of(source, &cached, true, running)
+                // Past its time with no failure on record, it is being asked again; with one, it is stale and says why.
+                let running =
+                    started || slot.background.load(Ordering::SeqCst) || cached.problem.is_none();
+                answer_of(source, &cached, cached.problem.is_some(), running)
             }
             _ => {
                 let cached = self.refresh(&slot, overlays, source);

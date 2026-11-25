@@ -135,6 +135,21 @@ impl Run {
         }
     }
 
+    /// Asks the source of `entry` again when a catalog kept for it is past its time: what the background renewal does. One never
+    /// read, a pinned one and one that is off are left alone. A source that fails leaves what is kept, to be asked at the next
+    /// renewal.
+    pub(crate) fn renew(&self, kind: &TypeCatalogs, entry: &Entry) {
+        if !entry.enabled || entry.pin.is_some() {
+            return;
+        }
+        let ttl = entry.ttl.map_or(self.ttl, Duration::from_secs);
+        if self.kept(kind, entry).is_some_and(|kept| {
+            u128::from(now_millis().saturating_sub(kept.fetched)) >= ttl.as_millis()
+        }) {
+            let _ = self.read(kind, entry, true);
+        }
+    }
+
     /// The catalog `entry` of `kind`, asking its source only when what is kept is stale, or `refresh` says to.
     ///
     /// # Errors

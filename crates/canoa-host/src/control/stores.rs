@@ -660,6 +660,33 @@ impl Stores {
         Ok(json!({"stores": stores}))
     }
 
+    /// Lists again, on this thread, the models of each Store type whose kept list is past `[host.store] models_ttl`.
+    pub(crate) fn refresh_models(&self) {
+        for type_id in self.caches.models.expired() {
+            if let Some(held) = self.models.of(&type_id) {
+                let _ = self.model_rows_asked(held, true);
+            }
+        }
+    }
+
+    /// Asks again, on this thread, each catalog kept for a Store type that is past its time, in the `[store]` table `store`.
+    pub(crate) fn refresh_sources(&self, store: &Value) {
+        let run = self.catalog_run();
+        for scope in self.catalog_types() {
+            if scope.format.is_none() {
+                continue;
+            }
+            for merged in crate::store::catalogs::merge(
+                &scope,
+                crate::store::catalogs::table_of(store, &scope.id),
+            ) {
+                if let Ok(entry) = merged.parsed {
+                    run.renew(&scope, &entry);
+                }
+            }
+        }
+    }
+
     /// Asks again, on this thread, the publishers whose kept version has gone stale.
     pub(crate) fn refresh_latest(&self) {
         for (provider, channel) in self.caches.latest.stale() {

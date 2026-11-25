@@ -83,7 +83,8 @@ fn a_stale_answer_is_served_at_once_and_refreshed_once() {
             .get("p", None, false, Arc::clone(&slow))
             .expect("kept");
         assert_eq!(stale["version"], "1.0.0", "{stale}");
-        assert_eq!(stale["stale"], true);
+        assert_eq!(stale["stale"], false, "past its time is not a failure");
+        assert_eq!(stale["refreshing"], true);
     }
     wait_for("the background request starts", || {
         count.load(Ordering::SeqCst) == 2
@@ -96,7 +97,9 @@ fn a_stale_answer_is_served_at_once_and_refreshed_once() {
             .is_some_and(|kept| kept["version"] == "2.0.0")
     });
     assert_eq!(count.load(Ordering::SeqCst), 2, "one refresh, not three");
-    assert_eq!(cache.peek("p", None).expect("kept")["stale"], false);
+    let kept = cache.peek("p", None).expect("kept");
+    assert_eq!(kept["stale"], false);
+    assert_eq!(kept["refreshing"], false);
 }
 
 #[test]
@@ -127,7 +130,20 @@ fn what_the_publisher_did_not_say_is_not_kept_and_a_stale_version_survives_a_fai
     wait_for("the request is over", || {
         lock(&cache.state).running.is_empty()
     });
-    assert_eq!(cache.peek("p", None).expect("kept")["version"], "1.0.0");
+    let held = cache.peek("p", None).expect("kept");
+    assert_eq!(held["version"], "1.0.0");
+    assert_eq!(held["stale"], true, "the ask failed: {held}");
+    assert_eq!(held["problem"], "no answer");
+    assert_eq!(held["refreshing"], false, "nothing is asking now");
+    assert_eq!(held["checked"], kept["checked"], "when it last worked");
+
+    // The next ask that works clears it.
+    cache
+        .get("p", None, true, publisher("2.0.0", &count))
+        .expect("asked");
+    let healed = cache.peek("p", None).expect("kept");
+    assert_eq!(healed["stale"], false);
+    assert_eq!(healed["version"], "2.0.0");
 }
 
 #[test]
@@ -210,4 +226,22 @@ fn answers_kept_for_a_time_are_asked_again_after_it_a_change_or_a_refresh() {
     let failing: Result<u32, Failed> = cache.get("b", false, || Err((-32002, "no".to_owned())));
     assert!(failing.is_err());
     assert_eq!(cache.get("b", false, ask), Ok(7), "a failure is not kept");
+}
+
+#[test]
+fn a_kept_answer_past_its_time_is_named_for_renewal_only_with_a_request_noted() {
+    let cache: TtlCache<Value> = TtlCache::new(Duration::from_millis(40));
+    cache
+        .get("a", false, || Ok(json!({"n": 1})))
+        .expect("asked");
+    cache
+        .get("b", false, || Ok(json!({"n": 2})))
+        .expect("asked");
+    cache.note("a", &json!({"type": "skills", "label": "main"}));
+    assert!(cache.due().is_empty(), "within its time");
+    std::thread::sleep(Duration::from_millis(80));
+    assert_eq!(cache.expired(), ["a", "b"]);
+    assert_eq!(cache.due(), [json!({"type": "skills", "label": "main"})]);
+    cache.get("a", true, || Ok(json!({"n": 3}))).expect("asked");
+    assert!(cache.due().is_empty(), "renewed");
 }

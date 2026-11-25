@@ -22,6 +22,8 @@ static ASKED: AtomicUsize = AtomicUsize::new(0);
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 /// While set, the publisher holds its answer, so a refresh in the background cannot finish before the test lets it.
 static HOLD: AtomicBool = AtomicBool::new(false);
+/// While set, the publisher cannot be asked.
+static DOWN: AtomicBool = AtomicBool::new(false);
 
 /// Holds the publisher's answers until dropped, also when the test fails.
 struct Held;
@@ -86,6 +88,9 @@ impl Recipe for Counts {
         let until = std::time::Instant::now() + Duration::from_secs(30);
         while HOLD.load(Ordering::SeqCst) && std::time::Instant::now() < until {
             std::thread::sleep(Duration::from_millis(5));
+        }
+        if DOWN.load(Ordering::SeqCst) {
+            return LatestReport::unknown("the publisher is down".to_owned());
         }
         LatestReport::known(format!("{n}.0.0"))
     }
@@ -299,5 +304,53 @@ fn a_timer_of_zero_starts_none() {
     let dir = folder("off");
     let control = control_over(&dir, caches(Duration::from_secs(1), Duration::ZERO));
     assert!(control.keep_fresh().is_none());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_newest_version_is_stale_only_when_the_renewal_could_not_ask_and_says_why() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    ASKED.store(0, Ordering::SeqCst);
+    DOWN.store(false, Ordering::SeqCst);
+    let dir = folder("failing");
+    let control = control_over(&dir, caches(Duration::from_millis(60), Duration::ZERO));
+    let first = latest(&control, false);
+    std::thread::sleep(Duration::from_millis(150));
+    let past = control
+        .caches
+        .latest
+        .peek("counts_store", None)
+        .expect("kept");
+    assert_eq!(
+        past["stale"], false,
+        "past its time is not a failure: {past}"
+    );
+    assert_eq!(past["refreshing"], true);
+
+    DOWN.store(true, Ordering::SeqCst);
+    control.renew_stale();
+    let failed = control
+        .caches
+        .latest
+        .peek("counts_store", None)
+        .expect("kept");
+    assert_eq!(failed["stale"], true, "{failed}");
+    assert_eq!(failed["problem"], "the publisher is down");
+    assert_eq!(
+        failed["version"], first["version"],
+        "the last answer stands"
+    );
+    assert_eq!(failed["checked"], first["checked"], "when it last worked");
+
+    DOWN.store(false, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(150));
+    control.renew_stale();
+    let healed = control
+        .caches
+        .latest
+        .peek("counts_store", None)
+        .expect("kept");
+    assert_eq!(healed["stale"], false, "{healed}");
+    assert_ne!(healed["version"], first["version"]);
     let _ = fs::remove_dir_all(&dir);
 }

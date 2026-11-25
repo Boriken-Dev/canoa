@@ -429,3 +429,41 @@ fn a_source_fetches_only_from_its_endpoints_and_the_address_its_entry_names() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_kept_catalog_past_its_time_is_asked_again_by_the_renewal_and_one_never_read_is_not() {
+    let dir = folder("renewal");
+    let world = Arc::new(World::default());
+    answer("renew-a", &models("r1", &["base"]));
+    let entry = entry("renew-a", "models_standin");
+    // A time of zero makes whatever is kept past it.
+    let reader = run(&dir, &world, 0);
+    reader.renew(&kind(), &entry);
+    assert_eq!(
+        asked("renew-a"),
+        0,
+        "nothing was ever read, so nothing is asked"
+    );
+    reader.read(&kind(), &entry, false).expect("read once");
+    assert_eq!(asked("renew-a"), 1);
+
+    answer("renew-a", &models("r2", &["base", "small"]));
+    reader.renew(&kind(), &entry);
+    assert_eq!(asked("renew-a"), 2, "asked with no request for the catalog");
+    let now = run(&dir, &world, 3600)
+        .read(&kind(), &entry, false)
+        .expect("kept");
+    assert!(
+        now.text.contains("small"),
+        "the renewal kept the new answer"
+    );
+
+    // A source that fails leaves what was kept, and the next read says why.
+    down("renew-a", true);
+    reader.renew(&kind(), &entry);
+    let failed = run(&dir, &world, 3600)
+        .read(&kind(), &entry, false)
+        .expect("kept");
+    assert!(failed.text.contains("small"), "the last good answer stands");
+    let _ = std::fs::remove_dir_all(dir);
+}

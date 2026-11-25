@@ -208,7 +208,12 @@ fn a_stale_index_is_served_at_once_while_it_refreshes() {
         !names(&stale).contains(&"gamma".to_owned()),
         "the old index answered"
     );
-    assert_eq!(stale.source["stale"], true, "{}", stale.source);
+    assert_eq!(
+        stale.source["stale"], false,
+        "past its time is not a failure: {}",
+        stale.source
+    );
+    assert_eq!(stale.source["refreshing"], true, "{}", stale.source);
     settle(&index);
     let fresh = rig.ask(&index, false);
     assert!(
@@ -584,4 +589,42 @@ fn the_default_catalog_is_offered_first_and_a_false_label_removes_it() {
     let default = default[0].as_ref().expect("source");
     assert_eq!(default.spec, DEFAULT_CATALOG_SPEC);
     assert_eq!(default.path, "catalog.toml");
+}
+
+#[test]
+fn the_renewal_asks_a_kept_source_again_with_no_request_and_a_failed_one_is_stale_with_its_reason()
+{
+    let rig = Rig::new();
+    let index = rig.index(Duration::from_millis(1500));
+    let first = rig.ask(&index, false);
+    assert_eq!(first.source["stale"], false);
+    change(
+        &rig.upstream,
+        &[
+            (
+                "catalog.toml",
+                &format!("{CATALOG}\n[overlays.gamma]\nsource = \"./overlays/gamma\"\n"),
+            ),
+            ("overlays/gamma/overlay.cfg", "name = \"gamma\"\n"),
+        ],
+        "gamma",
+    );
+    std::thread::sleep(Duration::from_millis(1600));
+    // Nobody asks for the catalog: the renewal alone brings it up to date.
+    index.keep_fresh(&rig.overlays, &rig.rows());
+    let renewed = rig.ask(&index, false);
+    assert!(names(&renewed).contains(&"gamma".to_owned()));
+    assert_eq!(renewed.source["stale"], false);
+    assert!(renewed.source["checked"].as_u64() > first.source["checked"].as_u64());
+
+    // When the source cannot be asked, what is kept is stale, says why, and still says when it last worked.
+    let moved = rig.tmp.join("catalog-gone");
+    std::fs::rename(&rig.upstream, &moved).expect("moves away");
+    std::thread::sleep(Duration::from_millis(1600));
+    index.keep_fresh(&rig.overlays, &rig.rows());
+    let failed = rig.ask(&index, false);
+    assert_eq!(failed.source["stale"], true, "{}", failed.source);
+    assert!(failed.source["problem"].as_str().is_some());
+    assert_eq!(failed.source["checked"], renewed.source["checked"]);
+    assert_eq!(failed.source["refreshing"], false, "{}", failed.source);
 }

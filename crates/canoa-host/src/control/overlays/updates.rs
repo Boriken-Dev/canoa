@@ -154,7 +154,7 @@ fn identity(record: &Value) -> Option<(&str, &str)> {
 }
 
 impl Overlays {
-    /// `overlay/updates` `{"refresh"?}` -> `{"overlays": {name: look}, "available", "checked", "stale", "checking"}`: whether the
+    /// `overlay/updates` `{"refresh"?}` -> `{"overlays": {name: look}, "available", "checked", "stale", "refreshing", "checking"}`: whether the
     /// source of each installed overlay holds something other than what is installed, as last looked at. A look kept less than
     /// `ttl` ago answers with no network. Anything not looked at yet, or past `ttl`, is answered as it is (`checking` for an overlay
     /// never looked at) and looked at again on a thread of its own, so a page never waits on git; `refresh: true` looks at every
@@ -175,7 +175,7 @@ impl Overlays {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let mut found = Map::new();
-        let (mut available, mut stale, mut checking) = (0_u64, false, false);
+        let (mut available, mut stale, mut checking, mut refreshing) = (0_u64, false, false, false);
         let mut checked: Option<u64> = None;
         for (name, record) in &records {
             let Some((source, installed)) = identity(record) else {
@@ -186,7 +186,8 @@ impl Overlays {
                 .and_then(|look| look.for_record(source, installed))
             {
                 Some(look) => {
-                    stale |= look.stale(ttl);
+                    refreshing |= look.stale(ttl);
+                    stale |= look.state == State::Unreachable;
                     available += u64::from(look.state == State::Available);
                     checked = Some(checked.map_or(look.checked, |old| old.min(look.checked)));
                     found.insert(name.clone(), look.json());
@@ -201,7 +202,7 @@ impl Overlays {
             }
         }
         drop(looks);
-        if !refresh && (stale || checking) {
+        if !refresh && (refreshing || checking) {
             self.look_in_background(ttl);
         }
         Ok(json!({
@@ -209,6 +210,7 @@ impl Overlays {
             "available": available,
             "checked": checked,
             "stale": stale,
+            "refreshing": refreshing,
             "checking": checking,
         }))
     }
