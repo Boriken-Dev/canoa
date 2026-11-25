@@ -5,8 +5,9 @@ Writes canoa_whisper.js and canoa_whisper_bg.wasm to app/web/whisper/ (generated
 copies into the page beside whisper_worker.js, the web worker that loads them. Needs cargo with the wasm32-unknown-unknown
 target and a wasm-bindgen command line of exactly the version app/web_whisper/Cargo.toml pins.
 
-With --deps DIR (or CANOA_DEPS), a checkout of the deps branch, nothing comes from crates.io or GitHub: the crates are
-DIR/crates-web_whisper, and the command line is installed as build_noise.py's --install-bindgen does.
+Nothing comes from crates.io or GitHub: the crates are DEPS/crates-web_whisper, DEPS being --deps, CANOA_DEPS or the deps
+branch's worktree beside the repository, and the command line is installed as build_noise.py's --install-bindgen does. Without
+a deps checkout the build stops; only --online, for refreshing the mirror, reads crates.io and GitHub.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_noise  # noqa: E402
 import offline_pub  # noqa: E402
 
 CRATE = APP / "web_whisper"
@@ -59,6 +61,7 @@ def install_bindgen(bindgen: str, deps: Path) -> None:
 def require_tools(bindgen: str, deps: Path | None) -> str:
     if shutil.which("cargo") is None:
         raise RuntimeError("cargo is not on PATH")
+    build_noise.require_wasm_target()
     how = (f"python app/tool/build_noise.py --deps {deps} --install-bindgen" if deps
            else f"cargo install {BINDGEN} --version {bindgen} --locked")
     if shutil.which("wasm-bindgen") is None:
@@ -93,8 +96,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, help="where the loader and the wasm go (default web/whisper)")
     parser.add_argument("--deps", type=Path, default=os.environ.get("CANOA_DEPS") or None,
-                        help="a checkout of the deps branch: build from its crates, with the network off (default: CANOA_DEPS)")
+                        help="a checkout of the deps branch: build from its crates, with the network off (default: CANOA_DEPS, "
+                             "else the deps branch's worktree beside the repository)")
+    parser.add_argument("--online", action="store_true",
+                        help="build from crates.io and GitHub instead of the deps branch, to refresh the mirror")
     opts = parser.parse_args()
+    if opts.online and opts.deps:
+        parser.error("--online reads no deps branch: not with --deps")
+    if not opts.online and opts.deps is None:
+        opts.deps = offline_pub.find_deps(APP.parent, offline_pub.load_settings(APP.parent, os.environ))
+        if opts.deps is None:
+            sys.exit("build_whisper.py: no deps checkout (set CANOA_DEPS or --deps, or fetch the deps branch; "
+                     "--online builds from crates.io and GitHub to refresh the mirror)")
     try:
         wasm = build(opts.out or (APP / "web" / "whisper"), opts.deps)
     except (RuntimeError, subprocess.CalledProcessError) as error:

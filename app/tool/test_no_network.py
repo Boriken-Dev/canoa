@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import build
 import build_noise
+import build_whisper
 import offline_pub
 
 HERE = Path(__file__).resolve().parent
@@ -116,7 +117,7 @@ class OfflineInvariantTests(unittest.TestCase):
                 self.assertEqual(env.get("CARGO_NET_OFFLINE"), "true", joined)
                 self.assertEqual(env.get("FLUTTER_SUPPRESS_ANALYTICS"), "true", joined)
                 self.assertNotIn("googleapis", env.get("FLUTTER_STORAGE_BASE_URL", "googleapis-unset"), joined)
-            if "build_noise.py" in joined:
+            if "build_noise.py" in joined or "build_whisper.py" in joined:
                 self.assertIn("--deps", command, joined)
                 self.assertNotIn("--online", command, joined)
 
@@ -168,6 +169,27 @@ class NoiseTests(unittest.TestCase):
         with patch("sys.argv", ["build_noise.py", "--online"]), patch("build_noise.build", return_value=Path(__file__)) as built:
             build_noise.main()
         self.assertIsNone(built.call_args.args[2])
+
+    def test_whisper_stops_without_a_deps_checkout_and_online_is_explicit(self):
+        with patch("sys.argv", ["build_whisper.py"]), patch.dict("os.environ", {}, clear=False) as env,                 patch("build_whisper.offline_pub.find_deps", return_value=None), patch("build_whisper.build") as built:
+            env.pop("CANOA_DEPS", None)
+            with self.assertRaises(SystemExit) as stopped:
+                build_whisper.main()
+        self.assertIn("no deps checkout", str(stopped.exception))
+        built.assert_not_called()
+        with patch("sys.argv", ["build_whisper.py", "--online", "--deps", "/d"]), self.assertRaises(SystemExit):
+            build_whisper.main()
+        with patch("sys.argv", ["build_whisper.py", "--online"]), patch("build_whisper.build", return_value=Path(__file__)) as built:
+            build_whisper.main()
+        self.assertIsNone(built.call_args.args[1])
+
+    def test_the_wasm_builds_run_both_scripts_from_the_deps_checkout(self):
+        with patch("build.subprocess.run") as run:
+            build.build_wasm(build.Offline(Path("/deps"), Path("/c"), None))
+            build.build_wasm(None)
+        commands = [[Path(part).name for part in call.args[0][1:]] for call in run.call_args_list]
+        self.assertEqual(commands, [["build_noise.py", "--deps", "deps"], ["build_whisper.py", "--deps", "deps"],
+                                    ["build_noise.py", "--online"], ["build_whisper.py", "--online"]])
 
     def test_a_missing_wasm_target_is_named_not_installed(self):
         with tempfile.TemporaryDirectory() as tmp, patch("build_noise.subprocess.run") as run:

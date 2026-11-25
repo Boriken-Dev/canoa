@@ -274,7 +274,7 @@ class PubModeTests(unittest.TestCase):
         self.assertNotIn("FLUTTER_STORAGE_BASE_URL", build.os.environ)
 
 
-@patch("build.build_noise")
+@patch("build.build_wasm")
 @patch("build.finish_web")
 @patch("build.flutter_program", return_value="flutter")
 @patch("build.subprocess.run")
