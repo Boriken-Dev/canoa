@@ -1,12 +1,14 @@
 //! What this crate offers a Canoa host as a library: the Store type that lists whisper.cpp's models, the models page and the provider
 //! that transcribes with them. The host holds no word of any of them: it loads this library as it loads any other.
 
-use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
+use canoa::store::catalog::MODELS_FORMAT;
+use canoa::store::extension::{CatalogWords, ExtensionInfo, ExtensionType, StoreExtension};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
 
 use crate::STORE_TYPE;
 use crate::model_store::WhisperModels;
+use crate::source::WhisperHf;
 use crate::speech::WhisperSpeech;
 
 /// Adds the whisper.cpp type to the Store: the models whisper.cpp runs. The type has no program store, because the speech runs
@@ -20,6 +22,11 @@ impl StoreExtension for WhisperExtension {
         let mut local = ExtensionType::new(STORE_TYPE, "whisper.cpp", [] as [&str; 0]);
         local.icon = Some("chip".to_owned());
         local.models = Some("whisper_models".to_owned());
+        local.catalogs = Some(
+            CatalogWords::new("catalog", "catalogs", "models")
+                .in_format(MODELS_FORMAT)
+                .registering([crate::catalog::default_catalog()]),
+        );
         Ok(ExtensionInfo::new(
             "whisper.cpp",
             "Boriken Dev",
@@ -32,7 +39,7 @@ impl StoreExtension for WhisperExtension {
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-whisper",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [WhisperExtension, WhisperModels, WhisperSpeech]
+    providers = [WhisperExtension, WhisperModels, WhisperHf, WhisperSpeech]
 );
 
 #[cfg(test)]

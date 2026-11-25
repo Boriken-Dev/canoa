@@ -526,9 +526,329 @@ pub fn summary(format: &str, source: &str) -> String {
     }
 }
 
+/// Whether `name` matches `pattern`, where `*` stands for any run of characters (a name with no `*` matches only itself).
+#[must_use]
+pub fn wildcard(pattern: &str, name: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let mut parts: Vec<&str> = parts.collect();
+    let Some(last) = parts.pop() else {
+        return rest.is_empty();
+    };
+    for part in parts {
+        let Some(at) = rest.find(part) else {
+            return false;
+        };
+        rest = &rest[at + part.len()..];
+    }
+    rest.ends_with(last)
+}
+
+impl CatalogFile {
+    /// A file at `url` kept as `file`, with no digest yet.
+    #[must_use]
+    pub fn new(url: impl Into<String>, file: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            file: file.into(),
+            bytes: None,
+            check: None,
+            derived: false,
+        }
+    }
+
+    /// This file with its size.
+    #[must_use]
+    pub const fn sized(mut self, bytes: u64) -> Self {
+        self.bytes = Some(bytes);
+        self
+    }
+
+    /// This file checked by `check`.
+    #[must_use]
+    pub fn checked(mut self, check: FileCheck) -> Self {
+        self.check = Some(check);
+        self
+    }
+
+    /// This file's digest marked as one computed from content at a pinned address.
+    #[must_use]
+    pub const fn derived(mut self) -> Self {
+        self.derived = true;
+        self
+    }
+
+    fn to_value(&self, with_name: bool) -> Value {
+        let mut map = Map::new();
+        map.insert("url".into(), Value::String(self.url.clone()));
+        if with_name {
+            map.insert("file".into(), Value::String(self.file.clone()));
+        }
+        if let Some(bytes) = self.bytes {
+            map.insert("bytes".into(), Value::from(bytes));
+        }
+        let (key, text) = match &self.check {
+            Some(FileCheck::Sha256(value)) => ("sha256", value),
+            Some(FileCheck::Sha512(value)) => ("sha512", value),
+            Some(FileCheck::GitBlob(value)) => ("git_blob", value),
+            Some(FileCheck::Unverified(why)) => ("unverified", why),
+            None => return Value::Object(map),
+        };
+        let mut check = Map::new();
+        check.insert(key.into(), Value::String(text.clone()));
+        map.insert("check".into(), Value::Object(check));
+        if self.derived {
+            map.insert("derived".into(), Value::Bool(true));
+        }
+        Value::Object(map)
+    }
+}
+
+impl ModelItem {
+    /// An item with no tags, facts or files yet.
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            by: None,
+            tags: Vec::new(),
+            license: None,
+            facts: Vec::new(),
+            files: Vec::new(),
+        }
+    }
+}
+
+impl ModelsCatalog {
+    /// A catalog read at `revision` listing `items`.
+    #[must_use]
+    pub fn new(revision: Option<String>, items: Vec<ModelItem>) -> Self {
+        Self { revision, items }
+    }
+
+    /// This catalog as the text of a `canoa.models/1` document.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        let items: Vec<Value> = self
+            .items
+            .iter()
+            .map(|item| {
+                let mut map = Map::new();
+                map.insert("id".into(), Value::String(item.id.clone()));
+                map.insert("label".into(), Value::String(item.label.clone()));
+                if let Some(by) = &item.by {
+                    map.insert("by".into(), Value::String(by.clone()));
+                }
+                if !item.tags.is_empty() {
+                    map.insert("tags".into(), Value::from(item.tags.clone()));
+                }
+                if let Some(license) = &item.license {
+                    map.insert("license".into(), Value::String(license.clone()));
+                }
+                if !item.facts.is_empty() {
+                    let facts = item
+                        .facts
+                        .iter()
+                        .map(|(label, value)| {
+                            let mut fact = Map::new();
+                            fact.insert("label".into(), Value::String(label.clone()));
+                            fact.insert("value".into(), Value::String(value.clone()));
+                            Value::Object(fact)
+                        })
+                        .collect();
+                    map.insert("facts".into(), Value::Array(facts));
+                }
+                map.insert(
+                    "files".into(),
+                    Value::Array(item.files.iter().map(|file| file.to_value(true)).collect()),
+                );
+                Value::Object(map)
+            })
+            .collect();
+        let mut document = Map::new();
+        document.insert("format".into(), Value::String(MODELS_FORMAT.into()));
+        if let Some(revision) = &self.revision {
+            document.insert("revision".into(), Value::String(revision.clone()));
+        }
+        document.insert("items".into(), Value::Array(items));
+        serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_default()
+    }
+}
+
+impl ReleasePart {
+    /// A file placed at `path` in the copy.
+    #[must_use]
+    pub fn new(file: CatalogFile, path: impl Into<String>) -> Self {
+        Self {
+            file,
+            path: path.into(),
+            executable: false,
+        }
+    }
+
+    /// This part started once placed.
+    #[must_use]
+    pub const fn executable(mut self) -> Self {
+        self.executable = true;
+        self
+    }
+}
+
+impl ReleasePlatform {
+    /// What one platform downloads, started from `launch`.
+    #[must_use]
+    pub const fn new(launch: Option<String>, parts: Vec<ReleasePart>) -> Self {
+        Self { launch, parts }
+    }
+}
+
+impl Release {
+    /// A release of `version`, on no channel, with nothing to download yet.
+    #[must_use]
+    pub fn new(version: impl Into<String>) -> Self {
+        Self {
+            version: version.into(),
+            channels: Vec::new(),
+            notices: Vec::new(),
+            platforms: BTreeMap::new(),
+        }
+    }
+}
+
+impl ReleasesCatalog {
+    /// A catalog with the channels' versions and the releases it lists, signed by nobody.
+    #[must_use]
+    pub const fn new(channels: BTreeMap<String, String>, releases: Vec<Release>) -> Self {
+        Self {
+            channels,
+            releases,
+            signed: None,
+        }
+    }
+
+    /// This catalog as the text of a `canoa.releases/1` document.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        let releases: Vec<Value> = self
+            .releases
+            .iter()
+            .map(|release| {
+                let mut map = Map::new();
+                map.insert("version".into(), Value::String(release.version.clone()));
+                if !release.channels.is_empty() {
+                    map.insert("channels".into(), Value::from(release.channels.clone()));
+                }
+                if !release.notices.is_empty() {
+                    map.insert("notices".into(), Value::from(release.notices.clone()));
+                }
+                let mut platforms = Map::new();
+                for (name, platform) in &release.platforms {
+                    let mut each = Map::new();
+                    if let Some(launch) = &platform.launch {
+                        each.insert("launch".into(), Value::String(launch.clone()));
+                    }
+                    let parts = platform
+                        .parts
+                        .iter()
+                        .map(|part| {
+                            let Value::Object(mut one) =
+                                part.file.to_value(part.file.file != part.path)
+                            else {
+                                return Value::Null;
+                            };
+                            one.insert("path".into(), Value::String(part.path.clone()));
+                            if part.executable {
+                                one.insert("executable".into(), Value::Bool(true));
+                            }
+                            Value::Object(one)
+                        })
+                        .collect();
+                    each.insert("parts".into(), Value::Array(parts));
+                    platforms.insert(name.clone(), Value::Object(each));
+                }
+                map.insert("platforms".into(), Value::Object(platforms));
+                Value::Object(map)
+            })
+            .collect();
+        let mut document = Map::new();
+        document.insert("format".into(), Value::String(RELEASES_FORMAT.into()));
+        let channels: Map<String, Value> = self
+            .channels
+            .iter()
+            .map(|(name, version)| (name.clone(), Value::String(version.clone())))
+            .collect();
+        document.insert("channels".into(), Value::Object(channels));
+        document.insert("releases".into(), Value::Array(releases));
+        if let Some((by, over)) = &self.signed {
+            let mut signed = Map::new();
+            signed.insert("by".into(), Value::String(by.clone()));
+            signed.insert("over".into(), Value::String(over.clone()));
+            document.insert("signed".into(), Value::Object(signed));
+        }
+        serde_json::to_string_pretty(&Value::Object(document)).unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_patterns_take_a_star_for_any_run_of_characters() {
+        assert!(wildcard("ggml-*.bin", "ggml-base.en.bin"));
+        assert!(!wildcard("ggml-*.bin", "ggml-base.zip"));
+        assert!(wildcard("ggml-base.bin", "ggml-base.bin"));
+        assert!(!wildcard("ggml-base.bin", "ggml-base.bin.zip"));
+        assert!(wildcard("*large*", "ggml-large-v3.bin"));
+        assert!(wildcard("a*b*c", "aXbYc"));
+        assert!(!wildcard("a*a", "a"));
+    }
+
+    #[test]
+    fn a_catalog_written_reads_back_the_same() {
+        let mut item = ModelItem::new("base", "Base");
+        item.tags = vec!["speech-to-text".into()];
+        item.facts = vec![("Size".into(), "148 MB".into())];
+        item.files = vec![
+            CatalogFile::new(
+                "https://huggingface.co/x/resolve/5359861c5359861c5359861c5359861c5359861c/ggml-base.bin",
+                "ggml-base.bin",
+            )
+            .sized(7)
+            .checked(FileCheck::Sha256(SHA256.into())),
+            CatalogFile::new(
+                "https://huggingface.co/x/resolve/5359861c5359861c5359861c5359861c5359861c/a.json",
+                "a.json",
+            )
+            .checked(FileCheck::GitBlob("1799".repeat(10)))
+            .derived(),
+        ];
+        let written = ModelsCatalog::new(Some("5359861c".into()), vec![item]);
+        let read = parse_models(&written.to_json()).expect("a document");
+        assert_eq!(read, written);
+
+        let mut release = Release::new("1.2.3");
+        release.channels = vec!["stable".into()];
+        release.notices = vec!["a notice".into()];
+        let file = CatalogFile::new("https://x.example/p.exe", "p.exe")
+            .checked(FileCheck::Sha512("ab".repeat(64)));
+        release.platforms.insert(
+            "windows-x86_64".into(),
+            ReleasePlatform::new(
+                Some("p.exe".into()),
+                vec![ReleasePart::new(file, "p.exe").executable()],
+            ),
+        );
+        let mut channels = BTreeMap::new();
+        channels.insert("stable".into(), "1.2.3".into());
+        let mut written = ReleasesCatalog::new(channels, vec![release]);
+        written.signed = Some(("5A3F".into(), "manifest.json".into()));
+        assert_eq!(parse_releases(&written.to_json()), Ok(written));
+    }
 
     const SHA256: &str = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
 

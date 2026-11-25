@@ -1,0 +1,302 @@
+{
+  "format": "canoa.models/1",
+  "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+  "items": [
+    {
+      "id": "base",
+      "label": "Base, every language (148 MB)",
+      "tags": [
+        "speech-to-text",
+        "Every language"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "148 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-base.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin",
+          "file": "ggml-base.bin",
+          "bytes": 147951465,
+          "check": {
+            "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
+          }
+        }
+      ]
+    },
+    {
+      "id": "base.en",
+      "label": "Base, English only (148 MB)",
+      "tags": [
+        "speech-to-text",
+        "English only"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "148 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-base.en.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
+          "file": "ggml-base.en.bin",
+          "bytes": 147964211,
+          "check": {
+            "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tiny",
+      "label": "Tiny, every language (78 MB)",
+      "tags": [
+        "speech-to-text",
+        "Every language"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "78 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-tiny.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin",
+          "file": "ggml-tiny.bin",
+          "bytes": 77691713,
+          "check": {
+            "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tiny.en",
+      "label": "Tiny, English only (78 MB)",
+      "tags": [
+        "speech-to-text",
+        "English only"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "78 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-tiny.en.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+          "file": "ggml-tiny.en.bin",
+          "bytes": 77704715,
+          "check": {
+            "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"
+          }
+        }
+      ]
+    },
+    {
+      "id": "small-q5_1",
+      "label": "Small, every language, compressed (190 MB)",
+      "tags": [
+        "speech-to-text",
+        "Every language"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "190 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-small-q5_1.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
+          "file": "ggml-small-q5_1.bin",
+          "bytes": 190085487,
+          "check": {
+            "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+          }
+        }
+      ]
+    },
+    {
+      "id": "small",
+      "label": "Small, every language (488 MB)",
+      "tags": [
+        "speech-to-text",
+        "Every language"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "488 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-small.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+          "file": "ggml-small.bin",
+          "bytes": 487601967,
+          "check": {
+            "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+          }
+        }
+      ]
+    },
+    {
+      "id": "small.en",
+      "label": "Small, English only (488 MB)",
+      "tags": [
+        "speech-to-text",
+        "English only"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "488 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-small.en.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en.bin",
+          "file": "ggml-small.en.bin",
+          "bytes": 487614201,
+          "check": {
+            "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
+          }
+        }
+      ]
+    },
+    {
+      "id": "large-v3-turbo-q5_0",
+      "label": "Large v3 turbo, every language, compressed (574 MB)",
+      "tags": [
+        "speech-to-text",
+        "Every language"
+      ],
+      "license": "MIT",
+      "facts": [
+        {
+          "label": "Runtime",
+          "value": "whisper.cpp"
+        },
+        {
+          "label": "Size",
+          "value": "574 MB"
+        },
+        {
+          "label": "File",
+          "value": "ggml-large-v3-turbo-q5_0.bin"
+        },
+        {
+          "label": "SHA-256",
+          "value": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+        }
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
+          "file": "ggml-large-v3-turbo-q5_0.bin",
+          "bytes": 574041195,
+          "check": {
+            "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+          }
+        }
+      ]
+    }
+  ]
+}

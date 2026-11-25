@@ -32,8 +32,6 @@ use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
 };
 
-use crate::catalog;
-
 /// The id of the provider, which a table names and the Store type's speech offer builds.
 pub const PROVIDER: &str = "speech_whisper";
 
@@ -98,11 +96,7 @@ impl WhisperSettings {
 
     /// The model file these settings name.
     fn file(&self) -> PathBuf {
-        let name = catalog::model(&self.model).map_or_else(
-            || alloc::format!("ggml-{}.bin", self.model),
-            |model| model.file.to_owned(),
-        );
-        Path::new(&self.models_dir).join(name)
+        Path::new(&self.models_dir).join(alloc::format!("ggml-{}.bin", self.model))
     }
 
     fn threads(&self) -> i32 {
@@ -499,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn the_model_file_is_the_catalogs_or_ggml_and_the_id() {
+    fn the_model_file_is_ggml_and_the_id() {
         let own = WhisperSettings::new("small-q5_1", "/models");
         assert_eq!(own.file(), Path::new("/models/ggml-small-q5_1.bin"));
         let other = WhisperSettings::new("mine", "/models");

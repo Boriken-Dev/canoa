@@ -17,7 +17,8 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use canoa::speech::{AudioFormat, Hints, OpenRequest, PCM_S16LE, SpeechProvider};
-use canoa_whisper::catalog::{self, MODELS_ORIGIN};
+use canoa::store::catalog::{FileCheck, parse_models};
+use canoa_whisper::catalog::SNAPSHOT;
 use canoa_whisper::{WhisperSettings, WhisperSpeech, is_loaded, unload};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_harness::LocalSpawner;
@@ -43,16 +44,24 @@ fn fixture(name: &str) -> (PathBuf, Vec<u8>) {
     let dir = std::env::temp_dir().join(format!("canoa-whisper-it-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a folder");
-    let tiny = catalog::model("tiny").expect("the catalog has tiny");
-    let file = dir.join(tiny.file);
-    fetch(&format!("{MODELS_ORIGIN}{}", tiny.file), &file);
+    let catalog = parse_models(SNAPSHOT).expect("the shipped catalog");
+    let tiny = catalog
+        .items
+        .iter()
+        .find(|item| item.id == "tiny")
+        .expect("the catalog has tiny")
+        .files[0]
+        .clone();
+    let file = dir.join(&tiny.file);
+    fetch(&tiny.url, &file);
     let bytes = std::fs::read(&file).expect("the model");
     let digest: String = Sha256::digest(&bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
     assert_eq!(
-        digest, tiny.sha256,
+        Some(FileCheck::Sha256(digest)),
+        tiny.check,
         "the model is the one the catalog names"
     );
     let wav = dir.join("clip.wav");

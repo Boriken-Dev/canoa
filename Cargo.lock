@@ -1268,6 +1268,7 @@ dependencies = [
  "guatiao",
  "guatiao-intake",
  "serde_json",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -1296,6 +1297,7 @@ dependencies = [
  "coqui-acp-harness",
  "guatiao",
  "guatiao-intake",
+ "serde_json",
  "sha2 0.11.1",
  "whisper-rs",
 ]

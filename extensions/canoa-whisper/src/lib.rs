@@ -10,10 +10,12 @@ extern crate alloc;
 pub mod catalog;
 mod model_store;
 mod providers;
+mod source;
 mod speech;
 
 pub use model_store::WhisperModels;
 pub use providers::{WhisperExtension, library};
+pub use source::{SOURCE, WhisperHf, WhisperHfSettings, catalog_of};
 pub use speech::{IDLE, PROVIDER, WhisperSettings, WhisperSpeech, is_loaded, unload};
 
 /// The name this crate's library is registered under.
