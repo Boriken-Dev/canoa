@@ -80,6 +80,20 @@ void main() {
     final h = await openSettings(tester, config: config, section: 'sources', presets: [codex]);
     expect(_from, findsNWidgets(2), reason: 'the hidden preset and the system\'s own source');
     expect(_overrides, findsOneWidget, reason: 'a source of the person\'s that replaces the system\'s');
+    // The middle of a row holds its Reset, so a row is opened from its corner.
+    for (final name in ['mine', 'theirs']) {
+      await tester.ensureVisible(find.byKey(Key('source-row $name')));
+      await tester.tapAt(tester.getTopLeft(find.byKey(Key('source-row $name'))) + const Offset(12, 12));
+      await tester.pumpAndSettle();
+    }
+    expect(find.byKey(const Key('source-layer theirs')), findsOneWidget, reason: 'it says where it is defined');
+    expect(find.byKey(const Key('source-remove theirs')), findsNothing, reason: 'the person file holds nothing to remove');
+    expect(find.byKey(const Key('source-layer mine')), findsNothing, reason: 'it is the person own entry');
+    await tester.tap(find.byKey(const Key('source-remove mine')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('the entry of the same name in the system file shows again'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('confirm-remove-no')));
+    await tester.pumpAndSettle();
     await _resetOne(tester);
     expect(h.last.agents.firstWhere((agent) => agent.label == 'mine').args, ['--acp']);
   });

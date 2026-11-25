@@ -5,6 +5,7 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/mail/mail_accounts.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/profile/profile_home.dart';
+import 'package:canoa/settings/advanced_config.dart';
 import 'package:canoa/settings/host_sections.dart';
 import 'package:canoa/settings/provider_switches.dart';
 import 'package:canoa/settings/settings_page.dart';
@@ -58,6 +59,7 @@ Future<SettingsHarness> openSettings(
   PortalSession? portal,
   ProviderSwitches? providers,
   CatalogSources? catalogSources,
+  AdvancedConfig? advancedConfig,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -94,6 +96,7 @@ Future<SettingsHarness> openSettings(
       portal: portal,
       providers: providers,
       catalogSources: catalogSources,
+      advancedConfig: advancedConfig,
     ),
   ));
   await tester.pumpAndSettle();

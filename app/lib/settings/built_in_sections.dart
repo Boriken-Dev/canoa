@@ -202,6 +202,19 @@ const builtInSectionsListing = r'''
       "form": null
     },
     {
+      "id": "advanced",
+      "title": "Advanced",
+      "help": null,
+      "icon": "wrench",
+      "group": "Store",
+      "under": null,
+      "keywords": "configuration canoa.cfg tables keys web control native network delegate kb history worktrees tools environments openers limits advanced edit add remove",
+      "origin": "built-in",
+      "stored": "config",
+      "schema": null,
+      "form": null
+    },
+    {
       "id": "providers",
       "title": "Providers",
       "help": null,

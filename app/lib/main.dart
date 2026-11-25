@@ -849,6 +849,7 @@ class _CanoaAppState extends State<CanoaApp> {
       extensions: _extensionSettings,
       providers: _providerSwitches,
       catalogSources: _services.catalogSourcesHeld,
+      advancedConfig: _services.advancedConfigHeld,
       hostSections: _hostSections,
       portal: widget.served?.portal,
       shells: _shellSettings,

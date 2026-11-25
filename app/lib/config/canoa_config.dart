@@ -1323,6 +1323,12 @@ final class CanoaConfig {
     return model;
   }
 
+  /// The keys of each table the app edits through its own fields, by table.
+  static Map<String, Set<String>> get editedKeys => _editedKeys;
+
+  /// The tables of canoa.cfg this app reads.
+  static Set<String> get ownTables => _ownTables;
+
   /// The tables of canoa.cfg this app reads; any other is kept as it was found.
   static const _ownTables = {
     'desktop', 'network', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile', 'permissions',

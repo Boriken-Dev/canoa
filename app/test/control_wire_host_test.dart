@@ -20,6 +20,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool_io.dart' show freeLoopbackPort;
 import 'package:canoa/served/served_control.dart';
+import 'package:canoa/settings/advanced_config.dart';
 import 'package:canoa/settings/host_sections.dart';
 import 'package:canoa/store/store_models.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,8 +34,9 @@ final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
   _ => null,
 };
 
-/// What this page's key may do on the host: read its configuration and its Store, run a Store type's program, and manage accounts.
-const _grants = ['config.read', 'store.read', 'store.programs', 'accounts'];
+/// What this page's key may do on the host: read its configuration and its Store, run a Store type's program, manage accounts, and
+/// edit the host's own tables (`hosting`).
+const _grants = ['config.read', 'store.read', 'store.programs', 'accounts', 'hosting'];
 
 /// The model the stand-in for the Foundry Local program lists.
 const _model = 'qwen3-14b-generic-gpu:2';
@@ -47,6 +49,7 @@ void main() {
   late WebPeerBridge browser;
   late PeerMethod method;
   late ServedProcess host;
+  late File config;
   late HostControl control;
 
   Future<VerifiedPeer> prove(channel, expected) => provePeer(browser, channel, expected, method: method);
@@ -63,7 +66,7 @@ void main() {
     method = PeerMethod.parse(Platform.environment['CANOA_TEST_METHOD'] ?? 'noise');
     browser = await WebPeerBridge.start();
     final browserId = await browser.localId(method);
-    final config = File('$root/host/cfg/canoa.cfg')
+    config = File('$root/host/cfg/canoa.cfg')
       ..writeAsStringSync('''
 [host.control]
 listen = "127.0.0.1:${await freeLoopbackPort()}"
@@ -177,6 +180,41 @@ peers = [${jsonEncode(browserId)}]
     expect(row.actions.first.steps, isNotEmpty);
     expect(models.settings, isNotNull, reason: 'the type keeps a setting of a model');
     expect(models.settings!.schema, isNotEmpty);
+  });
+
+  test("the Advanced page's tables are listed, added, changed and removed through the host, and a refusal is the host's words", () async {
+    final advanced = AdvancedConfig((method, params) async => (await control.ready(wait: false)).call(method, params));
+    await advanced.load();
+    expect(advanced.problem, isNull);
+    AdvancedTable table(String id) => advanced.tables.firstWhere((each) => each.id == id);
+    expect(advanced.tables.map((each) => each.id), containsAll(['host.mcp_list', 'host.tools', 'host.openers', 'harnesses']));
+    expect(table('host.mcp_list').shape, AdvancedShape.flat);
+    expect(table('host.mcp_list').schema, containsPair('properties', contains('query_seconds')));
+    expect(table('host.mcp_list').own, isNull);
+
+    // A table of settings: made, changed, and taken out; the rest of the file stays.
+    expect(await advanced.set(['host', 'mcp_list'], {'query_seconds': 7}), isNull);
+    expect(config.readAsStringSync(), allOf(contains('query_seconds = 7'), contains('[host.agents.scripted]')));
+    expect(table('host.mcp_list').own, {'query_seconds': 7});
+    expect(await advanced.set(['host', 'mcp_list'], {'query_seconds': 9, 'max_items_per_server': 50}), isNull);
+    expect(table('host.mcp_list').own, {'query_seconds': 9, 'max_items_per_server': 50});
+
+    // A table of names, each one text.
+    expect(await advanced.set(['harnesses', 'my-acp'], 'My Harness'), isNull);
+    expect(config.readAsStringSync(), contains('My Harness'));
+    expect(table('harnesses').ownEntries['my-acp'], {'value': 'My Harness'});
+
+    // What the host would not read is refused in its words, and nothing is written.
+    final kept = config.readAsStringSync();
+    final refused = await advanced.set(['host', 'mcp_list'], {'query_seconds': 0});
+    expect(refused, isNotNull);
+    expect(config.readAsStringSync(), kept);
+    expect(await advanced.set(['host', 'agents', 'x'], {'program': 'x'}), isNotNull, reason: 'a table another page edits is not offered here');
+
+    expect(await advanced.set(['host', 'mcp_list'], null), isNull);
+    expect(await advanced.set(['harnesses', 'my-acp'], null), isNull);
+    expect(table('host.mcp_list').own, isNull);
+    expect(config.readAsStringSync(), allOf(isNot(contains('mcp_list')), isNot(contains('My Harness')), contains('[host.agents.scripted]')));
   });
   });
 }

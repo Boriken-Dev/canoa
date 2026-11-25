@@ -427,6 +427,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('source-remove Other')));
       await tester.pumpAndSettle();
+      expect(find.byKey(const Key('confirm-remove')), findsOneWidget, reason: 'removing asks first');
+      await tester.tap(find.byKey(const Key('confirm-remove-no')));
+      await tester.pumpAndSettle();
+      expect(h.last.agents.map((agent) => agent.label), ['Mine', 'Other'], reason: 'keeping it changes nothing');
+      await tester.tap(find.byKey(const Key('source-remove Other')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-remove-yes')));
+      await tester.pumpAndSettle();
       expect(h.last.agents.map((agent) => agent.label), ['Mine']);
       expect(changedTables(every, h.last), isEmpty);
     });

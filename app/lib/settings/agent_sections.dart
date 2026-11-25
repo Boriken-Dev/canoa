@@ -5,8 +5,11 @@ import 'package:material_ui/material_ui.dart';
 import '../accounts/account_models.dart' show standardsText;
 import '../accounts/accounts_controller.dart';
 import '../acp/agent_commands.dart';
+import '../config/canoa_config.dart';
 import '../chat/modes.dart';
 import '../forms/schema_fields.dart';
+import '../l10n/app_text.dart';
+import '../shell/confirm_remove.dart';
 import '../permissions/permission_rules.dart';
 import '../permissions/protected_paths.dart';
 import '../profile/profile.dart';
@@ -130,6 +133,35 @@ class _SourcesSectionState extends State<SourcesSection> {
     return accepts == null || accepts.isEmpty ? null : 'Accepts accounts that support ${standardsText(accepts)}';
   }
 
+  /// What stands where an own-file source's Remove goes: the button, or, for one a lower layer defines, where it is defined, since the
+  /// person's file holds nothing to take out.
+  Widget _removal(BuildContext context, CanoaConfig config, AgentCommand agent) {
+    final text = AppText.of(context);
+    final lower = config.lowerLayerOf(['agents', agent.label]);
+    if (lower != null) {
+      return Text(text('cfg.from_layer', {'layer': lower}), key: Key('source-layer ${agent.label}'), style: Theme.of(context).textTheme.bodySmall);
+    }
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton.icon(
+        key: Key('source-remove ${agent.label}'),
+        icon: const Icon(Icons.delete_outline),
+        label: Text(text('cfg.remove', {'name': agent.label})),
+        onPressed: () async {
+          final under = config.lowerValueFrom(['agents', agent.label]);
+          if (!await confirmRemoval(
+            context,
+            title: text('cfg.remove_title', {'name': agent.label}),
+            body: under == null ? text('cfg.remove_source') : text('cfg.remove_source_over', {'layer': under}),
+          )) {
+            return;
+          }
+          widget.controller.change((x) => x.copyWith(agents: [for (final each in x.agents) if (each != agent) each]));
+        },
+      ),
+    );
+  }
+
   Widget _row({
     required AgentSource source,
     required String key,
@@ -229,15 +261,7 @@ class _SourcesSectionState extends State<SourcesSection> {
               key: agent.label,
               configKey: ['agents', agent.label],
               command: [agent.program, ...agent.args].join(' '),
-              detail: Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  key: Key('source-remove ${agent.label}'),
-                  icon: const Icon(Icons.delete_outline),
-                  label: Text('Remove ${agent.label}'),
-                  onPressed: () => c.change((x) => x.copyWith(agents: [for (final each in x.agents) if (each != agent) each])),
-                ),
-              ),
+              detail: _removal(context, config, agent),
             ),
           for (final name in widget.hosted)
             SettingsRow(title: name, description: 'Served by canoa: Hosting changes it'),
