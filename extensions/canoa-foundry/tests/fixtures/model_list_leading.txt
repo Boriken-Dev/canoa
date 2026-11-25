@@ -1,0 +1,30 @@
+Foundry Local 0.14.0 is installed; 0.15.0 is available. Run the installer to update.
+Starting the Foundry Local service...
+{
+ "variants": [
+  {
+   "alias": "deepseek-r1-14b",
+   "source": "Public",
+   "variantName": "deepseek-r1-distill-qwen-14b-qnn-npu",
+   "variantId": "deepseek-r1-distill-qwen-14b-qnn-npu:2",
+   "type": "Chat",
+   "device": "Npu",
+   "executionProvider": "QNNExecutionProvider",
+   "fileSizeMb": 7290,
+   "cached": true,
+   "license": "MIT"
+  },
+  {
+   "alias": "deepseek-r1-14b",
+   "source": "Public",
+   "variantName": "deepseek-r1-distill-qwen-14b-generic-gpu",
+   "variantId": "deepseek-r1-distill-qwen-14b-generic-gpu:4",
+   "type": "Chat",
+   "device": "Gpu",
+   "executionProvider": "WebGPUExecutionProvider",
+   "fileSizeMb": 10516,
+   "cached": false,
+   "license": "MIT"
+  }
+ ]
+}

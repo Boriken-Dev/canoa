@@ -567,7 +567,7 @@ pub struct Finished {
 /// Runs `program` with `args` through `spawner` until the program exits, or ends it (and what it started) when `limit` is over.
 ///
 /// It ends when the program exits, not when its pipes close: a service the program started and left running keeps them open,
-/// so once the program has exited only what is already buffered is read, for at most 400 ms. `run` ends nothing the
+/// so once the program has exited only what is already buffered is read, for at most a second. `run` ends nothing the
 /// program started once it has exited (the spawner may, when it lets go of the process); only the limit ends the program,
 /// and what it started.
 ///
@@ -593,12 +593,25 @@ pub fn run(
         if started.elapsed() >= limit {
             let _ = process.kill();
             let _ = process.wait(500);
+            let said = last_words(
+                &format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&out.bytes),
+                    String::from_utf8_lossy(&err.bytes)
+                ),
+                LAST_WORDS,
+            );
+            let how = format!(
+                "{program} did not finish within {} minutes and was ended",
+                limit.as_secs().div_ceil(60)
+            );
             return Err(ProviderError::new(
                 Status::GUATIAO_ERR_GONE,
-                &format!(
-                    "{program} did not finish within {} minutes and was ended",
-                    limit.as_secs().div_ceil(60)
-                ),
+                &if said.is_empty() {
+                    format!("{how}; it had written nothing")
+                } else {
+                    format!("{how}; its last words: {said}")
+                },
             ));
         }
         let both = !out.done && !err.done;
@@ -619,10 +632,11 @@ pub fn run(
     };
     let drain = Instant::now();
     for (stream, error) in [(&mut out, false), (&mut err, true)] {
-        while !stream.done
-            && drain.elapsed() < DRAIN
-            && stream.take(&process, error, DRAIN_POLL_MS)?
-        {}
+        // A read that times out is not the end: the pipe's reader may be late on a busy machine, so it is read until it is
+        // closed or the time is over.
+        while !stream.done && drain.elapsed() < DRAIN {
+            stream.take(&process, error, DRAIN_POLL_MS)?;
+        }
     }
     Ok(Finished {
         code: exit.code,
@@ -632,7 +646,44 @@ pub fn run(
 }
 
 /// The most [`run`] reads after the program has exited, for what its pipes still hold.
-const DRAIN: Duration = Duration::from_millis(400);
+const DRAIN: Duration = Duration::from_secs(1);
+
+/// How much of a program's last words an error carries.
+const LAST_WORDS: usize = 600;
+
+/// The end of `text` as a person reads it: the escapes a terminal would draw and the control characters taken out, blank
+/// lines dropped, and at most the last `most` characters (marked with a leading `…` when it was cut). Empty when the program
+/// said nothing.
+#[must_use]
+pub fn last_words(text: &str, most: usize) -> String {
+    let mut clean = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.next_if_eq(&'[').is_some() {
+                for next in chars.by_ref() {
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else if c == '\n' || !c.is_control() {
+            clean.push(c);
+        }
+    }
+    let lines: Vec<&str> = clean
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let joined = lines.join("\n");
+    let count = joined.chars().count();
+    if count <= most {
+        return joined;
+    }
+    let tail: String = joined.chars().skip(count - most).collect();
+    format!("…{}", tail.trim_start())
+}
 
 /// How long one read waits for a pipe's last bytes once the program has exited.
 const DRAIN_POLL_MS: u64 = 50;
@@ -881,6 +932,23 @@ impl ModelKeep {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_words_keep_the_end_of_what_a_program_said_without_its_escapes() {
+        assert_eq!(last_words("", 50), "");
+        assert_eq!(last_words("\n  \n", 50), "");
+        assert_eq!(
+            last_words(
+                "\u{1b}[31merror:\u{1b}[0m no space\u{7}\n\n  try again",
+                100
+            ),
+            "error: no space\ntry again"
+        );
+        assert_eq!(
+            last_words("a banner that is long\nthe real reason", 15),
+            "…the real reason"
+        );
+    }
 
     fn info(speech: SpeechService) -> ModelStoreInfo {
         let mut info = ModelStoreInfo::new("t", "c", "p", "m");

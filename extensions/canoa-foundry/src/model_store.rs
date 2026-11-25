@@ -13,7 +13,7 @@ use std::time::Duration;
 use canoa::store::models::{
     Fact, ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
     ModelSettings, ModelStore, ModelStoreInfo, RowAction, Section, ServedModel, ServiceQuery,
-    ServiceReport, SpeechService, SpeechUse, run,
+    ServiceReport, SpeechService, SpeechUse, last_words, run,
 };
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -90,12 +90,20 @@ fn tokens(value: Option<u64>) -> String {
     )
 }
 
-/// The program's refusal in its own words.
+/// The program's refusal in its own words: the end of what it wrote, which is where a program says why it stopped.
 fn refusal(what: &str, program: &str, done: &canoa::store::models::Finished) -> ProviderError {
-    let said = models::plain(&format!("{}\n{}", done.err, done.out), MOST_WORDS);
-    let how = done
-        .code
-        .map_or_else(|| "was ended".to_owned(), |code| format!("exited {code}"));
+    refused_with(what, program, done.code, &done.out, &done.err)
+}
+
+fn refused_with(
+    what: &str,
+    program: &str,
+    code: Option<i64>,
+    out: &str,
+    err: &str,
+) -> ProviderError {
+    let said = last_words(&format!("{out}\n{err}"), MOST_WORDS);
+    let how = code.map_or_else(|| "was ended".to_owned(), |code| format!("exited {code}"));
     failed(if said.is_empty() {
         format!("{what}: {program} {how}")
     } else {
@@ -103,10 +111,44 @@ fn refusal(what: &str, program: &str, done: &canoa::store::models::Finished) -> 
     })
 }
 
+/// The JSON a listing holds: all of what the program wrote, or, when it wrote lines of its own first (an update notice, a
+/// service that is starting), the JSON from the first line that opens one.
+fn json_of(out: &str) -> Option<Value> {
+    if let Ok(whole) = serde_json::from_str::<Value>(out.trim()) {
+        return Some(whole);
+    }
+    let mut at = 0;
+    for line in out.split_inclusive('\n') {
+        if line.trim_start().starts_with(['{', '[']) {
+            let rest = &out[at + (line.len() - line.trim_start().len())..];
+            if let Some(Ok(found)) = serde_json::Deserializer::from_str(rest)
+                .into_iter::<Value>()
+                .next()
+            {
+                return Some(found);
+            }
+        }
+        at += line.len();
+    }
+    None
+}
+
 fn rows_of(out: &str) -> Option<Vec<models::Row>> {
-    serde_json::from_str::<Value>(out.trim())
-        .ok()
-        .map(|answer| models::rows(&answer))
+    json_of(out).map(|answer| models::rows(&answer))
+}
+
+/// A listing that exited well and said something that is not JSON, with what it said.
+fn not_json(what: &str, done: &canoa::store::models::Finished) -> ProviderError {
+    not_json_of(what, &done.out, &done.err)
+}
+
+fn not_json_of(what: &str, out: &str, err: &str) -> ProviderError {
+    let said = last_words(&format!("{out}\n{err}"), MOST_WORDS);
+    failed(if said.is_empty() {
+        format!("{what}: Foundry Local exited 0 and wrote nothing")
+    } else {
+        format!("{what}: Foundry Local did not answer in JSON; it said: {said}")
+    })
 }
 
 fn size_of(row: &models::Row) -> String {
@@ -275,9 +317,8 @@ impl ModelStore for FoundryModels {
         if all.code != Some(0) {
             return Err(refusal("the model catalog was not listed", &program, &all));
         }
-        let all = rows_of(&all.out).ok_or_else(|| {
-            failed("the model catalog was not listed: Foundry Local did not answer in JSON")
-        })?;
+        let all =
+            rows_of(&all.out).ok_or_else(|| not_json("the model catalog was not listed", &all))?;
         let cached = ask(Listing::Cached)?;
         if cached.code != Some(0) {
             return Err(refusal(
@@ -453,6 +494,64 @@ fn whisper_models(_base: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const RECORDED: &str = include_str!("../tests/fixtures/model_list_recorded.json");
+    const LEADING: &str = include_str!("../tests/fixtures/model_list_leading.txt");
+    const NOT_JSON: &str = include_str!("../tests/fixtures/model_list_not_json.txt");
+
+    #[test]
+    fn a_listing_is_read_whole_or_after_the_lines_the_program_wrote_first() {
+        let whole = rows_of(RECORDED).expect("a recorded answer");
+        assert_eq!(whole.len(), 2);
+        assert_eq!(whole[0].id, "deepseek-r1-distill-qwen-14b-qnn-npu:2");
+        let after = rows_of(LEADING).expect("an answer after an update notice and a banner");
+        assert_eq!(after, whole, "the notice lines change nothing");
+        assert!(
+            rows_of("[info] starting\n{\"variants\": []}").is_some_and(|rows| rows.is_empty()),
+            "a bracket that opens no JSON is skipped"
+        );
+        assert_eq!(rows_of(NOT_JSON), None);
+        assert_eq!(rows_of(""), None);
+    }
+
+    #[test]
+    fn an_answer_that_is_not_json_says_what_it_was() {
+        let why = not_json_of("the model catalog was not listed", "", NOT_JSON)
+            .message()
+            .to_owned();
+        assert!(
+            why.starts_with(
+                "the model catalog was not listed: Foundry Local did not answer in JSON; it said: "
+            ),
+            "{why}"
+        );
+        assert!(why.contains("error: the service did not start"), "{why}");
+        assert!(!why.contains('\u{1b}'), "no terminal escapes: {why}");
+        assert_eq!(
+            not_json_of("the model catalog was not listed", "\n", "").message(),
+            "the model catalog was not listed: Foundry Local exited 0 and wrote nothing"
+        );
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_end_of_what_the_program_wrote() {
+        let banner = "Foundry Local is checking for updates\n".repeat(40);
+        let why = refused_with(
+            "the model catalog was not listed",
+            "foundry",
+            Some(1),
+            &banner,
+            "error: the catalog is not reachable\n",
+        )
+        .message()
+        .to_owned();
+        assert!(why.contains("the catalog is not reachable"), "{why}");
+        let long = format!("{}error: out of space\n", "chatter\n".repeat(200));
+        let why = refused_with("a", "foundry", Some(1), "", &long)
+            .message()
+            .to_owned();
+        assert!(why.ends_with("error: out of space"), "{why}");
+    }
 
     fn model(id: &str, cached: bool, loaded: bool) -> models::Model {
         let rows = models::rows(
