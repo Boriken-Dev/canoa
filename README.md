@@ -11,23 +11,40 @@
 [![Offline deps](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/canoa/offline.yml?label=Offline%20deps)](https://github.com/Boriken-Dev/canoa/actions/workflows/offline.yml)
 [![Docs CI](https://img.shields.io/github/actions/workflow/status/Boriken-Dev/canoa/docs.yml?label=Docs%20CI)](https://github.com/Boriken-Dev/canoa/actions/workflows/docs.yml)
 
-**Discover. Connect. Route.** A protocol-neutral gateway and multi-session client connecting applications to local and remote AI agents. Canoa is a standalone [Boriken Dev](https://boriken.dev) project, not tied to a particular agent provider, platform or browser. It aims to make [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) peers accessible through preferred WebTransport (HTTPS) with WSS fallback and a documented peer-authentication profile.
+**Discover. Connect. Route.** Canoa is one chat window for the coding agents on your computer and the ones you reach elsewhere: Claude, Codex, Pi and any agent that speaks the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/). You choose what each agent may do, and it asks before it does more. It also runs in a browser tab, in a browser extension's side panel and beside a mail or a document in Office. A [Boriken Dev](https://boriken.dev) project, not tied to a particular agent provider, platform or browser.
+
+![The Canoa window with a session waiting for an answer](docs/assets/screens/window-permission-dark.png#gh-dark-mode-only)
+![The Canoa window with a session waiting for an answer](docs/assets/screens/window-permission-light.png#gh-light-mode-only)
+
+## Quick Start
+
+**Download:** no release has been published yet, so there is no file to download. Build it from source (below, or [Getting started](https://boriken-dev.github.io/canoa/getting-started/)); the [releases page](https://github.com/Boriken-Dev/canoa/releases) will list the files of each release once there is one, and the [documentation's Quick Start](https://boriken-dev.github.io/canoa/) offers the one for your system.
+
+1. **Get Canoa.** `python app/tool/build.py desktop --portable` makes one file: `CanoaUI.exe` on Windows, an AppImage on Linux (needs `flutter` and `cargo`).
+2. **Open it and sign an agent in.** The window lists the agents it found on this computer; add an account under **Settings, Accounts** if an agent needs one.
+3. **Start a session.** Press **Ctrl+N**, choose **Workspace** and a folder, and type what you want. When the agent wants to change a file or run a command, a card asks you: **Yes** lets it, **Deny** refuses.
+
+<p>
+<img src="docs/assets/screens/window-new-session-phone-dark.png#gh-dark-mode-only" alt="A new session at phone width" width="260">
+<img src="docs/assets/screens/window-new-session-phone-light.png#gh-light-mode-only" alt="A new session at phone width" width="260">
+<img src="docs/assets/screens/window-permission-phone-dark.png#gh-dark-mode-only" alt="A permission card at phone width" width="260">
+<img src="docs/assets/screens/window-permission-phone-light.png#gh-light-mode-only" alt="A permission card at phone width" width="260">
+</p>
+
+The [user guide](https://boriken-dev.github.io/canoa/guide/window/) walks through the window, [permissions](https://boriken-dev.github.io/canoa/guide/permissions/), [the Store](https://boriken-dev.github.io/canoa/guide/store/), [accounts](https://boriken-dev.github.io/canoa/guide/accounts/), [settings](https://boriken-dev.github.io/canoa/guide/settings/), [the browser extension](https://boriken-dev.github.io/canoa/guide/browser-extension/), [the Office add-in](https://boriken-dev.github.io/canoa/guide/office-addin/) and [the web app and the portal](https://boriken-dev.github.io/canoa/guide/web-and-portal/), each with a worked example.
+
+> **Status: early development.** Pairing, `canoa serve` and the desktop app's hosting work and are tested; see the [roadmap](docs/roadmap.md) for what is not yet available. No packages have been released.
 
 *Canoa* is a historically attested Taíno word for canoe: a vessel carrying people and goods between places. Canoa carries agent sessions and tools between applications.
 
-> **Status: early development.** The Rust crates are a deny-by-default registry (`canoa`), the host that serves agents to paired keys (`canoa-host`, the `canoa` program), that host as a library behind a C ABI (`canoa-ffi`) and the Windows portable launcher (`canoa-launch`). The Flutter app is a multi-session chat: the desktop app hosts and runs agents (Claude, Codex, Pi, any ACP agent) itself, and the web app and extension connect to a host over a verified ACP link; the Chromium extension offers permission-gated browser tools to agents over that link and validates site-adapter manifests (running an adapter is planned). **Pairing, `canoa serve` and the desktop app's hosting work and are tested; see the [roadmap](docs/roadmap.md) for what is not yet available.** No packages have been released.
+## Developers
 
-## Features and direction
+Canoa is one implementation on shared libraries: [coqui-transport](https://github.com/Boriken-Dev/coqui-transport) and [coqui-transport-web](https://github.com/Boriken-Dev/coqui-transport-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2. WebTransport is preferred, with a secure WebSocket fallback only when opening it fails, and peer identity is verified separately. The Rust workspace holds a deny-by-default registry (`canoa`), the host (`canoa-host`, the `canoa` program), that host as a library behind a C ABI (`canoa-ffi`) and the portable Windows launcher (`canoa-launch`).
 
-- **One chat app:** root `app/` contains a responsive Flutter client for full-page, sidebar, desktop, PWA and optional Wasm builds; the browser extension packages the same app.
-- **Agent independent:** WebTransport is preferred; a secure WebSocket fallback is used only when opening it fails. Peer identity is verified separately.
-- **Browser owned permissions:** approve access by verified peer, origin, tab and capability, with cancellation and revocation.
-- **Bidirectional MCP:** agents can request approved DOM/browser tools and website-provided WebMCP; webpages can advertise MCP endpoints.
-- **Developer debugging:** explicit elevated Chromium CDP mode; Firefox and Safari require separate adapters.
-- **User site adapters:** attach JavaScript or Wasm tools to one or several exact website origins; manifest validation is implemented, runtime sandbox remains planned.
-- **Multi-session:** one workspace for multiple ACP sessions, with v1 and v2 create/resume/prompt and streamed transcript handling over a verified peer link.
+The [developer documentation](https://boriken-dev.github.io/canoa/developers/) covers the [architecture](https://boriken-dev.github.io/canoa/architecture/), the [interoperability profile](https://boriken-dev.github.io/canoa/interop/), [building and running the host](https://boriken-dev.github.io/canoa/host/), [canoa.cfg](https://boriken-dev.github.io/canoa/configuration/), [one file per platform](https://boriken-dev.github.io/canoa/portable/), [browser integration](https://boriken-dev.github.io/canoa/browser/), the Python and JavaScript SDKs for providers, the [offline deps branch](https://boriken-dev.github.io/canoa/offline-deps/) and the [roadmap](https://boriken-dev.github.io/canoa/roadmap/). The Rust API is at <https://boriken-dev.github.io/canoa/rust/canoa/index.html>.
 
-## Layout
+
+### Layout
 
 | Path | Responsibility |
 | --- | --- |
@@ -52,35 +69,7 @@
 | `clients/office/` | Office add-in manifests and task pane pages served by the host (`[host.web] office = true`) |
 | `docs/` | Architecture, protocols, browser support and developer guides |
 
-## Try the current UI
-
-```sh
-python app/tool/build.py desktop          # builds the desktop app and prints the path of CanoaUI
-python app/tool/build.py desktop --run    # or runs it (needs flutter and cargo on PATH)
-```
-
-The desktop app carries the host as a library and lives in the tray. For the web app, `python app/tool/build_noise.py && (cd app && flutter build web --release --csp --no-web-resources-cdn)` then `canoa serve --web app/build/web`; see [getting started](https://boriken-dev.github.io/canoa/getting-started/). A manually pinned Coqui peer connection can also be tested against `canoa serve` with the `stdio_agent` example (`cargo build -p canoa-host --bin canoa --examples`, a canoa.cfg with `[host.agents.echo]` naming `target/debug/examples/stdio_agent` as its `program`, then `canoa accept` for the key that connects), which is not a production agent. To package the UI for the Chromium extension, run `python app/tool/build.py chromium`; inspect [extension instructions](https://boriken-dev.github.io/canoa/browser/) before loading it as unpacked.
-
-Canoa is one implementation on two shared libraries: [coqui-transport](https://github.com/Boriken-Dev/coqui-transport) and [coqui-transport-web](https://github.com/Boriken-Dev/coqui-transport-web) for channels a browser can open, and [coqui-acp](https://github.com/Boriken-Dev/coqui-acp) for Agent Client Protocol sessions, version 1 and version 2.
-
-## Desktop, configuration, and offline dependencies
-
-The desktop app reads its settings from [canoa.cfg](https://boriken-dev.github.io/canoa/configuration/), one file in TOML, YAML or JSON chosen by its first line and read through [anycfg](https://github.com/jose-pr/anycfg-rs), and has a tray context menu (Open, Hosting, Settings, Hide, Exit). Closing the window keeps it and its agents running; a double click on the tray icon opens the chat on Windows, and Linux, whose tray icons pass no clicks on, uses **Open Canoa** in the menu. It runs `canoa` as its child, and its **Hosting** dialog adds agents and pairs browsers. The [deps branch](https://github.com/Boriken-Dev/canoa/tree/deps) mirrors the Dart Pub cache and Unicode fallback CDN assets, populated by the [Refresh deps workflow](https://github.com/Boriken-Dev/canoa/actions/workflows/deps.yml).
-
-The Chromium extension now has a local [MCP JSON-RPC tool adapter, options-based permission grants and elevated CDP command bridge](https://boriken-dev.github.io/canoa/browser-mcp/). An agent of Canoa's own chat, and with a person's say an MCP client on a paired machine, reach those tools over a proven link with nothing listening in the browser: see [browser integration](https://boriken-dev.github.io/canoa/browser/).
-
-## One file per platform
-
-`python app/tool/build.py desktop --portable` makes the desktop app as one file: on Windows `target/canoa-windows/CanoaUI.exe`, a launcher
-(`crates/canoa-launch`) that carries the built app folder, unpacks it once per version into `%LOCALAPPDATA%\Canoa\<version>\`, checks it
-against a manifest of SHA-256 digests on every start and runs it; on Linux an AppImage. macOS ships `Canoa.app`. See
-[one file per platform](https://boriken-dev.github.io/canoa/portable/) for the release recipe and what an unsigned file shows.
-
-## The host
-
-`canoa serve` offers each `[host]` entry of canoa.cfg, a stdio ACP agent or a Guatiao provider, to keys you paired, on loopback unless an entry's `listen` says otherwise. The desktop app starts it, starts it again if it ends, and ends it with its agents on quit. See [the host](https://boriken-dev.github.io/canoa/host/).
-
-## Development
+### Checks
 
 Rust 1.89+:
 
