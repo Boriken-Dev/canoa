@@ -51,20 +51,25 @@ Map<String, Object?> _window(String id, String label, int used, {required int ho
   'source': 'reported',
 };
 
-AccountsController _accounts() => AccountsController(
+/// The accounts the host lists: canoa.cfg's `work` and the login of each harness in [logins], which the host lists only for a harness that is
+/// signed in on its computer.
+AccountsController _accounts(List<String> logins) => AccountsController(
   host: FakeAccountsHost(accounts: [
     account('work', kind: 'claude-login', id: 'id-work'),
-    harnessLogin('claude'),
-    harnessLogin('codex'),
+    for (final harness in logins) harnessLogin(harness),
   ]),
   config: () => const CanoaConfig(),
   change: (_) async {},
 );
 
-Future<(UsageController, _Host)> _open(WidgetTester tester, void Function(_Host host) setUp) async {
+Future<(UsageController, _Host)> _open(
+  WidgetTester tester,
+  void Function(_Host host) setUp, {
+  List<String> logins = const ['claude', 'codex'],
+}) async {
   final host = _Host();
   setUp(host);
-  final accounts = _accounts();
+  final accounts = _accounts(logins);
   await accounts.refresh();
   final usage = UsageController(sources: [host], accounts: accounts, now: () => _noon);
   tester.view
@@ -122,6 +127,17 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('usage-account local:codex')), matching: find.text('88% left')), findsNothing);
   });
 
+  testWidgets('a harness the host lists no login for has no card and is not asked', (tester) async {
+    final (usage, host) = await _open(tester, (host) {
+      host.rows['work/'] = {'supported': true, 'buckets': <Object?>[]};
+      host.rows['local/claude'] = {'supported': true, 'account': 'local:claude', 'buckets': <Object?>[]};
+    }, logins: const ['claude']);
+    expect(host.reads.toSet(), {('work', null), ('local', 'claude')});
+    expect(find.byKey(const Key('usage-account local:codex')), findsNothing);
+    expect(find.byKey(const Key('usage-index account local:codex')), findsNothing);
+    expect(usage.all.where((each) => each.id == 'local:codex'), isEmpty);
+  });
+
   testWidgets('what sessions heard on a harness\'s login is shown on that harness\'s login only', (tester) async {
     final (usage, _) = await _open(tester, (host) {
       host.heard.add({
@@ -147,7 +163,7 @@ void main() {
   });
 
   testWidgets('the logins are listed with the accounts but are no account to offer, sign in again or remove', (tester) async {
-    final accounts = _accounts();
+    final accounts = _accounts(const ['claude', 'codex']);
     await accounts.refresh();
     expect([for (final each in accounts.listed) each.id], ['id-work', 'local:claude', 'local:codex']);
     // What Settings, the pools and the new-session picker read stays what canoa.cfg names.
