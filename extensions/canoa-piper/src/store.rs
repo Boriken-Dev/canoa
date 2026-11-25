@@ -4,7 +4,7 @@
 //! is a Python package under another licence. The release is MIT licensed and publishes no checksums, so the digests here are the
 //! SHA-256 of the published files, measured once and pinned.
 //!
-//! The program is installed alone, in `piper/`. The voices are the type's catalogs ([`crate::source`]) and are installed on their
+//! The program is installed alone, in `piper/`. The voices are the type's catalogs (the `source` module) and are installed on their
 //! own from the Models page, each `NAME.onnx` with its `NAME.onnx.json` in the host's models folder; the type's `speech_say_piper`
 //! provider is given that folder through `PiperModels::service`. A Linux archive carries its libraries' short names
 //! as links, which the unpack leaves out, so the install writes them as copies.
