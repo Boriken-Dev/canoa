@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/build.py, at commit 77e1f9ac61b910e0c5ff78f95bea9a8af3c2d676.
+# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/build.py, at commit f5bca04762d3c9ee7a6077871b1abc162d5c350f.
 # Copyright (c) 2026 Jose A.
 """One build tool for a repository: vendored crates, scans, SDK lock, offline and release builds.
 
@@ -2277,7 +2277,7 @@ SCHEMA["deps"].keys["pub"] = Key(
         "lock": Key("str", "", "The app's pubspec.lock, relative to the repository."),
         "drop": Key("strs", PUB_DROP, "Directories at a package's top that are left out."),
         "require": Key("strs", [], "Packages that must be in the pub cache whatever pub resolves (for example a desktop build's tray and window packages)."),
-        "git": Key("str", "checkout", "`checkout`: pub/git/REPO-REV/ without .git is on the branch; `record`: git packages are only listed in manifest.json."),
+        "git": Key("str", "checkout", "`checkout`: the lock's package folders of pub/git/REPO-REV/ (without .git) are on the branch; `record`: git packages are only listed in manifest.json."),
         "system": Key("strs", [], "System packages the require list links on Linux, recorded in manifest.json for whoever builds offline."),
         "cache": Key("str", "", "The pub cache `deps sync` copies from; empty: --pub-cache, else $PUB_CACHE, else the default of the platform."),
     },
@@ -2468,6 +2468,14 @@ def copy_package(source: Path, target: Path, drop: list[str], allow: Allow, pref
     return dropped, deleted
 
 
+def pub_folder(path: str) -> str:
+    """A git package's `path` in pubspec.lock as a clean POSIX folder of its repository (`.` for the root)."""
+    parts = [part for part in path.replace("\\", "/").split("/") if part not in ("", ".")]
+    if ".." in parts:
+        raise Problem(f"git package path {path!r} leaves its repository")
+    return "/".join(parts) or "."
+
+
 def sync_pub(ctx: Ctx, deps_dir: Path, args: Any) -> tuple[list[str], dict]:
     cfg = ctx.cfg.deps.pub
     lock_path = pubspec_lock_of(ctx)
@@ -2498,14 +2506,24 @@ def sync_pub(ctx: Ctx, deps_dir: Path, args: Any) -> tuple[list[str], dict]:
                 shutil.copyfile(cache / rel, target / rel)
     wanted_git: set[str] = set()
     if cfg.git == "checkout":
-        for p in git:
-            source = cache / "git" / p.key
+        for key in dict.fromkeys(p.key for p in git):
+            source = cache / "git" / key
             if not source.is_dir():
-                raise Problem(f"pub cache {cache} has no git/{p.key}; run `flutter pub get` first")
-            done = copy_package(source, target / "git" / p.key, cfg.drop, allow, f"pub/git/{p.key}", skip_git=True)
-            counts.update(done[0])
-            deleted += done[1]
-            wanted_git.add(p.key)
+                raise Problem(f"pub cache {cache} has no git/{key}; run `flutter pub get` first")
+            # Only the folders the lock names, as pub reads them; the rest of the repository stays in history for good.
+            folders = sorted({pub_folder(p.path) for p in git if p.key == key})
+            if "." in folders:
+                folders = ["."]
+            shutil.rmtree(target / "git" / key, ignore_errors=True)
+            for folder in folders:
+                package = source / folder
+                if not (package / "pubspec.yaml").is_file():
+                    raise Problem(f"pub cache {cache}: git/{key} has no package at {folder}")
+                where = key if folder == "." else f"{key}/{folder}"
+                done = copy_package(package, target / "git" / where, cfg.drop, allow, f"pub/git/{where}", skip_git=True)
+                counts.update(done[0])
+                deleted += done[1]
+            wanted_git.add(key)
     changes = []
     # What the lock no longer names goes.
     for base in ("hosted", "hosted-hashes"):
@@ -3665,6 +3683,7 @@ class Installer:
         # The deps checkout an item vendor's tool is built from (`--deps`), found only when a tool has to be built.
         self.deps_arg: Path | None = None
         self.deps_found: tuple[Path | None, str] | None = None
+        self.precache: list[str] = list(ctx.cfg.flutter.precache)
 
     def deps_checkout(self) -> tuple[Path | None, str]:
         if self.deps_found is None:
@@ -3741,6 +3760,8 @@ class Installer:
         init = [i for i in self.rows("rustup-init")]
         toolchains = self.rows("rust")
         if not toolchains:
+            # Only cargo tools are asked for: no rustup and no toolchain row is installed for them.
+            self.cargo_tools(self.installed_toolchain())
             return
         if len(init) != 1:
             raise Problem(f"the lock needs one rustup-init row for {self.plat}, it has {len(init)}")
@@ -3783,10 +3804,34 @@ class Installer:
             if not out.startswith(f"{numeric[0]}-{self.triple}"):
                 run_tool([str(self.rustup), "default", f"{numeric[0]}-{self.triple}"], self.tool_env)
         self.rust_targets(numeric, targets)
+        self.cargo_tools(numeric[0] if numeric else None)
+
+    def installed_toolchain(self) -> str | None:
+        """The numeric toolchain the lock names (any group) that this prefix's rustup already has, else None."""
+        if not self.rustup.is_file():
+            return None
+        code, out = capture_tool([str(self.rustup), "toolchain", "list"], self.tool_env)
+        if code:
+            return None
+        names = [i.version for i in self.items if i.name == "rust" and i.group != "system" and re.match(r"^\d+\.\d+\.\d+$", i.version)]
+        return next((v for v in names if any(row.startswith(f"{v}-{self.triple}") for row in out.splitlines())), None)
+
+    def cargo_command(self, stable: str | None, what: str) -> tuple[list[str], dict[str, str]]:
+        """What runs cargo for a tool: the locked toolchain under the prefix's rustup, else the cargo on PATH."""
+        if stable:
+            return [str(self.rustup), "run", stable, "cargo"], self.tool_env
+        found = shutil.which("cargo")
+        if found is None:
+            raise Problem(f"{what} needs a cargo: install a rust row of the lock (`--groups` naming its group) or put cargo on PATH")
+        # The tool lands in the prefix's cargo home; RUSTUP_HOME stays the caller's so a rustup shim finds its toolchains.
+        return [found], {**os.environ, "CARGO_HOME": str(self.cargo_home)}
+
+    def cargo_tools(self, stable: str | None) -> None:
+        """The `cargo-*` rows and each item vendor's tool of the chosen groups."""
         vendored = {split_item(v.item) for v in vendors_of(self.ctx) if v.item}
         for tool in [i for i in self.items if i.name.startswith("cargo-") and i.group in self.groups and (i.group, i.name) not in vendored]:
-            self.cargo_tool(tool, numeric[0] if numeric else None)
-        self.vendored_tools(numeric[0] if numeric else None)
+            self.cargo_tool(tool, stable)
+        self.vendored_tools(stable)
         self.paths.append(str(self.cargo_home / "bin"))
 
     def rust_targets(self, toolchains: list[str], targets: list[str]) -> None:
@@ -3828,13 +3873,9 @@ class Installer:
             if self.check:
                 self.need(label, f"missing, cargo would build it from {vendor.folder}/ offline")
                 continue
-            if stable is None:
-                raise Problem(f"{name} needs a stable rust row to be installed with")
+            cargo, env = self.cargo_command(stable, name)
             info = use_vendor(self.ctx, deps, vendor, None, self.prefix / "vendor" / vendor.folder)
-            run_tool(
-                [str(self.rustup), "run", stable, "cargo", "--config", info["config"], "install", "--offline", "--locked", name, "--version", row.version],
-                self.tool_env,
-            )
+            run_tool([*cargo, "--config", info["config"], "install", "--offline", "--locked", name, "--version", row.version], env)
             self.report(label, "installed")
 
     def cargo_tool(self, tool: Item, stable: str | None) -> None:
@@ -3846,9 +3887,8 @@ class Installer:
         elif self.check:
             self.need(label, "missing, cargo would compile it")
         else:
-            if stable is None:
-                raise Problem(f"{tool.name} needs a stable rust row to be installed with")
-            run_tool([str(self.rustup), "run", stable, "cargo", "install", tool.name, "--version", tool.version, "--locked"], self.tool_env)
+            cargo, env = self.cargo_command(stable, tool.name)
+            run_tool([*cargo, "install", tool.name, "--version", tool.version, "--locked"], env)
             self.report(label, "installed")
 
     # clang for ring on Windows ARM64
@@ -3929,9 +3969,9 @@ class Installer:
         if not cfg.engine_release:
             self.report("flutter precache", "not configured ([flutter] engine_release)")
             return
-        missing = precache_missing(directory, cfg.precache, arch, engine)
+        missing = precache_missing(directory, self.precache, arch, engine)
         if self.check or not missing:
-            for name in cfg.precache:
+            for name in self.precache:
                 if name in missing or "engine.stamp" in missing:
                     self.need(f"flutter precache {name}", f"missing, {missing.get(name) or missing['engine.stamp']}")
                 else:
@@ -3956,11 +3996,11 @@ class Installer:
                 "DART_SUPPRESS_ANALYTICS": "true",
             }
             run_tool([flutter, "config", "--no-analytics", "--no-cli-animations"], env, directory)
-            run_tool([flutter, "precache", *(f"--{p}" for p in cfg.precache)], env, directory)
+            run_tool([flutter, "precache", *(f"--{p}" for p in self.precache)], env, directory)
             run_tool([flutter, "--version"], env, directory)
         if misses:
             raise Problem("flutter asked the engine release for files it does not hold:\n" + "\n".join(f"  {m}" for m in sorted(set(misses))))
-        still = precache_missing(directory, cfg.precache, arch, engine)
+        still = precache_missing(directory, self.precache, arch, engine)
         if still:
             raise Problem("flutter precache left " + ", ".join(f"{k} ({v})" for k, v in still.items()))
         self.report("flutter precache", "installed")
@@ -4160,6 +4200,8 @@ def sdk_install(ctx: Ctx, args: argparse.Namespace) -> int:
     prefix = prefix.resolve() if prefix.is_absolute() else (Path.cwd() / prefix).resolve()
     install = Installer(ctx, items, plat, prefix, groups + ["system"], args.check, native)
     install.deps_arg = getattr(args, "deps", None)
+    if getattr(args, "precache", None) is not None:
+        install.precache = [p for p in args.precache.split(",") if p]
     if not args.check:
         (prefix / "dl").mkdir(parents=True, exist_ok=True)
     install.report("prefix", str(prefix) + (f" (SDK_HOME, {native['SDK_HOME'][1]})" if "SDK_HOME" in native and not args.prefix else ""))
@@ -4192,6 +4234,7 @@ def add_sdk(sub: argparse._SubParsersAction) -> None:
     install.add_argument("--prefix", metavar="DIR", help="where (default: SDK_HOME of `help env`, else $BUILD_SDK_HOME, else ~/.REPO-sdk)")
     install.add_argument("--check", action="store_true", help="install nothing: report what is missing and exit 1 if anything is")
     install.add_argument("--deps", type=Path, metavar="DIR", help="the deps checkout a [[deps.vendor]] item's tool is built from (default: `deps path`)")
+    install.add_argument("--precache", metavar="PLATFORMS", help="the Flutter platforms to precache and check, comma separated, for this call (default: [flutter] precache)")
     install.add_argument("--print-system", action="store_true", help="print the system packages to install, and nothing else")
     install.add_argument("--platform", metavar="OS-ARCH", help="act as this platform (default: this machine, or $BUILD_SDK_PLATFORM)")
     install.add_argument("--env", action="append", metavar="KEY=VALUE", help="set a native key of `help env` (SDK_HOME, VSINSTALLDIR, LLVM_DIR, ...); wins over the environment and the .env files")
