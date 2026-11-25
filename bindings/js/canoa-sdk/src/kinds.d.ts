@@ -1094,6 +1094,85 @@ export interface ProfileItemRemote extends k.RemoteBase<typeof ProfileItem> {
 export declare const ProfileItem: k.DescribedKind<ProfileItem, ProfileItemRemote, false>;
 
 /**
+ * A vendor's client for an account type.
+ *
+ * The `sdk_provider` kind: what a provider of it implements.
+ */
+export interface SdkProvider {
+  /** What it is and what it implements. The same answer on every call, with nothing run and no connection opened. */
+  describe(): unknown;
+  /** Opens the client over `http`, which the provider owns from then on. */
+  open(request: g.Ref, http: k.ObjectHandle<typeof LentHttp>): Sdk | k.ObjectHandle<typeof Sdk>;
+}
+
+/** A caller's handle on a `sdk_provider` table: a method per slot. */
+export interface SdkProviderRemote extends k.RemoteBase<typeof SdkProvider> {
+  /** What it is and what it implements. The same answer on every call, with nothing run and no connection opened. */
+  describe(): g.Value;
+  /** Opens the client over `http`, which the provider owns from then on. */
+  open(request: unknown, http: LentHttp | k.ObjectHandle<typeof LentHttp>): k.ObjectHandle<typeof Sdk>;
+}
+
+/** A vendor's client for an account type. */
+export declare const SdkProvider: k.DescribedKind<SdkProvider, SdkProviderRemote, false>;
+
+/**
+ * An opened provider: every operation is called only if its capability was described.
+ *
+ * The `sdk` kind: what an object of it implements.
+ */
+export interface Sdk {
+  /** The models the account or server may use, each with the capabilities and limits the provider knows. */
+  models(): unknown;
+  /** A chat completion (`chat`). */
+  chat(request: g.Ref): unknown;
+  /** Vectors of texts (`embed`). */
+  embed(request: g.Ref): unknown;
+  /** An order of passages (`rerank`). */
+  rerank(request: g.Ref): unknown;
+}
+
+/** A caller's handle on a `sdk` table or object: a method per slot. */
+export interface SdkRemote extends k.RemoteBase<typeof Sdk> {
+  /** The models the account or server may use, each with the capabilities and limits the provider knows. */
+  models(): g.Value;
+  /** A chat completion (`chat`). */
+  chat(request: unknown): g.Value;
+  /** Vectors of texts (`embed`). */
+  embed(request: unknown): g.Value;
+  /** An order of passages (`rerank`). */
+  rerank(request: unknown): g.Value;
+}
+
+/** An opened provider: every operation is called only if its capability was described. */
+export declare const Sdk: k.DescribedKind<Sdk, SdkRemote, true>;
+
+/**
+ * HTTP to the address of one account or server, made by the host: the credential applied, the person's network used, the answer
+ * size limited, redirects refused, and nothing outside the address reachable. A transport failure is an error; a status is an
+ * answer.
+ *
+ * The `lent_http` kind: what an object of it implements.
+ */
+export interface LentHttp {
+  /** Makes `request` below the address. */
+  request(request: g.Ref): unknown;
+}
+
+/** A caller's handle on a `lent_http` table or object: a method per slot. */
+export interface LentHttpRemote extends k.RemoteBase<typeof LentHttp> {
+  /** Makes `request` below the address. */
+  request(request: unknown): g.Value;
+}
+
+/**
+ * HTTP to the address of one account or server, made by the host: the credential applied, the person's network used, the answer
+ * size limited, redirects refused, and nothing outside the address reachable. A transport failure is an error; a status is an
+ * answer.
+ */
+export declare const LentHttp: k.DescribedKind<LentHttp, LentHttpRemote, true>;
+
+/**
  * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
  * instance with none to describe the provider before anyone has set it up.
  *

@@ -716,6 +716,63 @@ class ProfileItem(KindProtocol, Protocol, kind="profile_item", floor_hash=238628
         ...
 
 
+class LentHttp(KindProtocol, Protocol, kind="lent_http", floor_hash=525845123, is_object=True):
+    """HTTP to the address of one account or server, made by the host: the credential applied, the person's network used, the answer
+    size limited, redirects refused, and nothing outside the address reachable. A transport failure is an error; a status is an
+    answer.
+    """
+
+    @required
+    @fallible
+    def request(self, request: Ref) -> ValueAnswer:
+        """Makes `request` below the address."""
+        ...
+
+
+class Sdk(KindProtocol, Protocol, kind="sdk", floor_hash=1637788789, is_object=True):
+    """An opened provider: every operation is called only if its capability was described."""
+
+    @required
+    @fallible
+    def models(self) -> ValueAnswer:
+        """The models the account or server may use, each with the capabilities and limits the provider knows."""
+        ...
+
+    @required
+    @fallible
+    def chat(self, request: Ref) -> ValueAnswer:
+        """A chat completion (`chat`)."""
+        ...
+
+    @required
+    @fallible
+    def embed(self, request: Ref) -> ValueAnswer:
+        """Vectors of texts (`embed`)."""
+        ...
+
+    @required
+    @fallible
+    def rerank(self, request: Ref) -> ValueAnswer:
+        """An order of passages (`rerank`)."""
+        ...
+
+
+class SdkProvider(KindProtocol, Protocol, kind="sdk_provider", floor_hash=1944290915):
+    """A vendor's client for an account type."""
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What it is and what it implements. The same answer on every call, with nothing run and no connection opened."""
+        ...
+
+    @required
+    @fallible
+    def open(self, request: Ref, http: Taken[LentHttp]) -> Sdk:
+        """Opens the client over `http`, which the provider owns from then on."""
+        ...
+
+
 class SecretProvider(KindProtocol, Protocol, kind="secret_provider", floor_hash=246402531):
     """A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
     instance with none to describe the provider before anyone has set it up.
@@ -1224,4 +1281,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

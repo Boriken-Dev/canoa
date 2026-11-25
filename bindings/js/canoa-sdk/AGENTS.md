@@ -85,3 +85,4 @@ are the handles a slot receives.
 `section(id, title, description?)`, `ui(sectionId)` (the `x-section` schema keyword, spread into an `s` builder's keywords),
 `when(field, equals)` and `formMeta({ sections, fields })` (the `meta` entry `{ form }`, for `static meta`). The schema is
 `static config = s.object({...})` from `guatiao/provide`. There is no field type of Canoa's own.
+- `SdkProvider`, `Sdk` and `LentHttp` in `kinds.js` (generated from `canoa.sdk_provider.kinds.json`): a vendor's client for an account type, as in the Python SDK's header. No hand-written base class yet.

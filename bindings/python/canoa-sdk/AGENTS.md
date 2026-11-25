@@ -91,3 +91,4 @@ metadata for `Annotated[T, ui(...)]`; `section(id, title, description=None)` nam
 - A Python library shares one interpreter with every other: two libraries needing different versions of a package need separate hosts.
 - A provider that starts a program does it through the `spawner` its slot is handed, and destroys the spawner it was handed.
 - `Provider` classes must come before kind protocols in the bases; the SDK's already do, so subclass the SDK's.
+- `kinds.SdkProvider`, `kinds.Sdk` and `kinds.LentHttp` (generated from `canoa.sdk_provider.kinds.json`): a vendor's client for an account type. A provider implements `describe` (id, title, the `standards` it serves, the `credential` and `auth` the host writes, its `capabilities`) and `open(request, http)`, which returns an `Sdk` with `models`, `chat`, `embed` and `rerank`; it names only paths to `http.request` and never sees the key. No hand-written base class yet.
