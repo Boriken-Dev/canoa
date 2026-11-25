@@ -46,6 +46,10 @@ fn isolate() {
             // SAFETY: set once, before this test's hosts start, and every test of this file calls `isolate` first.
             unsafe { std::env::set_var(name, folder.join(name)) };
         }
+        // Grok's own provider finds its login there.
+        let grok = folder.join("GROK_HOME");
+        std::fs::create_dir_all(&grok).expect("a folder");
+        std::fs::write(grok.join("auth.json"), "{\"fixture\":true}").expect("a login");
     });
 }
 
@@ -331,12 +335,21 @@ fn grok_and_antigravity_account_providers_and_sources_are_listed() {
             let agy = dir.join(format!("agy{}", std::env::consts::EXE_SUFFIX));
             std::fs::copy(&agent, &grok).expect("grok stand-in copied");
             std::fs::copy(&agent, &agy).expect("agy stand-in copied");
+            // A stored login in the test's own home, read with no keyring: the operating system's is never asked.
+            std::fs::create_dir_all(gemini(dir)).expect("a home");
+            std::fs::write(
+                gemini(dir).join("jetski-standalone-oauth-token"),
+                login_json().to_string(),
+            )
+            .expect("the stored login");
             format!(
                 "[secrets]\naccounts = \"file\"\n\n\
                  [host.agents.Grok]\nharness = \"grok\"\nexecutable = {}\n\n\
-                 [host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {}\n",
+                 [host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {}\n\
+                 account_settings = {{ home = {}, keyring = false }}\n",
                 quoted(&grok.to_string_lossy()),
                 quoted(&agy.to_string_lossy()),
+                quoted(&home(dir).to_string_lossy()),
             )
         },
         &[],
@@ -465,21 +478,27 @@ fn with_no_antigravity_login_the_account_says_so_and_its_own_sign_in_stores_one(
     let host = host_running(&google, false, signing_in);
     let link = host.local.open("@control").expect("a link");
 
-    let read = plain_call(
+    // The provider says no sign-in is stored, so there is no account `local` to read, nor one listed.
+    let refused = plain_call(
         &link,
         1,
         "usage/read",
         json!({"account": "local", "harness": "antigravity"}),
     )
-    .expect("usage/read");
-    let row = &read["account"];
-    assert_eq!(row["supported"], false, "{read}");
-    assert_eq!(
-        row["unsupported_because"],
-        canoa_antigravity::NOT_SIGNED_IN,
-        "{read}"
+    .expect_err("no login to read");
+    assert!(
+        refused.contains("nobody is signed in to antigravity") && !refused.contains("fixture"),
+        "{refused}"
     );
-    assert!(row.get("details").is_none(), "{read}");
+    let listed = plain_call(&link, 4, "accounts/list", json!({})).expect("accounts");
+    assert!(
+        !listed["accounts"]
+            .as_array()
+            .expect("accounts array")
+            .iter()
+            .any(|row| row["agent"] == "antigravity" && row["name"] == "local"),
+        "{listed}"
+    );
     assert!(google.paths().is_empty(), "{:?}", google.paths());
     let stored = gemini(&host.scratch.0).join("jetski-standalone-oauth-token");
     assert!(!stored.exists(), "agy was started to read the account");

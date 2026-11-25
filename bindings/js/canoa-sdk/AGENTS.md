@@ -12,7 +12,7 @@ Imports only `guatiao`, `guatiao/kinds`, `guatiao/provide` and its own files by 
 class AgentVendor extends Provider {          // vendor.js
   static agent; static title;                 // required; agent = its acp_harness id, else its source's name
   static program; static vendor; static aos; static model_variable; static tool_name; static skills_folder; static home_variable; static home_folder; static mark; static look;   // optional
-  static standards = []; static names = []; static markers = []; static context_files = []; static home_context_files = []; static login_files = []; static login_env = []; static modes = []; static endpoints = [];   // {id, title} lists; endpoints: the https addresses the program reaches
+  static standards = []; static names = []; static markers = []; static context_files = []; static home_context_files = []; static modes = []; static endpoints = [];   // {id, title} lists; endpoints: the https addresses the program reaches
   info()                                      // override to compute the description
 }
 class StoreExtension extends Provider {       // store.js
@@ -60,10 +60,10 @@ class PanelTab extends Provider {             // panel.js: static tab, title, he
 }
 class TerminalPanelTab extends PanelTab; class PagePanelTab extends PanelTab   // a page at `url`, on this computer's loopback
 class LogPanelTab extends PanelTab   // lines() -> the log's lines, oldest first
-class AccountProvider extends Provider {      // account.js: static title, description, offeredKinds, logins, usageKinds, local; offer(), login/renew/watch throw Unsupported, usage/models answer unsupported/unknown (and release handles)
+class AccountProvider extends Provider {      // account.js: static title, description, offeredKinds, logins, usageKinds, local; offer(), login/renew/watch throw Unsupported, usage/models answer unsupported/unknown (and release handles); signedIn(query) says whether the program's own login exists (`loginPresent`, `loginAbsent`, `loginUnknown`): Unsupported without `local`, unknown with it, until overridden
 }
 class AccountWatch   // account.js: stop()
-credentialSchema(title?, description?); accountKind(fields); loginMethod(fields); endpointSlot(fields); loginOutcome(fields); modelsListed(models); modelsUnknown(reason, unknownKind?); usageUnsupported(reason, account?); renewed(credentials, expiresAt?); renewUnchanged(reason); release(...handles)
+credentialSchema(title?, description?); accountKind(fields); loginMethod(fields); endpointSlot(fields); loginOutcome(fields); modelsListed(models); modelsUnknown(reason, unknownKind?); loginPresent(variable?); loginAbsent(reason); loginUnknown(reason); usageUnsupported(reason, account?); renewed(credentials, expiresAt?); renewUnchanged(reason); release(...handles)
 class ModelGateway extends Provider {         // gateway.js: static kind, vendor, table?; open(request, spawner) -> GatewayLease
 }
 class GatewayLease   // gateway.js: address(), bearer(), models() (defaults to modelsUnknown)

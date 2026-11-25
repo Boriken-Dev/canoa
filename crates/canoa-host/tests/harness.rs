@@ -366,6 +366,8 @@ fn pi_starts_its_gate_in_the_mode_the_access_amounts_to() {
         std::fs::copy(example("fake_pi", false), &program).expect("the Pi stand-in is copied");
         let agent_dir = scratch.0.join("pi-agent");
         std::fs::create_dir_all(&agent_dir).expect("made");
+        // A host refuses a session on an agent nobody is signed in to.
+        std::fs::write(agent_dir.join("auth.json"), "{\"fixture\":true}").expect("a login");
         let env = vec![
             ("PI_CODING_AGENT_DIR", agent_dir.clone().into_os_string()),
             ("ACP_HARNESS_CHECK_HOME", scratch.0.clone().into_os_string()),
@@ -1469,11 +1471,12 @@ fn grok_and_antigravity_run_through_their_harness_providers_on_the_standin() {
         .join(format!("agy{}", std::env::consts::EXE_SUFFIX));
     std::fs::copy(&agent, &grok).expect("grok stand-in copied");
     std::fs::copy(&agent, &agy).expect("agy stand-in copied");
+    // Antigravity's login is a file of the test's own, read with no keyring.
+    support::antigravity_login(&scratch.0);
     let config = format!(
-        "[host.agents.Grok]\nharness = \"grok\"\nexecutable = {}\n\n\
-         [host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {}\n",
+        "[host.agents.Grok]\nharness = \"grok\"\nexecutable = {}\n{}",
         quoted(&grok.to_string_lossy()),
-        quoted(&agy.to_string_lossy()),
+        support::antigravity_entry(&scratch.0, &agy),
     );
     let host = Host::start_in(scratch, &config, 2, &[]);
     let client = support::key();

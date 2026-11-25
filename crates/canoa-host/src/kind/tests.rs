@@ -377,3 +377,116 @@ mod declared_link {
         );
     }
 }
+
+/// How each answer of the account provider's `signed_in` is read, and what the row of the account `local` says of it.
+mod login {
+    use coqui_acp_api::SignedInCheck;
+    use coqui_acp_api::guatiao::Status;
+    use coqui_acp_api::guatiao::library::ProviderError;
+
+    use super::super::{Login, with_login};
+    use super::*;
+    use crate::accounts::{ACCOUNT_META, matching::Catalogs};
+
+    #[test]
+    fn each_answer_of_the_provider_is_one_login() {
+        let signed = Login::of(Ok(SignedInCheck::signed_in()));
+        assert_eq!(signed, Login::SignedIn(None));
+        assert!(signed.listed() && signed.via().is_none() && signed.note().is_none());
+
+        let keyed = Login::of(Ok(SignedInCheck::by_variable("ANTHROPIC_API_KEY")));
+        assert_eq!(
+            keyed.via().as_deref(),
+            Some("environment key (ANTHROPIC_API_KEY)")
+        );
+        assert!(keyed.listed() && keyed.note().is_none());
+
+        let out = Login::of(Ok(SignedInCheck::signed_out("no credentials file")));
+        assert_eq!(out, Login::SignedOut("no credentials file".to_owned()));
+        assert!(!out.listed() && out.via().is_none() && out.note().is_none());
+
+        let unknown = Login::of(Ok(SignedInCheck::unknown("the keyring did not answer")));
+        assert!(unknown.listed() && unknown.via().is_none());
+        assert_eq!(
+            unknown.note().as_deref(),
+            Some("the keyring did not answer")
+        );
+
+        // A provider that fails to answer is unknown, with its own words, and its account is listed.
+        let failed = Login::of(Err(ProviderError::new(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "no local account",
+        )));
+        assert_eq!(failed, Login::Unknown("no local account".to_owned()));
+    }
+
+    fn first(account: Option<&str>) -> Vec<u8> {
+        let meta = account.map_or_else(|| json!({}), |name| json!({ ACCOUNT_META: name }));
+        serde_json::to_vec(
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"_meta": meta}}),
+        )
+        .expect("a message")
+    }
+
+    #[test]
+    fn a_session_on_the_local_account_is_refused_only_when_the_provider_says_signed_out() {
+        let claude = harness("claude", &Settings::default(), &Settings::default()).expect("builds");
+        let refused = with_login(
+            Login::SignedOut("Claude Code's credentials file is not there".into()),
+            || claude.choose(&first(None), "holder", false),
+        )
+        .map(|_| ())
+        .expect_err("nobody is signed in");
+        assert!(
+            refused.contains("nobody is signed in to claude")
+                && refused.contains("Claude Code's credentials file is not there")
+                && refused.contains("Accounts"),
+            "{refused}"
+        );
+        // Naming `local` is the same; naming another account is not the login's to refuse.
+        with_login(Login::SignedOut("none".into()), || {
+            claude
+                .choose(&first(Some("local")), "holder", false)
+                .map(|_| ())
+                .expect_err("refused");
+            claude
+                .choose(&first(Some("work")), "holder", false)
+                .expect("not the login's");
+        });
+        for login in [
+            Login::SignedIn(None),
+            Login::Unknown("the keyring did not answer".into()),
+        ] {
+            with_login(login, || claude.choose(&first(None), "holder", false))
+                .expect("a login to run on");
+        }
+    }
+
+    #[test]
+    fn the_local_account_is_listed_unless_the_provider_says_signed_out() {
+        let config = crate::config::Config::default();
+        let listed = |login: Login| {
+            with_login(login, || {
+                let catalogs = Catalogs::new(&config);
+                (
+                    catalogs
+                        .locals()
+                        .iter()
+                        .any(|(harness, _)| harness == "claude"),
+                    catalogs.login("claude"),
+                )
+            })
+        };
+        let (shown, _) = listed(Login::SignedIn(Some("ANTHROPIC_API_KEY".into())));
+        assert!(shown);
+        let (shown, login) = listed(Login::Unknown("the keyring did not answer".into()));
+        assert!(shown, "an account that could not be looked for is listed");
+        assert_eq!(
+            login.expect("asked").note().as_deref(),
+            Some("the keyring did not answer")
+        );
+        let (shown, login) = listed(Login::SignedOut("none".into()));
+        assert!(!shown);
+        assert_eq!(login, Some(Login::SignedOut("none".into())));
+    }
+}

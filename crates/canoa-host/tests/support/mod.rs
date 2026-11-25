@@ -94,6 +94,31 @@ pub fn quoted(text: &str) -> String {
     serde_json::to_string(text).expect("JSON")
 }
 
+/// The canoa.cfg block of an Antigravity entry that reads its login from a folder of the test's own and never from the operating
+/// system's keyring: a test that lists the accounts of the bundled harnesses asks Antigravity's provider whether it is signed in, and
+/// a keyring is the person's, so it is never looked at, not even for whether an entry is there. `program` is any file. The folder
+/// is `dir/agy-home`.
+pub fn antigravity_entry(dir: &Path, program: &Path) -> String {
+    let home = dir.join("agy-home");
+    std::fs::create_dir_all(home.join(".gemini")).expect("an Antigravity home");
+    format!(
+        "\n[host.agents.Antigravity]\nharness = \"antigravity\"\nexecutable = {}\naccount_settings = {{ home = {}, keyring = false }}\n",
+        quoted(&program.to_string_lossy()),
+        quoted(&home.to_string_lossy())
+    )
+}
+
+/// Puts the stored login of Antigravity in the folder `antigravity_entry` reads: a token that never expires, of no account.
+pub fn antigravity_login(dir: &Path) {
+    let gemini = dir.join("agy-home").join(".gemini");
+    std::fs::create_dir_all(&gemini).expect("an Antigravity home");
+    std::fs::write(
+        gemini.join("jetski-standalone-oauth-token"),
+        r#"{"token":{"access_token":"fixture","token_type":"Bearer","refresh_token":"fixture","expiry":"0001-01-01T00:00:00Z"},"auth_method":"consumer","id_token_email":"a@example.test","project_id":"fixture-project","user_tier":"free-tier","tier_display_name":"Free"}"#,
+    )
+    .expect("a stored login");
+}
+
 /// A directory of the test's own, removed afterwards.
 pub struct Scratch(pub PathBuf);
 
@@ -260,6 +285,9 @@ impl Host {
             "CODEX_HOME",
             "PI_CODING_AGENT_DIR",
             "GROK_HOME",
+            "XDG_DATA_HOME",
+            "HOME",
+            "USERPROFILE",
         ] {
             if !env.iter().any(|(set, _)| *set == name) {
                 let home = scratch.0.join("logins").join(name);
@@ -267,11 +295,14 @@ impl Host {
                 // content that matters, in the test's own folder.
                 if let Some(file) = match name {
                     "CLAUDE_CONFIG_DIR" => Some(".credentials.json"),
-                    "CODEX_HOME" => Some("auth.json"),
+                    "CODEX_HOME" | "PI_CODING_AGENT_DIR" | "GROK_HOME" => Some("auth.json"),
+                    "XDG_DATA_HOME" => Some("opencode/auth.json"),
                     _ => None,
                 } {
-                    std::fs::create_dir_all(&home).expect("an agent home");
-                    std::fs::write(home.join(file), "{\"fixture\":true}").expect("a login");
+                    let file = home.join(file);
+                    std::fs::create_dir_all(file.parent().expect("a folder"))
+                        .expect("an agent home");
+                    std::fs::write(file, "{\"fixture\":true}").expect("a login");
                 }
                 command.env(name, home);
             }

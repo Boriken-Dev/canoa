@@ -21,7 +21,8 @@ use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
 use coqui_acp_api::{
     AccountCatalog, AccountKindInfo, AccountProvider, AccountsLink, AcpHarness, CacheLifetime,
-    Environment, HARNESS_LOGIN, HarnessNotice, LOCAL_ACCOUNT, ProcessSpawner, StartRequest,
+    Environment, HARNESS_LOGIN, HarnessNotice, LOCAL_ACCOUNT, ProcessSpawner, SignedInCheck,
+    SignedInState, StartRequest,
 };
 
 use crate::accounts::matching::Runs;
@@ -67,6 +68,105 @@ pub(crate) fn registry(origin: Option<&Origin>) -> Result<Registry, ProviderErro
 
 /// One setting of an instance that differs from the provider's default, for the log: its key, value and default.
 pub(crate) type Departure = (String, String, String);
+
+/// How the login a harness keeps for itself stands on this computer, as its account provider answers
+/// (`AccountProvider::signed_in`): the host keeps no list of files or variables of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Login {
+    /// A login is there. Holds the name of the variable of the environment that signs the program in when that is what counted,
+    /// never its value.
+    SignedIn(Option<String>),
+    /// Every place the program keeps a login was looked at and none holds one: why.
+    SignedOut(String),
+    /// The provider could not tell: why. The account is listed, since a login that cannot be looked at may be there.
+    Unknown(String),
+}
+
+impl Login {
+    /// What the provider's answer says; a provider that fails to answer is unknown.
+    fn of(answer: Result<SignedInCheck, coqui_acp_api::guatiao::library::ProviderError>) -> Self {
+        match answer {
+            Ok(check) => match check.state {
+                SignedInState::SignedIn => Self::SignedIn(check.variable),
+                SignedInState::SignedOut => Self::SignedOut(
+                    check
+                        .reason
+                        .unwrap_or_else(|| "no login is where the program keeps one".to_owned()),
+                ),
+                // A state a newer provider adds is one this host cannot read.
+                _ => Self::Unknown(
+                    check
+                        .reason
+                        .unwrap_or_else(|| "the provider could not tell".to_owned()),
+                ),
+            },
+            Err(error) => Self::Unknown(error.message().to_owned()),
+        }
+    }
+
+    /// How the row of the account `local` says it signs in, when it is a key of the environment.
+    pub(crate) fn via(&self) -> Option<String> {
+        match self {
+            Self::SignedIn(Some(variable)) => Some(format!("environment key ({variable})")),
+            _ => None,
+        }
+    }
+
+    /// What the row of the account `local` tells the person when the provider could not say whether the login is there.
+    pub(crate) fn note(&self) -> Option<String> {
+        match self {
+            Self::Unknown(why) => Some(why.clone()),
+            _ => None,
+        }
+    }
+
+    /// Whether the account `local` is listed: unless the program has no login at all.
+    pub(crate) const fn listed(&self) -> bool {
+        !matches!(self, Self::SignedOut(_))
+    }
+}
+
+/// A question to a harness's account provider, kept until someone needs the answer.
+#[derive(Clone)]
+pub(crate) struct LoginProbe {
+    provider: Arc<dyn AccountProvider>,
+    environment: Environment,
+}
+
+impl LoginProbe {
+    /// Asks the provider whether the program's own login exists.
+    pub(crate) fn ask(&self) -> Login {
+        ask(self.provider.as_ref(), self.environment.clone())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What a unit test makes every harness's own login stand as: no test looks at the person's home, keyring or environment.
+    static TEST_LOGIN: core::cell::RefCell<Login> = const { core::cell::RefCell::new(Login::SignedIn(None)) };
+}
+
+/// What `provider` says of the login its program keeps when asked with `environment`.
+#[cfg(not(test))]
+fn ask(provider: &dyn AccountProvider, environment: Environment) -> Login {
+    use coqui_acp_api::SignedInQuery;
+    Login::of(provider.signed_in(SignedInQuery::new().environment(environment)))
+}
+
+/// What a unit test says it is, so that no test asks a real provider.
+#[cfg(test)]
+fn ask(_: &dyn AccountProvider, _: Environment) -> Login {
+    TEST_LOGIN.with(|slot| slot.borrow().clone())
+}
+
+/// Runs `f` with every harness's own login standing as `login`, for a unit test.
+#[cfg(test)]
+pub(crate) fn with_login<T>(login: Login, f: impl FnOnce() -> T) -> T {
+    let before = TEST_LOGIN.with(|slot| slot.replace(login));
+    let out = f();
+    TEST_LOGIN.with(|slot| *slot.borrow_mut() = before);
+    out
+}
 
 /// One entry's provider, configured: what each of its connections starts from.
 pub(crate) struct Harness {
@@ -315,10 +415,23 @@ impl Harness {
         Some((LOCAL_ACCOUNT.to_owned(), config, info))
     }
 
-    /// Whether it offers its own login as the account `local`, and its description says the login is not on this computer: nobody is
-    /// signed in to it here, which is not the same as a login the description cannot look for.
-    pub(crate) fn local_signed_out(&self) -> bool {
-        self.local && crate::vendors::login(&self.id) == Some(crate::vendors::Login::Missing)
+    /// How its own login stands on this computer, asked of its account provider with the environment its sessions would have (the
+    /// host's, and the variables the entry's shell adds); `None` when it offers no such login. It starts no program and reaches no
+    /// network, and is asked again each time, so a login made meanwhile is seen.
+    pub(crate) fn login(&self) -> Option<Login> {
+        self.login_probe().map(|probe| probe.ask())
+    }
+
+    /// What asks how its own login stands, later and when it is needed: a keyring is looked at no earlier than that. `None` when it
+    /// offers no such login.
+    pub(crate) fn login_probe(&self) -> Option<LoginProbe> {
+        if !self.local {
+            return None;
+        }
+        Some(LoginProbe {
+            provider: Arc::clone(self.accounts_of.as_ref()?),
+            environment: Environment::from_iter(self.shell_env.clone()),
+        })
     }
 
     /// This harness as an account is held for it.
@@ -581,9 +694,11 @@ impl Harness {
         holder: &str,
         any: bool,
     ) -> Result<Option<Held>, String> {
-        if self.local_signed_out() && self.runs_on_local(first) {
+        if self.runs_on_local(first)
+            && let Some(Login::SignedOut(why)) = self.login()
+        {
             return Err(format!(
-                "nobody is signed in to {} on this computer, and none of the variables that sign it in is set: sign in to it from Accounts, or choose an account that is signed in",
+                "nobody is signed in to {} on this computer ({why}): sign in to it from Accounts, or choose an account that is signed in",
                 self.id
             ));
         }

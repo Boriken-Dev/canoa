@@ -6,15 +6,16 @@
     reason = "a cache of catalogs is std's"
 )]
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use coqui_acp_api::{AccountCatalog, AccountKindInfo};
 
 use super::commands::provider_for;
 use crate::config::{AccountConfig, Config};
-use crate::kind::Harness;
+use crate::kind::{Harness, Login, LoginProbe};
 use crate::makers::Makers;
 
 /// What a provider says of its accounts: the standards it accepts, and the kinds and sign-in methods its account provider offers.
@@ -25,21 +26,29 @@ struct Known {
     listing: AccountCatalog,
     /// The id of the harness's account provider, when it has one.
     provider: Option<String>,
-    /// Whether the provider offers the harness's own login as the automatic `local` account and that login is on this computer.
-    local: bool,
-    /// Whether the provider offers that login but the agent's description says it is not on this computer, so nobody is signed in.
-    signed_out: bool,
+    /// What asks how the harness's own login stands, when its provider offers it as the automatic `local` account.
+    probe: Option<LoginProbe>,
+    /// The answer, once someone needed it: a call that only reads a catalog never asks a keyring.
+    asked: Rc<OnceCell<Option<Login>>>,
+}
+
+impl Known {
+    /// How the login stands, asked of the provider the first time and kept for this reading.
+    fn login(&self) -> Option<Login> {
+        self.asked
+            .get_or_init(|| self.probe.as_ref().map(LoginProbe::ask))
+            .clone()
+    }
 }
 
 impl Known {
     fn of(harness: &Harness) -> Option<Self> {
-        let signed_out = harness.local_signed_out();
         Some(Self {
             catalog: harness.catalog().cloned()?,
             listing: harness.listing().clone(),
             provider: harness.account_provider_id().map(str::to_owned),
-            local: harness.local_account().is_some() && !signed_out,
-            signed_out,
+            probe: harness.login_probe(),
+            asked: Rc::default(),
         })
     }
 }
@@ -94,8 +103,8 @@ impl<'a> Catalogs<'a> {
                 catalog: catalog.clone(),
                 listing: listing.clone(),
                 provider: provider.map(str::to_owned),
-                local,
-                signed_out: false,
+                probe: None,
+                asked: Rc::new(OnceCell::from(local.then_some(Login::SignedIn(None)))),
             }),
         );
         catalogs
@@ -230,23 +239,23 @@ impl<'a> Catalogs<'a> {
         self.known(harness)?.provider
     }
 
-    /// The kind of the automatic `local` account of `harness`; `None` when its provider does not offer its own login, or the login is
-    /// not on this computer.
+    /// The kind of the automatic `local` account of `harness`; `None` when its provider does not offer its own login, or it says the
+    /// login is not on this computer.
     pub(crate) fn local_kind(&self, harness: &str) -> Option<AccountKindInfo> {
         let known = self.known(harness)?;
-        if !known.local {
+        if !known.login()?.listed() {
             return None;
         }
         known.listing.kind(coqui_acp_api::HARNESS_LOGIN).cloned()
     }
 
-    /// Whether `harness` has a login of its own to offer as the account `local` that is not on this computer: nobody is signed in to it.
-    pub(crate) fn signed_out(&self, harness: &str) -> bool {
-        self.known(harness).is_some_and(|known| known.signed_out)
+    /// How the login of `harness` stands, as its account provider answers; `None` when it offers none as the account `local`.
+    pub(crate) fn login(&self, harness: &str) -> Option<Login> {
+        self.known(harness)?.login()
     }
 
-    /// The automatic `local` account of every harness whose provider offers its own login: the harness and the kind that login is. Only a login that
-    /// is there is listed: where the agent says its login is kept, and it is not, there is no account.
+    /// The automatic `local` account of every harness whose provider offers its own login: the harness and the kind that login is. Only a login
+    /// that is there, or one the provider could not look for, is listed.
     pub(crate) fn locals(&self) -> Vec<(String, AccountKindInfo)> {
         self.harnesses()
             .into_iter()
@@ -261,7 +270,7 @@ impl<'a> Catalogs<'a> {
     /// A harness lists first what it was made for, but a harness also takes the APIs others do, so the login is the first standard
     /// it accepts that no other harness accepts: one only its own login makes. `None` when it has no such login.
     pub(crate) fn login_standard(&self, harness: &str) -> Option<String> {
-        if !self.known(harness)?.local {
+        if !self.known(harness)?.login()?.listed() {
             return None;
         }
         let others: Vec<Vec<String>> = self

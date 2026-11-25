@@ -32,8 +32,6 @@ export class AgentVendor extends Provider {
   /** @type {string | undefined} */ static home_variable;
   /** @type {string | undefined} */ static home_folder;
   /** @type {string[]} */ static home_context_files = [];
-  /** @type {string[]} */ static login_files = [];
-  /** @type {string[]} */ static login_env = [];
   /** @type {{id: string, title: string}[]} */ static standards = [];
   /** @type {string[]} */ static names = [];
   /** @type {string[]} */ static markers = [];
@@ -58,8 +56,6 @@ export class AgentVendor extends Provider {
       home_variable: c.home_variable,
       home_folder: c.home_folder,
       home_context_files: c.home_context_files,
-      login_files: c.login_files,
-      login_env: c.login_env,
       standards: c.standards,
       names: c.names,
       markers: c.markers,

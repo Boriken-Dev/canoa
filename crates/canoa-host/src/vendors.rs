@@ -14,17 +14,6 @@ use canoa::store::ProgramStore;
 use canoa::vendor::{AgentVendor, VendorInfo};
 use coqui_acp_api::guatiao::library::Registry;
 
-/// How an agent's own login stands on this computer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Login {
-    /// A variable of the environment signs it in; the program takes it in place of a stored login. Holds the variable's name.
-    Key(&'static str),
-    /// A login file is there.
-    File,
-    /// None of its login files is there and no variable is set: nobody is signed in.
-    Missing,
-}
-
 /// One agent's description, kept.
 #[derive(Debug, Clone)]
 pub(crate) struct Vendor {
@@ -50,10 +39,6 @@ pub(crate) struct Vendor {
     pub(crate) home_folder: Option<&'static str>,
     /// The files in that folder it loads as the person's own instructions.
     pub(crate) home_context_files: Vec<&'static str>,
-    /// The files in that folder it keeps its own sign-in in.
-    pub(crate) login_files: Vec<&'static str>,
-    /// The variables of the environment that sign it in by themselves.
-    pub(crate) login_env: Vec<&'static str>,
     /// The credential standards that are the vendor's own.
     pub(crate) standards: Vec<&'static str>,
     /// The names it reports in `initialize`.
@@ -79,33 +64,6 @@ impl Vendor {
         named.or_else(|| Some(below(home?, self.home_folder?)))
     }
 
-    /// How the agent's own login stands on this computer, from what its description says: a variable of `env` that signs it in and
-    /// is not empty, else a login file that is there and not empty. `None` when nothing can be said: no variable is set and it
-    /// lists no file (or has no folder to look in), so a login it keeps somewhere else (a keyring) is never reported missing. Only
-    /// whether a variable is empty is read of it, never the value.
-    pub(crate) fn login(
-        &self,
-        home: Option<&Path>,
-        env: &dyn Fn(&str) -> Option<OsString>,
-    ) -> Option<Login> {
-        if let Some(variable) = self
-            .login_env
-            .iter()
-            .find(|name| env(name).is_some_and(|value| !value.is_empty()))
-        {
-            return Some(Login::Key(variable));
-        }
-        if self.login_files.is_empty() {
-            return None;
-        }
-        let folder = self.folder(home, env)?;
-        let present = self.login_files.iter().any(|file| {
-            std::fs::metadata(below(&folder, file))
-                .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
-        });
-        Some(if present { Login::File } else { Login::Missing })
-    }
-
     fn of(info: &VendorInfo) -> Self {
         Self {
             agent: keep(&info.agent),
@@ -123,8 +81,6 @@ impl Vendor {
                 .iter()
                 .map(|path| keep(path))
                 .collect(),
-            login_files: info.login_files.iter().map(|path| keep(path)).collect(),
-            login_env: info.login_env.iter().map(|name| keep(name)).collect(),
             standards: info.standards.iter().map(|each| keep(&each.id)).collect(),
             names: info.names.iter().map(|name| keep(name)).collect(),
         }
@@ -216,19 +172,6 @@ pub(crate) fn by_title(title: &str) -> Option<Vendor> {
 /// The agent that goes by `agent`.
 pub(crate) fn by_agent(agent: &str) -> Option<Vendor> {
     all().into_iter().find(|each| each.agent == agent)
-}
-
-/// How the login the agent `agent` keeps for itself stands on this computer, as its description says where it is kept (the process's
-/// own environment and the person's home); `None` when it says nothing, or the agent is not known.
-pub(crate) fn login(agent: &str) -> Option<Login> {
-    // A unit test never looks at the person's home or environment: an agent that lists login files has its login there.
-    #[cfg(test)]
-    let found = by_agent(agent)?.login_files.first().map(|_| Login::File);
-    #[cfg(not(test))]
-    let found = by_agent(agent)?.login(std::env::home_dir().as_deref(), &|name| {
-        std::env::var_os(name)
-    });
-    found
 }
 
 /// `file`, written with `/`, below `dir`.
@@ -323,153 +266,4 @@ pub(crate) fn behave<T>(agent: &str, f: impl FnOnce(&dyn AgentVendor) -> T) -> O
             .map(|(_, vendor)| Arc::clone(vendor))
     }?;
     Some(f(&*vendor))
-}
-
-#[cfg(test)]
-mod tests {
-    use alloc::collections::BTreeMap;
-
-    use super::*;
-
-    /// A folder of the test's own, removed when it goes.
-    struct Folder(PathBuf);
-
-    impl Folder {
-        fn new(name: &str) -> Self {
-            let path =
-                std::env::temp_dir().join(format!("canoa-vendors-{}-{name}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
-            std::fs::create_dir_all(&path).expect("a folder");
-            Self(path)
-        }
-    }
-
-    impl Drop for Folder {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn signed_in(agent: &str, home: &Path, set: &[(&str, &Path)]) -> Option<Login> {
-        let set: BTreeMap<String, OsString> = set
-            .iter()
-            .map(|(name, value)| ((*name).to_owned(), value.as_os_str().to_owned()))
-            .collect();
-        by_agent(agent)?.login(Some(home), &|name| set.get(name).cloned())
-    }
-
-    #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn claude_is_signed_in_where_its_login_file_is_and_not_empty() {
-        let home = Folder::new("claude-home");
-        let there = home.0.join(".claude");
-        assert_eq!(signed_in("claude", &home.0, &[]), Some(Login::Missing));
-        std::fs::create_dir_all(&there).expect("its folder");
-        std::fs::write(there.join(".credentials.json"), "").expect("empty");
-        assert_eq!(
-            signed_in("claude", &home.0, &[]),
-            Some(Login::Missing),
-            "an empty file"
-        );
-        std::fs::write(there.join(".credentials.json"), "{}").expect("a login");
-        assert_eq!(signed_in("claude", &home.0, &[]), Some(Login::File));
-    }
-
-    #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn the_variable_that_moves_an_agents_folder_is_where_its_login_is_looked_for() {
-        let home = Folder::new("moved-home");
-        let moved = Folder::new("moved-folder");
-        std::fs::create_dir_all(home.0.join(".claude")).expect("its folder");
-        std::fs::write(home.0.join(".claude").join(".credentials.json"), "{}").expect("a login");
-        // The login below the home is not the one the variable points at.
-        assert_eq!(
-            signed_in("claude", &home.0, &[("CLAUDE_CONFIG_DIR", &moved.0)]),
-            Some(Login::Missing)
-        );
-        std::fs::write(moved.0.join(".credentials.json"), "{}").expect("a login");
-        assert_eq!(
-            signed_in("claude", &home.0, &[("CLAUDE_CONFIG_DIR", &moved.0)]),
-            Some(Login::File)
-        );
-    }
-
-    #[test]
-    fn codex_is_signed_in_where_its_auth_file_is() {
-        let home = Folder::new("codex-home");
-        let codex = Folder::new("codex-folder");
-        assert_eq!(
-            signed_in("codex", &home.0, &[("CODEX_HOME", &codex.0)]),
-            Some(Login::Missing)
-        );
-        // Claude's file is not Codex's.
-        std::fs::write(codex.0.join(".credentials.json"), "{}").expect("a file");
-        assert_eq!(
-            signed_in("codex", &home.0, &[("CODEX_HOME", &codex.0)]),
-            Some(Login::Missing)
-        );
-        std::fs::write(codex.0.join("auth.json"), "{}").expect("a login");
-        assert_eq!(
-            signed_in("codex", &home.0, &[("CODEX_HOME", &codex.0)]),
-            Some(Login::File)
-        );
-    }
-
-    #[test]
-    fn an_agent_that_lists_no_login_file_is_never_said_to_be_signed_out() {
-        let home = Folder::new("none-home");
-        for agent in ["pi", "antigravity"] {
-            assert_eq!(signed_in(agent, &home.0, &[]), None, "{agent}");
-        }
-    }
-
-    /// The login of `agent` with the variables `set` in its environment.
-    fn with_variables(agent: &str, home: &Path, set: &[(&str, &str)]) -> Option<Login> {
-        let set: BTreeMap<String, OsString> = set
-            .iter()
-            .map(|(name, value)| ((*name).to_owned(), OsString::from(value)))
-            .collect();
-        by_agent(agent)?.login(Some(home), &|name| set.get(name).cloned())
-    }
-
-    #[test]
-    fn a_variable_that_signs_the_agent_in_is_a_login_whatever_files_there_are() {
-        let home = Folder::new("key-home");
-        let claude = [("ANTHROPIC_API_KEY", "CANARY-key")];
-        assert_eq!(
-            with_variables("claude", &home.0, &claude),
-            Some(Login::Key("ANTHROPIC_API_KEY"))
-        );
-        let codex = [("OPENAI_API_KEY", "CANARY-key")];
-        assert_eq!(
-            with_variables("codex", &home.0, &codex),
-            Some(Login::Key("OPENAI_API_KEY"))
-        );
-        // The program takes the key in place of a stored login, so it is the key that is told.
-        std::fs::create_dir_all(home.0.join(".claude")).expect("its folder");
-        std::fs::write(home.0.join(".claude").join(".credentials.json"), "{}").expect("a login");
-        assert_eq!(
-            with_variables("claude", &home.0, &claude),
-            Some(Login::Key("ANTHROPIC_API_KEY"))
-        );
-        // A variable that is set and empty is no key, and another agent's variable is not this one's.
-        let empty = [("ANTHROPIC_API_KEY", "")];
-        assert_ne!(
-            with_variables("claude", &home.0, &empty),
-            Some(Login::Key("ANTHROPIC_API_KEY"))
-        );
-        assert_ne!(
-            with_variables("codex", &home.0, &claude),
-            Some(Login::Key("ANTHROPIC_API_KEY"))
-        );
-    }
-
-    #[test]
-    fn with_no_variable_and_no_file_an_agent_that_lists_files_is_signed_out() {
-        let home = Folder::new("signed-out-home");
-        if cfg!(not(target_os = "macos")) {
-            assert_eq!(with_variables("claude", &home.0, &[]), Some(Login::Missing));
-        }
-        assert_eq!(with_variables("codex", &home.0, &[]), Some(Login::Missing));
-    }
 }

@@ -71,17 +71,6 @@ impl AgentVendor for ClaudeVendor {
         info.home_variable = Some("CLAUDE_CONFIG_DIR".to_owned());
         info.home_folder = Some(".claude".to_owned());
         info.home_context_files = vec!["CLAUDE.md".to_owned()];
-        // On macOS Claude Code keeps its login in the Keychain, which a file does not show: listing none leaves `local` always listed.
-        if !cfg!(target_os = "macos") {
-            info.login_files = vec![crate::acp::accounts::CREDENTIALS_FILE.to_owned()];
-        }
-        info.login_env = [
-            "ANTHROPIC_API_KEY",
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "ANTHROPIC_AUTH_TOKEN",
-        ]
-        .map(str::to_owned)
-        .to_vec();
         info.standards = vec![
             StandardTitle::new("claude-code", "Claude Code"),
             StandardTitle::new("anthropic-api", "Anthropic API"),

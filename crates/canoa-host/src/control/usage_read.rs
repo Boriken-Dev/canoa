@@ -14,6 +14,7 @@ use super::accounts::Accounts;
 use super::{NOT_FOUND, REFUSED, bad, text_param};
 use crate::accounts::matching::Catalogs;
 use crate::config::AccountConfig;
+use crate::kind::Login;
 use crate::options::limits::Endpoints;
 
 /// How long an answer stands, so a view that is opened again and again does not start the provider's program each time.
@@ -40,9 +41,9 @@ pub(super) fn call(
         })?;
         let catalogs = Catalogs::new(&config);
         if catalogs.local_kind(harness).is_none() {
-            let why = if catalogs.signed_out(harness) {
+            let why = if let Some(Login::SignedOut(reason)) = catalogs.login(harness) {
                 format!(
-                    "nobody is signed in to {harness} on this computer, so it has no account {name}"
+                    "nobody is signed in to {harness} on this computer ({reason}), so it has no account {name}"
                 )
             } else {
                 format!("{harness} has no login of its own to offer as the account {name}")

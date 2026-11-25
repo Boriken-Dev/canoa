@@ -21,7 +21,7 @@ use canoa_host::Link;
 use linked::{Hosted, next, send};
 use sealed::{App, Typed, forms, found_in};
 use serde_json::{Value, json};
-use support::{WAIT, example, host_binary, quoted};
+use support::{WAIT, antigravity_entry, example, host_binary, quoted};
 
 const KEY: &str = "sk-ant-CANARY/+=q\"\\z-0123456789";
 
@@ -34,6 +34,7 @@ fn signed_in_programs() {
         for (variable, file) in [
             ("CLAUDE_CONFIG_DIR", ".credentials.json"),
             ("CODEX_HOME", "auth.json"),
+            ("PI_CODING_AGENT_DIR", "auth.json"),
         ] {
             let home = root.join(variable);
             std::fs::create_dir_all(&home).expect("a home");
@@ -53,8 +54,9 @@ fn host() -> Hosted {
             let program = dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX));
             std::fs::copy(&claude, &program).expect("the stand-in is copied");
             format!(
-                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100 }}\n",
-                quoted(&program.to_string_lossy())
+                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100 }}\n{}",
+                quoted(&program.to_string_lossy()),
+                antigravity_entry(dir, &program)
             )
         },
         &[],
@@ -617,8 +619,8 @@ fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_s
         names,
         [
             ("Claude", "claude"),
-            ("Codex", "codex"),
             ("Antigravity", "antigravity"),
+            ("Codex", "codex"),
             ("Grok", "grok"),
             ("OpenCode", "opencode"),
             ("Pi", "pi")
@@ -976,8 +978,9 @@ fn host_without_usage() -> Hosted {
             let program = dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX));
             std::fs::copy(&claude, &program).expect("the stand-in is copied");
             format!(
-                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100, usage_endpoint = \"http://127.0.0.1:9\" }}\n",
-                quoted(&program.to_string_lossy())
+                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100, usage_endpoint = \"http://127.0.0.1:9\" }}\n{}",
+                quoted(&program.to_string_lossy()),
+                antigravity_entry(dir, &program)
             )
         },
         &[],

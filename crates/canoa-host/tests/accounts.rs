@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 
 use canoa_host::{ACCOUNT_META, MODEL_META};
 use serde_json::{Value, json};
-use support::{Host, Scratch, WAIT, cwd, example, host_binary, quoted, with_link};
+use support::{
+    Host, Scratch, WAIT, antigravity_entry, cwd, example, host_binary, quoted, with_link,
+};
 
 const CANARY: &str = "CANARY";
 
@@ -49,8 +51,9 @@ impl Fixture {
         std::fs::write(
             &config,
             format!(
-                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100 }}\n",
-                quoted(&claude.to_string_lossy())
+                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100 }}\n{}",
+                quoted(&claude.to_string_lossy()),
+                antigravity_entry(&scratch.0, &claude)
             ),
         )
         .expect("canoa.cfg is written");
@@ -126,6 +129,11 @@ impl Fixture {
             command.env_remove(name);
         }
         command.envs(set.iter().copied());
+        // Where each program keeps its login is a folder of the test's own, never the person's.
+        command
+            .env("HOME", self.scratch.0.join("user"))
+            .env("USERPROFILE", self.scratch.0.join("user"))
+            .env("PI_CODING_AGENT_DIR", self.pi_home());
         if busless {
             command
                 .env_remove("DBUS_SESSION_BUS_ADDRESS")
@@ -183,11 +191,16 @@ impl Fixture {
         self.scratch.0.join("codex_home")
     }
 
+    fn pi_home(&self) -> PathBuf {
+        self.scratch.0.join("pi_home")
+    }
+
     /// Puts a login where Claude Code and Codex each keep theirs, so both are signed in on this computer.
     fn sign_in_programs(&self) {
         for (home, file) in [
             (self.claude_home(), ".credentials.json"),
             (self.codex_home(), "auth.json"),
+            (self.pi_home(), "auth.json"),
         ] {
             std::fs::create_dir_all(&home).expect("a home");
             std::fs::write(home.join(file), "{\"fixture\":true}").expect("a login");
@@ -636,8 +649,7 @@ fn the_login_each_harness_has_is_listed_after_the_accounts_of_canoa_cfg() {
     target_os = "macos",
     ignore = "Claude Code keeps its login in the Keychain there, so its local account is always listed"
 )]
-fn a_harness_nobody_is_signed_in_to_has_no_local_account_and_one_that_keeps_its_login_elsewhere_still_does()
- {
+fn a_harness_nobody_is_signed_in_to_has_no_local_account_until_someone_is() {
     let fixture = Fixture::signed_in();
     let named = |rows: &[Value], harness: &str| {
         rows.iter()
@@ -648,8 +660,6 @@ fn a_harness_nobody_is_signed_in_to_has_no_local_account_and_one_that_keeps_its_
         !named(&rows, "claude") && !named(&rows, "codex"),
         "{rows:?}"
     );
-    // Pi describes no file its login is in, so nothing says it is signed out.
-    assert!(named(&rows, "pi"), "{rows:?}");
     let listing = fixture.canoa(&["accounts", "list"], None);
     assert!(
         !text(&listing.stdout).contains("claude_accounts harness-login"),
@@ -663,7 +673,11 @@ fn a_harness_nobody_is_signed_in_to_has_no_local_account_and_one_that_keeps_its_
     // Signing in is seen the next time the list is read.
     fixture.sign_in_programs();
     let rows = fixture.rows();
-    assert!(named(&rows, "claude") && named(&rows, "codex"), "{rows:?}");
+    // Pi's own provider looks in its folder, which is the test's, and finds its login there.
+    assert!(
+        named(&rows, "claude") && named(&rows, "codex") && named(&rows, "pi"),
+        "{rows:?}"
+    );
 }
 
 #[test]
@@ -676,6 +690,7 @@ fn a_session_that_would_run_on_local_is_told_nobody_is_signed_in_until_someone_i
     // login, and with none of it there is nothing to run on.
     for fixture in [Fixture::unlisted(), Fixture::bare()] {
         let claude_home = fixture.claude_home();
+        let marker = fixture.scratch.0.to_string_lossy().into_owned();
         let (host, _log, _record, _cfg) = fixture.serve_with_keys(false);
         let client = support::key();
         host.pair(&client);
@@ -694,6 +709,11 @@ fn a_session_that_would_run_on_local_is_told_nobody_is_signed_in_until_someone_i
             why.contains("nobody is signed in to claude") && why.contains("Accounts"),
             "{refused}"
         );
+        // The provider's reason says what it looked at, never where.
+        assert!(
+            !why.contains(&marker) && !why.contains("CANARY"),
+            "{refused}"
+        );
         // The host looks again at each start, so a login made meanwhile is used without restarting it.
         std::fs::create_dir_all(&claude_home).expect("a home");
         std::fs::write(claude_home.join(".credentials.json"), "{\"fixture\":true}")
@@ -703,6 +723,163 @@ fn a_session_that_would_run_on_local_is_told_nobody_is_signed_in_until_someone_i
         })
         .expect("served");
     }
+}
+
+/// What a program's own provider answers is the program's, and no value or path of the test's environment is in what the host says of
+/// it: the variable's name is, the key and the folders are not.
+#[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "Claude Code keeps its login in the Keychain there, so its local account is always listed"
+)]
+fn what_the_host_says_of_a_login_holds_no_value_and_no_path() {
+    const VALUE: &str = "CANARY-env-key-value";
+    let fixture = Fixture::bare();
+    let json = ["accounts", "list", "--format", "json"];
+    let keyed = [("ANTHROPIC_API_KEY", VALUE)];
+    let marker = fixture.claude_home().to_string_lossy().into_owned();
+    // A key, and the folders the logins would be in, which are the test's: the listing names the variable.
+    let listed = fixture.canoa_env(&json, None, false, &keyed);
+    let plain = fixture.canoa_env(&["accounts", "list"], None, false, &keyed);
+    // No login at all: Claude Code is signed out and Codex is looked for in a folder with nothing in it.
+    let none = fixture.canoa_env(&json, None, false, &[]);
+    for output in [&listed, &plain, &none] {
+        for said in [text(&output.stdout), text(&output.stderr)] {
+            assert!(!said.contains(VALUE) && !said.contains(&marker), "{said}");
+        }
+    }
+    assert!(claude_local(&rows_in(&listed)).is_some());
+    assert!(claude_local(&rows_in(&none)).is_none());
+}
+
+/// A program whose login the provider cannot look for is listed with the provider's reason, since the login may be there; one whose
+/// login it found has no such note.
+#[test]
+fn a_login_the_provider_cannot_look_for_is_listed_with_its_reason() {
+    let fixture = Fixture::bare();
+    fixture.sign_in_programs();
+    // Codex keeps its login in the operating system's keyring when its config says so, and the provider never reads a keyring's
+    // secret nor tells an entry it does not find from one that is not there: this folder is the test's, so there is none.
+    std::fs::write(
+        fixture.codex_home().join("config.toml"),
+        "cli_auth_credentials_store = \"keyring\"\n",
+    )
+    .expect("a config");
+    std::fs::remove_file(fixture.codex_home().join("auth.json")).expect("no file");
+    let listed = fixture.canoa_env(&["accounts", "list", "--format", "json"], None, false, &[]);
+    assert!(listed.status.success(), "{}", text(&listed.stderr));
+    let rows = rows_in(&listed);
+    let codex = rows
+        .iter()
+        .find(|row| row["automatic"] == true && row["fits"] == json!(["codex"]))
+        .expect("an account that could not be looked for is listed");
+    let why = codex["note"].as_str().expect("the provider's reason");
+    assert!(!why.is_empty(), "{codex}");
+    assert!(
+        !why.contains(&*fixture.scratch.0.to_string_lossy()),
+        "{why}"
+    );
+    assert_eq!(codex["via"], Value::Null, "{codex}");
+    // Claude Code's file is there, so it says nothing.
+    let claude = claude_local(&rows).expect("signed in");
+    assert_eq!(claude["note"], Value::Null, "{claude}");
+    let text_form = fixture.canoa_env(&["accounts", "list"], None, false, &[]);
+    assert!(
+        text(&text_form.stdout).contains(why),
+        "{}",
+        text(&text_form.stdout)
+    );
+}
+
+/// Antigravity keeps its login in the operating system's keyring or in files, and the entry of these tests reads the files of a
+/// folder of the test's own with the keyring off, so whether its account is listed is the folder's and never the machine's: with
+/// nothing stored there it is not, on a machine where the person is signed in as on one where they are not, and with a login file
+/// it is.
+#[test]
+fn antigravitys_account_is_listed_by_the_login_in_the_tests_folder_and_never_the_keyrings() {
+    let fixture = Fixture::bare();
+    let json = ["accounts", "list", "--format", "json"];
+    let antigravity = |rows: &[Value]| {
+        rows.iter()
+            .find(|row| row["automatic"] == true && row["fits"] == json!(["antigravity"]))
+            .cloned()
+    };
+    let none = fixture.canoa_env(&json, None, false, &[]);
+    assert!(none.status.success(), "{}", text(&none.stderr));
+    assert!(
+        antigravity(&rows_in(&none)).is_none(),
+        "a keyring was asked: {}",
+        text(&none.stdout)
+    );
+    let gemini = fixture.scratch.0.join("agy-home").join(".gemini");
+    std::fs::write(
+        gemini.join("jetski-standalone-oauth-token"),
+        json!({
+            "token": {"access_token": "CANARY-access", "token_type": "Bearer",
+                      "refresh_token": "CANARY-refresh", "expiry": "0001-01-01T00:00:00Z"},
+            "auth_method": "consumer",
+            "id_token_email": "a@example.test",
+            "project_id": "fixture-project",
+            "user_tier": "g1-pro-tier",
+            "tier_display_name": "Stored Plan"
+        })
+        .to_string(),
+    )
+    .expect("a stored login");
+    let found = fixture.canoa_env(&json, None, false, &[]);
+    let row = antigravity(&rows_in(&found)).expect("the stored login is listed");
+    assert_eq!(row["note"], Value::Null, "{row}");
+    for said in [text(&found.stdout), text(&found.stderr)] {
+        assert!(!said.contains("CANARY"), "{said}");
+    }
+}
+
+/// Listing the accounts asks each bundled harness's provider whether its program is signed in, and Antigravity's looks in the
+/// operating system's keyring unless its entry says `keyring = false`. A keyring is the person's: no test asks it, not even for whether
+/// an entry is there. So a test file that lists accounts (or reads the usage of a login) names an Antigravity entry that reads a folder
+/// of its own, or says why it never reaches one.
+#[test]
+fn no_test_that_lists_accounts_leaves_antigravitys_keyring_on() {
+    // The files that list accounts without reaching Antigravity's provider, and why.
+    let exempt = [
+        ("accounts.rs", "this test"),
+        ("native.rs", "its accounts/list is a call the relay denies"),
+        (
+            "codex_accounts.rs",
+            "it reads the usage of Codex's login alone",
+        ),
+    ];
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut leaving = Vec::new();
+    for file in std::fs::read_dir(&folder).expect("the tests folder") {
+        let path = file.expect("a file").path();
+        let name = path
+            .file_name()
+            .expect("a name")
+            .to_string_lossy()
+            .into_owned();
+        if path.extension().is_none_or(|extension| extension != "rs")
+            || exempt.iter().any(|(each, _)| *each == name)
+        {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("a test");
+        let lists = [
+            "\"accounts/list\"",
+            "\"accounts\", \"list\"",
+            "\"usage/read\"",
+            "\"usage/limits\"",
+        ]
+        .iter()
+        .any(|call| source.contains(call));
+        if lists && !source.contains("antigravity_entry(") && !source.contains("keyring = false") {
+            leaving.push(name);
+        }
+    }
+    assert!(
+        leaving.is_empty(),
+        "these tests list accounts and so ask Antigravity's keyring: {leaving:?}"
+    );
 }
 
 /// The rows `accounts list --format json` printed.
@@ -1368,7 +1545,7 @@ fn a_pi_session_runs_on_an_anthropic_key_that_claude_codes_provider_made() {
     let log = scratch.join("pi.log");
     let config = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
     let env = vec![("COQUI_ACP_FAKE_PI_LOG", log.clone().into_os_string())];
-    let (host, _log) = Host::start_logged(fixture.scratch, &config, 2, &env);
+    let (host, _log) = Host::start_logged(fixture.scratch, &config, 3, &env);
     let client = support::key();
     host.pair(&client);
     let dir = cwd(&host.scratch);

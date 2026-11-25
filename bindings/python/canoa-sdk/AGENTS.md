@@ -19,7 +19,7 @@ for other classes: it may leave `@abstract` slots in place; a class that does no
 class AgentVendor:        # canoa_sdk.vendor: who an agent is and how Canoa shows it
     agent: str; title: str                                   # required; agent = its acp_harness id, else its source's name
     program = vendor = aos = model_variable = tool_name = skills_folder = home_variable = home_folder = mark = look = None
-    standards: Sequence[StandardTitle] = (); names = markers = context_files = home_context_files = login_files = login_env = endpoints = (); modes: Sequence[ModeTitle] = ()   # context_files: project context files it loads itself, as `AGENTS.md`
+    standards: Sequence[StandardTitle] = (); names = markers = context_files = home_context_files = endpoints = (); modes: Sequence[ModeTitle] = ()   # context_files: project context files it loads itself, as `AGENTS.md`
     def info(self) -> VendorInfo                             # override to compute the description
 class StoreExtension:     # canoa_sdk.store: adds types to the Store
     title: str; publisher: str; types: Sequence[ExtensionType] = ()
@@ -56,9 +56,9 @@ class SettingsSection:    # canoa_sdk.settings: section, title, help, icon, grou
 class PanelTab:           # canoa_sdk.panel: tab, title, help, icon, shows = "log" | "terminal" | "page", shell, url; tail(request)
 class TerminalPanelTab(PanelTab); class PagePanelTab(PanelTab)   # a page at `url`, on this computer's loopback
 class LogPanelTab(PanelTab)   # lines() -> the log's lines, oldest first
-class AccountProvider:    # canoa_sdk.account: title, description, kinds_offered ([AccountKindInfo]), logins ([LoginMethodInfo]), usage_kinds, local; offer(), login/renew/watch refuse UNSUPPORTED, usage/models answer unsupported/unknown (and release handles)
+class AccountProvider:    # canoa_sdk.account: title, description, kinds_offered ([AccountKindInfo]), logins ([LoginMethodInfo]), usage_kinds, local; offer(), login/renew/watch refuse UNSUPPORTED, usage/models answer unsupported/unknown (and release handles); signed_in(query) says whether the program's own login exists (`login_present`, `login_absent`, `login_unknown`): UNSUPPORTED without `local`, unknown with it, until overridden
 class AccountWatch        # canoa_sdk.account: stop()
-credential_schema(title?, description?); models_listed(models); models_unknown(reason, unknown_kind?); usage_unsupported(reason, account?); renewed(credentials, expires_at?); renew_unchanged(reason); release(*handles)
+credential_schema(title?, description?); models_listed(models); models_unknown(reason, unknown_kind?); login_present(variable?); login_absent(reason); login_unknown(reason); usage_unsupported(reason, account?); renewed(credentials, expires_at?); renew_unchanged(reason); release(*handles)
 class ModelGateway:       # canoa_sdk.gateway: kind, vendor, table?; abstract slot open(request, spawner) -> GatewayLease
 class GatewayLease        # canoa_sdk.gateway: address() -> str, bearer() -> str, models() -> ModelListing (defaults to unknown)
 request_of(request) -> dict

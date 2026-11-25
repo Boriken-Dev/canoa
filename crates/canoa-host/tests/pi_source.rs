@@ -70,6 +70,13 @@ fn pi_runs_through_the_hosts_own_provider_from_a_pi_on_the_path_or_a_managed_cop
     env("LOCALAPPDATA", &data);
     env("XDG_DATA_HOME", &data);
     env("PI_CODING_AGENT_DIR", &home.join("pi-agent"));
+    // A host refuses a session on an agent nobody is signed in to: Pi's login is a file of the test's own.
+    std::fs::create_dir_all(home.join("pi-agent")).expect("made");
+    std::fs::write(
+        home.join("pi-agent").join("auth.json"),
+        "{\"fixture\":true}",
+    )
+    .expect("a login");
     let log = root.0.join("fake-pi.log");
     env("COQUI_ACP_FAKE_PI_LOG", &log);
     let standin = example("fake_pi", false);

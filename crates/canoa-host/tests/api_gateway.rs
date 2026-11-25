@@ -101,6 +101,13 @@ impl Fixture {
                 quoted(&program.to_string_lossy())
             ));
         }
+        // Antigravity's login is looked for in a folder of the test's own, never the operating system's keyring.
+        entries.push_str(&support::antigravity_entry(
+            &scratch.0,
+            &scratch
+                .0
+                .join(format!("claude{}", std::env::consts::EXE_SUFFIX)),
+        ));
         let config = scratch.0.join("canoa.cfg");
         std::fs::write(
             &config,

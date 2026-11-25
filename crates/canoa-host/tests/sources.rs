@@ -25,6 +25,23 @@ fn the_hosts_own_sources_run_over_a_link_and_say_what_they_miss() {
     let path = std::env::join_paths([bin.0.clone()]).expect("a path");
     // SAFETY: the only test in this process, set before any thread of the host starts.
     unsafe { std::env::set_var("PATH", &path) };
+    // A host refuses a session on an agent nobody is signed in to, and no test looks in the person's home: each login is a file of
+    // the test's own.
+    let logins = support::Scratch::new();
+    for (variable, file) in [
+        ("GROK_HOME", "auth.json"),
+        ("XDG_DATA_HOME", "opencode/auth.json"),
+    ] {
+        let folder = logins.0.join(variable);
+        std::fs::create_dir_all(folder.join(file).parent().expect("a folder")).expect("made");
+        std::fs::write(folder.join(file), "{\"fixture\":true}").expect("a login");
+        // SAFETY: as above.
+        unsafe { std::env::set_var(variable, &folder) };
+    }
+    for variable in ["HOME", "USERPROFILE"] {
+        // SAFETY: as above.
+        unsafe { std::env::set_var(variable, &logins.0) };
+    }
 
     let host = Hosted::start_with("", &["--local-sources"]);
     let names = host.local.entries();

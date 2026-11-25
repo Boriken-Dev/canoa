@@ -24,9 +24,10 @@ fn host() -> Hosted {
             let program = dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX));
             std::fs::copy(&claude, &program).expect("the stand-in is copied");
             format!(
-                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n\n[host.agents.Probe]\nprogram = {}\nargs = [\"--scripted\"]\n",
+                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n\n[host.agents.Probe]\nprogram = {}\nargs = [\"--scripted\"]\n{}",
                 quoted(&program.to_string_lossy()),
                 quoted(&agent.to_string_lossy()),
+                support::antigravity_entry(dir, &program),
             )
         },
         &[],
