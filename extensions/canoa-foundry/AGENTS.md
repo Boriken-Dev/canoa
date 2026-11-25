@@ -123,7 +123,8 @@ pub mod worker {
 // Foundry Local as a Store program.
 pub mod store {
     pub const RELEASES_API: &str; pub const DOWNLOADS: &str;     // the publisher's release listing and the folder its files are served from
-    pub struct FoundryRecipe;                                     // `canoa::store::recipe::Recipe`: program `foundry`; the `cli-preview-X.Y.Z` release, the Windows MSIX (a zip), the Linux tar.gz or the Apple silicon zip (no Intel Mac build), checked against GitHub's SHA-256
+    pub const NOT_PUBLISHED: &str;                                // what `latest` and `release` say (`unsupported`) when the listing answers 404: Microsoft no longer publishes Foundry Local where Canoa can install it
+    pub struct FoundryRecipe;                                     // `canoa::store::recipe::Recipe`: program `foundry`; the `cli-preview-X.Y.Z` release, the Windows MSIX (a zip), the Linux tar.gz or the Apple silicon zip (no Intel Mac build), checked against GitHub's SHA-256; with `microsoft/Foundry-Local` gone (404) on every platform, the listing says `NOT_PUBLISHED` instead
 }
 
 // Foundry Local's models, as its command line lists and moves them.
@@ -195,6 +196,7 @@ With `own_cache` the SDK is given a models folder of the caller's (`window::mirr
 
 ## Gotchas
 
+- **The release repository is gone (404, 2026-11-25).** `github.com/microsoft/Foundry-Local` and its `cli-preview-X.Y.Z` releases answer 404; winget's `Microsoft.FoundryLocal` 0.14.0, the Homebrew formula, `foundrylocal.ai` (its Windows, Linux and Mac buttons; its `/models` page is static, with no catalog address), the Learn pages and `aka.ms/foundry-local-installer` all still name those files. No other source for the `foundry` command line exists: the `foundry-local-core` wheels, `Microsoft.AI.Foundry.Local.Core` and `foundry-local-sdk` carry the native library only, and `microsoft-foundry` has no such repository. The Store therefore lists no Foundry Local version and installs none (`NOT_PUBLISHED`); a copy installed earlier is found on the PATH. The recipe goes back to working if the repository returns.
 - The command line's `-o json` answers were not measured: `models::rows` reads a list (or an object holding one) and takes a row's name from the first of `id`, `variantId`, `modelId` and `name`, so a shape with another key lists nothing. The program is `foundry`; `FoundryRecipe` unpacks Microsoft's own Windows package, whose run outside the installed package was not measured.
 
 - The Foundry Local service's model list says every Qwen calls tools; only `qwen3-14b-generic-gpu:2` returned structured calls when measured, so `DaemonEngine` offers tools and lets the service refuse, in its own words (`EngineError::Refused`).
