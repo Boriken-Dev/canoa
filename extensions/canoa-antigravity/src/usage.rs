@@ -263,6 +263,11 @@ mod tests {
 
     impl Google {
         fn start() -> Self {
+            Self::start_with(SUMMARY, None)
+        }
+
+        /// As `start`, answering `summary` and, when it is given, `available` as the service's list of models.
+        fn start_with(summary: &'static str, available: Option<&'static str>) -> Self {
             use std::io::{Read, Write};
             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
             let address = listener.local_addr().expect("its address");
@@ -297,7 +302,10 @@ mod tests {
                     let (status, answer) = match path.as_str() {
                         "/userinfo" => (200, r#"{"email": "person@example.test"}"#.to_owned()),
                         "/v1internal:loadCodeAssist" => (200, "{}".to_owned()),
-                        "/v1internal:retrieveUserQuotaSummary" => (200, SUMMARY.to_owned()),
+                        "/v1internal:retrieveUserQuotaSummary" => (200, summary.to_owned()),
+                        "/v1internal:fetchAvailableModels" if available.is_some() => {
+                            (200, available.unwrap_or("{}").to_owned())
+                        }
                         _ => (404, "{}".to_owned()),
                     };
                     let _ = write!(
@@ -418,6 +426,64 @@ mod tests {
         let in_session = reading.read(u32::MAX - 1, false).expect("answered");
         assert_eq!(in_session.buckets.len(), 4);
         assert!(in_session.failure.is_none());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn with_nothing_started_a_bucket_covers_the_models_the_service_lists_and_argon_is_among_them() {
+        let home = std::env::temp_dir().join(format!("canoa-agy-nothing-{}", std::process::id()));
+        let google = Google::start_with(
+            include_str!("../tests/fixtures/summary_one_gemini_pool.json"),
+            Some(include_str!(
+                "../tests/fixtures/fetch_available_models.json"
+            )),
+        );
+        // No `opened`: no session has listed a model.
+        let reading = signed_in(&home, &google)
+            .open(Alone.into_object())
+            .expect("a reading opens");
+
+        let read = reading.read(0, false).expect("answered");
+        assert!(read.failure.is_none(), "{:?}", read.failure);
+        let weekly = &read.buckets[0];
+        assert_eq!(weekly.group.as_deref(), Some("Gemini Models"));
+        assert_eq!(
+            weekly.model_names,
+            ["Gemini 4 Neon", "Gemini 4 Argon", "Gemini 3.8 Flash"]
+        );
+        assert_eq!(
+            weekly.models,
+            Coverage::Only {
+                models: alloc::vec![
+                    "gemini-4-neon-high".to_string(),
+                    "gemini-4-argon-medium".to_string(),
+                    "gemini-3.8-flash-low".to_string(),
+                ]
+            }
+        );
+        assert_eq!(
+            read.buckets[2].models,
+            Coverage::Only {
+                models: alloc::vec!["claude-opus-5-5-high".to_string()]
+            }
+        );
+
+        // Once a session lists its models, its list is the one used.
+        reading
+            .opened(
+                r#"{"models": {"availableModels": [
+                {"modelId": "n", "name": "Gemini 4 Neon (High)"},
+                {"modelId": "a", "name": "Gemini 4 Argon (Medium)"},
+                {"modelId": "f", "name": "Gemini 3.8 Flash (Low)"}]}}"#,
+            )
+            .expect("models");
+        let read = reading.read(0, false).expect("answered");
+        assert_eq!(
+            read.buckets[0].models,
+            Coverage::Only {
+                models: alloc::vec!["n".to_string(), "a".to_string(), "f".to_string()]
+            }
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 

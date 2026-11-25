@@ -18,7 +18,8 @@ use coqui_acp_api::{
     LoginForm, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest, ModelListing, OPEN_URL,
     OpenUrl, ProcessSpawner, RenewReport, RenewRequest, WatchRequest,
 };
-use coqui_acp_harness::antigravity::{AgyLogin, LoginReading, SignedIn};
+use coqui_acp_harness::ThroughSpawner;
+use coqui_acp_harness::antigravity::{AgyLogin, LoginReading, SignedIn, list_models};
 use coqui_acp_harness::cli::{Cli, Next, address_in, plain};
 use coqui_acp_harness::process::Launch;
 use coqui_acp_harness::stdio::login::{self, Ctx};
@@ -48,7 +49,12 @@ const LINE_LIMIT: usize = 1 << 16;
 pub struct AgyAccounts {
     inner: StdioAccounts,
     settings: AgySettings,
+    /// The models `agy models` last listed, and when.
+    listed: Mutex<Option<(Instant, ModelListing)>>,
 }
+
+/// How long the models `agy models` listed are kept.
+const LISTED_FOR: Duration = Duration::from_secs(600);
 
 impl From<AgySettings> for AgyAccounts {
     fn from(settings: AgySettings) -> Self {
@@ -59,6 +65,7 @@ impl From<AgySettings> for AgyAccounts {
         Self {
             inner: StdioAccounts::new(&coqui_acp_harness::vendors::antigravity::STDIO, stdio),
             settings,
+            listed: Mutex::new(None),
         }
     }
 }
@@ -155,7 +162,29 @@ impl AccountProvider for AgyAccounts {
         spawner: Object<dyn ProcessSpawner>,
         keeper: Object<dyn AccountKeeper>,
     ) -> Result<ModelListing, ProviderError> {
-        self.inner.models(query, spawner, keeper)
+        // The program lists its models with a command of its own, so the automatic account's models are known with nothing
+        // started; any other account is the harness's to answer.
+        if query.account.kind != HARNESS_LOGIN {
+            return self.inner.models(query, spawner, keeper);
+        }
+        query.account.check_id()?;
+        drop(keeper);
+        let mut held = lock(&self.listed);
+        if let Some((at, listing)) = held.as_ref()
+            && at.elapsed() < LISTED_FOR
+        {
+            return Ok(listing.clone());
+        }
+        let spawn = ThroughSpawner::shared(Arc::new(spawner));
+        let listing = list_models(
+            &spawn,
+            &self.settings.program(),
+            Duration::from_millis(self.settings.command_timeout_ms),
+        );
+        if listing.known {
+            *held = Some((Instant::now(), listing.clone()));
+        }
+        Ok(listing)
     }
 }
 
@@ -313,6 +342,56 @@ mod tests {
         assert_eq!(offer.logins[0].id, SIGN_IN);
         assert_eq!(offer.logins[0].title, "Sign in to Antigravity");
         assert_eq!(offer.logins[0].produces, HARNESS_LOGIN);
+    }
+
+    /// A keeper that is never told anything.
+    struct Deaf;
+
+    impl AccountKeeper for Deaf {
+        fn renewed(&self, _: coqui_acp_api::AccountRenewal) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn lost(&self, _: coqui_acp_api::AccountLoss) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    fn models_of(accounts: &AgyAccounts) -> ModelListing {
+        accounts
+            .models(
+                AccountModelsQuery::new(coqui_acp_api::AccountGrant::new("local", HARNESS_LOGIN)),
+                coqui_acp_harness::LocalSpawner::new().into_object(),
+                Deaf.into_object(),
+            )
+            .expect("a listing")
+    }
+
+    #[test]
+    fn a_program_that_is_not_there_has_no_models_to_list() {
+        let accounts = AgyAccounts::new(AgySettings {
+            executable: Some("canoa-no-such-agy-program".into()),
+            ..AgySettings::default()
+        });
+        let listing = models_of(&accounts);
+        assert!(!listing.known);
+        assert_eq!(
+            listing.unknown_kind,
+            Some(coqui_acp_api::UnknownKind::NotInstalled)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs Antigravity (agy) installed"]
+    fn the_installed_program_lists_its_models_with_nothing_started() {
+        let listing = models_of(&AgyAccounts::new(AgySettings::default()));
+        assert!(listing.known, "{listing:?}");
+        assert!(
+            listing
+                .models
+                .iter()
+                .any(|model| model.id.contains("argon"))
+        );
     }
 
     #[test]

@@ -1,0 +1,20 @@
+{
+  "models": {
+    "gemini-4-neon-high": {
+      "displayName": "Gemini 4 Neon (High)",
+      "quotaInfo": {"remainingFraction": 0.25, "resetTime": "2030-01-08T12:00:00Z"}
+    },
+    "gemini-4-argon-medium": {
+      "displayName": "Gemini 4 Argon (Medium)",
+      "quotaInfo": {"remainingFraction": 0.25, "resetTime": "2030-01-08T12:00:00Z"}
+    },
+    "gemini-3.8-flash-low": {
+      "displayName": "Gemini 3.8 Flash (Low)",
+      "quotaInfo": {"remainingFraction": 0.25, "resetTime": "2030-01-08T12:00:00Z"}
+    },
+    "claude-opus-5-5-high": {
+      "displayName": "Claude Opus 5.5 (High)",
+      "quotaInfo": {"resetTime": "2030-01-09T00:00:00Z"}
+    }
+  }
+}
