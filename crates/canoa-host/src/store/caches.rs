@@ -215,6 +215,11 @@ fn split(key: &str) -> (String, Option<String>) {
 }
 
 impl LatestCache {
+    /// How long a newest version answers with no network.
+    pub(crate) const fn ttl(&self) -> Duration {
+        self.ttl
+    }
+
     pub(crate) fn new(dir: Option<PathBuf>, ttl: Duration) -> Self {
         Self {
             file: dir.map(|dir| dir.join("latest.json")),

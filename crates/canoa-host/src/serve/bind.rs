@@ -1276,6 +1276,7 @@ impl Serving {
         }
         // It ends by itself when the host drops its control.
         let _ = serving.shared.control.keep_fresh();
+        serving.shared.control.look_at_overlays();
         serving.door = serving.open_door(config, options);
         serving.attach_delegation(config, dialer, usage_log);
 

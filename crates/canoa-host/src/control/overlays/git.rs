@@ -18,6 +18,7 @@ use coqui_aos::{EXCLUDED_COMPONENTS, TreeEntry, digest_entries};
 use crate::profile::full_commit_id;
 use crate::spawn::{Command, Stdio};
 
+use super::updates::Follows;
 use super::{Listing, OverlayLimits, Overlays, Trust, refused, unique};
 
 /// The git settings every isolated run is given: no credential helper, no redirect followed, every object received checked.
@@ -96,10 +97,23 @@ impl Overlays {
         repo: &str,
         reference: &str,
     ) -> Result<String, (i32, String)> {
+        self.remote_ref(Trust::Own, repo, reference)
+            .map(|(_, commit)| commit)
+    }
+
+    /// What `reference` is at `repo` now and the commit it names, from one `ls-remote` run under `trust` and no fetch; a whole
+    /// commit id is itself and names no listing.
+    pub(super) fn remote_ref(
+        &self,
+        trust: Trust,
+        repo: &str,
+        reference: &str,
+    ) -> Result<(Follows, String), (i32, String)> {
         if full_commit_id(reference) {
-            return Ok(reference.to_owned());
+            return Ok((Follows::Commit, reference.to_owned()));
         }
-        let listed = self.run(
+        let listed = self.run_as(
+            trust,
             &[
                 "ls-remote".into(),
                 "--heads".into(),
@@ -123,8 +137,12 @@ impl Overlays {
                 .map(|(id, _)| id.to_owned())
         };
         find(&format!("refs/heads/{reference}"))
-            .or_else(|| find(&format!("refs/tags/{reference}^{{}}")))
-            .or_else(|| find(&format!("refs/tags/{reference}")))
+            .map(|id| (Follows::Branch, id))
+            .or_else(|| {
+                find(&format!("refs/tags/{reference}^{{}}"))
+                    .or_else(|| find(&format!("refs/tags/{reference}")))
+                    .map(|id| (Follows::Tag, id))
+            })
             .ok_or_else(|| refused("The source has no branch or tag of that name"))
     }
 

@@ -365,6 +365,17 @@ impl Control {
         match method {
             "overlay/installed" => self.overlays.installed(params),
             "overlay/needs" => self.overlays.needs(params),
+            "overlay/updates" => {
+                if params.get("refresh").and_then(Value::as_bool) == Some(true)
+                    && !caller.may(super::Grant::OverlayWrite)
+                {
+                    return Err((
+                        super::DENIED,
+                        "refresh asks the sources, which takes the overlay.write grant".to_owned(),
+                    ));
+                }
+                self.overlays.updates(params, self.caches.latest.ttl())
+            }
             "overlay/prepare" => self.overlays.prepare(params),
             "overlay/read" => self.overlays.read(caller, params),
             "catalog/read" => self.overlays.catalog_read(params),

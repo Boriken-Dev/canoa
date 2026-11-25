@@ -31,6 +31,7 @@ mod git;
 mod scan;
 mod skills;
 mod tree;
+mod updates;
 
 type Outcome = Result<Value, (i32, String)>;
 
@@ -99,6 +100,8 @@ pub(crate) struct Overlays {
     /// One install or removal at a time.
     gates: Mutex<BTreeMap<String, std::sync::Arc<Mutex<()>>>>,
     git: OnceLock<Result<PathBuf, String>>,
+    /// What the last look at each installed overlay's source found, and the one look at a time.
+    updates: updates::Kept,
     /// The git processes this host has started, so a caller can tell an answer from a cache apart from one that went to git.
     git_runs: std::sync::atomic::AtomicUsize,
     /// The network git reaches its remotes through; the process's when `None`.

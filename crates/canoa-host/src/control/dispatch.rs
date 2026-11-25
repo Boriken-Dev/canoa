@@ -373,6 +373,11 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_overlays,
     ),
     rpc(
+        "overlay/updates",
+        Access::Require(Grant::OverlayRead),
+        Control::r_overlays,
+    ),
+    rpc(
         "overlay/needs",
         Access::All(&[Grant::OverlayRead, Grant::StorePrograms]),
         Control::r_overlays,

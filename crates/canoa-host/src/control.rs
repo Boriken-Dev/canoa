@@ -920,8 +920,14 @@ impl Control {
             .ok()
     }
 
+    /// Looks, in the background, at the source of each installed overlay, as the host starts: whether any holds something newer.
+    pub(crate) fn look_at_overlays(&self) {
+        self.overlays.look_in_background(self.caches.latest.ttl());
+    }
+
     /// Asks again, on this thread, what the Store keeps that is past its time.
     pub(crate) fn renew_stale(&self) {
+        let _ = self.overlays.look_at_all(self.caches.latest.ttl(), false);
         if let Some(Ok(stores)) = self.stores.get() {
             stores.refresh_latest();
         }
@@ -1134,6 +1140,8 @@ mod overlays;
 mod overlays_isolation_tests;
 #[cfg(test)]
 mod overlays_tests;
+#[cfg(test)]
+mod overlays_updates_tests;
 #[cfg(test)]
 mod profiles_tests;
 pub(crate) mod registry;
