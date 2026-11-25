@@ -845,14 +845,20 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn the_crates_run_in_process_start_no_process_by_std_but_behind_their_seam() {
-        // (file, what shows it is behind the seam or Windows-only)
-        const BEHIND: [(&str, &str); 6] = [
+        // (file, what shows it is behind the seam, Windows-only, or an ignored test that fetches with curl)
+        const BEHIND: [(&str, &str); 12] = [
             ("coqui-acp-secrets/run.rs", "STARTER"),
             ("coqui-acp-harness/process.rs", "STARTER"),
             ("coqui-acp-bridge/agent.rs", "Spawner"),
             ("coqui-acp-bridge/standing.rs", "icacls"),
             ("coqui-acp-pi/gate.rs", "icacls"),
             ("coqui-acp-harness/antigravity/ports.rs", "netstat"),
+            ("canoa-antigravity/source_tests.rs", "#[ignore = \"reaches"),
+            ("canoa-claude/source_tests.rs", "#[ignore = \"reaches"),
+            ("canoa-codex/source_tests.rs", "#[ignore = \"reaches"),
+            ("canoa-grok/source_tests.rs", "#[ignore = \"reaches"),
+            ("canoa-opencode/source_tests.rs", "#[ignore = \"reaches"),
+            ("canoa-pi/source_tests.rs", "#[ignore = \"reaches"),
         ];
         const CRATES: [&str; 16] = [
             "coqui-acp",
