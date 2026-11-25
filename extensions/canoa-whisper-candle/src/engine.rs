@@ -94,6 +94,24 @@ fn id(tokenizer: &Tokenizer, token: &str) -> Option<u32> {
     tokenizer.token_to_id(token)
 }
 
+/// How many times a block of tokens may repeat in a row before the decoder is taken to be stuck in a loop.
+const REPEATS: usize = 4;
+
+/// The longest block of tokens whose loop is tracked.
+const LONGEST_BLOCK: usize = 16;
+
+/// Where `said` ends when its tail is one block of tokens repeated [`REPEATS`] times in a row (a decoder stuck on a phrase): the
+/// tokens up to and including the first of the repeats. None when it is not looping.
+fn looped(said: &[u32]) -> Option<usize> {
+    (1..=LONGEST_BLOCK).find_map(|block| {
+        let from = said.len().checked_sub(block * REPEATS)?;
+        let tail = &said[from..];
+        tail.chunks(block)
+            .all(|each| each == &tail[..block])
+            .then_some(from + block)
+    })
+}
+
 impl Engine {
     /// A model from the three files its publisher ships: `config.json`, `tokenizer.json` and the `model.safetensors` weights
     /// (any float type; they are read as 32-bit floats).
@@ -323,6 +341,10 @@ impl Engine {
             }
             tokens.push(next as u32);
             said.push(next as u32);
+            if let Some(keep) = looped(&said) {
+                said.truncate(keep);
+                break;
+            }
         }
         let average = log_probability / (said.len() + 1) as f32;
         if no_speech > NO_SPEECH_THRESHOLD && average < LOGPROB_THRESHOLD {
@@ -333,5 +355,26 @@ impl Engine {
             .decode(&said, true)
             .map_err(|error| Error::new(format!("the words could not be read: {error}")))?;
         Ok(Some(words))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_phrase_said_four_times_in_a_row_is_cut_back_to_its_first_time() {
+        let phrase = [7, 8, 9];
+        let mut said = vec![1, 2];
+        for _ in 0..REPEATS {
+            said.extend(phrase);
+        }
+        assert_eq!(looped(&said), Some(5));
+        said.truncate(5);
+        assert_eq!(looped(&said), None);
+        assert_eq!(looped(&[1, 1, 1, 1]), Some(1), "a single token too");
+        assert_eq!(looped(&[1, 2, 3, 4, 5, 6]), None);
+        let almost = [4, 5, 4, 5, 4, 5, 4, 6];
+        assert_eq!(looped(&almost), None);
     }
 }
