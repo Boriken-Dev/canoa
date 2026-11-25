@@ -2,7 +2,7 @@
 //! has a `SHA256SUMS` naming every build (`cpython-<version>+<tag>-<triple>-install_only.tar.gz`) with its SHA-256. The catalog
 //! lists each version of it a final release has, and the newest of each minor series is that series' channel.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
 
 use canoa::store::catalog::{
     CatalogFile, FileCheck, Release, ReleasePart, ReleasePlatform, ReleasesCatalog,

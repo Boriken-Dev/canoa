@@ -2,7 +2,7 @@
 //! names the newest release and gives a SHA-256 for each of its files, and whose release folder holds `codex-package_SHA256SUMS`.
 //! A file is listed with the digest the checksums give, and only when the channel document says the same.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
 
 use canoa::store::catalog::{
     CatalogFile, FileCheck, Release, ReleasePart, ReleasePlatform, ReleasesCatalog,

@@ -43,12 +43,12 @@ fn the_shipped_snapshot_is_what_the_source_makes_of_the_recorded_answers() {
 }
 
 #[test]
-fn the_default_catalog_lists_the_two_voices_with_the_digests_the_crate_used_to_hold() {
+fn the_default_catalog_lists_the_two_voices_with_their_reviewed_digests() {
     let catalog = parse_models(SNAPSHOT).expect("a catalog");
     assert_eq!(catalog.revision.as_deref(), Some(REVISION));
     let ids: Vec<&str> = catalog.items.iter().map(|item| item.id.as_str()).collect();
     assert_eq!(ids, DEFAULT_VOICES);
-    // The model's SHA-256 and size Canoa measured when the voices were hard-coded.
+    // The model's SHA-256 and size as reviewed, and the size of its description.
     let golden = [
         (
             "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
@@ -187,20 +187,20 @@ impl SourceFetch for Recorded {
 }
 
 fn read(request: ReadRequest) -> (Result<String, ProviderError>, Vec<String>) {
-    let fetch = std::sync::Arc::new(Recorded {
+    let fetch = alloc::sync::Arc::new(Recorded {
         asked: Mutex::new(Vec::new()),
     });
     let answer = PiperVoices.read(
         request,
         LocalSpawner::new().into_object(),
-        Forward(std::sync::Arc::clone(&fetch)).into_object(),
+        Forward(alloc::sync::Arc::clone(&fetch)).into_object(),
     );
     let asked = fetch.asked.lock().expect("lock").clone();
     (answer, asked)
 }
 
 /// The recorded Hugging Face, shared with the test that reads what it was asked.
-struct Forward(std::sync::Arc<Recorded>);
+struct Forward(alloc::sync::Arc<Recorded>);
 
 impl SourceFetch for Forward {
     fn get_text(&self, url: &str, max: u64) -> Result<String, ProviderError> {
@@ -285,8 +285,8 @@ fn the_real_listings_at_the_pinned_commit_give_the_snapshot_and_the_blob_ids_mat
         )
         .expect("a catalog");
     assert_eq!(answer.trim_end(), SNAPSHOT.trim_end());
-    // The control: the blob id the listing gave is the id of the file the URL serves, and the SHA-256 this crate once pinned for
-    // that file is the file's SHA-256, so the two ways of checking it vouch for the same bytes.
+    // The control: the blob id the listing gave is the id of the file the URL serves, and that file's SHA-256 is the one reviewed, so
+    // the two ways of checking it vouch for the same bytes.
     let catalog = parse_models(&answer).expect("a document");
     let golden = [
         "141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860",

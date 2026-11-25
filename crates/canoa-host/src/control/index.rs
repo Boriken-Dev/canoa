@@ -173,7 +173,10 @@ impl crate::store::mcp::Backend for ToolsBackend {
         // No owner: the plan is returned and kept for no key, so no apply can name it.
         self.0
             .stores()
-            .and_then(|stores| stores.read("store/plan", &params, None))
+            .and_then(|stores| {
+                stores.trust_from(&self.0.store_section());
+                stores.read("store/plan", &params, None)
+            })
             .map_err(|(_, why)| why)
     }
 

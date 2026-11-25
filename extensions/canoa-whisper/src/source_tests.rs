@@ -34,7 +34,7 @@ fn the_shipped_snapshot_is_what_the_source_makes_of_the_recorded_listing() {
     );
 }
 
-/// The eight models this crate listed before the list came from a source: the control for the source's reading.
+/// The eight models of the default catalog as reviewed (size, label and SHA-256), the control for what the source reads.
 const GOLDEN: [(&str, &str, u64, &str); 8] = [
     (
         "base",
@@ -87,7 +87,7 @@ const GOLDEN: [(&str, &str, u64, &str); 8] = [
 ];
 
 #[test]
-fn the_default_catalog_lists_the_eight_models_with_the_digests_the_crate_used_to_hold() {
+fn the_default_catalog_lists_the_eight_models_with_their_reviewed_digests() {
     let catalog = parse_models(SNAPSHOT).expect("a catalog");
     assert_eq!(catalog.revision.as_deref(), Some(REVISION));
     assert_eq!(catalog.items.len(), GOLDEN.len());

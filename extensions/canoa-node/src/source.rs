@@ -6,7 +6,7 @@
 //! release team's keys ([`KEYS`]) and, when the entry names fingerprints, one of those: the digests are taken from the text the
 //! signature covers, so a mirror or a proxy cannot change one.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
 
 use canoa::store::catalog::{
     CatalogFile, FileCheck, Release, ReleasePart, ReleasePlatform, ReleasesCatalog,

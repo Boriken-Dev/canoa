@@ -420,7 +420,16 @@ pub fn catalog_release(
 ) -> Result<Release, ProviderError> {
     let catalog = read_releases(info, tools)?;
     let wanted = match version {
-        Some(version) => pinned(version)?,
+        // A version is named with or without the `v` a tag has.
+        Some(version) => {
+            let named = pinned(version)?;
+            let bare = named.strip_prefix('v').unwrap_or(&named);
+            if catalog.releases.iter().any(|release| release.version == bare) {
+                bare.to_owned()
+            } else {
+                named
+            }
+        }
         None => newest_on(info, &catalog, channel_of(info, channel))?,
     };
     let start = catalog

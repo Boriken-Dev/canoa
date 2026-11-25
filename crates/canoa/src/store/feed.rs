@@ -139,7 +139,7 @@ impl<const N: usize> GithubFeed<'_, N> {
     /// Why the listing offers no release.
     pub fn catalog_of(&self, listing: &Value) -> Result<ReleasesCatalog, ProviderError> {
         let mut all = (self.releases)(listing);
-        all.sort_by(|a, b| b.order.cmp(&a.order));
+        all.sort_by_key(|each| core::cmp::Reverse(each.order));
         let mut releases: Vec<Release> = Vec::new();
         let mut skipped: Option<String> = None;
         for published in &all {

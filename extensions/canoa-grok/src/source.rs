@@ -3,7 +3,7 @@
 //! The publisher gives no checksum for any of it, so every file is listed as one nothing checks, and a person installs it by
 //! saying in canoa.cfg that the entry is trusted.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
 
 use canoa::store::catalog::{
     CatalogFile, FileCheck, Release, ReleasePart, ReleasePlatform, ReleasesCatalog,

@@ -19,7 +19,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::path::Path;
 
-use canoa::status::{internal, unsupported};
+use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
     Finish, Part, Recipe, Release, UnpackStep, dotted, measured_platforms, pinned,
 };
@@ -181,10 +181,15 @@ impl Recipe for PiperRecipe {
     fn release(
         &self,
         version: Option<&str>,
-        _channel: Option<&str>,
+        channel: Option<&str>,
         platform: &Platform,
         _tools: &Object<dyn InstallTools>,
     ) -> Result<Release, ProviderError> {
+        if let Some(channel) = channel {
+            return Err(bad_value(format!(
+                "Piper has no channel {channel:?}: its voices are installed from the Models page"
+            )));
+        }
         let catalog = &self.catalog;
         if let Some(version) = version {
             let version = pinned(version)?;

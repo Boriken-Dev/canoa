@@ -2,7 +2,7 @@
 //! (`<origin>/<os>_<arch>.json`) naming the one build it serves, its address and its SHA-512. Only the newest build is served, so
 //! the catalog lists one release for each version the platforms' manifests name.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
 
 use canoa::store::catalog::{
     CatalogFile, FileCheck, Release, ReleasePart, ReleasePlatform, ReleasesCatalog,

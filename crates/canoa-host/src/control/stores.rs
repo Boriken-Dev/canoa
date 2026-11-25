@@ -47,6 +47,8 @@ pub(crate) struct Stores {
     home: Option<std::path::PathBuf>,
     /// What the Store keeps so that opening it asks nobody: the newest versions, the models and the catalogs' entries.
     caches: Arc<crate::store::caches::StoreCaches>,
+    /// canoa.cfg's `[store]` as the last Store call saw it, which what reads a program's catalogs reads its entries from.
+    section: Arc<std::sync::RwLock<Value>>,
 }
 
 /// Checks the bytes of an extension the Store installed against the digest it recorded, before any of it is loaded, so a file that
@@ -130,7 +132,28 @@ impl Stores {
             models: models::ModelStores::default(),
             home: std::env::home_dir(),
             caches: Arc::new(crate::store::caches::StoreCaches::in_memory()),
+            section: Arc::new(std::sync::RwLock::new(Value::Null)),
         }
+        .arm()
+    }
+
+    /// Makes what reads the catalogs of a program's scope this, as it is now: it keeps a copy, which a builder that changes the
+    /// stores replaces, so the one in use is always the last.
+    fn arm(self) -> Self {
+        self.install_reader();
+        self
+    }
+
+    fn install_reader(&self) {
+        let me = self.clone();
+        self.programs.read_releases_with(Arc::new(move |program| {
+            let section = me
+                .section
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            me.releases_of(program, &section)
+        }));
     }
 
     /// These stores keeping what they learn in `caches`, which the host that serves them also reads and renews.
@@ -149,7 +172,7 @@ impl Stores {
                 caches.lookup_response,
             ));
         self.caches = caches;
-        self
+        self.arm()
     }
 
     /// These stores keeping the person's home at `home`, as a test that must not touch the real one does.
@@ -201,10 +224,10 @@ impl Stores {
             }
         }
         self.programs.download_from(places);
-        let me = self.clone();
-        let store = store.clone();
-        self.programs
-            .read_releases_with(Arc::new(move |program| me.releases_of(program, &store)));
+        *self
+            .section
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = store.clone();
     }
 
     /// The `canoa.releases/1` document the catalogs of the program `program` make together: each catalog its scope has on, in the
@@ -360,7 +383,7 @@ impl Stores {
                 tracing::warn!(extension = extension.name.as_str(), "not loaded: {why}");
             }
         }
-        self
+        self.arm()
     }
 
     fn load_extension(&mut self, extension: &crate::config::Extension) -> Result<(), String> {
@@ -447,7 +470,7 @@ impl Stores {
     /// The same, also keeping the runtimes the stores named `runtimes` install.
     pub(crate) fn with_runtimes(mut self, runtimes: Vec<String>) -> Self {
         self.runtimes = runtimes;
-        self
+        self.arm()
     }
 
     /// The same, deriving the runtime stores from `registry` (every non-agent, non-extension `program_store` that supports this OS).
@@ -521,7 +544,7 @@ impl Stores {
                 });
             }
         }
-        self
+        self.arm()
     }
 
     /// The built-in stores over this user's programs folder; `verify_copies` is `[host.store] verify_copies`.

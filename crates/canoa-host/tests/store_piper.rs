@@ -1,6 +1,6 @@
 //! The Piper store against the pinned release it ships (what each platform's plan fetches and checks) and against a stand-in
-//! release it installs: the program and the voices land in the version's folder and the program is read back. Nothing is
-//! downloaded.
+//! release it installs: the program lands in the version's folder and is read back. Its voices are the catalogs' (`canoa-piper`'s
+//! own tests), installed on their own from the Models page. Nothing is downloaded.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -19,7 +19,7 @@ use canoa::store::{
 };
 use canoa_host::store::contract::{World, WorldTransport, standin_bytes};
 use canoa_host::store::tools::LocalTools;
-use canoa_piper::store::{Catalog, Engine as Archive, PiperRecipe, VERSION, VoiceFile};
+use canoa_piper::store::{Catalog, Engine as Archive, PiperRecipe, VERSION};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{LoginAnswer, LoginForm, ProcessSpawner};
 use coqui_acp_harness::LocalSpawner;
@@ -38,8 +38,7 @@ fn tools(recipe: &PiperRecipe, world: World) -> Object<dyn InstallTools> {
 }
 
 #[test]
-fn each_platforms_plan_fetches_the_pinned_archive_alone_or_with_the_voices_of_a_channel_and_checks_every_digest()
- {
+fn each_platforms_plan_fetches_the_pinned_archive_alone_and_checks_its_digest() {
     let recipe = PiperRecipe::default();
     let engine = Engine::new(PiperRecipe::default(), StoreSettings::default());
     let info = recipe.info();
@@ -52,66 +51,41 @@ fn each_platforms_plan_fetches_the_pinned_archive_alone_or_with_the_voices_of_a_
         ("linux", "aarch64", "piper_linux_aarch64.tar.gz"),
     ];
     for (os, arch, file) in expected {
-        let alone = engine
+        let plan = engine
             .plan(
                 &PlanRequest::new(Action::Install, Platform::new(os, arch)),
                 &tools(&recipe, World::new()),
             )
             .expect("a plan");
-        assert_eq!(
-            alone.downloads.len(),
-            1,
-            "{os} {arch}: the program alone, the voices are installed on their own"
-        );
-        assert!(alone.downloads[0].url.ends_with(file));
-        let mut request = PlanRequest::new(Action::Install, Platform::new(os, arch));
-        request.channel = Some("standard".to_owned());
-        let plan = engine
-            .plan(&request, &tools(&recipe, World::new()))
-            .expect("a plan");
         assert_eq!(plan.version.as_deref(), Some(VERSION), "{os} {arch}");
         assert_eq!(
             plan.downloads.len(),
-            5,
-            "{os} {arch}: the archive and two voices of two files"
+            1,
+            "{os} {arch}: the program alone, the voices are installed on their own"
         );
+        let download = &plan.downloads[0];
+        assert!(download.url.ends_with(file), "{}", download.url);
+        assert!(download.url.contains("/2023.11.14-2/"));
+        let Check::Sha256 { value } = &download.check else {
+            panic!("a download with no digest: {download:?}");
+        };
+        assert_eq!(value.len(), 64, "{download:?}");
+        assert!(download.bytes.is_some());
+        // Every file comes from an origin the store names.
         assert!(
-            plan.downloads[0].url.ends_with(file),
-            "{}",
-            plan.downloads[0].url
-        );
-        assert!(plan.downloads[0].url.contains("/2023.11.14-2/"));
-        for download in &plan.downloads {
-            let Check::Sha256 { value } = &download.check else {
-                panic!("a download with no digest: {download:?}");
-            };
-            assert_eq!(value.len(), 64, "{download:?}");
-            assert!(download.bytes.is_some());
-            // Every file comes from an origin the store names.
-            assert!(
-                info.endpoints
-                    .iter()
-                    .any(|endpoint| download.url.starts_with(endpoint.as_str())),
-                "{} is outside the endpoints",
-                download.url
-            );
-        }
-        assert!(
-            plan.downloads[1]
-                .url
-                .contains("/resolve/4a409e3cbfd0a189930b38f127a38e107677e8ac/")
+            info.endpoints
+                .iter()
+                .any(|endpoint| download.url.starts_with(endpoint.as_str())),
+            "{} is outside the endpoints",
+            download.url
         );
         assert!(plan.changes.is_empty(), "nothing outside the folder");
         let notices = plan.notices.join("\n");
-        assert!(
-            notices.contains("en_US-ljspeech-medium") && notices.contains("public domain"),
-            "{notices}"
-        );
-        assert!(
-            notices.contains("es_MX-claude-high") && notices.contains("Apache"),
-            "{notices}"
-        );
         assert!(notices.contains("last binary release"), "{notices}");
+        assert!(
+            notices.contains("No voice comes with the program"),
+            "{notices}"
+        );
         assert_eq!(
             notices.contains("emulation"),
             os == "windows" && arch == "aarch64"
@@ -120,7 +94,7 @@ fn each_platforms_plan_fetches_the_pinned_archive_alone_or_with_the_voices_of_a_
 }
 
 #[test]
-fn a_channel_chooses_the_voices_and_what_piper_does_not_publish_is_refused() {
+fn a_channel_a_version_or_a_platform_piper_does_not_publish_is_refused() {
     let recipe = PiperRecipe::default();
     let engine = Engine::new(PiperRecipe::default(), StoreSettings::default());
     let here = Platform::new("linux", "x86_64");
@@ -130,22 +104,16 @@ fn a_channel_chooses_the_voices_and_what_piper_does_not_publish_is_refused() {
         request.version = version.map(str::to_owned);
         engine.plan(&request, &tools(&recipe, World::new()))
     };
-    let english = plan(Some("english"), None, here.clone()).expect("a plan");
-    assert_eq!(english.downloads.len(), 3);
-    assert!(english.downloads[1].url.contains("en_US-ljspeech-medium"));
-    let spanish = plan(Some("spanish"), None, here.clone()).expect("a plan");
-    assert_eq!(spanish.downloads.len(), 3);
-    assert!(spanish.downloads[1].url.contains("es_MX-claude-high"));
-    // The engine plans the release again at apply from the channel the confirmed plan was made for.
-    assert_eq!(recipe.channel_of(&english).as_deref(), Some("english"));
-    assert_eq!(recipe.channel_of(&spanish).as_deref(), Some("spanish"));
-    let standard = plan(Some("standard"), None, here.clone()).expect("a plan");
-    assert_eq!(recipe.channel_of(&standard).as_deref(), Some("standard"));
     let alone = plan(None, None, here.clone()).expect("a plan");
     assert_eq!(
         recipe.channel_of(&alone),
         None,
-        "the program alone has no channel"
+        "the program has no channel"
+    );
+    let refused = plan(Some("standard"), None, here.clone()).expect_err("no channels");
+    assert!(
+        refused.message().contains("no channel") && refused.message().contains("Models page"),
+        "{refused:?}"
     );
     assert!(plan(Some("klingon"), None, here.clone()).is_err());
     assert!(
@@ -158,36 +126,6 @@ fn a_channel_chooses_the_voices_and_what_piper_does_not_publish_is_refused() {
         "no measured build"
     );
     assert!(plan(None, None, Platform::new("freebsd", "x86_64")).is_err());
-}
-
-#[test]
-fn an_update_of_a_copy_installed_with_voices_keeps_the_language_it_came_with() {
-    use canoa::store::{Launch, ManagedCopy};
-    let recipe = PiperRecipe::default();
-    let engine = Engine::new(PiperRecipe::default(), StoreSettings::default());
-    let root = std::env::temp_dir().join(format!("canoa-piper-update-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("voices")).expect("voices");
-    std::fs::write(root.join("voices/es_MX-claude-high.onnx"), b"v").expect("a voice");
-    let update = |dir: &std::path::Path| {
-        let mut request = PlanRequest::new(Action::Update, Platform::new("linux", "x86_64"));
-        request.managed = Some(ManagedCopy::new(
-            dir.to_string_lossy(),
-            "0.9.0",
-            Launch::new("piper/piper"),
-        ));
-        engine.plan(&request, &tools(&recipe, World::new()))
-    };
-    let kept = update(&root).expect("a plan");
-    assert_eq!(
-        kept.downloads.len(),
-        3,
-        "the archive and the one voice it held"
-    );
-    assert!(kept.downloads[1].url.contains("es_MX-claude-high"));
-    let none = update(&root.join("not-there")).expect("a plan");
-    assert_eq!(none.downloads.len(), 1, "a copy with no voice gets none");
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 fn standin() -> PathBuf {
@@ -268,18 +206,14 @@ fn guatiao_unsupported() -> coqui_acp_api::guatiao::Status {
 }
 
 #[test]
-fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_read_back() {
+fn a_stand_in_release_installs_the_program_and_the_program_is_read_back() {
     let program = standin_bytes(&standin(), VERSION, 0, None);
     let (file, bytes) = archive(&program);
-    let model = b"model bytes".to_vec();
-    let json = br#"{"audio":{"sample_rate":22050}}"#.to_vec();
     // The platform the engine reads from the system it runs on.
     let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
     let catalog = Catalog {
         version: VERSION.to_owned(),
         release: "https://piper.example/release/".to_owned(),
-        voices_at: "https://piper.example/voices/".to_owned(),
-        raw_at: "https://piper.example/voices/".to_owned(),
         endpoints: vec!["https://piper.example/".to_owned()],
         engines: vec![Archive {
             os,
@@ -288,26 +222,10 @@ fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_rea
             sha256: leak(sha256(&bytes)),
             bytes: bytes.len() as u64,
         }],
-        voices: vec![VoiceFile {
-            name: "xx_XX-test-low",
-            folder: "xx/test/",
-            language: "en",
-            licence: "a test licence",
-            onnx: (leak(sha256(&model)), model.len() as u64),
-            json: (leak(sha256(&json)), json.len() as u64),
-        }],
     };
     let recipe = PiperRecipe::over(catalog);
     let mut world = World::new();
     world.put(format!("https://piper.example/release/{file}"), bytes);
-    world.put(
-        "https://piper.example/voices/xx/test/xx_XX-test-low.onnx",
-        model.clone(),
-    );
-    world.put(
-        "https://piper.example/voices/xx/test/xx_XX-test-low.onnx.json",
-        json.clone(),
-    );
     let engine = Engine::new(recipe.clone(), StoreSettings::default());
     let staging = std::env::temp_dir().join(format!("canoa-piper-store-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
@@ -315,10 +233,9 @@ fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_rea
     let tools = LocalTools::new(WorldTransport::new(world), recipe.info().endpoints)
         .granted(&staging)
         .into_object();
-    let mut ask = PlanRequest::new(Action::Install, Platform::new(os, arch));
-    ask.channel = Some("standard".to_owned());
+    let ask = PlanRequest::new(Action::Install, Platform::new(os, arch));
     let plan = engine.plan(&ask, &tools).expect("a plan");
-    assert_eq!(plan.downloads.len(), 3);
+    assert_eq!(plan.downloads.len(), 1);
     let request = ApplyRequest::new(plan, staging.to_string_lossy());
     let spawner = LocalSpawner::new().files(&staging).into_object();
     let prompter = Prompter(Mutex::new(Vec::new())).into_object();
@@ -341,14 +258,6 @@ fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_rea
         .parent()
         .and_then(std::path::Path::parent)
         .expect("the version's folder");
-    assert_eq!(
-        std::fs::read(copy.join("voices/xx_XX-test-low.onnx")).expect("model"),
-        model
-    );
-    assert_eq!(
-        std::fs::read(copy.join("voices/xx_XX-test-low.onnx.json")).expect("json"),
-        json
-    );
     if cfg!(unix) {
         assert!(
             copy.join("piper/libespeak-ng.so.1").is_file(),
@@ -362,22 +271,13 @@ fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_rea
         format!("https://piper.example/release/{file}"),
         [bytes.as_slice(), b"x"].concat(),
     );
-    tampered.put(
-        "https://piper.example/voices/xx/test/xx_XX-test-low.onnx",
-        model,
-    );
-    tampered.put(
-        "https://piper.example/voices/xx/test/xx_XX-test-low.onnx.json",
-        json,
-    );
     let second = std::env::temp_dir().join(format!("canoa-piper-store-b-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&second);
     std::fs::create_dir_all(&second).expect("a staging folder");
     let tools = LocalTools::new(WorldTransport::new(tampered), recipe.info().endpoints)
         .granted(&second)
         .into_object();
-    let mut ask = PlanRequest::new(Action::Install, Platform::new(os, arch));
-    ask.channel = Some("standard".to_owned());
+    let ask = PlanRequest::new(Action::Install, Platform::new(os, arch));
     let plan = engine.plan(&ask, &tools).expect("a plan");
     let request = ApplyRequest::new(plan, second.to_string_lossy());
     let spawner: Object<dyn ProcessSpawner> = LocalSpawner::new().files(&second).into_object();
@@ -387,7 +287,7 @@ fn a_stand_in_release_installs_the_program_and_its_voices_and_the_program_is_rea
     let _ = std::fs::remove_dir_all(&second);
 }
 
-/// Downloads the real release and both voices (about 150 MB) and has the installed program speak. It reaches the network, so it
+/// Downloads the real release and the two voices of the shipped catalog (about 150 MB) and has the installed program speak. It reaches the network, so it
 /// runs on request: `cargo test -p canoa-host --test store_piper -- --ignored`.
 #[test]
 #[ignore = "downloads the real release from GitHub and Hugging Face"]
@@ -404,8 +304,7 @@ fn the_real_release_installs_and_speaks() {
         .granted(&staging)
         .into_object();
     let platform = Platform::new(std::env::consts::OS, std::env::consts::ARCH);
-    let mut ask = PlanRequest::new(Action::Install, platform);
-    ask.channel = Some("standard".to_owned());
+    let ask = PlanRequest::new(Action::Install, platform);
     let plan = engine.plan(&ask, &tools).expect("a plan");
     let request = ApplyRequest::new(plan, staging.to_string_lossy());
     let spawner = LocalSpawner::new().files(&staging).into_object();
@@ -421,6 +320,32 @@ fn the_real_release_installs_and_speaks() {
         .expect("the version's folder")
         .to_path_buf();
     println!("installed at {}", copy.display());
+    // The voices are the shipped catalog's, fetched as the Models page does, each checked by the digest the catalog gives.
+    let catalog = canoa::store::catalog::parse_models(canoa_piper::catalog::SNAPSHOT)
+        .expect("the shipped catalog");
+    let inside = copy
+        .strip_prefix(&staging)
+        .expect("inside the staging folder");
+    for file in catalog.items.iter().flat_map(|item| &item.files) {
+        let check = match &file.check {
+            Some(canoa::store::catalog::FileCheck::Sha256(value)) => Check::Sha256 {
+                value: value.clone(),
+            },
+            Some(canoa::store::catalog::FileCheck::GitBlob(value)) => Check::GitBlob {
+                value: value.clone(),
+            },
+            other => panic!("a voice file with no digest this reads: {other:?}"),
+        };
+        let at = inside.join("voices").join(&file.file);
+        tools
+            .fetch(canoa::store::FetchRequest::new(
+                file.url.clone(),
+                at.to_string_lossy().replace('\\', "/"),
+                check,
+                1 << 30,
+            ))
+            .unwrap_or_else(|error| panic!("{} was not fetched: {}", file.file, error.message));
+    }
     assert!(copy.join("voices/en_US-ljspeech-medium.onnx").is_file());
     assert!(copy.join("voices/es_MX-claude-high.onnx.json").is_file());
 

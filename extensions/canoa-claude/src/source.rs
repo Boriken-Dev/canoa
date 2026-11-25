@@ -5,7 +5,7 @@
 //! The key is shipped with this crate ([`KEY`]). A manifest whose signature does not verify with it, or is by another key than the
 //! one the entry demands, makes the whole catalog refuse: nothing is taken as a digest-only fallback.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
 
 use canoa::store::catalog::{
     CatalogFile, FileCheck, Release, ReleasePart, ReleasePlatform, ReleasesCatalog,

@@ -3,7 +3,7 @@
 //! catalog's files are Node's archives, which the host downloads and checks, and the release is Pi's version: npm fetches the
 //! package itself, and checks each file against the registry's integrity, which the host does not see.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
 
 use canoa::store::catalog::{Release, ReleasePlatform, ReleasesCatalog};
 use canoa::store::feed::{MEASURED, json_from, platform_key, text_of};

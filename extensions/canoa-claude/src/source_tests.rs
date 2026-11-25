@@ -78,21 +78,16 @@ fn each_channel_names_its_version_and_every_program_has_the_sha256_the_signed_ma
 #[test]
 fn a_manifest_that_was_changed_or_signed_by_another_key_makes_the_whole_catalog_refuse() {
     let changed = LATEST.replacen("e6652f9170a07df4", "0000000000000000", 1);
-    let refused = verified(&changed, LATEST_SIGNATURE, &[])
-        .err()
-        .expect("refused");
+    let refused = verified(&changed, LATEST_SIGNATURE, &[]).expect_err("refused");
     assert!(
         refused.message().contains("signature is refused"),
         "{refused:?}"
     );
-    let other = verified(LATEST, STABLE_SIGNATURE, &[])
-        .err()
-        .expect("another document's");
+    let other = verified(LATEST, STABLE_SIGNATURE, &[]).expect_err("another document's");
     assert!(other.message().contains("refused"), "{other:?}");
     let demanded = vec!["5BE8A3F6C8A5C01D106C0AD820B1A390B168D356".to_owned()];
-    let strangers = verified(LATEST, LATEST_SIGNATURE, &demanded)
-        .err()
-        .expect("a key the entry did not name");
+    let strangers =
+        verified(LATEST, LATEST_SIGNATURE, &demanded).expect_err("a key the entry did not name");
     assert!(
         strangers.message().contains("none of the keys"),
         "{strangers:?}"
