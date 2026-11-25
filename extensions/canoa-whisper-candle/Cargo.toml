@@ -1,0 +1,41 @@
+[package]
+name = "canoa-whisper-candle"
+description = "Whisper in pure Rust (Candle) for Canoa: its models as a Store type, and the speech-to-text provider that runs them inside the host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["canoa", "speech-to-text", "whisper", "candle"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# Canoa itself is not published yet.
+publish = false
+
+[features]
+default = ["host"]
+# The Store type, the models page and the speech provider. Without it the crate is the engine alone, which compiles to
+# WebAssembly: Whisper over bytes (a model, its tokenizer and configuration) and 16 kHz samples.
+host = ["dep:canoa", "dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:rayon"]
+
+[dependencies]
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+tokenizers.workspace = true
+serde_json.workspace = true
+canoa = { workspace = true, features = ["store", "speech"], optional = true }
+coqui-acp-api = { workspace = true, optional = true }
+guatiao = { workspace = true, optional = true }
+guatiao-intake = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
+
+[dev-dependencies]
+coqui-acp-harness.workspace = true
+coqui-acp-api.workspace = true
+sha2 = { workspace = true }
+guatiao.workspace = true
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whisper"]
+members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whisper", "extensions/canoa-whisper-candle"]
 exclude = ["third_party/whisper-rs-sys"]
 
 [workspace.package]
@@ -133,6 +133,12 @@ zeroize = "1"
 time = { version = "0.3", default-features = false, features = ["parsing"] }
 # whisper.cpp inside the host's process; its sources are carried by whisper-rs-sys and built with cmake.
 whisper-rs = { version = "=0.16.0", default-features = false }
+# Whisper in pure Rust (`canoa-whisper-candle`): Hugging Face's Candle, and the tokenizer with its regular expressions in Rust, as WebAssembly needs.
+candle-core = { version = "0.11", default-features = false }
+candle-nn = { version = "0.11", default-features = false }
+candle-transformers = { version = "0.11", default-features = false }
+tokenizers = { version = "0.23", default-features = false, features = ["unstable_wasm"] }
+rayon = "1"
 rpassword = "7"
 sha2 = { version = "0.11", default-features = false }
 rustix = { version = "1.1", default-features = false, features = ["std"] }
@@ -177,6 +183,7 @@ canoa-pi = { path = "extensions/canoa-pi" }
 canoa-powershell = { path = "extensions/canoa-powershell" }
 canoa-python = { path = "extensions/canoa-python" }
 canoa-whisper = { path = "extensions/canoa-whisper" }
+canoa-whisper-candle = { path = "extensions/canoa-whisper-candle" }
 canoa-piper = { path = "extensions/canoa-piper" }
 
 # The bridge library (coqui-acp-bridge) takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph
@@ -190,3 +197,11 @@ coqui-peer-tls = { git = "https://github.com/Boriken-Dev/coqui-peer-tls", rev = 
 # coqui-access takes coqui-net-acl from this commit and the bridge library (coqui-acp-bridge) from crates.io: one source, so the offline mirror
 # holds one copy.
 coqui-net-acl = { git = "https://github.com/Boriken-Dev/coqui-net-acl", rev = "839435acc29b76ec0190b7099f870863313d3fcd" }
+
+# Candle's matrix multiply writes its aarch64 half-precision instructions as inline assembly that assembles only once it is inlined into a
+# function that enables `fp16`, which an unoptimized build does not do: without this a debug build fails on Windows on ARM.
+[profile.dev.package.gemm-common]
+opt-level = 1
+
+[profile.dev.package.gemm-f16]
+opt-level = 1
