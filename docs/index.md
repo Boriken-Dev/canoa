@@ -1,23 +1,35 @@
+---
+title: Quick Start
+hide:
+  - toc
+---
+
 # {{ name }}
 
-**Discover. Connect. Route.**
+**Discover. Connect. Route.** {{ name }} is one chat window for the coding agents on your computer and the ones you reach elsewhere: Claude, Codex, Pi and any agent that speaks the Agent Client Protocol. You choose what each agent may do, and it asks before it does more.
 
-{{ name }} provides a common place to discover, authenticate and interact with local or remote agent services, without binding users to a single provider or client. It includes a responsive Flutter multi-session interface, a browser extension that can offer authorized page/DevTools functionality through MCP, a Rust host (`{{ program }}`) that serves local agents to paired keys, and a small Rust registry of services and client grants.
+<!-- download -->
+
+![The {{ name }} window with a session waiting for an answer](assets/screens/window-permission-dark.png#only-dark)
+![The {{ name }} window with a session waiting for an answer](assets/screens/window-permission-light.png#only-light)
+
+## Three steps to a first conversation
+
+1. **Get {{ name }}.** Use the button above, or [build it from source](getting-started.md) until a release exists. On Windows the download is one file, {{ executable }}.exe, that you can run from any folder; on Linux it is an AppImage.
+2. **Open it and sign an agent in.** The window lists the agents it found on this computer, or offers the Store when there are none. Add an account under **Settings, Accounts** if an agent needs one. See [Accounts](guide/accounts.md).
+3. **Start a session.** Press **Ctrl+N**, choose **Workspace** and a folder, type what you want and press Enter. When the agent wants to change a file or run a command, a card asks you; **Yes** lets it, **Deny** refuses. See [The window](guide/window.md) for a whole first session.
+
+## Where next
+
+| You want to | Read |
+| --- | --- |
+| Learn the window: sessions, tabs, the composer | [The window](guide/window.md) |
+| Decide what an agent may do | [Permissions](guide/permissions.md) |
+| Add agents, skills, tools and programs | [The Store](guide/store.md) |
+| Change how it looks and behaves | [Settings](guide/settings.md) |
+| Use the same chat in your browser | [The browser extension](guide/browser-extension.md), [the web app and the portal](guide/web-and-portal.md) |
+| Have the chat beside a mail or a document | [The Office add-in](guide/office-addin.md) |
+| Build on it, or run it on a server | [Developers](developers.md) |
 
 !!! warning "Development status"
-    Early development: nothing here implies a published binary or public service. The [roadmap](roadmap.md) is the one record of what exists.
-
-## Start here
-
-- [Getting started](getting-started.md) to build the Rust crates, the desktop and web apps and the extension.
-- [Architecture](architecture.md) explains peer identity, browser authority and tool permission boundaries.
-- [Interoperability](interop.md) and [Transport selection](transport.md) explain preferred WebTransport, WSS fallback and peer verification.
-- [Browser integration](browser.md) describes the Chromium extension, side panel, full-page UI and future cross-browser adapters.
-- [Site adapters](site-adapters.md) describe user-installed JavaScript and Wasm MCP tools for websites.
-- [Roadmap](roadmap.md) distinguishes working components from planned work.
-
-## Scope
-
-{{ name }} is **not** a new agent wire protocol. ACP is the client/agent interface; MCP is the tool interface, and coqui-peer supplies reusable identity and pairing primitives. Implementations may differ provided they agree on a published wire profile and authentication contract.
-
-See the [source repository](https://github.com/Boriken-Dev/canoa) or the [Rust API](https://boriken-dev.github.io/canoa/rust/canoa/index.html).
+    {{ name }} is in early development. The [roadmap](roadmap.md) is the one record of what works and what is planned.

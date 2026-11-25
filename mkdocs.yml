@@ -8,6 +8,7 @@ docs_dir: docs
 
 theme:
   name: material
+  custom_dir: overrides
   # The system font stack: the site asks Google Fonts for nothing.
   font: false
   favicon: assets/favicon.ico
@@ -31,28 +32,39 @@ theme:
     - content.code.copy
 
 nav:
-  - Home: index.md
-  - Getting started: getting-started.md
-  - Architecture: architecture.md
-  - ACP and MCP: protocols.md
-  - ACP v2 Flutter client: acp-client.md
-  - Interoperability: interop.md
-  - Transport selection: transport.md
-  - Desktop and configuration: configuration.md
-  - Words, symbols and brands: themes_and_brands.md
-  - Providers written as scripts: script_providers.md
-  - Views from agents and overlays: a2ui_views.md
-  - The host: host.md
-  - The portal: portal.md
-  - One file per platform: portable.md
-  - Offline deps branch: offline-deps.md
-  - Browser MCP and DevTools: browser-mcp.md
-  - Browser integration: browser.md
-  - ACP permission requests: acp-permissions.md
-  - User site adapters: site-adapters.md
-  - Browser comparisons: browser-comparison.md
-  - Roadmap: roadmap.md
-  - Rust API: https://boriken-dev.github.io/canoa/rust/canoa/index.html
+  - Quick Start: index.md
+  - User guide:
+      - The window: guide/window.md
+      - Permissions: guide/permissions.md
+      - The Store: guide/store.md
+      - Accounts: guide/accounts.md
+      - Settings: guide/settings.md
+      - The browser extension: guide/browser-extension.md
+      - The Office add-in: guide/office-addin.md
+      - The web app and the portal: guide/web-and-portal.md
+  - Developers:
+      - Overview: developers.md
+      - Getting started: getting-started.md
+      - Architecture: architecture.md
+      - ACP and MCP: protocols.md
+      - ACP v2 Flutter client: acp-client.md
+      - Interoperability: interop.md
+      - Transport selection: transport.md
+      - Desktop and configuration: configuration.md
+      - Words, symbols and brands: themes_and_brands.md
+      - Providers written as scripts: script_providers.md
+      - Views from agents and overlays: a2ui_views.md
+      - The host: host.md
+      - The portal: portal.md
+      - One file per platform: portable.md
+      - Offline deps branch: offline-deps.md
+      - Browser MCP and DevTools: browser-mcp.md
+      - Browser integration: browser.md
+      - ACP permission requests: acp-permissions.md
+      - User site adapters: site-adapters.md
+      - Browser comparisons: browser-comparison.md
+      - Roadmap: roadmap.md
+      - Rust API: https://boriken-dev.github.io/canoa/rust/canoa/index.html
 
 plugins:
   - search
@@ -64,3 +76,4 @@ markdown_extensions:
 
 hooks:
   - tools/docs_brand.py
+  - tools/docs_download.py
