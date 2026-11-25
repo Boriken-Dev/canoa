@@ -237,7 +237,6 @@ class SettingsPageState extends State<SettingsPage> {
     'mail': (ready: widget.mail != null, build: () => MailSection(key: const Key('settings-mail'), controller: widget.mail!)),
     'shells': (ready: widget.shells != null, build: () => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!)),
     'usage': (ready: !widget.usageSection, build: () => UsageWarning(controller: controller)),
-    'store': (ready: true, build: () => StoreSection(key: const Key('settings-store'), onStore: widget.onLoadout)),
     'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),
     'catalog_sources': (ready: widget.catalogSources != null, build: () => CatalogSourcesSection(key: const Key('settings-catalog-sources'), sources: widget.catalogSources!)),
     'advanced': (ready: widget.advancedConfig != null, build: () => AdvancedSection(key: const Key('settings-advanced'), config: widget.advancedConfig!)),

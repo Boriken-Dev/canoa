@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../desktop/control_client.dart' show ControlFailed;
 import '../served/host_files.dart';
+import '../l10n/app_text.dart';
 import '../shell/confirm_remove.dart';
 import 'settings_row.dart';
 
@@ -249,9 +250,7 @@ class _ExtensionsSectionState extends State<ExtensionsSection> {
       final text = Theme.of(context).textTheme;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
-          'An extension adds types to the Store, each made of programs the host installs with the plan you confirm. The host loads '
-          'extensions when it starts. The Store\'s Extensions type installs the ones the catalogs list, checking what it fetches against '
-          'their digest; the ones named here by hand are loaded as they are.',
+          context.t('extensions.intro'),
           style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 12),

@@ -264,7 +264,7 @@ void main() {
       final sections = HostSections(call);
       await sections.load();
       await openSettings(tester, hostSections: sections);
-      for (final id in ['general', 'appearance', 'notifications', 'voice', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'store', 'about']) {
+      for (final id in ['general', 'appearance', 'notifications', 'voice', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'about']) {
         expect(find.byKey(Key('settings-nav-$id')), findsOneWidget, reason: id);
       }
       expect(find.byKey(const Key('settings-nav-region')), extension ? findsOneWidget : findsNothing);

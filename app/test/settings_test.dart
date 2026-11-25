@@ -173,15 +173,15 @@ void main() {
   group('the page', () {
     testWidgets('lists the sections in groups, opens the first, and has no Save, Cancel or Quit', (tester) async {
       await openSettings(tester);
-      for (final group in const ['App', 'Agents', 'Store', 'About']) {
+      for (final group in const ['App', 'Agents', 'About']) {
         expect(find.text(group), findsWidgets);
       }
-      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'store', 'about']) {
+      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'about']) {
         expect(find.byKey(Key('settings-nav-$id')), findsOneWidget, reason: id);
       }
       expect(find.byKey(const Key('settings-nav-hosting')), findsNothing, reason: 'this app runs no host here');
       expect(find.byKey(const Key('settings-section-general')), findsOneWidget);
-      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'store', 'about']) {
+      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'about']) {
         await goTo(tester, id);
         expect(find.byKey(Key('settings-section-$id')), findsOneWidget, reason: id);
         for (final word in const ['Save', 'Cancel', 'Quit Canoa']) {
@@ -530,27 +530,10 @@ void main() {
     });
   });
 
-  group('Store', () {
-    testWidgets('Settings lists no catalogs: they are each Store type\'s, and the section opens the Store', (tester) async {
-      var opened = 0;
-      await openSettings(tester, config: every, section: 'store', onLoadout: () => opened++);
-      expect(find.text('https://example.invalid/catalog.git@main#catalog.json'), findsNothing);
-      for (final key in const ['catalog-main', 'catalog-label', 'catalog-spec', 'catalog-add', 'limit-catalog_max_bytes']) {
-        expect(find.byKey(Key(key)), findsNothing, reason: key);
-      }
-      expect(find.byKey(const Key('settings-nav-catalogs')), findsNothing);
-      await tester.tap(find.byKey(const Key('settings-open-store')));
-      expect(opened, 1);
-    });
-
-    testWidgets('searching for catalogs, sources or registries finds the Store section', (tester) async {
-      await openSettings(tester);
-      for (final word in const ['catalog', 'registries', 'skills']) {
-        await tester.enterText(find.byKey(const Key('settings-search')), word);
-        await tester.pumpAndSettle();
-        expect(find.byKey(const Key('settings-nav-store')), findsOneWidget, reason: word);
-      }
-    });
+  testWidgets('Settings has no section that only points to the Store: it has its own entry', (tester) async {
+    await openSettings(tester, config: every);
+    expect(find.byKey(const Key('settings-nav-store')), findsNothing);
+    expect(find.byKey(const Key('settings-open-store')), findsNothing);
   });
 
   testWidgets('About names the build', (tester) async {
