@@ -12,6 +12,7 @@ CLAUDE*
 !app/assets/icons/agents/claude.svg
 !app/test/fixtures/claude_subagent_updates.json
 !extensions/canoa-claude/looks/claude.json
+!extensions/canoa-claude/keys/claude-code.asc
 !app/test/goldens/claude_*.png
 .claude
 *.local.*

@@ -359,7 +359,7 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
     assert_eq!(whisper["installed"], true, "{whisper}");
     assert_eq!(
         whisper["models"],
-        json!([{"id": "tiny", "label": "Tiny, every language (78 MB)"}])
+        json!([{"id": "tiny", "label": "Tiny, every language"}])
     );
     let answer = ask(
         &control,
