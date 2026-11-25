@@ -4,7 +4,6 @@
 import { kindsOf } from 'guatiao/kinds';
 
 const described = kindsOf({
-  "format": 1,
   "kinds": [
     {
       "name": "account_provider",
@@ -609,6 +608,70 @@ const described = kindsOf({
               "type": "u64"
             }
           ],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ]
+    },
+    {
+      "name": "config_store",
+      "floor_hash": 724946182,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "read",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "get",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "key",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "change",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "changes",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "fallible": true,
+          "args": [],
           "answer": {
             "type": "text"
           }
@@ -1924,6 +1987,16 @@ export const CatalogSource = described["catalog_source"];
  * of the entry the person wrote). A source never opens a connection by itself. The source destroys it, as it does the spawner.
  */
 export const SourceFetch = described["source_fetch"];
+
+/**
+ * Where the configuration lives. One instance is one store.
+ *
+ * A path is refused, with `BAD_VALUE`, when it is empty, when a name on it is a value and not a table, or when a lower layer names
+ * the path and so the writable layer cannot take it out (a removal reaches only the writable layer: what a lower layer holds is
+ * shown, never silently hidden). A store that cannot be reached answers `GONE` ([`crate::status::unavailable`]); one asked for
+ * what it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]).
+ */
+export const ConfigStore = described["config_store"];
 
 /**
  * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).

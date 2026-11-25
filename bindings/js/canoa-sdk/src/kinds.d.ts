@@ -787,6 +787,65 @@ export interface SourceFetchRemote extends k.RemoteBase<typeof SourceFetch> {
 export declare const SourceFetch: k.DescribedKind<SourceFetch, SourceFetchRemote, true>;
 
 /**
+ * Where the configuration lives. One instance is one store.
+ *
+ * A path is refused, with `BAD_VALUE`, when it is empty, when a name on it is a value and not a table, or when a lower layer names
+ * the path and so the writable layer cannot take it out (a removal reaches only the writable layer: what a lower layer holds is
+ * shown, never silently hidden). A store that cannot be reached answers `GONE` ([`crate::status::unavailable`]); one asked for
+ * what it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]).
+ *
+ * The `config_store` kind: what a provider of it implements.
+ */
+export interface ConfigStore {
+  /** What it is and what layers it has. Cheap, and the same on every call. */
+  describe(): unknown;
+  /** Every layer's tables now. */
+  read(): unknown;
+  /** What one path holds, merged over the layers with the host's rules, and the layer it comes from. */
+  get(key: g.Ref): unknown;
+  /**
+   * Makes `changes` in the writable layer, all or none, keeping what a person wrote that the change does not touch (a file keeps
+   * its comments and its order). `BUSY` ([`crate::status::changed`]) when `expect_revision` is not the store's.
+   */
+  change(changes: g.Ref): unknown;
+  /**
+   * A token that differs whenever anything in the store did: the change notification. A host that holds a copy reads again when
+   * it moves.
+   */
+  revision(): string;
+}
+
+/** A caller's handle on a `config_store` table: a method per slot. */
+export interface ConfigStoreRemote extends k.RemoteBase<typeof ConfigStore> {
+  /** What it is and what layers it has. Cheap, and the same on every call. */
+  describe(): g.Value;
+  /** Every layer's tables now. */
+  read(): g.Value;
+  /** What one path holds, merged over the layers with the host's rules, and the layer it comes from. */
+  get(key: unknown): g.Value;
+  /**
+   * Makes `changes` in the writable layer, all or none, keeping what a person wrote that the change does not touch (a file keeps
+   * its comments and its order). `BUSY` ([`crate::status::changed`]) when `expect_revision` is not the store's.
+   */
+  change(changes: unknown): g.Value;
+  /**
+   * A token that differs whenever anything in the store did: the change notification. A host that holds a copy reads again when
+   * it moves.
+   */
+  revision(): string;
+}
+
+/**
+ * Where the configuration lives. One instance is one store.
+ *
+ * A path is refused, with `BAD_VALUE`, when it is empty, when a name on it is a value and not a table, or when a lower layer names
+ * the path and so the writable layer cannot take it out (a removal reaches only the writable layer: what a lower layer holds is
+ * shown, never silently hidden). A store that cannot be reached answers `GONE` ([`crate::status::unavailable`]); one asked for
+ * what it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]).
+ */
+export declare const ConfigStore: k.DescribedKind<ConfigStore, ConfigStoreRemote, false>;
+
+/**
  * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).
  *
  * A provider that cannot do something answers `UNSUPPORTED` ([`unsupported`]) and does not declare its capability; the host asks
