@@ -18,6 +18,7 @@ final class ModelChoice {
     this.defaultEffort,
     this.isDefault = false,
     this.accounts = const [],
+    this.capabilities = const [],
   });
 
   /// What a session is told to use.
@@ -43,6 +44,16 @@ final class ModelChoice {
   /// For the models of a pool: the accounts of the pool that list it. Empty for one account's list.
   final List<String> accounts;
 
+  /// What the model can do, as ids (`chat`, `embed`, `speech_to_text`, ...). Empty means the provider reports none, which is not
+  /// the same as none: such a model is kept apart and still accepted, never hidden.
+  final List<String> capabilities;
+
+  /// Whether the provider says what this model can do.
+  bool get reportsCapabilities => capabilities.isNotEmpty;
+
+  /// Whether the model reports [capability].
+  bool can(String capability) => capabilities.contains(capability);
+
   static ModelChoice? _parse(Object? json) {
     if (json is! Map || json['id'] is! String) return null;
     String? text(String key) => json[key] is String ? json[key] as String : null;
@@ -57,9 +68,31 @@ final class ModelChoice {
       defaultEffort: text('default_effort'),
       isDefault: json['is_default'] == true,
       accounts: [if (json['accounts'] is List) for (final each in json['accounts'] as List) if (each is String) each],
+      capabilities: [if (json['capabilities'] is List) for (final each in json['capabilities'] as List) if (each is String) each],
     );
   }
 }
+
+/// The models a use needs, split by what they report.
+final class ModelsFor {
+  const ModelsFor({required this.offered, required this.unreported});
+
+  /// The models that report the capability.
+  final List<ModelChoice> offered;
+
+  /// The models that report no capabilities at all: not offered by default, shown apart, and a typed id is accepted.
+  final List<ModelChoice> unreported;
+
+  /// What a picker lists: the offered models, then the unreported ones. A model that reports capabilities and lacks this one is
+  /// not listed.
+  List<ModelChoice> get listed => [...offered, ...unreported];
+}
+
+/// Splits [models] for a use that needs [capability]: a model that reports capabilities and lacks it is left out.
+ModelsFor modelsFor(Iterable<ModelChoice> models, String capability) => ModelsFor(
+  offered: [for (final model in models) if (model.can(capability)) model],
+  unreported: [for (final model in models) if (!model.reportsCapabilities) model],
+);
 
 /// An account of a pool, and whether it listed its models; a member that could not says why.
 final class PoolListing {
@@ -226,7 +259,8 @@ final class SourceChoices {
         ),
       if (models.isNotEmpty) ConfigOption(
         id: 'model', label: 'Model', current: '', category: 'model', defaultLabel: standsFor?.name, defaultName: shortName,
-        choices: [for (final each in models) if (each != standsFor) Choice(each.id, each.name)],
+        // An agent session talks: a model that reports it cannot chat (an embedding or a speech model) is not offered.
+        choices: [for (final each in modelsFor(models, 'chat').listed) if (each != standsFor) Choice(each.id, each.name)],
       ),
       if (efforts.isNotEmpty)
         ConfigOption(

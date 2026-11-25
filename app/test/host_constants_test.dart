@@ -7,7 +7,8 @@ import 'dart:io';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-String _host(String file) => File('../crates/canoa-host/src/$file').readAsStringSync();
+String _host(String file) =>
+    File('../crates/canoa-host/src/$file').readAsStringSync();
 
 /// The text of the Rust constant [name] in [source]: the string it is set to, which may be on the next line.
 String _constant(String source, String name) {
@@ -24,13 +25,53 @@ void main() {
   });
 
   test('the skills directory a search asks is the host\'s', () {
-    expect(CanoaConfig.defaultSkillsSearch, _constant(_host('control/skill_search.rs'), 'DEFAULT_BASE'));
+    expect(
+      CanoaConfig.defaultSkillsSearch,
+      _constant(_host('control/skill_search.rs'), 'DEFAULT_BASE'),
+    );
   });
 
   test('every key of [host.kb] the app edits is one the host reads', () {
-    final kb = RegExp(r'struct RawKb \{([^}]+)\}').firstMatch(_host('config/raw.rs'));
-    expect(kb, isNotNull);
-    final read = {for (final field in RegExp(r'^\s*(?:pub(?:\([a-z]+\))?\s+)?(\w+):', multiLine: true).allMatches(kb!.group(1)!)) field.group(1)!};
-    expect(read.containsAll(CanoaConfig.hostKbKeys), isTrue, reason: '${CanoaConfig.hostKbKeys.toSet().difference(read)} is read by the app only');
+    final raw = _host('config/raw.rs');
+    Set<String> fieldsOf(String struct) {
+      final body = RegExp('struct $struct \\{([^}]+)\\}').firstMatch(raw);
+      expect(body, isNotNull, reason: struct);
+      return {
+        for (final field in RegExp(
+          r'^\s*(?:pub(?:\([a-z]+\))?\s+)?(\w+):',
+          multiLine: true,
+        ).allMatches(body!.group(1)!))
+          field.group(1)!,
+      };
+    }
+
+    // `use` is written `choice` in the host's struct and renamed by serde.
+    expect(fieldsOf('RawKb').containsAll(['embedder', 'ranker']), isTrue);
+    for (final role in ['RawKbEmbedder', 'RawKbRanker']) {
+      expect(
+        fieldsOf(role).containsAll(['choice', 'model']),
+        isTrue,
+        reason: role,
+      );
+      expect(raw, contains('#[serde(rename = "use")]'));
+    }
+    for (final key in CanoaConfig.hostKbKeys.where((key) => key != 'server')) {
+      expect(
+        ['embedder', 'ranker'].contains(key.split('_').first),
+        isTrue,
+        reason: key,
+      );
+      expect(
+        ['use', 'model'].contains(key.split('_').last),
+        isTrue,
+        reason: key,
+      );
+    }
+    // The server is a `[sdk.NAME]` table of the `server` provider with an address and the operations it does.
+    expect(raw, contains('"provider" | "address" | "key_env"'));
+    expect(
+      _host('../../canoa/src/sdk/openai_shape.rs'),
+      contains('pub const SERVER_ID: &str = "server";'),
+    );
   });
 }

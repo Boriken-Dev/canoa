@@ -80,24 +80,70 @@ connect_timeout = 12
     expect(() => CanoaConfig.parse('[overlays]\nmine = { dir = "mine", kb = "sometimes" }\n'), throwsFormatException);
   });
 
-  test('[host.kb] is read and set by its four keys, and the rest of the table and of [host] stays', () {
-    final config = CanoaConfig.parse('[host.kb]\nembeddings = "http://127.0.0.1:60570"\nmodel = "m"\nchunk_bytes = 512\n'
-        '[host.agents.a]\nprogram = "agent"\nlisten = "127.0.0.1:7000"\n');
-    expect(config.hostKb, {'embeddings': 'http://127.0.0.1:60570', 'model': 'm'});
+  test('[host.kb] is read and set by its embedder, its ranker and the server the panel keeps, and the rest stays', () {
+    final config = CanoaConfig.parse(
+      '[host.kb]\nchunk_bytes = 512\n[host.kb.embedder]\nuse = "openai:work"\nmodel = "m"\ndimensions = 256\n'
+      '[sdk.other]\nprovider = "server"\naddress = "http://h"\n'
+      '[host.agents.a]\nprogram = "agent"\nlisten = "127.0.0.1:7000"\n',
+    );
+    expect(config.hostKb, {
+      'embedder_use': 'openai:work',
+      'embedder_model': 'm',
+    });
     expect(const CanoaConfig().hostKb, isEmpty);
 
-    final changed = config.withHostKb({'embeddings': 'http://127.0.0.1:60570', 'model': 'm', 'llm_endpoint': 'http://127.0.0.1:60570', 'llm_model': 'q'});
+    // A server and a ranker with no `use` of its own use the server; the embedder keeps its backend.
+    final changed = config.withHostKb({
+      'embedder_use': 'openai:work',
+      'embedder_model': 'm',
+      'ranker_model': 'q',
+      'server': 'http://127.0.0.1:60570',
+    });
     final reread = CanoaConfig.parse(changed.encode());
-    expect(reread.hostKb['llm_model'], 'q');
-    expect(((reread.host!['kb']) as Map)['chunk_bytes'], 512, reason: 'a key the app does not edit stays');
+    expect(reread.hostKb, {
+      'embedder_use': 'openai:work',
+      'embedder_model': 'm',
+      'ranker_use': 'knowledge',
+      'ranker_model': 'q',
+      'server': 'http://127.0.0.1:60570',
+    });
+    expect(
+      ((reread.host!['kb']) as Map)['chunk_bytes'],
+      512,
+      reason: 'a key the app does not edit stays',
+    );
+    expect(
+      (((reread.host!['kb']) as Map)['embedder'] as Map)['dimensions'],
+      256,
+      reason: 'so does one of a role it edits',
+    );
     expect(reread.hostEntries.single.name, 'a');
+    final sdk = reread.tables['sdk'] as Map;
+    expect(sdk['other'], isNotNull, reason: 'another offer stays');
+    expect((sdk['knowledge'] as Map)['capabilities'], ['embed', 'chat']);
+    expect((sdk['knowledge'] as Map)['provider'], 'server');
 
-    // Empty values go; a table with nothing left goes; a `[host]` with nothing left goes.
-    final less = reread.withHostKb({'embeddings': 'http://127.0.0.1:60570', 'model': ' '});
-    expect(CanoaConfig.parse(less.encode()).hostKb, {'embeddings': 'http://127.0.0.1:60570'});
-    final bare = CanoaConfig.parse('[host.kb]\nllm_endpoint = "http://h"\nllm_model = "q"\n').withHostKb(const {});
+    // A role with no model goes, with the server when none is named; a table with nothing left goes; so does a `[host]`.
+    final less = reread.withHostKb({
+      'embedder_use': 'openai:work',
+      'embedder_model': ' ',
+    });
+    expect(CanoaConfig.parse(less.encode()).hostKb, isEmpty);
+    expect(
+      (CanoaConfig.parse(less.encode()).tables['sdk'] as Map).containsKey(
+        'knowledge',
+      ),
+      isFalse,
+    );
+    final bare = CanoaConfig.parse('[host.kb.ranker]\nuse = "x"\nmodel = "q"\n')
+        .withHostKb(const {});
     expect(bare.host, isNull);
     expect(CanoaConfig.parse(bare.encode()).hostKb, isEmpty);
+    // With no `use` and no server, a role uses the operation's own choice.
+    expect(const CanoaConfig().withHostKb({'embedder_model': 'm'}).hostKb, {
+      'embedder_use': 'default',
+      'embedder_model': 'm',
+    });
   });
 
   test('allow_once_only is read, written and kept by every copy, and off by default', () {

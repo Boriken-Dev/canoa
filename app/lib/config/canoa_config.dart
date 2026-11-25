@@ -451,32 +451,84 @@ final class CanoaConfig {
     return _withTable('overlays', raw, overlays: overlays);
   }
 
-  /// `[host.kb]`: where the knowledge tools get meaning and ordering, as the file holds it. Only the four the app edits are
-  /// named here; the others the host reads stay in the file. The list is the knowledge panel's own choice of fields, which the host
-  /// does not say; `host_constants_test.dart` holds each to a key the host reads.
-  static const hostKbKeys = ['embeddings', 'model', 'llm_endpoint', 'llm_model'];
+  /// What the knowledge panel edits: `[host.kb.embedder]` and `[host.kb.ranker]` (the backend each `use`s and the model it asks for)
+  /// and the one server of the person's own the panel keeps, `[sdk.knowledge]`. The keys are the panel's own choice of fields,
+  /// which the host does not say; `host_constants_test.dart` holds each to a key the host reads.
+  static const hostKbKeys = [
+    'embedder_use',
+    'embedder_model',
+    'ranker_use',
+    'ranker_model',
+    'server',
+  ];
 
-  /// The values of [hostKbKeys] that `[host.kb]` holds.
+  /// The name of the server table the panel keeps (`[sdk.knowledge]`).
+  static const knowledgeServer = 'knowledge';
+
+  /// The values of [hostKbKeys] the file holds.
   Map<String, String> get hostKb {
     final kb = host?['kb'];
-    if (kb is! Map) return const {};
-    return {
-      for (final key in hostKbKeys)
-        if (kb[key] case final String value when value.isNotEmpty) key: value,
-    };
+    final out = <String, String>{};
+    for (final role in const ['embedder', 'ranker']) {
+      final table = kb is Map ? kb[role] : null;
+      if (table is! Map) continue;
+      for (final key in const ['use', 'model']) {
+        if (table[key] case final String value when value.isNotEmpty) {
+          out['${role}_$key'] = value;
+        }
+      }
+    }
+    final server = (tables['sdk'] as Map?)?[knowledgeServer];
+    if (server is Map) {
+      if (server['address'] case final String address when address.isNotEmpty) {
+        out['server'] = address;
+      }
+    }
+    return out;
   }
 
-  /// This configuration with the [hostKbKeys] of `[host.kb]` set to [values] (a key not in it, or empty, is taken out), and every
-  /// other key of the table, and of `[host]`, as it was. The table goes when nothing is left in it.
+  /// This configuration with the [hostKbKeys] set to [values]. A role with no model is off; a role with a model and no `use` uses
+  /// the server when one is named and the operation's own choice (`default`) when not. Every other key of `[host.kb]`, of `[host]`
+  /// and of `[sdk]` stays as it was; a table with nothing left goes.
   CanoaConfig withHostKb(Map<String, String> values) {
     final copy = _deepCopy(host ?? const {});
-    final kb = copy['kb'] is Map ? Map<String, dynamic>.of((copy['kb'] as Map).cast<String, dynamic>()) : <String, dynamic>{};
-    for (final key in hostKbKeys) {
-      final value = values[key]?.trim() ?? '';
-      value.isEmpty ? kb.remove(key) : kb[key] = value;
+    final kb = copy['kb'] is Map
+        ? Map<String, dynamic>.of((copy['kb'] as Map).cast<String, dynamic>())
+        : <String, dynamic>{};
+    final server = values['server']?.trim() ?? '';
+    for (final role in const ['embedder', 'ranker']) {
+      final model = values['${role}_model']?.trim() ?? '';
+      if (model.isEmpty) {
+        kb.remove(role);
+        continue;
+      }
+      var use = values['${role}_use']?.trim() ?? '';
+      if (use.isEmpty) use = server.isEmpty ? 'default' : knowledgeServer;
+      final table = kb[role] is Map
+          ? Map<String, dynamic>.of((kb[role] as Map).cast<String, dynamic>())
+          : <String, dynamic>{};
+      table['use'] = use;
+      table['model'] = model;
+      kb[role] = table;
     }
     kb.isEmpty ? copy.remove('kb') : copy['kb'] = kb;
-    return withHost(copy.isEmpty ? null : copy);
+    final sdk = _deepCopy((tables['sdk'] as Map?) ?? const {});
+    if (server.isEmpty) {
+      sdk.remove(knowledgeServer);
+    } else {
+      final held = sdk[knowledgeServer] is Map
+          ? Map<String, dynamic>.of(
+              (sdk[knowledgeServer] as Map).cast<String, dynamic>(),
+            )
+          : <String, dynamic>{};
+      sdk[knowledgeServer] = {
+        ...held,
+        'provider': 'server',
+        'address': server,
+        'capabilities': held['capabilities'] ?? const ['embed', 'chat'],
+      };
+    }
+    return withHost(copy.isEmpty ? null : copy)._withTable('sdk', sdk);
   }
 
   /// This configuration with the option values [options] for the overlay [name], or none when [options] is empty. A string
