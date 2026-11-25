@@ -14,7 +14,7 @@ exclude = [".*", "*.local.*"]
 publish = false
 
 [dependencies]
-canoa = { workspace = true, features = ["speech", "speech-builtin"] }
+canoa = { workspace = true, features = ["speech", "speech-builtin", "sdk"] }
 coqui-acp-api.workspace = true
 guatiao.workspace = true
 guatiao-intake.workspace = true

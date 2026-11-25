@@ -47,3 +47,14 @@ pub struct OpenAiVoiceSettings { pub api_key: Option<Secret<String>>, pub model:
 - The description holds no network call: `describe` runs with nothing opened.
 
 - The lists here (`MODELS`, `SPEECH_MODELS`, `VOICES`, `STYLES`, with their end dates) are the one thing in the extensions that stays shipped data with no source: OpenAI's documentation is their only upstream (`GET /v1/models` needs a key and lists neither voices nor end dates), so a change in them is a release of this crate.
+
+## The `sdk_provider`
+
+`OpenAiSdk` (id `openai_sdk`, offer id `openai`, an offer made of an account is `openai:NAME`) serves the accounts whose kind provides `openai-api`, at the address their kind's model API setting says (OpenAI's own, or a gateway that speaks the shape: the offer is not pinned). It describes `chat` and `embed`; the host lends the HTTP and writes the key, and the crate sees neither. It is `canoa::sdk::OpenAiShaped` with a `Dialect` for OpenAI's own address (`max_completion_tokens`; no temperature for `gpt-5*` and the `o` series) and `rule`, the table that says what each model does, since `GET /v1/models` lists an id and an owner and nothing else:
+
+```rust
+pub struct OpenAiSdk;                       // an `sdk_provider`
+pub fn rule(model: ModelInfo) -> ModelInfo; // capabilities (declared) and limits by id; an id it does not know reports none
+```
+
+`text-embedding-*`: `embed`, with `dimensions` (1536, 3072 for `-3-large`), adjustable for `-3-*`, 8191 input tokens. `*transcribe*` and `whisper-*`: `speech_to_text`, `audio_input`. `tts-*` and `*-tts`: `text_to_speech`, `audio_output`, the voices the model takes and, for `gpt-4o-mini-tts` alone, the four styles. `*realtime*` and `*-audio-*`: `audio_input`, `audio_output`. `gpt-*`, `chatgpt-*` and the `o` series: `chat`, `tool_use`, `structured_output`, with `reasoning` where the model takes no temperature and `image_input` for `gpt-4o`, `gpt-4.1` and `gpt-5`. A change in OpenAI's catalog is a release of this crate. The tests run the contract over recorded answers (`tests/fixtures/*.json`, readable, no key).

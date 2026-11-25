@@ -6,7 +6,10 @@
 //! The host names none of it. The models and their end dates are OpenAI's, which it changes on its own schedule.
 #![forbid(unsafe_code)]
 
+mod sdk;
 mod voices;
+
+pub use sdk::{OpenAiSdk, rule};
 
 pub use voices::{
     OpenAiVoiceSettings, OpenAiVoices, SPEECH, SPEECH_MODELS, SPEECH_PROVIDER, STYLED_MODEL,
@@ -100,7 +103,7 @@ impl AccountSpeechOutput for OpenAiSpeechOutput {
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-openai",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [OpenAiSpeech, OpenAiVoices, OpenAiSpeechOutput]
+    providers = [OpenAiSpeech, OpenAiVoices, OpenAiSpeechOutput, OpenAiSdk]
 );
 
 #[cfg(test)]

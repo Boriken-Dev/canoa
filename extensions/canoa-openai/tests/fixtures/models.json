@@ -1,0 +1,14 @@
+{
+  "object": "list",
+  "data": [
+    {"id": "gpt-5-mini", "object": "model", "created": 1754425777, "owned_by": "system"},
+    {"id": "gpt-4o", "object": "model", "created": 1715367049, "owned_by": "system"},
+    {"id": "text-embedding-3-small", "object": "model", "created": 1705948997, "owned_by": "system"},
+    {"id": "text-embedding-3-large", "object": "model", "created": 1705953180, "owned_by": "system"},
+    {"id": "gpt-4o-transcribe", "object": "model", "created": 1742068463, "owned_by": "system"},
+    {"id": "whisper-1", "object": "model", "created": 1677532384, "owned_by": "openai-internal"},
+    {"id": "gpt-4o-mini-tts", "object": "model", "created": 1742403959, "owned_by": "system"},
+    {"id": "tts-1", "object": "model", "created": 1681940951, "owned_by": "openai-internal"},
+    {"id": "some-new-model", "object": "model", "created": 1790000000, "owned_by": "system"}
+  ]
+}
