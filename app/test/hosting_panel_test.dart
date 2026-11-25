@@ -6,6 +6,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/desktop/hosting_panel.dart';
+import 'package:canoa/loadout/loadout_controller.dart' show FindProgram;
 import 'package:canoa/providers/provider_catalog.dart' show providerCatalog;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -37,8 +38,8 @@ final class _Harness {
     };
   }
 
-  Future<void> show(WidgetTester tester, {CanoaConfig config = const CanoaConfig()}) async {
-    await tester.binding.setSurfaceSize(const Size(900, 1400));
+  Future<void> show(WidgetTester tester, {CanoaConfig config = const CanoaConfig(), FindProgram? findProgram, VoidCallback? onStore, Size size = const Size(900, 1400)}) async {
+    await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
@@ -52,6 +53,8 @@ final class _Harness {
               return null;
             },
             freePort: () async => 7811,
+            findProgram: findProgram,
+            onStore: onStore,
           ),
         ),
       ),
@@ -63,6 +66,35 @@ final class _Harness {
 }
 
 void main() {
+  testWidgets('every agent the host providers describe is listed, hosted or not, with its program found or not, and hosted in one action', (tester) async {
+    listBundledProviders();
+    final host = _Harness();
+    var opened = 0;
+    final config = const CanoaConfig().withHostAgent(name: 'Claude', listen: '127.0.0.1:7001', more: {'harness': 'claude'});
+    unawaited(host.supervisor.apply(configPath: '/c/canoa.cfg'));
+    await host.show(tester, size: const Size(900, 2600), config: config, onStore: () => opened++, findProgram: (program) async => program == 'Claude Code' ? '/bin/claude' : null);
+    host.tool.children.single.out.add('{"name":"Claude","kind":"agent","url":"ws://127.0.0.1:7001","peer":"$_paired"}');
+    await tester.pumpAndSettle();
+    for (final agent in bundledProviders()) {
+      expect(find.byKey(Key('hosting-agent-${agent.id}')), findsOneWidget, reason: '${agent.id} has a row');
+    }
+    expect(find.descendant(of: find.byKey(const Key('hosting-agent-claude')), matching: find.textContaining('Hosted on this computer')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('hosting-agent-claude')), matching: find.textContaining('Installed: /bin/claude')), findsOneWidget);
+    expect(find.byKey(const Key('hosting-host-claude')), findsNothing, reason: 'it is hosted already');
+    expect(find.byKey(const Key('hosting-install-claude')), findsNothing);
+    expect(find.descendant(of: find.byKey(const Key('hosting-agent-pi')), matching: find.textContaining('Not hosted on this computer')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('hosting-agent-pi')), matching: find.textContaining('Not installed')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('hosting-install-pi')));
+    await tester.tap(find.byKey(const Key('hosting-install-pi')));
+    expect(opened, 1, reason: 'Install opens the Store');
+    await tester.ensureVisible(find.byKey(const Key('hosting-host-pi')));
+    await tester.tap(find.byKey(const Key('hosting-host-pi')));
+    await tester.pumpAndSettle();
+    final agents = host.saved.single.host!['agents'] as Map;
+    expect(agents['Pi'], {'harness': 'pi', 'listen': '127.0.0.1:7811'}, reason: 'one entry that runs the harness, on a free loopback port');
+    expect(find.byKey(const Key('hosting-host-pi')), findsNothing, reason: 'now it is hosted');
+  });
+
   testWidgets('a waiting key is paired only after the person compares its whole id and says so', (tester) async {
     final host = _Harness();
     await host.show(tester);
@@ -239,7 +271,8 @@ void main() {
     await addDialog(tester, {'name': 'mine', 'program': 'nothing-here'});
     await addIt(tester);
     expect(find.text('host entry mine: program not found'), findsOneWidget);
-    expect(find.text('None yet.'), findsOneWidget);
+    expect(find.textContaining('Hosted on this computer'), findsNothing, reason: 'nothing was saved, so nothing is hosted');
+    expect(host.saved, isEmpty);
   });
 
   testWidgets('stopping hosting an entry asks first, then saves canoa.cfg without it', (tester) async {

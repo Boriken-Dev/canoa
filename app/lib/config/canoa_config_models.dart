@@ -2,7 +2,7 @@ part of 'canoa_config.dart';
 
 /// One entry of `[host]`, as canoa.cfg has it.
 final class HostEntry {
-  const HostEntry({required this.name, required this.kind, required this.runs, this.args = const [], this.listen});
+  const HostEntry({required this.name, required this.kind, required this.runs, this.args = const [], this.listen, this.harness});
 
   factory HostEntry.read(String name, String kind, Map<dynamic, dynamic> table) => HostEntry(
     name: name,
@@ -10,6 +10,7 @@ final class HostEntry {
     runs: '${table[kind == 'agent' ? 'program' : 'library'] ?? ''}',
     args: [if (table['args'] case final List<dynamic> args) for (final arg in args) '$arg'],
     listen: table['listen'] is String ? table['listen'] as String : null,
+    harness: table['harness'] is String ? table['harness'] as String : null,
   );
 
   final String name;
@@ -23,6 +24,9 @@ final class HostEntry {
 
   /// The address it listens on, when the file names one.
   final String? listen;
+
+  /// The harness provider an agent entry runs, when it runs one instead of a program.
+  final String? harness;
 }
 
 /// `[notifications]`: which kinds of news from a session reach the person outside the window. Each is on by default.

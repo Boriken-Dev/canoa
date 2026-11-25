@@ -7,7 +7,9 @@ import '../acp/agent_commands.dart';
 import '../acp/share_path.dart';
 import '../config/canoa_config.dart';
 import '../forms/schema_fields.dart';
-import '../providers/provider_catalog.dart' show EntryForm, providerCatalog;
+import '../l10n/app_text.dart';
+import '../loadout/loadout_controller.dart' show FindProgram;
+import '../providers/provider_catalog.dart' show AgentProvider, EntryForm, providerCatalog;
 import '../settings/setting_layers.dart' show SettingNote;
 import '../theme/look.dart';
 import 'host_supervisor.dart';
@@ -27,12 +29,20 @@ class HostingPanel extends StatefulWidget {
     required this.config,
     required this.onSave,
     this.freePort = freeLoopbackPort,
+    this.findProgram,
+    this.onStore,
   });
 
   final HostSupervisor supervisor;
   final CanoaConfig config;
   final SaveHosting onSave;
   final Future<int> Function() freePort;
+
+  /// Looks a program up the way a session on this computer finds it (the host's own resolution); null where the app cannot ask.
+  final FindProgram? findProgram;
+
+  /// Opens the Store, where an agent that is not installed is installed from.
+  final VoidCallback? onStore;
 
   @override
   State<HostingPanel> createState() => _HostingPanelState();
@@ -46,6 +56,30 @@ class _HostingPanelState extends State<HostingPanel> {
   String? message;
   bool busy = false;
 
+  /// Where each agent's program was found, by agent id; absent until asked, null when it is not there.
+  final Map<String, String?> _found = {};
+
+  @override
+  void initState() {
+    super.initState();
+    widget.supervisor.addListener(_look);
+    unawaited(_look());
+  }
+
+  bool _looked = false;
+
+  /// Asks where each agent's program is, once the host is running to answer.
+  Future<void> _look() async {
+    final find = widget.findProgram;
+    if (find == null || _looked || widget.supervisor.phase != HostPhase.running) return;
+    _looked = true;
+    for (final agent in providerCatalog.providers) {
+      final path = await find(agent.program);
+      if (!mounted) return;
+      setState(() => _found[agent.id] = path);
+    }
+  }
+
   Future<List<HostKey>> _keys() => !widget.supervisor.managesKeys ? Future.value(const []) : widget.supervisor.keys();
 
   void _refresh() => setState(() {
@@ -54,6 +88,7 @@ class _HostingPanelState extends State<HostingPanel> {
 
   @override
   void dispose() {
+    widget.supervisor.removeListener(_look);
     pairing?.cancel();
     super.dispose();
   }
@@ -102,6 +137,35 @@ class _HostingPanelState extends State<HostingPanel> {
       );
     });
   }
+
+  /// Hosts [agent] in one action: an entry that runs its harness provider, or its program, on a free loopback address.
+  Future<void> _host(AgentProvider agent) => _run(() async {
+    final port = await widget.freePort();
+    final taken = {for (final entry in config.hostEntries) entry.name};
+    var name = config.ownEntryOf(agent.id);
+    if (taken.contains(name)) name = agent.title;
+    for (var count = 2; taken.contains(name); count++) {
+      name = '${agent.title} $count';
+    }
+    final launch = agent.launch;
+    await _save(
+      agent.harness
+          ? config.withHostAgent(name: name, listen: '127.0.0.1:$port', more: {'harness': agent.id})
+          : config.withHostAgent(
+              name: name,
+              program: agent.program,
+              args: launch != null && launch.$1 == agent.program ? launch.$2 : const [],
+              listen: '127.0.0.1:$port',
+              usage: launch != null && launch.$1 == agent.program ? launch.$3 : null,
+            ),
+    );
+  });
+
+  /// The entries that host [agent]: those that run its harness provider, or its program.
+  List<HostEntry> _entriesOf(AgentProvider agent) => [
+    for (final entry in config.hostEntries)
+      if (entry.kind == 'agent' && (agent.harness ? entry.harness == agent.id : entry.harness == null && entry.runs == agent.program)) entry,
+  ];
 
   Future<void> _remove(HostEntry entry) async {
     final sure = await _confirm(
@@ -224,9 +288,12 @@ class _HostingPanelState extends State<HostingPanel> {
               ),
             ],
           ),
-          if (config.hostEntries.isEmpty)
+          if (config.hostEntries.isEmpty && providerCatalog.providers.isEmpty)
             const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('None yet.')),
-          for (final entry in config.hostEntries) _entryTile(entry),
+          // Every agent the host's providers describe, hosted or not, then the entries that are none of them.
+          for (final agent in providerCatalog.providers) _agentTile(agent),
+          for (final entry in config.hostEntries)
+            if (!providerCatalog.providers.any((agent) => _entriesOf(agent).contains(entry))) _entryTile(entry),
           const Divider(height: 32),
           Row(
             children: [
@@ -268,6 +335,44 @@ class _HostingPanelState extends State<HostingPanel> {
     );
   }
 
+  /// One agent the host can run: whether this computer hosts it and at what address, whether its program is installed, and how to
+  /// host it, stop hosting it, or install it from the Store.
+  Widget _agentTile(AgentProvider agent) {
+    final entries = _entriesOf(agent);
+    final asked = _found.containsKey(agent.id);
+    final path = _found[agent.id];
+    final installed = !asked ? context.t('hosting.checking') : (path == null ? context.t('hosting.not_installed') : context.t('hosting.installed', {'path': path}));
+    return Column(
+      key: Key('hosting-agent-${agent.id}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: SourceMark.provider(agent.id),
+          title: Text(agent.title),
+          subtitle: Text(
+            '${entries.isEmpty ? context.t('hosting.not_hosted') : context.t('hosting.hosted')}\n$installed',
+            key: Key('hosting-agent-state-${agent.id}'),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (asked && path == null && widget.onStore != null)
+                TextButton(key: Key('hosting-install-${agent.id}'), onPressed: widget.onStore, child: Text(context.t('hosting.install'))),
+              if (entries.isEmpty)
+                FilledButton.tonal(
+                  key: Key('hosting-host-${agent.id}'),
+                  onPressed: busy || !widget.supervisor.managesKeys ? null : () => unawaited(_host(agent)),
+                  child: Text(context.t('hosting.host')),
+                ),
+            ],
+          ),
+        ),
+        for (final entry in entries) Padding(padding: const EdgeInsets.only(left: 24), child: _entryTile(entry)),
+      ],
+    );
+  }
+
   Widget _entryTile(HostEntry entry) {
     String? url;
     String? provider;
@@ -292,7 +397,7 @@ class _HostingPanelState extends State<HostingPanel> {
                 : () => _run(() => _save(config.resetKey(['host', entry.kind == 'agent' ? 'agents' : 'providers', entry.name]))),
           ),
           Text(
-            [entry.runs, ...entry.args].join(' ') + (url == null ? '' : '\n$url'),
+            [entry.harness ?? entry.runs, ...entry.args].join(' ') + (url == null ? '' : '\n$url'),
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
           ),

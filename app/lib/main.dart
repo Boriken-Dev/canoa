@@ -720,6 +720,8 @@ class _CanoaAppState extends State<CanoaApp> {
       config: config,
       onSave: _saveHosting,
       freePort: freePort ?? freeLoopbackPort,
+      findProgram: _control == null ? null : controlFindProgram(_control!),
+      onStore: () => unawaited(_showLoadout()),
     ),
     const SizedBox(height: 24),
     Text('Knowledge search', style: Theme.of(context).textTheme.titleMedium),
