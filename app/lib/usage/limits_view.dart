@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../accounts/usage_view.dart';
+import '../l10n/app_text.dart';
 import '../sources/source_icons.dart';
 import 'usage_model.dart';
 
@@ -75,7 +76,7 @@ class LimitsView extends StatelessWidget {
                     if (each.loginNote case final why?)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
-                        child: Text('Not checked whether it is signed in: $why', key: Key('usage-login-note ${each.id}'), style: small),
+                        child: Text(context.t('usage.loginUnchecked', {'why': why}), key: Key('usage-login-note ${each.id}'), style: small),
                       ),
                     if (each.who case final who?)
                       Padding(
