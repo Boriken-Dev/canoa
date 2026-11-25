@@ -79,19 +79,11 @@ void main() {
       final before = await home.overlays.updates(refresh: true);
       expect(before['review']?.state, 'current', reason: '${before['review']?.problem}');
       catalog
-        ..write('catalog.toml', '[overlays.review]
-source = "./overlays/review"
-# elsewhere
-')
+        ..write('catalog.toml', '[overlays.review]\nsource = "./overlays/review"\n# elsewhere\n')
         ..commit('elsewhere');
       expect((await home.overlays.updates(refresh: true))['review']?.state, 'current');
       catalog
-        ..write('overlays/review/overlay.cfg', '[about]
-summary = "Review conventions, newer."
-
-[env]
-REVIEW_MODE = "strict"
-')
+        ..write('overlays/review/overlay.cfg', '[about]\nsummary = "Review conventions, newer."\n\n[env]\nREVIEW_MODE = "strict"\n')
         ..commit('newer');
       final after = await home.overlays.updates(refresh: true);
       expect(after['review']?.available, isTrue, reason: '${after['review']?.state} ${after['review']?.problem}');
