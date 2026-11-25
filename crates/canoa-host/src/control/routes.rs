@@ -463,7 +463,9 @@ impl Control {
         method: &str,
         params: &Value,
     ) -> Result<Value, (i32, String)> {
-        self.stores()?.read(
+        let stores = self.stores()?;
+        stores.trust_from(&self.store_section());
+        stores.read(
             method,
             params,
             caller.may(Grant::StorePrograms).then(|| caller.owner()),

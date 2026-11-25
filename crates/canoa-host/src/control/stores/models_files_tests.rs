@@ -200,48 +200,6 @@ impl StoreExtension for TestExtension {
     }
 }
 
-macro_rules! delegate_models {
-    ($name:ident, $id:literal, $real:expr) => {
-        #[derive(Default, Debug, Clone, Copy, Provider)]
-        #[provider(ModelStore, id = $id, crate = ::coqui_acp_api::guatiao)]
-        struct $name;
-
-        impl ModelStore for $name {
-            fn describe(&self) -> Result<ModelStoreInfo, ProviderError> {
-                $real.describe()
-            }
-            fn list(
-                &self,
-                query: ModelQuery,
-                spawner: Object<dyn ProcessSpawner>,
-            ) -> Result<ModelList, ProviderError> {
-                $real.list(query, spawner)
-            }
-            fn act(
-                &self,
-                request: ModelAct,
-                spawner: Object<dyn ProcessSpawner>,
-            ) -> Result<ModelActed, ProviderError> {
-                $real.act(request, spawner)
-            }
-            fn keep(
-                &self,
-                request: ModelKeep,
-                spawner: Object<dyn ProcessSpawner>,
-            ) -> Result<ModelKept, ProviderError> {
-                $real.keep(request, spawner)
-            }
-            fn service(
-                &self,
-                query: ServiceQuery,
-                spawner: Object<dyn ProcessSpawner>,
-            ) -> Result<ServiceReport, ProviderError> {
-                $real.service(query, spawner)
-            }
-        }
-    };
-}
-
 /// Whisper's `model_store` as it answers in a host: the type's rows come from catalogs, so a test that has no source lists two
 /// stand-in rows of its own over the real description and speech offer.
 #[derive(Default, Debug, Clone, Copy, Provider)]

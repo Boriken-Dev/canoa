@@ -10,8 +10,8 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
 use super::{
-    Change, Download, InstallPlan, InstallTools, LatestReport, Launch, MANAGER_UNKNOWN, Platform,
-    Serves, StoreInfo, Updatable,
+    Change, Check, Download, InstallPlan, InstallTools, LatestReport, Launch, MANAGER_UNKNOWN,
+    Platform, Serves, StoreInfo, Updatable, catalog,
 };
 
 /// What to unpack a fetched file with.
@@ -228,21 +228,41 @@ pub trait Recipe: Send + Sync + 'static {
     /// Variables that turn the program's own updater off, none of them a credential.
     fn launch_environment(&self) -> BTreeMap<String, String>;
 
-    /// The newest version, from the publisher's own endpoint.
-    fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport;
+    /// The newest version on `channel` (the store's first channel when none is named), from the catalogs of the program's scope:
+    /// the host reads them (the sources its extension registers, as canoa.cfg replaces, adds to or turns off) and `tools.releases`
+    /// hands this the merged document.
+    fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
+        let info = self.info();
+        catalog_latest(&info, channel, tools)
+    }
 
-    /// The release of `version`, or the newest on `channel`, for `platform`.
+    /// The release of `version`, or the newest on `channel`, for `platform`: what the catalogs list, then [`Self::adjust`]ed by
+    /// what only this recipe knows (how an archive unpacks, where the program starts).
     ///
     /// # Errors
     ///
-    /// `GUATIAO_ERR_UNSUPPORTED` with the reason for a version or a platform the publisher does not serve.
+    /// `GUATIAO_ERR_UNSUPPORTED` with the reason for a version or a platform no catalog lists.
     fn release(
         &self,
         version: Option<&str>,
         channel: Option<&str>,
         platform: &Platform,
         tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError>;
+    ) -> Result<Release, ProviderError> {
+        let info = self.info();
+        let release = catalog_release(&info, version, channel, platform, tools)?;
+        self.adjust(release, platform)
+    }
+
+    /// What a catalog cannot say about a release: the unpack step of each part, where the program starts, the steps and notices
+    /// of this program. The catalog's files are already in `release`, each with the check the catalog gave.
+    ///
+    /// # Errors
+    ///
+    /// Why the release cannot be installed on `platform`.
+    fn adjust(&self, release: Release, _platform: &Platform) -> Result<Release, ProviderError> {
+        Ok(release)
+    }
 
     /// How to start the staged program whose release launches at `path`: the path, the settings that hand it to a harness
     /// provider and the variables that keep its updater off.
@@ -295,6 +315,146 @@ pub trait Recipe: Send + Sync + 'static {
     fn finish(&self, _finish: &Finish<'_>) -> Result<(), ProviderError> {
         Ok(())
     }
+}
+
+/// The check a catalog's file is downloaded under.
+fn check_of(file: &catalog::CatalogFile) -> Check {
+    match &file.check {
+        Some(catalog::FileCheck::Sha256(value)) => Check::Sha256 {
+            value: value.clone(),
+        },
+        Some(catalog::FileCheck::Sha512(value)) => Check::Sha512 {
+            value: value.clone(),
+        },
+        Some(catalog::FileCheck::GitBlob(value)) => Check::GitBlob {
+            value: value.clone(),
+        },
+        Some(catalog::FileCheck::Unverified(why)) => Check::Unverified { why: why.clone() },
+        None => Check::Unverified {
+            why: "the catalog gives no checksum".to_owned(),
+        },
+    }
+}
+
+fn read_releases(
+    info: &StoreInfo,
+    tools: &Object<dyn InstallTools>,
+) -> Result<catalog::ReleasesCatalog, ProviderError> {
+    let text = tools.releases()?;
+    catalog::parse_releases(&text).map_err(|why| {
+        crate::status::internal(format!(
+            "the releases of {} are unreadable: {why}",
+            info.title
+        ))
+    })
+}
+
+/// The channel a request names, or the store's first.
+fn channel_of<'a>(info: &'a StoreInfo, channel: Option<&'a str>) -> Option<&'a str> {
+    channel.or_else(|| info.channels.first().map(String::as_str))
+}
+
+/// The newest version on `channel` among the releases the catalogs of `info`'s scope list.
+#[must_use]
+pub fn catalog_latest(
+    info: &StoreInfo,
+    channel: Option<&str>,
+    tools: &Object<dyn InstallTools>,
+) -> LatestReport {
+    let channel = channel_of(info, channel);
+    match read_releases(info, tools).and_then(|catalog| newest_on(info, &catalog, channel)) {
+        Ok(version) => {
+            let mut report = LatestReport::known(version);
+            report.channel = channel.map(str::to_owned);
+            report
+        }
+        Err(error) => LatestReport::unknown(error.message().to_owned()),
+    }
+}
+
+/// The version `channel` is at: the catalog's own word for it, else the newest release listed on it, else (for a store with no
+/// channel) the newest release listed.
+fn newest_on(
+    info: &StoreInfo,
+    catalog: &catalog::ReleasesCatalog,
+    channel: Option<&str>,
+) -> Result<String, ProviderError> {
+    if let Some(channel) = channel {
+        if let Some(version) = catalog.channels.get(channel) {
+            return Ok(version.clone());
+        }
+        return catalog
+            .releases
+            .iter()
+            .find(|release| release.channels.iter().any(|each| each == channel))
+            .map(|release| release.version.clone())
+            .ok_or_else(|| {
+                crate::status::unsupported(format!(
+                    "no catalog of {} lists a release on the channel {channel:?}",
+                    info.title
+                ))
+            });
+    }
+    catalog
+        .releases
+        .first()
+        .map(|release| release.version.clone())
+        .ok_or_else(|| {
+            crate::status::unsupported(format!("no catalog of {} lists a release", info.title))
+        })
+}
+
+/// The release of `version`, or the newest on `channel`, that the catalogs of `info`'s scope list for `platform`, as the engine
+/// plans it: each file with the check its catalog gave and the place it goes. The recipe's [`Recipe::adjust`] follows.
+///
+/// # Errors
+///
+/// `GUATIAO_ERR_UNSUPPORTED` when no catalog lists the version or the platform, `GUATIAO_ERR_BAD_VALUE` for a version that is no
+/// name a URL can carry.
+pub fn catalog_release(
+    info: &StoreInfo,
+    version: Option<&str>,
+    channel: Option<&str>,
+    platform: &Platform,
+    tools: &Object<dyn InstallTools>,
+) -> Result<Release, ProviderError> {
+    let catalog = read_releases(info, tools)?;
+    let wanted = match version {
+        Some(version) => pinned(version)?,
+        None => newest_on(info, &catalog, channel_of(info, channel))?,
+    };
+    let listed = catalog
+        .releases
+        .iter()
+        .find(|release| release.version == wanted)
+        .ok_or_else(|| {
+            crate::status::unsupported(format!(
+                "no catalog of {} lists the release {wanted}",
+                info.title
+            ))
+        })?;
+    pinned(&listed.version)?;
+    let key = format!("{}-{}", platform.os, platform.arch);
+    let on = listed.platforms.get(&key).ok_or_else(|| {
+        crate::status::unsupported(format!(
+            "{} {wanted} is not published for {key}",
+            info.title
+        ))
+    })?;
+    let parts: Vec<Part> = on
+        .parts
+        .iter()
+        .map(|part| {
+            let download =
+                Download::new(part.file.url.clone(), part.file.bytes, check_of(&part.file));
+            let mut made = Part::new(download, part.path.clone());
+            made.executable = part.executable;
+            made
+        })
+        .collect();
+    let mut release = Release::new(wanted, on.launch.clone().unwrap_or_default(), parts);
+    release.notices.clone_from(&listed.notices);
+    Ok(release)
 }
 
 /// The `executable` setting that hands a copy to a harness provider.

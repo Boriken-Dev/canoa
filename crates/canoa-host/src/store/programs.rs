@@ -375,6 +375,10 @@ pub struct Applied {
     pub lines: Vec<String>,
 }
 
+/// What reads and merges the releases catalogs of a program's scope, by the program's id: the text of a `canoa.releases/1`
+/// document, or why none.
+pub(crate) type Releases = Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
+
 /// The programs this host keeps, through the stores a registry offers.
 #[must_use]
 pub struct Programs {
@@ -388,6 +392,7 @@ pub struct Programs {
     /// one may take a download nothing checks. The plan names each such download, and `current.json` records that a file was not
     /// verified.
     trusted: RwLock<BTreeSet<String>>,
+    releases: RwLock<Option<Releases>>,
     /// How long a lookup waits to connect and for an answer; `[host.store] connect_timeout` and `lookup_timeout`.
     lookups: Mutex<(Duration, Duration)>,
     /// The plans this host made, by token: it applies its own copy of a plan, never one a client sends.
@@ -422,6 +427,7 @@ impl Programs {
             transport: Arc::new(HttpTransport::default()),
             options: Options::default(),
             trusted: RwLock::new(BTreeSet::new()),
+            releases: RwLock::new(None),
             lookups: Mutex::new((
                 ToolsLimits::default().lookup_connect,
                 ToolsLimits::default().lookup_response,
@@ -550,9 +556,32 @@ impl Programs {
         Arc::clone(&self.transport)
     }
 
+    /// Takes `reader` as what reads the catalogs of a program's scope, by the program's id, in place of the one named before.
+    pub(crate) fn read_releases_with(&self, reader: Releases) {
+        *self
+            .releases
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(reader);
+    }
+
     fn tools(&self, info: &StoreInfo) -> LocalTools {
+        let reader = info
+            .catalogs
+            .as_ref()
+            .and(
+                self.releases
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone(),
+            )
+            .map(|reader| {
+                let program = info.program.clone();
+                let read: super::tools::ReleasesReader = Arc::new(move || reader(&program));
+                read
+            });
         self.tools_at(&info.endpoints)
             .allow_unverified(self.is_trusted(&info.program))
+            .releases_from(reader)
     }
 
     fn tools_at(&self, endpoints: &[String]) -> LocalTools {

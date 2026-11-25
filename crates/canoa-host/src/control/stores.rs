@@ -185,6 +185,86 @@ impl Stores {
                 })
         });
         self.programs.trust(trusted.map(|scope| scope.id));
+        let me = self.clone();
+        let store = store.clone();
+        self.programs
+            .read_releases_with(Arc::new(move |program| me.releases_of(program, &store)));
+    }
+
+    /// The `canoa.releases/1` document the catalogs of the program `program` make together: each catalog its scope has on, in the
+    /// order they are merged, read through its source; the version a channel is at is the first catalog's that names it, and a
+    /// version two catalogs list is the first one's. A catalog that cannot be read is left out, and why is the answer only when
+    /// none could be.
+    fn releases_of(&self, program: &str, store: &Value) -> Result<String, String> {
+        use canoa::store::catalog::{RELEASES_FORMAT, ReleasesCatalog, parse_releases};
+        let scope = self
+            .catalog_types()
+            .into_iter()
+            .find(|scope| scope.id == program && scope.format.as_deref() == Some(RELEASES_FORMAT))
+            .ok_or_else(|| format!("{program} registers no catalog of releases"))?;
+        let run = self.catalog_run();
+        let mut merged = ReleasesCatalog::new(std::collections::BTreeMap::new(), Vec::new());
+        let mut problems: Vec<String> = Vec::new();
+        let mut any = false;
+        for each in crate::store::catalogs::merge(
+            &scope,
+            crate::store::catalogs::table_of(store, &scope.id),
+        ) {
+            let entry = match each.parsed {
+                Ok(entry) => entry,
+                Err((label, why)) => {
+                    problems.push(format!("{label}: {why}"));
+                    continue;
+                }
+            };
+            if !entry.enabled {
+                continue;
+            }
+            let read = run
+                .read(&scope, &entry, false)
+                .and_then(|reading| parse_releases(&reading.text));
+            match read {
+                Ok(catalog) => {
+                    any = true;
+                    for (channel, version) in catalog.channels {
+                        merged.channels.entry(channel).or_insert(version);
+                    }
+                    for release in catalog.releases {
+                        match merged
+                            .releases
+                            .iter_mut()
+                            .find(|have| have.version == release.version)
+                        {
+                            Some(have) => {
+                                for (platform, files) in release.platforms {
+                                    have.platforms.entry(platform).or_insert(files);
+                                }
+                                for channel in release.channels {
+                                    if !have.channels.contains(&channel) {
+                                        have.channels.push(channel);
+                                    }
+                                }
+                            }
+                            None => merged.releases.push(release),
+                        }
+                    }
+                    if merged.signed.is_none() {
+                        merged.signed = catalog.signed;
+                    }
+                }
+                Err(why) => problems.push(format!("{}: {why}", entry.label)),
+            }
+        }
+        if any {
+            Ok(merged.to_json())
+        } else if problems.is_empty() {
+            Err(format!("every catalog of {program} is turned off"))
+        } else {
+            Err(format!(
+                "no catalog of {program} could be read: {}",
+                problems.join("; ")
+            ))
+        }
     }
 
     /// Forgets what the models pages and the catalogs' entries listed, since canoa.cfg's catalogs changed.
@@ -557,6 +637,9 @@ impl Stores {
 
 mod models;
 mod models_catalog;
+#[cfg(test)]
+#[path = "stores/releases_tests.rs"]
+mod releases_tests;
 
 type Failed = (i32, String);
 
