@@ -244,6 +244,16 @@ impl Host {
                 command.env_remove(&name);
             }
         }
+        // A key in the shell that runs the tests signs an agent in, so none reaches a host unless the test sets it.
+        for name in [
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CODEX_API_KEY",
+            "OPENAI_API_KEY",
+        ] {
+            command.env_remove(name);
+        }
         // Where each agent keeps its login is the test's own folder, so no test reads the person's: a default home is the person's.
         for name in [
             "CLAUDE_CONFIG_DIR",
@@ -252,7 +262,18 @@ impl Host {
             "GROK_HOME",
         ] {
             if !env.iter().any(|(set, _)| *set == name) {
-                command.env(name, scratch.0.join("logins").join(name));
+                let home = scratch.0.join("logins").join(name);
+                // A host refuses a session on an agent nobody is signed in to, so the default folder holds a login: a file of no
+                // content that matters, in the test's own folder.
+                if let Some(file) = match name {
+                    "CLAUDE_CONFIG_DIR" => Some(".credentials.json"),
+                    "CODEX_HOME" => Some("auth.json"),
+                    _ => None,
+                } {
+                    std::fs::create_dir_all(&home).expect("an agent home");
+                    std::fs::write(home.join(file), "{\"fixture\":true}").expect("a login");
+                }
+                command.env(name, home);
             }
         }
         let mut child = command

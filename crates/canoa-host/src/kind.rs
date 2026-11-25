@@ -318,7 +318,7 @@ impl Harness {
     /// Whether it offers its own login as the account `local`, and its description says the login is not on this computer: nobody is
     /// signed in to it here, which is not the same as a login the description cannot look for.
     pub(crate) fn local_signed_out(&self) -> bool {
-        self.local && crate::vendors::signed_in(&self.id) == Some(false)
+        self.local && crate::vendors::login(&self.id) == Some(crate::vendors::Login::Missing)
     }
 
     /// This harness as an account is held for it.
@@ -509,13 +509,31 @@ impl Harness {
                 why.unwrap_or_default()
             )
         })?;
-        if picked.1.kind == HARNESS_LOGIN && picked.0 == LOCAL_ACCOUNT && self.local_signed_out() {
-            return Err(format!(
-                "nobody is signed in to {} on this computer: sign in to it from Accounts, or choose an account that is signed in",
-                self.id
-            ));
-        }
         Ok(Some(picked))
+    }
+
+    /// Whether the session the first message starts runs on the automatic `local` account: it names it, or names none and the entry
+    /// has no account or pool to start on before it. A client that names `null` asks for the login the program has where it runs.
+    fn runs_on_local(&self, first: &[u8]) -> bool {
+        let named = serde_json::from_slice::<serde_json::Value>(first)
+            .ok()
+            .and_then(|message| {
+                message
+                    .get("params")?
+                    .get("_meta")?
+                    .get(ACCOUNT_META)
+                    .cloned()
+            });
+        match named {
+            None => self.accounts.as_ref().is_none_or(|offer| {
+                offer.default_pool.is_none()
+                    && offer.offered.first().is_none_or(|(name, config, _)| {
+                        name == LOCAL_ACCOUNT && config.kind == HARNESS_LOGIN
+                    })
+            }),
+            Some(serde_json::Value::String(name)) => name == LOCAL_ACCOUNT,
+            Some(_) => false,
+        }
     }
 
     /// The label, kind id and provided standards of the account the first message chooses, which a session's environment
@@ -563,6 +581,12 @@ impl Harness {
         holder: &str,
         any: bool,
     ) -> Result<Option<Held>, String> {
+        if self.local_signed_out() && self.runs_on_local(first) {
+            return Err(format!(
+                "nobody is signed in to {} on this computer, and none of the variables that sign it in is set: sign in to it from Accounts, or choose an account that is signed in",
+                self.id
+            ));
+        }
         let Some(offer) = &self.accounts else {
             return Ok(None);
         };

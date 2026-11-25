@@ -21,6 +21,15 @@ use support::{Host, Scratch, WAIT, cwd, example, host_binary, quoted, with_link}
 
 const CANARY: &str = "CANARY";
 
+/// The variables that sign an agent in by themselves.
+const KEYS: [&str; 5] = [
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CODEX_API_KEY",
+    "OPENAI_API_KEY",
+];
+
 /// A scratch directory holding a stand-in named `claude`, a canoa.cfg with one entry and an account made by signing in.
 struct Fixture {
     scratch: Scratch,
@@ -100,7 +109,23 @@ impl Fixture {
     /// As [`Fixture::canoa`]; `busless` leaves the process no session bus, as a service has none, and the real credential
     /// store, which it cannot reach: the tests' in-memory store would answer for it and end with the process.
     fn canoa_on(&self, args: &[&str], input: Option<&str>, busless: bool) -> Output {
+        self.canoa_env(args, input, busless, &[])
+    }
+
+    /// As [`Fixture::canoa_on`], with `set` added to the program's environment. No key that signs an agent in comes from the shell
+    /// that runs the tests.
+    fn canoa_env(
+        &self,
+        args: &[&str],
+        input: Option<&str>,
+        busless: bool,
+        set: &[(&str, &str)],
+    ) -> Output {
         let mut command = Command::new(host_binary());
+        for name in KEYS {
+            command.env_remove(name);
+        }
+        command.envs(set.iter().copied());
         if busless {
             command
                 .env_remove("DBUS_SESSION_BUS_ADDRESS")
@@ -184,19 +209,26 @@ impl Fixture {
 
     /// Serves the entry, logging to `host.log` in the scratch directory.
     fn serve(self) -> (Host, PathBuf, PathBuf, PathBuf) {
+        self.serve_with_keys(true)
+    }
+
+    /// As [`Fixture::serve`]; with `keys` false the host's environment holds no key that signs an agent in.
+    fn serve_with_keys(self, keys: bool) -> (Host, PathBuf, PathBuf, PathBuf) {
         let config = std::fs::read_to_string(&self.config).expect("canoa.cfg");
         let record = self.record.clone();
-        let env = vec![
+        let mut env = vec![
             ("CLAUDE_CONFIG_DIR", self.claude_home().into_os_string()),
             ("CODEX_HOME", self.codex_home().into_os_string()),
             ("STANDIN_RECORD", record.clone().into_os_string()),
             ("STANDIN_ENV", "ANTHROPIC_API_KEY".into()),
-            ("ANTHROPIC_API_KEY", "a-key-the-account-must-clear".into()),
-            (
+        ];
+        if keys {
+            env.push(("ANTHROPIC_API_KEY", "a-key-the-account-must-clear".into()));
+            env.push((
                 "CLAUDE_CODE_OAUTH_TOKEN",
                 "a-token-the-account-must-clear".into(),
-            ),
-        ];
+            ));
+        }
         let (host, log) = Host::start_logged(self.scratch, &config, 1, &env);
         let cfg = host.scratch.0.join("canoa.cfg");
         (host, log, record, cfg)
@@ -640,33 +672,113 @@ fn a_harness_nobody_is_signed_in_to_has_no_local_account_and_one_that_keeps_its_
     ignore = "Claude Code keeps its login in the Keychain there, so its local account is always listed"
 )]
 fn a_session_that_would_run_on_local_is_told_nobody_is_signed_in_until_someone_is() {
-    let fixture = Fixture::unlisted();
-    let claude_home = fixture.claude_home();
-    let (host, _log, _record, _cfg) = fixture.serve();
+    // Whether the host keeps an account the entry does not list or none at all, a session that names none has the harness's own
+    // login, and with none of it there is nothing to run on.
+    for fixture in [Fixture::unlisted(), Fixture::bare()] {
+        let claude_home = fixture.claude_home();
+        let (host, _log, _record, _cfg) = fixture.serve_with_keys(false);
+        let client = support::key();
+        host.pair(&client);
+        let start = |rpc: &support::Rpc<'_, coqui_transport_web::websocket::Channel>| {
+            rpc.request(
+                "initialize",
+                json!({"protocolVersion": 1, "clientCapabilities": {}}),
+            )
+        };
+        let refused = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+            start(rpc).expect_err("no login to run on")
+        })
+        .expect("served");
+        let why = refused["message"].as_str().expect("a reason");
+        assert!(
+            why.contains("nobody is signed in to claude") && why.contains("Accounts"),
+            "{refused}"
+        );
+        // The host looks again at each start, so a login made meanwhile is used without restarting it.
+        std::fs::create_dir_all(&claude_home).expect("a home");
+        std::fs::write(claude_home.join(".credentials.json"), "{\"fixture\":true}")
+            .expect("a login");
+        with_link(host.url("Claude"), &client, host.peer, |rpc| {
+            start(rpc).expect("starts on the login that is there now")
+        })
+        .expect("served");
+    }
+}
+
+/// The rows `accounts list --format json` printed.
+fn rows_in(output: &Output) -> Vec<Value> {
+    text(&output.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("one JSON object per line"))
+        .collect()
+}
+
+/// The `local` row of Claude Code among `rows`.
+fn claude_local(rows: &[Value]) -> Option<Value> {
+    rows.iter()
+        .find(|row| row["automatic"] == true && row["fits"] == json!(["claude"]))
+        .cloned()
+}
+
+/// A key the environment holds is a login of its own: listed as the account `local` and saying which variable it is, never its
+/// value.
+#[test]
+fn a_key_in_the_environment_is_the_local_account_and_names_its_variable_and_never_its_value() {
+    const VALUE: &str = "CANARY-env-key-value";
+    let fixture = Fixture::bare();
+    let json = ["accounts", "list", "--format", "json"];
+    let keyed = [("ANTHROPIC_API_KEY", VALUE)];
+    // With the key set and no login file, the row is there and says how it signs in.
+    let listed = fixture.canoa_env(&json, None, false, &keyed);
+    assert!(listed.status.success(), "{}", text(&listed.stderr));
+    let row = claude_local(&rows_in(&listed)).expect("a key is a login");
+    assert_eq!(row["via"], "environment key (ANTHROPIC_API_KEY)", "{row}");
+    assert_eq!(row["id"], "local:claude", "{row}");
+    let plain = fixture.canoa_env(&["accounts", "list"], None, false, &keyed);
+    assert!(
+        text(&plain.stdout).contains("environment key (ANTHROPIC_API_KEY)"),
+        "{}",
+        text(&plain.stdout)
+    );
+    for output in [&listed, &plain] {
+        assert!(!text(&output.stdout).contains(VALUE) && !text(&output.stderr).contains(VALUE));
+    }
+    // A key with a login file too is the key: it is what the program takes.
+    fixture.sign_in_programs();
+    let both = fixture.canoa_env(&json, None, false, &keyed);
+    assert_eq!(
+        claude_local(&rows_in(&both)).expect("listed")["via"],
+        "environment key (ANTHROPIC_API_KEY)"
+    );
+    // The login file alone is the login the program keeps for itself, with no `via`.
+    let file_only = fixture.canoa_env(&json, None, false, &[]);
+    assert_eq!(
+        claude_local(&rows_in(&file_only)).expect("listed")["via"],
+        Value::Null
+    );
+    // A variable that is set and empty is no key.
+    std::fs::remove_file(fixture.claude_home().join(".credentials.json")).expect("removed");
+    let empty = fixture.canoa_env(&json, None, false, &[("ANTHROPIC_API_KEY", "")]);
+    assert!(claude_local(&rows_in(&empty)).is_none());
+}
+
+/// A host started with the key and no login file runs a session on it, and nothing it logs holds the value.
+#[test]
+fn a_session_starts_on_a_key_in_the_environment_with_no_login_file() {
+    let fixture = Fixture::bare();
+    let (host, log, _record, _cfg) = fixture.serve();
     let client = support::key();
     host.pair(&client);
-    let start = |rpc: &support::Rpc<'_, coqui_transport_web::websocket::Channel>| {
+    with_link(host.url("Claude"), &client, host.peer, |rpc| {
         rpc.request(
             "initialize",
             json!({"protocolVersion": 1, "clientCapabilities": {}}),
         )
-    };
-    let refused = with_link(host.url("Claude"), &client, host.peer, |rpc| {
-        start(rpc).expect_err("no login to run on")
+        .expect("a key is a login to run on")
     })
     .expect("served");
-    let why = refused["message"].as_str().expect("a reason");
-    assert!(
-        why.contains("nobody is signed in to claude") && why.contains("Accounts"),
-        "{refused}"
-    );
-    // The host looks again at each start, so a login made meanwhile is used without restarting it.
-    std::fs::create_dir_all(&claude_home).expect("a home");
-    std::fs::write(claude_home.join(".credentials.json"), "{\"fixture\":true}").expect("a login");
-    with_link(host.url("Claude"), &client, host.peer, |rpc| {
-        start(rpc).expect("starts on the login that is there now")
-    })
-    .expect("served");
+    let logged = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(!logged.contains("a-key-the-account-must-clear"), "{logged}");
 }
 
 #[test]

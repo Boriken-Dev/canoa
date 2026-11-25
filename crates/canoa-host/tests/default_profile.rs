@@ -70,6 +70,10 @@ fn records(file: &Path) -> Vec<Value> {
 fn homes(scratch: &Scratch) -> Vec<(&'static str, OsString)> {
     let home = scratch.0.join("home");
     std::fs::create_dir_all(&home).expect("a directory");
+    // A host refuses a session on an agent nobody is signed in to: both agents have a login here, of no content that matters.
+    for file in [".credentials.json", "auth.json"] {
+        std::fs::write(home.join(file), "{\"fixture\":true}").expect("a login");
+    }
     [
         "HOME",
         "USERPROFILE",

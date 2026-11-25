@@ -211,7 +211,7 @@ the source also names the model's default effort) rather than Default twice; a s
 "Model: after start". A source that cannot start on its host says why beside the model instead, with the one thing to do:
 "Claude Code isn't installed on this host" with **Install** (the Store's programs, where the host allows installing),
 "Claude needs a sign-in" with **Sign in** (the Accounts flow; an account the entry offers carries its own login, so the
-machine's is not asked for; a harness with no login on this computer lists no `local` account, so it asks for the sign-in here and not a row with no figures), or "Couldn't start Claude" with **Try again**. Sending to a source of the first two asks the host
+machine's is not asked for; a harness with no login and no key in the environment on this computer lists no `local` account, so it asks for the sign-in here and not a row with no figures), or "Couldn't start Claude" with **Try again**. Sending to a source of the first two asks the host
 once more, then opens that action and keeps the message. The mode control is in the line under the composer's box (see Modes above), with Bypass beside the agent's own
 modes; its menu is headed "Permissions · this session" and gives each mode {{ name }} knows a line on what it does.
 

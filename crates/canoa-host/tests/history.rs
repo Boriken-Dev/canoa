@@ -126,6 +126,8 @@ fn a_session_is_recorded_exported_and_moved_from_claude_to_codex() {
     let (claude_home, codex_home) = (root.0.join("claude-home"), root.0.join("codex-home"));
     std::fs::create_dir_all(&claude_home).expect("dir");
     std::fs::create_dir_all(&codex_home).expect("dir");
+    std::fs::write(claude_home.join(".credentials.json"), "{\"fixture\":true}").expect("a login");
+    std::fs::write(codex_home.join("auth.json"), "{\"fixture\":true}").expect("a login");
     env("CLAUDE_CONFIG_DIR", &claude_home);
     env("CODEX_HOME", &codex_home);
     let config = format!(

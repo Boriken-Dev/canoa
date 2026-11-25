@@ -146,6 +146,7 @@ mod tests {
             home_folder: None,
             home_context_files: Vec::new(),
             login_files: Vec::new(),
+            login_env: Vec::new(),
             standards: Vec::new(),
             names: Vec::new(),
         }

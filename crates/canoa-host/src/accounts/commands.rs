@@ -225,6 +225,9 @@ pub(crate) struct Row {
     /// The account provider that made it when `[host.disabled]` leaves that provider off: the account stays in canoa.cfg, is not
     /// offered and cannot be signed in again until the provider is turned on.
     pub(crate) disabled: Option<String>,
+    /// How the automatic `local` account signs in when it is the key of the environment that does (`environment key (ANTHROPIC_API_KEY)`:
+    /// the variable's name, never its value); `None` for the login the program keeps for itself and for any other account.
+    pub(crate) via: Option<String>,
 }
 
 impl Row {
@@ -233,7 +236,7 @@ impl Row {
             "name": self.name, "provider": self.provider, "agent": self.agent, "kind": self.kind,
             "id": self.id, "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
             "types": self.types, "fits": self.fits, "automatic": self.automatic,
-            "warnings": self.warnings, "disabled": self.disabled,
+            "warnings": self.warnings, "disabled": self.disabled, "via": self.via,
         })
     }
 }
@@ -315,12 +318,19 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
                     .unwrap_or_default(),
                 automatic: false,
                 disabled: disabled.flatten(),
+                via: None,
             }
         })
         .collect();
     for (harness, kind) in catalogs.locals() {
         let account = AccountConfig::local(&harness);
         let (state, revision, expires_at) = state_of(accounts, &account);
+        let via = match crate::vendors::login(&harness) {
+            Some(crate::vendors::Login::Key(variable)) => {
+                Some(format!("environment key ({variable})"))
+            }
+            _ => None,
+        };
         rows.push(Row {
             name: coqui_acp_api::LOCAL_ACCOUNT.to_owned(),
             id: account.usage_id(),
@@ -333,6 +343,7 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
             revision,
             expires_at,
             automatic: true,
+            via,
             warnings: Vec::new(),
             disabled: None,
         });
@@ -346,7 +357,13 @@ pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
     for row in rows_of(env.cfg(), &accounts) {
         let line = match format {
             Format::Json => row.json().to_string(),
-            Format::Text => format!("{} {} {} {}", row.name, row.provider, row.kind, row.state),
+            Format::Text => match &row.via {
+                Some(via) => format!(
+                    "{} {} {} {} {via}",
+                    row.name, row.provider, row.kind, row.state
+                ),
+                None => format!("{} {} {} {}", row.name, row.provider, row.kind, row.state),
+            },
         };
         env.front.print(&line).map_err(Failed::run)?;
         if format == Format::Text {
