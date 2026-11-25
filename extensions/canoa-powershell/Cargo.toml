@@ -17,6 +17,7 @@ canoa = { workspace = true, features = ["store"] }
 coqui-acp-api.workspace = true
 serde_json.workspace = true
 
+
 [lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"

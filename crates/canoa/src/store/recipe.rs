@@ -423,24 +423,34 @@ pub fn catalog_release(
         Some(version) => pinned(version)?,
         None => newest_on(info, &catalog, channel_of(info, channel))?,
     };
-    let listed = catalog
+    let start = catalog
         .releases
         .iter()
-        .find(|release| release.version == wanted)
+        .position(|release| release.version == wanted)
         .ok_or_else(|| {
             crate::status::unsupported(format!(
                 "no catalog of {} lists the release {wanted}",
                 info.title
             ))
         })?;
-    pinned(&listed.version)?;
     let key = format!("{}-{}", platform.os, platform.arch);
-    let on = listed.platforms.get(&key).ok_or_else(|| {
+    let not_published = || {
         crate::status::unsupported(format!(
             "{} {wanted} is not published for {key}",
             info.title
         ))
-    })?;
+    };
+    // A release no file of which is for this platform: when the newest was asked for, the newest that has one is offered, and
+    // the person is told.
+    let (listed, on) = match catalog.releases[start].platforms.get(&key) {
+        Some(on) => (&catalog.releases[start], on),
+        None if version.is_none() => catalog.releases[start..]
+            .iter()
+            .find_map(|release| release.platforms.get(&key).map(|on| (release, on)))
+            .ok_or_else(not_published)?,
+        None => return Err(not_published()),
+    };
+    pinned(&listed.version)?;
     let parts: Vec<Part> = on
         .parts
         .iter()
@@ -452,8 +462,18 @@ pub fn catalog_release(
             made
         })
         .collect();
-    let mut release = Release::new(wanted, on.launch.clone().unwrap_or_default(), parts);
+    let mut release = Release::new(
+        listed.version.clone(),
+        on.launch.clone().unwrap_or_default(),
+        parts,
+    );
     release.notices.clone_from(&listed.notices);
+    if listed.version != wanted {
+        release.notices.push(format!(
+            "The newest release, {wanted}, is not published for {key}, so the store offers {} instead.",
+            listed.version
+        ));
+    }
     Ok(release)
 }
 

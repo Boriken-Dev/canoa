@@ -1,0 +1,56 @@
+[
+ {
+  "tag_name": "v2.4.1",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "opencode-linux-arm64.tar.gz",
+    "size": 128876799,
+    "digest": "sha256:cb28cf94541aeb62a4b2ea5997a99b5dd6bae595a772f36fbe279299f2032a4f"
+   },
+   {
+    "name": "opencode-linux-x64.tar.gz",
+    "size": 130647866,
+    "digest": "sha256:9ddd18e3faf64eaeccf6a0fcbc96a5c7a14520ae5fd5b61e5be51d894f478b47"
+   },
+   {
+    "name": "opencode-windows-arm64.zip",
+    "size": 125335322,
+    "digest": "sha256:03ccc3d6a9b46ab082cbf7f5f86ff07c4bfcd7b802dbafe1614c257b1a96df8e"
+   },
+   {
+    "name": "opencode-windows-x64.zip",
+    "size": 132524450,
+    "digest": "sha256:831e00806531fabb184533ef85fead96eb92287cab2d0f21db7daaa494e75083"
+   }
+  ]
+ },
+ {
+  "tag_name": "v2.4.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "opencode-linux-arm64.tar.gz",
+    "size": 128853191,
+    "digest": "sha256:fed468566215fd38b26abab99018240c0d30772d3f45aee25621664ceff7e360"
+   },
+   {
+    "name": "opencode-linux-x64.tar.gz",
+    "size": 130627244,
+    "digest": "sha256:66cf6adeb02fbfe9ccbb1f6497fcf46cecf2d299a1dc3a7a32e01ea30ff20201"
+   },
+   {
+    "name": "opencode-windows-arm64.zip",
+    "size": 125313197,
+    "digest": "sha256:146a715d36996141b1c1d76ad10cc32003f688dfbe650e3aa76e02222f55ad64"
+   },
+   {
+    "name": "opencode-windows-x64.zip",
+    "size": 132508419,
+    "digest": "sha256:16f22561cc174f01e4679401641f9a7cc30f0505508e0e47d89bac98959b662d"
+   }
+  ]
+ }
+]

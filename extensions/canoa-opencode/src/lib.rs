@@ -11,19 +11,17 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 use canoa::preset::SourcePreset;
-use canoa::store::recipe::{Part, Recipe, Release, UnpackStep};
+use canoa::store::catalog::RELEASES_FORMAT;
+use canoa::store::extension::{CatalogWords, DefaultCatalog};
+use canoa::store::recipe::{Recipe, Release, UnpackStep};
 use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
+    MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
 };
 use canoa::vendor::{AccessTarget, AgentVendor, StandardTitle, VendorInfo};
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_harness::Target;
 
-use canoa::status::{internal, unsupported};
-use canoa::store::recipe::{
-    dotted, exe_suffix, get_json, measured_platforms, path_has, pinned, serves_when, spell,
-};
+use canoa::store::recipe::{dotted, exe_suffix, measured_platforms, path_has, serves_when};
 
 const API: &str = "https://api.github.com/repos/anomalyco/opencode/releases";
 const DOWNLOADS: &str = "https://github.com/anomalyco/opencode/releases/download/";
@@ -86,6 +84,10 @@ impl AgentVendor for OpenCodeVendor {
     }
 }
 
+mod source;
+
+pub use source::{OpenCodeReleases, SOURCE};
+
 canoa::store_provider!(
     /// The OpenCode store: the program the recipe installs, offered with the agent's other providers.
     OpenCodeStore, OpenCodeRecipe, "opencode_store"
@@ -100,34 +102,14 @@ coqui_acp_api::guatiao::local_providers!(
         coqui_acp_harness::vendors::opencode::OpenCodeProvider,
         coqui_acp_harness::vendors::opencode::OpenCodeAccounts,
         OpenCodeVendor,
-        OpenCodeStore
+        OpenCodeStore,
+        OpenCodeReleases
     ]
 );
 
 /// OpenCode.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OpenCodeRecipe;
-
-impl OpenCodeRecipe {
-    /// The release document of `version`, or of GitHub's newest release.
-    fn document(
-        version: Option<&str>,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<serde_json::Value, ProviderError> {
-        match version {
-            Some(version) => get_json(tools, &format!("{API}/tags/v{}", pinned(version)?)),
-            None => get_json(tools, &format!("{API}/latest")),
-        }
-    }
-
-    /// The version a release document's tag names.
-    fn version_of(document: &serde_json::Value) -> Result<String, ProviderError> {
-        let tag = document["tag_name"]
-            .as_str()
-            .ok_or_else(|| internal("the release names no tag"))?;
-        pinned(tag.strip_prefix('v').unwrap_or(tag))
-    }
-}
 
 impl Recipe for OpenCodeRecipe {
     fn info(&self) -> StoreInfo {
@@ -140,6 +122,12 @@ impl Recipe for OpenCodeRecipe {
             .chain(ASSET_HOSTS)
             .map(str::to_owned)
             .collect();
+        info.catalogs = Some(
+            CatalogWords::new("source", "sources", "releases")
+                .in_format(RELEASES_FORMAT)
+                .registering([DefaultCatalog::new("github", SOURCE)
+                    .with_fields(serde_json::json!({"repo": source::REPO}).to_string())]),
+        );
         info
     }
 
@@ -195,55 +183,18 @@ impl Recipe for OpenCodeRecipe {
         BTreeMap::from([("OPENCODE_DISABLE_AUTOUPDATE".to_owned(), "1".to_owned())])
     }
 
-    fn latest(&self, _channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport {
-        match Self::document(None, tools).and_then(|document| Self::version_of(&document)) {
-            Ok(version) => LatestReport::known(version),
-            Err(error) => LatestReport::unknown(error.message().to_owned()),
-        }
-    }
-
-    fn release(
-        &self,
-        version: Option<&str>,
-        _channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError> {
-        let os = spell(&platform.os, &[("windows", "windows"), ("linux", "linux")])
-            .ok_or_else(|| unsupported("OpenCode is not published for this system"))?;
-        let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported("OpenCode is not published for this processor"))?;
+    fn adjust(&self, mut release: Release, platform: &Platform) -> Result<Release, ProviderError> {
         let extension = if platform.os == "windows" {
             "zip"
         } else {
             "tar.gz"
         };
-        let document = Self::document(version, tools)?;
-        let version = Self::version_of(&document)?;
-        let asset = format!("opencode-{os}-{arch}.{extension}");
-        let listed = document["assets"]
-            .as_array()
-            .and_then(|assets| {
-                assets
-                    .iter()
-                    .find(|each| each["name"].as_str() == Some(asset.as_str()))
-            })
-            .ok_or_else(|| unsupported(format!("release {version} lists no {asset}")))?;
-        let digest = listed["digest"]
-            .as_str()
-            .and_then(|digest| digest.strip_prefix("sha256:"))
-            .map(str::to_ascii_lowercase)
-            .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| internal(format!("release {version} gives no SHA-256 for {asset}")))?;
-        let download = Download::new(
-            format!("{DOWNLOADS}v{version}/{asset}"),
-            listed["size"].as_u64(),
-            Check::Sha256 { value: digest },
-        );
-        let launch = format!("pkg/opencode{}", exe_suffix(&platform.os));
-        let part = Part::new(download, format!("opencode.{extension}"))
-            .unpacked(UnpackStep::new(extension, "pkg", 0, true));
-        Ok(Release::new(version, launch, vec![part]))
+        for part in &mut release.parts {
+            part.path = format!("opencode.{extension}");
+            part.unpack = Some(UnpackStep::new(extension, "pkg", 0, true));
+        }
+        release.launch = format!("pkg/opencode{}", exe_suffix(&platform.os));
+        Ok(release)
     }
 }
 

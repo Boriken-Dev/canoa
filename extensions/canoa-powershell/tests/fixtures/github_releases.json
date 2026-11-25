@@ -1,0 +1,78 @@
+[
+ {
+  "tag_name": "v7.7.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "hashes.sha256",
+    "size": 4708,
+    "digest": "sha256:0f0534f42a2776f0c96cb18520b2ae28823376d95a5cf54e636e5828bce22a47"
+   },
+   {
+    "name": "powershell-7.7.0-linux-arm64.tar.gz",
+    "size": 72815139,
+    "digest": "sha256:e59c89776eaa59790d44b3edd14277435225ab08b6e7603763101b89de83d935"
+   },
+   {
+    "name": "powershell-7.7.0-linux-x64.tar.gz",
+    "size": 76881682,
+    "digest": "sha256:c89d9c682d2c403dfe726f3df948e359675235a5bd6fab535776de69729ca0cb"
+   },
+   {
+    "name": "PowerShell-7.7.0-win-arm64.zip",
+    "size": 107817704,
+    "digest": "sha256:5dc7440cd98f0ba786a44d7db9205df5058474fd4db143caf7171e8375f34f75"
+   },
+   {
+    "name": "PowerShell-7.7.0-win-x64.zip",
+    "size": 115330228,
+    "digest": "sha256:7c74e03b20a75b59715847439d046a6214b1863ee79b187872980f139bb4a05f"
+   }
+  ]
+ },
+ {
+  "tag_name": "v7.6.10",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "hashes.sha256",
+    "size": 7430,
+    "digest": "sha256:8d602422352e207184d587edf26e1e3962f222f5f99ffff8c46bb07321ae63f7"
+   },
+   {
+    "name": "powershell-7.6.10-linux-arm64.tar.gz",
+    "size": 69416352,
+    "digest": "sha256:439432cdecf4418413b9a8f547e3ab4d9b40e8e4258913ec3d15fc92c67a9235"
+   },
+   {
+    "name": "powershell-7.6.10-linux-x64.tar.gz",
+    "size": 73423947,
+    "digest": "sha256:e261cabc91c78a9afe8d1e5f24731ab0d38204735ab2ec94b0af55102652e10d"
+   },
+   {
+    "name": "PowerShell-7.6.10-win-arm64.zip",
+    "size": 102312337,
+    "digest": "sha256:1d36ecac1d8f5ac9577cfdfc426af41f3e90cbca6c52445e7db167f532b3a7ab"
+   },
+   {
+    "name": "PowerShell-7.6.10-win-x64.zip",
+    "size": 109626781,
+    "digest": "sha256:7d871531806eb1646264e4bbabd9f0c30c23355591bc756bb9909448c29ae166"
+   }
+  ]
+ },
+ {
+  "tag_name": "v7.7.0-rc.1",
+  "draft": false,
+  "prerelease": true,
+  "assets": [
+   {
+    "name": "hashes.sha256",
+    "size": 5064,
+    "digest": "sha256:ade03e60a4624ff30d886ea0671ed736efbca3d1de4fe80eaf8082bf9e5538a1"
+   }
+  ]
+ }
+]

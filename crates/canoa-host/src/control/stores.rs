@@ -185,6 +185,22 @@ impl Stores {
                 })
         });
         self.programs.trust(trusted.map(|scope| scope.id));
+        let mut places = std::collections::BTreeMap::new();
+        for scope in self.catalog_types() {
+            let more: Vec<String> = crate::store::catalogs::merge(
+                &scope,
+                crate::store::catalogs::table_of(store, &scope.id),
+            )
+            .into_iter()
+            .filter_map(|merged| merged.parsed.ok())
+            .filter(|entry| entry.enabled)
+            .flat_map(|entry| entry.endpoints)
+            .collect();
+            if !more.is_empty() {
+                places.insert(scope.id, more);
+            }
+        }
+        self.programs.download_from(places);
         let me = self.clone();
         let store = store.clone();
         self.programs

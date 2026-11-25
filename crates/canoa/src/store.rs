@@ -22,6 +22,7 @@ pub mod catalog;
 pub mod engine;
 pub mod exec;
 pub mod extension;
+pub mod feed;
 pub mod models;
 pub mod protect;
 mod provider;

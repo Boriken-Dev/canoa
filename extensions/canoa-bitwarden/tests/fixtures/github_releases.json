@@ -1,0 +1,90 @@
+[
+ {
+  "tag_name": "cli-v2026.11.1",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "bw-oss-linux-2026.11.1.zip",
+    "size": 49259623,
+    "digest": "sha256:242d77fa741230cbc2f4972eecfc709c73e431cb46adfbd6dade1f367e5a5262"
+   },
+   {
+    "name": "bw-oss-linux-arm64-2026.11.1.zip",
+    "size": 47789508,
+    "digest": "sha256:02682ca2198ebe10072e33e27964bf33a964c53910657a568ebcf419c3800f3f"
+   },
+   {
+    "name": "bw-oss-macos-2026.11.1.zip",
+    "size": 47662018,
+    "digest": "sha256:4d56ee298ca49be6563afa49036ebb757173a54a5fb6fc706f331ed11302239b"
+   },
+   {
+    "name": "bw-oss-macos-arm64-2026.11.1.zip",
+    "size": 45385655,
+    "digest": "sha256:a004279bf2a36dc8dc5fa45407a42dd2743778898907c49a06e29606098f1978"
+   },
+   {
+    "name": "bw-oss-windows-2026.11.1.zip",
+    "size": 42390107,
+    "digest": "sha256:1d04494a8c87c3b33fa1e41f8efd5a0f1e71dbb588abe1fdaee29beed88f7976"
+   }
+  ]
+ },
+ {
+  "tag_name": "web-v2026.11.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": []
+ },
+ {
+  "tag_name": "cli-v2026.11.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+   {
+    "name": "bw-oss-linux-2026.11.0.zip",
+    "size": 49260402,
+    "digest": "sha256:275eab92f287503b4606b06ea53ea90b6392cc9786735d0a25caad0f92109e71"
+   },
+   {
+    "name": "bw-oss-linux-arm64-2026.11.0.zip",
+    "size": 47783931,
+    "digest": "sha256:f85e3f851a4aa67f4d4bcbdfdb067998567b098620513e62257116941b8e04c2"
+   },
+   {
+    "name": "bw-oss-macos-2026.11.0.zip",
+    "size": 47660479,
+    "digest": "sha256:49260756da9f2f39ae41915de7db9a5dd10da8a040d3495041f20111eb799560"
+   },
+   {
+    "name": "bw-oss-macos-arm64-2026.11.0.zip",
+    "size": 45386627,
+    "digest": "sha256:4983f61106a9db0783e654aa6a63f79f9230a85b7f34ef1e36bd423cae618482"
+   },
+   {
+    "name": "bw-oss-windows-2026.11.0.zip",
+    "size": 42393031,
+    "digest": "sha256:ec8a20376d5f27e6a32185c804f6d955ff539bbd00bcfd6e36e674ebb29a030a"
+   }
+  ]
+ },
+ {
+  "tag_name": "browser-v2026.11.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": []
+ },
+ {
+  "tag_name": "browser-v2026.10.2",
+  "draft": false,
+  "prerelease": false,
+  "assets": []
+ },
+ {
+  "tag_name": "browser-v2026.9.3-beta.1",
+  "draft": false,
+  "prerelease": true,
+  "assets": []
+ }
+]

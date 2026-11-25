@@ -11,7 +11,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::time::Duration;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -393,6 +393,7 @@ pub struct Programs {
     /// verified.
     trusted: RwLock<BTreeSet<String>>,
     releases: RwLock<Option<Releases>>,
+    places: RwLock<BTreeMap<String, Vec<String>>>,
     /// How long a lookup waits to connect and for an answer; `[host.store] connect_timeout` and `lookup_timeout`.
     lookups: Mutex<(Duration, Duration)>,
     /// The plans this host made, by token: it applies its own copy of a plan, never one a client sends.
@@ -428,6 +429,7 @@ impl Programs {
             options: Options::default(),
             trusted: RwLock::new(BTreeSet::new()),
             releases: RwLock::new(None),
+            places: RwLock::new(BTreeMap::new()),
             lookups: Mutex::new((
                 ToolsLimits::default().lookup_connect,
                 ToolsLimits::default().lookup_response,
@@ -544,6 +546,12 @@ impl Programs {
             programs.into_iter().collect();
     }
 
+    /// Takes `places` as the further origins each program's files may be downloaded from: the ones the enabled catalog entries of its
+    /// scope in canoa.cfg name with `endpoints`, in place of the ones named before.
+    pub(crate) fn download_from(&self, places: BTreeMap<String, Vec<String>>) {
+        *self.places.write().unwrap_or_else(PoisonError::into_inner) = places;
+    }
+
     fn is_trusted(&self, program: &str) -> bool {
         self.trusted
             .read()
@@ -579,7 +587,16 @@ impl Programs {
                 let read: super::tools::ReleasesReader = Arc::new(move || reader(&program));
                 read
             });
-        self.tools_at(&info.endpoints)
+        let mut endpoints = info.endpoints.clone();
+        if let Some(more) = self
+            .places
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&info.program)
+        {
+            endpoints.extend(more.iter().cloned());
+        }
+        self.tools_at(&endpoints)
             .allow_unverified(self.is_trusted(&info.program))
             .releases_from(reader)
     }
