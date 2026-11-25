@@ -96,20 +96,30 @@ class FetchTests(unittest.TestCase):
 
 
 class PinTests(unittest.TestCase):
-    def test_every_pinned_tool_has_a_runtime_and_a_digest(self):
-        self.assertEqual(portable.APPIMAGETOOL.keys(), portable.RUNTIME.keys())
-        for table in (portable.APPIMAGETOOL, portable.RUNTIME):
-            for _name, digest in table.values():
-                self.assertRegex(digest, r"^[0-9a-f]{64}$")
-        self.assertTrue(portable.APPIMAGETOOL_RELEASE.startswith("https://"))
-        self.assertTrue(portable.RUNTIME_RELEASE.startswith("https://"))
+    def test_the_lock_pins_a_tool_and_a_runtime_with_a_digest_for_each_linux_machine(self):
+        root = Path(__file__).resolve().parents[2]
+        for arch in portable.LINUX_PLATFORMS:
+            tool, runtime = portable.appimage_pins(root, arch)
+            for pin in (tool, runtime):
+                self.assertRegex(pin.sha256, r"^[0-9a-f]{64}$")
+                self.assertTrue(pin.url.startswith("https://") and pin.url.endswith("/" + pin.name))
+            self.assertIn("appimagetool", tool.name)
+            self.assertIn("runtime", runtime.name)
+
+    def test_a_machine_the_lock_does_not_name_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "tools").mkdir()
+            (Path(tmp) / "tools" / "sdk.lock").write_text("app appimagetool 1 linux-x64 " + "0" * 64 + " https://example.invalid/t\n")
+            with self.assertRaisesRegex(RuntimeError, "no pinned appimagetool and runtime for riscv64"):
+                portable.appimage_pins(Path(tmp), "riscv64")
 
 
 class AppImageBuildTests(unittest.TestCase):
     @patch("portable.subprocess.run")
     @patch("portable.make_appdir")
     @patch("portable.pinned_tool", side_effect=lambda url, sha, dest: dest)
-    def test_appimagetool_gets_a_private_temporary_folder_under_target(self, _fetch, _appdir, run):
+    @patch("portable.appimage_pins", return_value=(portable.Pin("tool", "0" * 64, "https://x/tool"), portable.Pin("runtime", "0" * 64, "https://x/runtime")))
+    def test_appimagetool_gets_a_private_temporary_folder_under_target(self, _pins, _fetch, _appdir, run):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "target" / "appimage-tmp").mkdir(parents=True, mode=0o755)
@@ -125,7 +135,8 @@ class AppImageBuildTests(unittest.TestCase):
             (root / "target" / "appimage-tmp").mkdir(parents=True, mode=0o755)
             with patch("portable.subprocess.run"), patch("portable.make_appdir"), patch(
                 "portable.pinned_tool", side_effect=lambda url, sha, dest: dest
-            ), patch("portable.Path.chmod", autospec=True) as chmod:
+            ), patch("portable.appimage_pins", return_value=(portable.Pin("tool", "0" * 64, "u"), portable.Pin("runtime", "0" * 64, "u"))), \
+                    patch("portable.Path.chmod", autospec=True) as chmod:
                 portable.build_appimage(root / "bundle", root, root / "out", "x86_64")
             modes = {(call.args[0].name, call.args[1]) for call in chmod.call_args_list}
             self.assertIn(("appimage-tmp", 0o700), modes)
@@ -133,7 +144,9 @@ class AppImageBuildTests(unittest.TestCase):
 
 class ToolsAreNotFetchedByABuildTests(unittest.TestCase):
     def test_a_missing_tool_stops_the_build_naming_the_fetch_command(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("portable.make_appdir") as appdir, patch("portable.subprocess.run") as run:
+        pins = (portable.Pin("tool", "0" * 64, "https://x/tool"), portable.Pin("runtime", "0" * 64, "https://x/runtime"))
+        with tempfile.TemporaryDirectory() as tmp, patch("portable.make_appdir") as appdir, \
+                patch("portable.subprocess.run") as run, patch("portable.appimage_pins", return_value=pins):
             with self.assertRaisesRegex(RuntimeError, r"portable\.py fetch"):
                 portable.build_appimage(Path(tmp) / "bundle", Path(tmp), Path(tmp) / "out", "x86_64")
             appdir.assert_not_called()

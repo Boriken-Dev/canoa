@@ -11,24 +11,36 @@ from pathlib import Path
 import shutil
 import subprocess
 import tomllib
+from typing import NamedTuple
 import urllib.request
 
 APP_PROGRAM = "CanoaUI"
 
 # appimagetool and the AppImage runtime it embeds are programs, so the deps branch cannot carry them: they are toolchain,
-# put in target/appimage-tools by `python app/tool/portable.py fetch` (the only code here that uses the network) and checked
-# against these digests (a GitHub release's own, confirmed by hashing the download) by every build, which never fetches.
-# Bumping either is a deliberate edit of this table.
-APPIMAGETOOL_RELEASE = "https://github.com/AppImage/appimagetool/releases/download/1.9.1"
-APPIMAGETOOL = {
-    "x86_64": ("appimagetool-x86_64.AppImage", "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"),
-    "aarch64": ("appimagetool-aarch64.AppImage", "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"),
-}
-RUNTIME_RELEASE = "https://github.com/AppImage/type2-runtime/releases/download/20251108"
-RUNTIME = {
-    "x86_64": ("runtime-x86_64", "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"),
-    "aarch64": ("runtime-aarch64", "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444"),
-}
+# named with their digests by the `app appimagetool` and `app appimage-runtime` rows of tools/sdk.lock, put in
+# target/appimage-tools by `python app/tool/portable.py fetch` (the only code here that uses the network) and checked against
+# those digests by every build, which never fetches.
+LOCK = Path("tools") / "sdk.lock"
+LINUX_PLATFORMS = {"x86_64": "linux-x64", "aarch64": "linux-arm64"}
+
+
+class Pin(NamedTuple):
+    name: str
+    sha256: str
+    url: str
+
+
+def appimage_pins(root: Path, arch: str) -> tuple[Pin, Pin]:
+    """The pinned appimagetool and runtime for `arch`, from the SDK lock's rows `GROUP NAME VERSION PLATFORM SHA256 URL`."""
+    found: dict[str, Pin] = {}
+    for line in (root / LOCK).read_text(encoding="utf-8").splitlines():
+        row = line.split()
+        if len(row) == 6 and row[0] == "app" and row[1] in ("appimagetool", "appimage-runtime") and row[3] == LINUX_PLATFORMS.get(arch):
+            found[row[1]] = Pin(row[5].rsplit("/", 1)[-1], row[4], row[5])
+    if len(found) != 2:
+        raise RuntimeError(f"no pinned appimagetool and runtime for {arch} in {LOCK}")
+    return found["appimagetool"], found["appimage-runtime"]
+
 
 DESKTOP_FILE = """[Desktop Entry]
 Type=Application
@@ -90,12 +102,8 @@ def pinned_tool(url: str, sha256: str, dest: Path) -> Path:
 
 def fetch_tools(root: Path, arch: str | None = None) -> list[Path]:
     """Download appimagetool and the runtime for `arch` into target/appimage-tools, each checked against its pin."""
-    arch = arch or machine()
-    if arch not in APPIMAGETOOL:
-        raise RuntimeError(f"no pinned appimagetool for {arch}")
     tools = root / "target" / "appimage-tools"
-    return [fetch_pinned(f"{release}/{name}", sha, tools / name)
-            for release, (name, sha) in ((APPIMAGETOOL_RELEASE, APPIMAGETOOL[arch]), (RUNTIME_RELEASE, RUNTIME[arch]))]
+    return [fetch_pinned(pin.url, pin.sha256, tools / pin.name) for pin in appimage_pins(root, arch or machine())]
 
 
 def cargo_program() -> str:
@@ -161,13 +169,10 @@ def machine() -> str:
 def build_appimage(bundle: Path, root: Path, out_dir: Path, arch: str | None = None) -> Path:
     """Make out_dir/Canoa-<arch>.AppImage from Flutter's Linux release bundle, with appimagetool installed by `fetch`."""
     arch = arch or machine()
-    if arch not in APPIMAGETOOL:
-        raise RuntimeError(f"no pinned appimagetool for {arch}")
     tools = root / "target" / "appimage-tools"
-    tool_name, tool_sha = APPIMAGETOOL[arch]
-    runtime_name, runtime_sha = RUNTIME[arch]
-    tool = pinned_tool(f"{APPIMAGETOOL_RELEASE}/{tool_name}", tool_sha, tools / tool_name)
-    runtime = pinned_tool(f"{RUNTIME_RELEASE}/{runtime_name}", runtime_sha, tools / runtime_name)
+    tool_pin, runtime_pin = appimage_pins(root, arch)
+    tool = pinned_tool(tool_pin.url, tool_pin.sha256, tools / tool_pin.name)
+    runtime = pinned_tool(runtime_pin.url, runtime_pin.sha256, tools / runtime_pin.name)
     tool.chmod(0o755)
     appdir = root / "target" / "appimage" / "Canoa.AppDir"
     make_appdir(bundle, appdir, root / "app" / "assets" / "icons" / "canoa.svg")
@@ -191,7 +196,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Install the pinned AppImage tools a Linux `--portable` build reads.")
     parser.add_argument("command", choices=("fetch",))
-    parser.add_argument("--arch", choices=sorted(APPIMAGETOOL), help="default: this machine's")
+    parser.add_argument("--arch", choices=sorted(LINUX_PLATFORMS), help="default: this machine's")
     options = parser.parse_args()
     try:
         for installed in fetch_tools(Path(__file__).resolve().parents[2], options.arch):
