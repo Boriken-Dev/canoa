@@ -281,20 +281,31 @@ static HELD: Mutex<Held> = Mutex::new(Held {
     watching: false,
 });
 
+/// Held while a model loads, so a recording that asks for the model its own warm-up thread is loading waits for it: a large model
+/// read twice at once takes twice the memory.
+static LOADING: Mutex<()> = Mutex::new(());
+
+/// The model held when it is `folder` run on `threads`, marked used now.
+fn kept(folder: &Path, threads: usize) -> Option<Arc<Loaded>> {
+    let held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
+    let loaded = held
+        .loaded
+        .as_ref()
+        .filter(|(each, _)| each.folder == folder && each.threads == threads)
+        .map(|(each, _)| Arc::clone(each))?;
+    drop(held);
+    touch(&loaded);
+    Some(loaded)
+}
+
 /// The model in `folder`, loaded now or kept from the last recording. A different model frees the one held.
 fn loaded(folder: &Path, threads: usize) -> Result<Arc<Loaded>, ProviderError> {
-    {
-        let held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((loaded, _)) = held
-            .loaded
-            .as_ref()
-            .filter(|(each, _)| each.folder == folder && each.threads == threads)
-        {
-            let loaded = Arc::clone(loaded);
-            drop(held);
-            touch(&loaded);
-            return Ok(loaded);
-        }
+    if let Some(loaded) = kept(folder, threads) {
+        return Ok(loaded);
+    }
+    let _loading = LOADING.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(loaded) = kept(folder, threads) {
+        return Ok(loaded);
     }
     let read = |name: &str| {
         std::fs::read(folder.join(name)).map_err(|error| {
@@ -328,14 +339,6 @@ fn loaded(folder: &Path, threads: usize) -> Result<Arc<Loaded>, ProviderError> {
         engine: Mutex::new(engine),
     });
     let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
-    // Two recordings that asked at once loaded the same model: the first one kept stays.
-    if let Some((loaded, _)) = held
-        .loaded
-        .as_ref()
-        .filter(|(each, _)| each.folder == folder && each.threads == threads)
-    {
-        return Ok(Arc::clone(loaded));
-    }
     held.loaded = Some((Arc::clone(&made), Instant::now()));
     if !held.watching {
         held.watching = true;
