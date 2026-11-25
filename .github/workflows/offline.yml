@@ -13,19 +13,12 @@ jobs:
           ref: deps
           path: deps-cache
       - uses: ./.github/actions/flutter
-        with:
-          platforms: web
       - run: flutter config --enable-windowing
-      - name: Verify dependency manifest status
-        run: |
-          python -c "import json; d=json.load(open('deps-cache/manifest.json')); assert d['status']=='complete' and len(d['pubPackages'])>0"
-      - name: Resolve Dart graph without network
+      - name: The deps branch holds every lock
+        run: python3 tools/build.py deps check --deps deps-cache
+      - name: Resolve the Dart graph without network
+        run: python3 ../tools/build.py --root .. offline run --deps ${{ github.workspace }}/deps-cache -- flutter pub get --offline --enforce-lockfile
         working-directory: app
-        env:
-          PUB_CACHE: ${{ github.workspace }}/deps-cache/pub
-        run: flutter pub get --offline
-      - name: Analyze against mirrored packages
+      - name: Analyze against the mirrored packages
+        run: python3 ../tools/build.py --root .. offline run --deps ${{ github.workspace }}/deps-cache -- flutter analyze --no-pub
         working-directory: app
-        env:
-          PUB_CACHE: ${{ github.workspace }}/deps-cache/pub
-        run: flutter analyze

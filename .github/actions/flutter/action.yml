@@ -1,25 +1,20 @@
 name: Flutter from Boriken Dev's mirrors
 description: >-
-  Installs the Flutter SDK named in tools/flutter.pin: the checkout from github.com/Boriken-Dev/flutter and, for
-  `flutter precache`, the engine, the Dart SDK and the web artifacts from that repository's release `engine-<hash>`,
-  served on loopback while it runs. Nothing is fetched from Flutter's storage or from flutter/flutter. Needs the
-  repository checked out.
-inputs:
-  platforms:
-    description: Comma list of the platforms to precache for (web, linux, windows).
-    default: web
+  Installs the Flutter SDK named in tools/sdk.lock with `python tools/build.py sdk install --groups app`: the checkout from
+  github.com/Boriken-Dev/flutter and, for `flutter precache` (the platforms of `[flutter] precache` in tools/build.cfg), the
+  engine, the Dart SDK and the web artifacts from that repository's release `engine-<hash>`, served on loopback while it
+  runs. Nothing is fetched from Flutter's storage or from flutter/flutter. Needs the repository checked out.
 runs:
   using: composite
   steps:
-    - name: Install the Flutter SDK of tools/flutter.pin
+    - name: Install the Flutter SDK of tools/sdk.lock
       shell: bash
-      env:
-        PLATFORMS: ${{ inputs.platforms }}
       run: |
         set -eu
         if [ "$RUNNER_OS" = Windows ]; then PY=python; else PY=python3; fi
-        sdk="$RUNNER_TEMP/flutter"
-        "$PY" tools/flutter_pin.py install "$sdk" --platforms "$PLATFORMS"
+        prefix="$RUNNER_TEMP/sdk"
+        "$PY" tools/build.py sdk install --groups app --prefix "$prefix"
+        sdk=$(echo "$prefix"/git/flutter/*)
         if [ "$RUNNER_OS" = Windows ]; then sdk=$(cygpath -w "$sdk"); fi
         echo "FLUTTER_ROOT=$sdk" >> "$GITHUB_ENV"
         echo "FLUTTER_GIT_URL=https://github.com/Boriken-Dev/flutter.git" >> "$GITHUB_ENV"
