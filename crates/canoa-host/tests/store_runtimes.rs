@@ -849,18 +849,42 @@ fn the_bitwarden_plan_fetches_the_zip_of_this_system_and_checks_the_digest_githu
             .as_deref(),
         Some("2026.9.0")
     );
-    let tools = tools_for(&bw, BitwardenFixture.world(Variant::Normal));
+    let tools = tools_of(&bw, &BitwardenFixture);
     let freebsd = PlanRequest::new(Action::Install, Platform::new("freebsd", "x86_64"));
     assert!(bw.plan(freebsd, tools).is_err(), "not published for it");
 }
 
 fn tools_for(store: &dyn ProgramStore, world: World) -> Object<dyn InstallTools> {
+    tools_with(store, world, None)
+}
+
+/// Tools over `world` that hand a store the catalogs' releases `releases`, as a host does.
+fn tools_with(
+    store: &dyn ProgramStore,
+    world: World,
+    releases: Option<String>,
+) -> Object<dyn InstallTools> {
     let endpoints = store.describe().expect("described").endpoints;
-    LocalTools::new(WorldTransport::new(world), endpoints).into_object()
+    LocalTools::new(WorldTransport::new(world), endpoints)
+        .releases_from(
+            releases.map(|text| -> canoa_host::store::tools::ReleasesReader {
+                std::sync::Arc::new(move || Ok(text.clone()))
+            }),
+        )
+        .into_object()
+}
+
+/// Tools over the world of `fixture` and the releases of its catalogs.
+fn tools_of(store: &dyn ProgramStore, fixture: &dyn Fixture) -> Object<dyn InstallTools> {
+    tools_with(
+        store,
+        fixture.world(Variant::Normal),
+        fixture.releases(Variant::Normal),
+    )
 }
 
 fn plan_of(store: &dyn ProgramStore, fixture: &dyn Fixture, version: Option<&str>) -> InstallPlan {
-    let tools = tools_for(store, fixture.world(Variant::Normal));
+    let tools = tools_of(store, fixture);
     let mut request = PlanRequest::new(Action::Install, fixture.platform());
     request.version = version.map(str::to_owned);
     store.plan(request, tools).expect("a plan")
@@ -883,10 +907,29 @@ fn a_platform_the_store_was_not_measured_on_is_for_the_publishers_release_to_acc
         format!("{NODE_ORIGIN}v2.0.0/SHASUMS256.txt"),
         sums.into_bytes(),
     );
+    let macos_releases = {
+        let index: serde_json::Value = serde_json::from_str(
+            &world
+                .text_at(&format!("{NODE_ORIGIN}index.json"))
+                .expect("an index"),
+        )
+        .expect("JSON");
+        let heads = canoa_node::heads(&index).expect("heads");
+        let mut sums = std::collections::BTreeMap::new();
+        sums.insert(
+            "2.0.0".to_owned(),
+            world
+                .text_at(&format!("{NODE_ORIGIN}v2.0.0/SHASUMS256.txt"))
+                .expect("checksums"),
+        );
+        canoa_node::catalog_of(NODE_ORIGIN.trim_end_matches('/'), &heads, &sums)
+            .expect("a catalog")
+            .to_json()
+    };
     let plan = node
         .plan(
             PlanRequest::new(Action::Install, Platform::new("macos", "aarch64")),
-            tools_for(&node, world),
+            tools_with(&node, world, Some(macos_releases)),
         )
         .expect("the publisher lists a build for macOS");
     let [download] = plan.downloads.as_slice() else {
@@ -899,7 +942,7 @@ fn a_platform_the_store_was_not_measured_on_is_for_the_publishers_release_to_acc
     );
     let refused = node.plan(
         PlanRequest::new(Action::Install, Platform::new("freebsd", "x86_64")),
-        tools_for(&node, NodeFixture.world(Variant::Normal)),
+        tools_of(&node, &NodeFixture),
     );
     assert!(
         refused
@@ -1002,7 +1045,7 @@ fn the_git_bash_plan_fetches_the_portable_release_of_windows_and_checks_the_dige
     // A plan is made for a platform it is asked for: Windows, whatever system the test runs on.
     let git = GitBash(Engine::new(GitBashRecipe, StoreSettings::default()));
     let fixture = GitBashFixture;
-    let tools = tools_for(&git, fixture.world(Variant::Normal));
+    let tools = tools_of(&git, &fixture);
     let windows = Platform::new(
         "windows",
         if cfg!(target_arch = "aarch64") {
@@ -1048,7 +1091,7 @@ fn the_git_bash_plan_fetches_the_portable_release_of_windows_and_checks_the_dige
         "{:?}",
         plan.steps
     );
-    let tools = tools_for(&git, fixture.world(Variant::Normal));
+    let tools = tools_of(&git, &fixture);
     let mut older = PlanRequest::new(Action::Install, windows.clone());
     older.version = Some("2.55.0".to_owned());
     assert_eq!(
@@ -1059,14 +1102,14 @@ fn the_git_bash_plan_fetches_the_portable_release_of_windows_and_checks_the_dige
         Platform::new("linux", "x86_64"),
         Platform::new("macos", "aarch64"),
     ] {
-        let tools = tools_for(&git, fixture.world(Variant::Normal));
+        let tools = tools_of(&git, &fixture);
         assert!(
             git.plan(PlanRequest::new(Action::Install, refused), tools)
                 .is_err(),
             "Git Bash is Git for Windows'"
         );
     }
-    let tools = tools_for(&git, fixture.world(Variant::Normal));
+    let tools = tools_of(&git, &fixture);
     let mut unlisted = PlanRequest::new(Action::Install, windows);
     unlisted.version = Some("9.9.9".to_owned());
     assert!(git.plan(unlisted, tools).is_err(), "no such release");
@@ -1105,7 +1148,7 @@ fn the_powershell_plan_fetches_the_zip_or_the_archive_of_this_system_and_checks_
             .as_deref(),
         Some("7.6.1")
     );
-    let tools = tools_for(&pwsh, PowerShellFixture.world(Variant::Normal));
+    let tools = tools_of(&pwsh, &PowerShellFixture);
     let mut mac = PlanRequest::new(Action::Install, Platform::new("macos", "aarch64"));
     mac.version = None;
     assert!(
@@ -1160,13 +1203,13 @@ fn foundry_local_is_offered_for_apple_silicon_as_the_zip_and_for_no_other_mac() 
 #[test]
 fn a_version_the_publisher_does_not_list_is_refused_and_a_digest_it_lacks_too() {
     let python = Python(Engine::new(PythonRecipe, StoreSettings::default()));
-    let tools = tools_for(&python, PythonFixture.world(Variant::Normal));
+    let tools = tools_of(&python, &PythonFixture);
     let mut request = PlanRequest::new(Action::Install, here());
     request.version = Some("3.13.99".to_owned());
     assert!(python.plan(request, tools).is_err());
 
     let node = Node(Engine::new(NodeRecipe, StoreSettings::default()));
-    let tools = tools_for(&node, NodeFixture.world(Variant::Normal));
+    let tools = tools_of(&node, &NodeFixture);
     let mut request = PlanRequest::new(Action::Install, here());
     request.version = Some("9.9.9".to_owned());
     assert!(node.plan(request, tools).is_err(), "no digest list for it");
