@@ -9,7 +9,7 @@ It is offered beside `canoa-whisper` (whisper.cpp): the person picks. What a hos
 ## Features
 
 - `host` (default): the Store type, the models page, the provider and `catalog`.
-- Without it: [`Engine`] alone. It reads bytes and samples, and starts no thread, reads no file and keeps no clock, so the crate compiles to `wasm32-unknown-unknown` (the web app's module is `app/web_whisper`, which links it that way; its build needs `RUSTFLAGS` `-C target-feature=+simd128` and, for the random generator Candle's dependencies use, `--cfg getrandom_backend="wasm_js"`).
+- Without it: [`Engine`] and `catalog` alone. It reads bytes and samples, and starts no thread, reads no file and keeps no clock, so the crate compiles to `wasm32-unknown-unknown` (the web app's module is `app/web_whisper`, which links it that way; its build needs `RUSTFLAGS` `-C target-feature=+simd128` and, for the random generator Candle's dependencies use, `--cfg getrandom_backend="wasm_js"`).
 - A debug build on Windows on ARM needs the workspace's `[profile.dev.package.gemm-common]` and `gemm-f16` at `opt-level = 1`: Candle's matrix multiply writes half-precision instructions as inline assembly that assembles only once it is inlined.
 
 ## Exports
@@ -44,7 +44,7 @@ pub struct WhisperCandleSettings { pub model: String, pub models_dir: String, pu
 pub fn unload();                    // frees the model held
 pub fn is_loaded() -> bool;         // whether a model is held
 
-pub mod catalog {                   // (host)
+pub mod catalog {
     pub const ENDPOINTS: [&str; 6];  // where the files are downloaded from: Hugging Face's `openai/` and the hosts it sends a download on to
     pub const CONFIG: &str; pub const TOKENIZER: &str; pub const WEIGHTS: &str; pub const FILE_NAMES: [&str; 3];
     pub struct File { pub name: &'static str, pub bytes: u64, pub sha256: &'static str }

@@ -4,12 +4,12 @@
 //! person's speech-to-text calls them, and [`WhisperCandleSpeech`], the `speech_provider` that loads a model and transcribes with it.
 //! There is no program to install and nothing to compile but Rust: [`Engine`] is Whisper over Candle, and the host names none of it.
 //!
-//! Without the `host` feature only [`Engine`] is built, which has no thread, file or clock in it and compiles to WebAssembly.
+//! Without the `host` feature only [`Engine`] and the [`catalog`] of models are built: neither has a thread, file or clock in it,
+//! so they compile to WebAssembly.
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
-#[cfg(feature = "host")]
 pub mod catalog;
 mod engine;
 mod mel;

@@ -1,6 +1,6 @@
 //! The models Candle runs: OpenAI's Whisper in the `safetensors` form of the publisher's Hugging Face repositories, each at one pinned
 //! revision and each file checked against the SHA-256 that revision lists. The models are MIT licensed. They are installed on their
-//! own from the Models page ([`crate::WhisperCandleModels`]); nothing else is installed, since the speech runs inside the host.
+//! own from the host's Models page, or fetched by the web app's own module; nothing else is installed, since the speech runs in the process that asks.
 
 /// Where a repository is downloaded from.
 const HUB: &str = "https://huggingface.co/openai/";

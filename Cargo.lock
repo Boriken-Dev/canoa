@@ -1053,6 +1053,7 @@ dependencies = [
  "canoa-powershell",
  "canoa-python",
  "canoa-whisper",
+ "canoa-whisper-candle",
  "clap",
  "coqui-a2a",
  "coqui-access",
