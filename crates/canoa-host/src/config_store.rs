@@ -102,7 +102,8 @@ impl FileStore {
 
     /// Whether any layer's file exists.
     pub(crate) fn any_present(&self) -> bool {
-        self.layers.iter().any(|layer| layer.path.is_file())
+        // A path that is there but is no file (a directory) is present: reading it fails, which is not "no canoa.cfg yet".
+        self.layers.iter().any(|layer| layer.path.exists())
     }
 
     fn own(&self) -> &FileLayer {
@@ -447,6 +448,18 @@ mod tests {
         );
         std::fs::write(&own, "[host.agents.a]\nprogram = \"x\"\n").expect("write");
         assert_eq!(crate::Config::load(&own).expect("read").entries.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A path that is there and is no file is not "no canoa.cfg yet", which `serve --allow-empty` would excuse.
+    #[test]
+    fn a_directory_where_the_file_should_be_is_refused_and_is_not_a_missing_file() {
+        let dir = dir("directory");
+        let refused = crate::Config::load(&dir).expect_err("a directory is no canoa.cfg");
+        assert!(
+            !matches!(&refused, crate::ConfigError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound),
+            "{refused}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
