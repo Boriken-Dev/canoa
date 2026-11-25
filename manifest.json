@@ -4417,21 +4417,21 @@
         "mode": "checkout",
         "package": "coqui_acp",
         "path": "bindings/dart/coqui_acp",
-        "ref": "dacbce60f271dcef5564a1d4e8ee1d8b10d57571",
+        "ref": "0244aca97b7d779fc00bc0f8103e4f73fcc25640",
         "url": "https://github.com/Boriken-Dev/coqui-acp.git"
       },
       {
         "mode": "checkout",
         "package": "coqui_acp_chat",
         "path": "bindings/dart/coqui_acp_chat",
-        "ref": "dacbce60f271dcef5564a1d4e8ee1d8b10d57571",
+        "ref": "0244aca97b7d779fc00bc0f8103e4f73fcc25640",
         "url": "https://github.com/Boriken-Dev/coqui-acp.git"
       },
       {
         "mode": "checkout",
         "package": "coqui_acp_chat_ui",
         "path": "bindings/dart/coqui_acp_chat_ui",
-        "ref": "dacbce60f271dcef5564a1d4e8ee1d8b10d57571",
+        "ref": "0244aca97b7d779fc00bc0f8103e4f73fcc25640",
         "url": "https://github.com/Boriken-Dev/coqui-acp.git"
       },
       {
@@ -4567,7 +4567,7 @@
       "libxi-dev"
     ]
   },
-  "sourceCommit": "44ba012bb26bb1b9bb89fdb70507f47c9e37cc90",
+  "sourceCommit": "2a73d666a82540aa63b673b2d2f441a4e61cf15d",
   "trees": {
     "office-js": {
       "commit": "498e88261bc578243d40dd79083953d86f84e7f6",
@@ -8442,7 +8442,7 @@
       "crates": 691,
       "gitSources": 22,
       "lock": "Cargo.lock",
-      "lockSha256": "d689f2e95c2e312fa887902b49a74c92711ddeec22863209eb138dcbdccb221a"
+      "lockSha256": "c768c7f9081db1fb81c27980fbbf5ff9c362d0ac49985ac5b1fa77f7851b0bb6"
     },
     "crates-wasm-bindgen-cli": {
       "crates": 254,
