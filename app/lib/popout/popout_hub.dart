@@ -94,8 +94,12 @@ class PopoutHub extends ChangeNotifier {
   /// Whether a plain click on a conversation opens it in a window of its own (Settings, Appearance, Open in).
   bool openInNewWindows = false;
 
-  /// The tabs of the main window. The tab shown is the store's selected session, which the rail changes too.
+  /// The tabs of the main window. The tab shown is the store's selected session, which the rail changes too. A new session that has
+  /// not started is no tab: the window shows its start screen until the first message, and the strip stays as it was.
   final mainTabs = WindowTabs();
+
+  /// Shows the start screen of a new session: told when the main window is left with no tab to show.
+  VoidCallback? onNewSession;
 
   final _popped = <String, _Popped>{};
   final _groups = <String, _Group>{};
@@ -132,7 +136,14 @@ class PopoutHub extends ChangeNotifier {
   }
 
   /// The id of the tab the window [key] shows.
-  String? currentIn(String key) => key == mainKey ? store.selectedId : _groups[key]?.tabs.current;
+  String? currentIn(String key) {
+    if (key != mainKey) return _groups[key]?.tabs.current;
+    final chosen = store.selectedId;
+    return chosen != null && mainTabs.contains(chosen) ? chosen : null;
+  }
+
+  /// Whether [session] is a tab where it is shown: one that has started, or is starting; not the start screen of a new session.
+  bool _tabbable(ChatSession session) => !session.isDraft || store.isStarting(session);
 
   /// The tabs of a window of its own, to listen to; null for a window that is not one of this engine's.
   WindowTabs? tabsOf(String key) => key == mainKey ? mainTabs : _groups[key]?.tabs;
@@ -147,10 +158,12 @@ class PopoutHub extends ChangeNotifier {
       if (key != except) (id: key, title: _titleOf(value), tabs: value.tabs.length),
   ];
 
-  /// Whether the window [key] draws a strip: a window with several tabs does, and so does one with a window to move a tab to.
+  /// Whether the window [key] draws a strip: a window with several tabs does, and so does one with a window to move a tab to. The
+  /// main window also draws it for a lone tab while the start screen of a new session is shown, to go back to it.
   bool showsStrip(String key) {
     final tabs = tabsOf(key);
     if (tabs == null || tabs.isEmpty) return false;
+    if (key == mainKey && currentIn(key) == null) return true;
     return tabs.length > 1 || _groups.keys.any((other) => other != key);
   }
 
@@ -241,11 +254,11 @@ class PopoutHub extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Closes the tab [session] has in the window [key]; the conversation goes on. The main window keeps its last tab, and a window
-  /// of its own closes with its last.
+  /// Closes the tab [session] has in the window [key]; the conversation goes on. A window of its own closes with its last tab, and
+  /// the main window then shows the start screen of a new session.
   void closeTab(String key, ChatSession session) {
     if (key == mainKey) {
-      if (mainTabs.length <= 1 || !mainTabs.contains(session.id)) return;
+      if (!mainTabs.contains(session.id)) return;
       _leave(session.id);
     } else if (_groups[key]?.tabs.contains(session.id) ?? false) {
       _leave(session.id);
@@ -290,9 +303,14 @@ class PopoutHub extends ChangeNotifier {
       }
     } else if (mainTabs.contains(id)) {
       final next = mainTabs.remove(id);
-      if (store.selectedId == id && next != null) {
-        _lastMain = next;
-        store.select(next);
+      if (store.selectedId == id) {
+        if (next != null) {
+          _lastMain = next;
+          store.select(next);
+        } else {
+          _lastMain = null;
+          onNewSession?.call();
+        }
       }
     }
     notifyListeners();
@@ -359,21 +377,27 @@ class PopoutHub extends ChangeNotifier {
     _syncing = true;
     try {
       final here = {for (final session in store.sessions) session.id: session};
-      mainTabs.retain(here.containsKey);
+      mainTabs.retain((id) => switch (here[id]) { final session? => _tabbable(session), null => false });
       for (final group in [..._groups.values]) {
         for (final id in [...group.tabs.sessions]) {
           if (!here.containsKey(id)) _leave(id);
         }
       }
       final chosen = store.selectedId;
-      if (chosen == null || !here.containsKey(chosen)) return;
-      final group = _groupOf(chosen);
+      final selected = here[chosen];
+      if (selected == null || !_tabbable(selected)) return;
+      final group = _groupOf(chosen!);
       if (group == null) {
         mainTabs.open(chosen);
         _lastMain = chosen;
       } else if (mainTabs.isEmpty) {
-        // The only conversation the main window has is the one it shares with a window.
-        return;
+        // The main window has no tab: it shows the start screen of a new session, and the window is brought forward.
+        if (onNewSession case final show?) {
+          group.tabs.focus(chosen);
+          _retitle(group);
+          unawaited(group.window.focus());
+          scheduleMicrotask(show);
+        }
       } else {
         group.tabs.focus(chosen);
         _retitle(group);

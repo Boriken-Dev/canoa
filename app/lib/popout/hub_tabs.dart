@@ -72,15 +72,14 @@ class HubTabStrip extends StatelessWidget {
       builder: (context, _) {
         if (!hub.showsStrip(windowKey)) return const SizedBox.shrink();
         final sessions = hub.sessionsIn(windowKey);
-        final closable = windowKey != PopoutHub.mainKey || sessions.length > 1;
         return SessionTabStrip(
           sessions: sessions,
           current: hub.currentIn(windowKey),
           narrow: narrow,
           onSelect: (session) => hub.selectTab(windowKey, session),
           onReorder: (from, to) => hub.reorder(windowKey, from, to),
-          actions: (session) => tabActions(context, hub, windowKey, session, closable: closable),
-          onClose: closable ? (session) => hub.closeTab(windowKey, session) : null,
+          actions: (session) => tabActions(context, hub, windowKey, session, closable: true),
+          onClose: (session) => hub.closeTab(windowKey, session),
         );
       },
     );

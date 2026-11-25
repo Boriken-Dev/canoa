@@ -3129,6 +3129,7 @@ class _CanoaAppState extends State<CanoaApp> {
       ..imported = _importedFor
       ..showImported = _showImported;
     _conversation.popout = _popout;
+    _popout.onNewSession = _newSession;
     _conversation.windows = _itemWindows;
     _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));

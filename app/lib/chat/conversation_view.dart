@@ -369,6 +369,8 @@ class _ConversationViewState extends State<ConversationView> {
     }
 
     final tabs = widget.chatOnly ? null : widget.handle.popout;
+    // The start screen of a new session is no conversation yet: no title, state or close button over it, and no tab.
+    final start = session != null && session.isDraft && !widget.store.isStarting(session);
     final conversation = Column(children: [
       if (tabs != null) HubTabStrip(hub: tabs, windowKey: PopoutHub.mainKey, narrow: widget.narrow),
       Material(
@@ -380,24 +382,24 @@ class _ConversationViewState extends State<ConversationView> {
               if (widget.narrow)
                 Builder(builder: (inner) => IconButton(tooltip: 'Sessions', icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(inner).openDrawer())),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                child: start ? const SizedBox.shrink() : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(session?.title ?? 'Canoa', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
                   Text(_subtitle(session), style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
                 ]),
               ),
-              if (session != null && !session.isDraft && !widget.chatOnly)
+              if (!start && session != null && !session.isDraft && !widget.chatOnly)
                 if (changeTotals(session) case (final added, final removed))
                   _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
-              if (session != null && session.others.isNotEmpty) PresenceMark(others: session.others, narrow: widget.narrow),
-              if (session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
-              ..._headerActions(session, tight: headerBox.maxWidth < 680),
-              if (session != null)
+              if (!start && session != null && session.others.isNotEmpty) PresenceMark(others: session.others, narrow: widget.narrow),
+              if (!start && session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
+              if (!start) ..._headerActions(session, tight: headerBox.maxWidth < 680),
+              if (session != null && !start)
                 IconButton(
                   tooltip: 'Close conversation',
                   icon: const Icon(Icons.close),
                   onPressed: () => unawaited((widget.handle.close ?? widget.store.close)(session)),
                 ),
-              if (session == null)
+              if (session == null || start)
                 const SizedBox.shrink()
               else if (widget.narrow || headerBox.maxWidth < 680)
                 Tooltip(message: _state(session), child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)))
