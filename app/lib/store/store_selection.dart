@@ -51,6 +51,12 @@ class StoreSelection extends ChangeNotifier {
   /// The types, in the order of the index.
   List<StoreTypeRow> get types => _types;
 
+  /// How many items hold an update, across every type.
+  int get updates => _types.fold(0, (sum, type) => sum + type.updates);
+
+  /// What the index's Update all does: the section that lists the types sets it, and clears it when it goes.
+  VoidCallback? onUpdateAll;
+
   /// The id of the chosen type, or of the first when none was chosen or the chosen one is not listed; null before any type is
   /// published and nothing was kept.
   String? get selected {

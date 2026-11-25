@@ -68,6 +68,7 @@ ExtensionStoreType programsStoreType({
   image: image,
   changes: programs,
   load: () => programs.refresh(latest: true),
+  updates: (text) => programUpdates(programs, text),
   items: () => [
     for (final status in programs.statuses)
       ExtensionStoreItem(

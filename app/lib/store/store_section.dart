@@ -6,6 +6,7 @@ import '../surfaces/a2ui/overlay_views.dart' show OpenOverlayView;
 import 'package:flutter/scheduler.dart';
 
 import '../config/canoa_config.dart';
+import '../l10n/app_text.dart';
 import '../loadout/loadout_controller.dart';
 import '../loadout/mcp_registry.dart';
 import '../profile/profile_home.dart';
@@ -27,6 +28,8 @@ import 'store.dart' show LoadedCatalog;
 import 'store_overlays.dart';
 import 'store_selection.dart';
 import 'store_skills.dart';
+import 'store_update_all.dart';
+import 'store_update_all_view.dart';
 import 'store_view.dart';
 
 /// The Store: what an agent can be given, by type (**Overlays**, **Skills**, **Agents**, **MCP servers**, and those extensions add), each with what is
@@ -179,8 +182,15 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
       viewOf(id);
     }
     widget.programs?.addListener(_changed);
+    // What holds an update is counted in the index before its page is opened, so the newest versions are asked for now (the host
+    // answers from what it kept, and asks a publisher only when that is old).
+    unawaited(widget.programs?.refresh(latest: true));
+    for (final type in widget.extensionTypes) {
+      if (type.updates != null) unawaited(type.load?.call());
+    }
     _typeChanges = _merged(widget.extensionTypes)?..addListener(_changed);
     selection?.addListener(_selectionChanged);
+    selection?.onUpdateAll = () => unawaited(_updateAll(null));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _publish();
     });
@@ -203,7 +213,9 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     }
     if (oldWidget.selection != widget.selection) {
       oldWidget.selection?.removeListener(_selectionChanged);
+      oldWidget.selection?.onUpdateAll = null;
       widget.selection?.addListener(_selectionChanged);
+      widget.selection?.onUpdateAll = () => unawaited(_updateAll(null));
     }
     final programsChanged = oldWidget.programs != widget.programs;
     if (programsChanged) {
@@ -249,7 +261,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
         image: _extension(id)?.image,
         installed: _installedCount(id),
         available: _discoverCount(id),
-        updates: _builtin(id) == StoreType.overlays ? controller.updatable.length : 0,
+        updates: _candidates(id, AppText.base).length,
       ),
   ]);
 
@@ -281,6 +293,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     widget.programs?.removeListener(_changed);
     _typeChanges?.removeListener(_changed);
     selection?.removeListener(_selectionChanged);
+    selection?.onUpdateAll = null;
     controller
       ..removeListener(_changed)
       ..dispose();
@@ -310,6 +323,25 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     StoreType.mcps => controller.registryRead ? controller.registryEntries.length : null,
     null => _extension(id)?.items().where((item) => !item.installed).length,
   };
+
+  /// What the type [id] holds an update for that the Store can apply: the items Update all plans and applies.
+  List<UpdateCandidate> _candidates(String id, AppText text) => switch (_builtin(id)) {
+    StoreType.agents => widget.programs == null ? const [] : programUpdates(widget.programs!, text),
+    StoreType.overlays => overlayUpdates(controller, text),
+    StoreType.skills || StoreType.mcps => const [],
+    null => _extension(id)?.updates?.call(text) ?? const [],
+  };
+
+  /// Plans the updates of the type [id], or of every type when null, and shows them for the person to confirm.
+  Future<void> _updateAll(String? id) async {
+    final text = AppText.of(context);
+    final candidates = id == null
+        ? [for (final each in types) ..._candidates(each, text).map((candidate) => candidate.inGroup(_labelOf(each)))]
+        : _candidates(id, text);
+    if (candidates.isEmpty) return;
+    await showUpdateAll(context, candidates);
+    if (mounted) await controller.readUpdates();
+  }
 
   int get _updates => widget.programs?.statuses.where((status) => status.updateAvailable).length ?? 0;
 
@@ -520,6 +552,13 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
               },
             ),
           ),
+          if (_candidates(current, AppText.base).isNotEmpty)
+            FilledButton.tonalIcon(
+              key: const Key('store-update-all'),
+              onPressed: controller.busy != null ? null : () => unawaited(_updateAll(current)),
+              icon: const Icon(Icons.arrow_circle_up, size: 18),
+              label: Text(context.t('store.update_all_count', {'count': _candidates(current, AppText.base).length})),
+            ),
           IconButton(
             key: const Key('store-refresh'),
             tooltip: switch (builtin) {

@@ -9,6 +9,7 @@ import 'store_banner.dart';
 import 'store_cards.dart';
 import 'store_icon.dart';
 import 'store_selection.dart' show StoreMarkImage;
+import 'store_update_all.dart';
 import 'store_view.dart';
 
 /// One item of a store type an extension adds: what its tile shows, the catalog that lists it and what + does.
@@ -70,7 +71,11 @@ final class ExtensionStoreType {
     this.changes,
     this.load,
     this.notices,
+    this.updates,
   });
+
+  /// The items that hold an update the Store can apply, which Update all plans and applies together; null when the type has none.
+  final List<UpdateCandidate> Function(AppText text)? updates;
 
   /// A word of letters and digits that no built-in type uses; the index keeps its choice by it.
   final String id;

@@ -21,6 +21,21 @@ class StoreIndex extends StatelessWidget {
       return IndexPane(
         title: 'Store',
         headerBottomPadding: 10,
+        aboveDivider: [
+          if (selection.updates > 0 && selection.onUpdateAll != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  key: const Key('store-index-update-all'),
+                  onPressed: () => _updateAll(context),
+                  icon: const Icon(Icons.arrow_circle_up, size: 18),
+                  label: Text(context.t('store.update_all_count', {'count': selection.updates})),
+                ),
+              ),
+            ),
+        ],
         body: ListView(children: [
           for (final type in selection.types)
             IndexRow(
@@ -53,7 +68,16 @@ class StoreIndex extends StatelessWidget {
 
   void _choose(BuildContext context, String id) {
     selection.select(id);
-    // On a narrow window the index is in the drawer, which gives way to the content once a type is chosen.
+    _closeDrawer(context);
+  }
+
+  void _updateAll(BuildContext context) {
+    _closeDrawer(context);
+    selection.onUpdateAll?.call();
+  }
+
+  /// On a narrow window the index is in the drawer, which gives way to the content once something is chosen in it.
+  void _closeDrawer(BuildContext context) {
     final scaffold = Scaffold.maybeOf(context);
     if (scaffold != null && scaffold.isDrawerOpen) scaffold.closeDrawer();
   }

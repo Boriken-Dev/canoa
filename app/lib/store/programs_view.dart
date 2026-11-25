@@ -9,6 +9,7 @@ import '../l10n/app_text.dart';
 import '../selectable.dart';
 import '../sources/source_icons.dart';
 import 'programs.dart';
+import 'store_update_all.dart';
 import 'store_cards.dart';
 import 'store_view.dart';
 
@@ -608,3 +609,37 @@ class _AgentsBodyState extends State<AgentsBody> with AutomaticKeepAliveClientMi
     );
   }
 }
+
+/// The programs [programs] holds a newer version of, that Canoa's own copy can be updated to: each plans its update through the
+/// host as the Update button does and applies it through the same install, so a question it asks is put to the person.
+List<UpdateCandidate> programUpdates(ProgramStores programs, AppText text) => [
+  for (final status in programs.statuses)
+    if (status.copy case final copy? when copy.managed && status.updateAvailable)
+      UpdateCandidate(
+        id: status.info.provider,
+        title: status.info.title,
+        from: copy.version,
+        to: status.latest?.version,
+        plan: () async {
+          final plan = await programs.plan(status.info.provider, 'update');
+          return UpdateItem(
+            from: plan.fromVersion ?? copy.version,
+            to: plan.version ?? status.latest?.version,
+            changes: [
+              if (plan.bytes != null) text('store.update_all_download', {'size': sizeText(plan.bytes!)}),
+              for (final change in plan.changes) '${change.kind}: ${change.target}',
+            ],
+            attention: [
+              for (final each in plan.downloads)
+                if (!each.verified) text('store.update_all_unverified', {'url': each.url}),
+              ...plan.notices,
+            ],
+            run: (run) async {
+              final install = programs.apply(plan);
+              run.attach(install);
+              await install.done;
+            },
+          );
+        },
+      ),
+];

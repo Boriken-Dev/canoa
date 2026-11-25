@@ -21,6 +21,7 @@ import 'store_cards.dart';
 import 'store_catalogs.dart';
 import 'store_icon.dart';
 import 'store_runtimes.dart' show programsTypeId;
+import 'store_update_all.dart';
 import 'update_badge.dart';
 import 'store_view.dart';
 
@@ -531,3 +532,47 @@ List<Widget> sourceNotes(LoadoutController c, {Set<String> only = const {}}) => 
         ),
       ),
 ];
+
+/// The installed overlays whose source holds something newer: each is checked as the Update button checks it and applied the same
+/// way, pinned to the digest of what was fetched. What needs the person's eye (a manifest that changes) is said in the plan.
+List<UpdateCandidate> overlayUpdates(LoadoutController c, AppText text) {
+  final home = c.home;
+  if (home == null) return const [];
+  return [
+    for (final name in c.updatable)
+      if (c.config.overlays[name] case final GitOverlay source)
+        UpdateCandidate(
+          id: name,
+          title: name,
+          from: home.overlays.installed(name)?.commit == null ? null : shortCommit(home.overlays.installed(name)!.commit),
+          to: c.availability[name]?.latest == null ? null : shortCommit(c.availability[name]!.latest!),
+          plan: () async {
+            final update = await home.overlays.check(name, source.pinnedTo(null), catalog: home.overlays.installed(name)?.catalog);
+            final manifest = [...update.added, ...update.changed].any((path) => path == 'overlay.cfg' || path == 'OVERLAY.md');
+            return UpdateItem(
+              from: update.from == null ? null : shortCommit(update.from!),
+              to: shortCommit(update.commit),
+              changes: [
+                update.changesNothing
+                    ? text('store.update_all_nothing_changes')
+                    : text('store.update_all_files', {'added': update.added.length, 'changed': update.changed.length, 'removed': update.removed.length}),
+              ],
+              details: [
+                for (final path in update.added) '+ $path',
+                for (final path in update.changed) '~ $path',
+                for (final path in update.removed) '- $path',
+              ],
+              attention: [if (manifest) text('store.update_all_manifest')],
+              run: (run) async {
+                if (update.changesNothing) return;
+                run.say(text('store.update_all_applying', {'name': name}));
+                final record = await home.overlays.apply(update);
+                if (await c.apply(c.config.withOverlayPin(name, record.digest!)) == null) {
+                  throw OverlayException(c.problem ?? text('store.update_all_unsaved'));
+                }
+              },
+            );
+          },
+        ),
+  ];
+}
