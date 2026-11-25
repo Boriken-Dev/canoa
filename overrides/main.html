@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{#- The Quick Start's Download button: its style and script are inline, on the one page that holds the button, and load nothing. -#}
+{% block extrahead %}
+  {{ super() }}
+  {% if page and page.meta and page.meta.download %}
+  <style>
+    .canoa-download { margin: 1.2rem 0 1.6rem; }
+    .canoa-download__split { display: inline-flex; align-items: stretch; position: relative; max-width: 100%; }
+    .md-typeset .canoa-download__main.md-button {
+      margin: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; font-size: .85rem; padding: .8em 1.5em;
+      background-color: var(--md-accent-fg-color); border-color: var(--md-accent-fg-color); color: var(--md-accent-bg-color);
+    }
+    .md-typeset .canoa-download__main.md-button:hover, .md-typeset .canoa-download__main.md-button:focus-visible { filter: brightness(1.12); }
+    .canoa-download__arrow {
+      cursor: pointer; display: flex; align-items: center; align-self: stretch; box-sizing: border-box; font: inherit;
+      padding: 0 .9em; margin: 0 0 0 2px; border: .1rem solid var(--md-accent-fg-color);
+      border-top-right-radius: .1rem; border-bottom-right-radius: .1rem;
+      background-color: var(--md-accent-fg-color); color: var(--md-accent-bg-color);
+    }
+    .canoa-download__arrow::after { content: ""; border: .3em solid transparent; border-top-color: currentColor; border-bottom-width: 0; }
+    .canoa-download__arrow:hover, .canoa-download__arrow:focus-visible { filter: brightness(1.12); }
+    .md-typeset .canoa-download__menu {
+      list-style: none; margin: .3rem 0 0; padding: .3rem 0; min-width: 17rem; background: var(--md-default-bg-color);
+      border: 1px solid var(--md-default-fg-color--lightest); border-radius: .2rem;
+    }
+    .md-typeset .canoa-download.is-js .canoa-download__menu {
+      display: none; position: absolute; top: 100%; right: 0; z-index: 5; max-width: calc(100vw - 2rem);
+      box-shadow: 0 .4rem 1.2rem rgba(0, 0, 0, .25);
+    }
+    .md-typeset .canoa-download.is-js.is-open .canoa-download__menu { display: block; }
+    .canoa-download:not(.is-js) .canoa-download__split { display: block; }
+    .canoa-download:not(.is-js) .canoa-download__arrow { display: none; }
+    .md-typeset .canoa-download__menu li { margin: 0; padding: 0; list-style: none; }
+    .canoa-download__menu li a { display: block; padding: .5rem .9rem; color: var(--md-typeset-color); }
+    .canoa-download__menu li a:hover, .canoa-download__menu li a:focus-visible { background: var(--md-accent-fg-color--transparent); }
+    .canoa-download__menu li a[aria-current="true"] { font-weight: 700; }
+    .canoa-download__menu li small { display: block; color: var(--md-default-fg-color--light); font-size: .7rem; overflow-wrap: anywhere; }
+    .canoa-download__note { font-size: .75rem; color: var(--md-default-fg-color--light); margin: .6rem 0 0; }
+    @media (max-width: 30em) {
+      .canoa-download__split { display: flex; }
+      .md-typeset .canoa-download__main.md-button { flex: 1; text-align: center; }
+    }
+  </style>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  {% if page and page.meta and page.meta.download %}
+  <script>
+    (function () {
+      var root = document.querySelector(".canoa-download");
+      if (!root || !root.getAttribute("data-release")) return;
+      root.classList.add("is-js");
+      var main = root.querySelector(".canoa-download__main");
+      var arrow = root.querySelector(".canoa-download__arrow");
+      function toggle(open) { root.classList.toggle("is-open", open); arrow.setAttribute("aria-expanded", open ? "true" : "false"); }
+      var links = [].slice.call(root.querySelectorAll("a[data-platform]"));
+      var fallback = { href: main.getAttribute("href"), text: main.textContent };
+      var chosen = null;
+
+      function osOf(platform, ua) {
+        var p = (platform || "").toLowerCase();
+        if (/android/i.test(ua) || p === "android") return "android";
+        if (/iphone|ipad|ipod/i.test(ua)) return "ios";
+        if (/cros/i.test(ua) || p === "chrome os") return "chromeos";
+        if (p === "windows" || (!p && /windows/i.test(ua))) return "windows";
+        if (p === "macos" || (!p && /macintosh|mac os x/i.test(ua))) return "macos";
+        if (p === "linux" || (!p && /linux|x11/i.test(ua))) return "linux";
+        return "";
+      }
+      function archOf(ua) {
+        if (/aarch64|arm64|armv8/i.test(ua)) return "arm64";
+        if (/x86_64|x64|win64|amd64|wow64/i.test(ua)) return "x64";
+        return "";
+      }
+      function key(a) { return a.getAttribute("data-platform"); }
+      function pick(os, arch) {
+        var mine = links.filter(function (a) { return key(a).split("-")[0] === os; });
+        return mine.filter(function (a) { return key(a) === os + "-" + arch; })[0]
+          || mine.filter(function (a) { return key(a) === os; })[0]
+          || (arch ? null : mine[0]) || null;
+      }
+      function show(os, arch) {
+        var match = os ? pick(os, arch) : null;
+        links.forEach(function (a) { a.removeAttribute("aria-current"); });
+        chosen = match;
+        if (match) {
+          main.setAttribute("href", match.getAttribute("href"));
+          main.textContent = "Download for " + match.firstChild.textContent;
+          match.setAttribute("aria-current", "true");
+        } else {
+          main.setAttribute("href", fallback.href);
+          main.textContent = os ? "Choose a download" : fallback.text;
+        }
+      }
+
+      var ua = navigator.userAgent || "";
+      var data = navigator.userAgentData;
+      var os = osOf(data && data.platform, ua);
+      show(os, archOf(ua));
+      if (data && data.getHighEntropyValues) {
+        data.getHighEntropyValues(["architecture", "bitness"]).then(function (high) {
+          var arch = high.architecture === "arm" && high.bitness !== "32" ? "arm64"
+            : high.architecture === "x86" && high.bitness === "64" ? "x64" : "";
+          if (arch) show(os, arch);
+        }, function () {});
+      }
+      main.addEventListener("click", function (event) {
+        if (os && !chosen) { event.preventDefault(); toggle(true); }
+      });
+      arrow.addEventListener("click", function () { toggle(!root.classList.contains("is-open")); });
+      document.addEventListener("click", function (event) { if (!root.contains(event.target)) toggle(false); });
+      document.addEventListener("keydown", function (event) { if (event.key === "Escape") toggle(false); });
+    })();
+  </script>
+  {% endif %}
+{% endblock %}

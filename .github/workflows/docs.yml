@@ -9,6 +9,8 @@ on:
       - "app/brand.json"
       - "app/lib/theme/look.dart"
       - "tools/docs_brand.py"
+      - "tools/docs_download.py"
+      - "overrides/**"
       - "README.md"
       - "crates/**"
       - "extensions/**"
@@ -51,6 +53,9 @@ jobs:
           CANOA_DEPS: ${{ github.workspace }}/deps-cache
       - name: Build documentation
         run: mkdocs build --strict
+        env:
+          # The Quick Start's Download button reads the latest release.
+          GITHUB_TOKEN: ${{ github.token }}
       - name: Add Rust API reference
         run: |
           mkdir -p site/rust

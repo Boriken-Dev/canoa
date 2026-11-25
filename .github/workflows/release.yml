@@ -45,11 +45,14 @@ jobs:
           CANOA_WEB_DIST: ${{ github.workspace }}/crates/canoa-host/tests/site
           CANOA_DEPS: ${{ github.workspace }}/deps-cache
       - run: mkdocs build --strict
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
-  # The docs workflow owns every Pages deploy; the release does not wait for it.
+  # The docs workflow owns every Pages deploy; the release does not wait for it. It starts after the release is published, since the
+  # Download button of the Quick Start is written from the latest release's files.
   docs-deploy:
     name: Start the documentation deploy at the tag
-    needs: docs-gate
+    needs: release
     runs-on: ubuntu-latest
     permissions:
       actions: write
