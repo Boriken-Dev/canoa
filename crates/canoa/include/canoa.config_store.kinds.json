@@ -1,0 +1,74 @@
+{
+  "kinds": [
+    {
+      "name": "config_store",
+      "floor_hash": 724946182,
+      "object": false,
+      "doc": "Where the configuration lives. One instance is one store.\n\nA path is refused, with `BAD_VALUE`, when it is empty, when a name on it is a value and not a table, or when a lower layer names\nthe path and so the writable layer cannot take it out (a removal reaches only the writable layer: what a lower layer holds is\nshown, never silently hidden). A store that cannot be reached answers `GONE` ([`crate::status::unavailable`]); one asked for\nwhat it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]).",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What it is and what layers it has. Cheap, and the same on every call."
+        },
+        {
+          "name": "read",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Every layer's tables now."
+        },
+        {
+          "name": "get",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "key",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What one path holds, merged over the layers with the host's rules, and the layer it comes from."
+        },
+        {
+          "name": "change",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "changes",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Makes `changes` in the writable layer, all or none, keeping what a person wrote that the change does not touch (a file keeps\nits comments and its order). `BUSY` ([`crate::status::changed`]) when `expect_revision` is not the store's."
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "A token that differs whenever anything in the store did: the change notification. A host that holds a copy reads again when\nit moves."
+        }
+      ]
+    }
+  ]
+}

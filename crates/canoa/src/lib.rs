@@ -12,6 +12,9 @@ pub mod address;
 #[cfg_attr(docsrs, doc(cfg(feature = "api-gateway")))]
 pub mod api_gateway;
 pub mod brand;
+#[cfg(feature = "config-store")]
+#[cfg_attr(docsrs, doc(cfg(feature = "config-store")))]
+pub mod config_store;
 #[cfg(feature = "environment")]
 #[cfg_attr(docsrs, doc(cfg(feature = "environment")))]
 pub mod environment;
@@ -52,6 +55,7 @@ mod settings;
 pub mod settings_section;
 #[cfg(any(
     feature = "api-gateway",
+    feature = "config-store",
     feature = "gateway",
     feature = "panel-tab",
     feature = "profile-item",

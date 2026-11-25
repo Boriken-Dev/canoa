@@ -11,7 +11,8 @@
     feature = "panel-tab",
     feature = "usage",
     feature = "gateway",
-    feature = "environment"
+    feature = "environment",
+    feature = "config-store"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -21,6 +22,10 @@
 
 use std::path::PathBuf;
 
+use canoa::config_store::{
+    Changed, Changes, ConfigStoreVtable, Held as ConfigHeld, Key as ConfigKey, Layer, LayerInfo,
+    Op, Snapshot, StoreInfo as ConfigStoreInfo,
+};
 use canoa::environment::{
     Call, CallAnswer, Capability, DirEntry, EnvironmentInfo, EnvironmentVtable, FileContent,
     ListDir, Listing, ReadFile, State as EnvironmentState, WriteFile,
@@ -210,6 +215,32 @@ fn the_committed_model_store_schemas_are_what_this_build_describes() {
             ("ServiceReport", schema_of::<ServiceReport>()),
             ("ServedModel", schema_of::<ServedModel>()),
             ("SpeechRun", schema_of::<SpeechRun>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_config_store_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.config_store.kinds.json",
+        &document(&ConfigStoreVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_config_store_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.config_store.schemas.json",
+        &schemas(vec![
+            ("StoreInfo", schema_of::<ConfigStoreInfo>()),
+            ("LayerInfo", schema_of::<LayerInfo>()),
+            ("Snapshot", schema_of::<Snapshot>()),
+            ("Layer", schema_of::<Layer>()),
+            ("Key", schema_of::<ConfigKey>()),
+            ("Held", schema_of::<ConfigHeld>()),
+            ("Changes", schema_of::<Changes>()),
+            ("Op", schema_of::<Op>()),
+            ("Changed", schema_of::<Changed>()),
         ]),
     );
 }

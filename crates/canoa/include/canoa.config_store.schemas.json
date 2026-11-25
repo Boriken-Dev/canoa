@@ -1,0 +1,274 @@
+{
+  "StoreInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "description": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "One line on what it is."
+      },
+      "base_dir": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder a relative path in the configuration is made from, when the store has one (the file's directory)."
+      },
+      "name": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The file name the format of the configuration is told by (`canoa.cfg`), when it is a file."
+      },
+      "layers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Its id, which [`Layer`] and [`Held`] name it by: 1 to 64 letters, digits, `-`, `_` and `.`."
+            },
+            "label": {
+              "type": "string",
+              "description": "What the person is told it is (\"the installed canoa.cfg\", \"your canoa.cfg\")."
+            },
+            "origin": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Where it lives, for the person to go and change it there when it is not writable (a path, an address)."
+            },
+            "writable": {
+              "type": "boolean",
+              "description": "Whether [`ConfigStore::change`] writes it. Exactly one layer of a store is.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "description": "Its layers, lowest first."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "layers"
+    ]
+  },
+  "LayerInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Its id, which [`Layer`] and [`Held`] name it by: 1 to 64 letters, digits, `-`, `_` and `.`."
+      },
+      "label": {
+        "type": "string",
+        "description": "What the person is told it is (\"the installed canoa.cfg\", \"your canoa.cfg\")."
+      },
+      "origin": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Where it lives, for the person to go and change it there when it is not writable (a path, an address)."
+      },
+      "writable": {
+        "type": "boolean",
+        "description": "Whether [`ConfigStore::change`] writes it. Exactly one layer of a store is.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "label"
+    ]
+  },
+  "Snapshot": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "revision": {
+        "type": "string",
+        "description": "What [`ConfigStore::revision`] answers while nothing changes."
+      },
+      "layers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The layer's id, as [`StoreInfo::layers`] names it."
+            },
+            "document": {
+              "description": "What it holds: a map of tables, as the host reads them. An absent layer (a file that does not exist yet) is an empty map."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "document"
+          ]
+        },
+        "description": "Each layer, lowest first."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "revision",
+      "layers"
+    ]
+  },
+  "Layer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The layer's id, as [`StoreInfo::layers`] names it."
+      },
+      "document": {
+        "description": "What it holds: a map of tables, as the host reads them. An absent layer (a file that does not exist yet) is an empty map."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "document"
+    ]
+  },
+  "Key": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The keys from the top, at least one."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ]
+  },
+  "Held": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "value": {
+        "description": "The value of the highest layer that names the path (a table is the highest layer's table whole), or absent."
+      },
+      "layer": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The id of the layer it comes from, or absent when no layer names it."
+      }
+    },
+    "additionalProperties": false
+  },
+  "Changes": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "ops": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The keys from the top, at least one."
+            },
+            "value": {
+              "description": "The value, or absent to remove."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ]
+        },
+        "description": "The ops, in order."
+      },
+      "expect_revision": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The revision these ops were made from: the change is refused when the store is at another now, so a writer never overwrites what changed after it read."
+      },
+      "check_only": {
+        "type": "boolean",
+        "description": "Answer what the writable layer would hold and write nothing.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "ops"
+    ]
+  },
+  "Op": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The keys from the top, at least one."
+      },
+      "value": {
+        "description": "The value, or absent to remove."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ]
+  },
+  "Changed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "revision": {
+        "type": "string",
+        "description": "The store's revision after the change (the one it had, for a check)."
+      },
+      "document": {
+        "description": "What the writable layer holds after the change, or would hold for a check: the host reads it before it lets a change stand."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "revision",
+      "document"
+    ]
+  }
+}

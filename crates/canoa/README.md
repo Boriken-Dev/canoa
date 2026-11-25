@@ -27,6 +27,7 @@ Not published (`publish = false`). A default build has no dependencies. Cargo fe
 | `usage` | `canoa::usage_reader` | the `usage_reader` kind: how an agent's quota is read (`coqui-acp-api`) |
 | `profile-item` | `canoa::profile_item` | the `profile_item` kind: a setting a profile carries and applies (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `regex`) |
 | `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
+| `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |

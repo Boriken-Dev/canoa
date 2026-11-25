@@ -28,6 +28,8 @@ usage = ["dep:coqui-acp-api"]
 profile-item = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:regex"]
 # The `secret_provider` kind: somewhere a secret comes from and goes to (the person's form, the system's store, a password manager).
 secret = ["dep:guatiao", "dep:coqui-acp-api"]
+# The `config_store` kind: where the host's configuration lives (canoa.cfg's layers, or another store).
+config-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-serde", "dep:serde_json"]
 # The settings_section kind: a page, or a group on a page, of the application Settings.
 settings-section = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 # The `panel_tab` kind: a kind of tab the application bottom panel can open (a terminal, a log).
@@ -100,7 +102,7 @@ required-features = ["store"]
 
 [[test]]
 name = "script_kinds"
-required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment"]
+required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment", "config-store"]
 
 [[test]]
 name = "speech_kinds"
@@ -117,3 +119,7 @@ required-features = ["speech-builtin"]
 [[test]]
 name = "form_vectors"
 required-features = ["settings-section"]
+
+[[test]]
+name = "config_store_kinds"
+required-features = ["config-store"]

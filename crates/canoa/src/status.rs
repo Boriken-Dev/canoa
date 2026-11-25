@@ -26,3 +26,9 @@ pub fn bad_value(why: impl AsRef<str>) -> ProviderError {
 pub fn internal(why: impl AsRef<str>) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, why.as_ref())
 }
+
+/// Error with status `GUATIAO_ERR_BUSY`: what the caller read has changed since, so its write was not made. Read again and retry.
+#[must_use]
+pub fn changed(why: impl AsRef<str>) -> ProviderError {
+    ProviderError::new(Status::GUATIAO_ERR_BUSY, why.as_ref())
+}

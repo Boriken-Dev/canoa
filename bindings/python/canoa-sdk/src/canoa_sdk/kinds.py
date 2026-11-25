@@ -494,6 +494,50 @@ class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=11
         ...
 
 
+class ConfigStore(KindProtocol, Protocol, kind="config_store", floor_hash=724946182):
+    """Where the configuration lives. One instance is one store.
+
+    A path is refused, with `BAD_VALUE`, when it is empty, when a name on it is a value and not a table, or when a lower layer names
+    the path and so the writable layer cannot take it out (a removal reaches only the writable layer: what a lower layer holds is
+    shown, never silently hidden). A store that cannot be reached answers `GONE` ([`crate::status::unavailable`]); one asked for
+    what it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]).
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What it is and what layers it has. Cheap, and the same on every call."""
+        ...
+
+    @required
+    @fallible
+    def read(self) -> ValueAnswer:
+        """Every layer's tables now."""
+        ...
+
+    @required
+    @fallible
+    def get(self, key: Ref) -> ValueAnswer:
+        """What one path holds, merged over the layers with the host's rules, and the layer it comes from."""
+        ...
+
+    @required
+    @fallible
+    def change(self, changes: Ref) -> ValueAnswer:
+        """Makes `changes` in the writable layer, all or none, keeping what a person wrote that the change does not touch (a file keeps
+        its comments and its order). `BUSY` ([`crate::status::changed`]) when `expect_revision` is not the store's.
+        """
+        ...
+
+    @required
+    @fallible
+    def revision(self) -> str:
+        """A token that differs whenever anything in the store did: the change notification. A host that holds a copy reads again when
+        it moves.
+        """
+        ...
+
+
 class Environment(KindProtocol, Protocol, kind="environment", floor_hash=95687090):
     """A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).
 
@@ -1180,4 +1224,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

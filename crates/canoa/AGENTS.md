@@ -11,6 +11,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `usage` | `canoa::usage_reader` | the `usage_reader` kind: how an agent's quota is read (`coqui-acp-api`) |
 | `profile-item` | `canoa::profile_item` | the `profile_item` kind: a setting a profile carries and applies (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `regex`) |
 | `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
+| `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
@@ -675,6 +676,25 @@ pub fn sha256_from_sums(sums: &str, filename: &str) -> Option<String>;
 pub fn latest_report(result: Result<String, ProviderError>, channel: Option<&str>) -> LatestReport;
 ```
 
+## `canoa::config_store` (feature `config-store`)
+
+The `config_store` kind: where the host's configuration lives. canoa.cfg's layers are the host's provider; a service, a database or a policy store is another, and an extension adds one like any other kind. The host and the application never open the file: they read what the store holds and ask it to change a path. Models are plain data (`include/canoa.config_store.kinds.json`, `include/canoa.config_store.schemas.json`).
+
+```rust
+pub const KIND: &str = "config_store";
+#[guatiao::kind(name = "config_store")] pub trait ConfigStore: Send + Sync {
+    fn describe(&self) -> Result<StoreInfo, ProviderError>;         // title, base_dir, name, layers (lowest first); exactly one LayerInfo is `writable`
+    fn read(&self) -> Result<Snapshot, ProviderError>;              // revision and each layer's document (a map of tables)
+    fn get(&self, key: Key) -> Result<Held, ProviderError>;         // the highest layer's value at a path and that layer's id
+    fn change(&self, changes: Changes) -> Result<Changed, ProviderError>; // Op{path, value|None} in the writable layer, all or none
+    fn revision(&self) -> Result<String, ProviderError>;            // moves whenever anything in the store does: the change notification
+}
+```
+
+- **A removal reaches the writable layer only.** A path only a lower layer names is refused (`BAD_VALUE`, naming that layer's label): what a lower layer holds is shown, never silently hidden.
+- **`Changes.expect_revision`** makes a write from a stale read fail with `BUSY` (`status::changed`); **`check_only`** answers `Changed.document` (what the writable layer would hold) and writes nothing, which is how a host checks a change before it lets it stand.
+- **`MemoryStore`** is a store held in memory (`with_lower` adds a read-only layer); **`contract::check(&store)`** is the behaviour every store meets, which a provider's own tests run.
+
 ## `canoa::status` (any `coqui-acp-api` kind feature)
 
 ```rust
@@ -682,6 +702,7 @@ pub fn unsupported(why: impl AsRef<str>) -> ProviderError;  // status GUATIAO_ER
 pub fn unavailable(why: impl AsRef<str>) -> ProviderError;  // status GUATIAO_ERR_GONE
 pub fn bad_value(why: impl AsRef<str>) -> ProviderError;    // status GUATIAO_ERR_BAD_VALUE
 pub fn internal(why: impl AsRef<str>) -> ProviderError;     // status GUATIAO_ERR_INTERNAL
+pub fn changed(why: impl AsRef<str>) -> ProviderError;      // status GUATIAO_ERR_BUSY: what the caller read has changed
 ```
 
 `canoa::store::engine::Engine<R: Recipe>` is the store that runs a recipe (`describe`, `program`, `latest`, `plan`, `apply`, with the `Run` of `canoa::store::exec` that
