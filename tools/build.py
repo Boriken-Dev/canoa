@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/build.py, at commit 28bb67e0a5226390dba012f4b73b22f5427d8fd1.
+# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/build.py, at commit 77e1f9ac61b910e0c5ff78f95bea9a8af3c2d676.
 # Copyright (c) 2026 Jose A.
 """One build tool for a repository: vendored crates, scans, SDK lock, offline and release builds.
 
@@ -12,7 +12,7 @@ configuration leaves out is off. Standard library only, Python 3.11.0 or later.
     build.py deps ...             the deps branch: crates, pub packages and CDN files
     build.py scan ...             refuse archives, executables, keys and opaque binaries
     build.py sdk ...              the SDK lock: lint, agree with the repository, install
-    build.py offline plan         what an offline build of the repository needs, as JSON
+    build.py offline plan|env|run what an offline build needs, the environment for it, a command run under it
     build.py release ...          release binaries, a universal macOS binary, container images
     build.py container ...        build or test in a container from the deps branch, with .env overrides
     build.py flutter ...          plugin junctions and the pinned Flutter checkout
@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import argparse
 import collections
+import contextlib
 import fnmatch
 import gzip
 import hashlib
+import http.server
 import io
 import json
 import math
@@ -541,6 +543,9 @@ CHECKSUM = ".cargo-checksum.json"
 CONFIG_MARK = "# Written by tools/build.py."
 MANIFEST = "manifest.json"
 MANIFEST_FORMAT = 1
+MANIFEST_FORMATS = (1, 2)
+# What `deps sync` writes into manifest.json; every other top-level key is another writer's and is kept.
+OWNED_KEYS = {"format", "sourceCommit", "cargoLockSha256", "crates", "gitSources", "vendors", "pub", "cdn", "trees"}
 # Directories at a package's top that compiling never reads, and at any depth the ones that hold
 # only test data.
 DROP_TOP = {
@@ -615,25 +620,34 @@ class Tree(NamedTuple):
 
 
 class Scan(NamedTuple):
-    """A whole commit: its crates/, and every path or file a scanner would refuse."""
+    """A whole commit: its vendor folders (`tree` is the first), and every path or file a scanner would refuse."""
 
     tree: Tree
     flagged: list[str]
+    trees: dict[str, Tree] = {}
 
 
 def read_lock(path: Path) -> Lock:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise Problem(f"{path}: {error}") from error
+    return parse_lock(text, path.name, str(path))
+
+
+def parse_lock(text: str, file_name: str, label: str = "") -> Lock:
     lock = Lock([], {}, {})
     try:
-        packages = tomllib.loads(path.read_text(encoding="utf-8")).get("package", [])
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        raise Problem(f"{path}: {error}") from error
+        packages = tomllib.loads(text).get("package", [])
+    except tomllib.TOMLDecodeError as error:
+        raise Problem(f"{label or file_name}: {error}") from error
     for package in packages:
         name, version, source = package["name"], package["version"], package.get("source")
         if source is None:
             continue
         if source == CRATES_IO:
             if "checksum" not in package:
-                raise Problem(f"{path.name} gives {name} {version} no checksum")
+                raise Problem(f"{file_name} gives {name} {version} no checksum")
             lock.crates.append(Crate(name, version, package["checksum"]))
         elif source.startswith("git+"):
             parts = urllib.parse.urlsplit(source.removeprefix("git+"))
@@ -719,10 +733,10 @@ def read_dir(crates: Path, deep: bool = True, allow: Allow | None = None) -> Tre
 
 
 def package_problems(
-    tree: Tree, name: str, checksum: str | None, repo: Repo | None, deep: bool = True
+    tree: Tree, name: str, checksum: str | None, repo: Repo | None, deep: bool = True, folder: str = "crates"
 ) -> list[str]:
     """What keeps one directory from being the package Cargo.lock names, for a line each."""
-    where = f"crates/{name}"
+    where = f"{folder}/{name}"
     if name not in tree.dirs:
         return [f"{where}: missing, Cargo.lock names it"]
     sums = tree.sums.get(name)
@@ -748,16 +762,16 @@ def package_problems(
     return found
 
 
-def problems(lock: Lock, tree: Tree, deep: bool = True) -> list[str]:
-    """One line for each thing keeping a crates/ from covering Cargo.lock, and nothing more."""
+def problems(lock: Lock, tree: Tree, deep: bool = True, folder: str = "crates") -> list[str]:
+    """One line for each thing keeping a vendor folder from covering its Cargo.lock, and nothing more."""
     found = []
     wanted = wanted_packages(lock)
     for name, (checksum, repo) in wanted.items():
-        found += package_problems(tree, name, checksum, repo, deep)
+        found += package_problems(tree, name, checksum, repo, deep, folder)
     for name in sorted(set(tree.dirs) - set(wanted)):
-        found.append(f"crates/{name}: stale, Cargo.lock does not name it")
+        found.append(f"{folder}/{name}: stale, Cargo.lock does not name it")
     for name in sorted(tree.loose):
-        found.append(f"crates/{name}: a file; a vendor directory holds only package directories")
+        found.append(f"{folder}/{name}: a file; a vendor directory holds only package directories")
     return found
 
 
@@ -817,13 +831,13 @@ def has_commit(checkout: Path, commit: str) -> bool:
     return git_ok("cat-file", "-e", f"{commit}^{{commit}}", cwd=checkout)
 
 
-def scan_ref(checkout: Path, commit: str, allow: Allow | None = None) -> Scan | None:
-    """A commit's crates/ and everything in it a scanner would refuse; None when it is not here."""
+def scan_ref(checkout: Path, commit: str, allow: Allow | None = None, folders: tuple[str, ...] | list[str] = ("crates",)) -> Scan | None:
+    """A commit's vendor folders and everything in it a scanner would refuse; None when it is not here."""
     allow = allow or Allow()
     if not has_commit(checkout, commit):
         return None
-    tree = empty_tree()
-    adder = Adder(tree, allow)
+    trees = {folder: empty_tree() for folder in folders}
+    adders = {folder: Adder(trees[folder], allow, f"{folder}/") for folder in folders}
     flagged = []
     entries = commit_entries(checkout, commit)
     for (path, mode, _), (_, body) in zip(entries, batch_bodies(checkout, [e[2] for e in entries])):
@@ -833,9 +847,10 @@ def scan_ref(checkout: Path, commit: str, allow: Allow | None = None) -> Scan | 
             flagged.append(f"{path}: a symbolic link")
         elif (kind := flagged_kind(body, path.rsplit("/", 1)[-1])) and not allow.permits(path, kind):
             flagged.append(f"{path}: {kind}")
-        if path.startswith("crates/"):
-            adder.add(path.removeprefix("crates/"), body)
-    return Scan(tree, flagged)
+        for folder, adder in adders.items():
+            if path.startswith(f"{folder}/"):
+                adder.add(path.removeprefix(f"{folder}/"), body)
+    return Scan(trees[folders[0]], flagged, trees)
 
 
 # --- turning a package into a vendor directory ---------------------------------------------------------
@@ -1350,9 +1365,9 @@ def untrimmed(crates: Path, tree: Tree, name: str) -> bool:
     return set(include_closure(files)) != set(files)
 
 
-def sync_crates(deps_dir: Path, lock: Lock, template: str, jobs: int) -> list[str]:
-    """Makes deps_dir/crates cover the lock and hold nothing else; returns a line per change."""
-    crates = deps_dir / "crates"
+def sync_crates(deps_dir: Path, lock: Lock, template: str, jobs: int, folder: str = "crates") -> list[str]:
+    """Makes deps_dir/FOLDER cover the lock and hold nothing else; returns a line per change."""
+    crates = deps_dir / folder
     wanted = wanted_packages(lock)
     crates.mkdir(parents=True, exist_ok=True)
     for entry in sorted(crates.iterdir()):
@@ -1386,8 +1401,20 @@ SCHEMA["deps"] = Key(
         "branch": Key("str", "deps", "The orphan branch that holds the vendored files."),
         "source_name": Key("str", "vendored", "The name of the cargo source the written cargo config replaces crates.io with."),
         "crates_url": Key("str", "", "A mirror of crates.io's .crate files, with {name} and {version}; the environment variable BUILD_CRATES_URL wins."),
-        "cargo_lock": Key("str", "Cargo.lock", "The lock the deps branch must cover, relative to the repository."),
-        "checkout": Key("str", "", "Where the deps branch is checked out; the environment variable BUILD_DEPS wins. Empty: a detached worktree beside the repository, named REPO-deps."),
+        "cargo_lock": Key("str", "Cargo.lock", "The lock the deps branch's crates/ must cover, relative to the repository; unused when [[deps.vendor]] lists vendors."),
+        "vendor": Key(
+            "tables",
+            None,
+            "A vendor folder on the deps branch and the lock it covers; the first is the primary one (`deps use`, `offline`, `release build --offline`). Empty: one vendor, `crates`, covering `cargo_lock`.",
+            {
+                "folder": Key("str", REQUIRED, "The folder on the deps branch (one path segment, unique)."),
+                "lock": Key("str", "", "The Cargo.lock it covers, relative to the repository. Exactly one of `lock` and `item`."),
+                "item": Key("str", "", "An SDK lock row, `GROUP NAME`, naming a crate `cargo install --locked` builds: its lock is the Cargo.lock packaged in FOLDER/NAME-VERSION/, and the row's SHA-256 is the .crate file's checksum."),
+                "bin": Key("str", "", "The binary an `item` installs; empty: the row's name."),
+            },
+        ),
+        "checkout": Key("str", "", "Where the deps branch is checked out; the environment variables of checkout_env and BUILD_DEPS win. Empty: a detached worktree beside the repository, named REPO-deps."),
+        "checkout_env": Key("strs", [], "Environment variables read, in order, before BUILD_DEPS: the first one that is set names the deps checkout (for a repository whose scripts already use another name)."),
         "allow": Key("strs", [], "Files a scan lets through, as GLOB:KIND (for example cdn/www.gstatic.com/flutter-canvaskit/*:wasm)."),
         "jobs": Key("int", 8, "Packages fetched at once."),
         "pin": Key(
@@ -1417,15 +1444,16 @@ def short(commit: str) -> str:
 
 
 def find_deps(ctx: Ctx, given: Path | None = None) -> Path:
-    """The deps checkout: --deps, $BUILD_DEPS, `[deps] checkout`, else a worktree beside the repository.
+    """The deps checkout: --deps, the `[deps] checkout_env` variables, $BUILD_DEPS, `[deps] checkout`, else a worktree beside the repository.
 
     The worktree is added detached at origin/deps (or deps) when missing, and moved to that
     branch's tip when it is detached; one on a branch is its owner's and is left alone.
     """
     if given is not None:
         return given.resolve()
-    if os.environ.get("BUILD_DEPS"):
-        return Path(os.environ["BUILD_DEPS"]).resolve()
+    for name in [*ctx.cfg.deps.checkout_env, "BUILD_DEPS"]:
+        if os.environ.get(name):
+            return Path(os.environ[name]).resolve()
     cfg = ctx.cfg.deps
     if cfg.checkout:
         path = Path(cfg.checkout)
@@ -1456,6 +1484,11 @@ class DirView:
         target = self.path / rel
         return target.read_bytes() if target.is_file() else None
 
+    def files(self, rel: str) -> list[str]:
+        """The files below a folder, as paths relative to it."""
+        base = self.path / rel
+        return sorted(p.relative_to(base).as_posix() for p in base.rglob("*") if p.is_file()) if base.is_dir() else []
+
 
 class RefView:
     """A commit of the repository, for the same checks."""
@@ -1471,62 +1504,262 @@ class RefView:
         done = subprocess.run(["git", "-C", str(self.root), "show", f"{self.commit}:{rel}"], capture_output=True)
         return done.stdout if done.returncode == 0 else None
 
+    def files(self, rel: str) -> list[str]:
+        done = subprocess.run(["git", "-C", str(self.root), "ls-tree", "-r", "--name-only", "-z", self.commit, "--", rel], capture_output=True)
+        names = done.stdout.decode("utf-8", "surrogateescape").split("\0") if done.returncode == 0 else []
+        return sorted(n.removeprefix(rel.rstrip("/") + "/") for n in names if n)
+
 
 # Extra coverage checks and sync steps, added by the sections below (pub, CDN).
 DEPS_CHECKS: list[Callable[[Ctx, Any, Any], tuple[list[str], list[str]]]] = []
 
 
-def manifest_problems(text: bytes | None, lock: Lock) -> tuple[list[str], list[str]]:
-    """(problems, notes) about manifest.json: absent is a note, wrong is a problem."""
+class Vendor(NamedTuple):
+    """One vendor folder of the deps branch and where its lock comes from: a file (`lock`) or a crate (`item`)."""
+
+    folder: str
+    lock: str
+    item: str
+    bin: str
+
+
+def vendors_of(ctx: Ctx) -> list[Vendor]:
+    """The configured vendors, or the one `crates` over `[deps] cargo_lock`."""
+    cfg = ctx.cfg.deps
+    if not cfg.vendor:
+        return [Vendor("crates", cfg.cargo_lock, "", "")]
+    seen: set[str] = set()
+    vendors = []
+    for index, table in enumerate(cfg.vendor):
+        where = f"deps.vendor[{index}]"
+        if not table.folder or "/" in table.folder or "\\" in table.folder or table.folder in (".", "..") or table.folder.startswith("."):
+            raise Problem(f"{where}: folder {table.folder!r} is not one path segment")
+        if table.folder in seen:
+            raise Problem(f"{where}: folder {table.folder} is listed twice")
+        if bool(table.lock) == bool(table.item):
+            raise Problem(f"{where} ({table.folder}): name exactly one of lock and item")
+        seen.add(table.folder)
+        vendors.append(Vendor(table.folder, table.lock, table.item, table.bin))
+    return vendors
+
+
+def chosen_vendors(ctx: Ctx, args: Any, every: bool) -> list[Vendor]:
+    """The vendors a command covers: --vendor's one, else all (`every`) or the primary."""
+    vendors = vendors_of(ctx)
+    wanted = getattr(args, "vendor", None)
+    if wanted is None:
+        return vendors if every else vendors[:1]
+    found = [v for v in vendors if v.folder == wanted]
+    if not found:
+        raise Usage(f"unknown vendor {wanted}; the folders are {', '.join(v.folder for v in vendors)}")
+    return found
+
+
+def lock_overrides(ctx: Ctx, args: Any) -> dict[str, Path]:
+    """`--cargo-lock FILE` replaces the lock of the vendor --vendor names, else of the primary one."""
+    given = getattr(args, "cargo_lock", None)
+    if given is None:
+        return {}
+    vendors = vendors_of(ctx)
+    wanted = getattr(args, "vendor", None) or vendors[0].folder
+    for vendor in vendors:
+        if vendor.folder == wanted:
+            if vendor.item:
+                raise Usage(f"--cargo-lock cannot replace {vendor.folder}: its lock is the one packaged in {vendor.item}")
+            return {vendor.folder: given.resolve()}
+    return {}
+
+
+def item_row(ctx: Ctx, vendor: Vendor) -> "Item":
+    group, name = split_item(vendor.item)
+    rows = [i for i in read_sdk_lock(ctx) if i.group == group and i.name == name]
+    if len(rows) != 1:
+        raise Problem(f"{ctx.cfg.sdk.lock}: {vendor.folder} needs one `{vendor.item}` row, found {len(rows)}")
+    return rows[0]
+
+
+def packaged_lock(vendor: Vendor, row: "Item") -> str:
+    return f"{vendor.folder}/{row.name}-{row.version}/Cargo.lock"
+
+
+def vendor_lock_file(ctx: Ctx, vendor: Vendor, deps_dir: Path, override: Path | None = None) -> Path:
+    if vendor.item:
+        return deps_dir / packaged_lock(vendor, item_row(ctx, vendor))
+    return override or ctx.root / vendor.lock
+
+
+def vendor_lock(ctx: Ctx, vendor: Vendor, view: Any, override: Path | None = None, notes: list[str] | None = None) -> tuple[Lock, bytes]:
+    """The lock a vendor folder has to cover, and the bytes its hash is taken from.
+
+    An item vendor reads the Cargo.lock packaged in the crate's own directory on the deps branch (through `view`),
+    and its lock also holds the crate itself, which is what the SDK lock's row names.
+    """
+    if vendor.lock:
+        path = override or ctx.root / vendor.lock
+        lock = read_lock(path)
+        return lock, path.read_bytes()
+    row = item_row(ctx, vendor)
+    where = packaged_lock(vendor, row)
+    data = view.read(where)
+    if data is None:
+        raise Problem(f"{where}: missing, {vendor.folder} is the {vendor.item} crate and its lock; run `deps sync`")
+    lock = parse_lock(data.decode("utf-8", "replace"), "Cargo.lock", where)
+    checksum = row.sha256
+    if checksum == "-":
+        recorded = view.read(f"{vendor.folder}/{row.name}-{row.version}/{CHECKSUM}")
+        try:
+            checksum = json.loads(recorded or b"{}").get("package") or "-"
+        except ValueError:
+            checksum = "-"
+        if notes is not None:
+            notes.append(f"{ctx.cfg.sdk.lock}: the `{vendor.item}` row has no SHA-256, so {vendor.folder} is not held to the crate's checksum")
+    if not any(c.name == row.name and c.version == row.version for c in lock.crates):
+        lock.crates.append(Crate(row.name, row.version, checksum))
+    return lock, data
+
+
+def vendor_problems(
+    ctx: Ctx, view: Any, tree_of: Callable[[str], Tree], overrides: dict[str, Path], deep: bool, vendors: list[Vendor], notes: list[str]
+) -> tuple[list[str], dict[str, tuple[Lock, bytes]]]:
+    """What keeps each vendor folder from covering its lock, and the locks that could be read."""
+    found: list[str] = []
+    locks: dict[str, tuple[Lock, bytes]] = {}
+    for vendor in vendors:
+        try:
+            locks[vendor.folder] = vendor_lock(ctx, vendor, view, overrides.get(vendor.folder), notes)
+        except Problem as problem:
+            found.append(str(problem))
+            continue
+        found += problems(locks[vendor.folder][0], tree_of(vendor.folder), deep, vendor.folder)
+    return found, locks
+
+
+def lock_label(ctx: Ctx, vendors: list[Vendor], overrides: dict[str, Path]) -> str:
+    shown = (lambda v: v.lock) if ctx.cfg.deps.vendor else (lambda v: Path(v.lock).name)
+    names = [overrides[v.folder].name if v.folder in overrides else shown(v) if v.lock else f"the {v.item} crate's lock" for v in vendors]
+    return ", ".join(dict.fromkeys(names))
+
+
+def format_two(ctx: Ctx) -> bool:
+    """Whether the manifest is written as format 2: several vendors, or anything format 1 has no place for."""
+    cfg = ctx.cfg.deps
+    return bool(cfg.vendor or cfg.get("tree"))
+
+
+def manifest_problems(text: bytes | None, ctx: Ctx, locks: dict[str, tuple[Lock, bytes]], vendors: list[Vendor]) -> tuple[list[str], list[str]]:
+    """(problems, notes) about manifest.json: absent is a note, wrong is a problem.
+
+    Format 1 holds the counts of the one lock; format 2 holds them per vendor, and a vendor it does not
+    record (another writer's manifest) is a note.
+    """
     if text is None:
         return [], [f"no {MANIFEST} on the deps branch; `deps refresh` writes one"]
     try:
         data = json.loads(text)
     except ValueError:
         return [f"{MANIFEST}: not JSON"], []
-    found = []
-    if data.get("format") != MANIFEST_FORMAT:
-        found.append(f"{MANIFEST}: format {data.get('format')}, this tool reads {MANIFEST_FORMAT}")
-    if data.get("crates") != len(lock.crates) or data.get("gitSources") != len(lock.repos):
-        found.append(
-            f"{MANIFEST}: says {data.get('crates')} crates and {data.get('gitSources')} git sources, "
-            f"Cargo.lock names {len(lock.crates)} and {len(lock.repos)}"
-        )
-    return found, []
+    if not isinstance(data, dict):
+        return [f"{MANIFEST}: not a JSON object"], []
+    found: list[str] = []
+    notes: list[str] = []
+    if data.get("format") not in MANIFEST_FORMATS:
+        return [f"{MANIFEST}: format {data.get('format')}, this tool reads 1 and 2"], []
+    if data["format"] == 1:
+        primary = next((locks[v.folder][0] for v in vendors if v.folder in locks), None)
+        if primary and (data.get("crates") != len(primary.crates) or data.get("gitSources") != len(primary.repos)):
+            found.append(
+                f"{MANIFEST}: says {data.get('crates')} crates and {data.get('gitSources')} git sources, "
+                f"Cargo.lock names {len(primary.crates)} and {len(primary.repos)}"
+            )
+        return found, notes
+    recorded = data.get("vendors") if isinstance(data.get("vendors"), dict) else {}
+    for vendor in vendors:
+        if vendor.folder not in locks:
+            continue
+        lock = locks[vendor.folder][0]
+        entry = recorded.get(vendor.folder)
+        if not isinstance(entry, dict):
+            notes.append(f"{MANIFEST} does not record {vendor.folder}")
+        elif entry.get("crates") != len(lock.crates) or entry.get("gitSources") != len(lock.repos):
+            found.append(
+                f"{MANIFEST}: {vendor.folder}: says {entry.get('crates')} crates and {entry.get('gitSources')} git sources, "
+                f"its lock names {len(lock.crates)} and {len(lock.repos)}"
+            )
+    return found, notes
 
 
-def write_manifest(deps_dir: Path, ctx: Ctx, lock: Lock, lock_path: Path, extra: dict) -> None:
+def write_manifest(deps_dir: Path, ctx: Ctx, entries: dict[str, dict], extra: dict) -> None:
     """manifest.json at the root of the deps branch. `sourceCommit` is where main stood when the
-    contents last changed, so a commit that changes nothing else leaves the file as it was."""
+    contents last changed, so a commit that changes nothing else leaves the file as it was.
+
+    Keys this tool does not own stay as another writer left them; an owned section that is turned off disappears.
+    `entries` is the record of each vendor synced; the others keep their old record.
+    """
     commit = run_git("rev-parse", "HEAD", cwd=ctx.root) if git_ok("rev-parse", "HEAD", cwd=ctx.root) else ""
-    data = {
-        "format": MANIFEST_FORMAT,
-        "sourceCommit": commit,
-        "cargoLockSha256": sha256(lock_path.read_bytes()),
-        "crates": len(lock.crates),
-        "gitSources": len(lock.repos),
-        **extra,
-    }
     path = deps_dir / MANIFEST
     try:
         old = json.loads(path.read_bytes())
     except (OSError, ValueError):
         old = None
-    if isinstance(old, dict) and {**old, "sourceCommit": ""} == {**data, "sourceCommit": ""}:
+    if not isinstance(old, dict):
+        old = {}
+    if format_two(ctx):
+        previous = old.get("vendors") if old.get("format") == 2 and isinstance(old.get("vendors"), dict) else {}
+        folders = [v.folder for v in vendors_of(ctx)]
+        recorded = {f: entries.get(f) or previous.get(f) for f in folders if entries.get(f) or previous.get(f)}
+        owned = {"format": 2, "sourceCommit": commit, "vendors": recorded, **extra}
+    else:
+        entry = entries["crates"]
+        owned = {
+            "format": MANIFEST_FORMAT,
+            "sourceCommit": commit,
+            "cargoLockSha256": entry["lockSha256"],
+            "crates": entry["crates"],
+            "gitSources": entry["gitSources"],
+            **extra,
+        }
+    data = {**{k: v for k, v in old.items() if k not in OWNED_KEYS}, **owned}
+    if old and {**old, "sourceCommit": ""} == {**data, "sourceCommit": ""}:
         return
     path.write_bytes((json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8"))
 
 
-def deps_sync_all(ctx: Ctx, deps_dir: Path, lock: Lock, lock_path: Path, args: argparse.Namespace | None = None) -> list[str]:
-    """Crates, then the pub and CDN files when configured, then manifest.json; a line per change."""
+def deps_sync_all(ctx: Ctx, deps_dir: Path, args: argparse.Namespace | None = None) -> list[str]:
+    """Each vendor folder, then the pub and CDN files when configured, then manifest.json; a line per change."""
     cfg = ctx.cfg.deps
-    changes = sync_crates(deps_dir, lock, settings_crates_url(ctx.cfg), cfg.jobs)
+    template = settings_crates_url(ctx.cfg)
+    overrides = lock_overrides(ctx, args)
+    view = DirView(deps_dir)
+    changes: list[str] = []
+    entries: dict[str, dict] = {}
+    for vendor in chosen_vendors(ctx, args, True):
+        if vendor.item:
+            row = item_row(ctx, vendor)
+            if row.sha256 == "-":
+                raise Problem(
+                    f"{ctx.cfg.sdk.lock}:{row.line}: the `{vendor.item}` row has no SHA-256; it is the .crate file's `cksum` "
+                    f"in the crates.io index (https://index.crates.io/)"
+                )
+            crate = Crate(row.name, row.version, row.sha256)
+            folder = deps_dir / vendor.folder
+            have = read_dir(folder, False)
+            if package_problems(have, crate.dir, crate.checksum, None, False, vendor.folder):
+                shutil.rmtree(folder / crate.dir, ignore_errors=True)
+                materialize_crate(crate, folder, template)
+        lock, data = vendor_lock(ctx, vendor, view, overrides.get(vendor.folder))
+        changes += sync_crates(deps_dir, lock, template, cfg.jobs, vendor.folder)
+        entries[vendor.folder] = {
+            ("item" if vendor.item else "lock"): vendor.item or vendor.lock,
+            "lockSha256": sha256(data),
+            "crates": len(lock.crates),
+            "gitSources": len(lock.repos),
+        }
     extra: dict = {}
     for sync in DEPS_SYNCS:
         more, info = sync(ctx, deps_dir, args)
         changes += more
         extra.update(info)
-    write_manifest(deps_dir, ctx, lock, lock_path, extra)
+    write_manifest(deps_dir, ctx, entries, extra)
     return changes
 
 
@@ -1556,14 +1789,15 @@ def config_text(ctx: Ctx, lock: Lock, crates: Path) -> str:
 
 
 def use_crates(
-    ctx: Ctx, deps_dir: Path, lock: Lock, lock_path: Path, out: Path | None = None, repo_config: bool = False, full: bool = False
+    ctx: Ctx, deps_dir: Path, lock: Lock, lock_path: Path, out: Path | None = None, repo_config: bool = False, full: bool = False,
+    folder: str = "crates",
 ) -> dict:
-    """Writes a cargo home whose config builds from deps_dir/crates, only when it covers the lock.
+    """Writes a cargo home whose config builds from deps_dir/FOLDER, only when it covers the lock.
 
     The check reads each package's metadata; `full` also re-hashes every file.
     """
-    crates = (deps_dir / "crates").resolve()
-    found = problems(lock, read_dir(crates, full, Allow(ctx.cfg.deps.allow)), full)
+    crates = (deps_dir / folder).resolve()
+    found = problems(lock, read_dir(crates, full, Allow(ctx.cfg.deps.allow)), full, folder)
     if found:
         raise Problem("; ".join(found[:5]) + f" ({len(found)} in all); run `deps sync` first")
     root = ctx.root.resolve()
@@ -1588,76 +1822,119 @@ def use_crates(
     return info
 
 
-def ref_problems(ctx: Ctx, lock: Lock, commit: str) -> tuple[list[str], list[str]]:
-    """What keeps a commit of the repository from being a deps branch covering the lock."""
-    scan = scan_ref(ctx.root, commit, Allow(ctx.cfg.deps.allow))
+def ref_coverage(
+    ctx: Ctx, overrides: dict[str, Path], commit: str, vendors: list[Vendor] | None = None
+) -> tuple[list[str], list[str], dict[str, tuple[Lock, bytes]]]:
+    """What keeps a commit of the repository from being a deps branch covering every vendor's lock."""
+    vendors = vendors if vendors is not None else vendors_of(ctx)
+    scan = scan_ref(ctx.root, commit, Allow(ctx.cfg.deps.allow), [v.folder for v in vendors])
     if scan is None:
-        return [f"deps at {commit[:12]} is not here: git fetch --depth 1 origin {commit}"], []
+        return [f"deps at {commit[:12]} is not here: git fetch --depth 1 origin {commit}"], [], {}
     label = f"deps at {commit[:12]}"
-    found = [f"{label}: {line}" for line in problems(lock, scan.tree)]
-    found += [f"{label}: {line}; the branch holds no such file" for line in scan.flagged]
     view = RefView(ctx.root, commit)
-    more, notes = manifest_problems(view.read(MANIFEST), lock)
+    notes: list[str] = []
+    covered, locks = vendor_problems(ctx, view, lambda folder: scan.trees[folder], overrides, True, vendors, notes)
+    found = [f"{label}: {line}" for line in covered]
+    found += [f"{label}: {line}; the branch holds no such file" for line in scan.flagged]
+    more, more_notes = manifest_problems(view.read(MANIFEST), ctx, locks, vendors)
     found += [f"{label}: {line}" for line in more]
+    notes += more_notes
+    primary = locks[vendors[0].folder][0] if vendors[0].folder in locks else Lock([], {}, {})
     for check in DEPS_CHECKS:
-        extra, extra_notes = check(ctx, view, lock)
+        extra, extra_notes = check(ctx, view, primary)
         found += [f"{label}: {line}" for line in extra]
         notes += extra_notes
+    return found, notes, locks
+
+
+def ref_problems(ctx: Ctx, overrides: dict[str, Path] | None, commit: str, vendors: list[Vendor] | None = None) -> tuple[list[str], list[str]]:
+    found, notes, _ = ref_coverage(ctx, overrides or {}, commit, vendors)
     return found, notes
 
 
-def dir_problems(ctx: Ctx, deps: Path, lock: Lock, deep: bool = True) -> tuple[list[str], list[str]]:
-    """What keeps a deps checkout from covering the lock: (problems, notes)."""
-    found = problems(lock, read_dir(deps / "crates", deep, Allow(ctx.cfg.deps.allow)), deep)
+def dir_coverage(
+    ctx: Ctx, deps: Path, overrides: dict[str, Path], deep: bool = True, vendors: list[Vendor] | None = None
+) -> tuple[list[str], list[str], dict[str, tuple[Lock, bytes]]]:
+    """What keeps a deps checkout from covering every vendor's lock: (problems, notes, the locks read)."""
+    vendors = vendors if vendors is not None else vendors_of(ctx)
     view = DirView(deps)
-    more, notes = manifest_problems(view.read(MANIFEST), lock)
+    allow = Allow(ctx.cfg.deps.allow)
+    notes: list[str] = []
+    found, locks = vendor_problems(ctx, view, lambda folder: read_dir(deps / folder, deep, allow), overrides, deep, vendors, notes)
+    more, more_notes = manifest_problems(view.read(MANIFEST), ctx, locks, vendors)
     found += more
+    notes += more_notes
+    primary = locks[vendors[0].folder][0] if vendors[0].folder in locks else Lock([], {}, {})
     for check in DEPS_CHECKS:
-        extra, extra_notes = check(ctx, view, lock)
+        extra, extra_notes = check(ctx, view, primary)
         found += extra
         notes += extra_notes
+    return found, notes, locks
+
+
+def dir_problems(ctx: Ctx, deps: Path, overrides: dict[str, Path] | None, deep: bool = True, vendors: list[Vendor] | None = None) -> tuple[list[str], list[str]]:
+    """What keeps a deps checkout from covering the locks: (problems, notes)."""
+    found, notes, _ = dir_coverage(ctx, deps, overrides or {}, deep, vendors)
     return found, notes
 
 
-def lock_path_of(ctx: Ctx, args: argparse.Namespace) -> Path:
+def prepare(ctx: Ctx, args: argparse.Namespace) -> None:
     ctx.pubspec_lock = getattr(args, "pubspec_lock", None)
     ctx.quick = bool(getattr(args, "quick", False))
-    return args.cargo_lock.resolve() if args.cargo_lock else ctx.root / ctx.cfg.deps.cargo_lock
 
 
 def deps_sync(ctx: Ctx, args: argparse.Namespace) -> int:
-    path = lock_path_of(ctx, args)
-    lock = read_lock(path)
+    prepare(ctx, args)
     deps = find_deps(ctx, args.deps)
-    changes = deps_sync_all(ctx, deps, lock, path, args)
+    vendors = chosen_vendors(ctx, args, True)
+    changes = deps_sync_all(ctx, deps, args)
     for change in changes:
         print(change)
-    print(f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources, {len(changes)} changed")
+    if not ctx.cfg.deps.vendor:
+        lock = read_lock(lock_overrides(ctx, args).get("crates") or ctx.root / ctx.cfg.deps.cargo_lock)
+        print(f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources, {len(changes)} changed")
+    else:
+        print(f"ok: {', '.join(v.folder for v in vendors)}, {len(changes)} changed")
     return 0
 
 
 def deps_check(ctx: Ctx, args: argparse.Namespace) -> int:
-    path = lock_path_of(ctx, args)
-    lock = read_lock(path)
+    prepare(ctx, args)
+    vendors = chosen_vendors(ctx, args, True)
+    overrides = lock_overrides(ctx, args)
     if args.ref:
         if args.quick:
             raise Usage("--quick reads a checkout's metadata; --ref reads every file of a commit")
-        found, notes = ref_problems(ctx, lock, args.ref)
+        found, notes, locks = ref_coverage(ctx, overrides, args.ref, vendors)
     else:
-        found, notes = dir_problems(ctx, find_deps(ctx, args.deps), lock, not args.quick)
+        found, notes, locks = dir_coverage(ctx, find_deps(ctx, args.deps), overrides, not args.quick, vendors)
     for note in notes:
         print(f"note: {note}")
     if found:
         raise Problem("\n".join(found))
-    print(f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources cover {path.name}")
+    if not ctx.cfg.deps.vendor:
+        lock = locks["crates"][0]
+        print(f"ok: {len(lock.crates)} crates, {len(lock.repos)} git sources cover {lock_label(ctx, vendors, overrides)}")
+    else:
+        for vendor in vendors:
+            lock = locks[vendor.folder][0]
+            print(f"ok: {vendor.folder} {len(lock.crates)} crates, {len(lock.repos)} git sources cover {lock_label(ctx, [vendor], overrides)}")
     return 0
 
 
+def use_vendor(
+    ctx: Ctx, deps: Path, vendor: Vendor, override: Path | None, out: Path | None, repo_config: bool = False, full: bool = False
+) -> dict:
+    """`use_crates` for one vendor: the lock is read from the repository, or from the crate an item vendor is."""
+    lock, _ = vendor_lock(ctx, vendor, DirView(deps), override)
+    return use_crates(ctx, deps, lock, vendor_lock_file(ctx, vendor, deps, override), out, repo_config, full, vendor.folder)
+
+
 def deps_use(ctx: Ctx, args: argparse.Namespace) -> int:
-    path = lock_path_of(ctx, args)
-    lock = read_lock(path)
+    prepare(ctx, args)
     deps = find_deps(ctx, args.deps)
-    info = use_crates(ctx, deps, lock, path, args.out, args.repo_config, args.full)
+    vendor = chosen_vendors(ctx, args, False)[0]
+    info = use_vendor(ctx, deps, vendor, lock_overrides(ctx, args).get(vendor.folder), args.out, args.repo_config, args.full)
     if args.json:
         print(json.dumps(info, indent=2))
         return 0
@@ -1699,16 +1976,19 @@ def deps_refresh(ctx: Ctx, args: argparse.Namespace) -> int:
     commit cannot hold its own hash.
     """
     cfg = ctx.cfg.deps
-    lock_path = lock_path_of(ctx, args)
-    lock = read_lock(lock_path)
+    prepare(ctx, args)
+    vendors = vendors_of(ctx)
+    overrides = lock_overrides(ctx, args)
+    covers = lock_label(ctx, vendors, overrides)
+    folders = [v.folder for v in vendors]
     deps = find_deps(ctx, args.deps)
     if not git_ok("symbolic-ref", "-q", "HEAD", cwd=deps):
         raise Problem(f"{deps} is not on a branch; `deps init` makes one, or git -C {deps} checkout -B {cfg.branch} origin/{cfg.branch}")
-    generated = ["crates", "pub", "cdn", MANIFEST]
+    generated = [*folders, "pub", "cdn", *[t.path for t in ctx.cfg.deps.tree], MANIFEST]
     dirty = run_git("status", "--porcelain", "--", ".", *[f":!{g}" for g in generated], cwd=deps)
     if dirty:
         raise Problem(f"{deps} has changes outside {', '.join(generated)}: {dirty.splitlines()[0]}")
-    changes = deps_sync_all(ctx, deps, lock, lock_path, args)
+    changes = deps_sync_all(ctx, deps, args)
     for change in changes:
         print(change)
     source = run_git("rev-parse", "--short=8", "HEAD", cwd=ctx.root)
@@ -1722,15 +2002,17 @@ def deps_refresh(ctx: Ctx, args: argparse.Namespace) -> int:
     if pin_lock:
         text = pin_lock.read_bytes().decode("utf-8")
         pinned = pin_row(text, cfg.pin.item)[2]
-        scan = scan_ref(ctx.root, pinned, Allow(cfg.allow)) if has_commit(ctx.root, pinned) else None
-        if not committed and scan is not None and not problems(lock, scan.tree) and not scan.flagged:
-            print(f"current: deps {pinned} covers {lock_path.name}")
-            return 0
+        scan = scan_ref(ctx.root, pinned, Allow(cfg.allow), folders) if has_commit(ctx.root, pinned) else None
+        if not committed and scan is not None and not scan.flagged:
+            held, _ = vendor_problems(ctx, RefView(ctx.root, pinned), lambda folder: scan.trees[folder], overrides, True, vendors, [])
+            if not held:
+                print(f"current: deps {pinned} covers {covers}")
+                return 0
     pin = run_git("rev-parse", "HEAD", cwd=deps)
     if not pin_lock and not committed:
-        found, _ = ref_problems(ctx, lock, pin) if has_commit(ctx.root, pin) else ([f"deps {pin} is not in this repository"], [])
+        found, _ = ref_problems(ctx, overrides, pin) if has_commit(ctx.root, pin) else ([f"deps {pin} is not in this repository"], [])
         if not found:
-            print(f"current: deps {pin} covers {lock_path.name}")
+            print(f"current: deps {pin} covers {covers}")
             return 0
     repinned = []
     for rule in cfg.repin:
@@ -1753,9 +2035,9 @@ def deps_refresh(ctx: Ctx, args: argparse.Namespace) -> int:
         row = pin_row(text, cfg.pin.item)
         pin_lock.write_bytes((text[: row.start(2)] + pin + text[row.end(2) :]).encode("utf-8"))
         run_git("commit", "-q", "-m", f"chore: {Path(cfg.pin.lock).name} pins deps at {short(pin)}", "--", cfg.pin.lock, cwd=ctx.root)
-    found, _ = ref_problems(ctx, lock, pin)
+    found, _ = ref_problems(ctx, overrides, pin)
     if found:
-        raise Problem(f"deps {pin} does not cover {lock_path.name}: {found[0]}")
+        raise Problem(f"deps {pin} does not cover {covers}: {found[0]}")
     print(f"pinned deps {pin}; push {deps}'s branch to {cfg.branch} first, not rebased, then this one")
     return 0
 
@@ -1831,8 +2113,9 @@ def scan_command(ctx: Ctx, args: argparse.Namespace) -> int:
         scanned = 0
         base = args.tree.resolve()
         for current, dirs, names in os.walk(base):
+            # The top-level .git is a clone's directory or a linked worktree's `gitdir:` pointer file.
             dirs[:] = sorted(d for d in dirs if not (d == ".git" and Path(current) == base))
-            for name in sorted(names):
+            for name in sorted(n for n in names if not (n == ".git" and Path(current) == base)):
                 file = Path(current) / name
                 rel = file.relative_to(base).as_posix()
                 scanned += 1
@@ -1906,15 +2189,17 @@ def add_deps(sub: argparse._SubParsersAction) -> None:
     common.add_argument("--cargo-lock", type=Path, metavar="FILE", help="read this Cargo.lock instead of the repository's")
     common.add_argument("--deps", type=Path, metavar="DIR", help="the deps checkout (default: `deps path`)")
     common.add_argument("--pubspec-lock", type=Path, metavar="FILE", help="read this pubspec.lock instead of [deps.pub] lock")
+    only = argparse.ArgumentParser(add_help=False)
+    only.add_argument("--vendor", metavar="FOLDER", help="only this [[deps.vendor]] folder (default: every vendor; `use` takes the first); --cargo-lock then replaces its lock")
     pub_cache = argparse.ArgumentParser(add_help=False)
     pub_cache.add_argument("--pub-cache", type=Path, metavar="DIR", help="the pub cache the pub packages are copied from (default: [deps.pub] cache, $PUB_CACHE, the platform's)")
-    sync = commands.add_parser("sync", parents=[common, pub_cache], help="make the deps checkout match Cargo.lock (and the pub packages and CDN files): fetch, verify, remove")
+    sync = commands.add_parser("sync", parents=[common, only, pub_cache], help="make the deps checkout match Cargo.lock (and the pub packages and CDN files): fetch, verify, remove")
     sync.set_defaults(run=deps_sync)
-    check = commands.add_parser("check", parents=[common], help="fail, naming what is missing, changed or stale")
+    check = commands.add_parser("check", parents=[common, only], help="fail, naming what is missing, changed or stale")
     check.add_argument("--quick", action="store_true", help="read each package's metadata only, without re-hashing its files")
     check.add_argument("--ref", metavar="REF", help="check a commit of this repository instead of the checkout")
     check.set_defaults(run=deps_check)
-    use = commands.add_parser("use", parents=[common], help="write a cargo home that replaces every source by the checkout's crates/")
+    use = commands.add_parser("use", parents=[common, only], help="write a cargo home that replaces every source by a vendor folder of the checkout")
     use.add_argument("--out", type=Path, metavar="DIR", help="where to write it (default: a directory in the system temp dir named for the lock)")
     use.add_argument("--repo-config", action="store_true", help="also write the repository's .cargo/config.toml")
     use.add_argument("--json", action="store_true", help="print the result as JSON")
@@ -1924,6 +2209,10 @@ def add_deps(sub: argparse._SubParsersAction) -> None:
     refresh.set_defaults(run=deps_refresh)
     where = commands.add_parser("path", parents=[common], help="print the deps checkout, adding the worktree when it is missing")
     where.set_defaults(run=deps_path)
+    pinning = commands.add_parser("tree-pin", help="point a [[deps.tree]] pin file at a commit: fetch it and write its commit and every file's SHA-256")
+    pinning.add_argument("name", help="the [[deps.tree]] name")
+    pinning.add_argument("commit", help="a 40-hex commit of the tree's repository (a branch would float)")
+    pinning.set_defaults(run=deps_tree_pin)
     init = commands.add_parser("init", help="make the orphan deps branch in a new worktree")
     init.add_argument("--path", type=Path, metavar="DIR", help="the worktree (default: REPO-deps beside the repository)")
     init.set_defaults(run=deps_init)
@@ -2002,6 +2291,19 @@ SCHEMA["deps"].keys["cdn"] = Key(
         "hosts": Key("strs", [], "Only these hosts of the index; empty: all."),
     },
 )
+SCHEMA["deps"].keys["tree"] = Key(
+    "tables",
+    None,
+    "A whole repository tree at a pinned commit, carried unmodified on the deps branch (a library whose licence allows it only in its original form).",
+    {
+        "name": Key("str", REQUIRED, "The tree's name: its key in manifest.json and on the command line (unique)."),
+        "repo": Key("str", REQUIRED, "The GitHub repository, OWNER/NAME."),
+        "pin": Key("str", REQUIRED, "A JSON file of this repository with at least `commit` (40 hex) and `files` (path to SHA-256, the whole tree); its other keys are the repository's and are kept."),
+        "path": Key("str", REQUIRED, "The folder on the deps branch, for example cdn/office-js."),
+        "license": Key("str", "", "A path in the tree that the pin must name."),
+        "url": Key("str", "https://codeload.github.com/{repo}/tar.gz/{commit}", "Where the archive of the commit is fetched, over {repo} and {commit}; a mirror may replace it."),
+    },
+)
 SCHEMA["flutter"] = Key(
     "table",
     None,
@@ -2011,13 +2313,38 @@ SCHEMA["flutter"] = Key(
         "version_item": Key("str", "app flutter-version", "The lock row naming the framework version `precache-check` expects."),
         "engine_item": Key("str", "app flutter-engine", "The lock row naming the engine revision."),
         "dart_item": Key("str", "app dart", "The lock row naming the Dart version."),
+        "commit_items": Key("strs", [], "Lock rows (`GROUP NAME`) whose VERSION `precache-check` accepts as the checkout's commit (the mirror's and the upstream commit it mirrors). Empty: the commit is not checked."),
+        "sdk_item": Key("str", "", "The git row (`GROUP NAME`) that is the Flutter SDK: `sdk install` checks it out on `branch` with its tags and precaches it."),
+        "engine_release": Key("str", "", "Where `sdk install` precaches from: the URL of the directory holding MANIFEST.txt and the assets of the engine's release, `{engine}` being the engine_item row's version (for example https://github.com/OWNER/flutter/releases/download/engine-{engine}). Empty: no precache; nothing falls back to Google's storage."),
+        "precache": Key("strs", ["web"], "The platforms `sdk install` precaches (`flutter precache --P`) and holds the checkout to: web, windows, linux, macos."),
+        "branch": Key("str", "main", "The branch the SDK's clone is checked out on (Flutter names its channel from it)."),
+    },
+)
+SCHEMA["flutter"].keys["fonts"] = Key(
+    "table",
+    None,
+    "The fallback fonts the Flutter web engine asks for: the [deps.cdn] index entries of one host and path prefix (off when `host` is empty).",
+    {
+        "host": Key("str", "", "The CDN host of the fonts, for example fonts.gstatic.com."),
+        "prefix": Key("str", "/s/", "The path prefix of the fonts in the index; the font's own path is the rest."),
+        "engine_data": Key("str", "bin/cache/flutter_web_sdk/lib/_engine/engine/font_fallback_data.dart", "The engine's font manifest, relative to the Flutter checkout."),
+        "pattern": Key("str", "NotoFont\\(\\s*'[^']+',\\s*'([^']+)'", "A regular expression (multi-line) over that file with one group: a font's path."),
+        "install_dir": Key("str", "assets/fonts/fallback", "Where `fonts-install` puts the fonts below the build output."),
     },
 )
 SCHEMA["offline"] = Key(
     "table",
     None,
     "`offline plan`.",
-    {"cache_dir": Key("str", "target/offline-pub-cache", "Where the pub cache an offline build uses is seeded, relative to the repository.")},
+    {
+        "cache_dir": Key("str", "target/offline-pub-cache", "Where the pub cache an offline build uses is seeded, relative to the repository."),
+        "storage_url": Key(
+            "str",
+            "http://127.0.0.1:9",
+            "FLUTTER_STORAGE_BASE_URL for `offline env` and `offline run`, unless the process sets it: an address nothing answers, so a build that reaches for Google's storage fails. Empty: not set.",
+        ),
+        "env": Key("map", {}, "Variables `offline env` and `offline run` add after the defaults; an empty value removes the variable."),
+    },
 )
 
 
@@ -2246,8 +2573,11 @@ def sync_cdn(ctx: Ctx, deps_dir: Path, args: Any) -> tuple[list[str], dict]:
         if fetched:
             changes.append(f"added cdn/{entry['host']}{entry['path']}")
     cdn = deps_dir / "cdn"
+    carried = [(deps_dir / t.path).resolve() for t in ctx.cfg.deps.tree]
     if cdn.is_dir():
         for file in sorted(f for f in cdn.rglob("*") if f.is_file()):
+            if any(root in file.resolve().parents for root in carried):
+                continue
             if file.resolve() not in wanted:
                 file.unlink()
                 changes.append(f"removed cdn/{file.relative_to(cdn).as_posix()}")
@@ -2304,8 +2634,186 @@ def cdn_check(ctx: Ctx, view: Any, lock: Lock) -> tuple[list[str], list[str]]:
     return found, []
 
 
-DEPS_SYNCS.extend([sync_pub, sync_cdn])
-DEPS_CHECKS.extend([pub_check, cdn_check])
+def tree_pin(ctx: Ctx, tree: Table) -> dict:
+    """The pin file of a tree: its commit and the SHA-256 of every file."""
+    if not tree.path or unsafe_member(tree.path) or "\\" in tree.path:
+        raise Problem(f"deps.tree {tree.name}: path {tree.path!r} is not a relative path without ..")
+    try:
+        pin = json.loads((ctx.root / tree.pin).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise Problem(f"{tree.pin}: {error}") from error
+    files = pin.get("files") if isinstance(pin, dict) else None
+    if not isinstance(files, dict) or not HEX40.match(str(pin.get("commit", ""))) or not all(HEX64.match(str(v)) for v in files.values()):
+        raise Problem(f"{tree.pin}: needs a 40-hex `commit` and `files`, a map of path to SHA-256")
+    for name in files:
+        if not name or unsafe_member(name) or "\\" in name:
+            raise Problem(f"{tree.pin}: {name!r} is not a relative path without ..")
+    return pin
+
+
+def tree_files(data: bytes) -> dict[str, bytes]:
+    """The files of a source archive below its top directory, by relative path; anything but a regular file is refused."""
+    files: dict[str, bytes] = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            for member in tar:
+                if unsafe_member(member.name):
+                    raise Problem(f"the archive holds {member.name}, outside its directory")
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    raise Problem(f"the archive holds {member.name}, which is not a regular file")
+                parts = stripped(member.name, 1)
+                if not parts:
+                    continue
+                name = "/".join(parts)
+                if name in files:
+                    raise Problem(f"the archive holds {name} twice")
+                files[name] = tar.extractfile(member).read()
+    except (tarfile.TarError, OSError, EOFError) as error:
+        raise Problem(f"not a source archive: {error}") from error
+    return files
+
+
+def tree_url(tree: Table, commit: str) -> str:
+    return tree.url.format(repo=tree.repo, commit=commit)
+
+
+def sync_trees(ctx: Ctx, deps_dir: Path, args: Any) -> tuple[list[str], dict]:
+    """Each `[[deps.tree]]` equal to its pin, files unmodified, nothing else below its path."""
+    trees = ctx.cfg.deps.tree
+    if not trees:
+        return [], {}
+    names = [t.name for t in trees]
+    if len(set(names)) != len(names):
+        raise Problem(f"deps.tree: a name is listed twice: {', '.join(sorted(n for n in set(names) if names.count(n) > 1))}")
+    allow = Allow(ctx.cfg.deps.allow)
+    changes: list[str] = []
+    recorded: dict[str, dict] = {}
+    for tree in trees:
+        pin = tree_pin(ctx, tree)
+        wanted: dict[str, str] = pin["files"]
+        if tree.license and tree.license not in wanted:
+            raise Problem(f"{tree.pin} does not name {tree.license}, the licence of {tree.name}")
+        base = deps_dir / tree.path
+        stale: list[str] = []
+        refused: list[str] = []
+        for rel, digest in sorted(wanted.items()):
+            target = base / rel
+            body = target.read_bytes() if target.is_file() else None
+            if body is None or sha256(body) != digest:
+                stale.append(rel)
+            elif (kind := flagged_kind(body, rel.rsplit("/", 1)[-1])) and not allow.permits(f"{tree.path}/{rel}", kind):
+                refused.append(f"{tree.path}/{rel}: {kind}")
+        fresh: dict[str, bytes] = {}
+        if stale:
+            url = tree_url(tree, pin["commit"])
+            fresh = tree_files(fetch(url))
+            if set(fresh) != set(wanted):
+                gone = sorted(set(wanted) - set(fresh))
+                extra = sorted(set(fresh) - set(wanted))
+                raise Problem(
+                    f"{url} is not what {tree.pin} pins: it holds {len(fresh)} files, the pin names {len(wanted)}"
+                    + (f"; the pin names {gone[0]}, which it lacks" if gone else f"; it holds {extra[0]}, which the pin does not name")
+                )
+            different = sorted(rel for rel in stale if sha256(fresh[rel]) != wanted[rel])
+            if different:
+                raise Problem(f"{url} is not what {tree.pin} pins: {len(different)} files differ, the first is {different[0]}")
+            for rel in stale:
+                kind = flagged_kind(fresh[rel], rel.rsplit("/", 1)[-1])
+                if kind and not allow.permits(f"{tree.path}/{rel}", kind):
+                    refused.append(f"{tree.path}/{rel}: {kind}")
+        if refused:
+            raise Problem(
+                f"{tree.name}: the scanner would refuse {len(refused)} files, which are carried whole or not at all; "
+                f"[deps] allow lets a kind through one path: {refused[0]}"
+            )
+        for rel in stale:
+            target = base / rel
+            changes.append(f"{'replaced' if target.exists() else 'added'} {tree.path}/{rel}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(fresh[rel])
+        if base.is_dir():
+            for file in sorted(f for f in base.rglob("*") if f.is_file()):
+                rel = file.relative_to(base).as_posix()
+                if rel not in wanted:
+                    file.unlink()
+                    changes.append(f"removed {tree.path}/{rel}")
+            for folder in sorted((d for d in base.rglob("*") if d.is_dir()), key=lambda d: len(d.parts), reverse=True):
+                if not any(folder.iterdir()):
+                    folder.rmdir()
+        recorded[tree.name] = {
+            "repository": tree.repo,
+            "commit": pin["commit"],
+            "path": tree.path,
+            "files": [{"path": rel, "sha256": wanted[rel], "bytes": (base / rel).stat().st_size} for rel in sorted(wanted)],
+        }
+        changes.append(f"tree {tree.name}: {len(wanted)} files at {pin['commit'][:12]}, {len(stale)} written")
+    return changes, {"trees": recorded}
+
+
+def tree_check(ctx: Ctx, view: Any, lock: Lock) -> tuple[list[str], list[str]]:
+    """Every file a tree's pin names is on the branch with its hash, and nothing else is below its path."""
+    found: list[str] = []
+    notes: list[str] = []
+    if not ctx.cfg.deps.tree:
+        return found, notes
+    deep = not getattr(ctx, "quick", False)
+    try:
+        manifest = json.loads(view.read(MANIFEST) or b"{}")
+    except ValueError:
+        manifest = {}
+    recorded = manifest.get("trees") if isinstance(manifest, dict) and isinstance(manifest.get("trees"), dict) else {}
+    for tree in ctx.cfg.deps.tree:
+        try:
+            pin = tree_pin(ctx, tree)
+        except Problem as problem:
+            found.append(str(problem))
+            continue
+        wanted = pin["files"]
+        have = set(view.files(tree.path))
+        for rel in sorted(set(wanted) - have):
+            found.append(f"{tree.path}/{rel}: missing, {tree.pin} names it")
+        if deep:
+            for rel in sorted(set(wanted) & have):
+                if sha256(view.read(f"{tree.path}/{rel}") or b"") != wanted[rel]:
+                    found.append(f"{tree.path}/{rel}: SHA-256 is not the pin's {wanted[rel]}")
+        for rel in sorted(have - set(wanted)):
+            found.append(f"{tree.path}/{rel}: not in {tree.pin}")
+        if tree.license and tree.license not in wanted:
+            found.append(f"{tree.pin} does not name {tree.license}, the licence of {tree.name}")
+        entry = recorded.get(tree.name)
+        if not isinstance(entry, dict):
+            notes.append(f"{MANIFEST} records no trees.{tree.name}")
+        elif entry.get("commit") != pin["commit"]:
+            found.append(f"{MANIFEST}: trees.{tree.name} is at {entry.get('commit')}, {tree.pin} pins {pin['commit']}")
+    return found, notes
+
+
+def deps_tree_pin(ctx: Ctx, args: argparse.Namespace) -> int:
+    """Points a tree's pin file at a commit: fetches it and writes its `commit` and every file's SHA-256."""
+    tree = next((t for t in ctx.cfg.deps.tree if t.name == args.name), None)
+    if tree is None:
+        raise Usage(f"no [[deps.tree]] named {args.name}; the trees are {', '.join(t.name for t in ctx.cfg.deps.tree) or 'none'}")
+    if not HEX40.match(args.commit):
+        raise Usage(f"{args.commit} is not a 40-hex commit; a branch name would let the pin float")
+    path = ctx.root / tree.pin
+    try:
+        pin = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise Problem(f"{tree.pin}: {error}") from error
+    if not isinstance(pin, dict):
+        raise Problem(f"{tree.pin}: not a JSON object")
+    files = tree_files(fetch(tree_url(tree, args.commit)))
+    pin["commit"] = args.commit
+    pin["files"] = {rel: sha256(files[rel]) for rel in sorted(files)}
+    path.write_bytes((json.dumps(pin, indent=1) + "\n").encode("utf-8"))
+    print(f"pinned {tree.name} at {args.commit}: {len(files)} files")
+    return 0
+
+
+DEPS_SYNCS.extend([sync_pub, sync_cdn, sync_trees])
+DEPS_CHECKS.extend([pub_check, cdn_check, tree_check])
 
 
 # --- offline plan: what an offline build of the repository needs -----------------------------------------------
@@ -2319,8 +2827,53 @@ def seed(source: Path, target: Path) -> None:
         shutil.copyfile(source, target)
 
 
+def pub_packages_listing(checkout: Path) -> str:
+    """What pub reads from `.git/pub-packages` of a git checkout: each folder holding a pubspec.yaml, relative to it."""
+    folders = {
+        "." if (rel := pubspec.parent.relative_to(checkout).as_posix()) == "" else rel
+        for pubspec in checkout.rglob("pubspec.yaml")
+        if ".git" not in pubspec.relative_to(checkout).parts
+    }
+    return "\n".join(sorted(folders))
+
+
+BARE_IDENTITY = {
+    "GIT_AUTHOR_NAME": "build.py", "GIT_AUTHOR_EMAIL": "build.py@localhost",
+    "GIT_COMMITTER_NAME": "build.py", "GIT_COMMITTER_EMAIL": "build.py@localhost",
+}  # fmt: skip
+
+
+def seed_bare(cache: Path, package: Package) -> None:
+    """The bare repository pub looks for in `git/cache/REPO-SHA1`, where the locked revision resolves to an empty commit.
+
+    Pub asks that repository whether the revision exists before it reads the checkout; `refs/replace/REV` makes it
+    answer yes with no history, no objects of the real repository and no network. An existing repository is kept.
+    """
+    bare = cache / "git" / "cache" / f"{package.repo}-{hashlib.sha1(package.url.encode()).hexdigest()}"
+    rev = package.resolved_ref
+    env = {**os.environ, **BARE_IDENTITY}
+
+    def git_here(*args: str, data: bytes | None = None) -> str:
+        done = subprocess.run(["git", "-C", str(bare), *args], input=data, capture_output=True, env=env)
+        if done.returncode:
+            raise Problem(f"git {args[0]} in {bare}: {done.stderr.decode(errors='replace').strip()}")
+        return done.stdout.decode().strip()
+
+    if not bare.is_dir():
+        bare.parent.mkdir(parents=True, exist_ok=True)
+        done = subprocess.run(["git", "init", "--bare", "-q", str(bare)], capture_output=True, env=env)
+        if done.returncode:
+            raise Problem(f"git init --bare {bare}: {done.stderr.decode(errors='replace').strip()}")
+    if subprocess.run(["git", "-C", str(bare), "rev-parse", "-q", "--verify", f"refs/replace/{rev}"], capture_output=True, env=env).returncode == 0:
+        return
+    tree = git_here("hash-object", "-t", "tree", "-w", "--stdin", data=b"")
+    commit = git_here("commit-tree", tree, "-m", "build.py: stands in for a revision the checkout holds", data=b"")
+    git_here("update-ref", f"refs/replace/{rev}", commit)
+
+
 def offline_plan(
-    ctx: Ctx, deps: Path | None, user_cache: Path, cargo_lock: Path | None, pubspec_lock: Path | None, cargo_out: Path | None = None
+    ctx: Ctx, deps: Path | None, user_cache: Path, cargo_lock: Path | None, pubspec_lock: Path | None, cargo_out: Path | None = None,
+    vendor: Vendor | None = None,
 ) -> dict:
     """{cache, reason, cargo_home}: the seeded pub cache and cargo home, or why a build must go online.
 
@@ -2362,12 +2915,12 @@ def offline_plan(
             if absent_git:
                 plan["reason"] = f"the deps branch lacks git checkouts: {', '.join(absent_git[:5])}"
                 return plan
-    if cargo_lock is not None and cargo_lock.is_file():
-        lock = read_lock(cargo_lock)
+    vendor = vendor or vendors_of(ctx)[0]
+    if vendor.item or (cargo_lock is not None and cargo_lock.is_file()):
         try:
-            info = use_crates(ctx, deps, lock, cargo_lock, cargo_out)
+            info = use_vendor(ctx, deps, vendor, cargo_lock, cargo_out)
         except Problem as problem:
-            plan["reason"] = f"the deps branch's crates/ does not cover {cargo_lock.name}: {problem}"
+            plan["reason"] = f"the deps branch's {vendor.folder}/ does not cover {cargo_lock.name if cargo_lock else vendor.lock or vendor.item}: {problem}"
             return plan
         plan["cargo_home"] = info["cargo_home"]
     if pubspec_lock is not None and pubspec_lock.is_file():
@@ -2379,10 +2932,11 @@ def offline_plan(
             if cfg.git == "checkout":
                 destination = target / "git" / p.key
                 seed(deps / "pub" / "git" / p.key, destination)
-                # Pub takes a git package from its checkout once the checkout has .git/pub-packages,
-                # which pub fills in itself; git cannot carry a .git path, so the branch has none.
+                # Pub takes a git package from its checkout once the checkout has .git/pub-packages and its
+                # bare repository resolves the revision; git cannot carry a .git path, so the branch has neither.
                 (destination / ".git").mkdir(exist_ok=True)
-                (destination / ".git" / "pub-packages").touch()
+                (destination / ".git" / "pub-packages").write_bytes(pub_packages_listing(destination).encode("utf-8"))
+                seed_bare(target, p)
             else:
                 seed(user_cache / "git" / p.key, target / "git" / p.key)
                 for bare in (user_cache / "git" / "cache").glob(f"{p.repo}-*"):
@@ -2391,8 +2945,10 @@ def offline_plan(
     return plan
 
 
-def offline_command(ctx: Ctx, args: argparse.Namespace) -> int:
-    cargo_lock = args.cargo_lock.resolve() if args.cargo_lock else ctx.root / ctx.cfg.deps.cargo_lock
+def make_plan(ctx: Ctx, args: argparse.Namespace) -> dict:
+    vendor = chosen_vendors(ctx, args, False)[0]
+    override = lock_overrides(ctx, args).get(vendor.folder)
+    cargo_lock = override or (ctx.root / vendor.lock if vendor.lock else None)
     ctx.pubspec_lock = args.pubspec_lock
     try:
         deps = find_deps(ctx, args.deps)
@@ -2401,9 +2957,14 @@ def offline_command(ctx: Ctx, args: argparse.Namespace) -> int:
         reason = str(problem)
     chosen = args.pub_cache
     user_cache = Path(chosen) if chosen else Path(ctx.cfg.deps.pub.cache) if ctx.cfg.deps.pub.cache else default_pub_cache(os.environ)
-    plan = offline_plan(ctx, deps, user_cache, cargo_lock, pubspec_lock_of(ctx), args.out)
+    plan = offline_plan(ctx, deps, user_cache, cargo_lock, pubspec_lock_of(ctx), args.out, vendor)
     if deps is None:
         plan["reason"] = reason
+    return plan
+
+
+def offline_command(ctx: Ctx, args: argparse.Namespace) -> int:
+    plan = make_plan(ctx, args)
     if args.json:
         print(json.dumps(plan, indent=2))
     else:
@@ -2414,17 +2975,83 @@ def offline_command(ctx: Ctx, args: argparse.Namespace) -> int:
     return 0 if not plan["reason"] else 1
 
 
+def offline_environment(ctx: Ctx, plan: dict) -> dict[str, str | None]:
+    """The variables an offline build runs under (None: removed): the seeded caches, no network, no telemetry.
+
+    FLUTTER_STORAGE_BASE_URL keeps the process's own value, else `[offline] storage_url`; `[offline] env` has the last word.
+    """
+    cfg = ctx.cfg.offline
+    env: dict[str, str | None] = {}
+    if plan["cache"]:
+        env["PUB_CACHE"] = plan["cache"]
+    if plan["cargo_home"]:
+        env["CARGO_HOME"] = plan["cargo_home"]
+    env["CARGO_NET_OFFLINE"] = "true"
+    env["FLUTTER_SUPPRESS_ANALYTICS"] = "true"
+    env["DART_SUPPRESS_ANALYTICS"] = "true"
+    if os.environ.get("FLUTTER_STORAGE_BASE_URL"):
+        env["FLUTTER_STORAGE_BASE_URL"] = os.environ["FLUTTER_STORAGE_BASE_URL"]
+    elif cfg.storage_url:
+        env["FLUTTER_STORAGE_BASE_URL"] = cfg.storage_url
+    for key, value in cfg.env.items():
+        env[key] = value or None
+    return env
+
+
+def offline_env_command(ctx: Ctx, args: argparse.Namespace) -> int:
+    plan = make_plan(ctx, args)
+    if plan["reason"]:
+        raise Problem(f"offline is not possible: {plan['reason']}")
+    env = {k: v for k, v in offline_environment(ctx, plan).items() if v is not None}
+    if args.json:
+        print(json.dumps({**env, "cache": plan["cache"], "cargo_home": plan["cargo_home"]}, indent=2))
+    else:
+        for key, value in env.items():
+            print(f"{key}={value}")
+    return 0
+
+
+def offline_run_command(ctx: Ctx, args: argparse.Namespace) -> int:
+    command = list(args.cmd)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        raise Usage("name the command after --: offline run -- COMMAND ...")
+    plan = make_plan(ctx, args)
+    if plan["reason"]:
+        raise Problem(f"offline is not possible: {plan['reason']}")
+    env = dict(os.environ)
+    for key, value in offline_environment(ctx, plan).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    program = shutil.which(command[0], path=env.get("PATH")) or command[0]
+    try:
+        return subprocess.run([program, *command[1:]], env=env).returncode
+    except OSError as error:
+        raise Problem(f"{command[0]}: {error}") from error
+
+
 def add_offline(sub: argparse._SubParsersAction) -> None:
-    parser = sub.add_parser("offline", help="what an offline build of the repository needs")
+    parser = sub.add_parser("offline", help="what an offline build of the repository needs, and running one")
     commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-    plan = commands.add_parser("plan", help="seed the pub cache and write the cargo home from the deps checkout, or say why not")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--deps", type=Path, metavar="DIR", help="the deps checkout (default: `deps path`)")
+    common.add_argument("--vendor", metavar="FOLDER", help="the [[deps.vendor]] folder whose cargo home is written (default: the first)")
+    common.add_argument("--cargo-lock", type=Path, metavar="FILE", help="read this Cargo.lock instead of the repository's")
+    common.add_argument("--pubspec-lock", type=Path, metavar="FILE", help="read this pubspec.lock instead of [deps.pub] lock")
+    common.add_argument("--pub-cache", type=Path, metavar="DIR", help="the user's pub cache, only read (git packages recorded, not vendored, come from it)")
+    common.add_argument("--out", type=Path, metavar="DIR", help="where the cargo home is written (default: a temp directory named for the lock)")
+    plan = commands.add_parser("plan", parents=[common], help="seed the pub cache and write the cargo home from the deps checkout, or say why not")
     plan.add_argument("--json", action="store_true", help="print {cache, reason, cargo_home} as JSON")
-    plan.add_argument("--deps", type=Path, metavar="DIR", help="the deps checkout (default: `deps path`)")
-    plan.add_argument("--cargo-lock", type=Path, metavar="FILE", help="read this Cargo.lock instead of the repository's")
-    plan.add_argument("--pubspec-lock", type=Path, metavar="FILE", help="read this pubspec.lock instead of [deps.pub] lock")
-    plan.add_argument("--pub-cache", type=Path, metavar="DIR", help="the user's pub cache, only read (git packages recorded, not vendored, come from it)")
-    plan.add_argument("--out", type=Path, metavar="DIR", help="where the cargo home is written (default: a temp directory named for the lock)")
     plan.set_defaults(run=offline_command)
+    env = commands.add_parser("env", parents=[common], help="run the plan, then print the variables an offline build runs under")
+    env.add_argument("--json", action="store_true", help="print them as a JSON object, with cache and cargo_home")
+    env.set_defaults(run=offline_env_command)
+    run = commands.add_parser("run", parents=[common], help="run the plan, then a command under those variables (exit 1 and nothing run when offline is not possible)")
+    run.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="the command and its arguments")
+    run.set_defaults(run=offline_run_command)
 
 
 # --- flutter: plugin junctions and the pinned checkout ---------------------------------------------------------
@@ -2478,6 +3105,34 @@ def json_field(text: str, key: str) -> str:
     return found[1] if found else ""
 
 
+# Where a platform's files are below bin/cache of a Flutter checkout; {arch} is x64 or arm64.
+ENGINE_DIRS = {
+    "web": "flutter_web_sdk",
+    "windows": "artifacts/engine/windows-{arch}",
+    "linux": "artifacts/engine/linux-{arch}",
+    "macos": "artifacts/engine/darwin-x64",
+}
+
+
+def precache_missing(root: Path, platforms: list[str], arch: str, engine: str | None = None) -> dict[str, str]:
+    """Platform (or `engine.stamp`) to what is absent from bin/cache of a Flutter checkout; empty when it is precached."""
+    unknown = [p for p in platforms if p not in ENGINE_DIRS]
+    if unknown:
+        raise Usage(f"unknown platform {', '.join(unknown)}; one of {', '.join(ENGINE_DIRS)}")
+    cache = root / "bin" / "cache"
+    missing: dict[str, str] = {}
+    stamp = cache / "engine.stamp"
+    if not stamp.is_file():
+        missing["engine.stamp"] = "bin/cache/engine.stamp"
+    elif engine is not None and stamp.read_text(encoding="utf-8").strip() != engine:
+        missing["engine.stamp"] = f"bin/cache/engine.stamp is not {engine}"
+    for platform_name in platforms:
+        where = "bin/cache/" + ENGINE_DIRS[platform_name].format(arch=arch)
+        if not (root / where).is_dir():
+            missing[platform_name] = where
+    return missing
+
+
 def flutter_precache_check(ctx: Ctx, args: argparse.Namespace) -> int:
     """What Flutter reports about itself, against what the lock expects of that commit."""
     cfg = ctx.cfg.flutter
@@ -2508,9 +3163,86 @@ def flutter_precache_check(ctx: Ctx, args: argparse.Namespace) -> int:
     got = json_field(text, "dartSdkVersion")
     if want(cfg.dart_item) not in got:
         found.append(f"flutter's Dart is {got}, the lock says {want(cfg.dart_item)}")
+    if cfg.commit_items:
+        head = run_git("rev-parse", "HEAD", cwd=root) if git_ok("rev-parse", "HEAD", cwd=root) else ""
+        accepted = [want(row) for row in cfg.commit_items]
+        if head not in accepted:
+            found.append(f"flutter is at {head or 'no commit'}, the lock accepts " + " or ".join(f"{a} ({row})" for a, row in zip(accepted, cfg.commit_items)))
+    platforms = [p for p in (args.platform or "").split(",") if p]
+    for name, where in precache_missing(root, platforms, host_platform().split("-", 1)[1]).items():
+        if name != "engine.stamp":
+            found.append(f"flutter has no {name} files: {where} is missing; run flutter precache --{name}")
     if found:
         raise Problem("\n".join(found))
     print(f"ok: Flutter {want(cfg.version_item)}, engine {want(cfg.engine_item)[:12]}, Dart {want(cfg.dart_item)}")
+    return 0
+
+
+def font_index(ctx: Ctx) -> dict[str, str]:
+    """Font path (below the prefix) to SHA-256: the `[deps.cdn]` index entries of `[flutter.fonts]`'s host and prefix."""
+    cfg = ctx.cfg.flutter.fonts
+    if not cfg.host:
+        raise Usage("[flutter.fonts] host is not set")
+    if not ctx.cfg.deps.cdn.index:
+        raise Problem("[flutter.fonts] reads the [deps.cdn] index, and `index` is not set")
+    return {e["path"][len(cfg.prefix) :]: e["sha256"] for e in cdn_files(ctx) if e["host"] == cfg.host and e["path"].startswith(cfg.prefix)}
+
+
+def flutter_fonts_check(ctx: Ctx, args: argparse.Namespace) -> int:
+    """The index names exactly the fonts this SDK's web engine asks for."""
+    cfg = ctx.cfg.flutter.fonts
+    listed = font_index(ctx)
+    root = args.flutter_root or (Path(os.environ["FLUTTER_ROOT"]) if os.environ.get("FLUTTER_ROOT") else None)
+    if root is None:
+        raise Usage("name the Flutter checkout with --flutter-root or $FLUTTER_ROOT")
+    data = root / cfg.engine_data
+    if not data.is_file():
+        raise Problem(f"{data} is missing: run flutter precache --web there")
+    try:
+        pattern = re.compile(cfg.pattern, re.MULTILINE)
+    except re.error as error:
+        raise Problem(f"flutter.fonts.pattern: {error}") from error
+    if pattern.groups != 1:
+        raise Problem("flutter.fonts.pattern needs exactly one group: the font's path")
+    asked = set(pattern.findall(data.read_text(encoding="utf-8")))
+    if not asked:
+        raise Problem(f"{data} lists no fonts for flutter.fonts.pattern")
+    if asked != set(listed):
+        unlisted, unrequested = sorted(asked - set(listed)), sorted(set(listed) - asked)
+        raise Problem(
+            f"the {ctx.cfg.deps.cdn.index} fonts of {cfg.host} are not what this Flutter's engine asks for: "
+            f"{len(unlisted)} unlisted, {len(unrequested)} not requested"
+            + (f"; first unlisted {unlisted[0]}" if unlisted else "")
+            + (f"; first not requested {unrequested[0]}" if unrequested else "")
+        )
+    print(f"ok: {len(asked)} fonts, the engine's and the index's")
+    return 0
+
+
+def flutter_fonts_install(ctx: Ctx, args: argparse.Namespace) -> int:
+    """Copies each font from the deps checkout into the build output, verified against the index; never fetches."""
+    cfg = ctx.cfg.flutter.fonts
+    listed = font_index(ctx)
+    deps = find_deps(ctx, args.deps)
+    problems_found: list[str] = []
+    done = 0
+    for name, digest in sorted(listed.items()):
+        source = deps / "cdn" / cfg.host / (cfg.prefix + name).lstrip("/")
+        if not source.is_file():
+            problems_found.append(f"{name}: not on the deps branch")
+            continue
+        body = source.read_bytes()
+        if sha256(body) != digest:
+            problems_found.append(f"{name}: SHA-256 is not the index's")
+            continue
+        target = args.dist / cfg.install_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+        done += 1
+    if problems_found:
+        more = f" (and {len(problems_found) - 3} more)" if len(problems_found) > 3 else ""
+        raise Problem("the fallback fonts are not all on the deps branch: " + "; ".join(problems_found[:3]) + more + "; `deps sync` fills them")
+    print(f"installed {done} fonts into {args.dist / cfg.install_dir}")
     return 0
 
 
@@ -2522,7 +3254,15 @@ def add_flutter(sub: argparse._SubParsersAction) -> None:
     junctions.set_defaults(run=flutter_junctions)
     check = commands.add_parser("precache-check", help="verify the checkout's version, engine and Dart against the SDK lock")
     check.add_argument("--flutter-root", type=Path, metavar="DIR", help="the Flutter checkout (default: $FLUTTER_ROOT)")
+    check.add_argument("--platform", metavar="LIST", help="also require these platforms' files (web, windows, linux, macos; comma separated) to be precached")
     check.set_defaults(run=flutter_precache_check)
+    fonts = commands.add_parser("fonts-check", help="hold the CDN index's fonts to the ones this Flutter's web engine asks for ([flutter.fonts])")
+    fonts.add_argument("--flutter-root", type=Path, metavar="DIR", help="the Flutter checkout (default: $FLUTTER_ROOT)")
+    fonts.set_defaults(run=flutter_fonts_check)
+    install_fonts = commands.add_parser("fonts-install", help="copy the fallback fonts from the deps checkout into a web build's output")
+    install_fonts.add_argument("dist", type=Path, metavar="DIST", help="the build output (for example build/web)")
+    install_fonts.add_argument("--deps", type=Path, metavar="DIR", help="the deps checkout (default: `deps path`)")
+    install_fonts.set_defaults(run=flutter_fonts_install)
 
 
 SECTIONS.extend([add_offline, add_flutter])
@@ -2773,8 +3513,7 @@ def sdk_check(ctx: Ctx, args: argparse.Namespace) -> int:
         if not HEX40.match(pin):
             found.append(f"{path.name}:{pin_line}: the deps pin is not a commit: {pin}")
         else:
-            lock_file = ctx.root / ctx.cfg.deps.cargo_lock
-            more, extra = ref_problems(ctx, read_lock(lock_file), pin)
+            more, extra = ref_problems(ctx, None, pin)
             found += [f"{ctx.cfg.deps.pin.lock}:{pin_line}: {line}" for line in more]
             notes += extra
     deps_ref = args.deps_ref or f"origin/{ctx.cfg.deps.branch}"
@@ -2836,6 +3575,76 @@ def unpack(archive: Path, dest: Path, strip: int = 1) -> None:
         raise Problem(f"cannot unpack {archive.name}: only .zip, .tar.gz, .tar.xz and .tar.bz2")
 
 
+def engine_manifest(text: str) -> dict[str, tuple[str, int, str]]:
+    """MANIFEST.txt of an engine release: `path TAB sha256 TAB size TAB asset` per line, `#` for a comment."""
+    entries: dict[str, tuple[str, int, str]] = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) != 4 or not HEX64.match(fields[1]) or not fields[2].isdigit():
+            raise Problem(f"MANIFEST.txt:{number}: expected `path TAB sha256 TAB size TAB asset`")
+        path, digest, size, asset = fields
+        if not path or unsafe_member(path) or "\\" in path or "/" in asset or not asset:
+            raise Problem(f"MANIFEST.txt:{number}: {path!r} or {asset!r} is not a safe name")
+        entries[path] = (digest, int(size), asset)
+    return entries
+
+
+def fetch_engine_tree(base: str, tree: Path) -> int:
+    """Puts the assets of an engine release back in the layout Flutter's storage has, below `tree`; returns how many were fetched.
+
+    A file already there with the manifest's size and SHA-256 is kept. A download that is not what the manifest says is refused.
+    """
+    base = base.rstrip("/")
+    entries = engine_manifest(fetch(f"{base}/MANIFEST.txt").decode("utf-8"))
+    if not entries:
+        raise Problem(f"{base}/MANIFEST.txt lists nothing")
+    fetched = 0
+    for path, (digest, size, asset) in sorted(entries.items()):
+        target = tree / path
+        if target.is_file() and target.stat().st_size == size and sha256(target.read_bytes()) == digest:
+            continue
+        data = fetch(f"{base}/{urllib.parse.quote(asset)}")
+        if len(data) != size or sha256(data) != digest:
+            raise Problem(f"refused {base}/{asset}: {len(data)} bytes with SHA-256 {sha256(data)}, MANIFEST.txt says {size} and {digest}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        partial.write_bytes(data)
+        os.replace(partial, target)
+        fetched += 1
+    return fetched
+
+
+@contextlib.contextmanager
+def serve_tree(tree: Path) -> Iterator[tuple[int, list[str]]]:
+    """Serves a directory on 127.0.0.1 (GET and HEAD) while the block runs; yields (port, the paths asked for that it lacks)."""
+    misses: list[str] = []
+    lock = threading.Lock()
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, directory=str(tree), **kwargs)
+
+        def log_request(self, code: Any = "-", size: Any = "-") -> None:
+            if str(code) in ("404", "HTTPStatus.NOT_FOUND") or getattr(code, "value", None) == 404:
+                with lock:
+                    misses.append(self.path)
+
+        def log_error(self, *args: Any) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1], misses
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(30)
+
+
 class Installer:
     """What `sdk install` does for one platform, prefix and set of groups."""
 
@@ -2853,6 +3662,17 @@ class Installer:
         self.exe = ".exe" if self.windows else ""
         self.rustup = self.cargo_home / "bin" / f"rustup{self.exe}"
         self.tool_env = {**os.environ, "RUSTUP_HOME": str(self.rustup_home), "CARGO_HOME": str(self.cargo_home)}
+        # The deps checkout an item vendor's tool is built from (`--deps`), found only when a tool has to be built.
+        self.deps_arg: Path | None = None
+        self.deps_found: tuple[Path | None, str] | None = None
+
+    def deps_checkout(self) -> tuple[Path | None, str]:
+        if self.deps_found is None:
+            try:
+                self.deps_found = (find_deps(self.ctx, self.deps_arg), "")
+            except Problem as problem:
+                self.deps_found = (None, str(problem))
+        return self.deps_found
 
     # reporting
     def report(self, what: str, state: str) -> None:
@@ -2962,9 +3782,60 @@ class Installer:
             code, out = capture_tool([str(self.rustup), "default"], self.tool_env)
             if not out.startswith(f"{numeric[0]}-{self.triple}"):
                 run_tool([str(self.rustup), "default", f"{numeric[0]}-{self.triple}"], self.tool_env)
-        for tool in [i for i in self.items if i.name.startswith("cargo-") and i.group in self.groups]:
+        self.rust_targets(numeric, targets)
+        vendored = {split_item(v.item) for v in vendors_of(self.ctx) if v.item}
+        for tool in [i for i in self.items if i.name.startswith("cargo-") and i.group in self.groups and (i.group, i.name) not in vendored]:
             self.cargo_tool(tool, numeric[0] if numeric else None)
+        self.vendored_tools(numeric[0] if numeric else None)
         self.paths.append(str(self.cargo_home / "bin"))
+
+    def rust_targets(self, toolchains: list[str], targets: list[str]) -> None:
+        """One line per `rust-target` row of each numeric toolchain: a build never adds a target."""
+        for toolchain in toolchains:
+            if not targets:
+                return
+            code, out = capture_tool([str(self.rustup), "target", "list", "--toolchain", toolchain, "--installed"], self.tool_env) if self.rustup.is_file() else (1, "")
+            have = out.split() if code == 0 else []
+            for target in targets:
+                label = f"rust-target {target} ({toolchain})"
+                if target in have:
+                    self.report(label, "ok")
+                else:
+                    self.need(label, "missing")
+
+    def vendored_tools(self, stable: str | None) -> None:
+        """Each item vendor's crate, built offline from its folder of the deps branch."""
+        for vendor in vendors_of(self.ctx):
+            if not vendor.item:
+                continue
+            group, name = split_item(vendor.item)
+            rows = self.rows(name, group)
+            if not rows:
+                continue
+            row = rows[0]
+            binary = self.cargo_home / "bin" / f"{vendor.bin or name}{self.exe}"
+            code, out = capture_tool([str(binary), "--version"], self.tool_env) if binary.is_file() else (1, "")
+            label = f"{name} {row.version}"
+            if code == 0 and out.split()[1:2] == [row.version]:
+                self.report(label, "ok")
+                continue
+            deps, why = self.deps_checkout()
+            if deps is None:
+                if self.check:
+                    self.need(label, "missing, needs a deps checkout")
+                    continue
+                raise Problem(f"{label} is built offline from {vendor.folder}/ of the deps branch and there is no deps checkout ({why}); pass --deps DIR")
+            if self.check:
+                self.need(label, f"missing, cargo would build it from {vendor.folder}/ offline")
+                continue
+            if stable is None:
+                raise Problem(f"{name} needs a stable rust row to be installed with")
+            info = use_vendor(self.ctx, deps, vendor, None, self.prefix / "vendor" / vendor.folder)
+            run_tool(
+                [str(self.rustup), "run", stable, "cargo", "--config", info["config"], "install", "--offline", "--locked", name, "--version", row.version],
+                self.tool_env,
+            )
+            self.report(label, "installed")
 
     def cargo_tool(self, tool: Item, stable: str | None) -> None:
         binary = self.cargo_home / "bin" / f"{tool.name}{self.exe}"
@@ -3027,6 +3898,7 @@ class Installer:
             if (
                 item.group not in self.groups or item.group == "system" or not item.url.startswith("https://") or item.url.endswith(".git")
                 or item.sha256 == "-" or item.name in ("rustup-init", "llvm") or item.name.startswith("cargo-")
+                or (item.group, item.name) in {split_item(v.item) for v in vendors_of(self.ctx) if v.item}
             ):
                 continue
             directory = self.prefix / item.name / item.version
@@ -3049,14 +3921,60 @@ class Installer:
             self.paths.append(str(directory / "bin" if (directory / "bin").is_dir() else directory))
 
     # git items
+    def flutter_precache(self, directory: Path, url: str) -> None:
+        """The Flutter SDK precached for `[flutter] precache` from the engine's release, never from Google's storage."""
+        cfg = self.ctx.cfg.flutter
+        arch = self.plat.split("-", 1)[1]
+        engine = next((i.version for i in self.items if f"{i.group} {i.name}" == cfg.engine_item), None)
+        if not cfg.engine_release:
+            self.report("flutter precache", "not configured ([flutter] engine_release)")
+            return
+        missing = precache_missing(directory, cfg.precache, arch, engine)
+        if self.check or not missing:
+            for name in cfg.precache:
+                if name in missing or "engine.stamp" in missing:
+                    self.need(f"flutter precache {name}", f"missing, {missing.get(name) or missing['engine.stamp']}")
+                else:
+                    self.report(f"flutter precache {name}", "ok")
+            return
+        if engine is None:
+            raise Problem(f"[flutter] engine_item names no `{cfg.engine_item}` row to fill {{engine}} in engine_release with")
+        base = cfg.engine_release.replace("{engine}", engine)
+        tree = self.prefix / "flutter-artifacts"
+        self.report("flutter precache", f"fetching {base}")
+        self.report("flutter precache", f"{fetch_engine_tree(base, tree)} files fetched")
+        flutter = str(directory / "bin" / ("flutter.bat" if self.windows else "flutter"))
+        with serve_tree(tree) as (port, misses):
+            env = {
+                **self.tool_env,
+                "FLUTTER_STORAGE_BASE_URL": f"http://127.0.0.1:{port}",
+                "FLUTTER_GIT_URL": url,
+                "FLUTTER_ROOT": str(directory),
+                "CI": "true",
+                "TAR_OPTIONS": "--no-same-owner",
+                "FLUTTER_SUPPRESS_ANALYTICS": "true",
+                "DART_SUPPRESS_ANALYTICS": "true",
+            }
+            run_tool([flutter, "config", "--no-analytics", "--no-cli-animations"], env, directory)
+            run_tool([flutter, "precache", *(f"--{p}" for p in cfg.precache)], env, directory)
+            run_tool([flutter, "--version"], env, directory)
+        if misses:
+            raise Problem("flutter asked the engine release for files it does not hold:\n" + "\n".join(f"  {m}" for m in sorted(set(misses))))
+        still = precache_missing(directory, cfg.precache, arch, engine)
+        if still:
+            raise Problem("flutter precache left " + ", ".join(f"{k} ({v})" for k, v in still.items()))
+        self.report("flutter precache", "installed")
+
     def git_items(self) -> None:
         cfg = self.ctx.cfg.sdk
+        cfg_flutter = self.ctx.cfg.flutter
         for item in self.items:
             if item.group not in self.groups or item.group == "system" or not item.url.endswith(".git") or not item.url.startswith("https://"):
                 continue
             url = os.environ.get(f"BUILD_SDK_GIT_URL_{re.sub(r'[^A-Za-z0-9]', '_', item.name).upper()}") or cfg.git_urls.get(item.name) or item.url
             directory = self.prefix / "git" / item.name / item.version[:12]
             self.dirs[f"{item.group} {item.name}"] = directory
+            sdk = f"{item.group} {item.name}" == cfg_flutter.sdk_item
             label = f"{item.name} {item.version[:12]}"
             ready = (directory / ".git").exists() and git_ok("rev-parse", "HEAD", cwd=directory) and run_git("rev-parse", "HEAD", cwd=directory) == item.version
             if ready:
@@ -3072,7 +3990,12 @@ class Installer:
                 # A commit-only clone fetches just the trees and files of this revision, and keeps
                 # the history a tool that reads tags and commits needs.
                 run_git("-c", "core.autocrlf=false", "clone", "-q", "--filter=tree:0", "--no-checkout", url, str(partial))
-                run_git("-C", str(partial), "checkout", "-q", "--detach", item.version)
+                if sdk:
+                    # Flutter names its channel after the branch and reads its tags for the version.
+                    run_git("-C", str(partial), "checkout", "-q", "-B", cfg_flutter.branch, item.version)
+                    run_git("-C", str(partial), "fetch", "-q", "--no-tags", "origin", "+refs/tags/*:refs/tags/*")
+                else:
+                    run_git("-C", str(partial), "checkout", "-q", "--detach", item.version)
                 shutil.rmtree(directory, ignore_errors=True)
                 os.replace(partial, directory)
                 self.report(label, "installed")
@@ -3092,6 +4015,8 @@ class Installer:
                 run_tool([str(exe), *command[1:]], self.tool_env, cwd=directory)
                 stamp.write_text("", encoding="utf-8")
                 self.report(f"{item.name} {post.run[0]}", "ran")
+            if sdk:
+                self.flutter_precache(directory, url)
 
     # Python virtual environments
     def venvs(self) -> None:
@@ -3234,6 +4159,7 @@ def sdk_install(ctx: Ctx, args: argparse.Namespace) -> int:
         prefix = Path(os.environ["BUILD_SDK_HOME"]) if os.environ.get("BUILD_SDK_HOME") else Path.home() / f".{ctx.root.name}-sdk"
     prefix = prefix.resolve() if prefix.is_absolute() else (Path.cwd() / prefix).resolve()
     install = Installer(ctx, items, plat, prefix, groups + ["system"], args.check, native)
+    install.deps_arg = getattr(args, "deps", None)
     if not args.check:
         (prefix / "dl").mkdir(parents=True, exist_ok=True)
     install.report("prefix", str(prefix) + (f" (SDK_HOME, {native['SDK_HOME'][1]})" if "SDK_HOME" in native and not args.prefix else ""))
@@ -3265,6 +4191,7 @@ def add_sdk(sub: argparse._SubParsersAction) -> None:
     install.add_argument("--groups", metavar="A,B", help="the groups to install (default: [sdk] install)")
     install.add_argument("--prefix", metavar="DIR", help="where (default: SDK_HOME of `help env`, else $BUILD_SDK_HOME, else ~/.REPO-sdk)")
     install.add_argument("--check", action="store_true", help="install nothing: report what is missing and exit 1 if anything is")
+    install.add_argument("--deps", type=Path, metavar="DIR", help="the deps checkout a [[deps.vendor]] item's tool is built from (default: `deps path`)")
     install.add_argument("--print-system", action="store_true", help="print the system packages to install, and nothing else")
     install.add_argument("--platform", metavar="OS-ARCH", help="act as this platform (default: this machine, or $BUILD_SDK_PLATFORM)")
     install.add_argument("--env", action="append", metavar="KEY=VALUE", help="set a native key of `help env` (SDK_HOME, VSINSTALLDIR, LLVM_DIR, ...); wins over the environment and the .env files")
@@ -3445,8 +4372,8 @@ def release_build(ctx: Ctx, args: argparse.Namespace) -> int:
         if key in native and key != "SDK_HOME":
             print(f"native: {key}={native[key][0]} ({native[key][1]})")
     if args.offline:
-        lock_path = args.cargo_lock.resolve() if args.cargo_lock else ctx.root / ctx.cfg.deps.cargo_lock
-        info = use_crates(ctx, find_deps(ctx, args.deps), read_lock(lock_path), lock_path, args.out)
+        vendor = vendors_of(ctx)[0]
+        info = use_vendor(ctx, find_deps(ctx, args.deps), vendor, args.cargo_lock.resolve() if args.cargo_lock else None, args.out)
         config = Path(info["config"])
         env["CARGO_NET_OFFLINE"] = "true"
     fill = lambda text: text.replace("{triple_}", target.triple.replace("-", "_")).replace("{triple}", target.triple)  # noqa: E731
@@ -3903,10 +4830,9 @@ def container_deps(ctx: Ctx, values: dict[str, tuple[str, str]], items: list[Ite
     read file by file against Cargo.lock; the lock's own commit is read by metadata, as `sdk check` covers it.
     """
     cfg = ctx.cfg.container
-    lock = read_lock(ctx.root / ctx.cfg.deps.cargo_lock)
     if "DEPS_DIR" in values:
         deps = Path(values["DEPS_DIR"][0]).resolve()
-        found, extra = dir_problems(ctx, deps, lock, True)
+        found, extra = dir_problems(ctx, deps, None, True)
         notes += extra
         if found:
             raise Problem("\n".join(f"DEPS_DIR ({values['DEPS_DIR'][1]}): {line}" for line in found))
@@ -3921,7 +4847,7 @@ def container_deps(ctx: Ctx, values: dict[str, tuple[str, str]], items: list[Ite
     deps = ctx.root / cfg.work_dir / f"deps-{key}"
     if not fetch:
         if not own and HEX40.match(ref) and has_commit(ctx.root, ref):
-            found, extra = ref_problems(ctx, lock, ref)
+            found, extra = ref_problems(ctx, None, ref)
             notes += extra
             if found:
                 raise Problem("\n".join(f"DEPS_REF: {line}" for line in found))
@@ -3939,7 +4865,7 @@ def container_deps(ctx: Ctx, values: dict[str, tuple[str, str]], items: list[Ite
     commit = head_of(deps)
     if HEX40.match(ref) and commit != ref:
         raise Problem(f"{hide_credentials(url)}: fetching {ref} gave {commit}")
-    found, extra = dir_problems(ctx, deps, lock, not own)
+    found, extra = dir_problems(ctx, deps, None, not own)
     notes += extra
     if found:
         raise Problem("\n".join(f"deps at {commit[:12]}: {line}" for line in found))
