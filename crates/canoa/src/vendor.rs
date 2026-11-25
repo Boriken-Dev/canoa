@@ -105,6 +105,11 @@ pub struct VendorInfo {
     /// it somewhere a file does not say (a keyring), so its `local` account is always listed.
     #[map(default)]
     pub login_files: Vec<String>,
+    /// The variables of the host's environment that sign the agent in by themselves (`ANTHROPIC_API_KEY`), which the program takes
+    /// in place of its stored login. A session started where one is set and not empty is signed in, so the account `local` is
+    /// listed for it and says which variable it is; the value is never read beyond that.
+    #[map(default)]
+    pub login_env: Vec<String>,
     /// The credential standards that are the vendor's own, with their names for people.
     #[map(default)]
     pub standards: Vec<StandardTitle>,
@@ -146,6 +151,7 @@ impl VendorInfo {
             home_folder: None,
             home_context_files: Vec::new(),
             login_files: Vec::new(),
+            login_env: Vec::new(),
             standards: Vec::new(),
             names: Vec::new(),
             markers: Vec::new(),

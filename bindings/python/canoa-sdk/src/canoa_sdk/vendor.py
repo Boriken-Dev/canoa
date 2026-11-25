@@ -58,6 +58,7 @@ class VendorInfo(Model):
     home_folder: Optional[str] = None
     home_context_files: List[str] = field(default_factory=list)
     login_files: List[str] = field(default_factory=list)
+    login_env: List[str] = field(default_factory=list)
     standards: List[StandardTitle] = field(default_factory=list)
     names: List[str] = field(default_factory=list)
     markers: List[str] = field(default_factory=list)
@@ -89,6 +90,7 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
     home_folder: ClassVar[Optional[str]] = None
     home_context_files: ClassVar[Sequence[str]] = ()
     login_files: ClassVar[Sequence[str]] = ()
+    login_env: ClassVar[Sequence[str]] = ()
     standards: ClassVar[Sequence[StandardTitle]] = ()
     names: ClassVar[Sequence[str]] = ()
     markers: ClassVar[Sequence[str]] = ()
@@ -113,6 +115,7 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
             home_folder=self.home_folder,
             home_context_files=list(self.home_context_files),
             login_files=list(self.login_files),
+            login_env=list(self.login_env),
             standards=list(self.standards),
             names=list(self.names),
             markers=list(self.markers),

@@ -40,7 +40,7 @@ pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, 
 
 The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("codex")`).
 
-`CodexVendor`'s description lists `AGENTS.md` and `AGENTS.override.md` as files Codex loads itself (`context_files`), so the host does not hand them over a second time and `fs/instructions` lists them; Codex keeps the person's own in `$CODEX_HOME` (`.codex` below the home when it is not set), where it loads the same two names (`home_variable`, `home_folder`, `home_context_files`). Its `login_files` is `auth.json` in that folder: the host lists Codex's own login as the account `local` only while that file is there and not empty.
+`CodexVendor`'s description lists `AGENTS.md` and `AGENTS.override.md` as files Codex loads itself (`context_files`), so the host does not hand them over a second time and `fs/instructions` lists them; Codex keeps the person's own in `$CODEX_HOME` (`.codex` below the home when it is not set), where it loads the same two names (`home_variable`, `home_folder`, `home_context_files`). Its `login_files` is `auth.json` in that folder: the host lists Codex's own login as the account `local` only while that file is there and not empty or one of `login_env` (`CODEX_API_KEY`, `OPENAI_API_KEY`) is set in the host's environment.
 
 ## Gotchas
 
