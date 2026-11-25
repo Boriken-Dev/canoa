@@ -8,3 +8,4 @@ crates/** -text
 cdn/office-js/** -text
 crates-web_noise/** -text
 crates-wasm-bindgen-cli/** -text
+crates-web_whisper/** -text
