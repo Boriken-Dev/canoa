@@ -34,6 +34,9 @@ pub mod preset;
 #[cfg(feature = "profile-item")]
 #[cfg_attr(docsrs, doc(cfg(feature = "profile-item")))]
 pub mod profile_item;
+#[cfg(feature = "sdk")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sdk")))]
+pub mod sdk;
 pub mod search;
 #[cfg(feature = "session-service")]
 #[cfg_attr(docsrs, doc(cfg(feature = "session-service")))]
@@ -46,6 +49,7 @@ pub mod session_service;
 #[cfg(any(
     feature = "mail-backend",
     feature = "profile-item",
+    feature = "sdk",
     feature = "store",
     feature = "settings-section"
 ))]
@@ -59,6 +63,7 @@ pub mod settings_section;
     feature = "gateway",
     feature = "panel-tab",
     feature = "profile-item",
+    feature = "sdk",
     feature = "secret",
     feature = "settings-section",
     feature = "speech",
@@ -73,6 +78,7 @@ pub mod settings_section;
         feature = "gateway",
         feature = "panel-tab",
         feature = "profile-item",
+        feature = "sdk",
         feature = "secret",
         feature = "settings-section",
         feature = "speech",

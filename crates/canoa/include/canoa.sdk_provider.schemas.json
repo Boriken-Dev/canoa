@@ -1,0 +1,578 @@
+{
+  "Capability": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "A word of lower-case letters, digits and `_`."
+      },
+      "stream": {
+        "type": "boolean",
+        "description": "Whether the operation streams its answer. A fact of the operation, not of a model.",
+        "default": false
+      },
+      "max_batch": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The most items one call takes (texts to embed, passages to rank), when the vendor limits it."
+      },
+      "max_batch_bytes": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes of items one call takes, when the vendor limits it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ]
+  },
+  "Auth": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "header": {
+        "type": "string",
+        "description": "The header's name."
+      },
+      "scheme": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The scheme written before the key, with a space between; none sends the key alone."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "header"
+    ]
+  },
+  "SdkInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "1 to 32 lower-case letters and digits: the offer of an account is `ID:ACCOUNT`, one of the person's own is `NAME`."
+      },
+      "title": {
+        "type": "string",
+        "description": "What it is called."
+      },
+      "summary": {
+        "type": "string",
+        "description": "What it is, in a sentence."
+      },
+      "location": {
+        "type": "string",
+        "description": "Where the text goes, in a sentence or two, said before the person sets anything up."
+      },
+      "standards": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The credential standards of the accounts it serves; empty: it needs no account (a server by address).",
+        "default": []
+      },
+      "address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The address it is pinned to; absent, the account's own model API address."
+      },
+      "credential": {
+        "type": "string",
+        "description": "Which credential of the account holds the key."
+      },
+      "auth": {
+        "type": "object",
+        "properties": {
+          "header": {
+            "type": "string",
+            "description": "The header's name."
+          },
+          "scheme": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The scheme written before the key, with a space between; none sends the key alone."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "header"
+        ],
+        "description": "How the host applies the key.",
+        "default": {
+          "header": "authorization",
+          "scheme": "Bearer"
+        }
+      },
+      "capabilities": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "A word of lower-case letters, digits and `_`."
+            },
+            "stream": {
+              "type": "boolean",
+              "description": "Whether the operation streams its answer. A fact of the operation, not of a model.",
+              "default": false
+            },
+            "max_batch": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4294967295,
+              "description": "The most items one call takes (texts to embed, passages to rank), when the vendor limits it."
+            },
+            "max_batch_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "The most bytes of items one call takes, when the vendor limits it."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ]
+        },
+        "description": "The operations it implements.",
+        "default": []
+      },
+      "schema": {
+        "description": "The settings it takes, as a guatiao schema of an object, for a provider with no account."
+      },
+      "form": {
+        "description": "How the schema is shown, as a guatiao-intake form."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "summary",
+      "location",
+      "credential"
+    ]
+  },
+  "OpenRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "address": {
+        "type": "string",
+        "description": "The address the lent HTTP is bound to, which a provider reads to tell whether paths start with `/v1`. Never holds a key."
+      },
+      "settings": {
+        "type": "string",
+        "description": "The provider's own settings as a JSON object keyed by its schema's members; `{}` when it takes none."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "address",
+      "settings"
+    ]
+  },
+  "Header": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name."
+      },
+      "value": {
+        "type": "string",
+        "description": "Its value. A provider never puts the key here: the host applies it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "value"
+    ]
+  },
+  "HttpRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "method": {
+        "type": "string",
+        "description": "`GET` or `POST`."
+      },
+      "path": {
+        "type": "string",
+        "description": "The path and query below the address (`/embeddings`); never a URL."
+      },
+      "headers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name."
+            },
+            "value": {
+              "type": "string",
+              "description": "Its value. A provider never puts the key here: the host applies it."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ]
+        },
+        "description": "Headers beside the credential's (`content-type`, a version header).",
+        "default": []
+      },
+      "body": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The body, text."
+      },
+      "max_bytes": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes of the answer to read; the host's limit when absent."
+      },
+      "timeout_secs": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The seconds the request may take; the host's limit when absent."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "method",
+      "path"
+    ]
+  },
+  "HttpReply": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 65535,
+        "description": "The status code."
+      },
+      "body": {
+        "type": "string",
+        "description": "The body, text."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "status",
+      "body"
+    ]
+  },
+  "ChatMessage": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "role": {
+        "type": "string",
+        "description": "`user` or `assistant`."
+      },
+      "content": {
+        "type": "string",
+        "description": "What was said."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "role",
+      "content"
+    ]
+  },
+  "ChatRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "model": {
+        "type": "string",
+        "description": "The model."
+      },
+      "system": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The instructions, apart from the conversation."
+      },
+      "messages": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "description": "`user` or `assistant`."
+            },
+            "content": {
+              "type": "string",
+              "description": "What was said."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "description": "The conversation, oldest first."
+      },
+      "max_tokens": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The most tokens of the answer."
+      },
+      "temperature": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "exclusiveMinimum": -3.4028235677973366e+38,
+        "exclusiveMaximum": 3.4028235677973366e+38,
+        "description": "The sampling temperature, for a model that takes one."
+      },
+      "json": {
+        "type": "boolean",
+        "description": "Whether the answer must be JSON.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "model",
+      "messages"
+    ]
+  },
+  "ChatReply": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The answer's text."
+      },
+      "input_tokens": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Tokens read, when the service says."
+      },
+      "output_tokens": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Tokens written, when the service says."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ]
+  },
+  "EmbedRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "model": {
+        "type": "string",
+        "description": "The model."
+      },
+      "inputs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The texts, one vector each."
+      },
+      "dimensions": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The vector length asked for, for a model that allows it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "model",
+      "inputs"
+    ]
+  },
+  "EmbedReply": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "vectors": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": -3.4028235677973366e+38,
+            "exclusiveMaximum": 3.4028235677973366e+38
+          }
+        },
+        "description": "The vectors."
+      },
+      "input_tokens": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Tokens read, when the service says."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "vectors"
+    ]
+  },
+  "RerankRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "model": {
+        "type": "string",
+        "description": "The model."
+      },
+      "query": {
+        "type": "string",
+        "description": "What is looked for."
+      },
+      "passages": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The passages to order."
+      },
+      "top": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The most results wanted."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "model",
+      "query",
+      "passages"
+    ]
+  },
+  "Ranked": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "index": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The passage's place in the request, from 0."
+      },
+      "score": {
+        "type": "number",
+        "description": "Its score; higher is better."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "index",
+      "score"
+    ]
+  },
+  "RerankReply": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295,
+              "description": "The passage's place in the request, from 0."
+            },
+            "score": {
+              "type": "number",
+              "description": "Its score; higher is better."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "score"
+          ]
+        },
+        "description": "The passages, best first; may be fewer than the request's."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "results"
+    ]
+  }
+}

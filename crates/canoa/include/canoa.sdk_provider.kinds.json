@@ -1,0 +1,135 @@
+{
+  "kinds": [
+    {
+      "name": "sdk_provider",
+      "floor_hash": 1944290915,
+      "object": false,
+      "doc": "A vendor's client for an account type.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What it is and what it implements. The same answer on every call, with nothing run and no connection opened."
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "http",
+              "type": "object",
+              "kind": "lent_http",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "sdk"
+          },
+          "doc": "Opens the client over `http`, which the provider owns from then on."
+        }
+      ]
+    },
+    {
+      "name": "sdk",
+      "floor_hash": 1637788789,
+      "object": true,
+      "doc": "An opened provider: every operation is called only if its capability was described.",
+      "slots": [
+        {
+          "name": "models",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The models the account or server may use, each with the capabilities and limits the provider knows."
+        },
+        {
+          "name": "chat",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "A chat completion (`chat`)."
+        },
+        {
+          "name": "embed",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Vectors of texts (`embed`)."
+        },
+        {
+          "name": "rerank",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "An order of passages (`rerank`)."
+        }
+      ]
+    },
+    {
+      "name": "lent_http",
+      "floor_hash": 525845123,
+      "object": true,
+      "doc": "HTTP to the address of one account or server, made by the host: the credential applied, the person's network used, the answer\nsize limited, redirects refused, and nothing outside the address reachable. A transport failure is an error; a status is an\nanswer.",
+      "slots": [
+        {
+          "name": "request",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Makes `request` below the address."
+        }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
+| `sdk` | `canoa::sdk` | the `sdk_provider` kind: a vendor's client for an account type over HTTP the host lends (implies `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
 | `speech-builtin` | `canoa::speech::builtin` | built-in speech-to-text and speech-output providers (implies `speech`, `network`, `guatiao-intake`, `serde_json`) |
 | `loopback` | `canoa::loopback` | loopback HTTP server for host tools and local model gateways (`httparse`, `serde_json`, `sha2`, `rustix`) |
 | `environment` | `canoa::environment` | the `environment` kind: a place an agent works, which hands out the spawner programs start through and serves files (`coqui-acp-api`) |
@@ -994,3 +995,38 @@ pub const KIND: &str = "account_speech_output";   pub const KIND_VERSIONS: [&str
 pub struct AccountSpeechOutputInfo { pub services: Vec<AccountSpeechOutputService> }
 pub struct AccountSpeechOutputService { pub id, pub title, pub summary, pub location, pub standard, pub address, pub url, pub credential, pub provider: String, pub endpoint: bool, pub models, pub voices, pub styles: Vec<String> }
 ```
+
+## `sdk_provider` (`canoa::sdk`, feature `sdk`)
+
+A vendor's client for an account type, which the host's `assist` service asks for chat, embeddings and rerank. A provider never sees the key and never opens a socket: it is lent HTTP bound to one address, and every request goes through it. Plain data, the same in every language; the kinds are in `include/canoa.sdk_provider.kinds.json` (`sdk_provider`, `sdk`, `lent_http`) and every model's schema in `include/canoa.sdk_provider.schemas.json`, both checked by `tests/sdk.rs` (`CANOA_SDK_WRITE_KINDS=1` rewrites them).
+
+```rust
+pub const KIND: &str = "sdk_provider";
+pub const SERVER_ID: &str = "server";                // the built-in provider's id, which `[sdk.NAME] provider` names
+pub const SIGNED_OUT_PREFIX: &str = "sign-in refused: ";   // an error message that starts with it says the key was refused
+pub mod capability { pub const CHAT, EMBED, RERANK, SPEECH_TO_TEXT, TEXT_TO_SPEECH: &str; }   // an open set: the host passes any other id through
+
+#[non_exhaustive] pub struct SdkInfo { pub id: String /* 1..32 lower-case letters and digits */, pub title: String, pub summary: String, pub location: String /* where the text goes */,
+    pub standards: Vec<String> /* the credential standards it serves; empty: no account (a server by address) */, pub address: Option<String> /* pinned; else the account's model API */,
+    pub credential: String, pub auth: Auth, pub capabilities: Vec<Capability>, pub schema: Option<Value>, pub form: Option<Value> }
+SdkInfo::new(id, title);  .taking::<S>()  /* the settings S's schema and form */;  .can(capability);  .problem() -> Option<String>
+#[non_exhaustive] pub struct Capability { pub id: String, pub stream: bool, pub max_batch: Option<u32>, pub max_batch_bytes: Option<u64> }
+#[non_exhaustive] pub struct Auth { pub header: String, pub scheme: Option<String> }   // Auth::bearer() ("Authorization: Bearer KEY"), Auth::header("x-api-key"); the HOST writes it
+#[non_exhaustive] pub struct OpenRequest { pub address: String, pub settings: String /* JSON */ }
+#[non_exhaustive] pub struct HttpRequest { pub method: String /* GET or POST */, pub path: String /* below the address, never a URL */, pub headers: Vec<Header>, pub body: Option<String>, pub max_bytes: Option<u64>, pub timeout_secs: Option<u32> }
+#[non_exhaustive] pub struct HttpReply { pub status: u16, pub body: String }   // a status is an answer; a transport failure is an error
+#[non_exhaustive] pub struct ChatRequest { pub model, system: Option<String>, messages: Vec<ChatMessage>, max_tokens: Option<u32>, temperature: Option<f32>, json: bool }   // ChatRequest::ask(model, text)
+#[non_exhaustive] pub struct ChatReply { pub text: String, pub input_tokens: Option<u64>, pub output_tokens: Option<u64> }
+#[non_exhaustive] pub struct EmbedRequest { pub model, inputs: Vec<String>, dimensions: Option<u32> }   // EmbedReply { vectors: Vec<Vec<f32>>, input_tokens }
+#[non_exhaustive] pub struct RerankRequest { pub model, query, passages: Vec<String>, top: Option<u32> }   // RerankReply { results: Vec<Ranked { index: u32, score: f64 }> }, best first
+
+#[kind(object)] pub trait LentHttp { fn request(&self, HttpRequest) -> Result<HttpReply, ProviderError>; }   // the host's: the credential applied, the person's network, redirects refused, nothing outside the address
+#[kind(object)] pub trait Sdk { fn models(&self) -> Result<ModelListing>; fn chat(&self, ChatRequest) -> Result<ChatReply>; fn embed(&self, EmbedRequest) -> Result<EmbedReply>; fn rerank(&self, RerankRequest) -> Result<RerankReply>; }   // the host calls only what `describe` declared
+#[kind] pub trait SdkProvider { fn describe(&self) -> Result<SdkInfo>; fn open(&self, OpenRequest, Object<dyn LentHttp>) -> Result<Object<dyn Sdk>>; }
+pub fn undeclared(operation) -> ProviderError          // UNSUPPORTED
+pub fn models_for(models: &[ModelInfo], capability: &str) -> Filtered { offered, unreported }   // a model that reports capabilities and lacks this one is left out; one that reports none is kept apart
+```
+
+`ModelListing` and `ModelInfo` are `coqui-acp-api`'s: a model carries `capabilities` (empty means not reported, never none), `capabilities_from` and `limits`. `transcribe` and `speak` are not on the kind yet: they come with the Voice migration, which changes a kind that is not released.
+
+`canoa::sdk::OpenAiShaped` is the client of an OpenAI-shaped service (`/models`, `/chat/completions`, `/embeddings`, `/rerank`; paths start with `/v1` unless the address ends with it): a vendor builds it with its own `Dialect` (the token cap's key, which models take no temperature) and a model `rule`; the built-in `Server` (`canoa::sdk::Server`, id `server`) builds it for any address, stamping the capabilities the person declared in `capabilities` on its models. `canoa::sdk::testing::Recorded` is a `LentHttp` that answers recorded routes and records what it was asked; `canoa::sdk::contract::run(provider, &Fixtures)` holds a provider to the contract (describes itself offerably, does every operation it describes, asks only for paths, carries no credential header).
