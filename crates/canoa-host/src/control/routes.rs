@@ -691,7 +691,12 @@ impl Control {
     ) -> Result<Value, (i32, String)> {
         // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
         // or read what programs are installed here (their paths are in `store/report` too).
-        Ok(self.shells.report(&crate::shells::Lookup::here()))
+        // The agents are `providers/list`'s own, so this page lists exactly the ones that page does.
+        let agents = self
+            .loaded_config()
+            .map(|config| providers::agents(&config))
+            .unwrap_or_default();
+        Ok(self.shells.report(&crate::shells::Lookup::here(), &agents))
     }
 
     pub(super) fn r_secrets(

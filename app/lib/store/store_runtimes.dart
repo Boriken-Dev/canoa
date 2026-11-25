@@ -1,4 +1,5 @@
 import '../config/canoa_config.dart';
+import '../providers/provider_catalog.dart' show providerCatalog;
 import '../profile/profile.dart';
 import 'programs.dart';
 
@@ -71,6 +72,9 @@ final class RuntimeItem {
     return [
       for (final entry in config.hostEntries)
         if (entry.kind == 'agent' && names(entry.runs)) RuntimeUser('Agent', entry.name, entry.runs),
+      // An entry that runs a harness provider starts the command that provider says it launches.
+      for (final entry in config.hostEntries)
+        if (entry.kind == 'agent') if (_launches(entry.harness) case final command? when names(command)) RuntimeUser('Agent', entry.name, command),
       for (final agent in config.agents)
         if (names(agent.program)) RuntimeUser('Agent', agent.label, agent.program),
       for (final MapEntry(:key, :value) in config.profile.mcp.entries)
@@ -108,3 +112,6 @@ final class RuntimeItem {
 
 /// The rows of the Programs page: every store the host listed, in its order.
 List<RuntimeItem> runtimeItems(ProgramStores programs) => [for (final each in programs.statuses) RuntimeItem._(programs, each)];
+
+/// The command the harness provider [harness] says it launches, when the host's providers say.
+String? _launches(String? harness) => providerCatalog.byId(harness)?.launch?.$1;

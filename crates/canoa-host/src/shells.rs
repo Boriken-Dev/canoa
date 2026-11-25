@@ -680,7 +680,7 @@ impl Plan {
     /// `shell/list`: the shells found, the host's own choice, and for each agent entry which shell it uses and how its harness is
     /// told (the variables' names, never a value) or why it cannot be.
     #[must_use]
-    pub fn report(&self, lookup: &Lookup) -> Value {
+    pub fn report(&self, lookup: &Lookup, agents: &[(String, String)]) -> Value {
         let found = detect(lookup);
         let default = self
             .default
@@ -689,7 +689,10 @@ impl Plan {
         let line_for = |entry: Option<&AgentShell>, harness: &str| {
             let own = entry.and_then(|agent| agent.own.as_deref());
             let setting = own.or(self.default.as_deref());
-            let title = crate::vendors::by_agent(harness).map_or(harness, |vendor| vendor.title);
+            let title = agents
+                .iter()
+                .find(|(id, _)| id == harness)
+                .map_or(harness, |(_, title)| title.as_str());
             let mut line = json!({
                 "entry": entry.map(|agent| agent.entry.as_str()),
                 "harness": harness,
@@ -713,25 +716,21 @@ impl Plan {
             line
         };
         // Every agent the host can run has a row: one for each of its entries, then one for each agent no entry runs.
-        let mut agents: Vec<Value> = self
+        let mut rows: Vec<Value> = self
             .agents
             .iter()
             .map(|agent| line_for(Some(agent), &agent.harness))
             .collect();
-        agents.extend(
-            crate::vendors::all()
+        rows.extend(
+            agents
                 .iter()
-                .filter(|vendor| {
-                    self.agents
-                        .iter()
-                        .all(|agent| agent.harness != vendor.agent)
-                })
-                .map(|vendor| line_for(None, vendor.agent)),
+                .filter(|(id, _)| self.agents.iter().all(|agent| &agent.harness != id))
+                .map(|(id, _)| line_for(None, id)),
         );
         let mut report = json!({
             "shells": found.iter().map(Shell::to_json).collect::<Vec<_>>(),
             "setting": self.default,
-            "agents": agents,
+            "agents": rows,
         });
         match default {
             Some(Ok(shell)) => report["default"] = shell.to_json(),

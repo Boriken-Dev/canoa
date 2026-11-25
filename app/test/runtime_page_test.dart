@@ -16,6 +16,7 @@ import 'package:canoa/store/store_view.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/providers_fixture.dart' show listBundledProviders;
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 import 'fixtures/store_link.dart';
 
@@ -145,6 +146,18 @@ void main() {
       ]);
       expect(RuntimeItem.find(programs, 'foundry_store')!.users(_config), isEmpty, reason: 'it provides no command');
       expect(RuntimeItem.find(programs, 'nothing_store'), isNull);
+    });
+
+    test('an entry that runs a harness provider starts the command the provider says it launches', () async {
+      listBundledProviders();
+      final host = FakeStoreHost([
+        FakeStore('agy_store', title: 'Agy', runtime: true, commands: ['agy'], copies: [copyOf('1.0.0', path: '/programs/agy/1.0.0/agy')]),
+      ]);
+      final programs = host.programs(kind: programsTypeId);
+      await programs.refresh();
+      final agy = RuntimeItem.find(programs, 'agy_store')!;
+      final config = const CanoaConfig().withHostAgent(name: 'Antigravity', listen: '127.0.0.1:7001', more: {'harness': 'antigravity'});
+      expect([for (final user in agy.users(config)) '${user.kind} ${user.name} ${user.command}'], ['Agent Antigravity agy']);
     });
   });
 

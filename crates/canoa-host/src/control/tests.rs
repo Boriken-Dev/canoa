@@ -541,22 +541,31 @@ fn shell_list_names_the_shells_found_the_choice_and_what_each_agent_is_told() {
     // The two entries come first; every other agent the host's providers describe has a row of its own, not hosted.
     let hosted: Vec<_> = agents.iter().filter(|row| row["hosted"] == true).collect();
     assert_eq!(hosted.len(), 2, "{agents:?}");
-    let vendors = crate::vendors::all();
-    assert!(vendors.len() > 2, "the bundled agents are described");
-    for vendor in &vendors {
-        assert!(
-            agents.iter().any(|row| row["harness"] == vendor.agent),
-            "{} has a row: {agents:?}",
-            vendor.agent
-        );
-    }
-    assert_eq!(
-        agents.len(),
-        2 + vendors
-            .iter()
-            .filter(|v| v.agent != "claude" && v.agent != "codex")
-            .count()
+    // The rows are the agents `providers/list` lists, no more and no fewer: one list serves every page that offers an agent.
+    let listed = ask(&control, &Caller::Owner, "providers/list", json!({}));
+    let listed: Vec<&str> = listed["result"]["providers"]
+        .as_array()
+        .expect("providers")
+        .iter()
+        .filter_map(|row| row["id"].as_str())
+        .collect();
+    assert!(
+        listed.len() > 2,
+        "the bundled agents are listed: {listed:?}"
     );
+    let mut rows: Vec<&str> = agents
+        .iter()
+        .filter_map(|row| row["harness"].as_str())
+        .collect();
+    let mut want = listed.clone();
+    for entry in ["claude", "codex"] {
+        if !want.contains(&entry) {
+            want.push(entry);
+        }
+    }
+    rows.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(rows, want, "the shells report and providers/list differ");
     assert!(
         agents.iter().all(|row| row["title"].is_string()),
         "{agents:?}"

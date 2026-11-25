@@ -832,6 +832,11 @@ class _CanoaAppState extends State<CanoaApp> {
       presets: [
         for (final source in _hostedSources)
           if (source.local && !config.agents.any((agent) => agent.label == source.label)) source,
+        // Every other agent the host's providers describe, under the name the host would give its entry: its program can be checked
+        // and installed before it is hosted.
+        for (final agent in providerCatalog.providers)
+          if (agent.harness && !_hostedSources.any((source) => source.harness == agent.id || source.label == config.ownEntryOf(agent.id)) && !config.agents.any((each) => each.label == config.ownEntryOf(agent.id)))
+            AgentSource.hosted(config.ownEntryOf(agent.id), harness: agent.id, title: agent.title, local: true),
       ],
       hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
       checkSource: _sourceChecks.check,
@@ -963,8 +968,10 @@ class _CanoaAppState extends State<CanoaApp> {
     return ProfileChoices(models: asked?.models ?? const [], modes: asked != null && asked.modes.isNotEmpty ? asked.modes : known);
   }
 
-  /// The agents the app offers a profile for: the host's own sources, the commands in canoa.cfg and any agent with a profile.
+  /// The agents the app offers a profile for: every agent the host's providers describe (under the name its entry has, or would
+  /// have), the host's own sources, the commands in canoa.cfg and any agent with a profile.
   List<String> get _profileAgents => {
+    for (final agent in providerCatalog.providers) if (agent.harness) config.ownEntryOf(agent.id),
     for (final source in _hostedSources) if (source.local) source.label,
     for (final agent in config.agents) agent.label,
     ...config.agentProfiles.keys,

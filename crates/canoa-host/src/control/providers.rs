@@ -78,6 +78,22 @@ pub(crate) fn list(config: &Config) -> Value {
     })
 }
 
+/// The agents `providers/list` lists, as `(id, title)`: the one list every page that offers an agent starts from.
+pub(crate) fn agents(config: &Config) -> Vec<(String, String)> {
+    list(config)["providers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let id = row["id"].as_str()?;
+            Some((
+                id.to_owned(),
+                row["title"].as_str().unwrap_or(id).to_owned(),
+            ))
+        })
+        .collect()
+}
+
 /// Every provider the loaded libraries register, as `(kind, id)`, a provider that serves several kinds once for each.
 pub(crate) fn pairs(config: &Config) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = Vec::new();
