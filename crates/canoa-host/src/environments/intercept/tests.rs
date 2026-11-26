@@ -33,10 +33,12 @@ static STARTED: Mutex<Vec<(String, Vec<String>)>> = Mutex::new(Vec::new());
 /// The stand-in environment's files.
 static FILES: Mutex<BTreeMap<String, Vec<u8>>> = Mutex::new(BTreeMap::new());
 
-/// A program that has ended: what it printed, and its status.
+/// A program that has ended: what it printed, and its status. One whose command holds `STALL:` answers a wait only after a while,
+/// as an environment whose link stalled does.
 struct Canned {
     out: Mutex<Vec<u8>>,
     code: i64,
+    stalls: bool,
 }
 
 impl SpawnedProcess for Canned {
@@ -60,6 +62,9 @@ impl SpawnedProcess for Canned {
         Err(unsupported("no terminal"))
     }
     fn wait(&self, _: u64) -> Result<ProcessExit, ProviderError> {
+        if self.stalls {
+            std::thread::sleep(Duration::from_secs(5));
+        }
         Ok(ProcessExit::ended(Some(self.code), None))
     }
     fn kill(&self) -> Result<(), ProviderError> {
@@ -94,6 +99,7 @@ impl ProcessSpawner for CannedSpawner {
         Ok(Canned {
             out: Mutex::new(out),
             code: 3,
+            stalls: command.contains("STALL:"),
         }
         .into_object())
     }
@@ -255,7 +261,7 @@ fn a_command_is_turned_to_the_environment_with_the_original_after_an_exit_and_th
     };
     assert_eq!(
         input["command"],
-        format!("{PREFIX} env-exec ID; exit $?; rm -rf build")
+        format!("{PREFIX} env-exec ID; exit; rm -rf build")
     );
     assert_eq!(input["description"], "d", "the rest of the input is kept");
     let text = answer(&claude(), Verdict::Rewrite(input)).expect("an answer");
@@ -1312,7 +1318,7 @@ fn monitor_is_turned_to_the_environment_like_a_shell_but_is_not_offered_for_wait
     };
     let command = input["command"].as_str().expect("a command");
     assert!(command.starts_with(PREFIX), "{command}");
-    assert!(command.ends_with("exit $?; tail -f log"), "{command}");
+    assert!(command.ends_with("exit; tail -f log"), "{command}");
     assert_eq!(input["timeout_ms"], 5000, "its other settings stay");
     assert!(judged(&box_, Mode::Plan, &payload) != Verdict::Pass);
     let refused = json!({"tool_name": "Grep", "tool_input": {"pattern": "x"}});
@@ -1405,4 +1411,213 @@ fn a_session_held_at_plan_leaves_it_on_the_persons_own_allowance_of_the_agents_r
     answer(8, Some("yes"));
     mode("t", "manual");
     assert_eq!(link.mode_of("t"), Mode::Plan);
+}
+
+/// The agent's announcement of a tool call: `sessionUpdate` is `tool_call` or `tool_call_update`.
+fn call_update(kind: &str, id: &str, tool: Option<&str>, command: Option<&str>, status: &str) -> Value {
+    let mut update = json!({"sessionUpdate": kind, "toolCallId": id, "status": status});
+    if let Some(tool) = tool {
+        update["_meta"] = json!({"claudeCode": {"toolName": tool}});
+    }
+    if let Some(command) = command {
+        update["rawInput"] = json!({"command": command});
+    }
+    json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s9", "update": update}})
+}
+
+/// A link on Claude Code's tools whose session `s9` is open, and the channel of its plugin.
+fn open_link() -> (Arc<super::super::mcp::Link>, PathBuf) {
+    let link = hub("canoa")
+        .for_connection(None, &serve("box"), Some("claude"))
+        .expect("made")
+        .expect("a link");
+    let request = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/w", "mcpServers": []}});
+    let _ = said(&link, &request);
+    link.agent_said(
+        json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s9"}})
+            .to_string()
+            .as_bytes(),
+    );
+    let interception = link.interception_for_tests().expect("a take-over");
+    interception.own_folder_off();
+    let channel = interception.channel_of("session:s9:2").expect("a channel");
+    (link, channel)
+}
+
+#[test]
+fn a_call_the_agent_finished_that_the_hook_did_not_prepare_cancels_the_turn() {
+    let (link, channel) = open_link();
+    let agent = |message: Value| link.agent_said(message.to_string().as_bytes());
+    let cancelled = || {
+        link.next_answer()
+            .map(|bytes| serde_json::from_slice::<Value>(&bytes).expect("JSON"))
+    };
+    // A command the hook prepared goes through, announced first with the agent's own text and done after.
+    let (status, _, err) = forwarded(
+        KIND_TOOL,
+        &channel,
+        None,
+        bash("ls /work").to_string().as_bytes(),
+    );
+    assert_eq!(status, 0, "{err}");
+    agent(call_update("tool_call", "c1", Some("Bash"), Some("ls /work"), "pending"));
+    agent(call_update("tool_call_update", "c1", None, None, "completed"));
+    assert_eq!(cancelled(), None, "prepared by the hook");
+    // A call whose hook refused it ends failed, and a tool that acts on nothing here, or the host's own, ends as it should.
+    agent(call_update("tool_call", "c2", Some("Read"), None, "pending"));
+    agent(call_update("tool_call_update", "c2", None, None, "failed"));
+    for (id, tool) in [("c3", "TodoWrite"), ("c4", "mcp__env_box__fs_read")] {
+        agent(call_update("tool_call", id, Some(tool), None, "pending"));
+        agent(call_update("tool_call_update", id, None, None, "completed"));
+    }
+    assert_eq!(cancelled(), None);
+    // A command no hook prepared that ran, a file tool that ran, and a tool nobody described that ran.
+    for (id, tool, command) in [
+        ("c5", "Bash", Some("rm -rf /work")),
+        ("c6", "Read", None),
+        ("c7", "SomeToolOfTomorrow", None),
+    ] {
+        agent(call_update("tool_call", id, Some(tool), command, "pending"));
+        agent(call_update("tool_call_update", id, None, None, "completed"));
+        let cancel = cancelled().unwrap_or_else(|| panic!("{tool} cancels the turn"));
+        assert_eq!(cancel["method"], "session/cancel", "{tool}");
+        assert_eq!(cancel["params"]["sessionId"], "s9");
+    }
+    assert_eq!(cancelled(), None);
+}
+
+#[test]
+fn an_agent_older_than_the_hooks_failure_handling_is_not_started_and_one_that_says_nothing_is() {
+    use super::super::mcp::Said;
+    let session = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/w", "mcpServers": []}});
+    for (title, refused) in [
+        (Some("Claude Code 2.1.200"), true),
+        (Some("Claude Code 2.1.294"), true),
+        (Some("Claude Code 2.1.295"), false),
+        (Some("Claude Code 2.1.326"), false),
+        (Some("Claude Code 3.0.0"), false),
+        (Some("Claude Code"), false),
+        (None, false),
+    ] {
+        let link = hub("canoa")
+            .for_connection(None, &serve("box"), Some("claude"))
+            .expect("made")
+            .expect("a link");
+        let _ = said(
+            &link,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}),
+        );
+        let info = title.map_or(json!({"name": "coqui-acp-claude"}), |title| {
+            json!({"name": "coqui-acp-claude", "title": title})
+        });
+        link.agent_said(
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentInfo": info}})
+                .to_string()
+                .as_bytes(),
+        );
+        match (said(&link, &session), refused) {
+            (Said::Answered(answer), true) => {
+                let answer: Value = serde_json::from_slice(&answer).expect("JSON");
+                let why = answer["error"]["message"].as_str().expect("why");
+                assert!(why.contains("2.1.295") && why.contains("environment box"), "{why}");
+            }
+            (Said::On(_), false) => {}
+            (other, _) => panic!("{title:?}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn an_agent_that_does_its_own_work_and_was_started_as_a_program_is_refused_where_it_cannot_be_turned() {
+    use super::super::mcp::Said;
+    let session = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/w", "mcpServers": []}});
+    for (name, refused) in [("coqui-acp-claude", true), ("an-agent-that-only-talks", false)] {
+        // No harness: the connection runs a program, so the host cannot say which agent it is until it answers.
+        let link = hub("canoa")
+            .for_connection(None, &serve("box"), None)
+            .expect("made")
+            .expect("a link");
+        assert!(!link.gives_plugins());
+        let _ = said(
+            &link,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}),
+        );
+        link.agent_said(
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentInfo": {"name": name}}})
+                .to_string()
+                .as_bytes(),
+        );
+        match (said(&link, &session), refused) {
+            (Said::Answered(answer), true) => {
+                let answer: Value = serde_json::from_slice(&answer).expect("JSON");
+                let why = answer["error"]["message"].as_str().expect("why");
+                assert!(why.contains("Claude") && why.contains("environment box"), "{why}");
+            }
+            (Said::On(_), false) => {}
+            (other, _) => panic!("{name}: {other:?}"),
+        }
+    }
+    // Where the agent runs in the environment its tools are served from, nothing needs turning.
+    let link = hub("canoa")
+        .for_connection(None, &Placement::default(), None)
+        .expect("made");
+    assert!(link.is_none());
+}
+
+#[test]
+fn the_servers_a_session_starts_by_a_command_are_named_to_the_agent_as_acting_on_this_computer() {
+    let link = hub("canoa")
+        .for_connection(None, &serve("box"), Some("claude"))
+        .expect("made")
+        .expect("a link");
+    assert!(!link.briefing().contains("start on this computer"));
+    let request = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/w", "mcpServers": [
+        {"name": "mine", "command": "tool", "args": []},
+        {"name": "remote", "type": "http", "url": "http://127.0.0.1:1/mcp", "headers": []},
+    ]}});
+    let _ = said(&link, &request);
+    let text = link.briefing();
+    assert!(text.contains("(mine) start on this computer"), "{text}");
+    assert!(!text.contains("remote)"), "{text}");
+}
+
+#[test]
+fn a_command_whose_environment_stops_answering_ends_at_its_time_limit_and_frees_the_forwarder() {
+    let modes = Arc::new(Modes::default());
+    let (interception, channel) = opened_with("box", 1 << 20, &modes, "exec_seconds = 1\n");
+    let (status, out, err) = forwarded(
+        KIND_TOOL,
+        &channel,
+        None,
+        bash("echo STALL:x").to_string().as_bytes(),
+    );
+    assert_eq!(status, 0, "{err}");
+    let id = prepared(&out);
+    let begun = Instant::now();
+    let (status, _, err) = forwarded(KIND_EXEC, &channel, Some(&id), b"");
+    assert!(
+        begun.elapsed() < Duration::from_secs(4),
+        "the forwarder waited {:?} for a wait that returns in five seconds",
+        begun.elapsed()
+    );
+    assert_ne!(status, 0);
+    assert!(err.contains("exec_seconds"), "{err}");
+    drop(interception);
+}
+
+#[test]
+#[ignore = "needs bash on PATH"]
+fn a_bash_command_ends_with_the_forwarders_status_and_the_original_never_runs_there() {
+    for status in [0, 1, 7] {
+        let script = format!(
+            "f() {{ return {status}; }}; {}",
+            rewritten("f", "ID", ShellFamily::Bash, "echo ORIGINAL_RAN").expect("a Bash command")
+        );
+        let out = std::process::Command::new("bash")
+            .args(["-c", &script])
+            .output()
+            .expect("bash runs");
+        assert_eq!(out.status.code(), Some(status));
+        assert!(out.stdout.is_empty(), "{:?}", out.stdout);
+    }
 }

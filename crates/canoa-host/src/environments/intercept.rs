@@ -21,11 +21,12 @@
 )]
 
 use canoa::brand::PROGRAM;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -68,6 +69,10 @@ const LONGEST_HOOK_SECONDS: u64 = 2_147_000;
 const POLL: Duration = Duration::from_millis(20);
 /// How often a running command is looked at for its end, its time limit and a forwarder that left.
 const WAIT_SLICE_MS: u64 = 200;
+/// The most commands of one session whose originals are kept to tell the calls the hook saw, and the most calls kept until they end.
+const MAX_SEEN: usize = 512;
+/// How long a stopped command's end is waited for before its status is given up.
+const END_GRACE: Duration = Duration::from_secs(2);
 /// A frame of a command's output, and the last frame, which says how it ended.
 const TAG_OUTPUT: u8 = 1;
 const TAG_END: u8 = 2;
@@ -173,7 +178,7 @@ fn has_word(text: &str, word: &str) -> bool {
 /// The command that runs the command prepared as `id` through the forwarder `prefix`, written for `shell`, then ends the shell with
 /// its status before `original`, which stays only for the agent's rules to read.
 ///
-/// A POSIX shell reads a line whole before it runs it, so `original` after `exit $?` never runs. PowerShell reads the whole script
+/// A POSIX shell reads a line whole before it runs it, so `original` after `exit` never runs. PowerShell reads the whole script
 /// first and acts on some of it before the first statement: a `trap` anywhere covers the statements before it, and `#requires`
 /// loads modules. So for PowerShell `original` is the body of a script block that is never invoked, the forwarder runs inside
 /// `try` with an `exit` in `finally` (a forwarder that cannot start, or a status turned into an error, still ends the script),
@@ -190,7 +195,7 @@ pub(crate) fn rewritten(
 ) -> Result<String, String> {
     match shell {
         ShellFamily::Bash | ShellFamily::Zsh | ShellFamily::Other => {
-            Ok(format!("{prefix} {KIND_EXEC} {id}; exit $?; {original}"))
+            Ok(format!("{prefix} {KIND_EXEC} {id}; exit; {original}"))
         }
         ShellFamily::Powershell => {
             if has_word(original, "trap") || original.to_lowercase().contains("#requires") {
@@ -432,6 +437,11 @@ struct Shared {
     /// The secret of each session's latest request, whose plugin is the one in force.
     latest: Mutex<BTreeMap<String, String>>,
     ops: Mutex<BTreeMap<String, Op>>,
+    /// The commands of each secret's session as the agent wrote them, which its hook prepared: a call the agent reports done must
+    /// be one of these.
+    originals: Mutex<BTreeMap<String, VecDeque<String>>>,
+    /// The calls the agent announced that are not done, by session and call id: the tool and its command.
+    calls: Mutex<BTreeMap<(String, String), (String, Option<String>)>>,
     max_bytes: usize,
     /// How long a forwarder may take for its answer, in all: the environment's `hook_seconds`.
     seconds: u64,
@@ -517,6 +527,8 @@ impl Interception {
             secrets: Mutex::new(BTreeMap::new()),
             latest: Mutex::new(BTreeMap::new()),
             ops: Mutex::new(BTreeMap::new()),
+            originals: Mutex::new(BTreeMap::new()),
+            calls: Mutex::new(BTreeMap::new()),
             max_bytes,
             seconds,
         });
@@ -657,9 +669,118 @@ impl Interception {
         self.shared.seconds
     }
 
+    /// A test never reads the folder of the person who runs it.
+    #[cfg(test)]
+    pub(crate) fn own_folder_off(&self) {
+        self.shared.own_folder.store(false, Ordering::SeqCst);
+    }
+
+    /// The oldest version of the agent the hook is honoured in, as its vendor says.
+    pub(crate) fn min_version(&self) -> Option<&str> {
+        self.shared.hook.min_version.as_deref()
+    }
+
+    /// What the agent announced of a tool call in `update` (a `session/update` of `session`): a call is remembered with its tool and
+    /// command, and when it is done it must be one the hook went through.
+    ///
+    /// # Errors
+    ///
+    /// Why a call that is done did not go through the hook: it is a tool the take-over does not allow that ran, or a command the
+    /// hook did not prepare, so it ran on this computer.
+    pub(crate) fn saw(&self, session: &str, update: &Value) -> Result<(), String> {
+        let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
+            return Ok(());
+        };
+        let key = (session.to_owned(), id.to_owned());
+        match update.get("sessionUpdate").and_then(Value::as_str) {
+            Some("tool_call") => {
+                let pointer = crate::vendors::by_agent(&self.harness)
+                    .and_then(|vendor| vendor.tool_name);
+                let name = pointer
+                    .and_then(|pointer| update.get("_meta")?.pointer(pointer))
+                    .and_then(Value::as_str);
+                let Some(name) = name else {
+                    return Ok(());
+                };
+                let command = self
+                    .shared
+                    .hook
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == name)
+                    .and_then(|tool| tool.command.as_deref())
+                    .and_then(|key| update.pointer("/rawInput")?.get(key)?.as_str())
+                    .map(str::to_owned);
+                let mut calls = lock(&self.shared.calls);
+                while calls.len() >= MAX_SEEN {
+                    calls.pop_first();
+                }
+                calls.insert(key, (name.to_owned(), command));
+                Ok(())
+            }
+            Some("tool_call_update")
+                if update.get("status").and_then(Value::as_str) == Some("completed") =>
+            {
+                let Some((name, command)) = lock(&self.shared.calls).remove(&key) else {
+                    return Ok(());
+                };
+                self.went_through(session, &name, command.as_deref())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether a call of the tool `name` (with `command`, for a shell) that ran is one the hook let run as it is or prepared.
+    fn went_through(&self, session: &str, name: &str, command: Option<&str>) -> Result<(), String> {
+        let hook = &self.shared.hook;
+        let Some(tool) = hook.tools.iter().find(|tool| tool.name == name) else {
+            return if hook
+                .pass_prefixes
+                .iter()
+                .any(|prefix| !prefix.is_empty() && name.starts_with(prefix.as_str()))
+            {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{name} ran, and it is not a tool the take-over of this session's tools lets run"
+                ))
+            };
+        };
+        match tool.role {
+            ToolRole::Pass => Ok(()),
+            ToolRole::Files => Err(format!(
+                "{name} ran on this computer: the hook that refuses it did not"
+            )),
+            _ => {
+                let Some(command) = command else {
+                    return Ok(());
+                };
+                let secrets: Vec<String> = lock(&self.shared.secrets)
+                    .iter()
+                    .filter(|(_, holder)| holder.session.as_deref() == Some(session))
+                    .map(|(secret, _)| secret.clone())
+                    .collect();
+                let originals = lock(&self.shared.originals);
+                let prepared = secrets.iter().any(|secret| {
+                    originals
+                        .get(secret)
+                        .is_some_and(|all| all.iter().any(|each| each == command))
+                });
+                if prepared {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "{name} ran a command that this session's hook did not prepare, so it ran on this computer"
+                    ))
+                }
+            }
+        }
+    }
+
     fn revoke(&self, secret: &str) {
         lock(&self.shared.secrets).remove(secret);
         lock(&self.shared.ops).retain(|_, op| op.secret != secret);
+        lock(&self.shared.originals).remove(secret);
     }
 
     /// The channel file of the plugin written for `request`, for tests.
@@ -932,6 +1053,12 @@ impl Shared {
                 at: Instant::now(),
             },
         );
+        let mut originals = lock(&self.originals);
+        let seen = originals.entry(secret.to_owned()).or_default();
+        while seen.len() >= MAX_SEEN {
+            seen.pop_front();
+        }
+        seen.push_back(command.to_owned());
         Ok(run)
     }
 
@@ -1032,33 +1159,81 @@ impl Shared {
         let limit = self.env.exec_seconds();
         let started = Instant::now();
         let mut error = None;
-        loop {
-            match process.exit(WAIT_SLICE_MS) {
-                Ok(exit) if !exit.running => break,
-                Ok(_) => {}
-                Err(failed) => {
-                    error = Some(failed.to_string());
+        // The environment's own wait is asked on a thread of its own: a call that does not return (a link that stalled) must not hide
+        // the forwarder having left or the time limit, which are looked at every slice here.
+        let (ended, waited) = channel();
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let waiter = {
+            let (process, abandoned) = (process.clone(), Arc::clone(&abandoned));
+            std::thread::Builder::new()
+                .name("canoa-env-exec-wait".to_owned())
+                .spawn(move || {
+                    while !abandoned.load(Ordering::SeqCst) {
+                        match process.exit(WAIT_SLICE_MS) {
+                            Ok(exit) if exit.running => {}
+                            other => {
+                                let _ = ended.send(other);
+                                return;
+                            }
+                        }
+                    }
+                })
+        };
+        let stop = |process: &Remote| {
+            let process = process.clone();
+            // Ending it is a call to the environment too, and may not return either.
+            let _ = std::thread::Builder::new()
+                .name("canoa-env-exec-kill".to_owned())
+                .spawn(move || {
                     let _ = process.kill();
+                });
+        };
+        let mut exit = None;
+        let mut stopped = false;
+        if waiter.is_err() {
+            error = Some("the command's end cannot be waited for".to_owned());
+            stop(&process);
+            stopped = true;
+        }
+        while !stopped {
+            match waited.recv_timeout(Duration::from_millis(WAIT_SLICE_MS)) {
+                Ok(Ok(done)) => {
+                    exit = Some(done);
                     break;
                 }
-            }
-            if gone.load(Ordering::SeqCst) {
-                let _ = process.kill();
-                break;
-            }
-            if limit != 0 && started.elapsed() >= Duration::from_secs(limit) {
-                let _ = process.kill();
-                error = Some(format!(
-                    "the command ran longer than {limit} seconds, the exec_seconds of environment {}, and was ended",
-                    self.env.name()
-                ));
-                break;
+                Ok(Err(failed)) => {
+                    error = Some(failed.to_string());
+                    stop(&process);
+                    stopped = true;
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if gone.load(Ordering::SeqCst) {
+                        stop(&process);
+                        stopped = true;
+                    } else if limit != 0 && started.elapsed() >= Duration::from_secs(limit) {
+                        stop(&process);
+                        error = Some(format!(
+                            "the command ran longer than {limit} seconds, the exec_seconds of environment {}, and was ended",
+                            self.env.name()
+                        ));
+                        stopped = true;
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
-        if let Some(reader) = reader {
+        if stopped {
+            // Its status, if the environment says it soon; else none, and the reader is left to end when its own read does.
+            exit = waited
+                .recv_timeout(END_GRACE)
+                .ok()
+                .and_then(Result::ok);
+        }
+        abandoned.store(true, Ordering::SeqCst);
+        if !stopped && let Some(reader) = reader {
             let _ = reader.join();
         }
-        let code = process.exit(0).map_or(-1, |exit| code_of(&exit));
+        let code = exit.map_or(-1, |exit| code_of(&exit));
         let signed = mac(
             secret,
             &[

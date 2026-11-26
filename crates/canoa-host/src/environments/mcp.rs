@@ -821,6 +821,7 @@ impl Hub {
             }
             _ => None,
         };
+        let takeover_needed = served.as_ref().is_some_and(|served| !runs_there(served));
         Ok(Some(Arc::new(Link {
             hub: Arc::clone(self),
             run,
@@ -828,6 +829,7 @@ impl Hub {
             tools,
             own_tools,
             interception,
+            takeover_needed,
             modes,
             plugins_are_hosts: AtomicBool::new(false),
             state: Mutex::new(LinkState::default()),
@@ -880,6 +882,13 @@ struct LinkState {
     /// The sessions whose person allowed the agent's request to leave plan mode, until the agent says its new mode or the next
     /// prompt.
     leaving: BTreeSet<String>,
+    /// The version the agent reports in `initialize`, when it says one.
+    agent_version: Option<String>,
+    /// The agent that did its own file and shell work and was not started as one the host takes over, by its title: its tools
+    /// would act on this computer, so its sessions are refused.
+    unhooked: Option<String>,
+    /// The MCP servers the sessions' requests started by a command, which start on this computer.
+    local_servers: BTreeSet<String>,
 }
 
 /// One client connection's use of environments.
@@ -892,6 +901,9 @@ pub(crate) struct Link {
     own_tools: bool,
     /// The take-over of that work, when its tools are served from an environment.
     interception: Option<Interception>,
+    /// The connection's tools are served from an environment the agent does not run in, so an agent that does its own work must be
+    /// taken over.
+    takeover_needed: bool,
     /// The mode of each session, for the take-over and for the protected places of the tools.
     modes: Arc<Modes>,
     /// The connection has no profile, so every plugin a session request carries is the host's: one the client put there is taken
@@ -922,6 +934,35 @@ struct Held {
     session: String,
     id: Option<Value>,
     until: Instant,
+}
+
+/// The dotted number of a version in `text` (`Claude Code 2.1.326`): its first word that is numbers and dots, a leading `v` allowed.
+fn version_in(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .map(|word| word.trim_start_matches('v'))
+        .find(|word| {
+            word.contains('.')
+                && word
+                    .split('.')
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .map(str::to_owned)
+}
+
+/// Whether the dotted version `found` is older than `need`.
+fn older(found: &str, need: &str) -> bool {
+    let numbers = |text: &str| -> Vec<u64> {
+        text.split('.')
+            .map(|part| part.parse().unwrap_or(0))
+            .collect()
+    };
+    let (found, need) = (numbers(found), numbers(need));
+    let width = found.len().max(need.len());
+    let at = |all: &[u64], index: usize| all.get(index).copied().unwrap_or(0);
+    (0..width)
+        .map(|index| at(&found, index).cmp(&at(&need, index)))
+        .find(|order| order.is_ne())
+        .is_some_and(core::cmp::Ordering::is_lt)
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1046,7 +1087,40 @@ impl Link {
 
     /// What the agent is told of its environments.
     pub(crate) fn briefing(&self) -> String {
-        briefing(&self.attached())
+        let mut text = briefing(&self.attached());
+        let local: Vec<String> = lock(&self.state).local_servers.iter().cloned().collect();
+        if !local.is_empty() {
+            text.push_str(&format!(
+                "MCP servers that start by a command ({}) start on this computer and act here, not in the environment.\n",
+                local.join(", ")
+            ));
+        }
+        text
+    }
+
+    /// Notes the MCP servers a session request starts by a command: they start where the agent's program runs.
+    fn note_local_servers(&self, value: &Value) {
+        if self.served.is_none() {
+            return;
+        }
+        let servers = value
+            .pointer("/params/mcpServers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
+        let mut state = lock(&self.state);
+        for server in servers {
+            let name = server
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.starts_with(SERVER_PREFIX));
+            if let Some(name) = name
+                && server.get("command").is_some()
+                && state.local_servers.len() < MAX_PENDING
+            {
+                state.local_servers.insert(name.to_owned());
+            }
+        }
     }
 
     /// A message from the client, after the scope has checked it: `initialize` says what the host serves, a session request gets
@@ -1083,6 +1157,7 @@ impl Link {
                 self.advertise(&mut value)
             }
             ("session/new" | "session/load" | "session/resume", Some(id)) => {
+                self.note_local_servers(&value);
                 let taken = match self.take_over(&mut value, &id) {
                     Ok(taken) => taken,
                     Err(why) => {
@@ -1202,11 +1277,31 @@ impl Link {
     ///
     /// Why the plugin cannot be given: the session would run the agent's tools on this computer, so the request is refused.
     fn take_over(&self, value: &mut Value, id: &str) -> Result<bool, String> {
+        let on = || {
+            self.served
+                .as_ref()
+                .map_or(String::new(), |served| served.env().name().to_owned())
+        };
+        if let Some(title) = lock(&self.state).unhooked.clone() {
+            return Err(format!(
+                "{title} does its own file and shell work, and this connection started it as a program whose tools the host cannot turn to environment {}, so its commands would run on this computer: start it as the agent itself (a harness entry), or run it in the environment",
+                on()
+            ));
+        }
         let Some(interception) = &self.interception else {
             return Ok(false);
         };
         if self.is_closed() {
             return Err("the connection is closing".to_owned());
+        }
+        let found = lock(&self.state).agent_version.clone();
+        if let (Some(found), Some(need)) = (found, interception.min_version())
+            && older(&found, need)
+        {
+            return Err(format!(
+                "the agent says it is version {found}, and the hook that runs this session's tools in environment {} is honoured from version {need} on: an older one lets a call whose hook fails or times out run on this computer, so the session is not started. Update the agent's program",
+                on()
+            ));
         }
         let cwd = value
             .pointer("/params/cwd")
@@ -1392,14 +1487,20 @@ impl Link {
     pub(crate) fn agent_said(self: &Arc<Self>, message: &[u8]) -> bool {
         let marked =
             contains(message, b"current_mode_update") || contains(message, b"config_option_update");
-        if !contains(message, b"id") && !marked {
+        let calls = self.interception.is_some() && contains(message, b"tool_call");
+        if !contains(message, b"id") && !marked && !calls {
             return false;
         }
         let Ok(value) = serde_json::from_slice::<Value>(message) else {
             return false;
         };
-        if marked && value.get("method").and_then(Value::as_str) == Some("session/update") {
-            self.mode_notice(&value);
+        if value.get("method").and_then(Value::as_str) == Some("session/update") {
+            if marked {
+                self.mode_notice(&value);
+            }
+            if calls {
+                self.watch(&value);
+            }
         }
         let Some(id) = value.get("id").cloned() else {
             return false;
@@ -1434,6 +1535,25 @@ impl Link {
         }
         self.answered(&id.to_string(), &value);
         false
+    }
+
+    /// What the agent says of its tool calls: one that is done must be one the hook went through, and when it is not the turn is
+    /// cancelled, so that nothing more runs on this computer in it.
+    fn watch(&self, value: &Value) {
+        let (Some(interception), Some(session)) = (
+            &self.interception,
+            value.pointer("/params/sessionId").and_then(Value::as_str),
+        ) else {
+            return;
+        };
+        let Err(why) = interception.saw(session, &value["params"]["update"]) else {
+            return;
+        };
+        tracing::warn!("the turn of session {session} is cancelled: {why}");
+        let cancel = json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session}});
+        if let Ok(bytes) = serde_json::to_vec(&cancel) {
+            lock(&self.queue).push_back(bytes);
+        }
     }
 
     /// What the agent says of a session's mode, which can only make it stricter.
@@ -1571,6 +1691,21 @@ impl Link {
                     .and_then(Value::as_u64)
                     .unwrap_or(1);
                 let mut state = lock(&self.state);
+                let info = result.get("agentInfo");
+                state.agent_version = info
+                    .and_then(|info| info.get("title"))
+                    .and_then(Value::as_str)
+                    .and_then(version_in);
+                // An agent that does its own work, started as a program the host did not know to take over.
+                state.unhooked = (self.takeover_needed && self.interception.is_none())
+                    .then(|| {
+                        info.and_then(|info| info.get("name"))
+                            .and_then(Value::as_str)
+                            .and_then(crate::vendors::by_name)
+                            .filter(|vendor| crate::bundled::does_own_tool_work(vendor.agent))
+                            .map(|vendor| vendor.title.to_owned())
+                    })
+                    .flatten();
                 state.http = takes(
                     result
                         .pointer("/agentCapabilities/mcpCapabilities/http")
