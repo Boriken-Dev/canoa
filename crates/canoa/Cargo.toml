@@ -36,6 +36,8 @@ config-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-serde", "dep:se
 settings-section = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 # The `panel_tab` kind: a kind of tab the application bottom panel can open (a terminal, a log).
 panel-tab = ["dep:coqui-acp-api", "dep:guatiao"]
+# The `file_viewer` kind: a way to show a file of some type in the application Files surface (an A2UI surface or a sealed page).
+file-viewer = ["dep:coqui-acp-api", "dep:guatiao"]
 # The `history_store` kind: where recorded conversations and the list of them are kept (SQLite, memory, or an extension's store).
 history-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:serde_json", "dep:data-encoding", "dep:coqui-acp-history", "dep:time"]
 # The `notifier` kind: somewhere a notice about what happened on the host is sent (the desktop, a phone, an inbox).
@@ -113,7 +115,7 @@ required-features = ["store"]
 
 [[test]]
 name = "script_kinds"
-required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment", "config-store", "notifier"]
+required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment", "config-store", "notifier", "file-viewer"]
 
 [[test]]
 name = "speech_kinds"

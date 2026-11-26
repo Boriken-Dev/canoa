@@ -1,0 +1,127 @@
+{
+  "ViewerInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id the viewer is found by: a word of lower-case letters, digits and `_`, 1 to 32."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people, as the Open with menu says it."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying what it shows."
+      },
+      "mime_types": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The MIME types it shows: exact (`application/json`) or by family (`image/*`)."
+      },
+      "extensions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The extensions, without the dot, it shows whatever the type says."
+      },
+      "priority": {
+        "type": "integer",
+        "minimum": -2147483648,
+        "maximum": 2147483647,
+        "description": "Which of two viewers that can show a file is tried first: the higher. The application's own viewers are at -10 to 10."
+      },
+      "shows": {
+        "type": "string",
+        "enum": [
+          "surface",
+          "page"
+        ],
+        "x-enum-labels": {
+          "surface": "A JSON array of A2UI messages ([`FileViewer::render`] answers it as text), which the application draws with its own widgets in the person's theme.",
+          "page": "One self-contained HTML document with its styles, scripts and pictures inline. The host puts a policy on it that allows no request, form or frame, and the application opens it in the person's browser, since it embeds no web view."
+        },
+        "description": "What it answers with."
+      },
+      "opens_sections": {
+        "type": "boolean",
+        "description": "Whether it opens a document at a section ([`ViewRequest::section`])."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "mime_types",
+      "extensions",
+      "priority",
+      "shows",
+      "opens_sections"
+    ]
+  },
+  "ViewRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "The file's name, without its folder."
+      },
+      "mime": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The type the host judged the file to be, when it could."
+      },
+      "size": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The file's whole size in bytes."
+      },
+      "truncated": {
+        "type": "boolean",
+        "description": "Whether `data` stops short of the file."
+      },
+      "data": {
+        "type": "string",
+        "description": "What the host read of the file, in base64: its start, as many bytes as one answer of the host carries."
+      },
+      "section": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The heading to open at, by its anchor or its title, for a viewer that [`ViewerInfo::opens_sections`]."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "size",
+      "truncated",
+      "data"
+    ]
+  },
+  "Shows": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "surface",
+      "page"
+    ],
+    "x-enum-labels": {
+      "surface": "A JSON array of A2UI messages ([`FileViewer::render`] answers it as text), which the application draws with its own widgets in the person's theme.",
+      "page": "One self-contained HTML document with its styles, scripts and pictures inline. The host puts a policy on it that allows no request, form or frame, and the application opens it in the person's browser, since it embeds no web view."
+    },
+    "properties": {}
+  }
+}

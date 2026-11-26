@@ -964,3 +964,41 @@ def test_a_generator_that_reads_no_source_says_so() -> None:
             return ""
 
     assert Runs().describe()["source"] == "absent"
+
+def test_a_file_viewer_describes_itself_and_answers_from_the_file_the_host_read() -> None:
+    import base64
+    import json as _json
+
+    class Stamp(sdk.SurfaceViewer):
+        viewer = "stamp"
+        title = "Stamp"
+        extensions = ["stamp"]
+
+        def surface(self, file: sdk.ViewedFile) -> List[Any]:
+            return [{"version": "1.0", "createSurface": {"surfaceId": "s", "components": [
+                {"id": "root", "component": "Text", "text": f"{file.name}: {file.text()}"}]}}]
+
+    assert Stamp().describe() == {
+        "id": "stamp",
+        "title": "Stamp",
+        "mime_types": [],
+        "extensions": ["stamp"],
+        "priority": 0,
+        "shows": "surface",
+        "opens_sections": False,
+    }
+    asked = {"name": "a.stamp", "size": 6, "data": base64.b64encode("h\u00e9llo".encode()).decode(), "truncated": False}
+    assert _json.loads(Stamp().render(asked))[0]["createSurface"]["components"][0]["text"] == "a.stamp: h\u00e9llo"
+
+    class Page(sdk.PageViewer):
+        viewer = "page"
+        title = "Page"
+        mime_types = ["text/x-page"]
+        priority = 3
+
+        def page(self, file: sdk.ViewedFile) -> str:
+            return f"<p>{file.size}</p>"
+
+    assert Page().describe()["shows"] == "page" and Page().describe()["priority"] == 3
+    assert Page().render(asked) == "<p>6</p>"
+    assert provide.library("viewers", "1", providers=[Stamp, Page]).kinds == ("file_viewer",)

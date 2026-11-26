@@ -66,6 +66,10 @@
       "types": "./types/panel.d.ts",
       "import": "./src/panel.js"
     },
+    "./viewer": {
+      "types": "./types/viewer.d.ts",
+      "import": "./src/viewer.js"
+    },
     "./usage": {
       "types": "./types/usage.d.ts",
       "import": "./src/usage.js"

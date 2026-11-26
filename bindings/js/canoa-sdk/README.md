@@ -32,6 +32,7 @@ nothing else, so a library imports the SDK by a relative path to where it is und
 | `settings_section` | `SettingsSection` | `canoa-sdk/section` |
 | `notifier` | `Notifier`, `delivery`, `noticeOf`, `settingsOf` | `canoa-sdk/notifier` |
 | `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab`, `PagePanelTab` | `canoa-sdk/panel` |
+| `file_viewer` | `FileViewer`, `SurfaceViewer`, `PageViewer` | `canoa-sdk/viewer` |
 | `usage_reader` | `UsageReader`, `UsageReading` | `canoa-sdk/usage` |
 
 The examples in `examples/providers/js` are loaded by `crates/canoa-host/tests/script_providers.rs`. See `AGENTS.md` for the API.

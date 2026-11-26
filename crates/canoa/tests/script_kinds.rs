@@ -1,7 +1,7 @@
 //! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`, `model_store`,
-//! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab`, `usage_reader`, `model_gateway` and
+//! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab`, `file_viewer`, `usage_reader`, `model_gateway` and
 //! `account_provider`), and their models' schemas: what such a library is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage,gateway,environment --test script_kinds`.
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment --test script_kinds`.
 #![cfg(all(
     feature = "store",
     feature = "vendor",
@@ -9,6 +9,7 @@
     feature = "profile-item",
     feature = "settings-section",
     feature = "panel-tab",
+    feature = "file-viewer",
     feature = "usage",
     feature = "gateway",
     feature = "environment",
@@ -31,6 +32,7 @@ use canoa::environment::{
     Call, CallAnswer, Capability, DirEntry, EnvironmentInfo, EnvironmentVtable, FileContent,
     ListDir, Listing, ReadFile, State as EnvironmentState, WriteFile,
 };
+use canoa::file_viewer::{FileViewerVtable, Shows as ViewerShows, ViewRequest, ViewerInfo};
 use canoa::gateway::{GatewayInfo, GatewayLeaseVtable, GatewayRequest, ModelGatewayVtable};
 use canoa::notifier::{
     Action, Delivery, Notice, NotifierInfo, NotifierVtable, Reply, ReplyRequest, ReplyTo,
@@ -396,6 +398,26 @@ fn the_committed_panel_tab_schemas_are_what_this_build_describes() {
             ("TabInfo", schema_of::<TabInfo>()),
             ("TailRequest", schema_of::<TailRequest>()),
             ("Shows", schema_of::<Shows>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_file_viewer_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.file_viewer.kinds.json",
+        &document(&FileViewerVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_file_viewer_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.file_viewer.schemas.json",
+        &schemas(vec![
+            ("ViewerInfo", schema_of::<ViewerInfo>()),
+            ("ViewRequest", schema_of::<ViewRequest>()),
+            ("Shows", schema_of::<ViewerShows>()),
         ]),
     );
 }

@@ -1007,6 +1007,37 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "file_viewer",
+      "floor_hash": 464295908,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "render",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ]
+    },
+    {
       "name": "model_gateway",
       "floor_hash": 1955023755,
       "object": false,
@@ -2630,6 +2661,14 @@ export const ContentHost = described["content_host"];
  * Every slot takes `&self`, so the host may call it from several threads at once.
  */
 export const Environment = described["environment"];
+
+/**
+ * A way to show a file.
+ *
+ * `describe` answers the same on every call with nothing run. `render` is asked once for each time a person opens a file with the
+ * viewer.
+ */
+export const FileViewer = described["file_viewer"];
 
 /**
  * Serves a model that runs on this computer to the sessions of accounts of one kind. A provider is the same on every call; what

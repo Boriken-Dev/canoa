@@ -16,6 +16,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `notifier` | `canoa::notifier` | the `notifier` kind: somewhere a notice about what happened on the host is sent (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
+| `file-viewer` | `canoa::file_viewer` | the `file_viewer` kind: a way to show a file of some type in the Files surface, as an A2UI surface or a sealed page (`coqui-acp-api`, `guatiao`) |
 | `history-store` | `canoa::history_store` | the `history_store` kind: where recorded conversations and every turn's properties are kept, as typed tables with structured queries (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `data-encoding`, `coqui-acp-history`, `time`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
@@ -271,6 +272,31 @@ pub fn is_word(word: &str) -> bool;   // 1 to 32 lower-case letters, digits and 
 
 - `NotifierInfo::problem` says why a description cannot be used (a bad id, no title, an event that is no word, a schema its form does not fit). `events` limits the events a notifier takes; none takes any. A sensitive member of the schema is kept by the host as the secret `notifiers/NAME/MEMBER` and filled into `settings` when a notice is sent. No timeout is fixed by the kind: each provider declares its own as settings.
 - `NotifierError` is what a failure is called: `Unavailable` (no window is open, the service cannot be reached; `GUATIAO_ERR_GONE`), `Auth` and `Rejected` (`GUATIAO_ERR_INTERNAL` with a prefix), `Bad` (the settings do not fit; `GUATIAO_ERR_BAD_VALUE`). Each message is one line with no secret. The slot that takes a delivery away is `withdraw`: `close` is a name Guatiao's JavaScript binding keeps for a remote's own.
+
+## `canoa::file_viewer` (feature `file-viewer`)
+
+The `file_viewer` kind: a way to show a file of some type in the application's Files surface. Which viewers the application has beyond the ones it draws itself (text, Markdown sections, image, a JSON/YAML/TOML tree, a diff) is not Canoa's to say: each is a provider, and an extension adds one like any other kind. An extension's code never runs in the application: the host asks the provider, which answers an A2UI surface the application draws in its own widgets and the person's theme, or one self-contained page.
+
+```rust
+pub const KIND: &str = "file_viewer";   pub const MAX_TYPES: usize = 64;   pub const MAX_RENDER_BYTES: usize = 4 MiB;
+pub enum Shows { Surface, Page }
+#[non_exhaustive] pub struct ViewerInfo { pub id: String, pub title: String, pub help: Option<String>, pub mime_types: Vec<String>,
+    pub extensions: Vec<String>, pub priority: i32, pub shows: Shows, pub opens_sections: bool }
+#[non_exhaustive] pub struct ViewRequest { pub name: String, pub mime: Option<String>, pub size: u64, pub truncated: bool,
+    pub data: String /* base64 of what the host read */, pub section: Option<String> }
+#[guatiao::kind(name = "file_viewer")] pub trait FileViewer: Send + Sync {
+    fn describe(&self) -> Result<ViewerInfo, ProviderError>;                 // the same on every call, with nothing run
+    fn render(&self, request: ViewRequest) -> Result<String, ProviderError>; // Surface: a JSON array of A2UI messages; Page: an HTML document
+}
+impl ViewerInfo { pub fn new(id, title, shows, mime_types) -> Self; pub fn problem(&self) -> Option<String> }
+pub const PAGE_POLICY: &str;   pub fn sealed_page(html: &str) -> String;
+```
+
+- `id` is a word of lower-case letters, digits and `_` (1 to 32). `mime_types` are exact (`application/json`) or by family (`image/*`), lower case; `extensions` are lower-case letters and digits without the dot, and show a file whatever its type says. A viewer names at least one of the two, and at most `MAX_TYPES` of each. `priority` decides which of two viewers that can show a file is the person's first (the application's own are at -10 to 10; a viewer at 0 is offered in Open with and the application's own stays the default); the person's own choice for a type wins over any priority.
+- `render` is handed the file the host read: its name, the type the host judged, its whole size, and as many bytes as the host reads for one viewer (8 MiB; `truncated` says the file is longer), in base64. It is never handed a path, so a viewer shows the file the person opened and reaches nothing else of the computer through it. `section` is the heading to open at, for a viewer with `opens_sections`.
+- `Shows::Surface`: `render` answers a JSON array of A2UI messages that creates a surface with a component whose id is `root`; the application draws it with its own catalog, so the person's theme styles it and the viewer chooses structure only. `Shows::Page`: one HTML document with its styles, scripts and pictures inline. The host puts `PAGE_POLICY` in front of it (`sealed_page`): the page draws from itself and can make no request, submit no form, open no frame and set no base address; the application opens it in the person's browser, since it embeds no web view (the web build cannot open one: a page opened from the application's own origin would reach what the application keeps in the browser).
+- An answer over `MAX_RENDER_BYTES`, or a surface that is not a JSON array, is refused by the host with the reason.
+- `ViewerInfo::problem` says why a description cannot be used (a bad id, no title, no type and no extension, a type that is no MIME type, an extension with a dot or capitals, too many types). The kind's description and schemas are `include/canoa.file_viewer.{kinds,schemas}.json`, checked by `tests/script_kinds.rs`; a library in Python or JavaScript subclasses the SDK's `SurfaceViewer` or `PageViewer` (`canoa_sdk.viewer`, `canoa-sdk/viewer`).
 
 ## `canoa::environment` (feature `environment`)
 

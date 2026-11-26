@@ -1030,6 +1030,43 @@ export interface EnvironmentRemote extends k.RemoteBase<typeof Environment> {
 export declare const Environment: k.DescribedKind<Environment, EnvironmentRemote, false>;
 
 /**
+ * A way to show a file.
+ *
+ * `describe` answers the same on every call with nothing run. `render` is asked once for each time a person opens a file with the
+ * viewer.
+ *
+ * The `file_viewer` kind: what a provider of it implements.
+ */
+export interface FileViewer {
+  /** What this viewer is. */
+  describe(): unknown;
+  /**
+   * The file drawn: for [`Shows::Surface`] a JSON array of A2UI messages that creates a surface with a `root` component, for
+   * [`Shows::Page`] an HTML document. At most [`MAX_RENDER_BYTES`] bytes.
+   */
+  render(request: g.Ref): string;
+}
+
+/** A caller's handle on a `file_viewer` table: a method per slot. */
+export interface FileViewerRemote extends k.RemoteBase<typeof FileViewer> {
+  /** What this viewer is. */
+  describe(): g.Value;
+  /**
+   * The file drawn: for [`Shows::Surface`] a JSON array of A2UI messages that creates a surface with a `root` component, for
+   * [`Shows::Page`] an HTML document. At most [`MAX_RENDER_BYTES`] bytes.
+   */
+  render(request: unknown): string;
+}
+
+/**
+ * A way to show a file.
+ *
+ * `describe` answers the same on every call with nothing run. `render` is asked once for each time a person opens a file with the
+ * viewer.
+ */
+export declare const FileViewer: k.DescribedKind<FileViewer, FileViewerRemote, false>;
+
+/**
  * Serves a model that runs on this computer to the sessions of accounts of one kind. A provider is the same on every call; what
  * it keeps for one account is in the lease it opens.
  *

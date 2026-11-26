@@ -1,7 +1,7 @@
 """Write a Canoa provider in Python: subclass a kind's base class, set a few attributes or override a few methods, and list the class
 in the module's `__all__`; a guatiao source loads the module like any other, and the host offers the provider.
 
-Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.content`, `.settings`, `.panel`, `.notifier`, `.usage`, `.account`, `.gateway`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
+Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.content`, `.settings`, `.panel`, `.viewer`, `.notifier`, `.usage`, `.account`, `.gateway`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
 is written on a dataclass with `canoa_sdk.forms`. `canoa_sdk.kinds` holds the typed `Protocol` classes written from the kinds'
 descriptions, which the base classes sit on.
 """
@@ -53,6 +53,7 @@ from .forms import Section, form_meta, form_of, section, ui
 from .gateway import GatewayInfo, GatewayLease, ModelGateway, request_of
 from .notifier import Notifier, delivery, notice_of, settings_of
 from .panel import LogPanelTab, PagePanelTab, PanelTab, TerminalPanelTab
+from .viewer import FileViewer, PageViewer, SurfaceViewer, ViewedFile, viewed_file
 from .profile import (
     EnvProfileItem,
     ItemEffect,
@@ -109,6 +110,7 @@ __all__ = [
     "Environment",
     "ExtensionInfo",
     "ExtensionType",
+    "FileViewer",
     "FormSecretProvider",
     "GatewayInfo",
     "GatewayLease",
@@ -127,6 +129,7 @@ __all__ = [
     "Notifier",
     "OpenUrl",
     "PagePanelTab",
+    "PageViewer",
     "PanelTab",
     "ProfileItem",
     "ProgramStore",
@@ -147,11 +150,13 @@ __all__ = [
     "SpeechUtterance",
     "StandardTitle",
     "StoreExtension",
+    "SurfaceViewer",
     "SystemStoreSecretProvider",
     "TerminalPanelTab",
     "UsageReader",
     "UsageReading",
     "VendorInfo",
+    "ViewedFile",
     "bucket",
     "credential_schema",
     "delivery",
@@ -189,5 +194,6 @@ __all__ = [
     "ui",
     "usage_unsupported",
     "values_of",
+    "viewed_file",
     "words_of",
 ]

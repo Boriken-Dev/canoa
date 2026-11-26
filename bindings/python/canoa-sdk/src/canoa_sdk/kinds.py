@@ -695,6 +695,28 @@ class Environment(KindProtocol, Protocol, kind="environment", floor_hash=9568709
         ...
 
 
+class FileViewer(KindProtocol, Protocol, kind="file_viewer", floor_hash=464295908):
+    """A way to show a file.
+
+    `describe` answers the same on every call with nothing run. `render` is asked once for each time a person opens a file with the
+    viewer.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this viewer is."""
+        ...
+
+    @required
+    @fallible
+    def render(self, request: Ref) -> str:
+        """The file drawn: for [`Shows::Surface`] a JSON array of A2UI messages that creates a surface with a `root` component, for
+        [`Shows::Page`] an HTML document. At most [`MAX_RENDER_BYTES`] bytes.
+        """
+        ...
+
+
 class GatewayLease(KindProtocol, Protocol, kind="gateway_lease", floor_hash=904744137, is_object=True):
     """One session's access to a gateway. Destroying it ends the session's access, and the last one for an account ends that
     account's gateway.
@@ -1508,4 +1530,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "FileViewer", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

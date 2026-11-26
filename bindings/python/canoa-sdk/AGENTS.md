@@ -61,6 +61,10 @@ class SettingsSection:    # canoa_sdk.settings: section, title, help, icon, grou
 class PanelTab:           # canoa_sdk.panel: tab, title, help, icon, shows = "log" | "terminal" | "page", shell, url; tail(request)
 class TerminalPanelTab(PanelTab); class PagePanelTab(PanelTab)   # a page at `url`, on this computer's loopback
 class LogPanelTab(PanelTab)   # lines() -> the log's lines, oldest first
+class FileViewer:         # canoa_sdk.viewer: viewer, title, help, mime_types, extensions, priority, shows = "surface" | "page", opens_sections; render(request)
+class SurfaceViewer(FileViewer)   # surface(file: ViewedFile) -> the A2UI messages, a list of dicts
+class PageViewer(FileViewer)      # page(file: ViewedFile) -> one self-contained HTML document
+class ViewedFile          # name, size, data (bytes the host read), mime, truncated, section; text(); never a path
 class AccountProvider:    # canoa_sdk.account: title, description, kinds_offered ([AccountKindInfo]), logins ([LoginMethodInfo]), usage_kinds, local; offer(), provides(account) (the `provides` of the kind it names; override when settings pick the standards), login/renew/watch refuse UNSUPPORTED, usage/models answer unsupported/unknown (and release handles); signed_in(query) says whether the program's own login exists (`login_present`, `login_absent`, `login_unknown`): UNSUPPORTED without `local`, unknown with it, until overridden
 class AccountWatch        # canoa_sdk.account: stop()
 credential_schema(title?, description?); models_listed(models, signed_out=False) (ModelInfo: id, name, ..., capabilities, capabilities_from, limits=ModelLimits); models_unknown(reason, unknown_kind?); login_present(variable?); login_absent(reason); login_unknown(reason); usage_unsupported(reason, account?); renewed(credentials, expires_at?); renew_unchanged(reason); release(*handles)

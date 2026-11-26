@@ -32,6 +32,7 @@ examples in `examples/providers/python` are loaded by `crates/canoa-host/tests/s
 | `settings_section` | `SettingsSection` | `canoa_sdk.settings` |
 | `notifier` | `Notifier`, `delivery`, `notice_of`, `settings_of` | `canoa_sdk.notifier` |
 | `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab`, `PagePanelTab` | `canoa_sdk.panel` |
+| `file_viewer` | `FileViewer`, `SurfaceViewer`, `PageViewer` | `canoa_sdk.viewer` |
 | `usage_reader` | `UsageReader`, `UsageReading` | `canoa_sdk.usage` |
 | coqui-acp's `acp_harness`, `agent_provider` | re-exported | `canoa_sdk.acp` |
 

@@ -64,6 +64,10 @@ class PanelTab extends Provider {             // panel.js: static tab, title, he
 }
 class TerminalPanelTab extends PanelTab; class PagePanelTab extends PanelTab   // a page at `url`, on this computer's loopback
 class LogPanelTab extends PanelTab   // lines() -> the log's lines, oldest first
+class FileViewer extends Provider    // viewer.js: static viewer, title, help, mimeTypes, extensions, priority, shows = 'surface'|'page', opensSections; render(request)
+class SurfaceViewer extends FileViewer   // surface(file: ViewedFile) -> the A2UI messages, an array of objects
+class PageViewer extends FileViewer      // page(file: ViewedFile) -> one self-contained HTML document
+class ViewedFile                         // name, size, data (Uint8Array the host read), mime, truncated, section; text(); never a path
 class AccountProvider extends Provider {      // account.js: static title, description, offeredKinds, logins, usageKinds, local; offer(), provides(account) (the `provides` of the kind it names; override when settings pick the standards), login/renew/watch throw Unsupported, usage/models answer unsupported/unknown (and release handles); signedIn(query) says whether the program's own login exists (`loginPresent`, `loginAbsent`, `loginUnknown`): Unsupported without `local`, unknown with it, until overridden
 }
 class AccountWatch   // account.js: stop()

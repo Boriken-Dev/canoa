@@ -21,6 +21,9 @@ pub mod content;
 #[cfg(feature = "environment")]
 #[cfg_attr(docsrs, doc(cfg(feature = "environment")))]
 pub mod environment;
+#[cfg(feature = "file-viewer")]
+#[cfg_attr(docsrs, doc(cfg(feature = "file-viewer")))]
+pub mod file_viewer;
 #[cfg(feature = "gateway")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gateway")))]
 pub mod gateway;

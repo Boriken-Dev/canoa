@@ -49,6 +49,7 @@ export {
 } from './secret.js';
 export { Notifier, delivery, noticeOf, settingsOf } from './notifier.js';
 export { LogPanelTab, MAX_TAIL_LINES, PagePanelTab, PanelTab, TerminalPanelTab } from './panel.js';
+export { FileViewer, MAX_RENDER_BYTES, PageViewer, SurfaceViewer, ViewedFile } from './viewer.js';
 export {
   EnvProfileItem,
   NETWORK_MODES,

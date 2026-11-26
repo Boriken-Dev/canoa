@@ -1,0 +1,38 @@
+{
+  "kinds": [
+    {
+      "name": "file_viewer",
+      "floor_hash": 464295908,
+      "object": false,
+      "doc": "A way to show a file.\n\n`describe` answers the same on every call with nothing run. `render` is asked once for each time a person opens a file with the\nviewer.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this viewer is."
+        },
+        {
+          "name": "render",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "The file drawn: for [`Shows::Surface`] a JSON array of A2UI messages that creates a surface with a `root` component, for\n[`Shows::Page`] an HTML document. At most [`MAX_RENDER_BYTES`] bytes."
+        }
+      ]
+    }
+  ]
+}
