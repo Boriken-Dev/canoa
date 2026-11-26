@@ -168,7 +168,7 @@ class _UserTurnState extends State<UserTurn> {
           color: look.user,
           inBubble: look.userPrefix == null,
           child: Text(
-            '${look.userPrefix ?? ''}$text',
+            (look.userPrefix ?? '') + text,
             style: TextStyle(
               fontSize: look.bodySize,
               height: 1.45,
