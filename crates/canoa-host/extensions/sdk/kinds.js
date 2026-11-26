@@ -997,6 +997,127 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "sdk_provider",
+      "floor_hash": 1944290915,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "http",
+              "type": "object",
+              "kind": "lent_http",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "sdk"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sdk",
+      "floor_hash": 1637788789,
+      "object": true,
+      "slots": [
+        {
+          "name": "models",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "chat",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "embed",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "rerank",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
+      "name": "lent_http",
+      "floor_hash": 525845123,
+      "object": true,
+      "slots": [
+        {
+          "name": "request",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
       "name": "secret_provider",
       "floor_hash": 246402531,
       "object": false,
@@ -2044,6 +2165,19 @@ export const PanelTab = described["panel_tab"];
  * for the item already read against its schema; it must change nothing outside the effect it answers with.
  */
 export const ProfileItem = described["profile_item"];
+
+/** A vendor's client for an account type. */
+export const SdkProvider = described["sdk_provider"];
+
+/** An opened provider: every operation is called only if its capability was described. */
+export const Sdk = described["sdk"];
+
+/**
+ * HTTP to the address of one account or server, made by the host: the credential applied, the person's network used, the answer
+ * size limited, redirects refused, and nothing outside the address reachable. A transport failure is an error; a status is an
+ * answer.
+ */
+export const LentHttp = described["lent_http"];
 
 /**
  * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
