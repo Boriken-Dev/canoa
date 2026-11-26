@@ -791,10 +791,12 @@ mod tests {
             "#!/bin/sh\nMIN_UID=1000\nPREFIX=canoa\nALLOWED_GROUPS=\"b a\"\n",
         )
         .unwrap();
-        let mut settings = Settings::default();
-        settings.systemctl = helper.clone();
-        settings.min_uid = 1000;
-        settings.groups = vec!["a".to_owned(), "b".to_owned()];
+        let mut settings = Settings {
+            systemctl: helper.clone(),
+            min_uid: 1000,
+            groups: vec!["a".to_owned(), "b".to_owned()],
+            ..Settings::default()
+        };
         settings.check_helper().unwrap();
         settings.min_uid = 500;
         assert!(settings.check_helper().unwrap_err().starts_with("min_uid"));

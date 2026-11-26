@@ -265,7 +265,7 @@ fn portal_config(
                 .map_err(|why| Failed::usage(format!("{key}: not taken: {why}")))?;
             crate::config_store::FileStore::at(&target)
                 .change(Changes::of(vec![Op::set(
-                    keys.iter().map(String::as_str),
+                    portal_path(&keys),
                     value_of(&json),
                 )]))
                 .map_err(|error| Failed::run(format!("{}: {error}", target.display())))?;
@@ -277,9 +277,7 @@ fn portal_config(
         ConfigAction::Unset { key } => {
             let keys = path_of(key)?;
             crate::config_store::FileStore::at(&target)
-                .change(Changes::of(vec![Op::remove(
-                    keys.iter().map(String::as_str),
-                )]))
+                .change(Changes::of(vec![Op::remove(portal_path(&keys))]))
                 .map_err(|error| Failed::run(format!("{}: {error}", target.display())))?;
             print(
                 front,
@@ -287,6 +285,11 @@ fn portal_config(
             )
         }
     }
+}
+
+/// The path of a key of `[portal]` from the top of canoa.cfg.
+fn portal_path(keys: &[String]) -> impl Iterator<Item = &str> {
+    core::iter::once("portal").chain(keys.iter().map(String::as_str))
 }
 
 /// Puts `value` at `keys` below `[portal]`'s table, making the tables on the way.
