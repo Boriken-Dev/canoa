@@ -703,7 +703,7 @@ installs them with the overlay:
 **Store** in the left column (and **Store…** in Settings → Profiles) is where an agent's programs, overlays, skills and
 MCP servers are found, installed and chosen. It has four types, **Agents** (where the host grants programs),
 **Overlays**, **Skills** and **MCPs**, behind one toolbar: the type tabs with a count each (a badge on Agents when a
-program has a newer version), **Installed** and **Discover**, a search, **Refresh**, **Store settings** and a line that
+program has a newer version), **Installed** and **Available**, a search, **Refresh**, **Store settings** and a line that
 says how old the catalogs' index is ("Cached · updated 3 min ago", "Checking…" while the host asks again, "Stale" with the reason only when a source could not be refreshed; see [What the Store keeps fresh](#what-the-store-keeps-fresh)). Each
 type keeps its own query, switch and place in the list while you read an entry's details. Every card says where it comes
 from (the catalog's label, the repository, the commit and digest it is pinned to), what it needs, and whether it is
@@ -716,8 +716,8 @@ adds one.
   servers, context) and what {{ name }} does not apply yet, a switch for whether **new sessions** start with it, an update
   check and Remove (for one the store installed). The host asks each overlay's source whether it holds something newer
   (see [updates](#overlay-updates)); one that does shows an **Update available** mark, its check becomes an **Update**
-  button with the update icon, the same icon replaces the check on its tile in Discover, and the Store's index (or the
-  tab, on a page of its own) counts how many have an update. **Check for updates** asks every source now. Discover: the overlays of the catalogs below, filterable by catalog,
+  button with the update icon, the same icon replaces the check on its tile in Available, and the Store's index (or the
+  tab, on a page of its own) counts how many have an update. **Check for updates** asks every source now. Available: the overlays of the catalogs below, filterable by catalog,
   tag and text. With no catalog it offers a known one and a spec to paste.
 - **Loadouts.** A loadout is a named collection a session starts with: whole overlays, skills you chose, and MCP
   servers of `[profile.mcp]`, written as `[loadouts.NAME]` (`description`, `overlays`, `skills`, `mcp`; a name has 1
@@ -761,11 +761,11 @@ adds one.
 - **Skills.** Installed: the skills fetched, with the overlays that name each or that you chose it, source and pin; one
   you chose has a switch for new sessions, which adds or takes away its name in the starting loadout's `skills`. The host delivers
   such a skill from its record at each session, only when the record says you chose it and its files have the digest the
-  record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Installed also lists every skill an installed overlay provides, marked with the overlay and with no Remove of its own: it goes when the overlay does. Discover: the sources you read skills from (see [Skill sources](#skill-sources)) and a spec to paste; a skill an overlay's catalog names comes with its overlay and is not offered alone (`<repository>@<ref>#<skill directory>`). A
+  record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Installed also lists every skill an installed overlay provides, marked with the overlay and with no Remove of its own: it goes when the overlay does. Available: the sources you read skills from (see [Skill sources](#skill-sources)) and a spec to paste; a skill an overlay's catalog names comes with its overlay and is not offered alone (`<repository>@<ref>#<skill directory>`). A
   skill is an [Agent Skills](https://agentskills.io/specification) directory: a `SKILL.md` with YAML front matter whose
   `name` is the directory's. It is fetched only on a yes, after its source and pin are shown, and checked against the
   pin before any file is read.
-- **MCPs.** Installed: the servers `[profile.mcp]` and your overlays define; an overlay's is marked with the overlay and has no Remove of its own. Discover: the
+- **MCPs.** Installed: the servers `[profile.mcp]` and your overlays define; an overlay's is marked with the overlay and has no Remove of its own. Available: the
   [MCP Registry](https://github.com/modelcontextprotocol/registry) (`registry.modelcontextprotocol.io`, `GET
   /v0.1/servers`), each server a `server.json`. Installing shows the registry's claims, the digest of the `server.json`,
   each way to run it (an npm, PyPI or OCI package, or a remote address) with the command or address {{ name }} would write,
@@ -776,7 +776,7 @@ adds one.
   off for every agent in `[agents.NAME.mcp]`, so nothing starts until you allow it.
   A team's own servers can be listed by another registry that serves the same API, added by its `https` address (or
   `http` on the loopback address), or by a git repository holding a JSON file in the API's list shape, added as
-  `<repository>@<ref>#<file>`; they are kept in `[store.mcps.catalogs]` and chosen beside the official one in Discover.
+  `<repository>@<ref>#<file>`; they are kept in `[store.mcps.catalogs]` and chosen beside the official one in Available.
   A git list is fetched at its ref like a catalog and read as one page.
 - **Applying a change.** The host reads {{ config_file }}'s layers again when each session of its own sources starts, so a
   change to `[overlays]`, `[profile]` or `[agents.*.mcp]` reaches the next session and ends none that is open. A file
@@ -1038,7 +1038,7 @@ A value that comes with an end of its own (a token that expires) is kept no long
 ### Skill sources
 
 Skills are looked for the way `npx skills add` looks, in their own list, `[store.skills.catalogs]`, a label of yours
-for each source written as that command takes it. In Store, Skills, Discover the sources are chips; choosing one is what
+for each source written as that command takes it. In Store, Skills, Available the sources are chips; choosing one is what
 fetches its repository (nothing is fetched by listing it), reads which skills it holds and lists them, and installing one asks first, with
 the commit that was read shown, and fetches exactly that commit.
 
@@ -1078,7 +1078,7 @@ skills_search = true                       # skills.sh; remove the line (or writ
 # skills_search = "https://skills.example"  # another directory that answers /api/search?q=...&limit=... the same way
 ```
 
-With it on, Store, Skills, Discover has a Search skills.sh chip. Only the words you type are sent (at least two characters), through the
+With it on, Store, Skills, Available has a Search skills.sh chip. Only the words you type are sent (at least two characters), through the
 same proxy and certificate settings as every fetch the host makes, with no redirect followed. A result names a repository
 (`owner/repo`) and a skill in it, with how many installs skills.sh counted; nothing it sends is a file. Installing one reads that
 repository the way any source is read (fetched with none of your git settings, credentials or keys, its `SKILL.md` files listing what it
@@ -1228,7 +1228,7 @@ and pins the new digest in {{ config_file }} on the yes.
 
 ### The overlay store
 
-Store, Overlays, Discover lists the overlays of the catalogs `[store.overlays.catalogs]` names, to search, read about and
+Store, Overlays, Available lists the overlays of the catalogs `[store.overlays.catalogs]` names, to search, read about and
 install. A catalog is an [AOS catalog](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/catalog.md):
 a file in a git repository, TOML, JSON (or, with any other name, `overlay.cfg`'s rule), listing overlays by name and
 source, with a summary, an icon, tags and the like for each. {{ name }} fetches it as it fetches an overlay (git objects at
