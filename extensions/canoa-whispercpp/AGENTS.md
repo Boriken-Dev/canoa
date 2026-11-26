@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-whispercpp`: whisper.cpp for a Canoa host (the Store type that lists its models, the models page of that type, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa` (features `store`, `speech`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json` and `whisper-rs` 0.16.0, whose `whisper-rs-sys` is replaced (`[patch.crates-io]`) by the vendored copy in `third_party/whisper-rs-sys`: the same crate with whisper.cpp v1.9.6 (release tarball, commit 96ec4d9823e9d0211944172da35f9f29134af990, SHA-256 7ab15dc88022d2425ad94dcffd8abbf1b6d7018089b4e48d6b40780738e0b445) in place of the 1.8.3 it carries, reduced to the CPU and BLAS sources (no models, tests, examples, GPU backends or pre-generated bindings; its build script reads 1.9's `WHISPER_VERSION_*` lines). whisper-rs 0.16's safe API compiles against 1.9.6 unchanged. cmake compiles the sources with the crate.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![deny(unsafe_code)]`, with one module that allows it: `src/native.rs` holds the two foreign calls the converter makes (a read-only memory map of `model.safetensors`, and `ggml_quantize_chunk` with `ggml_row_size`), each behind a safe function. Depends on `canoa` (features `store`, `speech`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `safetensors`, `half`, `memmap2`, `whisper-rs-sys` and `whisper-rs` 0.16.0, whose `whisper-rs-sys` is replaced (`[patch.crates-io]`) by the vendored copy in `third_party/whisper-rs-sys`: the same crate with whisper.cpp v1.9.6 (release tarball, commit 96ec4d9823e9d0211944172da35f9f29134af990, SHA-256 7ab15dc88022d2425ad94dcffd8abbf1b6d7018089b4e48d6b40780738e0b445) in place of the 1.8.3 it carries, reduced to the CPU and BLAS sources (no models, tests, examples, GPU backends or pre-generated bindings; its build script reads 1.9's `WHISPER_VERSION_*` lines). whisper-rs 0.16's safe API compiles against 1.9.6 unchanged. cmake compiles the sources with the crate.
 
 What a host loads is `library` (below). The host names none of it: it carries the library as it carries any other, lists the type and its models through the generic Store calls and makes the speech offer from what `WhisperModels::service` answers.
 
@@ -38,6 +38,11 @@ pub struct WhisperHfSettings { pub repo: String, pub include: Vec<String>, pub e
 pub const SOURCE: &str = "whisper_hf";
 pub fn catalog_of(repo: &str, revision: &str, listing: &str, include: &[String], exclude: &[String]) -> Result<ModelsCatalog, String>;   // what the source makes of a listing
 
+/// A Hugging Face Whisper folder as whisper.cpp's GGML file.
+pub enum Precision { F16, Q5_0, Q5_1, Q8_0 }   // `Precision::ALL`; `suffix()` is "", "-q5_0", "-q5_1", "-q8_0" (as in `ggml-small-q5_1.bin`); `parse("q5_1")`
+pub enum ConvertError { Io(std::io::Error), Unsupported(String) }   // Display says what is missing or unread
+pub fn convert(folder: &Path, output: &Path, precision: Precision) -> Result<(), ConvertError>;
+
 pub mod catalog {
     pub const LABEL: &str = "ggerganov";    // the default catalog's label: `[store.whisper.catalogs.ggerganov]`
     pub const DEFAULT_REPO: &str;           // ggerganov/whisper.cpp
@@ -64,3 +69,12 @@ The type has no program: `WhisperExtension` names no store, and the host keeps t
 - A model is the file `ggml-<id>.bin` in the folder, whatever catalog it came from, so a file the person drops there runs.
 - The provider's tests that run a model (`tests/speech.rs`) download `tiny` (from the address a recorded listing gives) and a recording with `curl` into a temporary folder, check the model's SHA-256, and are ignored without the network: `cargo test -p canoa-whispercpp -- --ignored`.
 - When a `whisper-rs-sys` that bundles whisper.cpp 1.9 or later is published, drop the `[patch.crates-io]` entry and `third_party/whisper-rs-sys`.
+
+## The converter
+
+`convert(folder, output, precision)` reads the Hugging Face folder of a Whisper model (`config.json`, `tokenizer.json`, `model.safetensors`; f32, f16 or bf16 weights) and writes whisper.cpp's GGML file, in pure Rust, with no Python and no whisper.cpp program. The sizes come from `config.json`, the vocabulary from `tokenizer.json`'s `model.vocab` (the byte-level tokens whose id is below 50257: for an English-only model that ends with `<|endoftext|>`), the mel filters are computed (Slaney scale and norm, 80 or 128 bands as `num_mel_bins` says), and the tensors are written in the order of the files whisper.cpp publishes. The weights are read from a memory map one tensor at a time, so a large model is never held whole (the largest tensor, as f32, is the peak). Output goes to `<output>.part` and is renamed when whole; a failure removes it.
+
+- `F16` writes the same tensors as the published `ggml-<model>.bin`, byte for byte for tiny and tiny.en; for large-v3, large-v3-turbo and distil-small.en (whose published files list the tensors in another order) every tensor is identical. `Q8_0`, `Q5_0` and `Q5_1` are quantized by the ggml this crate links, from the f16-rounded values, as whisper.cpp's own `quantize` does: two-dimensional tensors other than `encoder.conv1.bias`, `encoder.conv2.bias` and the two positional embeddings; every other tensor is written as in the f16 file. The header's `ftype` carries ggml's quantization version (2), so a published file made by an older ggml differs from ours in those two bytes alone.
+- A quantized precision needs each weight row to divide into blocks of 32; a model whose rows do not is refused with the tensor's name, and f16 still works.
+- A tensor the folder lacks is named in the error (`model.safetensors has no tensor for decoder.blocks.0.mlp.2.weight`). Tensors whisper.cpp has no use for (`proj_out.weight`, tied to the embedding) are left out. Weights in a type other than f32, f16 or bf16, and folders with only a `pytorch_model.bin` or a sharded `model.safetensors.index.json`, are not read.
+- `tests/convert.rs` makes a small model of its own and reads the file back (always run), and its ignored tests download `openai/whisper-tiny` at `main` into a temporary folder, compare f16, q8_0 and q5_1 with whisper.cpp's published tiny files (q5_1 may differ in bytes 44 and 45, the quantization version) and transcribe a recording with every precision.

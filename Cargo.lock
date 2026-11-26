@@ -1353,9 +1353,13 @@ dependencies = [
  "coqui-acp-harness",
  "guatiao",
  "guatiao-intake",
+ "half",
+ "memmap2",
+ "safetensors",
  "serde_json",
  "sha2 0.11.1",
  "whisper-rs",
+ "whisper-rs-sys",
 ]
 
 [[package]]

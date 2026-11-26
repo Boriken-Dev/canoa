@@ -3,16 +3,21 @@
 //! [`library`] is what a Canoa host loads: the Store type that lists the models, the `model_store` that lists them and says how the
 //! person's speech-to-text calls them, and [`WhisperSpeech`], the `speech_provider` that loads a model and transcribes with it.
 //! There is no program to install: whisper.cpp is compiled into this crate (through `whisper-rs`), and the host names none of it.
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 extern crate alloc;
 
 pub mod catalog;
+mod conversion;
+mod mel;
 mod model_store;
+mod names;
+mod native;
 mod providers;
 mod source;
 mod speech;
 
+pub use conversion::{ConvertError, Precision, convert};
 pub use model_store::WhisperModels;
 pub use providers::{WhisperExtension, library};
 pub use source::{SOURCE, WhisperHf, WhisperHfSettings, catalog_of};

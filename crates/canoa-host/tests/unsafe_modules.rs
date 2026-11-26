@@ -73,6 +73,28 @@ fn the_modules_that_allow_unsafe_code_are_the_ones_written_down() {
     );
 }
 
+/// The module of `canoa-whispercpp` that opts out of `deny(unsafe_code)`: a memory map of the weights and ggml's quantizer.
+const WHISPER_MODULE: &str = "native.rs";
+
+#[test]
+fn the_whisper_cpp_crate_allows_unsafe_code_in_one_module_and_says_so() {
+    let crate_dir = manifest().join("..").join("..").join("extensions").join("canoa-whispercpp");
+    let src = crate_dir.join("src");
+    if !src.is_dir() {
+        return;
+    }
+    let mut files = Vec::new();
+    allowing(&src, &src, &mut files);
+    assert_eq!(files, [WHISPER_MODULE], "a module of canoa-whispercpp that opts out of deny(unsafe_code) is written down here, in its AGENTS.md and in the root AGENTS.md");
+    for (what, path) in [
+        ("canoa-whispercpp's AGENTS.md", crate_dir.join("AGENTS.md")),
+        ("the root AGENTS.md", manifest().join("..").join("..").join("AGENTS.md")),
+    ] {
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        assert!(text.contains(WHISPER_MODULE), "{what} does not name {WHISPER_MODULE}");
+    }
+}
+
 #[test]
 fn the_crate_header_and_the_root_header_name_every_one() {
     let headers = [
