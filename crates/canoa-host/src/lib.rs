@@ -36,6 +36,7 @@ mod makers;
 mod mcp_list;
 pub mod native;
 mod network;
+mod notify;
 pub mod options;
 mod pair_run;
 mod panel_tabs;

@@ -324,6 +324,8 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "sdk",
             "assist_harness",
             "assist_pool",
+            // Settings' Notifications page edits the routes of each event and the notifier entries.
+            "notifications",
         ],
     ),
     (
@@ -343,6 +345,18 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
     ("settings.power", &["keep_awake"]),
     ("permissions", &["protected"]),
     ("usage", &["limit_phrases"]),
+    ("notifications", &["notifiers"]),
+    (
+        "notifications.notifiers.NAME",
+        &[
+            "provider",
+            "library",
+            "source",
+            "source_settings",
+            "import_search",
+            "settings",
+        ],
+    ),
     (
         "host.agents.NAME",
         &[

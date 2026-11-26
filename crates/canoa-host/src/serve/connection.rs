@@ -560,10 +560,11 @@ fn launch_agent_program<C: Channel>(
     if let Some(pid) = pid {
         pid.store(agent.pid(), Ordering::Relaxed);
     }
+    let observed = crate::notify::Observed::new(channel, Arc::clone(&shared.notices), &served.name);
     let end = match connection {
         Some(connection) => {
             let given = Given::for_connection(Some(connection));
-            let hosted = Hosted::new(channel, scope, connection)
+            let hosted = Hosted::new(&observed, scope, connection)
                 .agent(agent.pid())
                 .given(given.clone());
             let end = coqui_acp_bridge::relay::relay(
@@ -594,9 +595,9 @@ fn launch_agent_program<C: Channel>(
         }
         None => {
             let scoped = if run_env.is_some() {
-                Scoped::new(channel, scope)
+                Scoped::new(&observed, scope)
             } else {
-                Scoped::new(channel, scope)
+                Scoped::new(&observed, scope)
                     .agent(agent.pid())
                     .launching(plain_launch_line(identity))
             };
@@ -625,6 +626,12 @@ fn launch_agent_program<C: Channel>(
             )
         }
     };
+    if matches!(
+        end,
+        coqui_acp_bridge::relay::LinkEnd::AgentEnded | coqui_acp_bridge::relay::LinkEnd::AgentStuck
+    ) {
+        observed.agent_ended();
+    }
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
     let _ = agent.stop();
@@ -1022,8 +1029,9 @@ fn give_harness<C: Channel>(
     if let Some(spawner) = env_spawner {
         started.spawner = spawner;
     }
+    let observed = crate::notify::Observed::new(channel, Arc::clone(&shared.notices), &served.name);
     let gated = Gated::new(
-        channel,
+        &observed,
         account.as_ref().map(|held| {
             let mut report = held.report();
             if let (Some(pool), Some(map)) = (pool, report.as_object_mut()) {
@@ -1126,6 +1134,9 @@ fn give_harness<C: Channel>(
         ),
     };
     drop(account);
+    if end == crate::inproc::End::AgentFailed {
+        observed.agent_ended();
+    }
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
     shared.forget(key);
 }

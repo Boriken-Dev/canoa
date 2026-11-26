@@ -239,6 +239,11 @@ struct Shared {
     mcp_list: crate::config::McpListConfig,
     /// Keeps the computer awake while an agent turn runs, when `[settings.power] keep_awake` is on.
     keep_awake: Arc<crate::awake::KeepAwake>,
+    /// Tells the person what happens on the host.
+    notices: Arc<crate::notify::Hub>,
+    /// This run, recorded as ended when the host ends.
+    #[expect(dead_code, reason = "held for its drop")]
+    run_record: Option<crate::notify::run::Record>,
 }
 
 impl Shared {

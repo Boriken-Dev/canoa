@@ -312,6 +312,45 @@ struct BindState<'a> {
     missing_of: BTreeMap<&'a str, &'a Vec<String>>,
 }
 
+/// What tells the person of events: it follows canoa.cfg through the host's configuration store, or what the host started with when
+/// it has none. A start that finds the last run in the same home with the same version says the host restarted, another version that
+/// it was updated, and a home with no record is a first run and says nothing.
+fn bind_notices(
+    config: &Config,
+    options: &ServeOptions,
+) -> (Arc<crate::notify::Hub>, Option<crate::notify::run::Record>) {
+    let store: Option<Arc<dyn canoa::config_store::ConfigStore>> =
+        match (&options.account_layers, &options.config_file) {
+            (Some(layers), _) => Some(Arc::new(crate::config_store::FileStore::of(layers))),
+            (None, Some(file)) => Some(Arc::new(crate::config_store::FileStore::at(file))),
+            (None, None) => None,
+        };
+    let source = match store {
+        Some(store) => crate::notify::watching(store, options.state_dir.clone()),
+        None => crate::notify::fixed(config, options.state_dir.clone()),
+    };
+    let hub = crate::notify::Hub::new(source);
+    let record = options.state_dir.as_ref().map(|home| {
+        let (record, start) = crate::notify::run::Record::begin(home, env!("CARGO_PKG_VERSION"));
+        let event = match start {
+            crate::notify::run::Start::First => None,
+            crate::notify::run::Start::Restarted => Some("host_restarted"),
+            crate::notify::run::Start::Updated => Some("host_updated"),
+        };
+        if let Some(event) = event {
+            drop(hub.fire(
+                event,
+                crate::notify::Occurrence {
+                    figure: (event == "host_updated").then(|| env!("CARGO_PKG_VERSION").to_owned()),
+                    ..crate::notify::Occurrence::default()
+                },
+            ));
+        }
+        record
+    });
+    (hub, record)
+}
+
 fn bind_proof(
     identity: Identity,
     store: &Arc<TrustStore>,
@@ -1201,6 +1240,7 @@ impl Serving {
                 .zip(options.state_dir.as_deref()),
         );
         let environments = crate::environments::Environments::of(config);
+        let (notices, run_record) = bind_notices(config, options);
         let control = build_control_hub(
             config,
             options,
@@ -1215,7 +1255,8 @@ impl Serving {
             Arc::clone(&services),
             &environments,
             Arc::clone(&assist),
-        )?;
+        )?
+            .with_notices(Arc::clone(&notices));
         let mut serving = Self {
             shared: Arc::new(Shared {
                 services: Arc::clone(&services),
@@ -1245,6 +1286,8 @@ impl Serving {
                 max_line: config.max_message_bytes,
                 mcp_list: config.mcp_list,
                 keep_awake: crate::awake::KeepAwake::new(config.keep_awake),
+                notices,
+                run_record,
                 control_grants: config
                     .control
                     .as_ref()

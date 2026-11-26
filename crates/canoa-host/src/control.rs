@@ -196,6 +196,8 @@ pub(crate) struct Control {
     /// What `host/pair` pairs by, once the host has its identity and a home.
     pairing: Option<hosting::Pairing>,
     pairings: hosting::Running,
+    /// What tells the person of events, once the host has one.
+    notices: Option<Arc<crate::notify::Hub>>,
 }
 
 /// Why a control channel could not be opened.
@@ -273,6 +275,7 @@ impl Control {
             state: state::State::new(dir.map(|dir| dir.join("state"))),
             pairing: None,
             pairings: hosting::Running::default(),
+            notices: None,
         })
     }
 
@@ -504,6 +507,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_services(mut self, services: Arc<crate::services::Services>) -> Self {
         self.services = Some(services);
+        self
+    }
+
+    /// Tells the person of events through `hub`, and answers `notify/*`.
+    #[must_use]
+    pub(crate) fn with_notices(mut self, hub: Arc<crate::notify::Hub>) -> Self {
+        self.notices = Some(hub);
         self
     }
 
@@ -747,6 +757,19 @@ fn is_terminal(line: &[u8]) -> bool {
         })
 }
 
+/// Whether `line` is a request that belongs to the link it came on: `notify/subscribe` and `notify/attended`.
+fn is_notify_link(line: &[u8]) -> bool {
+    line.windows(b"notify/".len())
+        .any(|window| window == b"notify/")
+        && serde_json::from_slice::<Value>(line).is_ok_and(|request| {
+            request.get("id").is_some()
+                && request
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .is_some_and(notify::is_link_method)
+        })
+}
+
 fn is_apply(line: &[u8]) -> bool {
     serde_json::from_slice::<Value>(line).is_ok_and(|request| {
         request.get("id").is_some()
@@ -763,6 +786,30 @@ fn is_apply(line: &[u8]) -> bool {
 }
 
 impl Control {
+    /// An install or an update ended in failure: the person is told when canoa.cfg says so.
+    pub(crate) fn update_failed(&self) {
+        if let Some(hub) = &self.notices {
+            drop(hub.fire("update_failed", crate::notify::Occurrence::default()));
+        }
+    }
+
+    /// `notify/subscribe` and `notify/attended`, for the window whose link `notices` is.
+    fn notify_link(&self, caller: &Caller, notices: &notify::Link, line: &[u8]) -> Vec<u8> {
+        let request: Value = serde_json::from_slice(line).unwrap_or(Value::Null);
+        let id = request.get("id").cloned().unwrap_or(Value::Null);
+        let outcome = allow(caller, Grant::Notify).and_then(|()| {
+            let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+            notices.call(method, request.get("params").unwrap_or(&Value::Null))
+        });
+        match outcome {
+            Ok(result) => {
+                serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
+                    .unwrap_or_default()
+            }
+            Err((code, message)) => error_line(&id, code, &message),
+        }
+    }
+
     /// A `terminal/*` request, for the terminals of the link it came on.
     fn terminal<C: Channel>(
         &self,
@@ -867,7 +914,7 @@ impl Control {
                     .sealer
                     .as_ref()
                     .and_then(|sealer| sealer.0.asker_of(peer));
-                stores.apply(
+                let answer = stores.apply(
                     caller.owner(),
                     &request,
                     (channel, asker.as_ref()),
@@ -875,7 +922,13 @@ impl Control {
                         .as_ref()
                         .map_or(crate::secrets::ask::ASK_WAIT, |sealer| sealer.1),
                     &|other| self.handle(caller, other),
-                )
+                );
+                if serde_json::from_slice::<Value>(&answer)
+                    .is_ok_and(|answered| answered.get("error").is_some())
+                {
+                    self.update_failed();
+                }
+                answer
             }
             Err((code, message)) => error_line(&id, code, &message),
         }
@@ -972,7 +1025,8 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
     // The shells this link opens run on threads of this scope, and end with the link.
     std::thread::scope(|scope| {
         let terminals = terminal::Link::new(scope, channel, &control.terminals);
-        serve_requests(scope, control, caller, channel, &terminals);
+        let notices = notify::Link::new(control.notices.clone());
+        serve_requests(scope, control, caller, channel, (&terminals, &notices));
         // A reader waiting to hand output to a link that nobody reads is let go by closing it.
         terminals.close_all();
         channel.close();
@@ -988,11 +1042,17 @@ fn serve_requests<'scope, 'env, C: Channel>(
     control: &'env Control,
     caller: &'env Caller,
     channel: &'env C,
-    terminals: &terminal::Link<'_, '_, C>,
+    (terminals, notices): (&terminal::Link<'_, '_, C>, &notify::Link),
 ) {
     let mut last = std::time::Instant::now();
     let running = Arc::new(AtomicUsize::new(0));
     loop {
+        // What the notifications of this link have to say goes out whether or not the person is asking anything.
+        for notice in notices.pending() {
+            if channel.send(&notice).is_err() {
+                return;
+            }
+        }
         match channel.receive(Some(POLL)) {
             Ok(Some(line)) => {
                 last = std::time::Instant::now();
@@ -1003,6 +1063,8 @@ fn serve_requests<'scope, 'env, C: Channel>(
                     Some(control.apply(caller, &line, channel))
                 } else if is_terminal(&line) {
                     Some(control.terminal(caller, terminals, &line))
+                } else if is_notify_link(&line) {
+                    Some(control.notify_link(caller, notices, &line))
                 } else if running.load(Ordering::SeqCst) < IN_FLIGHT {
                     running.fetch_add(1, Ordering::SeqCst);
                     let running = Arc::clone(&running);
@@ -1116,6 +1178,9 @@ mod ledger;
 mod looks;
 #[cfg(test)]
 mod looks_tests;
+pub(crate) mod notify;
+#[cfg(test)]
+mod notify_tests;
 pub(crate) mod panel_tabs;
 mod params;
 mod pools;

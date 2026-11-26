@@ -1,6 +1,7 @@
 // What a team might add to Canoa's screens, written in JavaScript: a profile item that tells a session which region it runs in, a
-// catalog source that lists a team's skills, a page of Settings and a tab of the bottom panel. One library serves four kinds; each
+// catalog source that lists a team's skills, a page of Settings, a tab of the bottom panel and a place notices are sent to. One library serves five kinds; each
 // class is a provider the host offers as it offers any extension's.
+import { Notifier, delivery, noticeOf } from '../../../../bindings/js/canoa-sdk/src/notifier.js';
 import { LogPanelTab, PagePanelTab } from '../../../../bindings/js/canoa-sdk/src/panel.js';
 import { EnvProfileItem } from '../../../../bindings/js/canoa-sdk/src/profile.js';
 import { SettingsSection } from '../../../../bindings/js/canoa-sdk/src/section.js';
@@ -95,4 +96,16 @@ export class DocsTab extends PagePanelTab {
   static tab = 'docs';
   static title = 'Team docs';
   static url = 'http://127.0.0.1:4100/docs';
+}
+
+/** Somewhere a notice could be sent: it keeps the notice's id and says it was delivered. */
+export class TeamChat extends Notifier {
+  static notifier = 'teamchat';
+  static title = 'Team chat';
+  static help = "Sends each notice to the team's chat.";
+  static events = ['finished', 'failed'];
+
+  send(request) {
+    return delivery(noticeOf(request).id);
+  }
 }

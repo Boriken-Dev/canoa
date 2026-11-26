@@ -1,5 +1,5 @@
 """What a team might add to Canoa's screens, written in Python: a profile item that tells a session which region it runs in, a catalog
-source that lists a team's skills, a page of Settings and a tab of the bottom panel. One library serves four kinds; each class is a
+source that lists a team's skills, a page of Settings, a tab of the bottom panel and a place notices are sent to. One library serves five kinds; each class is a
 provider the host offers as it offers any extension's.
 """
 
@@ -14,16 +14,19 @@ from canoa_sdk import (
     CommandCatalogSource,
     EnvProfileItem,
     LogPanelTab,
+    Notifier,
     PagePanelTab,
     ReadCatalogSource,
     SettingsSection,
+    delivery,
     fields_of,
+    notice_of,
     section,
     ui,
 )
 
 __version__ = "1.0.0"
-__all__ = ["BuildsTab", "DocsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamSource"]
+__all__ = ["BuildsTab", "DocsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamChat", "TeamSource"]
 
 
 @dataclass
@@ -106,3 +109,15 @@ class DocsTab(PagePanelTab):
     tab = "docs"
     title = "Team docs"
     url = "http://127.0.0.1:4100/docs"
+
+
+class TeamChat(Notifier):
+    """Somewhere a notice could be sent: it keeps the notice's id and says it was delivered."""
+
+    notifier = "teamchat"
+    title = "Team chat"
+    help = "Sends each notice to the team's chat."
+    events = ["finished", "failed"]
+
+    def send(self, request):  # type: ignore[no-untyped-def]
+        return delivery(notice_of(request)["id"])

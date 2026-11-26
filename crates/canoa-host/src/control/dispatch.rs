@@ -867,6 +867,36 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_secrets,
     ),
     rpc(
+        "notify/subscribe",
+        Access::Require(Grant::Notify),
+        Control::r_needs_output_link,
+    ),
+    rpc(
+        "notify/attended",
+        Access::Require(Grant::Notify),
+        Control::r_needs_output_link,
+    ),
+    rpc(
+        "notify/notifiers",
+        Access::Require(Grant::Notify),
+        Control::r_notify,
+    ),
+    rpc(
+        "notify/events",
+        Access::Require(Grant::Notify),
+        Control::r_notify,
+    ),
+    rpc(
+        "notify/test",
+        Access::Require(Grant::Notify),
+        Control::r_notify,
+    ),
+    rpc(
+        "notify/keep",
+        Access::Require(Grant::Notify),
+        Control::r_notify,
+    ),
+    rpc(
         "store/apply",
         Access::Require(Grant::StorePrograms),
         Control::r_needs_progress_link,
@@ -931,6 +961,11 @@ impl Control {
             },
             None => Err((NO_METHOD, "this host has no such method".to_owned())),
         };
+        if outcome.is_err()
+            && request.get("method").and_then(Value::as_str) == Some("extension/apply")
+        {
+            self.update_failed();
+        }
         Some(match outcome {
             Ok(result) => {
                 serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result}))

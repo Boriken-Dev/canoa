@@ -32,6 +32,8 @@ fn tables() -> Vec<(&'static str, Vec<String>)> {
         ("settings.power", keys_of("RawPower")),
         ("permissions", keys_of("RawPermissions")),
         ("usage", keys_of("RawUsage")),
+        ("notifications", keys_of("RawNotifications")),
+        ("notifications.notifiers.NAME", keys_of("RawNotifier")),
         ("host.agents.NAME", keys_of("RawAgent")),
         ("host.providers.NAME", keys_of("RawProvider")),
         ("host.accounts.NAME", keys_of("RawAccount")),

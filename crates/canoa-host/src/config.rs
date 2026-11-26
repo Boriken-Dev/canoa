@@ -14,6 +14,7 @@ use indexmap::IndexMap;
 mod entries;
 mod entries_parse;
 pub(crate) mod layers;
+mod notifications;
 mod profiles;
 mod raw;
 mod sections;
@@ -59,7 +60,7 @@ pub use types::{
     DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS, DEFAULT_MAX_SESSIONS, DEFAULT_PRESET,
     DelegateConfig, Extension, ExtensionCheck, HarnessTable, HistoryConfig, KbConfig, KbEmbedder,
     KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig,
-    NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable,
+    NativeConfig, NetworkConfig, NotificationsConfig, NotifierConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable,
     StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
@@ -187,15 +188,17 @@ impl Config {
         Self::from_raw(raw, base)
     }
 
-    fn from_raw(raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
+    fn from_raw(mut raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
         let assist = assist_of(
             &raw.assist,
             &raw.sdk,
             &raw.assist_harness,
             raw.assist_pool.as_ref(),
         )?;
+        let notifications = notifications::notifications_of(raw.notifications.take(), base)?;
         let mut config = Self::from_raw_tables(raw, base)?;
         config.assist = assist;
+        config.notifications = notifications;
         Ok(config)
     }
 
@@ -289,6 +292,7 @@ impl Config {
             network: sub.network,
             kb: sub.kb,
             assist: AssistConfig::default(),
+            notifications: NotificationsConfig::default(),
             mcp_list: sub.mcp_list,
             services: sub.services,
             delegate: sub.delegate,

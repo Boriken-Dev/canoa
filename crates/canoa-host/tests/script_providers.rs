@@ -323,6 +323,15 @@ mod with_source {
         )
         .expect("the tail");
         assert_eq!(tail["text"], "build 42 failed\n");
+        let (notifiers, _) = ask(&link, 20, "notify/notifiers", json!({})).expect("the notifiers");
+        let chat = notifiers["providers"]
+            .as_array()
+            .expect("providers")
+            .iter()
+            .find(|row| row["id"] == "teamchat")
+            .unwrap_or_else(|| panic!("the notifier is offered: {notifiers}"));
+        assert_eq!(chat["title"], "Team chat");
+        assert_eq!(chat["origin"], "examples");
         // The sources the library offers answer a Skills catalog: its own, then the SDK's command and read sources, which run a
         // program and read a file through the spawner the host hands them.
         let skills = |id: u64, label: &str| {

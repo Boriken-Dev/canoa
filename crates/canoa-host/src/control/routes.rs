@@ -13,7 +13,7 @@ use crate::worktree::Worktrees;
 
 use super::{
     BAD_PARAMS, Caller, Control, DENIED, Grant, REFUSED, Stores, allow, choices, discover,
-    error_line, files, hosting, kb_offers, looks, panel_tabs, profile_items, providers, registry,
+    error_line, files, hosting, kb_offers, looks, notify, panel_tabs, profile_items, providers, registry,
     secrets, settings_sections, speech_offers, usage_read,
 };
 
@@ -740,6 +740,38 @@ impl Control {
         params: &Value,
     ) -> Result<Value, (i32, String)> {
         secrets::call(&self.vault()?, &self.files, method, params)
+    }
+
+    pub(super) fn r_notify(
+        &self,
+        _: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        let hub = self.notices.as_ref();
+        match method {
+            "notify/events" => notify::events_of(hub),
+            "notify/test" => notify::test(hub, params),
+            "notify/keep" => {
+                let config = self.loaded_config()?;
+                notify::keep(
+                    hub,
+                    &settings_sections::Keeper::new(&config, self.section_home()),
+                    params,
+                )
+            }
+            _ => {
+                let config = self.loaded_config()?;
+                notify::notifiers(
+                    hub,
+                    self.files.config_store(),
+                    Some(&settings_sections::Keeper::new(
+                        &config,
+                        self.section_home(),
+                    )),
+                )
+            }
+        }
     }
 
     pub(super) fn r_needs_output_link(

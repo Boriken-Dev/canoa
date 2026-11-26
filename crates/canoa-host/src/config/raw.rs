@@ -153,6 +153,32 @@ pub(super) struct RawFile {
     /// `[assist_pool]`: the warm sessions the harness backends keep.
     #[serde(default)]
     pub(super) assist_pool: Option<RawAssistPool>,
+    /// `[notifications]`: the notifiers of each event, and the notifier entries.
+    #[serde(default)]
+    pub(super) notifications: Option<RawNotifications>,
+}
+
+/// `[notifications]`: `notifiers`, and every other key is an event's list of notifier names, which the reader checks against the
+/// host's catalog of events.
+#[derive(Deserialize)]
+pub(super) struct RawNotifications {
+    #[serde(default)]
+    pub(super) notifiers: IndexMap<String, RawNotifier>,
+    #[serde(flatten)]
+    pub(super) rest: toml::Table,
+}
+
+/// `[notifications.notifiers.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawNotifier {
+    pub(super) provider: Option<String>,
+    pub(super) library: Option<String>,
+    pub(super) source: Option<String>,
+    pub(super) source_settings: Option<toml::Table>,
+    pub(super) import_search: Option<String>,
+    #[serde(default)]
+    pub(super) settings: Option<toml::Table>,
 }
 
 /// `[settings]`: each section's table is the section's; the host reads the Power group's.

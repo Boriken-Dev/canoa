@@ -124,6 +124,11 @@ pub enum Grant {
     /// form sealed to the key that asked. A secret is whatever an agent may be given a handle to use, so this is as much as access to
     /// them. A key never holds it unless canoa.cfg gives it; the application in this process does.
     Secrets,
+    /// `notify/subscribe`, `notify/attended`, `notify/notifiers`, `notify/events`, `notify/test` and `notify/keep`: the window of this
+    /// host asks to be shown the notices of the `desktop` notifier and says which session the person is looking at, and reads, tests
+    /// and sets up the notifiers, whose settings name the services a notice is sent to and may hold their tokens. A key never holds
+    /// it unless canoa.cfg gives it; the application in this process does.
+    Notify,
 }
 
 pub(super) struct GrantSpec {
@@ -285,6 +290,11 @@ pub(super) const GRANT_SPECS: [GrantSpec; 30] = [
     GrantSpec {
         grant: Grant::Secrets,
         name: "secrets",
+        control: true,
+    },
+    GrantSpec {
+        grant: Grant::Notify,
+        name: "notify",
         control: true,
     },
 ];

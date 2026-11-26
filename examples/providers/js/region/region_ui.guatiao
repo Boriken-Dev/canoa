@@ -2,6 +2,6 @@ type = "js"
 name = "region_ui"
 version = "1.0.0"
 main = "region_ui.js"
-kinds = ["profile_item", "catalog_source", "settings_section", "panel_tab"]
+kinds = ["profile_item", "catalog_source", "settings_section", "panel_tab", "notifier"]
 # This folder, and the SDK the module imports by a relative path.
 paths = [".", "../../../../bindings/js/canoa-sdk/src"]

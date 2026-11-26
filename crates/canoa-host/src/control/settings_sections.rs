@@ -102,6 +102,24 @@ impl<'a> Keeper<'a> {
             .filter(|value| !value.is_empty()))
     }
 
+    /// The secret kept under `name`, or `None` when none is kept.
+    pub(crate) fn get_named(&self, name: &str) -> Result<Option<Zeroizing<String>>, String> {
+        let (vault, entry) = self.open()?;
+        Ok(vault.get_in(entry, name)?.filter(|value| !value.is_empty()))
+    }
+
+    /// Keeps `value` under `name`.
+    pub(crate) fn put_named(&self, name: &str, value: &str) -> Result<(), String> {
+        let (vault, entry) = self.open()?;
+        vault.put_in(entry, name, value)
+    }
+
+    /// Forgets the secret under `name`.
+    pub(crate) fn forget_named(&self, name: &str) -> Result<(), String> {
+        let (vault, entry) = self.open()?;
+        vault.forget_in(entry, name)
+    }
+
     fn put(&self, section: &str, member: &str, value: &str) -> Result<(), String> {
         let (vault, entry) = self.open()?;
         vault.put_in(entry, &Self::name(section, member), value)

@@ -80,6 +80,8 @@ pub struct Config {
     pub kb: KbConfig,
     /// `[assist]` and `[sdk]`: the backends that serve the host's own model work.
     pub assist: AssistConfig,
+    /// `[notifications]`: who is told about each event, and the notifier entries that add places to tell.
+    pub notifications: NotificationsConfig,
     /// `[host.mcp_list]`: how long and how much listing a session's MCP servers takes.
     pub mcp_list: McpListConfig,
     /// `[host.services.ID]`: the table of each session service as the text of a JSON object whose members keep the file's order,
@@ -139,6 +141,7 @@ impl Default for Config {
             network: Default::default(),
             kb: Default::default(),
             assist: Default::default(),
+            notifications: Default::default(),
             mcp_list: Default::default(),
             services: IndexMap::new(),
             delegate: Default::default(),
@@ -156,6 +159,30 @@ impl Default for Config {
             providers: Default::default(),
         }
     }
+}
+
+/// `[notifications]`: for each event the notifiers it goes to, and the notifier entries the names refer to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NotificationsConfig {
+    /// The event ids the file names, each with the notifier names it goes to (`[]` turns the event off), in the file's order. An
+    /// event the file does not name goes where the host's catalog says.
+    pub routes: IndexMap<String, Vec<String>>,
+    /// `[notifications.notifiers.NAME]`, in the file's order. `desktop` needs no entry and cannot be redefined.
+    pub notifiers: IndexMap<String, NotifierConfig>,
+}
+
+/// One `[notifications.notifiers.NAME]`: a place notices go, made by a `notifier` provider.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NotifierConfig {
+    /// The id of the provider that sends the notices.
+    pub provider: String,
+    /// Where the provider's code comes from when it is no bundled one (`library` or `source`, as a harness entry names them).
+    pub origin: Option<Origin>,
+    /// The provider's settings, checked against the schema it declares when a notice is sent; a sensitive member is not here but
+    /// kept by the host as a secret.
+    pub settings: Settings,
 }
 
 /// One `[host.extensions.NAME]`: a `store_extension` provider the host loads, whose store types the Store lists.

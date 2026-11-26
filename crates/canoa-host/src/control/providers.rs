@@ -255,6 +255,18 @@ pub(crate) fn libraries(config: &Config) -> LoadedRegistries {
                     .extensions
                     .iter()
                     .map(|extension| (extension.name.as_str(), &extension.origin, false)),
+            )
+            .chain(
+                config
+                    .notifications
+                    .notifiers
+                    .iter()
+                    .filter_map(|(name, notifier)| {
+                        notifier
+                            .origin
+                            .as_ref()
+                            .map(|origin| (name.as_str(), origin, true))
+                    }),
             );
         for (name, origin, entry) in origins {
             if seen.contains(origin) {
