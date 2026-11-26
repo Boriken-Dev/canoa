@@ -6,6 +6,8 @@
     reason = "tests name what they use from std"
 )]
 
+mod hooked;
+mod linked;
 mod support;
 
 use std::time::{Duration, Instant};
@@ -923,4 +925,152 @@ fn an_attached_key_is_not_sent_the_answer_to_its_watchs_prompt_and_a_waiting_per
         assert_eq!(held["promptsSent"], 0, "{held}");
     })
     .expect("the opener's link");
+}
+
+// Approvers and hooks on a shared entry: the profile's chain runs for every session the hub serves.
+
+/// A shared entry with the profile `main`, `profile` added to that profile's table and `top` after it (tables of canoa.cfg).
+fn profiled_entry(profile: &str, top: &str) -> String {
+    format!(
+        "[host.agents.shared]\nprogram = {}\nshared = true\nprofiles = [\"main\"]\n\
+         [host.profiles.main]\n{profile}\n{top}\n",
+        quoted(&example("stdio_agent", false).to_string_lossy())
+    )
+}
+
+const ALLOW_EDITS: &str = "[permissions.approvers.rules]\nprovider = \"policy\"\n\
+    settings = { rules = [ { kind = \"edit\", verdict = \"allow\" } ] }\n";
+
+fn asks(message: &Value) -> bool {
+    message["method"] == "session/request_permission"
+}
+
+fn approved_by(messages: &[Value], by: &str) -> bool {
+    messages.iter().any(|message| {
+        message["method"] == "_dev.boriken.canoa/approved"
+            && message["params"]["by"] == by
+            && message["params"]["outcome"] == "allowed"
+    })
+}
+
+#[test]
+fn a_policy_answers_for_a_shared_session_and_neither_client_is_asked() {
+    let config = profiled_entry("overlays = []", ALLOW_EDITS);
+    let host = Host::start(&config, 1);
+    let (key_a, key_b) = (support::key(), support::key());
+    host.pair(&key_a);
+    host.pair(&key_b);
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    with_link(&url, &key_a, host.peer, |a| {
+        let session = open_session(a, &dir);
+        with_link(&url, &key_b, host.peer, |b| {
+            attach(b, &session, &dir, None);
+            a.send(&json!({"jsonrpc": "2.0", "id": 700, "method": "session/prompt",
+                "params": {"sessionId": session, "prompt": [{"type": "text", "text": "ask first"}]}}))
+                .expect("A sends");
+            let (_, for_a) = read_until(a, says("the person chose allow"));
+            let (_, for_b) = read_until(b, says("the person chose allow"));
+            for read in [&for_a, &for_b] {
+                assert!(!read.iter().any(asks), "a client was asked: {read:?}");
+                assert!(approved_by(read, "rules"), "{read:?}");
+            }
+            let (ended, _) = read_until(a, |message| message["id"] == 700);
+            assert_eq!(ended["result"]["stopReason"], "end_turn", "{ended}");
+        })
+        .expect("B's link");
+    })
+    .expect("A's link");
+}
+
+#[test]
+fn a_call_that_names_a_protected_place_goes_to_every_client_of_a_shared_session_whatever_the_policy_says()
+ {
+    let config = profiled_entry("overlays = []", ALLOW_EDITS);
+    let host = Host::start(&config, 1);
+    let (key_a, key_b) = (support::key(), support::key());
+    host.pair(&key_a);
+    host.pair(&key_b);
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    with_link(&url, &key_a, host.peer, |a| {
+        let session = open_session(a, &dir);
+        with_link(&url, &key_b, host.peer, |b| {
+            attach(b, &session, &dir, None);
+            a.send(&json!({"jsonrpc": "2.0", "id": 701, "method": "session/prompt",
+                "params": {"sessionId": session, "prompt": [{"type": "text", "text": "ask @.env"}]}}))
+                .expect("A sends");
+            let (for_a, _) = read_until(a, asks);
+            let (for_b, _) = read_until(b, asks);
+            assert_eq!(for_a["id"], for_b["id"], "one request, put to both");
+            a.send(&json!({"jsonrpc": "2.0", "id": for_a["id"],
+                "result": {"outcome": {"outcome": "selected", "optionId": "reject"}}}))
+                .expect("A answers");
+            read_until(b, |message| {
+                message["method"] == "_dev.boriken.coqui.acp/hub_permission_closed"
+            });
+            read_until(a, says("the person chose reject"));
+        })
+        .expect("B's link");
+    })
+    .expect("A's link");
+}
+
+/// Installs overlay `team` in `scratch`, whose `pre-tool` hook answers `decision` for every edit, and returns the digest of its
+/// files, which canoa.cfg names to allow its hooks.
+fn install_hook(scratch: &support::Scratch, decision: &str) -> String {
+    let root = scratch.0.join("overlays").join("team");
+    std::fs::create_dir_all(&root).expect("a directory");
+    std::fs::write(
+        root.join("overlay.cfg"),
+        "[hooks]\npre-tool = { match = [\"edit\"] }\n",
+    )
+    .expect("written");
+    let arms = [("pre-tool", hooked::Arm::Print(decision.to_owned()))];
+    std::fs::write(
+        root.join(hooked::script::file_name()),
+        hooked::script::body(&scratch.0.join("hook.log"), &arms),
+    )
+    .expect("written");
+    let (_, digest) =
+        coqui_aos::read_tree(&coqui_aos::StdFs, &root, &coqui_aos::Settings::default())
+            .expect("read");
+    let digest = digest.digest.to_string();
+    std::fs::write(
+        scratch.0.join("overlays").join("team.json"),
+        json!({"source": "fixture", "commit": "0", "digest": digest, "files": {}}).to_string(),
+    )
+    .expect("written");
+    digest
+}
+
+#[test]
+fn a_hook_of_a_shared_entrys_profile_answers_for_every_client() {
+    let scratch = support::Scratch::new();
+    let digest = install_hook(&scratch, r#"{"decision":"deny","reason":"no edits"}"#);
+    let config = profiled_entry(
+        &format!("overlays = [\"team\"]\nallow_hooks = {{ team = \"{digest}\" }}"),
+        "",
+    );
+    let host = Host::start_in(scratch, &config, 1, &[]);
+    let (key_a, key_b) = (support::key(), support::key());
+    host.pair(&key_a);
+    host.pair(&key_b);
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    with_link(&url, &key_a, host.peer, |a| {
+        let session = open_session(a, &dir);
+        with_link(&url, &key_b, host.peer, |b| {
+            attach(b, &session, &dir, None);
+            a.send(&json!({"jsonrpc": "2.0", "id": 702, "method": "session/prompt",
+                "params": {"sessionId": session, "prompt": [{"type": "text", "text": "ask first"}]}}))
+                .expect("A sends");
+            // The hook refused it: the agent was told, and nobody was asked.
+            let (_, for_a) = read_until(a, says("the person chose reject"));
+            let (_, for_b) = read_until(b, says("the person chose reject"));
+            assert!(!for_a.iter().any(asks) && !for_b.iter().any(asks));
+        })
+        .expect("B's link");
+    })
+    .expect("A's link");
 }

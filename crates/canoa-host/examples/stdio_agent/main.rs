@@ -1,5 +1,5 @@
 //! A small ACP agent on its standard streams, the stdio entry the host's tests serve. It echoes prompts; a prompt starting
-//! `ask` first asks the client's permission and answers with the option chosen. It answers `session/new` with the
+//! `ask` first asks the client's permission, for the file a word `@path` names when it has one, and answers with the option chosen. It answers `session/new` with the
 //! parameters it received, and `_fixture/received` with every method it has seen, so a test can tell what reached it.
 //! `_fixture/pid` answers its process id. With `--reopens` it also answers `session/load` and `session/resume` of any session, the load first replaying one line of history, as an agent that keeps its sessions does. With `--agy FIXTURE` it plays Antigravity's usage surface (agy.rs). With `--scripted` it is the app's scripted coding agent instead (scripted.rs). With `CANOA_TEST_AGENT_STAYS` set it stays a minute after its input closes, as an
 //! agent that ignores its input would, so a test sees whether something else ends it.
@@ -86,10 +86,18 @@ fn main() {
                 if text.starts_with("ask") {
                     next_request += 1;
                     asking.insert(next_request, (id, session.clone()));
+                    let mut call =
+                        json!({"toolCallId": "t1", "title": "Write a file", "kind": "edit"});
+                    if let Some(path) = text
+                        .split_whitespace()
+                        .find_map(|word| word.strip_prefix('@'))
+                    {
+                        call["rawInput"] = json!({"file_path": path});
+                    }
                     send(
                         json!({"jsonrpc": "2.0", "id": next_request, "method": "session/request_permission", "params": {
                             "sessionId": session,
-                            "toolCall": {"toolCallId": "t1", "title": "Write a file", "kind": "edit"},
+                            "toolCall": call,
                             "options": [
                                 {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
                                 {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
