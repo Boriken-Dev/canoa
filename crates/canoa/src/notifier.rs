@@ -1,4 +1,4 @@
-//! The `notifier` kind: somewhere a notice about what happened on the host is sent (the person's desktop, a phone, a mailbox).
+//! The `notifier` kind: somewhere a notice about what happened on the host is sent (the person's desktop, a phone, an inbox).
 //!
 //! The host decides which events happen and which notifiers are told; a notifier only delivers. Each is a provider of this kind, the
 //! one the host carries (the desktop's) and the ones an extension adds alike. A provider describes itself (its id, its title, the
@@ -472,7 +472,10 @@ mod tests {
         assert_eq!(info.problem(), None);
         assert!(info.schema.is_some() && info.form.is_some());
         for bad in ["", "Push", "my-push", &"a".repeat(33)] {
-            assert!(NotifierInfo::new(bad, "Push").problem().is_some(), "{bad:?}");
+            assert!(
+                NotifierInfo::new(bad, "Push").problem().is_some(),
+                "{bad:?}"
+            );
         }
         assert!(NotifierInfo::new("push", " ").problem().is_some());
         let mut info = NotifierInfo::new("push", "Push");

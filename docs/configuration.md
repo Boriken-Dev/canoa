@@ -1323,6 +1323,36 @@ operating system's store unless you chose another), where the Secrets section li
 offered it, and the values it kept stay in {{ config_file }} until you remove the table. The pages {{ name }} draws itself (General, Appearance,
 Accounts and the rest) are listed by the host the same way, so the app learns what Settings has from the host and not from a list of its own.
 
+### Notifications
+
+The host decides which events happen and who is told. Each event has a list of notifiers in `[notifications]`; `[]` turns the event off.
+`desktop` is the notifier every host has: it shows the notice in the windows open on the host (a toast, or the browser's notification),
+and tells nobody when no window is open. Another is an entry of `[notifications.notifiers.NAME]`, which names a notifier provider and its settings.
+
+```toml
+[notifications]
+permission = ["desktop", "phone"]   # a session asks leave to use a tool
+question = ["desktop"]              # a session asks a question
+finished = ["desktop"]              # a turn finished
+failed = ["desktop"]                # a turn failed, or its agent ended while it ran
+usage_warn = ["desktop"]            # a usage limit is near
+usage_stop = ["desktop"]            # a usage limit was reached
+update_failed = ["desktop"]         # an install or an update ended in failure
+host_restarted = []                 # the host started again with the same version (off unless you list a notifier)
+host_updated = []                   # the host started with another version than its last run
+
+[notifications.notifiers.phone]
+provider = "ntfy"                   # a notifier an extension offers, with the settings its form asks for
+settings = { server = "https://ntfy.example", topic = "mine" }
+```
+
+An event not named goes to `desktop`, but the two host events. A name that is no notifier, an event this host does not know, and the older
+`permission = true` form are refused when {{ config_file }} is read, with the key named. A notifier's sensitive setting (a token) is kept as
+the secret `notifiers/NAME/MEMBER`, never in {{ config_file }}. A notice is built from the session's title, the agent's name and a fixed
+phrase in the app's language, and never names a command, a path or anything an agent sent. A window reports the session it shows while it
+is focused, and the host tells nobody, through any notifier, of an event of that session. Settings,
+Notifications edits all of this, and its Test button sends a notice of the words "Test" to one notifier.
+
 ### Panel tabs from extensions
 
 The bottom panel of a conversation is one bar of tabs. Its + menu offers Terminal (and Terminal in each shell the host lists), the host's

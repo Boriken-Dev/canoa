@@ -36,7 +36,7 @@ settings-section = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 panel-tab = ["dep:coqui-acp-api", "dep:guatiao"]
 # The `history_store` kind: where recorded conversations and the list of them are kept (SQLite, memory, or an extension's store).
 history-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:serde_json", "dep:data-encoding", "dep:coqui-acp-history", "dep:time"]
-# The `notifier` kind: somewhere a notice about what happened on the host is sent (the desktop, a phone, a mailbox).
+# The `notifier` kind: somewhere a notice about what happened on the host is sent (the desktop, a phone, an inbox).
 notifier = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 # The `session_service` kind: something a library runs for the sessions of a host and hands to them (an MCP server of its tools, its control methods).
 session-service = ["dep:coqui-acp-api", "dep:guatiao", "dep:serde_json"]

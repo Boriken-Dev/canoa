@@ -29,6 +29,7 @@ Not published (`publish = false`). A default build has no dependencies. Cargo fe
 | `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
 | `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
+| `notifier` | `canoa::notifier` | the `notifier` kind: somewhere a notice about what happened on the host is sent (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `history-store` | `canoa::history_store` | the `history_store` kind: where recorded conversations and every turn's properties are kept, as typed tables with structured queries (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `data-encoding`, `coqui-acp-history`, `time`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |

@@ -13,6 +13,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
 | `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
+| `notifier` | `canoa::notifier` | the `notifier` kind: somewhere a notice about what happened on the host is sent (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `history-store` | `canoa::history_store` | the `history_store` kind: where recorded conversations and every turn's properties are kept, as typed tables with structured queries (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `data-encoding`, `coqui-acp-history`, `time`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
@@ -187,7 +188,7 @@ pub fn name_problem(name: &str) -> Option<String>;   // text of any length that 
 - **`GONE` is "cannot answer now"** (locked, signed out, not installed). The reason holds no value; the host then asks the person for the secret itself.
 - **Written in a script.** A library in Python or JavaScript subclasses the Canoa SDK's `SecretProvider` (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`): `get` is the one slot it must write; `title`, `can_list`, `can_store` and `needs_person` make `describe`; `names`, `put` and `forget` refuse with `UNSUPPORTED` until it overrides them; a slot receives the spawner as its last argument and the provider destroys it. `FormSecretProvider` is the person's form and `SystemStoreSecretProvider` a provider over a store of keys and texts the subclass supplies (`read`, `write`, `remove`), with the index of names such a store needs. A request and an answer cross as plain data: `{name}`, `{name, value}`, `{value, expires_in}` (`{}` for nothing held), `{names}`. The kind reaches a source of JavaScript in the host's one document of descriptions (`descriptions.rs`).
 
-Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`), `store_extension`, `model_store` and `catalog_source` (`store`), `secret_provider` (`secret`), `profile_item` (`profile-item`), `settings_section` (`settings-section`) and `panel_tab` (`panel-tab`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
+Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`), `store_extension`, `model_store` and `catalog_source` (`store`), `secret_provider` (`secret`), `profile_item` (`profile-item`), `settings_section` (`settings-section`) `panel_tab` (`panel-tab`) and `notifier` (`notifier`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
 
 ## `canoa::settings_section` (feature `settings-section`)
 
@@ -236,6 +237,39 @@ pub fn loopback_problem(url: &str) -> Option<&'static str>;   // None for http/h
 
 - `id` is a word of lower-case letters, digits and `_` (1 to 32). `Shows::Terminal` opens a shell on the host: `shell` is the id of one the host lists (`shell/list`), none for the host's own choice. `Shows::Log` is a text the provider keeps: the application asks for the latest lines every couple of seconds while the tab is open. `Shows::Page` is a page the extension's own server answers on this computer's loopback, at `url`: the application has no web view of its own, so the tab names the page and a button opens it in the person's browser (the same decision as the Browser surface: nothing is embedded, and the extension's own permissions stay in the browser).
 - `TabInfo::problem` says why a description cannot be used (a bad id, no title, a shell named by a kind that shows no terminal, an address on a kind that shows no page, a page with none or one that is not `http`/`https` on the loopback: a tab names a server on this computer, not another site).
+
+## `canoa::notifier` (feature `notifier`)
+
+The `notifier` kind: somewhere a notice about what happened on the host is sent (the person's desktop, a phone, an inbox). The host decides which events happen and who is told; a notifier delivers one notice a `send`. Each is a provider, the one the host carries (`desktop`) and the ones an extension adds alike. A notice is built by the host from fixed words and ids, never from what an agent said: no command, no path, no tool input.
+
+```rust
+pub const KIND: &str = "notifier";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+pub const AUTH_REFUSED_PREFIX: &str = "sign-in refused: ";   pub const REJECTED_PREFIX: &str = "notice refused: ";
+#[non_exhaustive] pub enum NotifierError { Unavailable(String), Auth(String), Bad(String), Rejected(String) }   // From/Into ProviderError
+pub enum Urgency { Low, Normal /* default */, High }
+#[non_exhaustive] pub struct SessionRef { pub id: String, pub title: Option<String>, pub agent: Option<String> }
+#[non_exhaustive] pub struct Action { pub id: String, pub label: String }   #[non_exhaustive] pub struct ReplyTo { pub nonce: String }
+#[non_exhaustive] pub struct Notice { pub id: String, pub event: String, pub title: String, pub body: String, pub session: Option<SessionRef>,
+    pub urgency: Urgency, pub at: i64 /* Unix seconds */, pub actions: Vec<Action>, pub reply: Option<ReplyTo> }
+#[non_exhaustive] pub struct NotifierInfo { pub id: String, pub title: String, pub help: Option<String>, pub events: Option<Vec<String>>,
+    pub replies: bool, pub schema: Option<Value>, pub form: Option<Value> }
+#[non_exhaustive] pub struct SendRequest { pub settings: String, pub notice: Notice }   // settings: the entry's JSON, a sensitive member resolved
+#[non_exhaustive] pub struct Delivery { pub id: String, pub replies: bool }
+#[non_exhaustive] pub struct ReplyRequest { pub settings: String, pub delivery: String, pub wait_ms: u64 }   #[non_exhaustive] pub struct Reply { pub action: String, pub nonce: String }
+#[non_exhaustive] pub struct WithdrawRequest { pub settings: String, pub delivery: String }
+#[guatiao::kind(name = "notifier")] pub trait Notifier: Send + Sync {
+    fn describe(&self) -> Result<NotifierInfo, ProviderError>;                 // the same on every call, with nothing run
+    fn send(&self, request: SendRequest) -> Result<Delivery, ProviderError>;   // the host calls it on a thread of its own and does not retry
+    fn reply(&self, request: ReplyRequest) -> Result<Option<Reply>, ProviderError>;   // optional; default none; waits at most `wait_ms`
+    fn withdraw(&self, request: WithdrawRequest) -> Result<(), ProviderError>;        // optional; default nothing: takes a notice away
+}
+impl NotifierInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Screen>(self) -> Result<Self, ProviderError>; pub fn problem(&self) -> Option<String> }
+impl Notice { pub fn new(id, event, title, body, at) -> Self }
+pub fn is_word(word: &str) -> bool;   // 1 to 32 lower-case letters, digits and `_`
+```
+
+- `NotifierInfo::problem` says why a description cannot be used (a bad id, no title, an event that is no word, a schema its form does not fit). `events` limits the events a notifier takes; none takes any. A sensitive member of the schema is kept by the host as the secret `notifiers/NAME/MEMBER` and filled into `settings` when a notice is sent. The settings also carry a key of the host's own, `_host`, which the provider the host carries (`desktop`) reads and others ignore. No timeout is fixed by the kind: each provider declares its own as settings.
+- `NotifierError` is what a failure is called: `Unavailable` (no window is open, the service cannot be reached; `GUATIAO_ERR_GONE`), `Auth` and `Rejected` (`GUATIAO_ERR_INTERNAL` with a prefix), `Bad` (the settings do not fit; `GUATIAO_ERR_BAD_VALUE`). Each message is one line with no secret. The slot that takes a delivery away is `withdraw`: `close` is a name Guatiao's JavaScript binding keeps for a remote's own.
 
 ## `canoa::environment` (feature `environment`)
 

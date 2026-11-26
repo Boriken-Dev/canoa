@@ -33,8 +33,8 @@ use canoa::environment::{
 };
 use canoa::gateway::{GatewayInfo, GatewayLeaseVtable, GatewayRequest, ModelGatewayVtable};
 use canoa::notifier::{
-    Action, WithdrawRequest, Delivery, Notice, NotifierInfo, NotifierVtable, Reply, ReplyRequest,
-    ReplyTo, SendRequest, SessionRef, Urgency,
+    Action, Delivery, Notice, NotifierInfo, NotifierVtable, Reply, ReplyRequest, ReplyTo,
+    SendRequest, SessionRef, Urgency, WithdrawRequest,
 };
 use canoa::panel_tab::{PanelTabVtable, Shows, TabInfo, TailRequest};
 use canoa::profile_item::{

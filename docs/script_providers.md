@@ -14,6 +14,7 @@ A script is shared between hosts as the files it is.
 | `profile_item` | one thing a profile may set | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` |
 | `catalog_source` | where a Store type's catalog comes from | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` |
 | `settings_section` | a page, or a group on a page, of Settings | `SettingsSection` |
+| `notifier` | somewhere a notice about what happened on the host is sent | `Notifier` |
 | `panel_tab` | a kind of tab of the bottom panel | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` |
 | `speech_provider`, `speech_output` | dictation and a voice | `SpeechProvider`, `SpeechOutput` |
 | `account_speech` | the speech-to-text services the accounts of some kinds can call | `AccountSpeech` |
