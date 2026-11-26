@@ -328,3 +328,72 @@ fn a_version_2_turn_is_kept_when_the_agent_says_it_is_idle_not_when_the_prompt_i
     assert!(doc.to_string().expect("written").contains("later words"));
     let _ = fs::remove_dir_all(dir);
 }
+
+/// A history of one turn per word of `said`: each a prompt, an agent message and the turn's end.
+fn turns(said: &[&str]) -> Document {
+    let mut header = Header::new(ID, Origin::new("claude"));
+    header.cwd = Some("/work".to_owned());
+    let mut doc = Document::new(header);
+    for word in said {
+        doc.lines
+            .push(Line::prompt(vec![json!({"type": "text", "text": word})]));
+        doc.lines.push(Line::update(
+            json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": format!("re {word}")}}),
+        ));
+        doc.lines.push(Line::turn_end(Stop::Acp(
+            coqui_acp_history::StopReason::EndTurn,
+        )));
+    }
+    doc
+}
+
+fn prompts(doc: &Document) -> Vec<String> {
+    doc.lines
+        .iter()
+        .filter_map(|line| match &line.body {
+            Body::Prompt { prompt } => prompt_text(prompt).into(),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_history_is_cut_before_the_turn_asked_for_and_keeps_every_turn_before_it() {
+    let doc = turns(&["one", "two", "three"]);
+    let cut = before_turn(&doc, 2, None).expect("cut");
+    assert_eq!(prompts(&cut), ["one", "two"]);
+    assert_eq!(cut.lines.len(), 6, "the answers of the turns before stay");
+    assert!(matches!(
+        cut.lines.last().map(|line| &line.body),
+        Some(Body::TurnEnd { .. })
+    ));
+    assert_eq!(prompts(&before_turn(&doc, 1, None).expect("cut")), ["one"]);
+    assert_eq!(doc.lines.len(), 9, "the history itself is as it was");
+    assert!(cut.to_string().is_ok(), "what is left is a history");
+}
+
+#[test]
+fn a_turn_that_is_not_there_or_has_nothing_before_it_is_refused() {
+    let doc = turns(&["one", "two"]);
+    assert_eq!(
+        before_turn(&doc, 2, None).unwrap_err(),
+        CutError::NoSuchTurn {
+            wanted: 2,
+            turns: 2
+        }
+    );
+    assert_eq!(
+        before_turn(&doc, 0, None).unwrap_err(),
+        CutError::NothingBefore
+    );
+}
+
+#[test]
+fn a_count_that_disagrees_with_the_history_cuts_nothing() {
+    let doc = turns(&["one", "two", "three"]);
+    assert!(before_turn(&doc, 1, Some("  two ")).is_ok());
+    assert_eq!(
+        before_turn(&doc, 1, Some("three")).unwrap_err(),
+        CutError::Differs
+    );
+}

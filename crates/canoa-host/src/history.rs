@@ -810,5 +810,84 @@ pub(crate) fn reidentified(doc: &Document, uuid: &str) -> Document {
     moved
 }
 
+/// Why a history cannot be cut before a turn.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CutError {
+    /// The history has only `turns` prompts, so there is no turn `wanted`.
+    NoSuchTurn { wanted: usize, turns: usize },
+    /// The turn is the first: nothing comes before it to carry on.
+    NothingBefore,
+    /// The prompt at that turn is not the one the caller expects.
+    Differs,
+}
+
+impl core::fmt::Display for CutError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NoSuchTurn { wanted, turns } => {
+                write!(
+                    f,
+                    "the history has {turns} turns, so there is no turn {wanted}"
+                )
+            }
+            Self::NothingBefore => f.write_str(
+                "nothing comes before the first turn, so there is no history to carry on",
+            ),
+            Self::Differs => f.write_str("the history's turn there says something else"),
+        }
+    }
+}
+
+/// The text of a prompt's `text` blocks, one to a line.
+fn prompt_text(prompt: &[Value]) -> String {
+    prompt
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `doc` as it was before its turn number `turn` (from 0, one to each prompt), for a session that goes on from there. With
+/// `expect`, the prompt at `turn` must say that (its first text block or all its text, trimmed), so a count that does not agree
+/// with the history cuts nothing.
+pub(crate) fn before_turn(
+    doc: &Document,
+    turn: usize,
+    expect: Option<&str>,
+) -> Result<Document, CutError> {
+    let prompts: Vec<(usize, &Vec<Value>)> = doc
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(at, line)| match &line.body {
+            Body::Prompt { prompt } => Some((at, prompt)),
+            _ => None,
+        })
+        .collect();
+    let &(at, prompt) = prompts.get(turn).ok_or(CutError::NoSuchTurn {
+        wanted: turn,
+        turns: prompts.len(),
+    })?;
+    if let Some(expect) = expect {
+        let first = prompt
+            .iter()
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+            .and_then(|block| block.get("text").and_then(Value::as_str))
+            .unwrap_or("");
+        let wanted = expect.trim();
+        if first.trim() != wanted && prompt_text(prompt).trim() != wanted {
+            return Err(CutError::Differs);
+        }
+    }
+    if at == 0 {
+        return Err(CutError::NothingBefore);
+    }
+    let mut cut = Document::new(doc.header.clone());
+    cut.header.digest = None;
+    cut.lines = doc.lines[..at].to_vec();
+    Ok(cut)
+}
+
 #[cfg(test)]
 mod tests;

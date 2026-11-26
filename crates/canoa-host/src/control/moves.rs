@@ -281,6 +281,19 @@ impl Moves {
             return Err(bad("that source serves only under its working roots"));
         }
         let session = new_uuid()?;
+        let cut;
+        let doc = match params.get("before") {
+            None | Some(Value::Null) => doc,
+            Some(before) => {
+                let turn = before
+                    .as_u64()
+                    .and_then(|turn| usize::try_from(turn).ok())
+                    .ok_or_else(|| bad("before is a turn number, from 0"))?;
+                cut = history::before_turn(doc, turn, text_param(params, "expect")?)
+                    .map_err(|error| (BAD_PARAMS, error.to_string()))?;
+                &cut
+            }
+        };
         let moved = history::reidentified(doc, &session);
         let text = moved
             .to_string()
