@@ -447,10 +447,16 @@ const GIT_USR_BASH: &str = "/usr/bin/bash.exe";
 /// package's `WindowsApps/Microsoft.PowerShell_x/pwsh.exe` name one program, as do Git for Windows' `bin/bash.exe` and the
 /// `usr/bin/bash.exe` it starts; any other path names itself.
 fn program_key(path: &Path) -> String {
-    // The same file reached through a link, a `..` or another spelling is one program.
-    let text = std::fs::canonicalize(path).map_or_else(
-        |_| plain(path),
-        |real| plain(&real).trim_start_matches("//?/").to_owned(),
+    // The same folder reached through a link, a `..` or another spelling holds one program. The file's own name stays: two
+    // commands that link to one binary (`pwsh` and `bash` to a stand-in, `sh` to `bash`) are two shells a person names apart.
+    let real = path
+        .parent()
+        .and_then(|dir| std::fs::canonicalize(dir).ok())
+        .zip(path.file_name())
+        .map(|(dir, file)| dir.join(file));
+    let text = real.as_deref().map_or_else(
+        || plain(path),
+        |real| plain(real).trim_start_matches("//?/").to_owned(),
     );
     if let Some(at) = text.find(STORE_ALIASES) {
         let file = text.rsplit('/').next().unwrap_or_default();
@@ -1049,6 +1055,30 @@ mod tests {
         };
         let found = detect(&lookup);
         assert_eq!(ids(&found), ["bash"], "{found:#?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn two_commands_linked_to_one_binary_are_two_shells() {
+        let root = scratch("linked");
+        let real = root.join("real/shell");
+        touch(&real);
+        for name in ["bash", "zsh"] {
+            std::fs::create_dir_all(root.join("bin")).expect("folder");
+            std::os::unix::fs::symlink(&real, root.join("bin").join(name)).expect("linked");
+        }
+        let lookup = Lookup {
+            path: vec![root.join("bin")],
+            ..Lookup::default()
+        };
+        let found = detect(&lookup);
+        let named: Vec<_> = found
+            .iter()
+            .filter(|shell| shell.path.starts_with(root.join("bin")))
+            .map(|shell| shell.id.as_str())
+            .collect();
+        assert_eq!(named, ["bash", "zsh"], "{found:#?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
