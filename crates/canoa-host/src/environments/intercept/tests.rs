@@ -607,9 +607,14 @@ fn opened_in(
         max_bytes,
     )
     .expect("the channel opens");
-    interception.plugin_for("1", cwd).expect("the plugin is written");
+    interception
+        .plugin_for("1", cwd)
+        .expect("the plugin is written");
     // A test never reads the folder of the person who runs it.
-    interception.shared.own_folder.store(false, Ordering::SeqCst);
+    interception
+        .shared
+        .own_folder
+        .store(false, Ordering::SeqCst);
     let channel = interception.channel_of("1").expect("a channel");
     (interception, channel)
 }
@@ -1170,8 +1175,11 @@ impl Project {
         let dir = std::env::temp_dir().join(format!("canoa-person-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".claude")).expect("a project");
-        std::fs::write(dir.join(".claude").join("settings.json"), settings.to_string())
-            .expect("settings");
+        std::fs::write(
+            dir.join(".claude").join("settings.json"),
+            settings.to_string(),
+        )
+        .expect("settings");
         Self(dir)
     }
 }
@@ -1212,13 +1220,8 @@ fn the_persons_own_deny_and_ask_rules_reach_the_environments_tools_in_every_mode
         }}),
     );
     let modes = Arc::new(Modes::default());
-    let (_interception, channel) = opened_in(
-        "box",
-        1 << 20,
-        &modes,
-        "",
-        &project.0.to_string_lossy(),
-    );
+    let (_interception, channel) =
+        opened_in("box", 1 << 20, &modes, "", &project.0.to_string_lossy());
     for mode in [
         "default",
         "acceptEdits",
@@ -1227,13 +1230,20 @@ fn the_persons_own_deny_and_ask_rules_reach_the_environments_tools_in_every_mode
         "dontAsk",
         "bypassPermissions",
     ] {
-        let read = answered(&channel, &env_call("fs_read", mode, &json!({"path": "/work/app/.env"})));
+        let read = answered(
+            &channel,
+            &env_call("fs_read", mode, &json!({"path": "/work/app/.env"})),
+        );
         assert_eq!(decision(&read), Some("deny"), "{mode}: {read:?}");
-        let reason = read.as_ref().expect("an answer")["hookSpecificOutput"]["permissionDecisionReason"]
-            .as_str()
-            .expect("a reason");
+        let reason =
+            read.as_ref().expect("an answer")["hookSpecificOutput"]["permissionDecisionReason"]
+                .as_str()
+                .expect("a reason");
         assert!(reason.contains("/work/app/.env"), "{reason}");
-        let list = answered(&channel, &env_call("fs_list", mode, &json!({"path": "/work/app/.env"})));
+        let list = answered(
+            &channel,
+            &env_call("fs_list", mode, &json!({"path": "/work/app/.env"})),
+        );
         assert_eq!(decision(&list), Some("deny"), "{mode}");
         let edit = answered(
             &channel,
@@ -1246,26 +1256,48 @@ fn the_persons_own_deny_and_ask_rules_reach_the_environments_tools_in_every_mode
         assert_eq!(decision(&edit), Some("deny"), "{mode}");
         let run = answered(
             &channel,
-            &env_call("exec", mode, &json!({"program": "bash", "args": ["-c", "ls && rm -rf build"]})),
+            &env_call(
+                "exec",
+                mode,
+                &json!({"program": "bash", "args": ["-c", "ls && rm -rf build"]}),
+            ),
         );
         assert_eq!(decision(&run), Some("deny"), "{mode}");
         let push = answered(
             &channel,
-            &env_call("exec", mode, &json!({"program": "git", "args": ["push", "origin"]})),
+            &env_call(
+                "exec",
+                mode,
+                &json!({"program": "git", "args": ["push", "origin"]}),
+            ),
         );
         assert_eq!(decision(&push), Some("ask"), "{mode}");
         // What no rule names goes on as it is, and so does a write that is not one of the Edit rule's.
-        let fine = answered(&channel, &env_call("fs_read", mode, &json!({"path": "/work/app/main.rs"})));
+        let fine = answered(
+            &channel,
+            &env_call("fs_read", mode, &json!({"path": "/work/app/main.rs"})),
+        );
         assert_eq!(fine, None, "{mode}");
         let written = answered(
             &channel,
-            &env_call("fs_write", mode, &json!({"path": "/work/app/.env", "content": "x"})),
+            &env_call(
+                "fs_write",
+                mode,
+                &json!({"path": "/work/app/.env", "content": "x"}),
+            ),
         );
-        assert_eq!(written, None, "a Read rule is not a rule for writing ({mode})");
+        assert_eq!(
+            written, None,
+            "a Read rule is not a rule for writing ({mode})"
+        );
     }
     let asked = answered(
         &channel,
-        &env_call("fs_write", "bypassPermissions", &json!({"path": "/work/notes", "content": "x"})),
+        &env_call(
+            "fs_write",
+            "bypassPermissions",
+            &json!({"path": "/work/notes", "content": "x"}),
+        ),
     );
     assert_eq!(decision(&asked), Some("ask"));
 }
@@ -1276,7 +1308,10 @@ fn without_the_persons_rules_the_environments_tools_pass_as_they_did() {
     let modes = Arc::new(Modes::default());
     let (_interception, channel) =
         opened_in("box", 1 << 20, &modes, "", &project.0.to_string_lossy());
-    let read = answered(&channel, &env_call("fs_read", "default", &json!({"path": "/work/.env"})));
+    let read = answered(
+        &channel,
+        &env_call("fs_read", "default", &json!({"path": "/work/.env"})),
+    );
     assert_eq!(read, None);
 }
 
@@ -1299,11 +1334,9 @@ fn the_rules_of_the_agents_own_folder_are_read_where_the_hook_runs_the_forwarder
     let input = json!({"path": "/home/me/.ssh/id"});
     let input = input.as_object().expect("an object");
     let home = dir.to_string_lossy().into_owned();
-    let found = interception.shared.person(
-        &holder,
-        Some(&home),
-        ("mcp__env_box__fs_read", input),
-    );
+    let found = interception
+        .shared
+        .person(&holder, Some(&home), ("mcp__env_box__fs_read", input));
     let _ = std::fs::remove_dir_all(&dir);
     assert!(matches!(found, Some(Judged::Deny(_))), "{found:?}");
 }
@@ -1329,7 +1362,8 @@ fn monitor_is_turned_to_the_environment_like_a_shell_but_is_not_offered_for_wait
 }
 
 #[test]
-fn a_session_held_at_plan_leaves_it_on_the_persons_own_allowance_of_the_agents_request_and_no_report_alone_raises_it() {
+fn a_session_held_at_plan_leaves_it_on_the_persons_own_allowance_of_the_agents_request_and_no_report_alone_raises_it()
+ {
     let link = hub("canoa")
         .for_connection(None, &serve("box"), Some("claude"))
         .expect("made")
@@ -1342,13 +1376,15 @@ fn a_session_held_at_plan_leaves_it_on_the_persons_own_allowance_of_the_agents_r
         );
     };
     let ask = |id: u64, session: &str, kind: &str| {
-        agent(json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {
+        agent(
+            json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {
             "sessionId": session,
             "toolCall": {"toolCallId": "t", "kind": kind, "title": "Ready to code?"},
             "options": [
                 {"optionId": "yes", "name": "Yes", "kind": "allow_once"},
                 {"optionId": "no", "name": "No", "kind": "reject_once"},
-            ]}}));
+            ]}}),
+        );
     };
     let answer = |id: u64, option: Option<&str>| {
         let outcome = option.map_or(
@@ -1414,7 +1450,13 @@ fn a_session_held_at_plan_leaves_it_on_the_persons_own_allowance_of_the_agents_r
 }
 
 /// The agent's announcement of a tool call: `sessionUpdate` is `tool_call` or `tool_call_update`.
-fn call_update(kind: &str, id: &str, tool: Option<&str>, command: Option<&str>, status: &str) -> Value {
+fn call_update(
+    kind: &str,
+    id: &str,
+    tool: Option<&str>,
+    command: Option<&str>,
+    status: &str,
+) -> Value {
     let mut update = json!({"sessionUpdate": kind, "toolCallId": id, "status": status});
     if let Some(tool) = tool {
         update["_meta"] = json!({"claudeCode": {"toolName": tool}});
@@ -1460,11 +1502,29 @@ fn a_call_the_agent_finished_that_the_hook_did_not_prepare_cancels_the_turn() {
         bash("ls /work").to_string().as_bytes(),
     );
     assert_eq!(status, 0, "{err}");
-    agent(call_update("tool_call", "c1", Some("Bash"), Some("ls /work"), "pending"));
-    agent(call_update("tool_call_update", "c1", None, None, "completed"));
+    agent(call_update(
+        "tool_call",
+        "c1",
+        Some("Bash"),
+        Some("ls /work"),
+        "pending",
+    ));
+    agent(call_update(
+        "tool_call_update",
+        "c1",
+        None,
+        None,
+        "completed",
+    ));
     assert_eq!(cancelled(), None, "prepared by the hook");
     // A call whose hook refused it ends failed, and a tool that acts on nothing here, or the host's own, ends as it should.
-    agent(call_update("tool_call", "c2", Some("Read"), None, "pending"));
+    agent(call_update(
+        "tool_call",
+        "c2",
+        Some("Read"),
+        None,
+        "pending",
+    ));
     agent(call_update("tool_call_update", "c2", None, None, "failed"));
     for (id, tool) in [("c3", "TodoWrite"), ("c4", "mcp__env_box__fs_read")] {
         agent(call_update("tool_call", id, Some(tool), None, "pending"));
@@ -1507,9 +1567,10 @@ fn an_agent_older_than_the_hooks_failure_handling_is_not_started_and_one_that_sa
             &link,
             &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}),
         );
-        let info = title.map_or(json!({"name": "coqui-acp-claude"}), |title| {
-            json!({"name": "coqui-acp-claude", "title": title})
-        });
+        let info = title.map_or(
+            json!({"name": "coqui-acp-claude"}),
+            |title| json!({"name": "coqui-acp-claude", "title": title}),
+        );
         link.agent_said(
             json!({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": 1, "agentInfo": info}})
                 .to_string()
@@ -1519,7 +1580,10 @@ fn an_agent_older_than_the_hooks_failure_handling_is_not_started_and_one_that_sa
             (Said::Answered(answer), true) => {
                 let answer: Value = serde_json::from_slice(&answer).expect("JSON");
                 let why = answer["error"]["message"].as_str().expect("why");
-                assert!(why.contains("2.1.295") && why.contains("environment box"), "{why}");
+                assert!(
+                    why.contains("2.1.295") && why.contains("environment box"),
+                    "{why}"
+                );
             }
             (Said::On(_), false) => {}
             (other, _) => panic!("{title:?}: {other:?}"),
@@ -1528,10 +1592,14 @@ fn an_agent_older_than_the_hooks_failure_handling_is_not_started_and_one_that_sa
 }
 
 #[test]
-fn an_agent_that_does_its_own_work_and_was_started_as_a_program_is_refused_where_it_cannot_be_turned() {
+fn an_agent_that_does_its_own_work_and_was_started_as_a_program_is_refused_where_it_cannot_be_turned()
+ {
     use super::super::mcp::Said;
     let session = json!({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/w", "mcpServers": []}});
-    for (name, refused) in [("coqui-acp-claude", true), ("an-agent-that-only-talks", false)] {
+    for (name, refused) in [
+        ("coqui-acp-claude", true),
+        ("an-agent-that-only-talks", false),
+    ] {
         // No harness: the connection runs a program, so the host cannot say which agent it is until it answers.
         let link = hub("canoa")
             .for_connection(None, &serve("box"), None)
@@ -1551,7 +1619,10 @@ fn an_agent_that_does_its_own_work_and_was_started_as_a_program_is_refused_where
             (Said::Answered(answer), true) => {
                 let answer: Value = serde_json::from_slice(&answer).expect("JSON");
                 let why = answer["error"]["message"].as_str().expect("why");
-                assert!(why.contains("Claude") && why.contains("environment box"), "{why}");
+                assert!(
+                    why.contains("Claude") && why.contains("environment box"),
+                    "{why}"
+                );
             }
             (Said::On(_), false) => {}
             (other, _) => panic!("{name}: {other:?}"),

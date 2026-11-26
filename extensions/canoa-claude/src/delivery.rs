@@ -192,7 +192,11 @@ pub(crate) fn tool_hook() -> ToolHook {
         SHELL_TOOLS
             .iter()
             .map(|(name, shell)| HookTool::shell(*name, "command", *shell))
-            .chain([HookTool::background(WATCH_TOOL, "command", ShellFamily::Bash)])
+            .chain([HookTool::background(
+                WATCH_TOOL,
+                "command",
+                ShellFamily::Bash,
+            )])
             .chain(FILE_TOOLS.iter().map(|name| HookTool::files(*name)))
             .chain(PASS_TOOLS.iter().map(|name| HookTool::passes(*name)))
             .collect(),
@@ -364,7 +368,10 @@ mod tests {
         let ask: serde_json::Value =
             serde_json::from_str(hook.ask.as_deref().expect("an ask answer")).expect("JSON");
         assert_eq!(ask["hookSpecificOutput"]["permissionDecision"], "ask");
-        assert!(ask.pointer(hook.ask_reason_at.as_deref().expect("a place")).is_some());
+        assert!(
+            ask.pointer(hook.ask_reason_at.as_deref().expect("a place"))
+                .is_some()
+        );
     }
 
     #[test]

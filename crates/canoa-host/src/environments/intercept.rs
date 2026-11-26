@@ -77,6 +77,8 @@ const WAIT_SLICE_MS: u64 = 200;
 const MAX_SEEN: usize = 512;
 /// How long a stopped command's end is waited for before its status is given up.
 const END_GRACE: Duration = Duration::from_secs(2);
+/// A session and the id of one of its tool calls.
+type CallKey = (String, String);
 /// A frame of a command's output, and the last frame, which says how it ended.
 const TAG_OUTPUT: u8 = 1;
 const TAG_END: u8 = 2;
@@ -445,7 +447,7 @@ struct Shared {
     /// be one of these.
     originals: Mutex<BTreeMap<String, VecDeque<String>>>,
     /// The calls the agent announced that are not done, by session and call id: the tool and its command.
-    calls: Mutex<BTreeMap<(String, String), (String, Option<String>)>>,
+    calls: Mutex<BTreeMap<CallKey, (String, Option<String>)>>,
     max_bytes: usize,
     /// How long a forwarder may take for its answer, in all: the environment's `hook_seconds`.
     seconds: u64,
@@ -698,8 +700,8 @@ impl Interception {
         let key = (session.to_owned(), id.to_owned());
         match update.get("sessionUpdate").and_then(Value::as_str) {
             Some("tool_call") => {
-                let pointer = crate::vendors::by_agent(&self.harness)
-                    .and_then(|vendor| vendor.tool_name);
+                let pointer =
+                    crate::vendors::by_agent(&self.harness).and_then(|vendor| vendor.tool_name);
                 let name = pointer
                     .and_then(|pointer| update.get("_meta")?.pointer(pointer))
                     .and_then(Value::as_str);
@@ -1228,10 +1230,7 @@ impl Shared {
         }
         if stopped {
             // Its status, if the environment says it soon; else none, and the reader is left to end when its own read does.
-            exit = waited
-                .recv_timeout(END_GRACE)
-                .ok()
-                .and_then(Result::ok);
+            exit = waited.recv_timeout(END_GRACE).ok().and_then(Result::ok);
         }
         abandoned.store(true, Ordering::SeqCst);
         if !stopped && let Some(reader) = reader {

@@ -68,10 +68,7 @@ fn rules_in(request: &RulesRequest, managed: Option<PathBuf>) -> Vec<PersonRule>
 /// The deny and ask rules one settings document holds.
 pub(crate) fn rules_of(settings: &Value) -> Vec<PersonRule> {
     let mut rules = Vec::new();
-    for (key, decision) in [
-        ("deny", RuleDecision::Deny),
-        ("ask", RuleDecision::Ask),
-    ] {
+    for (key, decision) in [("deny", RuleDecision::Deny), ("ask", RuleDecision::Ask)] {
         let listed = settings
             .pointer(&format!("/permissions/{key}"))
             .and_then(Value::as_array);
@@ -156,7 +153,10 @@ pub(crate) fn commands(specifier: Option<&str>) -> Vec<Option<String>> {
         return vec![None];
     }
     match specifier.strip_suffix(":*") {
-        Some(prefix) => vec![Some(prefix.trim().to_owned()), Some(format!("{} *", prefix.trim()))],
+        Some(prefix) => vec![
+            Some(prefix.trim().to_owned()),
+            Some(format!("{} *", prefix.trim())),
+        ],
         None => vec![Some(specifier.to_owned())],
     }
 }
@@ -174,7 +174,8 @@ mod tests {
     }
 
     #[test]
-    fn read_edit_write_and_command_rules_become_the_hosts_rules_and_the_rest_is_left_to_claude_code() {
+    fn read_edit_write_and_command_rules_become_the_hosts_rules_and_the_rest_is_left_to_claude_code()
+     {
         let found = of(&json!({"permissions": {
             "deny": ["Read(./.env)", "Edit(~/.ssh/**)", "Write(//etc/**)", "Bash(rm:*)", "WebFetch(domain:example.com)", "mcp__x"],
             "ask": ["Read", "Bash(git push *)", "PowerShell(Remove-Item)"],
@@ -229,8 +230,11 @@ mod tests {
             r#"{"permissions":{"ask":["Bash(git push:*)"]}}"#,
         )
         .expect("project settings");
-        std::fs::write(project.join(".claude").join("settings.local.json"), "not json")
-            .expect("local settings");
+        std::fs::write(
+            project.join(".claude").join("settings.local.json"),
+            "not json",
+        )
+        .expect("local settings");
         let found = rules_in(
             &RulesRequest::new(
                 Some(home.to_string_lossy().into_owned()),

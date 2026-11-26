@@ -257,7 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn a_deny_rule_for_reading_a_path_refuses_the_environments_read_of_it_and_a_write_is_not_a_read() {
+    fn a_deny_rule_for_reading_a_path_refuses_the_environments_read_of_it_and_a_write_is_not_a_read()
+     {
         let rules = [rule(RuleDecision::Deny, RuleAccess::Read, Some(".env"))];
         let read = json!({"path": "/work/app/.env"});
         assert!(matches!(
@@ -270,7 +271,11 @@ mod tests {
         ));
         assert_eq!(judged(&rules, "mcp__env_box__fs_write", &read), None);
         assert_eq!(
-            judged(&rules, "mcp__env_box__fs_read", &json!({"path": "/work/app/main.rs"})),
+            judged(
+                &rules,
+                "mcp__env_box__fs_read",
+                &json!({"path": "/work/app/main.rs"})
+            ),
             None
         );
     }
@@ -282,7 +287,10 @@ mod tests {
         // Not an environment's server, not an MCP name, and a tool with nothing to read.
         assert_eq!(judged(&rules, "mcp__other__fs_read", &read), None);
         assert_eq!(judged(&rules, "Read", &read), None);
-        assert_eq!(judged(&rules, "mcp__env_box__terminal_read", &json!({"id": "1"})), None);
+        assert_eq!(
+            judged(&rules, "mcp__env_box__terminal_read", &json!({"id": "1"})),
+            None
+        );
         assert!(judged(&rules, "mcp__env_box__fs_read", &read).is_some());
     }
 
@@ -314,7 +322,11 @@ mod tests {
         let rules = [rule(RuleDecision::Deny, RuleAccess::Write, Some(".env"))];
         let patch = "*** Begin Patch\n*** Add File: /w/ok.txt\n+a\n*** Add File: /w/.env\n+b\n*** End Patch";
         assert!(matches!(
-            judged(&rules, "mcp__env_box__apply_patch", &json!({"patch": patch})),
+            judged(
+                &rules,
+                "mcp__env_box__apply_patch",
+                &json!({"patch": patch})
+            ),
             Some(Judged::Deny(_))
         ));
         let fine = "*** Begin Patch\n*** Add File: /w/ok.txt\n+a\n*** End Patch";
@@ -338,16 +350,28 @@ mod tests {
             )
         };
         assert!(denied(json!({"program": "rm", "args": ["-rf", "x"]})));
-        assert!(denied(json!({"program": "bash", "args": ["-c", "ls && rm -rf x"]})));
-        assert!(denied(json!({"program": "/bin/sh", "args": ["-c", "echo a; rm b"]})));
+        assert!(denied(
+            json!({"program": "bash", "args": ["-c", "ls && rm -rf x"]})
+        ));
+        assert!(denied(
+            json!({"program": "/bin/sh", "args": ["-c", "echo a; rm b"]})
+        ));
         assert!(!denied(json!({"program": "rmdir", "args": ["x"]})));
         assert!(!denied(json!({"program": "ls", "args": ["rm"]})));
         assert!(matches!(
-            judged(&rules, "mcp__env_box__exec", &json!({"program": "git", "args": ["push", "origin"]})),
+            judged(
+                &rules,
+                "mcp__env_box__exec",
+                &json!({"program": "git", "args": ["push", "origin"]})
+            ),
             Some(Judged::Ask(_))
         ));
         assert!(matches!(
-            judged(&rules, "mcp__env_box__terminal_send", &json!({"id": "1", "text": "rm x\n"})),
+            judged(
+                &rules,
+                "mcp__env_box__terminal_send",
+                &json!({"id": "1", "text": "rm x\n"})
+            ),
             Some(Judged::Deny(_))
         ));
     }
@@ -361,11 +385,19 @@ mod tests {
             Some(Judged::Deny(why)) if why.contains("give the full path")
         ));
         assert!(matches!(
-            judged(&anchored(RuleDecision::Ask), "mcp__env_box__fs_read", &relative),
+            judged(
+                &anchored(RuleDecision::Ask),
+                "mcp__env_box__fs_read",
+                &relative
+            ),
             Some(Judged::Ask(_))
         ));
         assert!(matches!(
-            judged(&anchored(RuleDecision::Deny), "mcp__env_box__fs_read", &json!({"path": "/etc/passwd"})),
+            judged(
+                &anchored(RuleDecision::Deny),
+                "mcp__env_box__fs_read",
+                &json!({"path": "/etc/passwd"})
+            ),
             Some(Judged::Deny(_))
         ));
     }
@@ -384,7 +416,10 @@ mod tests {
         assert_eq!(loaded.get(), 0);
         let path = json!({"path": "/x"});
         let object = path.as_object().expect("an object");
-        assert_eq!(judge(&hook(), &servers, &load, ("mcp__env_a__fs_read", object)), None);
+        assert_eq!(
+            judge(&hook(), &servers, &load, ("mcp__env_a__fs_read", object)),
+            None
+        );
         assert_eq!(loaded.get(), 1);
     }
 }

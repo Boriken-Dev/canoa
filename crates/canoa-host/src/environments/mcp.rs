@@ -1550,7 +1550,8 @@ impl Link {
             return;
         };
         tracing::warn!("the turn of session {session} is cancelled: {why}");
-        let cancel = json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session}});
+        let cancel =
+            json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session}});
         if let Ok(bytes) = serde_json::to_vec(&cancel) {
             lock(&self.queue).push_back(bytes);
         }
