@@ -56,6 +56,7 @@ final class ScriptedCatalogs {
     'format': 'canoa.models/1',
     'catalogs': _merge('whisper', [_acme], format: true),
     'sources': [_read, _hub],
+    'generators': [_listing],
   };
 
   static const _read = {
@@ -66,6 +67,19 @@ final class ScriptedCatalogs {
       'required': ['source'],
       'properties': {
         'source': {'type': 'string', 'title': 'Source'},
+      },
+    },
+  };
+
+  static const _listing = {
+    'id': 'models_listing',
+    'title': 'A generated list of models',
+    'source': 'required',
+    'grammar': 'hf://owner/name',
+    'schema': {
+      'type': 'object',
+      'properties': {
+        'include': {'type': 'string', 'title': 'Files to include'},
       },
     },
   };
@@ -113,10 +127,11 @@ final class ScriptedCatalogs {
   Map<String, Object?> _row(String label, Object? value, String origin, {required bool format}) {
     final table = value is Map ? value.cast<String, Object?>() : {'provider': 'read', 'source': value};
     final provider = table['provider'] as String? ?? 'read';
-    final fields = {for (final MapEntry(:key, :value) in table.entries) if (!{'provider', 'pin', 'ttl', 'keys'}.contains(key)) key: value};
+    final fields = {for (final MapEntry(:key, :value) in table.entries) if (!{'provider', 'generator', 'pin', 'ttl', 'keys'}.contains(key)) key: value};
     return {
       'label': label,
       'provider': provider,
+      if (table['generator'] != null) 'generator': table['generator'],
       'fields': fields,
       if (fields['source'] != null) 'source': fields['source'],
       'default': false,

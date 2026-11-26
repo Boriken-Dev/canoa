@@ -38,6 +38,9 @@ void main() {
       expect(acme.hasSnapshot, isTrue);
       final mine = whisper.rows.last;
       expect((mine.origin, mine.trust, mine.spec?.provider), ('added', 'pinned', 'whisper_hf'));
+      expect(whisper.generators.map((each) => (each.id, each.generator)), [('models_listing', true)]);
+      expect(whisper.forms.map((each) => each.id), ['read', 'models_listing', 'whisper_hf'], reason: 'the document first, then generators, then providers not yet moved');
+      expect(whisper.generators.single.schema['required'], ['source'], reason: 'a generator that reads a source asks for it first');
       expect(sources.types.first.format, isNull);
       expect(sources.types.first.rows.first.trust, isNull, reason: 'a type the host reads itself has no trust to say');
       sources.dispose();
@@ -146,6 +149,47 @@ void main() {
       expect(entry['pin'], '9d8c7b6a5f4e3d2c1b0a99887766554433221100');
       expect(find.descendant(of: _tile('whisper', 'mine'), matching: find.text('pinned')), findsOneWidget);
       expect(find.byKey(const Key('catalog-trust-whisper-mine')), findsOneWidget);
+    });
+
+    testWidgets('a path typed for a catalog is written as a file URI, and a type with its own grammar keeps what was typed', (tester) async {
+      final (host, _) = await open(tester);
+      await tester.tap(find.byKey(const Key('catalog-add-whisper')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('catalog-entry-label')), 'local');
+      await tester.enterText(find.byKey(const Key('catalog-entry-source')), r'D:\models\whisper list.json');
+      await tester.tap(find.byKey(const Key('catalog-entry-save')));
+      await tester.pumpAndSettle();
+      expect(host.calls.where((call) => call.$1 == 'store/catalog_set').last.$2['entry'], 'file:///D:/models/whisper%20list.json');
+
+      await tester.tap(find.byKey(const Key('catalog-add-overlays')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('catalog-entry-label')), 'plain');
+      await tester.enterText(find.byKey(const Key('catalog-entry-source')), 'owner/repo');
+      await tester.tap(find.byKey(const Key('catalog-entry-save')));
+      await tester.pumpAndSettle();
+      expect(host.calls.where((call) => call.$1 == 'store/catalog_set').last.$2['entry'], 'owner/repo', reason: 'the overlays reader takes its own grammar');
+    });
+
+    testWidgets('a catalog is made by a generator: its source is written as a URI beside the generator and its own fields', (tester) async {
+      final (host, _) = await open(tester);
+      await tester.tap(find.byKey(const Key('catalog-add-whisper')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('catalog-entry-label')), 'made');
+      await tester.tap(find.byKey(const Key('catalog-entry-provider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('A generated list of models').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('catalog-entry-source')), 'https://github.com/o/r/tree/main/models');
+      await tester.enterText(find.byKey(const Key('catalog-entry-models_listing-field-include')), 'ggml*');
+      await tester.tap(find.byKey(const Key('catalog-entry-save')));
+      await tester.pumpAndSettle();
+      expect(host.calls.where((call) => call.$1 == 'store/catalog_set').last.$2['entry'], {
+        'generator': 'models_listing',
+        'source': 'git+https://github.com/o/r.git!/models?ref=main',
+        'include': 'ggml*',
+      });
+      expect(find.descendant(of: _tile('whisper', 'made'), matching: find.textContaining('git+https://github.com/o/r.git!/models?ref=main')), findsOneWidget);
+
     });
 
     testWidgets('what the host refuses is said in the dialog and the dialog stays open', (tester) async {

@@ -63,6 +63,7 @@ built_in_sections! {
     Usage("usage", "Usage", "Agents", "speed", "limit warn percent quota");
     Extensions("extensions", "Libraries", "Extensions", "extension", "extensions libraries library file source host loads load add by hand provider store types restart");
     CatalogSources("catalog_sources", "Catalog sources", "Store", "hub", "catalogs sources models releases default replace add off pin trust verified pinned unverified checksum digest mirror");
+    Content("content", "Content", "Store", "hub", "content sources schemes uri file https git data generators cache try read list stat resolve documents ttl provider scheme");
     Advanced("advanced", "Advanced", "Store", "wrench", "configuration {config_file} tables keys web control native network delegate kb history worktrees tools environments openers limits advanced edit add remove");
     Providers("providers", "Providers", "Extensions", "wrench", "providers libraries kinds account harness vendor off disable switch turn disabled host restart");
     About("about", "About", "About", "info", "version {program} boriken licence");

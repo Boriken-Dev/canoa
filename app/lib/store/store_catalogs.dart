@@ -15,6 +15,7 @@ import '../shell/confirm_remove.dart';
 import '../theme/look.dart';
 import 'catalog_types.dart';
 import 'overlay_page.dart' show oneLine;
+import 'source_uri.dart';
 import 'store.dart';
 import 'store_settings.dart';
 
@@ -191,8 +192,8 @@ class CatalogRowTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    final provider = row.spec?.provider;
-    final titled = provider == null ? null : c.typeOf(type)?.sources.where((source) => source.id == provider).firstOrNull?.title;
+    final provider = row.spec?.generator ?? row.spec?.provider;
+    final titled = provider == null ? null : c.typeOf(type)?.forms.where((source) => source.id == provider).firstOrNull?.title;
     return ListTile(
       key: Key('store-catalog-${row.label}'),
       contentPadding: EdgeInsets.zero,
@@ -200,7 +201,7 @@ class CatalogRowTile extends StatelessWidget {
       subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text([
           if (row.shown.isNotEmpty) row.shown,
-          if (provider != null && provider != readProvider) 'Read by ${titled ?? provider}',
+          if (provider != null && provider != readProvider) '${row.spec?.generator != null ? 'Made by' : 'Read by'} ${titled ?? provider}',
           ?row.problem,
         ].map(oneLine).join('\n')),
         SettingNote(
@@ -265,22 +266,28 @@ class _AddCatalogFormState extends State<AddCatalogForm> {
   }
 
   List<CatalogSourceForm> get offered {
-    final given = widget.controller.typeOf(widget.type)?.sources ?? const [];
+    final given = widget.controller.typeOf(widget.type)?.forms ?? const [];
     return given.isEmpty ? const [_readForm] : given;
   }
 
-  CatalogSourceForm get form => offered.where((each) => each.id == chosen).firstOrNull ?? offered.first;
+  /// What tells a generator from a provider of the same id.
+  static String idOf(CatalogSourceForm form) => form.generator ? 'generator:${form.id}' : form.id;
+
+  CatalogSourceForm get form => offered.where((each) => idOf(each) == chosen).firstOrNull ?? offered.first;
 
   Future<void> _add() async {
     final form = this.form;
-    final values = held[form.id] ?? const <String, Object?>{};
+    final values = held[idOf(form)] ?? const <String, Object?>{};
     final invalid = schemaProblem(form.schema, form.form, values);
     if (invalid != null) {
       setState(() => problem = invalid);
       return;
     }
     final kept = collectSchemaValues(form.schema, form.form, values);
-    final why = await widget.controller.addCatalogOf(widget.type, label.text, form.id, kept);
+    // What was typed is written as the full URI, for a type whose catalogs are read through the content sources.
+    final uris = widget.controller.typeOf(widget.type)?.readsUris ?? false;
+    if (kept['source'] case final String typed) kept['source'] = sourceUri(typed, uris: uris);
+    final why = await widget.controller.addCatalogOf(widget.type, label.text, form.id, kept, generator: form.generator);
     if (!mounted) return;
     setState(() => problem = why);
     if (why == null) {
@@ -307,10 +314,10 @@ class _AddCatalogFormState extends State<AddCatalogForm> {
         if (offered.length > 1)
           DropdownButton<String>(
             key: const Key('store-source-provider'),
-            value: form.id,
+            value: idOf(form),
             items: [
               for (final each in offered)
-                DropdownMenuItem(value: each.id, child: Text(each.extension == null ? each.title : '${each.title} (${each.extension})')),
+                DropdownMenuItem(value: idOf(each), child: Text(each.extension == null ? each.title : '${each.title} (${each.extension})')),
             ],
             onChanged: (id) => setState(() {
               chosen = id;
@@ -320,14 +327,14 @@ class _AddCatalogFormState extends State<AddCatalogForm> {
       ]),
       if (form.help case final help?) Padding(padding: const EdgeInsets.only(top: 4), child: Text(help)),
       SchemaFields(
-        key: ValueKey('${form.id}/$generation'),
+        key: ValueKey('${idOf(form)}/$generation'),
         schema: form.schema,
         form: form.form,
-        values: held[form.id] ?? const {},
+        values: held[idOf(form)] ?? const {},
         idPrefix: 'store-${form.id}',
-        keys: form.id == readProvider ? const {'source': 'store-catalog-source'} : const {},
+        keys: form.id == readProvider || form.generator ? const {'source': 'store-catalog-source'} : const {},
         unsetEntry: true,
-        onValues: (values) => held[form.id] = values,
+        onValues: (values) => held[idOf(form)] = values,
         onSubmitted: () => unawaited(_add()),
       ),
       if (problem != null)

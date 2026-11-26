@@ -11,6 +11,7 @@ import 'package:canoa/settings/provider_switches.dart';
 import 'package:canoa/settings/settings_page.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/catalog_sources.dart';
+import 'package:canoa/store/content_settings.dart';
 import 'package:canoa/store/programs.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:canoa/voice/host_speech.dart';
@@ -59,6 +60,7 @@ Future<SettingsHarness> openSettings(
   PortalSession? portal,
   ProviderSwitches? providers,
   CatalogSources? catalogSources,
+  ContentSettings? contentSettings,
   AdvancedConfig? advancedConfig,
   NotificationsController? notifications,
 }) async {
@@ -96,6 +98,7 @@ Future<SettingsHarness> openSettings(
       portal: portal,
       providers: providers,
       catalogSources: catalogSources,
+      contentSettings: contentSettings,
       advancedConfig: advancedConfig,
       notifications: notifications,
     ),

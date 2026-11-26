@@ -203,6 +203,19 @@ const builtInSectionsListing = r'''
       "collection": null
     },
     {
+      "id": "content",
+      "title": "Content",
+      "help": null,
+      "icon": "hub",
+      "group": "Store",
+      "under": null,
+      "keywords": "content sources schemes uri file https git data generators cache try read list stat resolve documents ttl provider scheme",
+      "origin": "built-in",
+      "stored": "config",
+      "schema": null,
+      "form": null
+    },
+    {
       "id": "advanced",
       "title": "Advanced",
       "help": null,

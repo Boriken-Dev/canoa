@@ -206,7 +206,7 @@ class LoadoutController extends ChangeNotifier {
   /// The labels of the registries a program or an extension generates under `[store.mcps.catalogs]`.
   List<String> get generatedRegistryLabels => [
     for (final MapEntry(:key, :value) in config.catalogSpecs('mcps').entries)
-      if (value.provider != readProvider) key,
+      if (!value.isDocument) key,
   ];
 
   /// The label of the generated registry [address] names, or null for a registry read from an address.
@@ -363,11 +363,12 @@ class LoadoutController extends ChangeNotifier {
   /// Adds the catalog [label] of the Store type [type], read by [provider] from [fields]. The type's own reader checks a source the
   /// `read` provider reads; any other provider's fields are checked against what its form needs. Gives why it cannot be added, or
   /// null. The label is optional: a catalog gets one from where it reads.
-  Future<String?> addCatalogOf(String type, String label, String provider, Map<String, Object?> fields) async {
-    final source = provider == readProvider ? '${fields['source'] ?? ''}'.trim() : null;
+  Future<String?> addCatalogOf(String type, String label, String provider, Map<String, Object?> fields, {bool generator = false}) async {
+    final reads = provider == readProvider && !generator;
+    final source = reads || generator ? '${fields['source'] ?? ''}'.trim() : null;
     var name = label.trim();
     if (name.isEmpty) name = source != null && source.isNotEmpty ? catalogLabelFor(source) : provider;
-    if (provider == readProvider) {
+    if (reads) {
       if (source == null || source.isEmpty) return 'Name a source';
       switch (type) {
         case 'skills':
@@ -381,9 +382,9 @@ class LoadoutController extends ChangeNotifier {
     if (taken.any((key) => aos.normalizeName(key) == aos.normalizeName(name))) return 'Another catalog has the label $name';
     final CanoaConfig changed;
     try {
-      changed = type == 'overlays' && provider == readProvider
+      changed = type == 'overlays' && reads
           ? config.withCatalog(name, source!)
-          : config.withCatalogOf(type, name, CatalogSpec(provider, fields));
+          : config.withCatalogOf(type, name, generator ? CatalogSpec.generated(provider, fields) : CatalogSpec(provider, fields));
     } on FormatException catch (error) {
       return error.message.replaceFirst('canoa.cfg: ', '');
     }
@@ -570,7 +571,7 @@ class LoadoutController extends ChangeNotifier {
   /// The labels of the skill catalogs a program or an extension generates: the host asks it for a listing, which names where each skill is.
   List<String> get generatedSkillSources => [
     for (final MapEntry(:key, :value) in config.catalogSpecs('skills').entries)
-      if (value.provider != readProvider) key,
+      if (!value.isDocument) key,
   ];
 
   /// Reads which skills [label]'s source holds, through the host: at the commit its ref names now, or the listing a program or an

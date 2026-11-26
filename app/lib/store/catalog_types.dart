@@ -25,7 +25,7 @@ final class CatalogWords {
 
 /// A catalog source the host offers a type: the form it asks for, a guatiao schema and the guatiao-intake form that shows it.
 final class CatalogSourceForm {
-  const CatalogSourceForm({required this.id, required this.title, this.help, this.extension, this.schema = const {}, this.form = const {}});
+  const CatalogSourceForm({required this.id, required this.title, this.help, this.extension, this.schema = const {}, this.form = const {}, this.generator = false});
 
   factory CatalogSourceForm.fromAnswer(Map<Object?, Object?> each) => CatalogSourceForm(
     id: '${each['id']}',
@@ -35,6 +35,37 @@ final class CatalogSourceForm {
     schema: each['schema'] is Map ? (each['schema'] as Map).cast<String, Object?>() : const {},
     form: each['form'] is Map ? (each['form'] as Map).cast<String, Object?>() : const {},
   );
+
+  /// A `catalog_generator` of the host's answer. The form it shows starts with the `source` it reads (none for a generator that
+  /// reads nothing): the entry's `source` key.
+  factory CatalogSourceForm.generatorFromAnswer(Map<Object?, Object?> each) {
+    final base = CatalogSourceForm.fromAnswer(each);
+    final use = each['source'] as String? ?? 'required';
+    if (use == 'absent') {
+      return CatalogSourceForm(id: base.id, title: base.title, help: base.help, extension: base.extension, schema: base.schema, form: base.form, generator: true);
+    }
+    final properties = <String, Object?>{
+      'source': {
+        'type': 'string',
+        'title': 'Source',
+        if (each['grammar'] is String) 'description': each['grammar'],
+      },
+      ...(base.schema['properties'] is Map ? (base.schema['properties'] as Map).cast<String, Object?>() : const {}),
+    };
+    final required = <Object?>[if (use == 'required') 'source', ...(base.schema['required'] is List ? base.schema['required'] as List : const [])];
+    return CatalogSourceForm(
+      id: base.id,
+      title: base.title,
+      help: base.help,
+      extension: base.extension,
+      schema: {...base.schema, 'type': 'object', 'properties': properties, if (required.isNotEmpty) 'required': required},
+      form: base.form,
+      generator: true,
+    );
+  }
+
+  /// Whether it is a `catalog_generator` (its entry says `generator`) and not a `catalog_source` provider (`provider`).
+  final bool generator;
 
   final String id, title;
   final String? help;
@@ -100,7 +131,11 @@ final class CatalogRow {
   final bool hasSnapshot;
 
   /// What to show of where it comes from.
-  String get shown => spec == null ? '' : (spec!.source ?? '${spec!.provider}: ${spec!.fields.values.map((v) => v is List ? v.join(' ') : '$v').join(', ')}');
+  String get shown => spec == null
+      ? ''
+      : spec!.generator != null
+      ? (spec!.source ?? '').trim()
+      : (spec!.source ?? '${spec!.provider}: ${spec!.fields.values.map((v) => v is List ? v.join(' ') : '$v').join(', ')}');
 }
 
 /// One Store type that reads catalogs.
@@ -115,6 +150,7 @@ final class CatalogType {
     this.format,
     this.rows = const [],
     this.sources = const [],
+    this.generators = const [],
   });
 
   factory CatalogType.fromAnswer(Map<Object?, Object?> each) {
@@ -135,7 +171,9 @@ final class CatalogType {
           if (row is Map<Object?, Object?>)
             CatalogRow(
               label: '${row['label']}',
-              spec: row['provider'] is String
+              spec: row['generator'] is String
+                  ? CatalogSpec.generated('${row['generator']}', {for (final MapEntry(:key, :value) in ((row['fields'] as Map?) ?? const {}).entries) '$key': value})
+                  : row['provider'] is String
                   ? CatalogSpec('${row['provider']}', {for (final MapEntry(:key, :value) in ((row['fields'] as Map?) ?? const {}).entries) '$key': value})
                   : null,
               isDefault: row['default'] == true,
@@ -152,6 +190,7 @@ final class CatalogType {
             ),
       ],
       sources: [for (final source in each['sources'] as List<Object?>? ?? const []) if (source is Map<Object?, Object?>) CatalogSourceForm.fromAnswer(source)],
+      generators: [for (final one in each['generators'] as List<Object?>? ?? const []) if (one is Map<Object?, Object?>) CatalogSourceForm.generatorFromAnswer(one)],
     );
   }
 
@@ -171,6 +210,20 @@ final class CatalogType {
 
   /// The catalog sources that serve the type, the one that reads what the type reads itself first.
   final List<CatalogSourceForm> sources;
+
+  /// The catalog generators that serve the type.
+  final List<CatalogSourceForm> generators;
+
+  /// Everything an entry can be made with: the source that reads the document (first), the generators, then the providers of
+  /// extensions that have not moved to a generator.
+  List<CatalogSourceForm> get forms => [
+    ...sources.where((each) => each.id == readProvider),
+    ...generators,
+    ...sources.where((each) => each.id != readProvider),
+  ];
+
+  /// Whether the type's catalogs are read through the content sources, so a source is written as a URI.
+  bool get readsUris => format != null;
 }
 
 /// Reads every Store type that has catalogs.

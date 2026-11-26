@@ -29,6 +29,7 @@ import 'sign_in_section.dart';
 import 'extension_settings.dart';
 import 'provider_switches.dart';
 import '../store/catalog_sources.dart';
+import '../store/content_settings.dart';
 import 'advanced_config.dart';
 import 'host_sections.dart';
 import 'shell_settings.dart';
@@ -87,6 +88,7 @@ class SettingsPage extends StatefulWidget {
     this.extensions,
     this.providers,
     this.catalogSources,
+    this.contentSettings,
     this.advancedConfig,
     this.shells,
     this.usageSection = false,
@@ -158,6 +160,7 @@ class SettingsPage extends StatefulWidget {
   /// The catalogs of every Store type, with where each comes from and how far it is trusted, for the Catalog sources section; none
   /// where the app has no host.
   final CatalogSources? catalogSources;
+  final ContentSettings? contentSettings;
 
   /// The tables of canoa.cfg no other page edits; null where there is no host to write them.
   final AdvancedConfig? advancedConfig;
@@ -238,6 +241,7 @@ class SettingsPageState extends State<SettingsPage> {
     'usage': (ready: !widget.usageSection, build: () => UsageWarning(controller: controller)),
     'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),
     'catalog_sources': (ready: widget.catalogSources != null, build: () => CatalogSourcesSection(key: const Key('settings-catalog-sources'), sources: widget.catalogSources!)),
+    'content': (ready: widget.contentSettings != null, build: () => ContentSection(key: const Key('settings-content'), content: widget.contentSettings!)),
     'advanced': (ready: widget.advancedConfig != null, build: () => AdvancedSection(key: const Key('settings-advanced'), config: widget.advancedConfig!)),
     'providers': (ready: widget.providers != null, build: () => ProvidersSection(key: const Key('settings-providers'), switches: widget.providers!)),
     'signin': (ready: widget.portal != null, build: () => SignInSection(key: const Key('settings-signin'), portal: widget.portal!)),

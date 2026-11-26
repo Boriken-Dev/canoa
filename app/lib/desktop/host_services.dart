@@ -15,6 +15,7 @@ import '../settings/advanced_config.dart';
 import '../settings/extension_settings.dart';
 import '../settings/provider_switches.dart';
 import '../store/catalog_sources.dart';
+import '../store/content_settings.dart';
 import '../settings/host_sections.dart';
 import '../settings/shell_settings.dart';
 import '../shell/panel_tabs.dart';
@@ -116,6 +117,7 @@ final class HostServices {
           );
     providerSwitchesHeld = c == null ? null : ProviderSwitches((method, params) async => (await c.ready(wait: false)).call(method, params), restart: onRestartForExtensions);
     catalogSourcesHeld = c == null ? null : CatalogSources((method, params) async => (await c.ready(wait: false)).call(method, params));
+    contentSettingsHeld = c == null ? null : ContentSettings((method, params) async => (await c.ready(wait: false)).call(method, params));
     advancedConfigHeld = c == null ? null : AdvancedConfig((method, params) async => (await c.ready(wait: false)).call(method, params));
     shellSettingsHeld = hostFiles == null
         ? null
@@ -151,6 +153,7 @@ final class HostServices {
   late final ShellSettings? shellSettingsHeld;
   late final ProviderSwitches? providerSwitchesHeld;
   late final CatalogSources? catalogSourcesHeld;
+  late final ContentSettings? contentSettingsHeld;
   late final AdvancedConfig? advancedConfigHeld;
 
   bool may(String grant) => grants?.may(grant) ?? false;

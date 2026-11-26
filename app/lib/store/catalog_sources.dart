@@ -11,6 +11,7 @@ import '../settings/settings_row.dart';
 import '../shell/confirm_remove.dart';
 import 'catalog_types.dart';
 import 'overlay_page.dart' show oneLine;
+import 'source_uri.dart';
 
 /// What the app asks the host with: `store/catalogs` and `store/catalog_set`.
 typedef CatalogCall = Future<Object?> Function(String method, Map<String, Object?> params);
@@ -289,9 +290,13 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
   final _pin = TextEditingController();
   /// What each source's form holds, by the source's id; a catalog being replaced starts with what it was read with.
   late final _held = <String, Map<String, Object?>>{
-    if (widget.replacing?.spec case final spec?) spec.provider: {...spec.fields},
+    if (widget.replacing?.spec case final spec?) _idOfSpec(spec): {...spec.fields},
   };
-  late String? _chosen = widget.replacing?.spec?.provider;
+  late String? _chosen = widget.replacing?.spec == null ? null : _idOfSpec(widget.replacing!.spec!);
+
+  /// What tells a generator from a provider of the same id.
+  static String _idOf(CatalogSourceForm form) => form.generator ? 'generator:${form.id}' : form.id;
+  static String _idOfSpec(CatalogSpec spec) => spec.generator != null ? 'generator:${spec.generator}' : spec.provider;
   String? _problem;
   var _saving = false;
   final _generation = 0;
@@ -315,8 +320,8 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
     },
   );
 
-  List<CatalogSourceForm> get _offered => widget.type.sources.isEmpty ? const [_read] : widget.type.sources;
-  CatalogSourceForm get _form => _offered.where((each) => each.id == _chosen).firstOrNull ?? _offered.first;
+  List<CatalogSourceForm> get _offered => widget.type.forms.isEmpty ? const [_read] : widget.type.forms;
+  CatalogSourceForm get _form => _offered.where((each) => _idOf(each) == _chosen).firstOrNull ?? _offered.first;
 
   Future<void> _save() async {
     final form = _form;
@@ -325,16 +330,21 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
       setState(() => _problem = context.t('catalogs.label_needed'));
       return;
     }
-    final values = _held[form.id] ?? const <String, Object?>{};
+    final values = _held[_idOf(form)] ?? const <String, Object?>{};
     final invalid = schemaProblem(form.schema, form.form, values);
     if (invalid != null) {
       setState(() => _problem = invalid);
       return;
     }
     final kept = collectSchemaValues(form.schema, form.form, values);
+    // What was typed is written as the full URI.
+    if (kept['source'] case final String typed) kept['source'] = sourceUri(typed, uris: widget.type.readsUris);
     final pin = _pin.text.trim();
-    final bare = form.id == readProvider && pin.isEmpty && kept.length == 1 && kept['source'] is String;
-    final entry = bare ? kept['source'] : <String, Object?>{'provider': form.id, ...kept, if (pin.isNotEmpty) 'pin': pin};
+    final document = form.id == readProvider && !form.generator;
+    final bare = document && pin.isEmpty && kept.length == 1 && kept['source'] is String;
+    final entry = bare
+        ? kept['source']
+        : <String, Object?>{if (form.generator) 'generator': form.id else 'provider': form.id, ...kept, if (pin.isNotEmpty) 'pin': pin};
     setState(() {
       _saving = true;
       _problem = null;
@@ -372,8 +382,8 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
               DropdownButton<String>(
                 key: const Key('catalog-entry-provider'),
                 isExpanded: true,
-                value: form.id,
-                items: [for (final each in _offered) DropdownMenuItem(value: each.id, child: Text(each.extension == null ? each.title : '${each.title} (${each.extension})'))],
+                value: _idOf(form),
+                items: [for (final each in _offered) DropdownMenuItem(value: _idOf(each), child: Text(each.extension == null ? each.title : '${each.title} (${each.extension})'))],
                 onChanged: (id) => setState(() {
                   _chosen = id;
                   _problem = null;
@@ -381,14 +391,14 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
               ),
             if (form.help case final help?) Padding(padding: const EdgeInsets.only(top: 4), child: Text(help)),
             SchemaFields(
-              key: ValueKey('${form.id}/$_generation'),
+              key: ValueKey('${_idOf(form)}/$_generation'),
               schema: form.schema,
               form: form.form,
-              values: _held[form.id] ?? const {},
+              values: _held[_idOf(form)] ?? const {},
               idPrefix: 'catalog-entry-${form.id}',
-              keys: form.id == readProvider ? const {'source': 'catalog-entry-source'} : const {},
+              keys: form.id == readProvider || form.generator ? const {'source': 'catalog-entry-source'} : const {},
               unsetEntry: true,
-              onValues: (values) => _held[form.id] = values,
+              onValues: (values) => _held[_idOf(form)] = values,
               onSubmitted: () => unawaited(_save()),
             ),
             TextField(
