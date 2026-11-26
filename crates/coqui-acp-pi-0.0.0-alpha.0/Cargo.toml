@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-pi at 3c3cc535c6e5876714146e902c025b39ba59bb99, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-pi at b82e8e09a5c619826510ce4bcf15cfcfd48785b6, with what it inherits written out.
 example = [{ name = "pi_provider", crate-type = ["cdylib"] }]
 [package]
 name = "coqui-acp-pi"
