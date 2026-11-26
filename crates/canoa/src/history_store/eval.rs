@@ -179,6 +179,39 @@ pub fn normalize_row(
     Ok(out)
 }
 
+/// `cell` as the column `name` of `table` holds it: a whole number given for a real column made real.
+///
+/// # Errors
+///
+/// An unknown column, a null in a column that may not be, or a value of the wrong type.
+pub fn normalize_cell(table: &TableInfo, name: &str, cell: &Cell) -> Result<Cell, StoreError> {
+    let Some(column) = table.column(name) else {
+        return bad(format!("the table {} has no column {name}", table.name));
+    };
+    let cell = match (column.kind, cell) {
+        (ColumnType::Real, Cell::Int { value }) =>
+        {
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "a whole number given for a real column"
+            )]
+            Cell::real(*value as f64)
+        }
+        (_, cell) => cell.clone(),
+    };
+    if cell.is_null() {
+        if !column.nullable {
+            return bad(format!("{}.{name} may not be null", table.name));
+        }
+    } else if !fits(column.kind, &cell) {
+        return bad(format!(
+            "{}.{name} holds a value of another type",
+            table.name
+        ));
+    }
+    Ok(cell)
+}
+
 fn holds(text: &str, op: Op, needle: &str) -> bool {
     match op {
         Op::Prefix => text.starts_with(needle),

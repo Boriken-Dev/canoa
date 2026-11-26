@@ -17,7 +17,9 @@ use std::sync::Mutex;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::eval::{check_filter, cmp_cells, next_cursor, normalize_row, plan_select, row_matches};
+use super::eval::{
+    check_filter, cmp_cells, next_cursor, normalize_cell, normalize_row, plan_select, row_matches,
+};
 use super::{
     AggFn, Aggregate, Cell, Change, ColumnType, Compacted, HistoryDb, HistoryStore, Migration,
     OpenRequest, Rows, SchemaState, Select, Sql, Stats, Step, StoreError, StoreInfo, TableInfo,
@@ -434,17 +436,7 @@ fn apply_update(state: &mut State, update: &Update) -> Result<u64, StoreError> {
     let info = state.table(&update.table)?.clone();
     check_filter(&info, &update.filter)?;
     for (name, cell) in &update.set {
-        let mut probe = Row::new();
-        probe.insert(name.clone(), cell.clone());
-        let column = info.column(name).ok_or_else(|| {
-            StoreError::Bad(format!("the table {} has no column {name}", info.name))
-        })?;
-        if cell.is_null() && !column.nullable {
-            return Err(StoreError::Bad(format!(
-                "{}.{name} may not be null",
-                info.name
-            )));
-        }
+        normalize_cell(&info, name, cell)?;
     }
     for name in update.add.keys() {
         if !info.column(name).is_some_and(|c| c.kind == ColumnType::Int) {

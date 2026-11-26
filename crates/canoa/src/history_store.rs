@@ -26,7 +26,8 @@ use coqui_acp_api::guatiao::{Bytes, FromValue, Schema, Secret, Status, ToValue, 
 use guatiao_intake::Screen;
 
 pub use eval::{
-    Plan, check_filter, cmp_cells, next_cursor, normalize_row, plan_select, row_matches,
+    Plan, check_filter, cmp_cells, next_cursor, normalize_cell, normalize_row, plan_select,
+    row_matches,
 };
 
 /// The name of the `history_store` kind.
