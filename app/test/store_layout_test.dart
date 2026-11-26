@@ -189,8 +189,8 @@ void main() {
       expect(find.byKey(const Key('store-index-team')), findsNothing, reason: 'a catalog is not a type');
       final tops = [for (final id in ids) tester.getTopLeft(find.byKey(Key('store-index-$id'))).dy];
       expect(tops, [...tops]..sort(), reason: 'in order');
-      expect(find.text('0 installed · 3 to discover'), findsOneWidget, reason: 'overlays across both catalogs');
-      expect(find.text('0 installed · 2 to discover'), findsOneWidget, reason: 'themes: a skill an overlay catalog names comes with its overlay, so Skills counts none to discover');
+      expect(find.text('Installed: 0, Available: 3'), findsOneWidget, reason: 'overlays across both catalogs');
+      expect(find.text('Installed: 0, Available: 2'), findsOneWidget, reason: 'themes: a skill an overlay catalog names comes with its overlay, so Skills counts none to discover');
       expect(find.byKey(const Key('store-tabs')), findsNothing, reason: 'the index chooses the type');
     });
 

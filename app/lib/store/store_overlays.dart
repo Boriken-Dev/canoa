@@ -71,15 +71,14 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     if (c.config.overlays.isEmpty) {
       return CardList(header: [
         ...head,
-        const Text('No overlays yet. An overlay is a directory of rules, skills, MCP servers and settings that an agent starts '
-            'with. Find some in Discover.', key: Key('overlays-none')),
+        Text(context.t('store.overlays_none'), key: const Key('overlays-none')),
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerLeft,
           child: FilledButton.tonal(
             key: const Key('overlays-to-discover'),
             onPressed: () => view.discover = true,
-            child: const Text('Discover overlays'),
+            child: Text(context.t('store.to_available_overlays')),
           ),
         ),
       ]);
@@ -98,6 +97,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         if (c.home != null && c.config.overlays.values.any((source) => source is GitOverlay)) _updatesBar(context),
         if (shown.isEmpty) const Text('No installed overlay matches.', key: Key('overlays-installed-nothing')),
       ],
+      evenFrom: compactCardWidth,
       cards: [for (final (name, source) in shown) _installedCard(context, name, source)],
     );
   }
@@ -125,7 +125,40 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     );
   }
 
+  /// The overlay's card: its icon, name, a line about it and its switch. The rest is on the page the card opens.
   Widget _installedCard(BuildContext context, String name, OverlaySource source) {
+    final layer = c.layerOf(name);
+    final aosLayer = layer?.aos;
+    final icon = aosLayer?.about['icon'];
+    final iconBytes = icon == null ? null : aosLayer?.icon[icon];
+    final on = c.isDefaultOn(name);
+    return CompactCard(
+      key: Key('overlay-installed-$name'),
+      leading: icon != null && iconBytes != null
+          ? OverlayIcon(name: name, path: icon, bytes: iconBytes, limits: c.config.store.iconLimits)
+          : OverlayPlaceholder(name: name, size: 32),
+      title: name,
+      summary: aosLayer?.about['summary'],
+      trailing: Switch(
+        key: Key('overlay-default-$name'),
+        value: on,
+        onChanged: (value) => unawaited(c.setDefault(name, value)),
+      ),
+      onOpen: () => unawaited(showInstalledPage(
+          context,
+          title: name,
+          listenable: c,
+          present: () => c.config.overlays.containsKey(name),
+          builder: (context) {
+            final now = c.config.overlays[name];
+            return now == null ? const SizedBox.shrink() : _installedDetail(context, name, now);
+          },
+      )),
+    );
+  }
+
+  /// Everything about an installed overlay: what it applies, where it came from, its options and what can be done with it.
+  Widget _installedDetail(BuildContext context, String name, OverlaySource source) {
     final record = c.home?.overlays.installed(name);
     final found = c.availability[name];
     final hasUpdate = (found?.available ?? false) && source is GitOverlay;
@@ -164,7 +197,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     final fromStore = record?.catalog != null;
     final on = c.isDefaultOn(name);
     return LoadoutCard(
-      key: Key('overlay-installed-$name'),
+      key: Key('overlay-detail-$name'),
       leading: icon != null && iconBytes != null
           ? OverlayIcon(name: name, path: icon, bytes: iconBytes, limits: c.config.store.iconLimits)
           : OverlayPlaceholder(name: name, size: 32),
@@ -186,7 +219,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
       provenance: provenance,
       trailing: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
         Switch(
-          key: Key('overlay-default-$name'),
+          key: Key('overlay-detail-default-$name'),
           value: on,
           onChanged: (value) => unawaited(c.setDefault(name, value)),
         ),

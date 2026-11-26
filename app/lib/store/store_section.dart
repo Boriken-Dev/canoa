@@ -696,7 +696,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   }
 }
 
-/// Installed and Discover, and the counts of each.
+/// Installed and Available, and the counts of each.
 class InstalledOrDiscover extends StatelessWidget {
   const InstalledOrDiscover({super.key, required this.section, required this.discover, required this.installedCount,
       required this.discoverCount, required this.onChanged});
@@ -713,8 +713,14 @@ class InstalledOrDiscover extends StatelessWidget {
     key: Key('$section-switch'),
     showSelectedIcon: false,
     segments: [
-      ButtonSegment(value: false, label: Text('Installed $installedCount', key: Key('$section-installed'))),
-      ButtonSegment(value: true, label: Text(discoverCount == null ? 'Discover' : 'Discover $discoverCount', key: Key('$section-discover'))),
+      ButtonSegment(value: false, label: Text(context.t('store.tab_installed', {'count': installedCount}), key: Key('$section-installed'))),
+      ButtonSegment(
+        value: true,
+        label: Text(
+          discoverCount == null ? context.t('store.tab_available') : context.t('store.tab_available_count', {'count': discoverCount}),
+          key: Key('$section-discover'),
+        ),
+      ),
     ],
     selected: {discover},
     onSelectionChanged: (chosen) => onChanged(chosen.first),

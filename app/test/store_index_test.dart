@@ -161,7 +161,7 @@ void main() {
         asked.add(refresh);
         return catalogsFromIndex(answer());
       });
-      expect(find.text('Discover 2'), findsOneWidget, reason: 'two overlays are offered');
+      expect(find.text('Available 2'), findsOneWidget, reason: 'two overlays are offered');
       expect(asked, [false]);
       expect(overlays.fetched, isEmpty, reason: 'the app reads no catalog itself');
       await tester.tap(find.byKey(const Key('overlays-discover')));
@@ -184,7 +184,7 @@ void main() {
       await open(tester, ({bool refresh = false}) async => throw const OverlayException('this key has no overlay.read grant'));
       expect(find.byKey(const Key('loadout-problem')), findsOneWidget);
       expect(find.textContaining('overlay.read'), findsOneWidget);
-      expect(find.text('Discover 0'), findsOneWidget);
+      expect(find.text('Available 0'), findsOneWidget);
     });
 
     testWidgets('a host that is not there, which is no refusal, does not take the page down', (tester) async {

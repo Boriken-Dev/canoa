@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:material_ui/material_ui.dart';
+
+import '../l10n/app_text.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 
 import '../config/catalog_specs.dart';
@@ -444,10 +446,8 @@ class SkillsSearchSwitch extends StatelessWidget {
         contentPadding: EdgeInsets.zero,
         title: const Text('Search skills.sh'),
         subtitle: Text(
-          "Off until you turn it on. skills.sh is a third party's directory of skills, and its search is not documented. While this is on, "
-          'Skills, Discover can send it the words you search for, and nothing else. A result only says which repository holds a skill: '
-          'installing it reads that repository with git like any source, and asks first.'
-          '${address == null || address == c.defaultSkillsSearchAddress ? '' : ' Asking $address, as canoa.cfg says.'}',
+          context.t('store.skills_search_help') +
+              (address == null || address == c.defaultSkillsSearchAddress ? '' : context.t('store.skills_search_address', {'address': address})),
         ),
         value: c.skillsSearch != null,
         onChanged: c.busy != null ? null : (on) => unawaited(c.setSkillsSearch(on)),

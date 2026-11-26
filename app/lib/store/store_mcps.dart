@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/app_text.dart';
+
 import '../loadout/loadout_controller.dart';
 import '../loadout/mcp_registry.dart';
 import '../profile/profile.dart';
@@ -88,7 +90,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerLeft,
-          child: FilledButton.tonal(key: const Key('mcps-to-discover'), onPressed: () => view.discover = true, child: const Text('Discover MCP servers')),
+          child: FilledButton.tonal(key: const Key('mcps-to-discover'), onPressed: () => view.discover = true, child: Text(context.t('store.to_available_mcps'))),
         ),
       ]);
     }
@@ -101,6 +103,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
         const SizedBox(height: 8),
         if (shown.isEmpty) const Text('No installed server matches.', key: Key('mcps-installed-nothing')),
       ],
+      evenFrom: compactCardWidth,
       cards: [for (final server in shown) _installedCard(context, server)],
     );
   }
@@ -110,13 +113,40 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
     McpHttp(:final url, :final sse) => 'Connects to $url${sse ? ' (SSE)' : ''}',
   };
 
+  /// The server's card: its icon, name, a line about it and, for one you can allow, its switch. The rest is on the page the card opens.
   Widget _installedCard(BuildContext context, InstalledMcp server) {
+    final allowed = server.fromOverlay ? 0 : c.allowedFor(server.name);
+    final total = c.agents.length;
+    return CompactCard(
+      key: Key('mcp-installed-${server.name}'),
+      leading: const LoadoutMark(name: 'mcp', icon: Icons.hub_outlined),
+      title: server.name,
+      summary: _describe(server.server),
+      trailing: server.fromOverlay || total == 0
+          ? null
+          : Switch(
+              key: Key('mcp-allowed-${server.name}'),
+              value: allowed == total,
+              onChanged: (value) => unawaited(c.setMcpAllowed(server.name, value)),
+            ),
+      onOpen: () => unawaited(showInstalledPage(
+        context,
+        title: server.name,
+        listenable: c,
+        present: () => c.installedMcp().any((each) => each.name == server.name),
+        builder: (context) => _installedDetail(context, server),
+      )),
+    );
+  }
+
+  /// Everything about an installed server: what it starts, who may use it, where it came from and how to remove it.
+  Widget _installedDetail(BuildContext context, InstalledMcp server) {
     final origin = server.origin;
     final allowed = server.fromOverlay ? 0 : c.allowedFor(server.name);
     final total = c.agents.length;
     final text = Theme.of(context).textTheme;
     return LoadoutCard(
-      key: Key('mcp-installed-${server.name}'),
+      key: Key('mcp-detail-${server.name}'),
       leading: const LoadoutMark(name: 'mcp', icon: Icons.hub_outlined),
       title: server.name,
       lines: [
@@ -131,7 +161,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
           ? null
           : Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Switch(
-                key: Key('mcp-allowed-${server.name}'),
+                key: Key('mcp-detail-allowed-${server.name}'),
                 value: allowed == total,
                 onChanged: (value) => unawaited(c.setMcpAllowed(server.name, value)),
               ),

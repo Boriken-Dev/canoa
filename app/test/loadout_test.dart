@@ -133,7 +133,7 @@ void main() {
     expect(tabText(tester, 'store-tab-overlays'), 'Overlays 0');
     expect(tabText(tester, 'store-tab-skills'), 'Skills 0');
     expect(tabText(tester, 'store-tab-mcps'), 'MCP servers 0');
-    expect(find.text('Discover 1'), findsOneWidget, reason: 'the catalog offers one overlay');
+    expect(find.text('Available 1'), findsOneWidget, reason: 'the catalog offers one overlay');
 
     await installReview(tester);
     expect(tabText(tester, 'store-tab-overlays'), 'Overlays 1');
@@ -146,20 +146,21 @@ void main() {
     await open(tester);
     await installReview(tester);
     await tapKey(tester, 'overlays-installed');
-    final card = find.byKey(const Key('overlay-installed-review'));
+    await tapKey(tester, 'overlay-installed-review');
+    final card = find.byKey(const Key('overlay-detail-review'));
     expect(card, findsOneWidget);
     String within(String key) => tester.widget<Text>(find.descendant(of: card, matching: find.byKey(Key(key)))).data!;
     expect(within('provenance'), allOf(contains('from the catalog main'), contains('$teamRepo@main'), contains('commit '), contains('pinned sha256:')));
     expect(find.descendant(of: card, matching: find.text('Review conventions.')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.textContaining('Applies: 1 environment variable · 1 MCP server (off until allowed)')), findsOneWidget);
-    expect(tester.widget<Switch>(find.byKey(const Key('overlay-default-review'))).value, isTrue);
+    expect(tester.widget<Switch>(find.byKey(const Key('overlay-detail-default-review'))).value, isTrue);
 
-    await tapKey(tester, 'overlay-default-review');
+    await tapKey(tester, 'overlay-detail-default-review');
     expect(saved.last.loadouts['Default']!.overlays, isEmpty);
     expect(saved.last.defaultOverlays, isEmpty, reason: 'a new session starts without it');
     expect(saved.last.overlays.keys, ['review'], reason: 'it stays installed');
     expect(find.text('Off for new sessions'), findsOneWidget);
-    await tapKey(tester, 'overlay-default-review');
+    await tapKey(tester, 'overlay-detail-default-review');
     expect(saved.last.loadouts['Default']!.overlays, ['review']);
   });
 
@@ -178,7 +179,8 @@ void main() {
         : const []);
     await installReview(tester);
     await tapKey(tester, 'overlays-installed');
-    final card = find.byKey(const Key('overlay-installed-review'));
+    await tapKey(tester, 'overlay-installed-review');
+    final card = find.byKey(const Key('overlay-detail-review'));
     expect(find.descendant(of: card, matching: find.textContaining('Needs python: Python 3.11 or later is needed')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.textContaining('Needs commands: canoa-absent: canoa-absent is needed')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('Found on this computer: commands: git')), findsOneWidget);
@@ -221,7 +223,8 @@ void main() {
           ]);
     await installReview(tester);
     await tapKey(tester, 'overlays-installed');
-    final card = find.byKey(const Key('overlay-installed-review'));
+    await tapKey(tester, 'overlay-installed-review');
+    final card = find.byKey(const Key('overlay-detail-review'));
     expect(find.descendant(of: card, matching: find.textContaining('Needs python:')), findsOneWidget);
 
     // The button asks the host for its plan and shows it; a no installs nothing and the card is as it was.
@@ -252,7 +255,8 @@ void main() {
     await open(tester, overlayNeeds: (name) async => const [NeedLine(key: 'runtime.node', met: true, how: 'found /usr/bin/node')]);
     await installReview(tester);
     await tapKey(tester, 'overlays-installed');
-    final card = find.byKey(const Key('overlay-installed-review'));
+    await tapKey(tester, 'overlay-installed-review');
+    final card = find.byKey(const Key('overlay-detail-review'));
     expect(find.descendant(of: card, matching: find.text('Found on this computer: node')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.textContaining('Needs ')), findsNothing);
     expect(find.descendant(of: card, matching: find.text('Install from the Store')), findsNothing);
@@ -324,7 +328,8 @@ void main() {
     ]);
     await installReview(tester);
     await tapKey(tester, 'overlays-installed');
-    final card = find.byKey(const Key('overlay-installed-review'));
+    await tapKey(tester, 'overlay-installed-review');
+    final card = find.byKey(const Key('overlay-detail-review'));
     expect(find.descendant(of: card, matching: find.textContaining('Needs dependencies: lib/python/requirements.txt')), findsOneWidget);
     await tapKey(tester, 'overlay-prepare-review');
     expect(find.byKey(const Key('overlay-prepare-line-0')), findsOneWidget);
@@ -344,6 +349,7 @@ void main() {
     await installReview(tester);
     await tapKey(tester, 'overlays-installed');
     await tapKey(tester, 'overlay-default-review');
+    await tapKey(tester, 'overlay-installed-review');
     await tapKey(tester, 'overlay-remove-review');
     await tapKey(tester, 'overlay-remove-confirm');
     expect(saved.last.overlays, isEmpty);
@@ -362,21 +368,28 @@ void main() {
 
     await openTab(tester, 'skills');
     await tapKey(tester, 'skills-installed');
-    final skill = find.byKey(const Key('skill-installed-helper'));
+    await tapKey(tester, 'skill-installed-helper');
+    final skill = find.byKey(const Key('skill-detail-helper'));
     expect(skill, findsOneWidget, reason: 'the overlay\'s skill is installed with it');
     expect(find.descendant(of: skill, matching: find.text('Comes with review')), findsOneWidget);
     expect(find.byKey(const Key('skill-remove-helper')), findsNothing, reason: 'it goes only with its overlay');
     expect(find.byKey(const Key('skills-none')), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
     await openTab(tester, 'mcps');
     await tapKey(tester, 'mcps-installed');
-    final server = find.byKey(const Key('mcp-installed-tracker'));
+    await tapKey(tester, 'mcp-installed-tracker');
+    final server = find.byKey(const Key('mcp-detail-tracker'));
     expect(server, findsOneWidget);
     expect(find.descendant(of: server, matching: find.textContaining('comes with the overlay review')), findsOneWidget);
     expect(find.byKey(const Key('mcp-remove-tracker')), findsNothing, reason: 'it goes only with its overlay');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
     await openTab(tester, 'overlays');
     await tapKey(tester, 'overlays-installed');
+    await tapKey(tester, 'overlay-installed-review');
     await tapKey(tester, 'overlay-remove-review');
     await tapKey(tester, 'overlay-remove-confirm');
     await openTab(tester, 'skills');
@@ -454,10 +467,11 @@ void main() {
     expect(saved.last.loadoutSkills, {'pdf'});
     expect(saved.last.profile.skills, isEmpty);
 
-    final card = find.byKey(const Key('skill-installed-pdf'));
+    await tapKey(tester, 'skill-installed-pdf');
+    final card = find.byKey(const Key('skill-detail-pdf'));
     expect(find.descendant(of: card, matching: find.text('Chosen by you')), findsOneWidget);
     expect(tester.widget<Text>(find.descendant(of: card, matching: find.byKey(const Key('provenance')))).data, contains('unpinned'));
-    await tapKey(tester, 'skill-default-pdf');
+    await tapKey(tester, 'skill-detail-default-pdf');
     expect(saved.last.loadoutSkills, isEmpty, reason: 'off for new sessions, still installed');
     expect(overlays.skills.keys, ['pdf']);
     await tapKey(tester, 'skill-remove-pdf');
@@ -520,10 +534,11 @@ void main() {
       expect(changed.storeMcp['files']!.server, 'io.github.ana/files');
       expect(changed.storeMcp['files']!.digest, startsWith('sha256:'));
       expect(tabText(tester, 'store-tab-mcps'), 'MCP servers 1');
+      await tapKey(tester, 'mcp-installed-files');
       expect(find.textContaining('Off for every agent'), findsOneWidget);
       expect(find.textContaining('from the registry registry.modelcontextprotocol.io'), findsOneWidget);
 
-      await tapKey(tester, 'mcp-allowed-files');
+      await tapKey(tester, 'mcp-detail-allowed-files');
       expect(saved.last.agentMcp, {'Claude': {'files': true}, 'Codex': {'files': true}});
       expect(find.textContaining('Allowed for 2 of 2 agents'), findsOneWidget);
       await tapKey(tester, 'mcp-remove-files');

@@ -121,16 +121,20 @@ void main() {
   for (final (label, size) in [('phone', const Size(390, 900)), ('desktop', const Size(1280, 800))]) {
     testWidgets('an installed overlay with an update shows the badge, what is newer and an Update button at $label width', (tester) async {
       await installedWith(tester, size, _newer, index: label == 'desktop');
-      final card = find.byKey(const Key('overlay-installed-review'));
+      expect(find.text('1 overlay has an update.'), findsOneWidget);
+      expect(find.byKey(const Key('overlay-update-badge-review')), findsNothing, reason: 'the card in the list holds no badge');
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/overlay_update_installed_$label.png'));
+      await tapKey(tester, 'overlay-installed-review');
+      final card = find.byKey(const Key('overlay-detail-review'));
       expect(find.descendant(of: card, matching: find.byKey(const Key('overlay-update-badge-review'))), findsOneWidget);
       expect(find.descendant(of: card, matching: find.text('Update available')), findsOneWidget);
       expect(find.descendant(of: card, matching: find.textContaining('Newer commit 0f9e8d7c')), findsOneWidget);
       final update = find.descendant(of: card, matching: find.byKey(const Key('overlay-update-review')));
       expect(find.descendant(of: update, matching: find.text('Update')), findsOneWidget);
       expect(find.descendant(of: update, matching: find.byIcon(Icons.arrow_circle_up)), findsOneWidget);
-      expect(find.text('1 overlay has an update.'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/overlay_update_installed_$label.png'));
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/overlay_update_detail_$label.png'));
     });
 
     testWidgets('a Discover tile of an installed overlay with an update shows the update icon in place of the check at $label width',
@@ -150,11 +154,15 @@ void main() {
 
   testWidgets('an overlay with nothing newer shows its Check button, a check on its tile and no badge anywhere', (tester) async {
     await installedWith(tester, const Size(1280, 900), const OverlayAvailability(state: 'current', installed: 'a1b2c3d4e5f6'), index: true);
-    final card = find.byKey(const Key('overlay-installed-review'));
-    expect(find.descendant(of: card, matching: find.byKey(const Key('overlay-update-badge-review'))), findsNothing);
-    expect(find.descendant(of: card, matching: find.text('Check for updates…')), findsOneWidget);
     expect(find.text('Every overlay is up to date.'), findsOneWidget);
     expect(find.byKey(const Key('store-index-overlays-updates')), findsNothing);
+    expect(find.byKey(const Key('overlay-update-badge-review')), findsNothing);
+    await tapKey(tester, 'overlay-installed-review');
+    final card = find.byKey(const Key('overlay-detail-review'));
+    expect(find.descendant(of: card, matching: find.byKey(const Key('overlay-update-badge-review'))), findsNothing);
+    expect(find.descendant(of: card, matching: find.text('Check for updates…')), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tapKey(tester, 'overlays-discover');
     expect(find.byKey(const Key('store-entry-update-main-review')), findsNothing);
     expect(find.descendant(of: find.byKey(const Key('store-entry-main-review')), matching: find.byIcon(Icons.check)), findsOneWidget);
@@ -174,12 +182,12 @@ void main() {
 
   testWidgets('Check for updates asks every source now, and what the host then says is shown', (tester) async {
     await installedWith(tester, const Size(1280, 900), const OverlayAvailability(state: 'current', installed: 'a1b2c3d4e5f6'));
-    expect(find.byKey(const Key('overlay-update-badge-review')), findsNothing);
+    expect(find.text('1 overlay has an update.'), findsNothing);
     final before = overlays.forced;
     overlays.availability['review'] = _newer;
     await tapKey(tester, 'overlays-check-updates');
     expect(overlays.forced, before + 1, reason: 'the button asks with refresh');
-    expect(find.byKey(const Key('overlay-update-badge-review')), findsOneWidget);
+    expect(find.text('1 overlay has an update.'), findsOneWidget);
     expect(find.byKey(const Key('overlays-updates-badge')), findsOneWidget);
   });
 
@@ -189,7 +197,8 @@ void main() {
       const Size(1280, 900),
       const OverlayAvailability(state: 'unreachable', installed: 'a1b2c3d4e5f6', problem: 'the host is down'),
     );
-    final card = find.byKey(const Key('overlay-installed-review'));
+    await tapKey(tester, 'overlay-installed-review');
+    final card = find.byKey(const Key('overlay-detail-review'));
     expect(find.descendant(of: card, matching: find.textContaining('Its source could not be asked: the host is down')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.byKey(const Key('overlay-update-badge-review'))), findsNothing);
   });
@@ -201,6 +210,7 @@ void main() {
       'overlay.cfg': 'name = "review"\n[about]\nsummary = "Review conventions, newer."\n',
       'skills/review/SKILL.md': '# Review\n',
     });
+    await tapKey(tester, 'overlay-installed-review');
     await tapKey(tester, 'overlay-update-review');
     expect(find.text('Sync review?'), findsOneWidget);
     expect(find.textContaining('From ${installed.commit}'), findsOneWidget);
@@ -209,6 +219,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(overlays.records['review']!.commit, isNot(installed.commit), reason: 'the newer tree was installed');
     expect(find.byKey(const Key('overlay-update-badge-review')), findsNothing, reason: 'the host no longer lists an update');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('overlays-updates-badge')), findsNothing);
     expect(saved.last.overlays['review'], isNotNull);
   });

@@ -75,6 +75,8 @@ void main() {
         await installReview(tester);
         await tap(tester, 'overlays-installed');
         await golden(tester, 'overlays');
+        await tap(tester, 'overlay-installed-review');
+        await golden(tester, 'overlay_page');
       });
 
       testWidgets('the overlays a catalog offers, each with the catalog it is from', (tester) async {

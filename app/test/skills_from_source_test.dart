@@ -421,8 +421,11 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       await tester.pumpAndSettle();
       await tapKey(tester, 'store-tab-skills');
       await tapKey(tester, 'skills-installed');
-      final card = find.byKey(const Key('skill-installed-review'));
+      await tapKey(tester, 'skill-installed-review');
+      final card = find.byKey(const Key('skill-detail-review'));
       expect(find.descendant(of: card, matching: find.text('Comes with team')), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       await tapKey(tester, 'skills-discover');
       expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing);
       expect(tester.takeException(), isNull);
@@ -452,7 +455,8 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       expect(overlays.skillFetches, isEmpty, reason: 'shown before it is fetched');
       await tapKey(tester, 'store-skill-install-confirm');
       expect(overlays.skills['pdf']!.chosen, isTrue);
-      final card = find.byKey(const Key('skill-installed-pdf'));
+      await tapKey(tester, 'skill-installed-pdf');
+      final card = find.byKey(const Key('skill-detail-pdf'));
       expect(find.descendant(of: card, matching: find.text('Chosen by you')), findsOneWidget);
     });
   });

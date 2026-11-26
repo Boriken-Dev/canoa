@@ -220,6 +220,7 @@ void main() {
       expect(copy.chosen, isTrue);
       expect(saved.last.loadoutSkills, {'pdf'});
       expect(find.byKey(const Key('skill-installed-pdf')), findsOneWidget);
+      await tapKey(tester, 'skill-installed-pdf');
       expect(find.textContaining('from a source you named'), findsOneWidget);
     });
 

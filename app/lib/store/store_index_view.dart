@@ -50,7 +50,9 @@ class StoreIndex extends StatelessWidget {
                       size: 20,
                     ),
               title: type.label,
-              subtitle: '${type.installed} installed${type.available == null ? '' : ' · ${type.available} to discover'}',
+              subtitle: type.available == null
+                  ? context.t('store.index_installed', {'installed': type.installed})
+                  : context.t('store.index_counts', {'installed': type.installed, 'available': type.available}),
               selected: chosen == type.id,
               trailing: [
                 if (type.updates > 0)

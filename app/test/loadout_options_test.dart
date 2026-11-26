@@ -101,6 +101,7 @@ void main() {
         await tap(tester, 'overlays-installed');
         await tester.binding.setSurfaceSize(size);
         await tester.pumpAndSettle();
+        await tap(tester, 'overlay-installed-review');
         await tap(tester, 'overlay-options-review');
       }
 

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/app_text.dart';
+
 import '../loadout/loadout_controller.dart';
 import '../profile/overlays.dart' show ScannedSkill, SkillHit, SkillScan;
 import '../profile/profile.dart';
@@ -72,12 +74,11 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     if (c.skills.isEmpty && inOverlays.isEmpty) {
       return CardList(header: [
         ...head,
-        const Text('No skills fetched yet. A skill an overlay names is fetched when you install the overlay; others you choose '
-            'yourself in Discover.', key: Key('skills-none')),
+        Text(context.t('store.skills_none'), key: const Key('skills-none')),
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerLeft,
-          child: FilledButton.tonal(key: const Key('skills-to-discover'), onPressed: () => view.discover = true, child: const Text('Discover skills')),
+          child: FilledButton.tonal(key: const Key('skills-to-discover'), onPressed: () => view.discover = true, child: Text(context.t('store.to_available_skills'))),
         ),
       ]);
     }
@@ -88,29 +89,64 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
         ...head,
         if (shown.isEmpty && shownInOverlays.isEmpty) const Text('No installed skill matches.', key: Key('skills-installed-nothing')),
       ],
+      evenFrom: compactCardWidth,
       cards: [
         for (final copy in shown) _installedCard(context, copy),
-        for (final each in shownInOverlays) _overlayCard(each.name, each.overlay),
+        for (final each in shownInOverlays) _overlayCard(context, each.name, each.overlay),
       ],
     );
   }
 
   /// A skill an installed overlay provides: it has no Remove of its own, since removing the overlay removes it.
-  Widget _overlayCard(String name, String overlay) => LoadoutCard(
+  Widget _overlayCard(BuildContext context, String name, String overlay) => CompactCard(
     key: Key('skill-installed-${skillKey(name)}'),
     leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
     title: name,
-    lines: ['Comes with $overlay'],
-    provenance: 'comes with the overlay $overlay; remove the overlay to remove it',
+    summary: 'Comes with $overlay',
+    onOpen: () => unawaited(showInstalledPage(
+      context,
+      title: name,
+      listenable: c,
+      present: () => c.overlaySkills().any((each) => each.name == name),
+      builder: (context) => LoadoutCard(
+        key: Key('skill-detail-${skillKey(name)}'),
+        leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
+        title: name,
+        lines: ['Comes with $overlay'],
+        provenance: 'comes with the overlay $overlay; remove the overlay to remove it',
+      ),
+    )),
   );
 
+  /// The skill's card: its icon, name, a line about it and, for one you chose, its switch. The rest is on the page the card opens.
   Widget _installedCard(BuildContext context, SkillCopy copy) {
+    final on = copy.chosen ? c.skillIsOn(copy.name) : copy.overlays.isNotEmpty;
+    return CompactCard(
+      key: Key('skill-installed-${skillKey(copy.name)}'),
+      leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
+      title: copy.name,
+      summary: copy.chosen ? 'Chosen by you' : copy.overlays.isNotEmpty ? 'Comes with ${copy.overlays.join(', ')}' : 'Named by no overlay now',
+      trailing: copy.chosen
+          ? Switch(key: Key('skill-default-${skillKey(copy.name)}'), value: on, onChanged: (value) => unawaited(c.setSkillOn(copy.name, value)))
+          : null,
+      onOpen: () => unawaited(showInstalledPage(
+        context,
+        title: copy.name,
+        listenable: c,
+        present: () => c.skills.containsKey(copy.name),
+        builder: (context) => _installedDetail(context, copy),
+      )),
+    );
+  }
+
+  /// Everything about an installed skill: where it comes from and what can be done with it.
+  Widget _installedDetail(BuildContext context, SkillCopy copy) {
     final shown = _sourceShown(copy.source);
     final removable = copy.chosen || copy.overlays.isEmpty;
     final text = Theme.of(context).textTheme;
     final on = copy.chosen ? c.skillIsOn(copy.name) : copy.overlays.isNotEmpty;
     return LoadoutCard(
-      key: Key('skill-installed-${skillKey(copy.name)}'),
+      key: Key('skill-detail-${skillKey(copy.name)}'),
       leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
       title: copy.name,
       lines: [
@@ -123,7 +159,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
       ].join(' · '),
       trailing: copy.chosen
           ? Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Switch(key: Key('skill-default-${skillKey(copy.name)}'), value: on, onChanged: (value) => unawaited(c.setSkillOn(copy.name, value))),
+              Switch(key: Key('skill-detail-default-${skillKey(copy.name)}'), value: on, onChanged: (value) => unawaited(c.setSkillOn(copy.name, value))),
               Text(on ? 'On for new sessions' : 'Off for new sessions', style: text.labelSmall),
             ])
           : null,
