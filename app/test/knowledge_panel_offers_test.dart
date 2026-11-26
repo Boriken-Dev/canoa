@@ -182,7 +182,7 @@ void main() {
   testWidgets('the words are the person\'s language', (tester) async {
     await show(tester, const CanoaConfig(), language: 'es');
     expect(find.text('Buscar por significado'), findsWidgets);
-    expect(find.text('Agregar un agente'), findsOneWidget);
-    expect(find.text('Add an agent'), findsNothing);
+    expect(find.text('Agregar un backend de agente'), findsOneWidget);
+    expect(find.text('Add a harness backend'), findsNothing);
   });
 }
