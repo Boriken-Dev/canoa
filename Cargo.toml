@@ -63,7 +63,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # with the operating system's certificate verifier and client certificates.
 ureq = { version = "3.5", default-features = false }
 # The system's proxy (PAC, WPAD), proxy login, certificate verifier and client certificates, and the proxy variables of a child process.
-coqui-syshttp = { git = "https://github.com/Boriken-Dev/coqui-syshttp", rev = "8c23a6af97be812dcee8a953a629c4d80eea0a2e", default-features = false, features = ["pac", "ureq", "pkcs11"] }
+coqui-syshttp = { git = "https://github.com/Boriken-Dev/coqui-syshttp", rev = "8622bc90110d43742dea63f2c8f603e1e5014f98", default-features = false, features = ["pac", "ureq", "pkcs11"] }
 # Archives a store unpacks: tar and gzip for Codex and Node, zip for Node on Windows; deflate by flate2's pure Rust backend.
 tar = { version = "0.4", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
