@@ -68,8 +68,8 @@ canoa-pi.workspace = true
 canoa-piper.workspace = true
 canoa-powershell.workspace = true
 canoa-python.workspace = true
-canoa-whisper.workspace = true
-canoa-whisper-candle.workspace = true
+canoa-whispercpp.workspace = true
+canoa-candle.workspace = true
 clap.workspace = true
 coqui-acp = { workspace = true, features = ["secret"] }
 coqui-acp-api.workspace = true

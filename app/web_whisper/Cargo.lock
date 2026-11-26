@@ -159,7 +159,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "canoa-whisper-candle"
+name = "canoa-candle"
 version = "0.0.0-alpha.0"
 dependencies = [
  "candle-core",
@@ -173,7 +173,7 @@ dependencies = [
 name = "canoa-whisper-web"
 version = "0.0.0-alpha.0"
 dependencies = [
- "canoa-whisper-candle",
+ "canoa-candle",
  "getrandom 0.3.4",
  "serde_json",
  "wasm-bindgen",

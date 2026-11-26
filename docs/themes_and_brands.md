@@ -106,7 +106,7 @@ in the table is left as written, and three braces keep a placeholder as written,
 shows them).
 
 Keep a name literal when it is not the product's but a fact of this repository or of a protocol: crate names (`canoa-host`,
-`canoa-whisper`), the repository and its URLs (`Boriken-Dev/canoa`), wire identifiers (`dev.boriken.canoa/...`, `/canoa.json`,
+`canoa-whispercpp`), the repository and its URLs (`Boriken-Dev/canoa`), wire identifiers (`dev.boriken.canoa/...`, `/canoa.json`,
 `_canoa/...`), Cargo targets, build and test variables (`CANOA_DEPS`, `CANOA_WEB_DIST`), and a line that deliberately means Canoa
 itself. `tools/test_docs_brand.py` fails on a `docs/*.md` line that names the product literally (`Canoa` as a word,
 `canoa.cfg`, `CANOA_CONFIG`, `~/.canoa`, `canoa@`, `/etc/canoa`, `/opt/canoa`); a line that has to stay literal goes in its

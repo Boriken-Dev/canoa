@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.89"
 license = "MPL-2.0"
 repository = "https://github.com/Boriken-Dev/canoa"
-description = "Whisper in the browser: canoa-whisper-candle's engine compiled to WebAssembly"
+description = "Whisper in the browser: canoa-candle's engine compiled to WebAssembly"
 publish = false
 
 # Its own workspace: it builds only for wasm32-unknown-unknown, which the repository's
@@ -16,7 +16,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-canoa-whisper-candle = { path = "../../extensions/canoa-whisper-candle", default-features = false }
+canoa-candle = { path = "../../extensions/canoa-candle", default-features = false }
 # Exactly the wasm-bindgen command line's version, which has to match it.
 wasm-bindgen = "=0.2.130"
 serde_json = "1"

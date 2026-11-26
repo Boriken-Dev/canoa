@@ -33,7 +33,7 @@ pub use source::{SOURCE, WhisperCandleHf, WhisperCandleHfSettings, catalog_of, d
 pub use speech::{IDLE, PROVIDER, WhisperCandleSettings, WhisperCandleSpeech, is_loaded, unload};
 
 /// The name this crate's library is registered under.
-pub const LIBRARY: &str = "canoa-whisper-candle";
+pub const LIBRARY: &str = "canoa-candle";
 
 /// What this runtime is called to the person: the name on its Store rows, its facts and its speech offer.
 pub const NAME: &str = "Whisper (Candle)";

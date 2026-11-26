@@ -1,5 +1,5 @@
 [package]
-name = "canoa-whisper-candle"
+name = "canoa-candle"
 description = "Whisper in pure Rust (Candle) for Canoa: its models as a Store type, and the speech-to-text provider that runs them inside the host"
 version.workspace = true
 edition.workspace = true

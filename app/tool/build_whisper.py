@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the web app's Whisper (app/web_whisper, canoa-whisper-candle's engine) to WebAssembly and its loader.
+"""Build the web app's Whisper (app/web_whisper, canoa-candle's engine) to WebAssembly and its loader.
 
 Writes canoa_whisper.js and canoa_whisper_bg.wasm to app/web/whisper/ (generated, never committed), which `flutter build web`
 copies into the page beside whisper_worker.js, the web worker that loads them. Needs cargo with the wasm32-unknown-unknown

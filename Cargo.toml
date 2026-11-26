@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whisper", "extensions/canoa-whisper-candle"]
+members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whispercpp", "extensions/canoa-candle"]
 exclude = ["third_party/whisper-rs-sys"]
 
 [workspace.package]
@@ -133,7 +133,7 @@ zeroize = "1"
 time = { version = "0.3", default-features = false, features = ["parsing"] }
 # whisper.cpp inside the host's process; its sources are carried by whisper-rs-sys and built with cmake.
 whisper-rs = { version = "=0.16.0", default-features = false }
-# Whisper in pure Rust (`canoa-whisper-candle`): Hugging Face's Candle, and the tokenizer with its regular expressions in Rust, as WebAssembly needs.
+# Whisper in pure Rust (`canoa-candle`): Hugging Face's Candle, and the tokenizer with its regular expressions in Rust, as WebAssembly needs.
 candle-core = { version = "0.11", default-features = false }
 candle-nn = { version = "0.11", default-features = false }
 candle-transformers = { version = "0.11", default-features = false }
@@ -188,8 +188,8 @@ canoa-opencode = { path = "extensions/canoa-opencode" }
 canoa-pi = { path = "extensions/canoa-pi" }
 canoa-powershell = { path = "extensions/canoa-powershell" }
 canoa-python = { path = "extensions/canoa-python" }
-canoa-whisper = { path = "extensions/canoa-whisper" }
-canoa-whisper-candle = { path = "extensions/canoa-whisper-candle" }
+canoa-whispercpp = { path = "extensions/canoa-whispercpp" }
+canoa-candle = { path = "extensions/canoa-candle" }
 canoa-piper = { path = "extensions/canoa-piper" }
 
 # The bridge library (coqui-acp-bridge) takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph

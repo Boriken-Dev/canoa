@@ -964,6 +964,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-candle"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "canoa",
+ "coqui-acp-api",
+ "coqui-acp-harness",
+ "guatiao",
+ "guatiao-intake",
+ "rayon",
+ "serde_json",
+ "sha1 0.11.0",
+ "sha2 0.11.1",
+ "tokenizers",
+]
+
+[[package]]
 name = "canoa-claude"
 version = "0.0.0-alpha.0"
 dependencies = [
@@ -1065,6 +1084,7 @@ dependencies = [
  "canoa",
  "canoa-antigravity",
  "canoa-bitwarden",
+ "canoa-candle",
  "canoa-claude",
  "canoa-codex",
  "canoa-foundry",
@@ -1080,8 +1100,7 @@ dependencies = [
  "canoa-piper",
  "canoa-powershell",
  "canoa-python",
- "canoa-whisper",
- "canoa-whisper-candle",
+ "canoa-whispercpp",
  "clap",
  "coqui-a2a",
  "coqui-access",
@@ -1326,7 +1345,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "canoa-whisper"
+name = "canoa-whispercpp"
 version = "0.0.0-alpha.0"
 dependencies = [
  "canoa",
@@ -1337,25 +1356,6 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "whisper-rs",
-]
-
-[[package]]
-name = "canoa-whisper-candle"
-version = "0.0.0-alpha.0"
-dependencies = [
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "canoa",
- "coqui-acp-api",
- "coqui-acp-harness",
- "guatiao",
- "guatiao-intake",
- "rayon",
- "serde_json",
- "sha1 0.11.0",
- "sha2 0.11.1",
- "tokenizers",
 ]
 
 [[package]]

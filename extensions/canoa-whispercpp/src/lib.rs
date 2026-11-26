@@ -19,7 +19,7 @@ pub use source::{SOURCE, WhisperHf, WhisperHfSettings, catalog_of};
 pub use speech::{IDLE, PROVIDER, WhisperSettings, WhisperSpeech, is_loaded, unload};
 
 /// The name this crate's library is registered under.
-pub const LIBRARY: &str = "canoa-whisper";
+pub const LIBRARY: &str = "canoa-whispercpp";
 
 /// What whisper.cpp is called to the person: the name on its Store rows, its facts and its speech offer.
 pub const NAME: &str = "whisper.cpp";

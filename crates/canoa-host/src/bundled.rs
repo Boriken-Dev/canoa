@@ -207,13 +207,13 @@ pub(crate) const INCLUDED: &[Included] = &[
         helper: None,
     },
     Included {
-        name: canoa_whisper::LIBRARY,
-        library: canoa_whisper::library,
+        name: canoa_whispercpp::LIBRARY,
+        library: canoa_whispercpp::library,
         helper: None,
     },
     Included {
-        name: canoa_whisper_candle::LIBRARY,
-        library: canoa_whisper_candle::library,
+        name: canoa_candle::LIBRARY,
+        library: canoa_candle::library,
         helper: None,
     },
     Included {

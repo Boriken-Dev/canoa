@@ -18,7 +18,7 @@ use canoa::store::recipe::{Recipe, Release};
 use canoa::store::{InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable};
 use canoa_piper::PiperModels;
 use canoa_piper::store::Catalog;
-use canoa_whisper::WhisperModels;
+use canoa_whispercpp::WhisperModels;
 use coqui_acp_api::Environment;
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
@@ -537,7 +537,7 @@ fn a_whisper_model_needs_no_program_and_comes_only_from_the_origins_its_library_
         .programs
         .fetch_models_in(
             "whisper",
-            &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
+            &canoa_whispercpp::catalog::ENDPOINTS.map(str::to_owned),
             &outside,
             None,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -729,7 +729,7 @@ fn a_name_that_leaves_the_models_folder_is_refused() {
         .programs
         .fetch_models_in(
             "whisper",
-            &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
+            &canoa_whispercpp::catalog::ENDPOINTS.map(str::to_owned),
             &escaping,
             None,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),

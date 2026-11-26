@@ -18,9 +18,9 @@ use std::sync::Mutex;
 
 use canoa::speech::{AudioFormat, Hints, OpenRequest, PCM_S16LE, SpeechProvider};
 use canoa::store::catalog::FileCheck;
-use canoa_whisper::catalog::DEFAULT_REPO;
-use canoa_whisper::catalog_of;
-use canoa_whisper::{WhisperSettings, WhisperSpeech, is_loaded, unload};
+use canoa_whispercpp::catalog::DEFAULT_REPO;
+use canoa_whispercpp::catalog_of;
+use canoa_whispercpp::{WhisperSettings, WhisperSpeech, is_loaded, unload};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_harness::LocalSpawner;
 use sha2::{Digest, Sha256};

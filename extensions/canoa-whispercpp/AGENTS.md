@@ -1,6 +1,6 @@
-# `canoa-whisper` — API header
+# `canoa-whispercpp` — API header
 
-Header-file-style reference for `canoa-whisper`: whisper.cpp for a Canoa host (the Store type that lists its models, the models page of that type, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
+Header-file-style reference for `canoa-whispercpp`: whisper.cpp for a Canoa host (the Store type that lists its models, the models page of that type, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
 MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa` (features `store`, `speech`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json` and `whisper-rs` 0.16.0, whose `whisper-rs-sys` is replaced (`[patch.crates-io]`) by the vendored copy in `third_party/whisper-rs-sys`: the same crate with whisper.cpp v1.9.6 (release tarball, commit 96ec4d9823e9d0211944172da35f9f29134af990, SHA-256 7ab15dc88022d2425ad94dcffd8abbf1b6d7018089b4e48d6b40780738e0b445) in place of the 1.8.3 it carries, reduced to the CPU and BLAS sources (no models, tests, examples, GPU backends or pre-generated bindings; its build script reads 1.9's `WHISPER_VERSION_*` lines). whisper-rs 0.16's safe API compiles against 1.9.6 unchanged. cmake compiles the sources with the crate.
 
@@ -17,7 +17,7 @@ Compiling the crate compiles whisper.cpp (C and C++), so a build needs a C++ too
 ## Exports
 
 ```rust
-pub const LIBRARY: &str = "canoa-whisper";   // the name `library` is registered under
+pub const LIBRARY: &str = "canoa-whispercpp";   // the name `library` is registered under
 pub const NAME: &str = "whisper.cpp";        // what it is called to the person: its rows, facts and speech offer
 pub const STORE_TYPE: &str = "whisper";      // the id of the Store type, and of its speech offer
 pub const PROVIDER: &str = "speech_whisper"; // the id of the speech provider
@@ -62,5 +62,5 @@ The type has no program: `WhisperExtension` names no store, and the host keeps t
 
 - Logs from whisper.cpp and ggml are discarded (`whisper_rs::install_logging_hooks`), so nothing is written to the host's standard streams.
 - A model is the file `ggml-<id>.bin` in the folder, whatever catalog it came from, so a file the person drops there runs.
-- The provider's tests that run a model (`tests/speech.rs`) download `tiny` (from the address a recorded listing gives) and a recording with `curl` into a temporary folder, check the model's SHA-256, and are ignored without the network: `cargo test -p canoa-whisper -- --ignored`.
+- The provider's tests that run a model (`tests/speech.rs`) download `tiny` (from the address a recorded listing gives) and a recording with `curl` into a temporary folder, check the model's SHA-256, and are ignored without the network: `cargo test -p canoa-whispercpp -- --ignored`.
 - When a `whisper-rs-sys` that bundles whisper.cpp 1.9 or later is published, drop the `[patch.crates-io]` entry and `third_party/whisper-rs-sys`.

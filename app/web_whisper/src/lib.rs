@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Whisper in the browser: `canoa-whisper-candle`'s engine behind a surface a page can call. The page fetches a model's three files
+//! Whisper in the browser: `canoa-candle`'s engine behind a surface a page can call. The page fetches a model's three files
 //! (the same ones the host's Store installs, read from the publisher's listing), hands them over as bytes, and later hands over 16 kHz samples; nothing here
 //! reads a file, a clock or the network.
 
-use canoa_whisper_candle::Engine;
-use canoa_whisper_candle::catalog::{
+use canoa_candle::Engine;
+use canoa_candle::catalog::{
     Check, DEFAULT_AUTHOR, DEFAULT_EXCLUDE, DEFAULT_SEARCH, ENDPOINTS, MODELS_API, models_of,
     repositories as repositories_of,
 };

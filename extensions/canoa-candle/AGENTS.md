@@ -1,10 +1,10 @@
-# `canoa-whisper-candle` — API header
+# `canoa-candle` — API header
 
-Header-file-style reference for `canoa-whisper-candle`: OpenAI's Whisper written in Rust over Hugging Face's Candle, for a Canoa host (the Store type that lists its models, the models page of that type, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
+Header-file-style reference for `canoa-candle`: OpenAI's Whisper written in Rust over Hugging Face's Candle, for a Canoa host (the Store type that lists its models, the models page of that type, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
 MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `candle-core`, `candle-nn`, `candle-transformers` 0.11 (the `whisper` module), `tokenizers` 0.23 (its regular expressions in Rust: feature `unstable_wasm`) and `serde_json`; with the default feature `host` also `canoa` (features `store`, `speech`), `coqui-acp-api`, `guatiao`, `guatiao-intake` and `rayon`. There is no C or C++ to build and nothing is fetched at build time.
 
-It is offered beside `canoa-whisper` (whisper.cpp): the person picks. What a host loads is `library` (below); the host names none of it.
+It is offered beside `canoa-whispercpp` (whisper.cpp): the person picks. What a host loads is `library` (below); the host names none of it.
 
 ## Features
 
@@ -15,7 +15,7 @@ It is offered beside `canoa-whisper` (whisper.cpp): the person picks. What a hos
 ## Exports
 
 ```rust
-pub const LIBRARY: &str = "canoa-whisper-candle";    // the name `library` is registered under
+pub const LIBRARY: &str = "canoa-candle";    // the name `library` is registered under
 pub const NAME: &str = "Whisper (Candle)";           // what it is called to the person
 pub const STORE_TYPE: &str = "whispercandle";        // the id of the Store type, and of its speech offer
 pub const PROVIDER: &str = "speech_whisper_candle";  // the id of the speech provider (host)
@@ -74,4 +74,4 @@ The type has no program: the host keeps its files under its own id in the shelf 
 
 - The mel spectrogram is this crate's own (`mel.rs`: Slaney filters computed, a mixed-radix FFT), single-threaded: Candle's own one spawns threads, which WebAssembly lacks.
 - A clip is read at its real length, not padded to 30 seconds.
-- The tests that run a model (`tests/speech.rs`) download `tiny` and a recording with `curl` into a temporary folder, check each file against what the recorded listing states, and are ignored without the network: `cargo test -p canoa-whisper-candle -- --ignored` (use `--release`: Candle is slow unoptimized).
+- The tests that run a model (`tests/speech.rs`) download `tiny` and a recording with `curl` into a temporary folder, check each file against what the recorded listing states, and are ignored without the network: `cargo test -p canoa-candle -- --ignored` (use `--release`: Candle is slow unoptimized).

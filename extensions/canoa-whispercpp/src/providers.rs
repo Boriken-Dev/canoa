@@ -37,7 +37,7 @@ impl StoreExtension for WhisperExtension {
 
 // What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is read.
 coqui_acp_api::guatiao::local_providers!(
-    id = "canoa-whisper",
+    id = "canoa-whispercpp",
     version = env!("CARGO_PKG_VERSION"),
     providers = [WhisperExtension, WhisperModels, WhisperHf, WhisperSpeech]
 );
@@ -53,7 +53,7 @@ mod tests {
     fn registry() -> Registry {
         let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
         let loading = registry
-            .register_local("canoa-whisper", library)
+            .register_local("canoa-whispercpp", library)
             .expect("registers");
         assert!(loading.loaded().is_some(), "accepted");
         registry

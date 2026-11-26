@@ -1,5 +1,5 @@
 [package]
-name = "canoa-whisper"
+name = "canoa-whispercpp"
 description = "whisper.cpp for Canoa: its models as a Store type, and the speech-to-text provider that runs them inside the host"
 version.workspace = true
 edition.workspace = true
