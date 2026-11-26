@@ -922,7 +922,7 @@ pub struct NetworkConfig {
     /// `negotiate`: whether a proxy that asks for Negotiate or NTLM is answered with the logon session (default true on Windows,
     /// the only place this build can).
     pub negotiate: Option<bool>,
-    /// `client_certificate`: `system` (the default: what a browser here would send, from the operating system's keystores),
+    /// `client_certificate`: `system` (the default: what a browser here would send, from the operating system's keystores, by the browsers' policy: none when it picks none),
     /// `none`, or the path of a PEM file holding a certificate chain and its unencrypted private key.
     pub client_certificate: ClientCertificate,
     /// `ca_file`: trust exactly the certificates of this PEM file, replacing the system's trust.

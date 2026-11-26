@@ -14,7 +14,7 @@ use std::sync::Arc;
 use canoa::network::{ClientCertificate, Network, NetworkSettings, ProxyChoice, Secret};
 use canoa::store::{Check, FetchRequest, InstallTools};
 use coqui_syshttp::tls::{
-    ClientCertificates, Identity, IdentitySource, Selector, TlsBuilder, Trust,
+    CertificateChoice, ClientCertificates, Identity, IdentitySource, Selector, TlsBuilder, Trust,
 };
 use coqui_syshttp::{Environment, Resolver};
 use sha2::{Digest, Sha256};
@@ -264,7 +264,10 @@ fn a_fetch_presents_the_keystores_certificate_the_server_names_a_ca_for() {
     let (origin, client) = asking(&ca);
     let identity = Identity::from_pem(client.chain_pem.as_bytes(), client.key_pem.as_bytes())
         .expect("an identity");
-    let selector = Selector::builder().source(Keystore(identity)).build();
+    let selector = Selector::builder()
+        .source(Keystore(identity))
+        .send_sole_candidate(true)
+        .build();
     let tls = TlsBuilder::default()
         .trust(Trust::Roots(vec![ca.der()]))
         .client_certificates(ClientCertificates::Selector(Arc::new(selector)));
@@ -497,5 +500,39 @@ fn the_addresses_programs_reach_are_what_the_libraries_loaded_say() {
             .count(),
         1,
         "an address already there is not added again"
+    );
+}
+
+fn fetch_with(selector: Selector, ca: &Ca, origin: &TlsServer) -> Result<String, ()> {
+    let tls = TlsBuilder::default()
+        .trust(Trust::Roots(vec![ca.der()]))
+        .client_certificates(ClientCertificates::Selector(Arc::new(selector)));
+    HttpTransport::on(Arc::new(Network::with(direct(), tls)))
+        .get(
+            &format!("https://localhost:{}/x", origin.addr.port()),
+            &ToolsLimits::default(),
+        )
+        .map(body)
+        .map_err(|_| ())
+}
+
+#[test]
+fn the_keystores_only_certificate_is_not_sent_unless_a_rule_or_policy_picks_it() {
+    let ca = Ca::new("Test CA");
+    let (origin, client) = asking(&ca);
+    let identity = Identity::from_pem(client.chain_pem.as_bytes(), client.key_pem.as_bytes())
+        .expect("an identity");
+    let unasked = Selector::builder()
+        .source(Keystore(identity.clone()))
+        .build();
+    assert!(fetch_with(unasked, &ca, &origin).is_err());
+    assert!(origin.presented().iter().all(Option::is_none));
+    let by_policy = Selector::builder()
+        .source(Keystore(identity))
+        .policy(Arc::new(|_| CertificateChoice::First))
+        .build();
+    assert_eq!(
+        fetch_with(by_policy, &ca, &origin).as_deref(),
+        Ok("client certificate seen")
     );
 }

@@ -18,9 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
-use coqui_syshttp::tls::{
-    CertificateInfo, ClientCertificates, Identity, Selector, Tls, TlsBuilder, Trust,
-};
+use coqui_syshttp::tls::{CertificateInfo, ClientCertificates, Identity, Tls, TlsBuilder, Trust};
 use coqui_syshttp::ureq::{AgentBuilder, OriginAgent};
 use coqui_syshttp::{Credentials, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver, Route};
 use rustls::pki_types::pem::PemObject as _;
@@ -285,7 +283,7 @@ impl Network {
         }
         let mut file_identity = None;
         tls = tls.client_certificates(match &settings.client_certificate {
-            ClientCertificate::System => ClientCertificates::Selector(Arc::new(Selector::system())),
+            ClientCertificate::System => ClientCertificates::System,
             ClientCertificate::None => ClientCertificates::None,
             ClientCertificate::File(path) => {
                 let identity = read_identity(path)?;
@@ -332,8 +330,7 @@ impl Network {
     pub fn system() -> Self {
         Self::from_parts(
             Resolver::system(),
-            TlsBuilder::default()
-                .client_certificates(ClientCertificates::Selector(Arc::new(Selector::system()))),
+            TlsBuilder::default(),
             true,
             GitTls::System,
             Vec::new(),
@@ -435,7 +432,7 @@ impl Network {
 
     /// [`secure_tunnel`](Self::secure_tunnel) presenting the certificate with `thumbprint` (SHA-256 in hex, as
     /// [`client_identities`](Self::client_identities) lists it) to a server that asks for one, whatever authorities it names; `None`
-    /// presents what the network's own choice is, as `secure_tunnel` does.
+    /// presents what the keystores choose, and their only fitting certificate when no rule picks one, since the caller named this server.
     ///
     /// # Errors
     ///
@@ -447,7 +444,9 @@ impl Network {
         thumbprint: Option<&str>,
     ) -> Result<SecureConnection, NetworkError> {
         let Some(thumbprint) = thumbprint else {
-            return self.secure_tunnel(url);
+            // The caller names this destination as one that gets the keystores' choice, so their only
+            // fitting certificate is sent although no rule or chooser picked it.
+            return self.secure_tunnel_with(url, self.tls.clone().send_sole_candidate(true));
         };
         let wanted = thumbprint.to_ascii_lowercase();
         let identity = self

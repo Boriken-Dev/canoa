@@ -369,7 +369,10 @@ fn a_server_that_asks_for_a_client_certificate_gets_the_keystores_one() {
     let (origin, client) = asking(&ca);
     let identity = Identity::from_pem(client.chain_pem.as_bytes(), client.key_pem.as_bytes())
         .expect("an identity");
-    let selector = Selector::builder().source(Keystore(identity)).build();
+    let selector = Selector::builder()
+        .source(Keystore(identity))
+        .send_sole_candidate(true)
+        .build();
     let tls = TlsBuilder::default()
         .trust(Trust::Roots(vec![ca.der()]))
         .client_certificates(ClientCertificates::Selector(Arc::new(selector)));
