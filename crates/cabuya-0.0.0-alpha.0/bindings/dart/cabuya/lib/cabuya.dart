@@ -203,6 +203,7 @@ final class MuxLimits {
     this.maxStreams = 32,
     this.maxPerProtocol = 16,
     this.window = 1024 * 1024,
+    this.maxWindow = 1024 * 1024,
     this.maxMessage = 16 * 1024 * 1024,
     this.maxFrame = 64 * 1024,
     this.maxMetadata = 4096,
@@ -212,7 +213,12 @@ final class MuxLimits {
   });
   final int maxStreams;
   final int maxPerProtocol;
+
+  /// The credit both sides assume at a stream's start, so it is the same on both.
   final int window;
+
+  /// The most a stream's receive window may grow to with [MuxStream.grant]. A value below [window] means [window].
+  final int maxWindow;
   final int maxMessage;
   final int maxFrame;
   final int maxMetadata;
@@ -236,7 +242,8 @@ final class StreamEnded implements Exception {
 /// One stream inside a link.
 final class MuxStream {
   MuxStream._(this._mux, this.id, this.protocol, this.metadata)
-    : _creditLeft = _mux.limits.window;
+    : _creditLeft = _mux.limits.window,
+      _window = _mux.limits.window;
 
   final Mux _mux;
   final int id;
@@ -248,6 +255,7 @@ final class MuxStream {
   final BytesBuilder _partial = BytesBuilder(copy: false);
   int _held = 0;
   int _creditLeft;
+  int _window;
   bool _finished = false;
   bool _peerFinished = false;
   String? _ended;
@@ -310,6 +318,24 @@ final class MuxStream {
       at += size;
     }
     await _mux._send(DataFrame(id, Uint8List.sublistView(message, at)));
+  }
+
+  /// What this side lets the peer have in flight on the stream: [MuxLimits.window] at first, and more after [grant].
+  int get window => _window;
+
+  /// Widens what the peer may have in flight on this stream by [bytes], up to [MuxLimits.maxWindow], with one credit frame for the
+  /// increase, and answers the new window. A peer needs to know nothing of it: it counts the credit as it counts what is read.
+  Future<int> grant(int bytes) async {
+    final ended = _ended;
+    if (ended != null) throw StreamEnded(ended, _endedText);
+    final ceiling = min(
+      max(_mux.limits.window, _mux.limits.maxWindow),
+      0xffffffff,
+    );
+    final more = min(max(bytes, 0), ceiling - _window);
+    _window += more;
+    if (more > 0) await _mux._send(CreditFrame(id, more));
+    return _window;
   }
 
   /// Says this side will send nothing more, and goes on reading. The peer's receive answers null after what was sent.
@@ -566,7 +592,7 @@ final class Mux {
     // A sender may start a message only while it has credit, so what is held before a new one is under the window.
     final starting = stream._partial.isEmpty;
     if (stream._partial.length + body.length > limits.maxMessage ||
-        (starting && stream._held >= limits.window) ||
+        (starting && stream._held >= stream._window) ||
         stream._peerFinished) {
       stream._incoming.clear();
       stream._partial.clear();

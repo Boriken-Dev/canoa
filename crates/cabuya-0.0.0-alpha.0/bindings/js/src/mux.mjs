@@ -17,6 +17,7 @@ export const DEFAULT_LIMITS = Object.freeze({
   maxStreams: 32,
   maxPerProtocol: 16,
   window: 1024 * 1024,
+  maxWindow: 1024 * 1024,
   maxMessage: 16 * 1024 * 1024,
   maxFrame: 64 * 1024,
   maxMetadata: 4096,
@@ -157,6 +158,21 @@ class Stream {
     this.protocol = protocol;
     this.metadata = metadata;
     this.credit = mux.limits.window;
+    this.window = mux.limits.window;
+  }
+
+  /**
+   * Widens what the peer may have in flight on this stream by bytes, up to limits.maxWindow (a value below limits.window means
+   * window), with one credit frame for the increase, and answers the new window. The peer needs to know nothing of it: it counts the
+   * credit as it counts what is read.
+   */
+  async grant(bytes) {
+    if (this.ended !== null) throw new StreamEnded(this.ended, this.endedText);
+    const ceiling = Math.min(Math.max(this.mux.limits.window, this.mux.limits.maxWindow), 0xffffffff);
+    const more = Math.min(Math.max(Math.floor(bytes), 0), ceiling - this.window);
+    this.window += more;
+    if (more > 0) await this.mux.send({ kind: 'credit', stream: this.id, bytes: more });
+    return this.window;
   }
 
   /** Sends now or says it cannot: false means full, for a host that would rather drop a slow reader than wait. */
@@ -362,7 +378,7 @@ class Mux {
     if (stream.ended !== null) return;
     // A sender may start a message only while it has credit, so what is held before a new one is under the window.
     const starting = stream.partialSize === 0;
-    if (stream.partialSize + body.length > this.limits.maxMessage || (starting && stream.held >= this.limits.window) || stream.peerFinished) {
+    if (stream.partialSize + body.length > this.limits.maxMessage || (starting && stream.held >= stream.window) || stream.peerFinished) {
       stream.incoming.length = 0;
       stream.partial = [];
       stream.partialSize = 0;

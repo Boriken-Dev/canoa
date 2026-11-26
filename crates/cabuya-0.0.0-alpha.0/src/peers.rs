@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn memory_and_file_keep_the_same_promises() {
         exercise(&MemoryPeers::default());
-        let dir = std::env::temp_dir().join(format!("coqui-link-peers-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cabuya-peers-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         exercise(&FilePeers::new(dir.join("deep/peers.json")));
         let _ = std::fs::remove_dir_all(&dir);
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn a_grant_made_by_another_process_counts_at_once() {
-        let dir = std::env::temp_dir().join(format!("coqui-link-live-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cabuya-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("peers.json");
         let reading = FilePeers::new(&path);
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn a_file_it_cannot_read_is_an_error_not_an_empty_store() {
-        let dir = std::env::temp_dir().join(format!("coqui-link-bad-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cabuya-bad-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("peers.json");

@@ -1,14 +1,14 @@
-# coqui-link/. at 40123baab01440c0522a27baa7321a31892b3735, with what it inherits written out.
-test = [{ name = "pairing", required-features = ["sealed"] }, { name = "interop", required-features = ["sealed", "forward"] }]
+# cabuya/. at 7089185fbd047b676ba9a74963b7509136f4637a, with what it inherits written out.
+test = [{ name = "pairing", required-features = ["sealed"] }, { name = "interop", required-features = ["sealed", "forward"] }, { name = "asked", required-features = ["sealed"] }, { name = "shared", required-features = ["sealed"] }]
 [package]
-name = "coqui-link"
+name = "cabuya"
 description = "A proven link between two peers, and named streams over it: any protocol, no agent library"
 version = "0.0.0-alpha.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MPL-2.0"
-repository = "https://github.com/Boriken-Dev/coqui-link"
-homepage = "https://boriken-dev.github.io/coqui-link/"
+repository = "https://github.com/Boriken-Dev/cabuya"
+homepage = "https://boriken-dev.github.io/cabuya/"
 readme = "README.md"
 keywords = ["peer", "mux", "streams", "noise", "pairing"]
 categories = ["network-programming"]
@@ -22,7 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 sealed = ["dep:coqui-peer", "dep:coqui-builder", "dep:coqui-peer-noise", "dep:coqui-peer-webcrypto"]
-forward = ["dep:socket2"]
+forward = ["dep:socket2", "dep:coqui-net-acl"]
 [dependencies]
 serde_json = "1"
 [dependencies.coqui-transport]
@@ -39,16 +39,20 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 optional = true
 [dependencies.coqui-peer-webcrypto]
 git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
-rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681"
+rev = "7544cf9c026da808dc940bcb56a0b3d5d78bef2f"
 features = ["pin"]
 optional = true
 [dependencies.coqui-peer-noise]
 git = "https://github.com/Boriken-Dev/coqui-peer-noise"
-rev = "3a5b30689780a6e6291af565ff6abbaae515973c"
+rev = "518dd9f5693161d74af7b2ddb27ac0c4061b35b9"
 features = ["pin"]
 optional = true
 [dependencies.socket2]
 version = "0.6"
+optional = true
+[dependencies.coqui-net-acl]
+git = "https://github.com/Boriken-Dev/coqui-net-acl"
+rev = "839435acc29b76ec0190b7099f870863313d3fcd"
 optional = true
 [dev-dependencies]
 proptest = "1"

@@ -7,7 +7,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:coqui_link/coqui_link.dart';
+import 'package:cabuya/cabuya.dart';
 import 'package:test/test.dart';
 
 Uint8List _unhex(String text) => Uint8List.fromList([
@@ -358,6 +358,29 @@ void main() {
     final told = peer.sent.whereType<CloseFrame>().single;
     expect([told.stream, told.reason], [1, CloseReason.broken]);
   });
+
+  test(
+    'a widened stream is not broken by a peer that uses the credit',
+    () async {
+      final peer = _Against(limits: const MuxLimits(window: 8, maxWindow: 24));
+      peer
+        ..frame(OpenFrame(1, 'x'))
+        ..frame(DataFrame(1, Uint8List(8)));
+      final stream = (await peer.mux.accept().timeout(_wait))!;
+      expect(stream.window, 8);
+      expect(await stream.grant(1000), 24);
+      expect(await stream.grant(1), 24);
+      expect(peer.sent.whereType<CreditFrame>().single.bytes, 16);
+      peer
+        ..frame(DataFrame(1, Uint8List(8)))
+        ..frame(DataFrame(1, Uint8List(8)));
+      await pumpEventQueue();
+      for (var read = 0; read < 3; read++) {
+        expect((await stream.receive().timeout(_wait))!.length, 8);
+      }
+      expect(peer.sent.whereType<CloseFrame>(), isEmpty);
+    },
+  );
 
   test('a message over the limit ends its stream', () async {
     final peer = _Against(limits: const MuxLimits(maxMessage: 8));

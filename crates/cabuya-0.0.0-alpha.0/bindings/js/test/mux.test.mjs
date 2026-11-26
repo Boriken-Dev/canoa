@@ -111,6 +111,23 @@ test('a stream that stops reading holds up only itself', async () => {
   assert.equal(released, true, 'reading gives credit back');
 });
 
+test('a widened stream carries more than the initial window, and a grant past maxWindow is capped', async () => {
+  const { dialed, answered } = pair();
+  const client = createMux(dialed, { side: 'dialed', limits: { window: 16 } });
+  const server = createMux(answered, { side: 'answered', limits: { window: 16, maxWindow: 64 } });
+  const stream = await client.open('bulk');
+  const incoming = await within(server.accept());
+  assert.equal(incoming.window, 16);
+  assert.equal(await incoming.grant(1000), 64);
+  assert.equal(await incoming.grant(1), 64);
+  await incoming.send('ready');
+  assert.equal(text(await within(stream.receive())), 'ready');
+  for (let sent = 0; sent < 4; sent += 1) assert.equal(stream.trySend(new Uint8Array(16)), true);
+  assert.equal(stream.trySend(new Uint8Array(16)), false);
+  for (let read = 0; read < 4; read += 1) assert.equal((await within(incoming.receive())).length, 16);
+  assert.equal(incoming.ended, null);
+});
+
 test('metadata reaches the side accepting, and each cause arrives as itself', async () => {
   for (const reason of ['refused', 'superseded', 'revoked']) {
     const { dialed, answered } = pair();
@@ -243,6 +260,19 @@ test('a peer ignoring credit loses that stream and not the link', async () => {
   await assert.rejects(first.receive(), (error) => error.reason === 'broken');
   assert.equal((await second.receive()).length, 1);
   assert.deepEqual(sent.find((item) => item.kind === 'close'), { kind: 'close', stream: 1, reason: 'broken', text: '' });
+});
+
+test('a widened stream is not broken by a peer that uses the credit', async () => {
+  const { mux, sent, frame } = against({ window: 8, maxWindow: 24 });
+  frame({ kind: 'open', stream: 1, protocol: 'x' });
+  frame({ kind: 'data', stream: 1, body: new Uint8Array(8) });
+  const stream = await mux.accept();
+  assert.equal(await stream.grant(16), 24);
+  assert.deepEqual(sent.at(-1), { kind: 'credit', stream: 1, bytes: 16 });
+  frame({ kind: 'data', stream: 1, body: new Uint8Array(8) });
+  frame({ kind: 'data', stream: 1, body: new Uint8Array(8) });
+  for (let read = 0; read < 3; read += 1) assert.equal((await stream.receive()).length, 8);
+  assert.equal(stream.ended, null);
 });
 
 test('a message over the limit ends its stream', async () => {

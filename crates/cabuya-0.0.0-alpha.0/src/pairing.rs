@@ -7,20 +7,25 @@
 //!
 //! Both sides pair by their identity's method, and a joiner of the other method fails the handshake. The key a joiner stores is
 //! the one its method proved, so the pairing names the method the two then connect by.
+//!
+//! A pairing and a proof begin with the same handshake message under either method, so a listener that serves both cannot
+//! tell them apart from it. [`join_shared`] sends [`MARKER`] first, and [`answer`] reads the first message and runs a
+//! pairing or a proof by it: one listener, no second port.
 
 use core::cell::Cell;
 use std::io;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use coqui_peer::pair::{Paired, Pairing, PairingDesk, PairingOptions, Pin, PinRole};
-use coqui_peer::{MessageTransport, ReadTimeout, TrustStore};
+use coqui_peer::pair::{DeskLimits, Paired, Pairing, PairingDesk, PairingOptions, Pin, PinRole};
+use coqui_peer::{Established, Handshake, MessageTransport, ReadTimeout, TrustStore};
 use coqui_peer_noise as noise;
 use coqui_peer_webcrypto as webcrypto;
 use coqui_transport::{Channel, Failure};
 
 use crate::Error;
 use crate::auth::{Identity, MAX_PROOF_MESSAGE, prove, prove_out};
+use crate::link::Prefilled;
 
 /// The error and each cause beneath it, so a refusal says which: a wrong PIN, an expired one, a disabled mode.
 fn failed(error: impl core::error::Error) -> Error {
@@ -93,7 +98,16 @@ fn io_error(failure: Failure) -> io::Error {
 ///
 /// [`Error::Proof`] when the options are refused.
 pub fn desk() -> Result<PairingDesk, Error> {
-    let mut options = PairingOptions::default();
+    desk_with(PairingOptions::default(), DeskLimits::default())
+}
+
+/// [`desk`] with `options` and `limits`: how long a PIN lasts, how many runs may try it, its alphabet and length, and the bounds
+/// on pending runs. A PIN is the only mode a desk offers, whatever `options` says of the others.
+///
+/// # Errors
+///
+/// [`Error::Proof`] when `options` are meaningless (a zero lifetime or zero attempts, an empty alphabet).
+pub fn desk_with(mut options: PairingOptions, limits: DeskLimits) -> Result<PairingDesk, Error> {
     options.invitation = false;
     options.device = false;
     // Nobody is at a desk here to enter a PIN the joiner shows, so such a run must not wait for one.
@@ -101,6 +115,7 @@ pub fn desk() -> Result<PairingDesk, Error> {
     PairingDesk::builder()
         .random(coqui_peer_webcrypto::random())
         .options(options)
+        .limits(limits)
         .build()
         .map_err(failed)
 }
@@ -220,5 +235,138 @@ pub fn join_as<C: Channel>(
     match store.accept_key(&paired.peer) {
         Ok(_) | Err(coqui_peer::Error::AlreadyAccepted) => Ok(paired),
         Err(error) => Err(failed(error)),
+    }
+}
+
+/// What a joiner sends first on a listener that also takes proofs, so that listener knows a pairing follows. It is neither
+/// 32 bytes (Noise's first message) nor JSON (WebCrypto's), so no proof begins with it.
+pub const MARKER: &[u8] = b"cabuya/pairing/1";
+
+/// Whether `first_message` is a joiner's [`MARKER`]: a pairing follows on that channel, not a proof.
+#[must_use]
+pub fn starts_pairing(first_message: &[u8]) -> bool {
+    first_message == MARKER
+}
+
+/// [`join`] on a listener that also takes proofs: sends [`MARKER`] first, so the listener's [`answer`] runs a pairing.
+///
+/// # Errors
+///
+/// As [`join`].
+pub fn join_shared<C: Channel>(
+    channel: &C,
+    identity: &Identity,
+    pin: Pin,
+    store: &TrustStore,
+    limit: Duration,
+) -> Result<Paired, Error> {
+    channel.send(MARKER)?;
+    join(channel, identity, pin, store, limit)
+}
+
+/// What a listener's connection turned out to be.
+#[non_exhaustive]
+pub enum Answered<T> {
+    /// A pairing, complete: the joiner's key is accepted in the store.
+    Paired(Paired),
+    /// A proof, complete, as [`prove`] answers it.
+    Proven(Established<T>),
+}
+
+/// What [`answer`] needs to pair a joiner: this side's identity, the store a joiner's key is accepted in, and the desk that
+/// holds the PIN (a desk with no PIN shown refuses a joiner as one that is not offered).
+#[derive(Clone, Copy)]
+pub struct PairingHost<'a> {
+    /// The key this side pairs by.
+    pub identity: &'a Identity,
+    /// Where a paired joiner is accepted.
+    pub store: &'a TrustStore,
+    /// The desk showing the PIN.
+    pub desk: &'a PairingDesk,
+}
+
+/// Why [`answer`] ended without an answer, and whether the connection was a pairing.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Unanswered {
+    /// `true` when the joiner sent [`MARKER`]: a refused pairing, never a failed proof.
+    pub pairing: bool,
+    /// What went wrong, as [`respond`] or [`prove`] report it.
+    pub error: Error,
+}
+
+impl core::fmt::Display for Unanswered {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl core::error::Error for Unanswered {}
+
+/// The responder of a listener that takes proofs and pairings: reads the first message, and runs [`respond`] when it is
+/// [`MARKER`], otherwise [`prove`] with `method` (the message is not lost). `limit` bounds the whole run. With `pairing` `None`
+/// a joiner is sent away at once, unanswered.
+///
+/// # Errors
+///
+/// [`Unanswered`], holding what [`respond`] reports for a pairing and what [`prove`] reports for a proof, or
+/// [`Error::Channel`] for silence before the first message.
+pub fn answer<M: coqui_peer::Method, C: Channel>(
+    channel: &C,
+    method: &M,
+    max_message: usize,
+    pairing: Option<PairingHost<'_>>,
+    source: Option<SocketAddr>,
+    limit: Duration,
+) -> Result<Answered<<M::Handshake as Handshake>::Output>, Unanswered> {
+    let deadline = Instant::now() + limit;
+    let first = crate::auth::next(channel, deadline).map_err(|error| Unanswered {
+        pairing: false,
+        error,
+    })?;
+    let left = deadline.saturating_duration_since(Instant::now());
+    if starts_pairing(&first) {
+        let unanswered = |error| Unanswered {
+            pairing: true,
+            error,
+        };
+        let Some(pairing) = pairing else {
+            return Err(unanswered(Error::Proof(
+                "pairing is not offered on this listener".to_owned(),
+            )));
+        };
+        respond(
+            channel,
+            pairing.identity,
+            pairing.store,
+            pairing.desk,
+            source,
+            left,
+        )
+        .map(Answered::Paired)
+        .map_err(unanswered)
+    } else {
+        let channel = Prefilled::new(channel, first);
+        prove(method, &channel, left, max_message)
+            .map(Answered::Proven)
+            .map_err(|error| Unanswered {
+                pairing: false,
+                error,
+            })
+    }
+}
+
+impl<T> core::fmt::Debug for Answered<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Paired(_) => "Answered::Paired",
+            Self::Proven(_) => "Answered::Proven",
+        })
+    }
+}
+
+impl core::fmt::Debug for PairingHost<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PairingHost").finish_non_exhaustive()
     }
 }

@@ -163,7 +163,7 @@ fn decide(
     Ok(record)
 }
 
-fn document(store: &dyn PeerStore, peer: &str, services: &Services) -> Vec<u8> {
+fn document(store: &dyn PeerStore, peer: &str, services: &Services, limits: &Limits) -> Vec<u8> {
     let offers: Vec<&str> = match store.get(peer) {
         Ok(Some(record)) => services
             .tokens()
@@ -171,9 +171,16 @@ fn document(store: &dyn PeerStore, peer: &str, services: &Services) -> Vec<u8> {
             .collect(),
         _ => Vec::new(),
     };
-    json!({ "version": 1, "instance": instance(), "peer": peer, "offers": offers })
-        .to_string()
-        .into_bytes()
+    json!({
+        "version": 1,
+        "instance": instance(),
+        "peer": peer,
+        "offers": offers,
+        "window": limits.window,
+        "max_frame": limits.max_frame,
+    })
+    .to_string()
+    .into_bytes()
 }
 
 /// What a host brings to every link it serves.
@@ -234,7 +241,8 @@ pub fn serve_with<'c, C: Channel>(
     events.event(&Event::LinkUp {
         peer: peer.to_owned(),
     });
-    Mux::run(channel, side, options.limits, first, |mux| {
+    let limits = options.limits;
+    Mux::run(channel, side, limits, first, |mux| {
         thread::scope(|scope| {
             scope.spawn(|| opener(mux));
             let live: Mutex<Vec<Live<'_, C>>> = Mutex::new(Vec::new());
@@ -279,7 +287,7 @@ pub fn serve_with<'c, C: Channel>(
                         } = incoming;
                         if protocol == LINK_PROTOCOL {
                             scope.spawn(move || {
-                                let _ = stream.send(&document(store, peer, services));
+                                let _ = stream.send(&document(store, peer, services, &limits));
                                 let _ = stream.finish();
                                 let _ = stream.receive(Some(Duration::from_secs(5)));
                             });
@@ -345,6 +353,11 @@ pub struct Capabilities {
     pub instance: String,
     /// What this peer may open there.
     pub offers: Vec<String>,
+    /// The credit that side assumes at a stream's start (its `Limits::window`), when it said. Both sides must start from the
+    /// same value: a difference is for the host to report. Absent from an older peer.
+    pub window: Option<u32>,
+    /// The largest part of a message that side puts in one frame (its `Limits::max_frame`), when it said.
+    pub max_frame: Option<usize>,
 }
 
 /// Asks the other side what this side may open.
@@ -371,7 +384,20 @@ pub fn capabilities<C: Channel>(mux: &Mux<'_, C>, wait: Duration) -> Result<Capa
         .iter()
         .filter_map(|offer| offer.as_str().map(str::to_owned))
         .collect();
-    Ok(Capabilities { instance, offers })
+    let window = value
+        .get("window")
+        .and_then(Value::as_u64)
+        .and_then(|window| u32::try_from(window).ok());
+    let max_frame = value
+        .get("max_frame")
+        .and_then(Value::as_u64)
+        .and_then(|frame| usize::try_from(frame).ok());
+    Ok(Capabilities {
+        instance,
+        offers,
+        window,
+        max_frame,
+    })
 }
 
 /// A channel with one message already read from it, as when a server looked at what a client sent first.
@@ -543,6 +569,8 @@ mod tests {
             let told = capabilities(mux, TICK).unwrap();
             assert_eq!(told.offers, ["acp/1", "mcp"]);
             assert_eq!(told.instance, instance());
+            assert_eq!(told.window, Some(Limits::default().window));
+            assert_eq!(told.max_frame, Some(Limits::default().max_frame));
             let acp = mux.open("acp/1").unwrap();
             let mcp = mux.open("mcp").unwrap();
             acp.send(b":acp").unwrap();

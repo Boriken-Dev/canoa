@@ -9,7 +9,8 @@ use core::str::FromStr;
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use coqui_builder::NonDefault;
@@ -281,8 +282,12 @@ pub fn create_identity(path: &Path, method: Method) -> Result<PeerId, Error> {
     Ok(identity.peer_id())
 }
 
+/// What the host is asked about a proven key: the key, whether this side answered the connection, and the connection's source
+/// when the host gave one. It is `true` to admit.
+pub type Asking = dyn Fn(&KeyMaterial, bool, Option<SocketAddr>) -> bool + Send + Sync;
+
 /// Whom a proof admits, decided after the peer proved its key and never before.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub enum Trust {
     /// These ids, fixed when the proof is built. An empty set admits nobody.
@@ -290,6 +295,20 @@ pub enum Trust {
     /// The keys a store accepts, of the proof's own method, read at each handshake. A responder records a proved stranger as
     /// waiting.
     Store(TrustStore),
+    /// The host decides, at each handshake and after the proof, from the proven key, whether this side answered, and the
+    /// connection's source. It is asked once, never for a key whose proof failed, and records nothing itself: a host that
+    /// queues a refused stranger does it in its own closure. Build it with [`Trust::asked`].
+    Asked(Arc<Asking>),
+}
+
+impl fmt::Debug for Trust {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pinned(ids) => f.debug_tuple("Pinned").field(ids).finish(),
+            Self::Store(store) => f.debug_tuple("Store").field(store).finish(),
+            Self::Asked(_) => f.debug_tuple("Asked").field(&"..").finish(),
+        }
+    }
 }
 
 impl Trust {
@@ -298,10 +317,21 @@ impl Trust {
         Self::Pinned(ids.into_iter().collect())
     }
 
+    /// Admits what `admit` answers `true` to: it gets the proven key, whether this side answered the connection and that
+    /// connection's source. Under either method it runs once per handshake, after the proof held.
+    pub fn asked(
+        admit: impl Fn(&KeyMaterial, bool, Option<SocketAddr>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        Self::Asked(Arc::new(admit))
+    }
+
     fn webcrypto(self) -> webcrypto::Trust {
         match self {
             Self::Pinned(ids) => webcrypto::Trust::Pinned(ids),
             Self::Store(store) => webcrypto::Trust::Store(store),
+            Self::Asked(admit) => {
+                webcrypto::Trust::asked(move |key, answering, source| admit(key, answering, source))
+            }
         }
     }
 
@@ -309,6 +339,9 @@ impl Trust {
         match self {
             Self::Pinned(ids) => noise::Trust::Pinned(ids),
             Self::Store(store) => noise::Trust::Store(store),
+            Self::Asked(admit) => {
+                noise::Trust::asked(move |key, answering, source| admit(key, answering, source))
+            }
         }
     }
 }
@@ -851,6 +884,7 @@ pub struct Sealed<'a, C: Channel> {
     method: Method,
     allowed: Option<Box<dyn Fn() -> bool + Send + Sync + 'a>>,
     checked: Mutex<Instant>,
+    revoked: AtomicBool,
     recheck: Duration,
 }
 
@@ -877,12 +911,17 @@ impl<'a, C: Channel> Sealed<'a, C> {
             method,
             allowed: None,
             checked: Mutex::new(Instant::now()),
+            revoked: AtomicBool::new(false),
             recheck: RECHECK,
         }
     }
 
     /// Ends the link within about a second once `allowed` says no, for a peer removed from a store while connected. A check that
     /// cannot tell has to say no: a store that cannot be read must not keep a link alive.
+    ///
+    /// The first failed check answers [`Failure::Permission`] from `receive` and leaves the channel open, so a [`Mux`](crate::mux::Mux)
+    /// over it can close each stream with [`CloseReason::Revoked`](crate::mux::CloseReason::Revoked) before the owner closes the
+    /// channel; any later `receive` closes it.
     #[must_use]
     pub fn with_check(mut self, allowed: impl Fn() -> bool + Send + Sync + 'a) -> Self {
         self.allowed = Some(Box::new(allowed));
@@ -945,8 +984,14 @@ impl<C: Channel> Channel for Sealed<'_, C> {
     }
 
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
-        if !self.still_allowed() {
+        // The first answer leaves the channel open, so a mux over it can still tell each stream why before its owner closes the
+        // channel; any later call closes it.
+        if self.revoked.load(Ordering::SeqCst) {
             self.channel.close();
+            return Err(Failure::Permission);
+        }
+        if !self.still_allowed() {
+            self.revoked.store(true, Ordering::SeqCst);
             return Err(Failure::Permission);
         }
         let mut opener = self.opener.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1088,6 +1133,12 @@ mod tests {
     const LIMIT: Duration = Duration::from_secs(10);
 
     fn sealed_pair(method: Method) -> (Session, Session) {
+        let (_, _, dialed, answered) = proved_pair(method);
+        (dialed, answered)
+    }
+
+    /// The two ends of a link in memory, and the sessions their proof made.
+    fn proved_pair(method: Method) -> (Wire, Wire, Session, Session) {
         let dialer = Identity::generate(method).unwrap();
         let answerer = Identity::generate(method).unwrap();
         let (dialer_id, answerer_id) = (dialer.peer_id(), answerer.peer_id());
@@ -1100,12 +1151,13 @@ mod tests {
             .build()
             .unwrap();
         let (ours, theirs) = wires();
-        thread::scope(|scope| {
+        let (dialed, answered) = thread::scope(|scope| {
             let answer =
                 scope.spawn(|| prove(&answering, &theirs, LIMIT, 1 << 20).unwrap().session);
             let dialed = prove_out(&dialing, &ours, LIMIT, 1 << 20).unwrap().session;
             (dialed, answer.join().unwrap())
-        })
+        });
+        (ours, theirs, dialed, answered)
     }
 
     fn opened(session: Session, records: &[Vec<u8>]) -> Vec<Vec<u8>> {
@@ -1161,6 +1213,38 @@ mod tests {
             );
             let taken = link.taken.lock().unwrap().clone();
             assert_eq!(opened(theirs, &taken), [&b"last"[..]]);
+        }
+    }
+
+    #[test]
+    fn a_failed_check_tells_the_peer_each_stream_was_revoked_before_the_link_ends() {
+        use crate::mux::{Limits, Mux, Side, StreamEnd};
+        const WAIT: Option<Duration> = Some(Duration::from_secs(5));
+        for method in Method::ALL {
+            let (near, far, ours, theirs) = proved_pair(method);
+            let allowed = AtomicBool::new(true);
+            let checked = Sealed::new(&near, ours)
+                .with_check(|| allowed.load(Ordering::SeqCst))
+                .with_check_every(Duration::ZERO);
+            let peer = Sealed::new(&far, theirs);
+            let (opened, hear) = std::sync::mpsc::channel::<()>();
+            thread::scope(|scope| {
+                scope.spawn(|| {
+                    Mux::run(&checked, Side::Dialed, Limits::default(), None, |mux| {
+                        let _stream = mux.accept(WAIT).unwrap().unwrap();
+                        opened.send(()).unwrap();
+                        thread::sleep(Duration::from_millis(500));
+                    });
+                });
+                Mux::run(&peer, Side::Answered, Limits::default(), None, |mux| {
+                    let stream = mux.open("bulk").unwrap();
+                    stream.send(b"in flight").unwrap();
+                    hear.recv_timeout(Duration::from_secs(5)).unwrap();
+                    allowed.store(false, Ordering::SeqCst);
+                    assert_eq!(stream.receive(WAIT), Err(Failure::Permission));
+                    assert!(matches!(stream.end(), Some(StreamEnd::Revoked(_))));
+                });
+            });
         }
     }
 
@@ -1278,7 +1362,7 @@ mod tests {
     #[test]
     fn an_identity_file_is_read_as_its_keys_method_and_never_used_for_the_other() {
         let dir = std::env::temp_dir().join(format!(
-            "coqui-link-auth-{}-{:?}",
+            "cabuya-auth-{}-{:?}",
             std::process::id(),
             thread::current().id()
         ));
@@ -1397,8 +1481,7 @@ mod tests {
 
     #[test]
     fn an_identity_that_cannot_be_written_says_why() {
-        let dir =
-            std::env::temp_dir().join(format!("coqui-link-unwritable-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cabuya-unwritable-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // A file where the parent directory should be.

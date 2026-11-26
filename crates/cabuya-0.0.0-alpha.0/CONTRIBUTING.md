@@ -1,4 +1,4 @@
-# Contributing to coqui-link
+# Contributing to cabuya
 
 ## Licence
 
@@ -18,7 +18,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo test --no-default-features
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
-(cd bindings/dart/coqui_link && dart analyze && dart test)
+(cd bindings/dart/cabuya && dart analyze && dart test)
 (cd bindings/js && npm test)
 ```
 

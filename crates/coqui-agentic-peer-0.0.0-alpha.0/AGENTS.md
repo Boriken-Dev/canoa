@@ -2,9 +2,9 @@
 
 Header-file-style reference for the `coqui-agentic-peer` crate, so it can be used without reading the source. It ships inside the package and is self-contained.
 
-No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published. It depends on `coqui-link` (by revision, feature `sealed`), `coqui-transport` (by revision, no default features; its `Channel` and `Failure` are what every stream is generic over), `coqui-peer-webcrypto`, `mdns-sd`, `serde_json` and `url`. No `unsafe` code. Public modules: `companion`, `discovery`, `home`, `mcp_offer`.
+No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published. It depends on `cabuya` (by revision, feature `sealed`), `coqui-transport` (by revision, no default features; its `Channel` and `Failure` are what every stream is generic over), `coqui-peer-webcrypto`, `mdns-sd`, `serde_json` and `url`. No `unsafe` code. Public modules: `companion`, `discovery`, `home`, `mcp_offer`.
 
-The link itself is `coqui-link`'s, and this crate re-exports none of it: the proof and its identities (`auth`), pairing by PIN (`pairing`), the streams (`mux`), serving under grants (`link`), the peers' records (`peers`) and TCP forwarding (`forward`, feature `forward`) are `coqui_link::{auth, pairing, mux, link, peers, forward}`, documented in that crate's `AGENTS.md`. `Method` and `Identity` below are `coqui_link::auth::{Method, Identity}`; `home`'s `Error` is `coqui_link::Error`, and `discovery`'s and `companion`'s is `coqui_agentic_peer::Error`.
+The link itself is `cabuya`'s, and this crate re-exports none of it: the proof and its identities (`auth`), pairing by PIN (`pairing`), the streams (`mux`), serving under grants (`link`), the peers' records (`peers`) and TCP forwarding (`forward`, feature `forward`) are `cabuya::{auth, pairing, mux, link, peers, forward}`, documented in that crate's `AGENTS.md`. `Method` and `Identity` below are `cabuya::auth::{Method, Identity}`; `home`'s `Error` is `cabuya::Error`, and `discovery`'s and `companion`'s is `coqui_agentic_peer::Error`.
 
 ## `coqui_agentic_peer::mcp_offer`
 
@@ -12,7 +12,7 @@ The link itself is `coqui-link`'s, and this crate re-exports none of it: the pro
 pub const OFFER_PROTOCOL: &str = "mcp-offer/1";
 pub const ADDRESS_VARIABLE: &str = "COQUI_MCP_OFFER_ADDRESS";
 pub const TOKEN_FILE_VARIABLE: &str = "COQUI_MCP_OFFER_TOKEN_FILE";
-pub fn handler(command: PathBuf, args: Vec<String>, tokens: PathBuf) -> coqui_link::link::Handler      // what coqui_link::link::Services::with takes; command is absolute and starts shim; tokens is made private and holds one file per offer
+pub fn handler(command: PathBuf, args: Vec<String>, tokens: PathBuf) -> cabuya::link::Handler      // what cabuya::link::Services::with takes; command is absolute and starts shim; tokens is made private and holds one file per offer
 pub fn shim(input: impl Read + Send + 'static, output: impl Write) -> Result<(), ShimError>   // the stdio server, from its environment
 pub enum ShimError { Setting(&'static str), Io(io::Error) }  // non_exhaustive
 ```
@@ -97,7 +97,7 @@ It answers `{ "op": "discover", "seconds": N }`, at most 10 seconds, and nothing
 
 ## Errors
 
-`coqui_agentic_peer::Error` (`#[non_exhaustive]`): `Discovery(String)`, a peer that could not be advertised or searched for, or a companion that could not be installed. `home` returns `coqui_link::Error` (`Identity(String)` for a key, identity file, trust store or directory that could not be used, with `Channel`, `Proof` and `OtherMethod` the link's own). A message never quotes a key file.
+`coqui_agentic_peer::Error` (`#[non_exhaustive]`): `Discovery(String)`, a peer that could not be advertised or searched for, or a companion that could not be installed. `home` returns `cabuya::Error` (`Identity(String)` for a key, identity file, trust store or directory that could not be used, with `Channel`, `Proof` and `OtherMethod` the link's own). A message never quotes a key file.
 
 ## Gotchas
 

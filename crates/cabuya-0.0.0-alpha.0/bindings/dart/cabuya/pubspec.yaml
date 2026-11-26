@@ -1,7 +1,7 @@
-name: coqui_link
+name: cabuya
 description: Named channels inside a proven link, for Dart and Flutter.
 version: 0.0.0-alpha.0
-repository: https://github.com/Boriken-Dev/coqui-link
+repository: https://github.com/Boriken-Dev/cabuya
 publish_to: none
 
 environment:

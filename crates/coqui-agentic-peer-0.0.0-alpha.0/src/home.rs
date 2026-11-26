@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use coqui_peer_webcrypto::TrustStore;
 
-use coqui_link::Error;
-use coqui_link::auth::{Identity, Method};
+use cabuya::Error;
+use cabuya::auth::{Identity, Method};
 
 /// Overrides the whole directory, for a second identity on one account, and for tests.
 pub const HOME_ENV: &str = "COQUI_AGENTIC_PEER_HOME";
@@ -42,7 +42,7 @@ fn inside(name: &str) -> Result<PathBuf, Error> {
 }
 
 /// The file name of a method's identity in this user's directory: `identity` for WebCrypto, where it has always been, and
-/// `identity-noise` for Noise. A method `coqui-link` adds later shares `identity-other` until this names its own file, and
+/// `identity-noise` for Noise. A method `cabuya` adds later shares `identity-other` until this names its own file, and
 /// [`Identity::open_or_create`] refuses a key of another method there, so two never mix.
 #[must_use]
 pub const fn identity_file(method: Method) -> &'static str {
@@ -71,7 +71,7 @@ pub fn store_path() -> Result<PathBuf, Error> {
     inside("peers")
 }
 
-/// The file of this user's grants, which [`coqui_link::peers::FilePeers`] reads.
+/// The file of this user's grants, which [`cabuya::peers::FilePeers`] reads.
 ///
 /// # Errors
 ///

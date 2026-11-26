@@ -3,7 +3,7 @@
 //! anything else runs as a capability on the same link, with no second pairing. It adds finding and reaching a peer, never a
 //! dialect: what crosses a stream is that protocol's own messages.
 //!
-//! The proof, the pairing, the streams, the peers' grants and the service loop are `coqui-link`'s, and not repeated here.
+//! The proof, the pairing, the streams, the peers' grants and the service loop are `cabuya`'s, and not repeated here.
 #![forbid(unsafe_code)]
 #![allow(clippy::std_instead_of_core, clippy::std_instead_of_alloc)]
 
