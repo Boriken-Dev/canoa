@@ -10,6 +10,7 @@
     reason = "the clock is std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::time::Duration;
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -41,7 +42,9 @@ pub(crate) fn search_base(store: &Value) -> Result<String, (i32, String)> {
         Some(Value::String(address)) => directory_base(address),
         _ => Err((
             REFUSED,
-            "Skill search is off: turn it on in Store settings, or write skills_search = true under [store] in canoa.cfg".to_owned(),
+            format!(
+                "Skill search is off: turn it on in Store settings, or write skills_search = true under [store] in {CONFIG_FILE}"
+            ),
         )),
     }
 }

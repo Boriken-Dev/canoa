@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 
 use canoa_host::cli::{self, Cli, Front, Program};
 use canoa_host::{Link, LinkError, Local};
-use clap::Parser as _;
 use serde_json::{Value, json};
 
 use crate::support::{Scratch, WAIT, example, host_binary, quoted};

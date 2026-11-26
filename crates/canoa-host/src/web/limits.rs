@@ -197,7 +197,7 @@ pub enum WebError {
         /// The directory.
         dir: PathBuf,
         /// Why: absent, not a directory, or without `index.html`.
-        why: &'static str,
+        why: String,
     },
     /// Plain HTTP was asked for beyond loopback, where it is refused: give a certificate and key.
     PlainBeyondLoopback(SocketAddr),

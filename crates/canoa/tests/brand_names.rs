@@ -90,7 +90,8 @@ fn a_name_that_is_one_path_component_is_taken() {
         ("home_dir", "agentui"),
         ("program", "agent-ui"),
     ] {
-        Names::read(&fixture(key, good.into())).unwrap_or_else(|error| panic!("{key} {good}: {error}"));
+        Names::read(&fixture(key, good.into()))
+            .unwrap_or_else(|error| panic!("{key} {good}: {error}"));
     }
 }
 
@@ -103,7 +104,8 @@ fn a_build_carries_the_names_of_the_brand_file_it_was_made_from() {
             || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("brand/brand.json"),
             PathBuf::from,
         );
-    let brand = Names::read(&std::fs::read_to_string(&file).expect("the brand file")).expect("a brand");
+    let brand =
+        Names::read(&std::fs::read_to_string(&file).expect("the brand file")).expect("a brand");
     assert_eq!(canoa::brand::NAME, brand.name);
     assert_eq!(canoa::brand::PROGRAM, brand.program);
     assert_eq!(canoa::brand::CONFIG_FILE, brand.config_file);

@@ -31,6 +31,8 @@ pub(crate) mod store;
 mod tests;
 mod watch;
 
+use canoa::brand::CONFIG_FILE;
+use canoa::brand::PROGRAM;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -137,9 +139,9 @@ impl fmt::Display for Refusal {
                 f,
                 "this account rotates its credentials, so one connection may hold it at a time, and {holder} holds it"
             ),
-            Self::NoCredentials => {
-                f.write_str("this account has no credentials: sign in with `canoa accounts login`")
-            }
+            Self::NoCredentials => f.write_str(
+                "this account has no credentials: sign in with `{PROGRAM} accounts login`",
+            ),
             Self::Store(why) => write!(f, "the account store failed: {why}"),
             Self::Gateway(why) => f.write_str(why),
         }
@@ -1110,7 +1112,7 @@ pub(crate) fn check_settings(
     for key in map.keys() {
         if schema.find(key).is_some_and(|field| field.is_sensitive()) {
             return Err(format!(
-                "{key} is a credential, and a credential never goes in canoa.cfg: `canoa accounts add` keeps it in the account store"
+                "{key} is a credential, and a credential never goes in {CONFIG_FILE}: `{PROGRAM} accounts add` keeps it in the account store"
             ));
         }
     }

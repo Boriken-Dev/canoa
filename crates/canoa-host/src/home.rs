@@ -298,7 +298,7 @@ impl Home {
 /// The directory a host with no home named uses: `named` (the library's override variable), else `.canoa` in `user`, the
 /// person's home folder.
 fn user_dir(named: Option<PathBuf>, user: Option<PathBuf>) -> Option<PathBuf> {
-    named.or_else(|| user.map(|user| user.join(".canoa")))
+    named.or_else(|| user.map(|user| user.join(canoa::brand::HOME_DIR)))
 }
 
 /// What the lock is taken on: see the module's documentation.
@@ -384,12 +384,12 @@ mod tests {
     }
 
     #[test]
-    fn a_home_with_none_named_is_dot_canoa_in_the_persons_home_folder() {
+    fn a_home_with_none_named_is_the_brands_folder_in_the_persons_home_folder() {
         let user = |path: &str| Some(PathBuf::from(path));
         for path in ["/home/me", "/Users/me", r"C:\Users\me"] {
             assert_eq!(
                 user_dir(None, user(path)),
-                Some(PathBuf::from(path).join(".canoa"))
+                Some(PathBuf::from(path).join(canoa::brand::HOME_DIR))
             );
         }
         assert_eq!(user_dir(None, None), None);

@@ -19,7 +19,11 @@ macro_rules! built_in_sections {
                     let mut info = SectionInfo::new($id, $title);
                     info.group = Some($group.to_owned());
                     info.icon = Some($icon.to_owned());
-                    info.keywords = Some($keywords.to_owned());
+                    info.keywords = Some(
+                        $keywords
+                            .replace("{config_file}", canoa::brand::CONFIG_FILE)
+                            .replace("{program}", canoa::brand::PROGRAM),
+                    );
                     Ok(info)
                 }
 
@@ -59,7 +63,7 @@ built_in_sections! {
     Usage("usage", "Usage", "Agents", "speed", "limit warn percent quota");
     Extensions("extensions", "Libraries", "Extensions", "extension", "extensions libraries library file source host loads load add by hand provider store types restart");
     CatalogSources("catalog_sources", "Catalog sources", "Store", "hub", "catalogs sources models releases default replace add off pin trust verified pinned unverified checksum digest mirror");
-    Advanced("advanced", "Advanced", "Store", "wrench", "configuration canoa.cfg tables keys web control native network delegate kb history worktrees tools environments openers limits advanced edit add remove");
+    Advanced("advanced", "Advanced", "Store", "wrench", "configuration {config_file} tables keys web control native network delegate kb history worktrees tools environments openers limits advanced edit add remove");
     Providers("providers", "Providers", "Extensions", "wrench", "providers libraries kinds account harness vendor off disable switch turn disabled host restart");
-    About("about", "About", "About", "info", "version canoa boriken licence");
+    About("about", "About", "About", "info", "version {program} boriken licence");
 }

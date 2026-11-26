@@ -217,7 +217,10 @@ fn a_project_profile_is_trusted_as_it_was_shown_and_revoked() {
     let tmp = dir("trust");
     let work = tmp.join("work");
     let body = "[mcp]\n";
-    write(&work.join(".canoa").join("profile.toml"), body);
+    write(
+        &work.join(canoa::brand::HOME_DIR).join("profile.toml"),
+        body,
+    );
     let control = host(&tmp, &tmp.join("cfg").join("canoa.cfg"), "");
     let owner = Caller::Owner;
     let said = ask(
@@ -304,7 +307,7 @@ fn a_project_profile_is_trusted_as_it_was_shown_and_revoked() {
 fn a_folder_with_no_profile_cannot_be_trusted_and_a_removed_one_can_be_revoked() {
     let tmp = dir("gone");
     let work = tmp.join("work");
-    write(&work.join(".canoa").join("profile.toml"), "x");
+    write(&work.join(canoa::brand::HOME_DIR).join("profile.toml"), "x");
     let control = host(&tmp, &tmp.join("cfg").join("canoa.cfg"), "");
     let owner = Caller::Owner;
     let said = ask(

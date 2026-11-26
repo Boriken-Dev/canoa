@@ -2,6 +2,8 @@
 
 use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
+use canoa::brand::CONFIG_FILE;
+use canoa::brand::PROGRAM;
 use core::time::Duration;
 use std::path::{Component, Path, PathBuf};
 
@@ -201,7 +203,7 @@ pub(super) fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, C
     }
     if let Some(key) = raw.rest.keys().next() {
         return Err(refused(format!(
-            "{key} is not a key of an account, and a credential never goes in canoa.cfg: `canoa accounts add` keeps it in the account store"
+            "{key} is not a key of an account, and a credential never goes in {CONFIG_FILE}: `{PROGRAM} accounts add` keeps it in the account store"
         )));
     }
     let text = |value: Option<String>, key: &str| match value {
@@ -472,7 +474,7 @@ fn unknown_key(table: &str, key: &str) -> String {
             "{key} is not a setting this host knows; `accounts` under `[secrets]` replaced it (`file` is `file`, `os` is `system`)"
         ),
         (table, "own_profile") if table.starts_with("host.agents.") => format!(
-            "{key} is not a setting this host knows; an entry that names no `profiles` gets canoa.cfg's top level, and one that should run bare names an empty profile"
+            "{key} is not a setting this host knows; an entry that names no `profiles` gets {CONFIG_FILE}'s top level, and one that should run bare names an empty profile"
         ),
         _ => "a setting this host does not know".to_owned(),
     }

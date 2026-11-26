@@ -6,6 +6,7 @@
 //! the person was shown: a plan that moved since, or one made for another session, is refused and nothing changes. Nothing here
 //! is reachable by a catalog's words, and no source comes from the agent: an entry is looked up in the sources the person listed.
 
+use canoa::brand::CONFIG_FILE;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -216,7 +217,7 @@ impl Control {
         });
         if from.as_ref() != Some(source) {
             return Err(format!(
-                "canoa.cfg names {key} from another source or by hand: remove it there first to let the store manage it"
+                "{CONFIG_FILE} names {key} from another source or by hand: remove it there first to let the store manage it"
             ));
         }
         let record = self
@@ -231,7 +232,7 @@ impl Control {
             .and_then(Value::as_str);
         let Some(recorded) = recorded else {
             return Err(format!(
-                "canoa.cfg names {key} by hand: remove it there first to let the store manage it"
+                "{CONFIG_FILE} names {key} by hand: remove it there first to let the store manage it"
             ));
         };
         if let Some(catalog) = catalog
@@ -335,7 +336,7 @@ impl Control {
         {
             discard();
             return Err(format!(
-                "canoa.cfg pins {pin} for {name}, which is neither what the store installed nor what was fetched ({digest}): a pin set by hand is the person's to move, so nothing was changed"
+                "{CONFIG_FILE} pins {pin} for {name}, which is neither what the store installed nor what was fetched ({digest}): a pin set by hand is the person's to move, so nothing was changed"
             ));
         }
         let protected = self.protected_place(true);
@@ -400,7 +401,7 @@ impl Control {
             lines.push(format!("Now installed: {from}"));
             if !same_digest(from, digest) {
                 lines.push(format!(
-                    "It moves the pin in canoa.cfg from {from} to {digest}."
+                    "It moves the pin in {CONFIG_FILE} from {from} to {digest}."
                 ));
             }
         }
@@ -451,10 +452,9 @@ impl Control {
         listed(&mut lines, "+", added);
         listed(&mut lines, "~", changed);
         listed(&mut lines, "-", removed);
-        lines.push(
-            "It writes the overlay's folder beside canoa.cfg and its entry in [overlays]."
-                .to_owned(),
-        );
+        lines.push(format!(
+            "It writes the overlay's folder beside {CONFIG_FILE} and its entry in [overlays]."
+        ));
         if let Some(place) = protected {
             lines.push(format!("It writes a place on your protected list: {place}"));
         }
@@ -527,7 +527,9 @@ impl Control {
                     .and_then(Value::as_str)
                     && !pin_may_move(pin, installed_now.as_deref(), &prepared.digest)
                 {
-                    return Err("canoa.cfg now pins another digest: nothing was changed".to_owned());
+                    return Err(format!(
+                        "{CONFIG_FILE} now pins another digest: nothing was changed"
+                    ));
                 }
                 let mut entry = Map::new();
                 if let Some(options) = old
@@ -575,7 +577,7 @@ impl Control {
                 let mut message = why(error);
                 if let Err(error) = restored {
                     message.push_str(&format!(
-                        "; canoa.cfg's entry could not be put back: {}",
+                        "; {CONFIG_FILE}'s entry could not be put back: {}",
                         why(error)
                     ));
                 }
@@ -639,7 +641,7 @@ impl Control {
         let (key, _) = self.overlay_standing(name, &source, None)?;
         if key.is_none() || text(record, "catalog").is_none() {
             return Err(format!(
-                "canoa.cfg does not name {name} as the store installed it: the store does not remove it"
+                "{CONFIG_FILE} does not name {name} as the store installed it: the store does not remove it"
             ));
         }
         let digest = text(record, "digest").unwrap_or_default().to_owned();
@@ -710,7 +712,7 @@ impl Control {
             })
             .map_err(|error| {
                 format!(
-                    "the overlay's files were removed but its entry in canoa.cfg could not be: {}",
+                    "the overlay's files were removed but its entry in {CONFIG_FILE} could not be: {}",
                     why(error)
                 )
             })?;
@@ -806,8 +808,14 @@ impl Control {
             digest,
             title: format!("Turn {what} {}: {name}", if on { "on" } else { "off" }),
             lines: vec![
-                format!("Turn {} the {} {name} in the loadout {loadout}", if on { "on" } else { "off" }, change.kind),
-                "It is kept in canoa.cfg's [loadouts] and applies to sessions started after it; running ones keep what they have.".to_owned(),
+                format!(
+                    "Turn {} the {} {name} in the loadout {loadout}",
+                    if on { "on" } else { "off" },
+                    change.kind
+                ),
+                format!(
+                    "It is kept in {CONFIG_FILE}'s [loadouts] and applies to sessions started after it; running ones keep what they have."
+                ),
             ],
             nothing: None,
             protected: self.protected_place(false),

@@ -1,6 +1,7 @@
 //! The commands that are calls into `coqui-acp-bridge`: this file holds the glue (this host's home, the program that runs its helper
 //! subcommands, and how a status ends the process) and nothing the library does.
 
+use canoa::brand::CONFIG_FILE;
 use std::path::{Path, PathBuf};
 
 use cabuya::auth::{self, Method};
@@ -87,9 +88,9 @@ pub(super) fn serve_program(args: &ServeArgs, front: &dyn Front) -> Result<(), F
         || args.supervised
         || args.until_stdin_closes
     {
-        return Err(Failed::usage(
-            "--program serves one program with no canoa.cfg: --web, --web-listen, --portal, --local-sources, --allow-empty, --supervised and --until-stdin-closes belong to a serve of canoa.cfg",
-        ));
+        return Err(Failed::usage(format!(
+            "--program serves one program with no {CONFIG_FILE}: --web, --web-listen, --portal, --local-sources, --allow-empty, --supervised and --until-stdin-closes belong to a serve of {CONFIG_FILE}"
+        )));
     }
     let mut bridge = args.bridge.clone();
     let home = home_of(front)?;
@@ -158,7 +159,7 @@ pub(super) fn refuse_program_flags(args: &ServeArgs) -> Result<(), Failed> {
         return Ok(());
     }
     Err(Failed::usage(format!(
-        "{} belong to --program, which serves one program with no canoa.cfg",
+        "{} belong to --program, which serves one program with no {CONFIG_FILE}",
         args.given.0.join(", ")
     )))
 }

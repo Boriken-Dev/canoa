@@ -4,6 +4,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use std::path::{Path, PathBuf};
 
 use coqui_aos::{self as aos, Limit, OverlayTree, Settings, StdFs};
@@ -462,7 +463,7 @@ pub(super) fn layers_of(
                         "overlay",
                         LayerId::new(LayerKind::Overlay, overlay.identity.clone()),
                         State::Refused,
-                        "left out: a hook of it fails closed and its hooks are not allowed; canoa.cfg's agents.NAME.hooks names the digest that allows them",
+                        format!("left out: a hook of it fails closed and its hooks are not allowed; {CONFIG_FILE}'s agents.NAME.hooks names the digest that allows them"),
                     ));
                 }
             }

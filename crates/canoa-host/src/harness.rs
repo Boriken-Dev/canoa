@@ -6,6 +6,7 @@
     reason = "processes, paths, environments and streams are std's"
 )]
 
+use canoa::brand::PROGRAM;
 use std::ffi::OsString;
 use std::io::{BufRead as _, Write as _};
 use std::path::PathBuf;
@@ -183,7 +184,7 @@ pub(crate) fn serve_stdio(run: &AgentRun) -> Result<(), Refused> {
     )
     .map_err(|error| match error {
         ProviderError::Missing => usage(format!(
-            "{} is not an agent this host carries (the bundled agents' ids are what `canoa providers` lists)",
+            "{} is not an agent this host carries (the bundled agents' ids are what `{PROGRAM} providers` lists)",
             run.id
         )),
         ProviderError::Schema(_)

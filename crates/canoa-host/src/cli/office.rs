@@ -8,6 +8,7 @@
 use super::args::{ConfigArgs, Format, LauncherArgs};
 use super::commands::{load, print};
 use super::{Failed, Front, home_of};
+use canoa::brand::CONFIG_FILE;
 
 /// What `office-launcher` is asked to do about signing in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,7 +27,7 @@ fn office_web(args: &ConfigArgs, front: &dyn Front) -> Result<crate::config::Web
         .filter(|web| web.office && web.office_local)
         .ok_or_else(|| {
             Failed::usage(
-                "canoa.cfg has no [host.web] with office = true and office_local = true: there is no add-in address to hold",
+                format!("{CONFIG_FILE} has no [host.web] with office = true and office_local = true: there is no add-in address to hold"),
             )
         })
 }
@@ -161,8 +162,6 @@ fn office_login(
 mod office_login_tests {
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
-
-    use clap::Parser as _;
 
     use super::super::Program;
     use super::super::args::{Cli, ConfigArgs, Format};
@@ -325,7 +324,6 @@ mod office_login_tests {
 
     #[test]
     fn after_help_lists_every_environment_variable_read_at_startup() {
-        use clap::CommandFactory as _;
         let help = super::super::Cli::command().render_help().to_string();
         for name in [
             "CANOA_CONFIG",

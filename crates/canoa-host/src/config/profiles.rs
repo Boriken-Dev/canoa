@@ -3,6 +3,7 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use std::path::Path;
 
 use indexmap::IndexMap;
@@ -556,7 +557,7 @@ pub(super) fn absolute_paths(
         let path = std::path::absolute(&path).unwrap_or(path);
         *text = path
             .to_str()
-            .ok_or_else(|| invalid(name, "canoa.cfg's directory is not Unicode, so a relative path cannot be made absolute"))?
+            .ok_or_else(|| invalid(name, &format!("{CONFIG_FILE}'s directory is not Unicode, so a relative path cannot be made absolute")))?
             .to_owned();
         Ok(())
     };

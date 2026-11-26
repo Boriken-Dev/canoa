@@ -29,7 +29,7 @@ use crate::home::{Home, LockError};
 use crate::pipe::{self, PipeName, Stream};
 
 /// The name the extension passes to `connectNative`.
-pub const HOST_NAME: &str = "dev.boriken.canoa";
+pub const HOST_NAME: &str = canoa::brand::ID;
 /// The ids of the extension builds that may start the native host without being named at install, from `manifest.json`'s `key`
 /// (an unpacked build) and, once published, the stores' ids.
 pub const KNOWN_EXTENSIONS: &[&str] = &["lpppofcphpjkedfnpbpabhmiamaicaed"];
@@ -105,7 +105,7 @@ fn name_in(home: &Path, file: &str, suffix: &str) -> Result<PipeName, pipe::Erro
     }
     let digest = Sha256::digest(text.as_bytes());
     let hex = data_encoding::HEXLOWER.encode(&digest[..8]);
-    let named = format!("canoa-native-{hex}{suffix}");
+    let named = format!("{}-native-{hex}{suffix}", canoa::brand::PROGRAM);
     if cfg!(windows) {
         return PipeName::named(&named);
     }

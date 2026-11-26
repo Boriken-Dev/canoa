@@ -21,7 +21,11 @@ pub const FOLDER: &str = env!("CANOA_BRAND_FOLDER");
 /// The home under the person's own folder, and the per-project folder: a dot first.
 pub const HOME_DIR: &str = env!("CANOA_BRAND_HOME_DIR");
 /// The user layer's path under a configuration root: the folder, then the file.
-pub const USER_CONFIG: &str = concat!(env!("CANOA_BRAND_FOLDER"), "/", env!("CANOA_BRAND_CONFIG_FILE"));
+pub const USER_CONFIG: &str = concat!(
+    env!("CANOA_BRAND_FOLDER"),
+    "/",
+    env!("CANOA_BRAND_CONFIG_FILE")
+);
 /// The brand file this build was made from.
 pub const JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/brand.json"));
 /// The brand's icon, an SVG.
@@ -126,7 +130,8 @@ mod tests {
             let Ok(app) = std::fs::read_to_string(root.join(original)) else {
                 continue;
             };
-            let ours = std::fs::read_to_string(root.join(copy)).expect("the crate carries its copy");
+            let ours =
+                std::fs::read_to_string(root.join(copy)).expect("the crate carries its copy");
             assert_eq!(
                 ours.replace("\r\n", "\n"),
                 app.replace("\r\n", "\n"),

@@ -7,6 +7,7 @@
 )]
 
 use alloc::sync::Arc;
+use canoa::brand::CONFIG_FILE;
 use std::fs;
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
@@ -621,9 +622,9 @@ impl Files {
             ));
         }
         if self.keeps(&resolved) && !caller.may(super::Grant::FilesWriteHost) {
-            return Err(refused(
-                "that is canoa.cfg or this host's own state folder, which a key writes only with the files.write.host grant",
-            ));
+            return Err(refused(&format!(
+                "that is {CONFIG_FILE} or this host's own state folder, which a key writes only with the files.write.host grant"
+            )));
         }
         crate::replace::write_file(&resolved, text.as_bytes(), crate::replace::SHARED)
             .map_err(|error| refused(&format!("that file could not be written: {error}")))?;

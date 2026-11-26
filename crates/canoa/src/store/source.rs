@@ -10,6 +10,7 @@
 //!
 //! The models are plain data, the same in every language.
 
+use crate::brand::CONFIG_FILE;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -135,7 +136,7 @@ impl SourceInfo {
             && let Some(key) = HOST_KEYS.iter().find(|key| shown.find(key).is_some())
         {
             return Some(format!(
-                "the source {:?} has a field called {key:?}, which canoa.cfg's entry keeps for the host",
+                "the source {:?} has a field called {key:?}, which {CONFIG_FILE}'s entry keeps for the host",
                 self.id
             ));
         }

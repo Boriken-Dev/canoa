@@ -4,6 +4,7 @@ use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use canoa::brand::PROGRAM;
 use core::net::SocketAddr;
 use core::sync::atomic::{AtomicU32, Ordering};
 use core::time::Duration;
@@ -231,7 +232,7 @@ pub(super) fn connection<C: Channel>(
         Err(error @ cabuya::Error::Proof(_)) => {
             return tracing::info!(
                 entry = served.name,
-                "a key was refused: {error}; a key that proved itself and is not paired waits for `canoa accept`"
+                "a key was refused: {error}; a key that proved itself and is not paired waits for `{PROGRAM} accept`"
             );
         }
         Err(error) => {

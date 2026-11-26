@@ -8,6 +8,7 @@
     reason = "files, processes and clocks are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
 use std::ffi::OsString;
@@ -160,7 +161,9 @@ impl Overlays {
 
     fn root(&self) -> Result<&Path, (i32, String)> {
         self.root.as_deref().ok_or_else(|| {
-            refused("this host was not started with a canoa.cfg to keep overlays beside")
+            refused(format!(
+                "this host was not started with a {CONFIG_FILE} to keep overlays beside"
+            ))
         })
     }
 
@@ -323,7 +326,7 @@ impl Overlays {
             && !same_digest(pin, &digest)
         {
             return Err(refused(format!(
-                "Its tree digest is {digest}, not the pin {pin} canoa.cfg names: nothing was installed"
+                "Its tree digest is {digest}, not the pin {pin} {CONFIG_FILE} names: nothing was installed"
             )));
         }
         let before = record_of(self.root()?, name);

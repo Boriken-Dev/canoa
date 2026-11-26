@@ -149,7 +149,11 @@ pub(crate) fn tag(text: &str) -> String {
 
 /// The service under which `home`'s accounts rest, so two homes of one user never share a credential.
 pub(crate) fn service_for(home: &Path) -> String {
-    format!("dev.boriken.canoa.{}", &tag(&home.to_string_lossy())[..16])
+    format!(
+        "{}.{}",
+        canoa::brand::ID,
+        &tag(&home.to_string_lossy())[..16]
+    )
 }
 
 /// One operation on the operating system's store at a time in this process, whichever store object it comes through. That

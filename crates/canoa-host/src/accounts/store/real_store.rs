@@ -27,7 +27,7 @@ static MADE: Mutex<Vec<(String, Touched)>> = Mutex::new(Vec::new());
 
 /// What every service of this run starts with: nothing else's does, so what holds it was made by this process.
 fn prefix() -> String {
-    format!("dev.boriken.canoa.test.{}", std::process::id())
+    format!("{}.test.{}", canoa::brand::ID, std::process::id())
 }
 
 /// A service of this run in the operating system's store, emptied when it is dropped.

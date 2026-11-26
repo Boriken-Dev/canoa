@@ -30,10 +30,6 @@ pub(crate) const SYSTEM: &str = "system";
 /// The id of the sealed-files provider, and of the entry that is there with no configuration.
 pub(crate) const FILE: &str = "file";
 
-/// The service the system provider keeps its entries under when it has no home to name one after (a vault made with none); a vault
-/// with a home gives it the service of that home, and the person may name another.
-pub(crate) const DEFAULT_SERVICE: &str = "dev.boriken.canoa.secrets";
-
 /// The person's form: it holds nothing, so a secret it is to answer is typed in the app, which the host asks itself.
 #[derive(Default, Provider)]
 #[provider(SecretProvider, id = "form", crate = ::coqui_acp_api::guatiao)]
@@ -105,7 +101,7 @@ impl From<SystemSettings> for SystemSecrets {
         let service = settings
             .service
             .filter(|service| !service.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_SERVICE.to_owned());
+            .unwrap_or_else(|| format!("{}.secrets", canoa::brand::ID));
         Self::over_with(
             Box::new(KeyringStore::new(service.clone())),
             Box::new(KeyringStore::new(service)),

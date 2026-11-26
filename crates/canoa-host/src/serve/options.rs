@@ -3,6 +3,7 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
@@ -250,7 +251,7 @@ impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NothingToServe => f.write_str(
-                "canoa.cfg has no [host.agents], [host.providers] or [host.tools] entry to serve",
+                &format!("{CONFIG_FILE} has no [host.agents], [host.providers] or [host.tools] entry to serve"),
             ),
             Self::Listen { entry, failure } => {
                 write!(f, "host entry {entry} could not listen: {failure}")

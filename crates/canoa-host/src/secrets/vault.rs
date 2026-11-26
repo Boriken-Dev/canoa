@@ -11,6 +11,7 @@
     reason = "locks and the clock are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -542,7 +543,7 @@ impl Vault {
             for setting in entry.config.keys() {
                 if is_secret(setting) {
                     return Err(format!(
-                        "{name}: {setting} is a secret, so it is not written to canoa.cfg: take it from another provider with `from`"
+                        "{name}: {setting} is a secret, so it is not written to {CONFIG_FILE}: take it from another provider with `from`"
                     ));
                 }
             }

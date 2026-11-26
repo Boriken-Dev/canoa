@@ -5,6 +5,7 @@
     reason = "files and locks are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -30,7 +31,11 @@ pub(crate) fn check_cfg(path: &Path, text: &str) -> Result<(), Failed> {
         path.parent().unwrap_or_else(|| Path::new("")),
     )
     .map(|_| ())
-    .map_err(|error| Failed::run(format!("the edited canoa.cfg would not be read: {error}")))
+    .map_err(|error| {
+        Failed::run(format!(
+            "the edited {CONFIG_FILE} would not be read: {error}"
+        ))
+    })
 }
 
 /// Writes `text` as the whole of the file at `path`, and only if it is a canoa.cfg this host reads.
@@ -44,7 +49,7 @@ pub(crate) fn write_cfg(path: &Path, text: &str) -> Result<(), Failed> {
 pub(crate) fn file_name(path: &Path) -> &str {
     path.file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("canoa.cfg")
+        .unwrap_or(CONFIG_FILE)
 }
 
 /// The registered name of the format `text` is in, by its file's name or first line.
@@ -241,7 +246,7 @@ pub(crate) fn append_table(
     at.push(name);
     if holds(store, &at)? {
         return Err(Failed::usage(format!(
-            "canoa.cfg has a table [{}] already",
+            "{CONFIG_FILE} has a table [{}] already",
             at.join(".")
         )));
     }
@@ -354,7 +359,7 @@ pub(crate) fn set_table(
         None => {
             if !holds(store, at)? {
                 return Err(Failed::usage(format!(
-                    "canoa.cfg does not hold [{}] as a table of its own: change it by hand",
+                    "{CONFIG_FILE} does not hold [{}] as a table of its own: change it by hand",
                     at.join(".")
                 )));
             }
@@ -377,7 +382,7 @@ pub(crate) fn remove_table(
     at.push(name);
     if !holds(store, &at)? {
         return Err(Failed::usage(format!(
-            "canoa.cfg does not hold [{}] as `{writer}` writes it: remove it from the file by hand",
+            "{CONFIG_FILE} does not hold [{}] as `{writer}` writes it: remove it from the file by hand",
             at.join(".")
         )));
     }
@@ -395,13 +400,13 @@ pub(crate) fn remove_entry(store: &dyn ConfigStore, name: &str) -> Result<(), Fa
         Some(serde_json::Value::Object(entry)) => {
             if entry.values().any(serde_json::Value::is_object) {
                 return Err(Failed::usage(format!(
-                    "[host.agents.{name}] has tables of its own: change canoa.cfg by hand"
+                    "[host.agents.{name}] has tables of its own: change {CONFIG_FILE} by hand"
                 )));
             }
         }
         _ => {
             return Err(Failed::usage(format!(
-                "canoa.cfg has no [host.agents.{name}] as a table of its own: change it by hand"
+                "{CONFIG_FILE} has no [host.agents.{name}] as a table of its own: change it by hand"
             )));
         }
     }

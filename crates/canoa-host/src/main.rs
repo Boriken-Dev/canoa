@@ -6,13 +6,13 @@
     reason = "a binary names what it uses from std"
 )]
 
+use canoa::brand::PROGRAM;
 use std::io::{IsTerminal as _, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use canoa_host::cli::{self, Cli, Front, Program};
-use clap::Parser as _;
 use zeroize::Zeroize as _;
 
 /// This process's own standard streams.
@@ -56,7 +56,7 @@ impl Front for Standard {
     }
 
     fn holder(&self) -> &str {
-        "canoa"
+        canoa::brand::PROGRAM
     }
 
     /// A secret is typed without echo at a terminal; with input piped, a line of it is read, as a script gives one.
@@ -102,7 +102,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(failed) => {
             if !failed.why.is_empty() {
-                eprintln!("canoa: {}", failed.why);
+                eprintln!("{PROGRAM}: {}", failed.why);
             }
             ExitCode::from(failed.status)
         }

@@ -28,6 +28,7 @@
     reason = "the settings are the host's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::collections::BTreeMap;
 
 #[cfg(test)]
@@ -434,10 +435,10 @@ pub(crate) fn source_of(path: Option<std::path::PathBuf>) -> super::vault::Sourc
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("canoa.cfg cannot be read: {error}")),
+            Err(error) => return Err(format!("{CONFIG_FILE} cannot be read: {error}")),
         };
         let table: toml::Table = text.parse().map_err(|error: toml::de::Error| {
-            format!("canoa.cfg cannot be parsed: {}", error.message())
+            format!("{CONFIG_FILE} cannot be parsed: {}", error.message())
         })?;
         table
             .get("secrets")

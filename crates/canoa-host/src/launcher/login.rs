@@ -5,15 +5,20 @@
 //! desktop entry in `~/.config/autostart` elsewhere. Nothing needs elevation, and removing deletes that one entry by its name.
 
 use crate::spawn::Command;
+use canoa::brand::CONFIG_FILE;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The value's name under the Run key.
-const VALUE: &str = "CanoaOfficeLauncher";
+fn value() -> String {
+    format!("{}OfficeLauncher", canoa::brand::NAME.replace(' ', ""))
+}
 /// The file name stem of the macOS and Linux entries, and the macOS job's label.
-const LABEL: &str = "dev.boriken.canoa.office-launcher";
+fn label() -> String {
+    format!("{}.office-launcher", canoa::brand::ID)
+}
 /// The key Windows reads at sign-in, below `HKCU`.
 #[cfg(windows)]
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -68,9 +73,12 @@ impl Place {
     /// The file this entry is, or the key and value it is.
     pub(crate) fn location(&self) -> String {
         match self {
-            Self::RunKey(key) => format!(r"HKCU\{key}\{VALUE}"),
-            Self::LaunchAgents(dir) => dir.join(format!("{LABEL}.plist")).display().to_string(),
-            Self::Autostart(dir) => dir.join(format!("{LABEL}.desktop")).display().to_string(),
+            Self::RunKey(key) => format!(r"HKCU\{key}\{}", value()),
+            Self::LaunchAgents(dir) => dir.join(format!("{}.plist", label())).display().to_string(),
+            Self::Autostart(dir) => dir
+                .join(format!("{}.desktop", label()))
+                .display()
+                .to_string(),
         }
     }
 
@@ -106,7 +114,7 @@ impl Place {
                 "add",
                 &format!(r"HKCU\{key}"),
                 "/v",
-                VALUE,
+                &value(),
                 "/t",
                 "REG_SZ",
                 "/d",
@@ -114,9 +122,11 @@ impl Place {
                 "/f",
             ])
             .map(drop),
-            Self::LaunchAgents(dir) => write_entry(dir, &format!("{LABEL}.plist"), &plist(command)),
+            Self::LaunchAgents(dir) => {
+                write_entry(dir, &format!("{}.plist", label()), &plist(command))
+            }
             Self::Autostart(dir) => {
-                write_entry(dir, &format!("{LABEL}.desktop"), &desktop(command))
+                write_entry(dir, &format!("{}.desktop", label()), &desktop(command))
             }
         }
     }
@@ -132,7 +142,7 @@ impl Place {
                 if self.registered()?.is_none() {
                     return Ok(false);
                 }
-                reg(&["delete", &format!(r"HKCU\{key}"), "/v", VALUE, "/f"]).map(|_| true)
+                reg(&["delete", &format!(r"HKCU\{key}"), "/v", &value(), "/f"]).map(|_| true)
             }
             Self::LaunchAgents(_) | Self::Autostart(_) => {
                 let file = self.file().ok_or("no entry file")?;
@@ -156,7 +166,7 @@ impl Place {
                 let Some(output) = reg_query(&format!(r"HKCU\{key}"))? else {
                     return Ok(None);
                 };
-                Ok(value_in(&output, VALUE))
+                Ok(value_in(&output, &value()))
             }
             Self::LaunchAgents(_) | Self::Autostart(_) => {
                 let file = self.file().ok_or("no entry file")?;
@@ -182,8 +192,8 @@ impl Place {
     fn file(&self) -> Option<PathBuf> {
         match self {
             Self::RunKey(_) => None,
-            Self::LaunchAgents(dir) => Some(dir.join(format!("{LABEL}.plist"))),
-            Self::Autostart(dir) => Some(dir.join(format!("{LABEL}.desktop"))),
+            Self::LaunchAgents(dir) => Some(dir.join(format!("{}.plist", label()))),
+            Self::Autostart(dir) => Some(dir.join(format!("{}.desktop", label()))),
         }
     }
 }
@@ -319,12 +329,13 @@ fn xml_escape(text: &str) -> String {
 }
 
 fn plist(command: &[String]) -> String {
+    let label = label();
     let arguments: String = command
         .iter()
         .map(|part| format!("    <string>{}</string>\n", xml_escape(part)))
         .collect();
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>{LABEL}</string>\n  <key>ProgramArguments</key>\n  <array>\n{arguments}  </array>\n  <key>RunAtLoad</key>\n  <true/>\n</dict>\n</plist>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>{label}</string>\n  <key>ProgramArguments</key>\n  <array>\n{arguments}  </array>\n  <key>RunAtLoad</key>\n  <true/>\n</dict>\n</plist>\n"
     )
 }
 
@@ -452,8 +463,9 @@ impl Status {
                     "does not answer"
                 }
             ),
-            None => "address: none (canoa.cfg has no [host.web] with office and office_local)"
-                .to_owned(),
+            None => format!(
+                "address: none ({CONFIG_FILE} has no [host.web] with office and office_local)"
+            ),
         });
         lines.push(format!("a host holds the home: {}", yes(self.host_runs)));
         lines.push(format!(

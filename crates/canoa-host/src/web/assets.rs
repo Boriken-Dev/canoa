@@ -8,6 +8,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use core::time::Duration;
 use std::fs::File;
@@ -67,9 +68,9 @@ pub(crate) enum Lookup {
 
 /// `dir` resolved, holding `index.html` and none of `keep_out`.
 pub(crate) fn site_root(dir: &Path, keep_out: &[PathBuf]) -> Result<PathBuf, WebError> {
-    let refused = |why| WebError::Site {
+    let refused = |why: &str| WebError::Site {
         dir: dir.to_owned(),
-        why,
+        why: why.to_owned(),
     };
     let root = std::fs::canonicalize(dir).map_err(|_| refused("cannot be found"))?;
     if !root.is_dir() {
@@ -84,9 +85,9 @@ pub(crate) fn site_root(dir: &Path, keep_out: &[PathBuf]) -> Result<PathBuf, Web
         .filter_map(|private| std::fs::canonicalize(private).ok())
         .any(|private| private.starts_with(&root))
     {
-        return Err(refused(
-            "holds a directory the host keeps private, canoa.cfg's or its identity's: serve a directory of the site's own",
-        ));
+        return Err(refused(&format!(
+            "holds a directory the host keeps private, {CONFIG_FILE}'s or its identity's: serve a directory of the site's own"
+        )));
     }
     Ok(root)
 }

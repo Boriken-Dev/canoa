@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use canoa_host::cli::{self, Cli, Front, Program};
-use clap::Parser as _;
 use serde_json::{Value, json};
 
 struct Printed(Mutex<Vec<String>>);

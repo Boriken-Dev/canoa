@@ -13,7 +13,7 @@ use keyring_core::{Entry, Error as KeyError};
 use super::{KeyringStore, StoreError, failed, one_at_a_time};
 
 /// What every service Canoa keeps entries under starts with, whichever home or test made it.
-const OWN: &str = "dev.boriken.canoa";
+const OWN: &str = canoa::brand::ID;
 
 /// An entry of the store that another program wrote.
 #[derive(Debug, Clone, PartialEq, Eq)]

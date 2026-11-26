@@ -82,7 +82,12 @@ impl Interaction for Relay {
 }
 
 /// Why a typed answer cannot be taken, when the front has no way to take one.
-const NO_TYPING: &str = "this way of running canoa cannot take a typed secret: sealed prompts are not available to it yet, so run `canoa accounts add` in a terminal, or add the account in the app";
+fn no_typing() -> String {
+    let program = canoa::brand::PROGRAM;
+    format!(
+        "this way of running {program} cannot take a typed secret: sealed prompts are not available to it yet, so run `{program} accounts add` in a terminal, or add the account in the app"
+    )
+}
 
 /// Runs the sign-in `method` of an account provider and answers what it made, showing its prompts through `env.front`. `cancel` is
 /// set when the person gives up.
@@ -115,7 +120,7 @@ pub(super) fn sign_in(
                             front
                                 .ask(&format!("{title}: "), secret)
                                 .map_err(|error| error.to_string())?
-                                .ok_or_else(|| NO_TYPING.to_owned())
+                                .ok_or_else(no_typing)
                         });
                         let _ = reply.send(answer);
                     }

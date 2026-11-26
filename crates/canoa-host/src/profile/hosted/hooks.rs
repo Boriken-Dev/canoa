@@ -15,6 +15,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use core::time::Duration;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -383,7 +384,7 @@ impl Hooks {
                             // It runs before the agent starts, when nobody can be asked: only canoa.cfg's allowance runs it.
                             each["fires"] = json!(false);
                             each["note"] = json!(
-                                "runs before the agent starts, so only canoa.cfg's allowance runs it, never this question"
+                                format!("runs before the agent starts, so only {CONFIG_FILE}'s allowance runs it, never this question")
                             );
                         }
                         each
@@ -428,9 +429,13 @@ impl Hooks {
             let on = overlay.allowed || person.contains(&overlay.identity);
             if !on {
                 let how = if overlay.changed.is_some() {
-                    "hook-not-allowed: canoa.cfg allows another version of the overlay's files; its hooks are off until allowed again"
+                    format!(
+                        "hook-not-allowed: {CONFIG_FILE} allows another version of the overlay's files; its hooks are off until allowed again"
+                    )
                 } else {
-                    "hook-not-allowed: its hooks are off until canoa.cfg names the overlay's digest or the person allows them"
+                    format!(
+                        "hook-not-allowed: its hooks are off until {CONFIG_FILE} names the overlay's digest or the person allows them"
+                    )
                 };
                 items.push(Item::new(
                     format!("hooks.{}", overlay.identity),
@@ -469,7 +474,9 @@ impl Hooks {
                         key,
                         &layer,
                         State::Unsupported,
-                        "hook-not-applied: pre-env runs before the agent starts, when nobody can be asked; only canoa.cfg's allowance runs it",
+                        format!(
+                            "hook-not-applied: pre-env runs before the agent starts, when nobody can be asked; only {CONFIG_FILE}'s allowance runs it"
+                        ),
                     )
                 } else if let Some(support) = native {
                     match support {

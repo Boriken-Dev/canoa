@@ -13,6 +13,7 @@
 #[cfg(test)]
 use alloc::collections::BTreeMap;
 
+use canoa::brand::CONFIG_FILE;
 use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
 #[cfg(test)]
 use coqui_acp_api::guatiao::{Value as GuatiaoValue, ValueError};
@@ -527,7 +528,7 @@ pub(crate) fn find(kind: &TypeCatalogs, table: &Value, label: &str) -> Result<En
                     Ok(entry)
                 } else {
                     Err(format!(
-                        "{} is turned off ({} = false in canoa.cfg)",
+                        "{} is turned off ({} = false in {CONFIG_FILE})",
                         entry.label, entry.label
                     ))
                 };

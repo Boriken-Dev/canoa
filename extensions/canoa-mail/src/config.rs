@@ -5,6 +5,7 @@
     reason = "the file's tables are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -88,9 +89,9 @@ impl MailConfig {
                 .ok_or_else(|| invalid("backend must be 1 to 32 lower-case letters, digits or _"))?
                 .to_owned();
             if raw.rest.contains_key("password") {
-                return Err(invalid(
-                    "password is a setting this host does not keep in canoa.cfg; use password_env or add the account through the host",
-                ));
+                return Err(invalid(&format!(
+                    "password is a setting this host does not keep in {CONFIG_FILE}; use password_env or add the account through the host"
+                )));
             }
             let timeout_secs = raw.timeout_secs.unwrap_or(60);
             if timeout_secs == 0 {

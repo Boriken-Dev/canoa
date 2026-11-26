@@ -5,6 +5,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use core::fmt;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
@@ -165,7 +166,7 @@ impl Refresh {
             Err(error) => {
                 tracing::warn!(
                     entry = self.entry,
-                    "canoa.cfg could not be read again, so the profile offered stays as it was: {error}"
+                    "{CONFIG_FILE} could not be read again, so the profile offered stays as it was: {error}"
                 );
             }
         }
@@ -435,9 +436,9 @@ pub(crate) fn applied_profile(config: &Config, entry: &Entry) -> String {
     match &entry.kind {
         EntryKind::Agent { .. } | EntryKind::Harness { .. } => {
             if config.local_profiles.for_agent(&entry.name).is_some() {
-                "default (canoa.cfg's top level; the entry names none)".to_owned()
+                format!("default ({CONFIG_FILE}'s top level; the entry names none)")
             } else {
-                "none (the entry names none and canoa.cfg has no profile)".to_owned()
+                format!("none (the entry names none and {CONFIG_FILE} has no profile)")
             }
         }
         _ => "none (the entry's kind takes no profile)".to_owned(),

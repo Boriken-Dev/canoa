@@ -3,6 +3,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use std::ffi::OsString;
 use std::path::Path;
 #[cfg(test)]
@@ -153,7 +154,7 @@ impl Config {
                 .find(|each| each.id == layer.id)
                 .and_then(|each| each.origin.as_deref());
             let text = toml::to_string(&document).unwrap_or_default();
-            read_raw(text.as_bytes(), Some("canoa.cfg"))
+            read_raw(text.as_bytes(), Some(CONFIG_FILE))
                 .map_err(|error| config_error(&error, origin.map(Path::new)))?;
             merge_into(&mut merged, document);
         }
@@ -164,7 +165,7 @@ impl Config {
             what: error.to_string(),
         })?;
         let base = info.base_dir.as_deref().map_or(Path::new(""), Path::new);
-        Self::from_str_named(&text, "canoa.cfg", base)
+        Self::from_str_named(&text, CONFIG_FILE, base)
     }
 
     /// Parses canoa.cfg's text, in TOML, or in YAML or JSON when its first line says `#!yaml` or `#!json`, with relative
@@ -175,7 +176,7 @@ impl Config {
     /// [`ConfigError::Parse`] for text that is not of this shape, naming the key or giving the position, never a value;
     /// [`ConfigError::Invalid`] for a setting the host refuses.
     pub fn from_str_in(text: &str, base: &Path) -> Result<Self, ConfigError> {
-        Self::from_str_named(text, "canoa.cfg", base)
+        Self::from_str_named(text, CONFIG_FILE, base)
     }
 
     /// As [`Config::from_str_in`] for text that is a file called `name`, whose extension (`.yaml`, `.json`, `.toml`) fixes

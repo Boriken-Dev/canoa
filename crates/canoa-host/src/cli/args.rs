@@ -20,29 +20,103 @@ use crate::home::{Home, LockError};
 #[cfg(all(unix, feature = "portal"))]
 use super::portal::PortalArgs;
 
-/// The help's closing section; the variables carry the build's brand prefix.
+/// The help's closing section; the names are the build's brand.
 fn after_help() -> String {
     format!(
-        "\
-Environment:
-  {config:<24} canoa.cfg to read, below --config and above the platform's default
-  {installed:<24} the folder whose canoa.cfg is the installed copy (default: beside the program)
+        "Environment:
+  {config:<24} {file} to read, below --config and above the platform's default
+  {installed:<24} the folder whose {file} is the installed copy (default: beside the program)
   {log:<24} what to log on standard error, as a tracing filter (default: info)
-  {home:<24} the directory of this host's identity and trust store (default: .canoa in the user's home folder)
+  {home:<24} the directory of this host's identity and trust store (default: {home_dir} in the user's home folder)
   {color:<24} no colour in the log
 
-Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg was wrong, 3 another host holds this home.",
+Exit status: 0 success, 1 the operation failed, 2 the invocation or {file} was wrong, 3 another host holds this home.",
         config = canoa::brand::CONFIG,
         installed = canoa::brand::INSTALLED_DIR,
         log = canoa::brand::LOG,
         home = "COQUI_AGENTIC_PEER_HOME",
         color = "NO_COLOR",
+        file = canoa::brand::CONFIG_FILE,
+        home_dir = canoa::brand::HOME_DIR,
     )
+}
+
+/// `text` as the build's names say it: the file, the folder, the home, the program and the identifier.
+fn in_brand(text: &str) -> String {
+    use canoa::brand::{CONFIG_FILE, FOLDER, HOME_DIR, ID, NAME, PROGRAM};
+    let program = format!("`{PROGRAM}");
+    text.replace("dev.boriken.canoa", ID)
+        .replace("Canoa\\", &format!("{FOLDER}\\"))
+        .replace("Canoa/", &format!("{FOLDER}/"))
+        .replace("Canoa", NAME)
+        .replace("canoa.cfg", CONFIG_FILE)
+        .replace(": .canoa ", &format!(": {HOME_DIR} "))
+        .replace("`canoa.exe", &format!("`{PROGRAM}.exe"))
+        .replace("`canoa ", &format!("{program} "))
+        .replace("`canoa`", &format!("{program}`"))
+}
+
+/// `command` and every subcommand and argument below it, with the words of its help in the build's names.
+fn branded(command: clap::Command) -> clap::Command {
+    let mut command = command;
+    if let Some(text) = command.get_about().map(ToString::to_string) {
+        command = command.about(in_brand(&text));
+    }
+    if let Some(text) = command.get_long_about().map(ToString::to_string) {
+        command = command.long_about(in_brand(&text));
+    }
+    command
+        .mut_args(|arg| {
+            let help = arg.get_help().map(ToString::to_string);
+            let long = arg.get_long_help().map(ToString::to_string);
+            let arg = match help {
+                Some(text) => arg.help(in_brand(&text)),
+                None => arg,
+            };
+            match long {
+                Some(text) => arg.long_help(in_brand(&text)),
+                None => arg,
+            }
+        })
+        .mut_subcommands(branded)
+}
+
+impl Cli {
+    /// The command line as clap describes it, in the build's names.
+    #[must_use]
+    pub fn command() -> clap::Command {
+        branded(<Self as clap::CommandFactory>::command())
+    }
+
+    /// Parse `items`, the first being the program's name; a request for help or a mistake ends the process as clap does.
+    pub fn parse_from<I, T>(items: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        Self::try_parse_from(items).unwrap_or_else(|error| error.exit())
+    }
+
+    /// Parse `items`, the first being the program's name.
+    ///
+    /// # Errors
+    ///
+    /// What clap says of a mistake in them, or of a request for help or the version.
+    pub fn try_parse_from<I, T>(items: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let mut command = Self::command();
+        let mut matches = command.try_get_matches_from_mut(items)?;
+        <Self as clap::FromArgMatches>::from_arg_matches_mut(&mut matches)
+            .map_err(|error| error.format(&mut command))
+    }
 }
 
 /// Serves stdio ACP agents and Guatiao agent providers from canoa.cfg to paired keys, on loopback.
 #[derive(Debug, Parser)]
-#[command(name = "canoa", version, after_help = after_help())]
+#[command(name = canoa::brand::PROGRAM, version, after_help = after_help())]
 pub struct Cli {
     #[command(subcommand)]
     pub(super) command: Command,

@@ -5,6 +5,7 @@
     reason = "files and locks are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::path::Path;
 use std::sync::PoisonError;
 
@@ -36,7 +37,7 @@ impl Files {
         self.store.as_ref().map(|kept| &*kept.0).ok_or_else(|| {
             (
                 REFUSED,
-                "this host was not started with a canoa.cfg a page may edit".to_owned(),
+                format!("this host was not started with a {CONFIG_FILE} a page may edit"),
             )
         })
     }

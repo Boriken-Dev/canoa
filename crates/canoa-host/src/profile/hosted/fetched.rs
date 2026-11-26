@@ -11,6 +11,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use std::path::Path;
 
 use coqui_aos::{self as aos, Limit, Settings, SkillEntry, SkillOrigin, StdFs};
@@ -239,9 +240,9 @@ fn one(
         .get(&lower)
         .is_some_and(|pin| !same_digest(pin, digest))
     {
-        return Err(refused(
-            "its record is not at the pin canoa.cfg's skill_pins names",
-        ));
+        return Err(refused(&format!(
+            "its record is not at the pin {CONFIG_FILE}'s skill_pins names"
+        )));
     }
     let skill_dir = dir.join(&lower);
     if is_link(&skill_dir) {

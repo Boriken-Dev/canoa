@@ -25,6 +25,7 @@ mod remote;
 mod server;
 mod tools;
 
+use canoa::brand::CONFIG_FILE;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -1547,15 +1548,15 @@ impl PeerStore for Grants {
     }
 
     fn put(&self, _record: &PeerRecord) -> Result<(), cabuya::Error> {
-        Err(cabuya::Error::Identity(
-            "the grants are canoa.cfg's".to_owned(),
-        ))
+        Err(cabuya::Error::Identity(format!(
+            "the grants are {CONFIG_FILE}'s"
+        )))
     }
 
     fn remove(&self, _peer: &str) -> Result<(), cabuya::Error> {
-        Err(cabuya::Error::Identity(
-            "the grants are canoa.cfg's".to_owned(),
-        ))
+        Err(cabuya::Error::Identity(format!(
+            "the grants are {CONFIG_FILE}'s"
+        )))
     }
 }
 

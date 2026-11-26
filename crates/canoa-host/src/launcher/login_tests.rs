@@ -67,7 +67,7 @@ fn a_property_list_holds_the_arguments_and_they_come_back_whole() {
     ];
     let text = plist(&arguments);
     assert!(text.contains("<key>RunAtLoad</key>\n  <true/>"));
-    assert!(text.contains(LABEL));
+    assert!(text.contains(&label()));
     assert!(!text.contains("<x>"), "markup is escaped");
     assert_eq!(plist_arguments(&text), arguments);
 }
@@ -237,13 +237,16 @@ fn the_run_value_starts_the_launcher_detached_and_an_entry_without_that_is_not_c
 
     // What `reg query` lists is what `status` compares with what `--install` would write now.
     let listing = |written: &str| {
-        format!("\r\nHKEY_CURRENT_USER\\Run\r\n    {VALUE}    REG_SZ    {written}\r\n")
+        format!(
+            "\r\nHKEY_CURRENT_USER\\Run\r\n    {}    REG_SZ    {written}\r\n",
+            value()
+        )
     };
-    let held = value_in(&listing(&place.text_of(&wanted)), VALUE);
+    let held = value_in(&listing(&place.text_of(&wanted)), &value());
     assert_eq!(held, Some(place.text_of(&wanted)));
     let before = place.text_of(&command_of(program, &[], config, false));
     assert_ne!(
-        value_in(&listing(&before), VALUE),
+        value_in(&listing(&before), &value()),
         Some(place.text_of(&wanted)),
         "an entry written without --detach is not current: --install replaces it"
     );

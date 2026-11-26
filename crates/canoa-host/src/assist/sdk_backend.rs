@@ -6,6 +6,7 @@
 //! from the variable a table names) when a request is made, put on the request by [`HostHttp`] and never given to the provider.
 
 use alloc::sync::Arc;
+use canoa::brand::CONFIG_FILE;
 use core::time::Duration;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -102,7 +103,7 @@ impl SdkBackend {
                 credential,
             } => {
                 let config = Config::load_layers(layers)
-                    .map_err(|error| Failure::new(format!("canoa.cfg: {error}")))?;
+                    .map_err(|error| Failure::new(format!("{CONFIG_FILE}: {error}")))?;
                 crate::control::speech_accounts::read_credential(&config, home, name, credential)
                     .map(Some)
                     .map_err(|why| Failure {

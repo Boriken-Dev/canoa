@@ -7,6 +7,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use std::ffi::OsString;
 use std::path::Path;
 
@@ -353,7 +354,7 @@ impl Connection {
                         LayerId::new(LayerKind::Session, ""),
                         State::Unsupported,
                         format!(
-                            "the profile {asked} names the loadout {named}, which canoa.cfg no longer holds: the default applies"
+                            "the profile {asked} names the loadout {named}, which {CONFIG_FILE} no longer holds: the default applies"
                         ),
                     ));
                 }
@@ -373,7 +374,7 @@ impl Connection {
                     LayerId::new(LayerKind::Session, ""),
                     State::Unsupported,
                     format!(
-                        "canoa.cfg gives {kind} clients the loadout {named}, which it no longer holds: the default applies"
+                        "{CONFIG_FILE} gives {kind} clients the loadout {named}, which it no longer holds: the default applies"
                     ),
                 ));
             }
@@ -562,7 +563,7 @@ impl Connection {
                         format!("env_scripts.{subject}"),
                         &report.layer,
                         State::Off,
-                        "env-script-not-allowed: its env scripts are off until canoa.cfg names the overlay's digest, which allows its hooks and env scripts; the rest of the overlay still applies",
+                        format!("env-script-not-allowed: its env scripts are off until {CONFIG_FILE} names the overlay's digest, which allows its hooks and env scripts; the rest of the overlay still applies"),
                     ));
                 }
             }
@@ -600,7 +601,7 @@ impl Connection {
                 LayerId::new(LayerKind::User, ""),
                 State::Applied,
                 format!(
-                    "the default profile ({name}): canoa.cfg's top level, which applies to an entry that names no profile"
+                    "the default profile ({name}): {CONFIG_FILE}'s top level, which applies to an entry that names no profile"
                 ),
             ));
         }

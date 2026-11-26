@@ -5,6 +5,8 @@
     reason = "a command line names what it uses from std"
 )]
 
+use canoa::brand::CONFIG_FILE;
+use canoa::brand::PROGRAM;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,10 +40,17 @@ pub(super) fn layers_of(
     Layers::resolve(named, must_exist).map_err(Failed::usage)
 }
 
-/// Gives a `Canoa.cfg` beside `path` the name `path`, once, and says so on standard error. A file already at `path`, a
-/// dangling link included, is never replaced. Returns whether it renamed.
+/// Gives the configuration file's name spelled with a capital first letter (`Canoa.cfg`) beside `path` the name `path`, once, and
+/// says so on standard error. A file already at `path`, a dangling link included, is never replaced. Returns whether it renamed.
 pub(super) fn adopt_legacy_name(path: &Path, say: &dyn Fn(&str)) -> bool {
-    let Some(old) = path.parent().map(|dir| dir.join("Canoa.cfg")) else {
+    let mut letters = CONFIG_FILE.chars();
+    let capitalised: String = letters
+        .next()
+        .into_iter()
+        .flat_map(char::to_uppercase)
+        .chain(letters)
+        .collect();
+    let Some(old) = path.parent().map(|dir| dir.join(capitalised)) else {
         return false;
     };
     if path.symlink_metadata().is_ok() || !old.is_file() {
@@ -52,7 +61,7 @@ pub(super) fn adopt_legacy_name(path: &Path, say: &dyn Fn(&str)) -> bool {
     match renamed {
         Ok(()) => {
             say(&format!(
-                "canoa: renamed {} to {}",
+                "{PROGRAM}: renamed {} to {}",
                 old.display(),
                 path.display()
             ));
@@ -60,7 +69,7 @@ pub(super) fn adopt_legacy_name(path: &Path, say: &dyn Fn(&str)) -> bool {
         }
         Err(error) => {
             say(&format!(
-                "canoa: {} was not renamed to canoa.cfg: {error}",
+                "{PROGRAM}: {} was not renamed to {CONFIG_FILE}: {error}",
                 old.display()
             ));
             false
@@ -653,7 +662,7 @@ pub(super) fn options(args: &OptionsArgs, front: &dyn Front) -> Result<(), Faile
             asking.account = Some((account.clone(), store));
         }
         crate::options::entry_with(&config, &args.source, &asking)
-            .ok_or_else(|| Failed::usage("canoa.cfg has no entry of that name"))?
+            .ok_or_else(|| Failed::usage(format!("{CONFIG_FILE} has no entry of that name")))?
     } else {
         if !crate::config::is_built_in_harness(&args.source) {
             return Err(Failed::usage(

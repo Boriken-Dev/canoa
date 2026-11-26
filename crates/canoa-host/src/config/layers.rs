@@ -7,10 +7,12 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use std::path::{Path, PathBuf};
 
+use canoa::brand::CONFIG_FILE;
+
 /// The file's name below the user's and the system's configuration directories.
-pub const NAME: &str = "Canoa/canoa.cfg";
+pub const NAME: &str = canoa::brand::USER_CONFIG;
 /// The file's name beside the program.
-pub const INSTALLED_NAME: &str = "canoa.cfg";
+pub const INSTALLED_NAME: &str = canoa::brand::CONFIG_FILE;
 /// The variable that says which folder is "beside the program", when it is not the executable's own: the portable launcher
 /// sets it to its own folder, since the app it starts runs from an unpacked copy.
 pub const INSTALLED_DIR_VARIABLE: &str = canoa::brand::INSTALLED_DIR;
@@ -51,8 +53,12 @@ impl Layers {
         let program = installed_file();
         let system = anycfg::system_config_path(Some(Path::new(NAME)));
         let user = || {
-            anycfg::user_config_path(Some(Path::new(NAME)))
-                .map_err(|_| "no canoa.cfg: give --config or CANOA_CONFIG".to_owned())
+            anycfg::user_config_path(Some(Path::new(NAME))).map_err(|_| {
+                format!(
+                    "no {CONFIG_FILE}: give --config or {}",
+                    canoa::brand::CONFIG
+                )
+            })
         };
         let listed = listed.filter(|value| !value.is_empty());
         let (merging, entries) = match listed {
@@ -82,7 +88,7 @@ impl Layers {
                 let last = at + 1 == list.len();
                 if !file.is_file() && (must_exist || !last) {
                     return Err(format!(
-                        "canoa.cfg entry {} ({}) is not a file",
+                        "{CONFIG_FILE} entry {} ({}) is not a file",
                         at + 1,
                         file.display()
                     ));
@@ -142,7 +148,7 @@ fn entries_of(list: &str) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
     for (at, entry) in list.split(separator).enumerate() {
         if entry.is_empty() {
-            return Err(format!("canoa.cfg entry {} is empty", at + 1));
+            return Err(format!("{CONFIG_FILE} entry {} is empty", at + 1));
         }
         out.push(PathBuf::from(entry));
     }
@@ -414,5 +420,29 @@ address = \"https://b.example\"
         assert!(Layers::resolve(Some(&list(&[&a, &missing])), false).is_ok());
         assert!(Layers::resolve(Some(&list(&[&missing, &a])), false).is_err());
         std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// Every layer's file is the brand's file name, and the system's and the user's sit in the brand's folder.
+    #[test]
+    fn the_layers_are_named_by_the_brand() {
+        assert_eq!(NAME, format!("{}/{}", canoa::brand::FOLDER, CONFIG_FILE));
+        assert_eq!(INSTALLED_NAME, CONFIG_FILE);
+        let layers = Layers::resolve(None, false).expect("the default layers");
+        assert!(layers.files.len() >= 2, "{:?}", layers.files);
+        for file in &layers.files {
+            assert_eq!(
+                file.file_name().and_then(|name| name.to_str()),
+                Some(CONFIG_FILE)
+            );
+        }
+        for file in &layers.files[1..] {
+            let folder = file
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str());
+            assert_eq!(folder, Some(canoa::brand::FOLDER), "{}", file.display());
+        }
+        let message = Layers::resolve(Some("x"), true).expect_err("no such file");
+        assert!(message.starts_with(CONFIG_FILE), "{message}");
     }
 }

@@ -9,6 +9,7 @@
     reason = "files are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,6 @@ use super::{Files, Outcome, plain, refused, text_of};
 use crate::control::{Caller, bad, text_param};
 
 /// The project profile file in a working directory.
-pub const PROJECT_PROFILE: &str = ".canoa/profile.toml";
 /// The most bytes a project profile may hold.
 const MAX_PROFILE_BYTES: u64 = 1024 * 1024;
 /// What an overlay may hold, as `overlay/check` allows.
@@ -154,7 +154,9 @@ impl Files {
             .and_then(Path::parent)
             .map(|dir| dir.join("trust.json"))
             .ok_or_else(|| {
-                refused("this host was not started with a canoa.cfg to keep trust beside")
+                refused(&format!(
+                    "this host was not started with a {CONFIG_FILE} to keep trust beside"
+                ))
             })
     }
 
@@ -249,7 +251,7 @@ impl Files {
 
 /// The bytes of `folder`'s project profile; none when it has none, an error for one that is not a plain file or is too large.
 fn project_profile(folder: &Path) -> Result<Option<Vec<u8>>, (i32, String)> {
-    let path = folder.join(PROJECT_PROFILE);
+    let path = folder.join(canoa::brand::HOME_DIR).join("profile.toml");
     let Ok(meta) = fs::symlink_metadata(&path) else {
         return Ok(None);
     };

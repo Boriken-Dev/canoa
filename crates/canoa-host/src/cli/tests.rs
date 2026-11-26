@@ -6,9 +6,6 @@
 
 use std::path::PathBuf;
 
-use clap::CommandFactory as _;
-use clap::Parser as _;
-
 use super::args::{Cli, Command};
 use super::commands::adopt_legacy_name;
 use crate::Config;
@@ -77,6 +74,39 @@ fn a_canoa_cfg_that_exists_is_read_by_the_new_name_on_windows() {
 #[test]
 fn the_command_line_is_well_formed() {
     Cli::command().debug_assert();
+}
+
+/// The help names the build's file, folder, home and program, and no other brand's.
+#[test]
+fn the_help_speaks_in_the_names_of_the_brand() {
+    use canoa::brand::{CONFIG_FILE, HOME_DIR, PROGRAM};
+    let mut command = Cli::command();
+    let top = command.render_long_help().to_string();
+    let serve = command
+        .find_subcommand_mut("serve")
+        .expect("serve")
+        .render_long_help()
+        .to_string();
+    let config = command
+        .find_subcommand_mut("check")
+        .expect("check")
+        .render_long_help()
+        .to_string();
+    assert!(top.contains(&format!("Usage: {PROGRAM}")), "{top}");
+    assert!(
+        top.contains(&format!("default: {HOME_DIR} in the user's home folder")),
+        "{top}"
+    );
+    assert!(serve.contains(CONFIG_FILE), "{serve}");
+    assert!(config.contains(CONFIG_FILE), "{config}");
+    for shown in [&top, &serve, &config] {
+        for own in ["canoa.cfg", ".canoa ", "`canoa "] {
+            assert!(
+                canoa::brand::PROGRAM == "canoa" || !shown.contains(own),
+                "{own:?} is Canoa's own name: {shown}"
+            );
+        }
+    }
 }
 
 #[test]

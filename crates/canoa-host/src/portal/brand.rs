@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use super::page::escape;
 
-const BUILTIN: &str = include_str!("brand/brand.json");
-const BUILTIN_ICON: &str = include_str!("brand/canoa.svg");
+const BUILTIN: &str = canoa::brand::JSON;
+const BUILTIN_ICON: &str = canoa::brand::ICON_SVG;
 const LOOK: &str = include_str!("brand/look.json");
 
 /// The least contrast (WCAG) the accent keeps against the card, the text on a button against the accent, and a notice's text
@@ -417,29 +417,5 @@ mod tests {
         assert_ne!(adjusted, look.accent);
         assert!(contrast(adjusted, look.card) >= CONTRAST);
         assert!(!strict.contains("--accent: #e0b070;"));
-    }
-}
-
-#[cfg(test)]
-mod copy_tests {
-    use super::*;
-
-    /// The crate builds packaged on its own, so it carries a copy of the app's brand; a checkout holds both.
-    #[test]
-    fn the_built_in_brand_is_a_copy_of_the_apps() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for (copy, original) in [
-            (BUILTIN, "app/brand.json"),
-            (BUILTIN_ICON, "app/assets/icons/canoa.svg"),
-        ] {
-            let Ok(app) = std::fs::read_to_string(root.join(original)) else {
-                continue;
-            };
-            assert_eq!(
-                copy.replace("\r\n", "\n"),
-                app.replace("\r\n", "\n"),
-                "the portal's copy of {original} is stale: copy {original} over crates/canoa-host/src/portal/brand/ (brand.json, canoa.svg)"
-            );
-        }
     }
 }

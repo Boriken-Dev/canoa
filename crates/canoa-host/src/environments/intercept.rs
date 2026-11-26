@@ -20,6 +20,7 @@
     reason = "sockets, threads, files and the clock are std's"
 )]
 
+use canoa::brand::PROGRAM;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -1154,7 +1155,7 @@ pub(crate) fn forward(
         KIND_EXEC => match id {
             Some(id) => exec(channel, id, stdout, stderr),
             None => {
-                let _ = writeln!(stderr, "canoa: env-exec names no command");
+                let _ = writeln!(stderr, "{PROGRAM}: env-exec names no command");
                 NOT_RUN
             }
         },
@@ -1163,13 +1164,16 @@ pub(crate) fn forward(
             Err(why) => {
                 let _ = writeln!(
                     stderr,
-                    "canoa: the host was not told the session started ({why}); its prompts are refused"
+                    "{PROGRAM}: the host was not told the session started ({why}); its prompts are refused"
                 );
                 1
             }
         },
         _ => {
-            let _ = writeln!(stderr, "canoa: {kind} is not a kind this forwarder knows");
+            let _ = writeln!(
+                stderr,
+                "{PROGRAM}: {kind} is not a kind this forwarder knows"
+            );
             REFUSED
         }
     }
@@ -1233,7 +1237,7 @@ fn tool(channel: &Path, stdin: impl Read) -> Result<String, String> {
 
 fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Write) -> u8 {
     let failed = |stderr: &mut dyn Write, why: &str| {
-        let _ = writeln!(stderr, "canoa: {why}; nothing ran on this computer.");
+        let _ = writeln!(stderr, "{PROGRAM}: {why}; nothing ran on this computer.");
         NOT_RUN
     };
     let begun = Instant::now();
@@ -1266,7 +1270,7 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
         if reader.read_exact(&mut head).is_err() {
             let _ = writeln!(
                 stderr,
-                "canoa: the host ended the command's connection before it said how the command ended"
+                "{PROGRAM}: the host ended the command's connection before it said how the command ended"
             );
             return 1;
         }
@@ -1275,7 +1279,7 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
         if length > channel.max_bytes.max(ENVELOPE) {
             let _ = writeln!(
                 stderr,
-                "canoa: the host sent a frame larger than the channel allows"
+                "{PROGRAM}: the host sent a frame larger than the channel allows"
             );
             return 1;
         }
@@ -1283,7 +1287,7 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
         if reader.read_exact(&mut bytes).is_err() {
             let _ = writeln!(
                 stderr,
-                "canoa: the host ended the command's connection mid-frame"
+                "{PROGRAM}: the host ended the command's connection mid-frame"
             );
             return 1;
         }
@@ -1315,11 +1319,14 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
                     &signed,
                     end.get("mac").and_then(Value::as_str).unwrap_or(""),
                 ) {
-                    let _ = writeln!(stderr, "canoa: the command's end is not signed by the host");
+                    let _ = writeln!(
+                        stderr,
+                        "{PROGRAM}: the command's end is not signed by the host"
+                    );
                     return 1;
                 }
                 if let Some(why) = end.get("error").and_then(Value::as_str) {
-                    let _ = writeln!(stderr, "canoa: {why}");
+                    let _ = writeln!(stderr, "{PROGRAM}: {why}");
                 }
                 return end
                     .get("code")
@@ -1330,7 +1337,7 @@ fn exec(channel: &Path, id: &str, stdout: &mut impl Write, stderr: &mut impl Wri
             _ => {
                 let _ = writeln!(
                     stderr,
-                    "canoa: the host sent a frame this forwarder does not know"
+                    "{PROGRAM}: the host sent a frame this forwarder does not know"
                 );
                 return 1;
             }

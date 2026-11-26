@@ -6,6 +6,7 @@
     reason = "threads and processes are std's"
 )]
 
+use canoa::brand::PROGRAM;
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -15,7 +16,6 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use canoa_host::Local;
 use canoa_host::cli::{self, Cli, Front, Program};
-use clap::Parser as _;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -295,7 +295,7 @@ pub(crate) fn start(request: &[u8]) -> Result<u64, i32> {
 fn run_job(args: &[String], front: &JobFront) {
     let status = catch_unwind(AssertUnwindSafe(|| run_command(args, front))).unwrap_or_else(|p| {
         core::mem::forget(p);
-        front.say("canoa: the command panicked");
+        front.say(&format!("{PROGRAM}: the command panicked"));
         STATUS_JOB_PANICKED
     });
     front.job.end(status);
@@ -303,12 +303,12 @@ fn run_job(args: &[String], front: &JobFront) {
 
 fn run_command(args: &[String], front: &JobFront) -> i32 {
     log::install(follows_the_log(args));
-    let line = std::iter::once("canoa".to_owned()).chain(args.iter().cloned());
+    let line = std::iter::once(PROGRAM.to_owned()).chain(args.iter().cloned());
     let parsed = match Cli::try_parse_from(line) {
         // They change the process they run in: its directory, its standard input, its end.
         Ok(parsed) if parsed.is_a_hosts_own() => {
             front.say(&format!(
-                "canoa: provider, tool, agent, launch, mcp-bridge, helper, hook-forward, native-host, spawner, serve --program, dial, forward, discover, mcp-shim, agent-guard and pair --join run only as a process of their own, through {CHILD_FLAG}"
+                "{PROGRAM}: provider, tool, agent, launch, mcp-bridge, helper, hook-forward, native-host, spawner, serve --program, dial, forward, discover, mcp-shim, agent-guard and pair --join run only as a process of their own, through {CHILD_FLAG}"
             ));
             return STATUS_USAGE;
         }
@@ -331,7 +331,7 @@ fn run_command(args: &[String], front: &JobFront) -> i32 {
     match cli::run(parsed, front) {
         Ok(()) => 0,
         Err(failed) => {
-            front.say(&format!("canoa: {}", failed.why));
+            front.say(&format!("{PROGRAM}: {}", failed.why));
             i32::from(failed.status)
         }
     }
@@ -415,7 +415,7 @@ impl Front for ChildFront {
     }
 
     fn holder(&self) -> &str {
-        "canoa"
+        PROGRAM
     }
 
     fn ask(&self, _prompt: &str, _secret: bool) -> std::io::Result<Option<String>> {
@@ -444,26 +444,26 @@ pub(crate) fn child_main() -> i32 {
         .then(|| OsString::from("native-host"))
         .into_iter()
         .chain(first.filter(|_| browser));
-    let line = std::iter::once(OsString::from("canoa"))
+    let line = std::iter::once(OsString::from(PROGRAM))
         .chain(command)
         .chain(arguments);
     let parsed = match Cli::try_parse_from(line) {
         Ok(parsed) if parsed.is_a_hosts_own() => parsed,
         Ok(_) => {
             eprintln!(
-                "canoa: {CHILD_FLAG} takes only provider, tool, agent, launch, mcp-bridge, helper, hook-forward, native-host or spawner"
+                "{PROGRAM}: {CHILD_FLAG} takes only provider, tool, agent, launch, mcp-bridge, helper, hook-forward, native-host or spawner"
             );
             return STATUS_USAGE;
         }
         Err(error) => {
-            eprintln!("canoa: {error}");
+            eprintln!("{PROGRAM}: {error}");
             return if error.use_stderr() { STATUS_USAGE } else { 0 };
         }
     };
     match cli::run(parsed, &ChildFront) {
         Ok(()) => 0,
         Err(failed) => {
-            eprintln!("canoa: {}", failed.why);
+            eprintln!("{PROGRAM}: {}", failed.why);
             i32::from(failed.status)
         }
     }

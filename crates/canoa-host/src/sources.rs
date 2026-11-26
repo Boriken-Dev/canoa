@@ -6,6 +6,7 @@
     reason = "paths and environments are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::path::{Path, PathBuf};
 
 use canoa::preset::SourcePreset as Preset;
@@ -357,7 +358,7 @@ fn sources_in(
             let taken = config.entries.iter().any(|entry| entry.name == preset.name);
             if taken {
                 tracing::info!(
-                    "host.agents.{} is canoa.cfg's own, so the built-in source of that name is not served",
+                    "host.agents.{} is {CONFIG_FILE}'s own, so the built-in source of that name is not served",
                     preset.name
                 );
             }

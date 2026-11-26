@@ -9,6 +9,7 @@
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
@@ -116,7 +117,7 @@ impl core::fmt::Display for LinkError {
             Self::TooLong { limit } => {
                 return write!(
                     f,
-                    "the message is longer than the {limit} bytes this host takes: raise max_message_bytes under [host] in canoa.cfg"
+                    "the message is longer than the {limit} bytes this host takes: raise max_message_bytes under [host] in {CONFIG_FILE}"
                 );
             }
             Self::Timeout => "nothing arrived in time",

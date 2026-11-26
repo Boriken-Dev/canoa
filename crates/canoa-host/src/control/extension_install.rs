@@ -16,6 +16,7 @@
     reason = "files, locks and the clock are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -259,8 +260,9 @@ impl Control {
         if entry.runtime == Some(Runtime::Python) {
             return Err((
                 REFUSED,
-                "this package is written in Python, and the host carries no Python of its own: name its folder in canoa.cfg under a source of Python you have set up, or use a package written in JavaScript"
-                    .to_owned(),
+                format!(
+                    "this package is written in Python, and the host carries no Python of its own: name its folder in {CONFIG_FILE} under a source of Python you have set up, or use a package written in JavaScript"
+                ),
             ));
         }
         if matches!(entry.digest, Digest::Tree(_))
@@ -382,7 +384,7 @@ impl Control {
                 .and_then(Value::as_str)
                 .map_or_else(String::new, |from| format!(" (loaded from {from})"));
             notices.push(format!(
-                "canoa.cfg already names an extension {name}{from}: this replaces it."
+                "{CONFIG_FILE} already names an extension {name}{from}: this replaces it."
             ));
         }
         Ok(json!({
@@ -667,7 +669,7 @@ impl Control {
             .ok_or_else(|| {
                 (
                     REFUSED,
-                    format!("there is no extension {name} in canoa.cfg"),
+                    format!("there is no extension {name} in {CONFIG_FILE}"),
                 )
             })?;
         // A library is a file in its folder, a package of scripts is its folder.

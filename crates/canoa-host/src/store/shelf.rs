@@ -209,19 +209,19 @@ impl Shelf {
                 .map(PathBuf::from)
         };
         if cfg!(windows) {
-            return env("LOCALAPPDATA").map(|d| d.join("Canoa").join("programs"));
+            return env("LOCALAPPDATA").map(|d| d.join(canoa::brand::FOLDER).join("programs"));
         }
         if cfg!(target_os = "macos") {
             return env("HOME").map(|d| {
                 d.join("Library")
                     .join("Application Support")
-                    .join("Canoa")
+                    .join(canoa::brand::FOLDER)
                     .join("programs")
             });
         }
         env("XDG_DATA_HOME")
             .or_else(|| env("HOME").map(|d| d.join(".local").join("share")))
-            .map(|d| d.join("Canoa").join("programs"))
+            .map(|d| d.join(canoa::brand::FOLDER).join("programs"))
     }
 
     /// A shelf at `root`, which has to be the default folder or below it: no check yet reads who may write another place, so the
@@ -858,4 +858,23 @@ pub fn record_tree(dir: &Path, records: &mut Vec<FileRecord>) -> Result<(), Shel
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn the_programs_folder_sits_in_the_brands_folder() {
+        let root = super::Shelf::default_root().expect("a data folder on this machine");
+        assert_eq!(
+            root.file_name().and_then(|name| name.to_str()),
+            Some("programs")
+        );
+        let folder = root
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str());
+        assert_eq!(folder, Some(canoa::brand::FOLDER));
+    }
 }

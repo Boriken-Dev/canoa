@@ -4,6 +4,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use canoa::brand::CONFIG_FILE;
 use core::sync::atomic::AtomicBool;
 use std::ffi::OsString;
 use std::sync::Mutex;
@@ -578,7 +579,7 @@ fn bind_entry(state: &mut BindState<'_>, entry: &Entry) -> Result<(), ServeError
                         .ok_or_else(|| ServeError::Usage {
                             entry: entry.name.clone(),
                             what: format!(
-                                "no usage reader {id} is offered by a bundled agent or by a library or source of canoa.cfg"
+                                "no usage reader {id} is offered by a bundled agent or by a library or source of {CONFIG_FILE}"
                             ),
                         })?;
                     scope.quota(Launch {

@@ -9,6 +9,7 @@
     reason = "files are std's"
 )]
 
+use canoa::brand::CONFIG_FILE;
 use std::path::{Path, PathBuf};
 
 use canoa::config_store::{
@@ -57,7 +58,7 @@ impl FileStore {
         Self {
             layers: vec![FileLayer {
                 id: "own".to_owned(),
-                label: format!("canoa.cfg ({})", path.display()),
+                label: format!("{CONFIG_FILE} ({})", path.display()),
                 path: path.to_owned(),
             }],
             own: 0,
@@ -79,13 +80,16 @@ impl FileStore {
             .enumerate()
             .map(|(at, path)| {
                 let (id, what) = if at == own {
-                    ("own".to_owned(), "your canoa.cfg")
+                    ("own".to_owned(), format!("your {CONFIG_FILE}"))
                 } else if installed.as_ref() == Some(path) {
-                    ("installed".to_owned(), "the installed canoa.cfg")
+                    (
+                        "installed".to_owned(),
+                        format!("the installed {CONFIG_FILE}"),
+                    )
                 } else if *path == system {
-                    ("system".to_owned(), "the system's canoa.cfg")
+                    ("system".to_owned(), format!("the system's {CONFIG_FILE}"))
                 } else {
-                    (format!("layer-{at}"), "canoa.cfg")
+                    (format!("layer-{at}"), CONFIG_FILE.to_owned())
                 };
                 FileLayer {
                     id,
@@ -123,12 +127,14 @@ impl FileStore {
         let name = path
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or("canoa.cfg");
+            .unwrap_or(CONFIG_FILE);
         match crate::format::formats()
             .from_slice(text.as_bytes(), anycfg::Options::new().name(name))
         {
             Ok(toml::Value::Table(table)) => Ok(table),
-            Ok(_) => Err(bad_value("canoa.cfg is not a table of settings")),
+            Ok(_) => Err(bad_value(format!(
+                "{CONFIG_FILE} is not a table of settings"
+            ))),
             Err(error) => Err(bad_value(format!("{}: {error}", path.display()))),
         }
     }
@@ -165,7 +171,7 @@ impl ConfigStore for FileStore {
     fn describe(&self) -> Result<StoreInfo, ProviderError> {
         let own = self.own();
         let mut info = StoreInfo::new(
-            "canoa.cfg",
+            CONFIG_FILE,
             self.layers
                 .iter()
                 .map(|layer| {
@@ -217,7 +223,7 @@ impl ConfigStore for FileStore {
         if let Some(expected) = &changes.expect_revision
             && *expected != self.revision_now()?
         {
-            return Err(changed("canoa.cfg changed since it was read"));
+            return Err(changed(format!("{CONFIG_FILE} changed since it was read")));
         }
         let mut text = read_cfg(path).map_err(|failed| why(&failed))?;
         let was = text.clone();
@@ -254,7 +260,9 @@ impl ConfigStore for FileStore {
                         }
                         other if parents.is_empty() => {
                             let _ = other;
-                            return Err(bad_value("a top-level key of canoa.cfg is a table"));
+                            return Err(bad_value(format!(
+                                "a top-level key of {CONFIG_FILE} is a table"
+                            )));
                         }
                         other => {
                             let mut table = toml::Table::new();
@@ -322,7 +330,7 @@ mod tests {
     #[test]
     fn the_files_meet_the_contract_every_store_meets() {
         let dir = dir("contract");
-        let file = dir.join("canoa.cfg");
+        let file = dir.join(CONFIG_FILE);
         std::fs::write(&file, "# mine\n[desktop]\nstart_hidden = true\n").expect("write");
         contract::check(&FileStore::at(&file));
         let text = std::fs::read_to_string(&file).expect("read");
@@ -332,6 +340,16 @@ mod tests {
             !text.contains("contract"),
             "the contract cleaned up: {text:?}"
         );
+        // A host over a brand's file reads and writes that file and leaves nothing else beside it.
+        let beside: Vec<_> = std::fs::read_dir(&dir)
+            .expect("list")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(beside, [std::ffi::OsString::from(CONFIG_FILE)]);
+        let label = FileStore::at(&file).describe().expect("describe").layers[0]
+            .label
+            .clone();
+        assert!(label.starts_with(CONFIG_FILE), "{label}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -96,9 +96,7 @@ impl Names {
                 .chars()
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
         {
-            return Err(
-                "env_prefix is upper-case letters and digits, such as MYAPP".to_owned(),
-            );
+            return Err("env_prefix is upper-case letters and digits, such as MYAPP".to_owned());
         }
         for key in ["accent", "accent_on_dark"] {
             if let Some(color) = text(key)?
@@ -131,8 +129,8 @@ impl Names {
         {
             return Err("program is lower-case letters, digits and hyphens, starting with a letter (a unit and a user name)".to_owned());
         }
-        let config_file = text("config_file")?
-            .map_or_else(|| format!("{program}.cfg"), str::to_owned);
+        let config_file =
+            text("config_file")?.map_or_else(|| format!("{program}.cfg"), str::to_owned);
         let folder = text("folder")?.map_or_else(|| name.clone(), str::to_owned);
         let home_dir = text("home_dir")?.map_or_else(|| format!(".{program}"), str::to_owned);
         for (key, value) in [
@@ -160,7 +158,9 @@ impl Names {
 
     /// Where the icon is, given the brand file's own path.
     pub fn icon_path(&self, file: &Path) -> PathBuf {
-        file.parent().unwrap_or_else(|| Path::new(".")).join(&self.icon)
+        file.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(&self.icon)
     }
 }
 
@@ -174,9 +174,9 @@ fn not_a_component(value: &str) -> Option<&'static str> {
         return Some("is empty");
     }
     if value.contains("..")
-        || value
-            .chars()
-            .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control())
+        || value.chars().any(|c| {
+            matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control()
+        })
     {
         return Some(
             "is one file or folder name: no separators, colons, wildcards, quotes or control characters",

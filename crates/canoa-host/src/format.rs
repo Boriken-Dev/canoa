@@ -12,6 +12,13 @@ use alloc::vec::Vec;
 use std::sync::OnceLock;
 
 use anycfg::{Callbacks, CodecError, Formats};
+use canoa::brand::CONFIG_FILE;
+
+/// What a list that holds a null is refused with.
+#[cfg(any(feature = "json", feature = "yaml"))]
+fn null_in_list() -> String {
+    format!("a list holds a null, which has no place in {CONFIG_FILE}")
+}
 
 /// The registry for canoa.cfg's formats.
 pub(crate) fn formats() -> &'static Formats<toml::Value> {
@@ -19,7 +26,10 @@ pub(crate) fn formats() -> &'static Formats<toml::Value> {
     FORMATS.get_or_init(|| {
         let mut formats = Formats::new();
         let registered = register(&mut formats);
-        assert!(registered.is_ok(), "canoa.cfg's formats register");
+        assert!(
+            registered.is_ok(),
+            "the configuration file's formats register"
+        );
         formats
     })
 }
@@ -76,7 +86,9 @@ fn decode_toml(bytes: &[u8]) -> Result<toml::Value, CodecError> {
         })?;
     // No setting is a date or a time, and anycfg's typed read would hand one on as a table holding a private key.
     if holds_datetime(&value) {
-        return Err(CodecError::new().message("a date or time is not a setting canoa.cfg takes"));
+        return Err(CodecError::new().message(format!(
+            "a date or time is not a setting {CONFIG_FILE} takes"
+        )));
     }
     Ok(value)
 }
@@ -143,9 +155,7 @@ impl<'de> serde::de::Visitor<'de> for NodeVisitor {
     fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut items: A) -> Result<Node, A::Error> {
         let mut out = Vec::new();
         while let Some(Node(item)) = items.next_element()? {
-            out.push(item.ok_or_else(|| {
-                serde::de::Error::custom("a list holds a null, which has no place in canoa.cfg")
-            })?);
+            out.push(item.ok_or_else(|| serde::de::Error::custom(null_in_list()))?);
         }
         Ok(Node(Some(toml::Value::Array(out))))
     }
@@ -198,13 +208,12 @@ fn decode_json(bytes: &[u8]) -> Result<toml::Value, CodecError> {
 /// serde_json's messages that name no document text, and ours.
 #[cfg(feature = "json")]
 fn fixed(message: &str) -> String {
-    const KNOWN: [&str; 4] = [
+    const KNOWN: [&str; 3] = [
         "a key is given twice",
         "an integer beyond 64 bits",
-        "a list holds a null, which has no place in canoa.cfg",
         "EOF while parsing a value",
     ];
-    if KNOWN.contains(&message) {
+    if KNOWN.contains(&message) || message == null_in_list() {
         message.to_owned()
     } else {
         "not valid JSON".to_owned()
@@ -241,13 +250,11 @@ fn yaml_failure(error: &serde_saphyr::Error) -> CodecError {
 }
 
 #[cfg(feature = "yaml")]
-fn fixed_yaml(message: &str) -> &'static str {
+fn fixed_yaml(message: &str) -> String {
     match message {
-        "a key is given twice" => "a key is given twice",
-        "an integer beyond 64 bits" => "an integer beyond 64 bits",
-        "a list holds a null, which has no place in canoa.cfg" => {
-            "a list holds a null, which has no place in canoa.cfg"
-        }
-        _ => "not valid YAML",
+        "a key is given twice" => "a key is given twice".to_owned(),
+        "an integer beyond 64 bits" => "an integer beyond 64 bits".to_owned(),
+        _ if message == null_in_list() => null_in_list(),
+        _ => "not valid YAML".to_owned(),
     }
 }
