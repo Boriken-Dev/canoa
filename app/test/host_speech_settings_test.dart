@@ -135,6 +135,27 @@ void main() {
     expect(sent.containsKey('clear'), isFalse);
   });
 
+  testWidgets('About names the engine a host provider reports and what it was built for', (tester) async {
+    final link = _Host();
+    link.providers.add({
+      'name': 'whisper',
+      'provider': 'speech_whisper',
+      'title': 'whisper.cpp',
+      'description': 'Turns the recording into text on this computer',
+      'settings': <String, Object?>{},
+      'secrets_set': <String>[],
+      'partials': false,
+      'version': '1.9.6',
+      'built_for': 'x86-64-v3',
+    });
+    final catalog = HostSpeechCatalog(HostControl.dialing(() async => link));
+    await tester.runAsync(catalog.refresh);
+    await openSettings(tester, section: 'about', hostSpeech: catalog);
+    await tester.pumpAndSettle();
+    expect(find.text('whisper.cpp 1.9.6, built for x86-64-v3'), findsOneWidget);
+    expect(find.byKey(const Key('about-engine-cloud')), findsNothing, reason: 'a provider that reports no version is not listed');
+  });
+
   testWidgets('keeping a provider at the question removes nothing', (tester) async {
     final link = _Host();
     final catalog = HostSpeechCatalog(HostControl.dialing(() async => link));

@@ -55,6 +55,8 @@ final class HostSpeechProvider {
     this.offer,
     this.account,
     this.accountKind,
+    this.version,
+    this.builtFor,
   });
 
   final String name, kind, title, description;
@@ -77,6 +79,9 @@ final class HostSpeechProvider {
   /// Why it cannot be used, in the host's words; null when it can.
   final String? problem;
 
+  /// The release of the engine behind it and what that was built for (a CPU target), when it says; About shows them.
+  final String? version, builtFor;
+
   static HostSpeechProvider? parse(Object? json) {
     if (json is! Map || json['name'] is! String) return null;
     final secrets = json['secrets_set'];
@@ -93,6 +98,8 @@ final class HostSpeechProvider {
       offer: json['offer'] is String ? json['offer']! as String : null,
       account: json['account'] is String ? json['account']! as String : null,
       accountKind: json['account_kind'] is String ? json['account_kind']! as String : null,
+      version: json['version'] is String ? json['version']! as String : null,
+      builtFor: json['built_for'] is String ? json['built_for']! as String : null,
     );
   }
 }

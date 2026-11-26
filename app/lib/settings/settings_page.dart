@@ -235,7 +235,7 @@ class SettingsPageState extends State<SettingsPage> {
     'advanced': (ready: widget.advancedConfig != null, build: () => AdvancedSection(key: const Key('settings-advanced'), config: widget.advancedConfig!)),
     'providers': (ready: widget.providers != null, build: () => ProvidersSection(key: const Key('settings-providers'), switches: widget.providers!)),
     'signin': (ready: widget.portal != null, build: () => SignInSection(key: const Key('settings-signin'), portal: widget.portal!)),
-    'about': (ready: true, build: () => AboutSection(version: widget.version)),
+    'about': (ready: true, build: () => AboutSection(version: widget.version, host: widget.hostSpeech)),
   };
 
   /// The sections the host lists, in its order but with About last: those the app draws that this build and key have, and the
