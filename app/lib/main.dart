@@ -54,7 +54,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 
-import 'accounts/account_models.dart' show AccountEntry, LimitHint, TurnAdvice, accountMeta, machineLogin, modelMeta;
+import 'accounts/account_models.dart' show AccountEntry, AccountInfo, LimitHint, TurnAdvice, accountMeta, machineLogin, modelMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
 import 'desktop/host_grants.dart';
@@ -819,6 +819,9 @@ class _CanoaAppState extends State<CanoaApp> {
             _applySettings(config.copyWith(warnPermille: value)).then((changed) => _settingsKey.currentState?.controller.adopt(changed)),
           ),
           onManageAccounts: _accounts == null ? null : () => unawaited(_showSettings(section: 'accounts')),
+          limits: _services.limitsHeld,
+          limitAccounts: [for (final each in _accounts?.accounts ?? const <AccountInfo>[]) each.name],
+          limitProfiles: ['default', if (config.host?['profiles'] case final Map<Object?, Object?> held) for (final name in held.keys) '$name'],
         );
 
   Widget _hostsPage() {

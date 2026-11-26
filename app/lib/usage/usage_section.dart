@@ -5,7 +5,10 @@ import 'package:material_ui/material_ui.dart';
 import '../settings/agent_sections.dart' show WarnFromRow;
 import '../settings/settings_row.dart' show SettingsGroup;
 import '../sources/source_icons.dart';
+import '../l10n/app_text.dart';
 import 'cost_view.dart';
+import 'limit_rules.dart';
+import 'limits_group.dart';
 import 'limits_view.dart';
 import 'spend_model.dart';
 import 'tokens_view.dart';
@@ -77,12 +80,20 @@ class UsagePage extends StatefulWidget {
     required this.warnPermille,
     required this.onWarnChanged,
     this.onManageAccounts,
+    this.limits,
+    this.limitAccounts = const [],
+    this.limitProfiles = const [],
   });
 
   final UsageController controller;
   final int warnPermille;
   final ValueChanged<int> onWarnChanged;
   final VoidCallback? onManageAccounts;
+
+  /// The host's limits, with the names its scope pickers offer; the Limits group is there when the host keeps them.
+  final LimitsController? limits;
+  final List<String> limitAccounts;
+  final List<String> limitProfiles;
 
   @override
   State<UsagePage> createState() => _UsagePageState();
@@ -233,6 +244,21 @@ class _UsagePageState extends State<UsagePage> {
                     ),
                   ],
                 ),
+              if (_usage.view == UsageView.limits && widget.limits != null) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    context.t('limits.warn_default'),
+                    key: const Key('limits-warn-default'),
+                    style: text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
+                LimitsGroup(
+                  controller: widget.limits!,
+                  accounts: widget.limitAccounts,
+                  profiles: widget.limitProfiles,
+                ),
+              ],
               if (widget.onManageAccounts != null)
                 Align(
                   alignment: Alignment.centerLeft,

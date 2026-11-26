@@ -26,6 +26,7 @@ import 'package:canoa/served/served_control.dart';
 import 'package:canoa/settings/advanced_config.dart';
 import 'package:canoa/settings/host_sections.dart';
 import 'package:canoa/store/store_models.dart';
+import 'package:canoa/usage/limit_rules.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/examples.dart';
@@ -38,8 +39,8 @@ final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
 };
 
 /// What this page's key may do on the host: read its configuration and its Store, run a Store type's program, manage accounts, and
-/// edit the host's own tables (`hosting`).
-const _grants = ['config.read', 'config.write', 'store.read', 'store.programs', 'accounts', 'hosting', 'notify'];
+/// edit the host's own tables (`hosting`), read what it spent and its limits (`usage`), and be told (`notify`).
+const _grants = ['config.read', 'config.write', 'store.read', 'store.programs', 'accounts', 'hosting', 'notify', 'usage'];
 
 /// The model the stand-in for the Foundry Local program lists: one row per alias, its builds inside.
 const _model = 'qwen3-14b';
@@ -247,6 +248,42 @@ peers = [${jsonEncode(browserId)}]
     expect(await advanced.set(['harnesses', 'my-acp'], null), isNull);
     expect(table('host.mcp_list').own, isNull);
     expect(config.readAsStringSync(), allOf(isNot(contains('mcp_list')), isNot(contains('My Harness')), contains('[host.agents.scripted]')));
+  });
+
+  test("the Usage page's limits are written to canoa.cfg and read back as the host measures them, and a refusal is the host's words", () async {
+    Future<Object?> call(String method, Map<String, Object?> params) async => (await control.ready(wait: false)).call(method, params);
+    final limits = LimitsController(call, AdvancedConfig(call));
+    await limits.refresh();
+    expect(limits.problem, isNull);
+    expect(limits.rows, isEmpty, reason: 'a new install has no limits');
+
+    expect(await limits.save('daily', limitEntry(scope: LimitScope.all, kind: LimitKind.tokens, figure: '1000', window: 'day', stop: 1000)), isNull);
+    expect(config.readAsStringSync(), allOf(contains('[host.usage.limits.daily]'), contains('tokens = 1000'), contains('window = "day"'), contains('[host.agents.scripted]')));
+    final row = limits.rows.single;
+    expect((row.name, row.scope, row.kind, row.state), ('daily', LimitScope.all, LimitKind.tokens, LimitState.ok));
+    expect((row.used, row.limit, row.permille, row.stopPermille), (0, 1000, 0, 1000));
+    expect(row.resetsAt! - row.windowStart!, 86400);
+    expect(limits.own['daily'], containsPair('tokens', 1000));
+
+    // Money on an account no file names is not measured, and said so: never 0 percent.
+    expect(await limits.save('missing', limitEntry(scope: LimitScope.account, scopeName: 'nobody', kind: LimitKind.usd, figure: '5', window: 'week')), isNull);
+    final missing = limits.rows.firstWhere((each) => each.name == 'missing');
+    expect(missing.state, LimitState.unmeasured);
+    expect(missing.permille, isNull);
+    expect(missing.why, contains('nobody'));
+
+    // What the host would not read is refused in its words, and nothing is written.
+    final kept = config.readAsStringSync();
+    final refused = await limits.save('bad', limitEntry(scope: LimitScope.all, kind: LimitKind.usd, figure: '5'));
+    expect(refused, isNotNull);
+    expect(config.readAsStringSync(), kept);
+    // The owner's link lets a turn through only a limit the host has; this key is not the owner's.
+    expect(await limits.allow('daily'), isNotNull);
+
+    expect(await limits.remove('missing'), isNull);
+    expect(await limits.remove('daily'), isNull);
+    expect(limits.rows, isEmpty);
+    expect(config.readAsStringSync(), allOf(isNot(contains('[host.usage')), contains('[host.agents.scripted]')));
   });
   });
 }
