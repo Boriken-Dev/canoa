@@ -766,7 +766,32 @@ fn a_login_the_provider_cannot_look_for_is_listed_with_its_reason() {
     )
     .expect("a config");
     std::fs::remove_file(fixture.codex_home().join("auth.json")).expect("no file");
-    let listed = fixture.canoa_env(&["accounts", "list", "--format", "json"], None, false, &[]);
+    // A program that is not installed has no such row, so Codex is on this test's PATH, as a stand-in the host never runs.
+    let bin = fixture.scratch.0.join("bin");
+    std::fs::create_dir_all(&bin).expect("a folder");
+    for name in ["codex", "codex.exe", "codex.cmd"] {
+        let path = bin.join(name);
+        std::fs::write(&path, b"").expect("a stand-in program");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+        }
+    }
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let path = std::env::join_paths(paths).expect("a PATH");
+    let path = path.to_string_lossy();
+    let with_codex = [("PATH", &*path)];
+    let listed = fixture.canoa_env(
+        &["accounts", "list", "--format", "json"],
+        None,
+        false,
+        &with_codex,
+    );
     assert!(listed.status.success(), "{}", text(&listed.stderr));
     let rows = rows_in(&listed);
     let codex = rows
@@ -783,7 +808,7 @@ fn a_login_the_provider_cannot_look_for_is_listed_with_its_reason() {
     // Claude Code's file is there, so it says nothing.
     let claude = claude_local(&rows).expect("signed in");
     assert_eq!(claude["note"], Value::Null, "{claude}");
-    let text_form = fixture.canoa_env(&["accounts", "list"], None, false, &[]);
+    let text_form = fixture.canoa_env(&["accounts", "list"], None, false, &with_codex);
     assert!(
         text(&text_form.stdout).contains(why),
         "{}",
