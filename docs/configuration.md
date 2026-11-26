@@ -134,7 +134,7 @@ model, effort and mode it starts with. It comes in layers, merged lowest first:
 1. **built-in**: {{ name }}'s own: the [standard access](#access), and nothing else;
 2. **overlays**, each named in `[overlays]`: [AOS](https://github.com/Boriken-Dev/agent-overlay-spec) overlays, in their composition order (`priority`, then name);
 3. **yours**: `[profile]` in {{ config_file }};
-4. **the project's**: `{{ home_dir }}/profile.toml` in the working directory, only once you trust that directory;
+4. **the project's**: the `[profile]` table of `{{ home_dir }}/{{ config_file }}` in the working directory (in any format {{ config_file }} may be in; its other tables are not read), only once you trust that directory;
 5. **the agent's entry**: `[agents.NAME.profile]`, where `NAME` is an agent's label (an entry with only a `profile` names
    a preset, such as `Claude`);
 6. **the session** being started: the profile chosen for it in its footer (`[profiles.NAME]`, below), and what was changed
@@ -334,7 +334,7 @@ from_env = "DOCS_MCP_AUTH"
 model = "claude-opus-4-1"
 ```
 
-A project's profile file has the same keys at its top level (`model = ...`, `[env.NAME]`). Each entry takes exactly one form, and
+A project's profile file has the same keys under `[profile]` (`[profile] model = ...`, `[profile.env.NAME]`). Each entry takes exactly one form, and
 a key the schema does not know is refused. Names: environment variables a letter or `_` then letters, digits or `_`;
 skills, MCP servers and headers 1 to 64 letters, digits, `-` or `_`. A relative path is read from its layer's
 directory: {{ config_file }}'s for yours and an agent's, the overlay's, or the working directory for a project.

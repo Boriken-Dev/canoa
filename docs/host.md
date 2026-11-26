@@ -271,7 +271,7 @@ command = "/usr/local/bin/lint-mcp"
 - **The client is told what applied.** The answer to `initialize` and to each session request carries, under
   `_meta["dev.boriken.canoa/profile"]`, the profile's name, the harness, a one-line summary and each part with its layer,
   `applied`, `not supported`, `off` or `refused`, and why: names only, never a value.
-- The host reads no project's `{{ home_dir }}/profile.toml`: the directory is the client's to name.
+- The host reads no project's `{{ home_dir }}/{{ config_file }}`: the directory is the client's to name.
 
 ## Worktrees
 
