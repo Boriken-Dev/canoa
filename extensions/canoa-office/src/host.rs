@@ -2,8 +2,8 @@
 //!
 //! The host that holds a home opens a door in it: a named pipe whose name is made from the home's path, which the browser
 //! extension's native host also uses. Its `@hello` says, among other things, where the host's web app is. The home is the one
-//! `canoa` itself uses (`COQUI_AGENTIC_PEER_HOME`, else `.canoa` in the user's folder). With no host running, the program the
-//! canoa.cfg recorded for starting one (`[host.native]` `program` and `args`) is started detached, so that sessions outlive Office.
+//! `canoa` itself uses (`COQUI_AGENTIC_PEER_HOME`, else the brand's home folder in the user's folder). With no host running, the program the
+//! config file recorded for starting one (`[host.native]` `program` and `args`) is started detached, so that sessions outlive Office.
 
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
@@ -70,19 +70,42 @@ pub enum Failure {
 impl core::fmt::Display for Failure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::NoHome => f.write_str("Canoa's home folder could not be worked out for this user."),
-            Self::NotRunning => f.write_str(
-                "Canoa is not running, and the add-in does not know how to start it. Start Canoa, or run `canoa native install` once.",
+            Self::NoHome => write!(
+                f,
+                "{}'s home folder could not be worked out for this user.",
+                crate::brand::NAME
             ),
-            Self::NotStarted(why) => write!(f, "Canoa could not be started: {why}"),
-            Self::NoWebApp => f.write_str(
-                "Canoa is running but does not serve its web app. Add a [host.web] table with office = true and office_local = true to canoa.cfg.",
+            Self::NotRunning => write!(
+                f,
+                "{name} is not running, and the add-in does not know how to start it. Start {name}, or run `{program} native install` once.",
+                name = crate::brand::NAME,
+                program = crate::brand::PROGRAM
             ),
-            Self::WebAppNotForOffice => f.write_str(
-                "Canoa's web app is served without the Office pages. Set office = true and office_local = true in [host.web] of canoa.cfg.",
+            Self::NotStarted(why) => {
+                write!(f, "{} could not be started: {why}", crate::brand::NAME)
+            }
+            Self::NoWebApp => write!(
+                f,
+                "{} is running but does not serve its web app. Add a [host.web] table with office = true and office_local = true to {}.",
+                crate::brand::NAME,
+                crate::brand::CONFIG_FILE
             ),
-            Self::NotLocal(url) => write!(f, "Canoa's door named a web address that is not on this computer ({url}), so it was not opened."),
-            Self::Unreadable(why) => write!(f, "Canoa's door answered something unexpected: {why}"),
+            Self::WebAppNotForOffice => write!(
+                f,
+                "{}'s web app is served without the Office pages. Set office = true and office_local = true in [host.web] of {}.",
+                crate::brand::NAME,
+                crate::brand::CONFIG_FILE
+            ),
+            Self::NotLocal(url) => write!(
+                f,
+                "{}'s door named a web address that is not on this computer ({url}), so it was not opened.",
+                crate::brand::NAME
+            ),
+            Self::Unreadable(why) => write!(
+                f,
+                "{}'s door answered something unexpected: {why}",
+                crate::brand::NAME
+            ),
         }
     }
 }
@@ -98,13 +121,13 @@ pub fn home_dir() -> Option<PathBuf> {
     )
 }
 
-/// The home from the variable's value and the user's folder: the variable, else `.canoa` in the user's folder.
+/// The home from the variable's value and the user's folder: the variable, else the brand's home folder in the user's folder.
 #[must_use]
 pub fn home_dir_from(variable: Option<PathBuf>, user: Option<PathBuf>) -> Option<PathBuf> {
-    variable.or_else(|| user.map(|dir| dir.join(".canoa")))
+    variable.or_else(|| user.map(|dir| dir.join(crate::brand::HOME_DIR)))
 }
 
-/// The name of the door of the host that holds `home`: `canoa-native-` and 16 hexadecimal digits of SHA-256 over the home's
+/// The name of the door of the host that holds `home`: the program's name, `-native-` and 16 hexadecimal digits of SHA-256 over the home's
 /// path, in lower case (the one `canoa_host::native::door_name` makes).
 #[must_use]
 pub fn door_name(home: &Path) -> String {
@@ -117,7 +140,7 @@ pub fn door_name(home: &Path) -> String {
     for byte in digest.iter().take(8) {
         hex.push_str(&format!("{byte:02x}"));
     }
-    format!("canoa-native-{hex}")
+    format!("{}-native-{hex}", crate::brand::PROGRAM)
 }
 
 /// The file-system path of a pipe.

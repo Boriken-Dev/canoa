@@ -1,12 +1,28 @@
-//! Takes the app's payload archive, named by CANOA_LAUNCH_PAYLOAD, into the launcher, with its SHA-256.
+//! Gives the launcher the names of its brand, and takes the app's payload archive, named by CANOA_LAUNCH_PAYLOAD, into the launcher, with its SHA-256.
 //!
 //! Without the variable the launcher carries nothing and says so when started; that is the build every test and a
 //! workspace-wide `cargo build` makes.
+
+#[allow(
+    dead_code,
+    reason = "a shared reader: this script needs only the names"
+)]
+#[path = "../canoa/build/emit.rs"]
+mod emit;
+#[allow(
+    dead_code,
+    reason = "a shared reader: this script needs only the names"
+)]
+#[path = "../canoa/build/names.rs"]
+mod names;
 
 use sha2::{Digest, Sha256};
 use std::{env, fs, path::PathBuf};
 
 fn main() {
+    let manifest =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
+    emit::env(&emit::read(&manifest.join("../canoa/brand/brand.json")).names);
     println!("cargo:rerun-if-env-changed=CANOA_LAUNCH_PAYLOAD");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
     let bytes = match env::var_os("CANOA_LAUNCH_PAYLOAD") {

@@ -42,6 +42,8 @@ object.workspace = true
 
 [build-dependencies]
 sha2.workspace = true
+# The brand file's names, read by the script `canoa` shares.
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -1,13 +1,22 @@
-//! The ribbon: one tab with one button, for the windows of each application that has a ribbon.
+//! The ribbon: one tab with one button, for the windows of each application that has a ribbon. The labels carry the brand's name,
+//! which cannot hold a quote or a markup character.
 
 /// The callback the button names; `AddIn`'s `IDispatch` answers it.
 pub(crate) const TOGGLE_CALLBACK: &str = "OnTogglePane";
 
 const XML: &str = concat!(
     r#"<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui"><ribbon><tabs>"#,
-    r#"<tab id="canoaTab" label="Canoa"><group id="canoaGroup" label="Canoa">"#,
-    r#"<button id="canoaPane" label="Canoa chat" size="large" getImage="GetImage" "#,
-    r#"screentip="Show or hide the Canoa pane" onAction="OnTogglePane"/>"#,
+    r#"<tab id="chatTab" label=""#,
+    env!("CANOA_BRAND_NAME"),
+    r#""><group id="chatGroup" label=""#,
+    env!("CANOA_BRAND_NAME"),
+    r#"">"#,
+    r#"<button id="chatPane" label=""#,
+    env!("CANOA_BRAND_NAME"),
+    r#" chat" size="large" getImage="GetImage" "#,
+    r#"screentip="Show or hide the "#,
+    env!("CANOA_BRAND_NAME"),
+    r#" pane" onAction="OnTogglePane"/>"#,
     r#"</group></tab></tabs></ribbon></customUI>"#
 );
 

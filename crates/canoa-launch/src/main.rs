@@ -9,7 +9,8 @@
 )]
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use canoa_launch::{APP_PROGRAM, Error, Payload, install, prune};
+use canoa_launch::brand::{self, APP_PROGRAM};
+use canoa_launch::{Error, Payload, install, prune};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
@@ -38,10 +39,10 @@ fn base_dir() -> Result<PathBuf, Error> {
             root.display()
         )));
     }
-    Ok(root.join("Canoa"))
+    Ok(root.join(brand::FOLDER))
 }
 
-/// CANOA_CONFIG is a list of files (a leading `+` layers them over the installed, system and user ones), split at `;` on
+/// The configuration variable is a list of files (a leading `+` layers them over the installed, system and user ones), split at `;` on
 /// Windows and `:` elsewhere. Each entry is made absolute, as the person gave it otherwise: the app runs in another folder.
 fn absolute_list(list: &std::ffi::OsStr) -> Result<std::ffi::OsString, Error> {
     let Some(text) = list.to_str() else {
@@ -58,7 +59,7 @@ fn absolute_list(list: &std::ffi::OsStr) -> Result<std::ffi::OsString, Error> {
             continue;
         }
         let absolute = std::path::absolute(entry)
-            .map_err(|e| Error::Refused(format!("CANOA_CONFIG {entry}: {e}")))?;
+            .map_err(|e| Error::Refused(format!("{} {entry}: {e}", brand::CONFIG)))?;
         out.push(absolute.to_string_lossy().into_owned());
     }
     Ok(format!("{plus}{}", out.join(&separator.to_string())).into())
@@ -76,20 +77,20 @@ fn run() -> Result<i32, Error> {
     let _ = prune(&base, &installed.manifest.version);
     let program = installed.program(APP_PROGRAM)?;
     // The app runs in its own folder, not wherever it was started from, which a download may have filled. It reads no
-    // file by a path relative to its working folder except the one CANOA_CONFIG names, kept as the person gave it.
+    // file by a path relative to its working folder except the ones the configuration variable names, kept as the person gave it.
     let mut command = Command::new(&program);
     command
         .args(std::env::args_os().skip(1))
         .current_dir(&installed.dir);
-    // The app runs from an unpacked copy, so "beside the program" for its installed canoa.cfg is this launcher's folder.
+    // The app runs from an unpacked copy, so "beside the program" for its installed configuration file is this launcher's folder.
     if let Some(folder) = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(PathBuf::from))
     {
-        command.env("CANOA_INSTALLED_DIR", folder);
+        command.env(brand::INSTALLED_DIR, folder);
     }
-    if let Some(list) = std::env::var_os("CANOA_CONFIG") {
-        command.env("CANOA_CONFIG", absolute_list(&list)?);
+    if let Some(list) = std::env::var_os(brand::CONFIG) {
+        command.env(brand::CONFIG, absolute_list(&list)?);
     }
     let status = command
         .status()
@@ -100,13 +101,15 @@ fn run() -> Result<i32, Error> {
 /// Says why the launch failed: on standard error, and in a message box when there is a desktop, because this program has
 /// no console to show it in.
 fn report(error: &Error) {
-    eprintln!("canoa: {error}");
+    eprintln!("{}: {error}", brand::PROGRAM);
     #[cfg(windows)]
-    if std::env::var_os("CANOA_LAUNCH_NO_DIALOG").is_none() {
-        let _ =
-            win_msgbox::error::<win_msgbox::Okay>(&format!("Canoa could not start.\n\n{error}"))
-                .title("Canoa")
-                .show();
+    if std::env::var_os(brand::NO_DIALOG).is_none() {
+        let _ = win_msgbox::error::<win_msgbox::Okay>(&format!(
+            "{} could not start.\n\n{error}",
+            brand::NAME
+        ))
+        .title(brand::NAME)
+        .show();
     }
 }
 

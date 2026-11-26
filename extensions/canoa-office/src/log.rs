@@ -3,13 +3,13 @@
 use std::io::Write;
 
 /// One line of metadata per event, so a person can see whether and when Office loaded the DLL. No content is ever written.
-/// `CANOA_OFFICE_LOG` names the file; otherwise it is `office-addin.log` in `%LOCALAPPDATA%\Canoa`.
+/// The variable `brand::LOG` names the file; otherwise it is `office-addin.log` in the brand's folder under `%LOCALAPPDATA%`.
 pub(crate) fn log(event: &str) {
-    let path = match std::env::var_os("CANOA_OFFICE_LOG") {
+    let path = match std::env::var_os(crate::brand::LOG) {
         Some(path) => std::path::PathBuf::from(path),
         None => match std::env::var_os("LOCALAPPDATA") {
             Some(base) => std::path::Path::new(&base)
-                .join("Canoa")
+                .join(crate::brand::FOLDER)
                 .join("office-addin.log"),
             None => return,
         },

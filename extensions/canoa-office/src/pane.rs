@@ -58,7 +58,7 @@ const DEFAULT_EXTENT: SIZE = SIZE {
     cy: 20_000,
 };
 
-const WINDOW_CLASS: PCWSTR = w!("CanoaOfficePane");
+const WINDOW_CLASS: PCWSTR = w!("OfficeChatPane");
 
 /// The pane's control. Office creates it from `PANE_PROG_ID` and drives it through the OLE container interfaces.
 #[implement(

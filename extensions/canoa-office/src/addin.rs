@@ -14,9 +14,7 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Variant::{VARIANT, VT_ERROR};
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MessageBoxW};
-use windows::core::{
-    BSTR, GUID, HRESULT, HSTRING, IUnknown, Interface, PCWSTR, Result, implement, w,
-};
+use windows::core::{BSTR, GUID, HRESULT, HSTRING, IUnknown, Interface, PCWSTR, Result, implement};
 
 use crate::automation::get_object;
 use crate::context::{Context, client_of_exe, current, current_exe_name};
@@ -33,16 +31,21 @@ use crate::ribbon::{IMAGE_CALLBACK, TOGGLE_CALLBACK, ribbon_xml};
 use crate::surface::{pane_state, set_next_context};
 
 /// Says something to the person in a message box, for a click that cannot do what it was for.
-/// A test sets `CANOA_OFFICE_NO_DIALOG` so none opens.
+/// A test sets the build's no-dialog variable (`brand::NO_DIALOG`) so none opens.
 fn tell_person(text: &str) {
     log(&format!("told the person: {text}"));
-    if std::env::var_os("CANOA_OFFICE_NO_DIALOG").is_some() {
+    if std::env::var_os(crate::brand::NO_DIALOG).is_some() {
         return;
     }
     let text = HSTRING::from(text);
     // SAFETY: both strings outlive the call; no owner window, so the box is the desktop's.
     unsafe {
-        MessageBoxW(None, &text, w!("Canoa"), MB_OK | MB_ICONWARNING);
+        MessageBoxW(
+            None,
+            &text,
+            &HSTRING::from(crate::brand::NAME),
+            MB_OK | MB_ICONWARNING,
+        );
     }
 }
 
@@ -99,7 +102,7 @@ impl AddIn {
             return Err(E_FAIL);
         };
         let prog_id = BSTR::from(PANE_PROG_ID);
-        let title = BSTR::from("Canoa");
+        let title = BSTR::from(crate::brand::NAME);
         let context = self.context_of(window);
         // The pane's control is made inside `CreateCTP`: it is told what it is for before that.
         let mut raw: *mut c_void = ptr::null_mut();
@@ -192,7 +195,8 @@ impl AddIn {
                         // Office, so the person is told here instead.
                         if hr != E_FAIL || self.factory.borrow().is_some() {
                             tell_person(&format!(
-                                "Canoa could not open its pane (error {:#010x}). The add-in's log says more.",
+                                "{} could not open its pane (error {:#010x}). The add-in's log says more.",
+                                crate::brand::NAME,
                                 hr.0
                             ));
                         }

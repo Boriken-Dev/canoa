@@ -58,15 +58,17 @@ pub fn set_next_locator(locator: impl Fn() -> Result<Located, Failure> + Send + 
     LOCATOR.with(|slot| *slot.borrow_mut() = Some(std::sync::Arc::new(locator)));
 }
 
-/// Where the pane's browser keeps its data: `CANOA_OFFICE_DATA`, else `webview2` in the `Canoa\office` folder of the user's local
+/// Where the pane's browser keeps its data: the variable `brand::DATA`, else `webview2` in the brand's `office` folder of the user's local
 /// application data. It is the pane's own: the app's key, once admitted, lives in it between runs.
 #[must_use]
 pub fn data_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("CANOA_OFFICE_DATA").filter(|dir| !dir.is_empty()) {
+    if let Some(dir) = std::env::var_os(crate::brand::DATA).filter(|dir| !dir.is_empty()) {
         return PathBuf::from(dir);
     }
     let base = std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
-    base.join("Canoa").join("office").join("webview2")
+    base.join(crate::brand::FOLDER)
+        .join("office")
+        .join("webview2")
 }
 
 /// One pane: what it is for, how far it has got, and its browser.
@@ -110,7 +112,7 @@ impl PaneState {
         let state = Rc::new(Self {
             context: RefCell::new(context),
             window: Cell::new(HWND::default()),
-            status: RefCell::new("Canoa".to_owned()),
+            status: RefCell::new(crate::brand::NAME.to_owned()),
             located: RefCell::new(None),
             locating: Cell::new(false),
             locator,
@@ -169,11 +171,11 @@ impl PaneState {
         if window.is_invalid() || self.locating.replace(true) {
             return;
         }
-        self.set_status("Looking for Canoa…");
+        self.set_status(&format!("Looking for {}…", crate::brand::NAME));
         let locator = std::sync::Arc::clone(&self.locator);
         let target = window.0 as isize;
         let spawned = std::thread::Builder::new()
-            .name("canoa-office-locate".to_owned())
+            .name("office-locate".to_owned())
             .spawn(move || {
                 let result = locator();
                 let boxed = Box::into_raw(Box::new(result));
@@ -193,7 +195,10 @@ impl PaneState {
             });
         if let Err(error) = spawned {
             self.locating.set(false);
-            self.set_status(&format!("Canoa could not look for its host ({error})."));
+            self.set_status(&format!(
+                "{} could not look for its host ({error}).",
+                crate::brand::NAME
+            ));
         }
     }
 
@@ -232,7 +237,10 @@ impl PaneState {
 
     fn open_browser(self: &Rc<Self>, window: HWND) {
         let Some(address) = self.address() else {
-            self.set_status("Canoa's web address is not usable.");
+            self.set_status(&format!(
+                "{}'s web address is not usable.",
+                crate::brand::NAME
+            ));
             return;
         };
         self.set_status("Opening the chat…");
@@ -307,7 +315,8 @@ pub unsafe extern "system" fn window_proc(
 ) -> LRESULT {
     match message {
         WM_PAINT => {
-            let text = state_of(window).map_or_else(|| "Canoa".to_owned(), |state| state.status());
+            let text = state_of(window)
+                .map_or_else(|| crate::brand::NAME.to_owned(), |state| state.status());
             let mut paint = PAINTSTRUCT::default();
             // SAFETY: `window` is the window being painted and `paint` is a live local `BeginPaint` fills; `EndPaint` pairs it.
             unsafe {

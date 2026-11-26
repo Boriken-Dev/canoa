@@ -3,6 +3,7 @@
 
 mod addin;
 pub mod automation;
+pub mod brand;
 pub mod context;
 mod exports;
 pub mod host;

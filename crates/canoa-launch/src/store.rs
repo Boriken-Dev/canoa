@@ -116,7 +116,11 @@ pub fn install(base: &Path, payload: &Payload<'_>) -> Result<Installed> {
         fs::rename(&dir, &aside).map_err(|e| {
             remove_tree(&fresh);
             Error::io(
-                format!("replace {} (is Canoa running from it?)", dir.display()),
+                format!(
+                    "replace {} (is {} running from it?)",
+                    dir.display(),
+                    crate::brand::NAME
+                ),
                 e,
             )
         })?;

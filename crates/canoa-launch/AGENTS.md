@@ -8,7 +8,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). Two 
 
 | Program | Does |
 | --- | --- |
-| `canoa-launch` | The launcher. Windows subsystem `windows` (no console). Starts the app out of `<LOCALAPPDATA>\Canoa\<version>\` with its own arguments, waits, exits with the app's status; on failure exit 1 with the reason on stderr and, on Windows, in a message box |
+| `canoa-launch` | The launcher. Windows subsystem `windows` (no console). Starts the app out of `<LOCALAPPDATA>\<folder>\<version>\` (the brand's folder, `Canoa` in the default brand) with its own arguments, waits, exits with the app's status; on failure exit 1 with the reason on stderr and, on Windows, in a message box |
 | `canoa-pack <app folder> <version> <payload.zip>` | Packs the folder, reads it back as the launcher will, requires `CanoaUI.exe`, writes the archive and prints its SHA-256. Exit 2 on usage, 1 on failure |
 
 Build the launcher with the payload: `CANOA_LAUNCH_PAYLOAD=<payload.zip> cargo build --release -p canoa-launch --bin canoa-launch`. `build.rs` compiles the file and its SHA-256 in; unset, the launcher carries nothing and exits 1 with "carries no app" (what `cargo test` builds). `app/tool/portable.py` does both steps.
