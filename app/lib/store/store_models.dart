@@ -431,7 +431,7 @@ Future<Map<String, String>?> _confirm(
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: Column(key: Key('model-choice-${engine.id}'), crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('${engine.label} file', style: Theme.of(dialog).textTheme.titleSmall),
+                    Text(dialog.t('store.engine_file', {'engine': engine.label}), style: Theme.of(dialog).textTheme.titleSmall),
                     RadioGroup<String>(
                       groupValue: picks[engine.id],
                       onChanged: (value) => setPicked(() => picks[engine.id] = value ?? picks[engine.id]!),
