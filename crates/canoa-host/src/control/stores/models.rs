@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use canoa::store::models::{
-    ModelAct, ModelKeep, ModelList, ModelQuery, ModelRow, ModelStore, ModelStoreInfo,
+    ModelAct, ModelFile, ModelKeep, ModelList, ModelQuery, ModelRow, ModelStore, ModelStoreInfo,
     STEP_DELETE_FILES, STEP_FETCH_FILES, ServiceQuery, ServiceReport, SpeechService,
 };
 use coqui_acp_api::ProcessSpawner;
@@ -128,6 +128,16 @@ fn failure(error: &ProviderError) -> Failed {
         (BAD_PARAMS, words)
     } else {
         (REFUSED, words)
+    }
+}
+
+/// What a row a type's own `model_store` listed says of its files: they are downloaded against the SHA-256 each carries, so a row whose
+/// files all have one is verified with it; any other is not.
+fn verified_of_files(files: &[ModelFile]) -> Value {
+    if !files.is_empty() && files.iter().all(|file| !file.sha256.is_empty()) {
+        json!("SHA-256")
+    } else {
+        Value::Null
     }
 }
 
@@ -286,8 +296,8 @@ impl Stores {
     /// "settings"?: {"help"?, "schema", "form"?}, "speech": bool, "sources": [{"label", "provider", "origin", "enabled", "trust",
     /// "pin", "fetched"?, "from"?, "stale"?, "items"?, "problem"?}], "models": [row, ...]}`, each row as `canoa::store::models::ModelRow`
     /// with `"values"`, what canoa.cfg keeps for it, and for a row a catalog listed `"catalog"` (`label`, `provider`, `origin`,
-    /// `trust`, `pin`, `revision`, `fetched`, `from`, `stale`) and `"trust"` (`verified`, `pinned`, `unverified`, null when it has no
-    /// digest and is not installable). Runs the type's program as this user, and nothing else.
+    /// `trust`, `pin`, `revision`, `fetched`, `from`, `stale`) and `"verified"` (the algorithm its files' digests are made with, as
+    /// `"SHA-256"` or `"MD5"`, several joined by `, `; null when a file has none). Runs the type's program as this user, and nothing else.
     pub(crate) fn models_read(&self, params: &Value, files: &Files) -> Result<Value, Failed> {
         let held = self.model_type(params)?;
         let refresh = params
@@ -302,8 +312,11 @@ impl Stores {
             let mut shown = json_of(row)?;
             if let Some(meta) = from.meta.get(&row.id) {
                 shown["catalog"] = meta["catalog"].clone();
-                shown["trust"] = meta["trust"].clone();
             }
+            shown["verified"] = from.meta.get(&row.id).map_or_else(
+                || verified_of_files(&row.files),
+                |meta| meta["verified"].clone(),
+            );
             shown["values"] = kept
                 .as_ref()
                 .and_then(|kept| kept.get(&row.id))
@@ -410,7 +423,7 @@ impl Stores {
                 return Err((
                     REFUSED,
                     format!(
-                        "{model} cannot be installed: its file {} is at {}, which is none of the places {} downloads from; a catalog entry that is trusted or pinned names more with endpoints = [\"https://...\"]",
+                        "{model} cannot be installed: its file {} is at {}, which is none of the places {} downloads from; a catalog entry names more with endpoints = [\"https://...\"]",
                         file.file, file.url, held.info.title
                     ),
                 ));

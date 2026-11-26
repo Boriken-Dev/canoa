@@ -93,9 +93,7 @@ fn each_store_installs_its_real_program_into_a_throwaway_folder_and_changes_noth
         built_in().expect("the built-in stores"),
     )
     .options(options);
-    // Grok's publisher gives nothing to check its binary against: the plan says so, and this run takes it, as an entry that says
-    // `trusted = true` does.
-    programs.trust(["grok".to_owned()]);
+    // Grok's publisher gives nothing to check its binary against: the plan says so, and the install takes it.
     let mut failed = Vec::new();
     for id in wanted.split(',').filter(|s| !s.is_empty()) {
         let provider = format!("{id}_store");

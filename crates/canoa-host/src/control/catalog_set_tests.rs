@@ -117,17 +117,13 @@ fn a_catalog_is_replaced_added_turned_off_and_taken_out_through_the_host_and_the
         &Caller::Owner,
         "overlays",
         "team",
-        json!({"provider": "read", "source": "https://example.org/t.git@main#c.toml", "pin": "abc", "trusted": true, "ttl": 60}),
+        json!({"provider": "read", "source": "https://example.org/t.git@main#c.toml", "pin": "abc", "ttl": 60}),
     );
     let team = row(&added, "team");
     assert_eq!(team["origin"], "added");
     assert_eq!(
-        (
-            team["pin"].as_str(),
-            team["trusted"].as_bool(),
-            team["ttl"].as_u64()
-        ),
-        (Some("abc"), Some(true), Some(60))
+        (team["pin"].as_str(), team["ttl"].as_u64()),
+        (Some("abc"), Some(60))
     );
 
     // Taken out: the entry is gone, and the default is back as the type's own.
@@ -161,7 +157,7 @@ fn a_catalog_set_is_refused_for_what_the_host_would_refuse_and_for_the_hosts_own
         &Caller::Owner,
         "skills",
         "x",
-        json!({"provider": "read", "source": "a", "trusted": "yes"}),
+        json!({"provider": "read", "source": "a", "ttl": "soon"}),
     );
     assert!(bad_key["error"].is_object(), "{bad_key}");
     let number = set(&control, &Caller::Owner, "skills", "x", json!(3));

@@ -2,16 +2,16 @@
 //! catalog (the type's defaults and canoa.cfg's entries, merged by label) is read through its source and its items become rows beside
 //! the ones the type's `model_store` lists.
 //!
-//! A row says which catalog it came from, in a fact and in the `catalog` object `store/models` adds to it, and how far its digests
-//! can be believed. An item whose files carry no digest is listed with the reason and cannot be installed unless the entry says
-//! `trusted = true`; the files of an item are downloaded checked by the digest the catalog gave, and an unverified one only from such
-//! an entry. An id two catalogs list is shown once for each, the later ones as `<id>@<label>`.
+//! A row says which catalog it came from, in a fact and in the `catalog` object `store/models` adds to it, and which algorithm its
+//! files' digests are made with (`verified`). The files of an item are downloaded checked by the digest the catalog gave; an item
+//! whose files carry none is listed all the same, as not verified. An id two catalogs list is shown once for each, the later ones as
+//! `<id>@<label>`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use canoa::store::Check;
-use canoa::store::catalog::{FileCheck, MODELS_FORMAT, ModelItem, Trust, parse_models};
+use canoa::store::catalog::{FileCheck, MODELS_FORMAT, ModelItem, parse_models};
 use canoa::store::models::{
     Fact, ModelFile, ModelRow, RowAction, STEP_DELETE_FILES, STEP_FETCH_FILES,
 };
@@ -48,6 +48,9 @@ fn check_of(file: &canoa::store::catalog::CatalogFile) -> Option<Check> {
         Some(FileCheck::Sha512(value)) => Some(Check::Sha512 {
             value: value.clone(),
         }),
+        Some(FileCheck::Md5(value)) => Some(Check::Md5 {
+            value: value.clone(),
+        }),
         Some(FileCheck::GitBlob(value)) => Some(Check::GitBlob {
             value: value.clone(),
         }),
@@ -74,7 +77,7 @@ fn row_of(
     id: &str,
     item: &ModelItem,
     entry: &Entry,
-    trust: &Result<Trust, String>,
+    verified: Option<&str>,
     checks: Option<&[Check]>,
     done: bool,
 ) -> ModelRow {
@@ -104,54 +107,39 @@ fn row_of(
             ModelFile::new(&file.url, &file.file, file.bytes, sha256)
         })
         .collect();
-    match (trust, checks) {
-        (Ok(trust), Some(_)) => {
-            row.facts.push(Fact::new("Trust", trust.word()));
-            row.on = done;
-            row.state = if done {
-                Some("installed".to_owned())
-            } else if *trust == Trust::Unverified {
-                Some("unverified".to_owned())
-            } else {
-                None
-            };
-            row.actions = vec![if done {
-                RowAction::new(
-                    format!("Remove {}", item.label),
-                    "The files of this model are deleted from this computer.",
-                    "Remove",
-                    [STEP_DELETE_FILES],
-                )
-            } else {
-                RowAction::new(
-                    format!("Install {}", item.label),
-                    if *trust == Trust::Unverified {
-                        format!(
-                            "{} publishes no checksum for these files, so nothing can say they are the ones meant. This catalog's entry says trusted = true.",
-                            entry.label
-                        )
-                    } else {
-                        format!(
-                            "The files are downloaded and checked against the digest {} gives.",
-                            entry.label
-                        )
-                    },
-                    "Install",
-                    [STEP_FETCH_FILES],
-                )
-            }];
-        }
-        (Err(why), _) => {
-            row.state = Some("no checksum".to_owned());
-            row.facts.push(Fact::new("Not installable", why.clone()));
-        }
-        (Ok(_), None) => {
-            row.state = Some("not installable".to_owned());
-            row.facts.push(Fact::new(
-                "Not installable",
-                "its files are checked in a way this host does not know",
-            ));
-        }
+    if checks.is_some() {
+        row.on = done;
+        row.state = done.then(|| "installed".to_owned());
+        row.actions = vec![if done {
+            RowAction::new(
+                format!("Remove {}", item.label),
+                "The files of this model are deleted from this computer.",
+                "Remove",
+                [STEP_DELETE_FILES],
+            )
+        } else {
+            RowAction::new(
+                format!("Install {}", item.label),
+                match verified {
+                    Some(algorithm) => format!(
+                        "The files are downloaded and checked against the {algorithm} digest {} gives.",
+                        entry.label
+                    ),
+                    None => format!(
+                        "{} gives no checksum for these files, so nothing says they are the ones meant.",
+                        entry.label
+                    ),
+                },
+                "Install",
+                [STEP_FETCH_FILES],
+            )
+        }];
+    } else {
+        row.state = Some("not installable".to_owned());
+        row.facts.push(Fact::new(
+            "Not installable",
+            "its files are checked in a way this host does not know",
+        ));
     }
     row
 }
@@ -233,32 +221,30 @@ impl Stores {
                     item.id.clone()
                 };
                 used.insert(id.clone());
-                let trust = item.trust(entry.trusted);
+                let verified = item.verified_with();
                 let checks: Option<Vec<Check>> = item.files.iter().map(check_of).collect();
                 let done = installed(item, folder.as_deref());
-                let shown = trust
-                    .as_ref()
-                    .map_or(Value::Null, |trust| json!(trust.word()));
-                let row = row_of(&id, item, &entry, &trust, checks.as_deref(), done);
-                match (&trust, checks) {
-                    (Ok(_), Some(checks)) => {
-                        made.checks.insert(id.clone(), checks);
-                    }
-                    (Err(why), _) => {
-                        made.refused.insert(id.clone(), why.clone());
-                    }
-                    (Ok(_), None) => {
-                        made.refused.insert(
-                            id.clone(),
-                            "its files are checked in a way this host does not know".to_owned(),
-                        );
-                    }
+                let row = row_of(
+                    &id,
+                    item,
+                    &entry,
+                    verified.as_deref(),
+                    checks.as_deref(),
+                    done,
+                );
+                if let Some(checks) = checks {
+                    made.checks.insert(id.clone(), checks);
+                } else {
+                    made.refused.insert(
+                        id.clone(),
+                        "its files are checked in a way this host does not know".to_owned(),
+                    );
                 }
                 if !entry.endpoints.is_empty() {
                     made.endpoints.insert(id.clone(), entry.endpoints.clone());
                 }
                 made.meta
-                    .insert(id, json!({"catalog": info.clone(), "trust": shown}));
+                    .insert(id, json!({"catalog": info.clone(), "verified": verified}));
                 made.rows.push(row);
             }
         }

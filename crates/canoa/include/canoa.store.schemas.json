@@ -999,6 +999,23 @@
                   ]
                 },
                 {
+                  "description": "Its MD5, in lower-case hexadecimal.",
+                  "properties": {
+                    "kind": {
+                      "const": "md5"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "The digest."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "value"
+                  ]
+                },
+                {
                   "description": "Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL names the 40-digit commit it is read at.",
                   "properties": {
                     "kind": {
@@ -1170,6 +1187,23 @@
             ]
           },
           {
+            "description": "Its MD5, in lower-case hexadecimal.",
+            "properties": {
+              "kind": {
+                "const": "md5"
+              },
+              "value": {
+                "type": "string",
+                "description": "The digest."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
             "description": "Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL names the 40-digit commit it is read at.",
             "properties": {
               "kind": {
@@ -1240,6 +1274,23 @@
         "properties": {
           "kind": {
             "const": "sha512"
+          },
+          "value": {
+            "type": "string",
+            "description": "The digest."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "value"
+        ]
+      },
+      {
+        "description": "Its MD5, in lower-case hexadecimal.",
+        "properties": {
+          "kind": {
+            "const": "md5"
           },
           "value": {
             "type": "string",
@@ -1397,6 +1448,23 @@
                       "properties": {
                         "kind": {
                           "const": "sha512"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The digest."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Its MD5, in lower-case hexadecimal.",
+                      "properties": {
+                        "kind": {
+                          "const": "md5"
                         },
                         "value": {
                           "type": "string",
@@ -1775,6 +1843,23 @@
             "properties": {
               "kind": {
                 "const": "sha512"
+              },
+              "value": {
+                "type": "string",
+                "description": "The digest."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "description": "Its MD5, in lower-case hexadecimal.",
+            "properties": {
+              "kind": {
+                "const": "md5"
               },
               "value": {
                 "type": "string",

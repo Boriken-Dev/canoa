@@ -271,7 +271,7 @@ fn a_catalog_that_is_off_or_no_catalog_is_not_found_and_says_why() {
 fn the_hosts_keys_are_read_apart_from_the_providers_fields() {
     let table = json!({"mirror": {
         "provider": "codex_releases", "origin": "https://mirror.example",
-        "pin": "sha256:1e0c", "trusted": true, "ttl": 90, "keys": ["5A3F"],
+        "pin": "sha256:1e0c", "ttl": 90, "keys": ["5A3F"],
     }});
     let entry = read(&table).remove(0).expect("valid");
     assert_eq!(
@@ -279,27 +279,16 @@ fn the_hosts_keys_are_read_apart_from_the_providers_fields() {
         json!({"origin": "https://mirror.example"})
     );
     assert_eq!(
-        (
-            entry.pin.as_deref(),
-            entry.trusted,
-            entry.ttl,
-            entry.keys.as_slice()
-        ),
+        (entry.pin.as_deref(), entry.ttl, entry.keys.as_slice()),
         (
             Some("sha256:1e0c"),
-            true,
             Some(90),
             ["5A3F".to_owned()].as_slice()
         )
     );
-    assert_eq!(
-        entry.trust(),
-        "unverified",
-        "an entry that takes files with no digest is drawn as such"
-    );
+    assert_eq!(entry.trust(), Some("pinned"));
     for bad in [
         json!({"pin": 3}),
-        json!({"trusted": "yes"}),
         json!({"ttl": "soon"}),
         json!({"keys": "5A3F"}),
     ] {
@@ -309,7 +298,7 @@ fn the_hosts_keys_are_read_apart_from_the_providers_fields() {
     let plain = read(&json!({"a": {"provider": "x"}}))
         .remove(0)
         .expect("valid");
-    assert_eq!(plain.trust(), "verified");
+    assert_eq!(plain.trust(), None);
 }
 
 #[test]

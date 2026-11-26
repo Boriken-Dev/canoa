@@ -830,12 +830,8 @@ fn a_declared_change_of_a_filesystem_root_is_refused() {
 }
 
 #[test]
-fn a_download_nothing_checks_needs_the_host_to_have_been_told_and_is_then_recorded() {
+fn a_download_nothing_checks_goes_ahead_and_is_recorded_as_not_verified() {
     let s = setup("unverified", Variant::Normal);
-    let error =
-        apply_rigged(&s, rigged(&s, Rig::PlansAnUnverifiedDownload), |_| {}).expect_err("refused");
-    assert!(matches!(error, StoreError::Unverified(_)), "{error}");
-    // Told it may, the same plan goes ahead and the copy records that the file was not verified.
     let dir = Dir::new("unverified-ok");
     let home = dir.0.join("home");
     fs::create_dir_all(&home).expect("home");
@@ -848,7 +844,6 @@ fn a_download_nothing_checks_needs_the_host_to_have_been_told_and_is_then_record
     let programs = Programs::new(Shelf::unchecked(dir.0.join("programs")), registry())
         .transport(s.transport.clone())
         .options(options);
-    programs.trust(["echo".to_owned()]);
     let store: Arc<dyn ProgramStore> = Arc::new(Rigged {
         engine: Engine::new(EchoRecipe, StoreSettings::default()),
         rc: dir.0.join("home").join(".bashrc"),

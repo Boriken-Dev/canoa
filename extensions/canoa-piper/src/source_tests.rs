@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use canoa::store::catalog::{MODELS_FORMAT, Trust, parse_models};
+use canoa::store::catalog::{MODELS_FORMAT, parse_models};
 use coqui_acp_harness::LocalSpawner;
 
 use super::*;
@@ -125,7 +125,7 @@ fn the_recorded_voices_have_their_reviewed_digests() {
             item.license, None,
             "no licence is claimed for a voice whose card was not read"
         );
-        assert_eq!(item.trust(false), Ok(Trust::Verified), "{}", item.id);
+        assert!(item.verified_with().is_some(), "{}", item.id);
     }
 }
 

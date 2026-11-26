@@ -298,13 +298,17 @@ fn the_default_a_pinned_extension_registers_lists_its_items_from_the_shipped_sna
     assert_eq!(base["catalog"]["label"], "acme");
     assert_eq!(base["catalog"]["origin"], "default");
     assert_eq!(base["catalog"]["revision"], "r1");
-    assert_eq!(base["trust"], "verified");
+    assert_eq!(base["verified"], "SHA-256");
     assert_eq!(base["actions"][0]["steps"], json!(["fetch_files"]));
     assert_eq!(base["by"], "acme");
     let bare = host.row("bare").expect("a row");
-    assert_eq!(bare["trust"], Value::Null, "no digest, no trust word");
-    assert_eq!(bare["actions"], json!([]), "and nothing to install");
-    assert_eq!(bare["state"], "no checksum");
+    assert_eq!(bare["verified"], Value::Null, "no digest: not verified");
+    assert_eq!(
+        bare["actions"][0]["steps"],
+        json!(["fetch_files"]),
+        "and offered all the same"
+    );
+    assert_eq!(bare["state"], Value::Null);
 }
 
 #[test]
@@ -321,9 +325,6 @@ fn a_row_the_catalog_lists_is_downloaded_checked_and_removed() {
     let after = host.row("base").expect("a row");
     assert_eq!(after["state"], "installed");
     assert_eq!(after["actions"][0]["steps"], json!(["delete_files"]));
-    let refused = host.act("bare", "fetch_files").expect_err("no digest");
-    assert!(refused.1.contains("no checksum"), "{refused:?}");
-    assert!(!host.root.join("shelf/stand/models/bare.bin").exists());
     host.act("base", "delete_files").expect("removed");
     assert!(!file.exists());
 }
@@ -341,7 +342,7 @@ fn an_entry_replaces_the_default_adds_a_catalog_or_turns_the_default_off() {
         .to_string(),
     );
 
-    // Added: a second catalog, whose `base` is shown beside the default's; its file has no digest, so it is refused until trusted.
+    // Added: a second catalog, whose `base` is shown beside the default's; its file has no digest, so it is not verified.
     host.catalogs(&json!({"mine": mine.clone()}));
     assert_eq!(
         host.row("base").expect("the default's")["catalog"]["label"],
@@ -351,16 +352,10 @@ fn an_entry_replaces_the_default_adds_a_catalog_or_turns_the_default_off() {
         .row("base@mine")
         .expect("the added catalog's, by its label");
     assert_eq!(second["catalog"]["origin"], "added");
-    assert_eq!(second["trust"], Value::Null);
-    assert_eq!(host.row("extra").expect("extra")["trust"], "verified");
-
-    // Trusted: the same entry takes files with no digest, drawn unverified.
-    host.catalogs(&json!({"mine": {"provider": "read", "source": mine.clone(), "trusted": true}}));
-    let trusted = host.row("base@mine").expect("a row");
-    assert_eq!(trusted["trust"], "unverified");
-    assert_eq!(trusted["state"], "unverified");
+    assert_eq!(second["verified"], Value::Null);
+    assert_eq!(host.row("extra").expect("extra")["verified"], "SHA-256");
     host.act("base@mine", "fetch_files")
-        .expect("taken on trust");
+        .expect("offered and taken, as not verified");
     assert!(host.root.join("shelf/stand/models/mine.bin").is_file());
 
     // Replaced: an entry with the default's label is the catalog now, and the default's rows are gone.
@@ -393,7 +388,7 @@ fn a_catalog_that_cannot_be_read_is_listed_with_the_reason_and_the_others_stay()
 }
 
 #[test]
-fn a_file_outside_the_places_the_type_downloads_from_is_refused_until_a_trusted_entry_names_them() {
+fn a_file_outside_the_places_the_type_downloads_from_is_refused_until_an_entry_names_them() {
     let host = fixture("endpoints");
     let mirrored = host.file(
         "mirror.json",
@@ -403,9 +398,7 @@ fn a_file_outside_the_places_the_type_downloads_from_is_refused_until_a_trusted_
         ]})
         .to_string(),
     );
-    host.catalogs(
-        &json!({"mirror": {"provider": "read", "source": mirrored.clone(), "trusted": true}}),
-    );
+    host.catalogs(&json!({"mirror": {"provider": "read", "source": mirrored.clone()}}));
     let refused = host
         .act("mirrored", "fetch_files")
         .expect_err("not one of the type's places");
@@ -416,7 +409,7 @@ fn a_file_outside_the_places_the_type_downloads_from_is_refused_until_a_trusted_
     assert!(!host.root.join("shelf/stand/models/m.bin").exists());
 
     host.catalogs(
-        &json!({"mirror": {"provider": "read", "source": mirrored.clone(), "trusted": true,
+        &json!({"mirror": {"provider": "read", "source": mirrored.clone(),
         "endpoints": ["https://mirror.example/models/"]}}),
     );
     assert_eq!(
@@ -428,20 +421,5 @@ fn a_file_outside_the_places_the_type_downloads_from_is_refused_until_a_trusted_
     assert_eq!(
         std::fs::read(host.root.join("shelf/stand/models/m.bin")).expect("the file"),
         WEIGHTS
-    );
-
-    // An entry that is neither trusted nor pinned may not widen where files come from: it is listed with the reason.
-    host.catalogs(&json!({"mirror": {"provider": "read", "source": mirrored,
-        "endpoints": ["https://mirror.example/models/"]}}));
-    let page = host.list();
-    let row = page["sources"]
-        .as_array()
-        .and_then(|all| all.iter().find(|source| source["label"] == "mirror"))
-        .expect("listed");
-    assert!(
-        row["problem"]
-            .as_str()
-            .is_some_and(|why| why.contains("trusted or pinned")),
-        "{row}"
     );
 }

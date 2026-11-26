@@ -68,7 +68,7 @@
   },
   "$defs": {
     "check": {
-      "description": "What checks the file; absent when the publisher gives nothing, which the host takes only from an entry that says trusted = true.",
+      "description": "What checks the file, named by its algorithm; absent when the publisher gives nothing, and the file is then offered as not verified.",
       "oneOf": [
         {
           "type": "object",
@@ -81,6 +81,12 @@
           "required": ["sha512"],
           "additionalProperties": false,
           "properties": { "sha512": { "type": "string", "pattern": "^[0-9a-fA-F]{128}$" } }
+        },
+        {
+          "type": "object",
+          "required": ["md5"],
+          "additionalProperties": false,
+          "properties": { "md5": { "type": "string", "pattern": "^[0-9a-fA-F]{32}$" } }
         },
         {
           "type": "object",

@@ -876,18 +876,18 @@ repo = "myorg/whisper.cpp-models"
 pin = "0f3c9d1a5b7e2c4d6f8091a2b3c4d5e6f7a8b9c0"   # a revision the source reads at, or "sha256:<hex>" of the catalog's text
 
 [store.whisper.catalogs]
-mine = { provider = "read", source = "D:/models/whisper.json", trusted = true }   # a canoa.models/1 file of your own
+mine = { provider = "read", source = "D:/models/whisper.json" }   # a canoa.models/1 file of your own
 other = false                                 # a default turned off
 ```
 
-Five keys of an entry are the host's, whatever the provider: `pin` (a pinned catalog is read once and never goes stale by time; a
-`sha256:` pin must match the text the source answers with), `trusted`, `ttl` (seconds before it is read again; `[host.store] source_ttl`,
+Four keys of an entry are the host's, whatever the provider: `pin` (a pinned catalog is read once and never goes stale by time; a
+`sha256:` pin must match the text the source answers with), `ttl` (seconds before it is read again; `[host.store] source_ttl`,
 3600, otherwise), `keys` (the publisher key fingerprints the entry demands a signature from) and `endpoints` (see below). A provider's
 own form may not use these names. Type catalogs that list models answer in `canoa.models/1` and a program's releases in `canoa.releases/1`
-(`crates/canoa/include/canoa.models.schema.json`, `canoa.releases.schema.json`); every item says which catalog it came from and carries a
-badge: **verified** (a digest the publisher gives for every file), **pinned** (a digest derived at a pinned commit) or **unverified**. A file
-with no digest, or one weaker than SHA-256 or SHA-512, is not offered unless the entry says `trusted = true`, and then it is drawn unverified
-and the download of a program from that scope may take it. What was last read is kept on disk beside `latest.json`
+(`crates/canoa/include/canoa.models.schema.json`, `canoa.releases.schema.json`); every item says which catalog it came from. A file's
+`check` names the algorithm of the digest its publisher states (`sha256`, `sha512`, `md5`, `git_blob`), and the download is checked against
+that one; an item whose files all have one carries a check mark in the Store, which says "Verified with SHA-256" (or the algorithm used),
+and its page has a Verified field with the algorithm, or No. A file with no digest is offered all the same, without the mark. What was last read is kept on disk beside `latest.json`
 (`cache/store/catalogs/<scope>/<label>.json`) and a catalog that cannot be reached shows its last answer with the reason; a pinned default
 ships a copy and needs no network the first time. Settings, Catalog sources lists every scope's catalogs with their origin, pin, badge and last
 read, and replaces, adds, turns off and removes them through `store/catalog_set`.
@@ -896,15 +896,15 @@ read, and replaces, adds, turns off and removes them through `store/catalog_set`
 
 A Store type, and each program, downloads only from the places its extension names (the `endpoints` it declares), whatever a catalog
 says: an item whose file is anywhere else is refused, with the address and the places it may have come from. A catalog that lives
-elsewhere (a mirror, a fork's repository) names its own places with `endpoints`, a list of `https` origins or prefixes, and only an entry
-that is `trusted = true` or pinned may: whoever wrote it has said where the files are, and each file is still checked by its digest.
+elsewhere (a mirror, a fork's repository) names its own places with `endpoints`, a list of `https` origins or prefixes: whoever wrote it
+has said where the files are, and each file is still checked by its digest.
 
 ```toml
 [store.whisper.catalogs.ggerganov]
 provider = "whisper_hf"
 repo = "myorg/whisper.cpp-models"
 pin = "0f3c9d1a5b7e2c4d6f8091a2b3c4d5e6f7a8b9c0"
-endpoints = ["https://huggingface.co/myorg/whisper.cpp-models/resolve/"]   # where its files are; the pin makes it allowed
+endpoints = ["https://huggingface.co/myorg/whisper.cpp-models/resolve/"]   # where its files are
 ```
 
 #### The releases of a program
@@ -926,17 +926,12 @@ address, a version, a digest) is held in code:
 
 A version you name must be one a catalog lists. A signature that does not verify refuses the whole catalog; there is no fallback to the
 digest alone. An entry's `keys` list the fingerprints a signature must come from, in place of the publisher's. A program with no
-checksum is installed only from an entry that says `trusted = true`:
+checksum is offered as not verified, and its plan says so:
 
 ```toml
-[store.grok.catalogs.xai]                        # the default's label: this replaces it, and takes the builds as they are
-provider = "grok_releases"
-trusted = true
-
 [store.codex.catalogs.internal]                  # a mirror that serves the publisher's layout
 provider = "codex_releases"
 origin = "https://mirror.example.com/openai-releases"
-trusted = true                                   # a trusted or pinned entry may name places; the digests are still checked
 endpoints = ["https://mirror.example.com/openai-releases/"]
 ```
 

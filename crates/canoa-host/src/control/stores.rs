@@ -199,20 +199,9 @@ impl Stores {
         self.sources.clone()
     }
 
-    /// Takes as trusted the programs whose scope in `store` (canoa.cfg's `[store]`) has a catalog entry that is on and says
-    /// `trusted = true`: an install of one may take a download nothing checks.
+    /// Takes the `[store]` section of canoa.cfg as it is now: the further places each program's files are downloaded from, and
+    /// the reader of its catalogs.
     pub(crate) fn trust_from(&self, store: &Value) {
-        let trusted = self.catalog_types().into_iter().filter(|scope| {
-            crate::store::catalogs::merge(scope, crate::store::catalogs::table_of(store, &scope.id))
-                .iter()
-                .any(|merged| {
-                    merged
-                        .parsed
-                        .as_ref()
-                        .is_ok_and(|entry| entry.enabled && entry.trusted)
-                })
-        });
-        self.programs.trust(trusted.map(|scope| scope.id));
         let mut places = std::collections::BTreeMap::new();
         for scope in self.catalog_types() {
             let more: Vec<String> = crate::store::catalogs::merge(

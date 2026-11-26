@@ -12,7 +12,7 @@ type Outcome = Result<Value, (i32, String)>;
 
 impl Control {
     /// `store/catalogs` `{"type"?: string}` -> `{"schema": 1, "types": [{"type", "title", "words": {"noun", "plural", "lists"},
-    /// "default"?: {"label", "source"}, "format"?, "catalogs": [{"label", "provider", "fields", "source"?, "default", "origin", "enabled", "trusted", "pin"?, "ttl"?, "keys"?, "endpoints"?, "trust"?, "snapshot"?, "fetched"?, "from"?, "problem"?}],
+    /// "default"?: {"label", "source"}, "format"?, "catalogs": [{"label", "provider", "fields", "source"?, "default", "origin", "enabled", "pin"?, "ttl"?, "keys"?, "endpoints"?, "trust"? (`pinned`), "snapshot"?, "fetched"?, "from"?, "problem"?}],
     /// "sources": [{"id", "title", "help"?, "extension"?, "types", "schema"?, "form"?}]}]}`, the schema and the form a guatiao schema and a
     /// guatiao-intake form document. With `type` only that type is answered.
     /// Needs `overlay.read`, as the catalogs it lists do.

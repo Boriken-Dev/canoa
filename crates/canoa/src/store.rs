@@ -401,6 +401,11 @@ pub enum Check {
         /// The digest.
         value: String,
     },
+    /// Its MD5, in lower-case hexadecimal.
+    Md5 {
+        /// The digest.
+        value: String,
+    },
     /// Its git blob id (the SHA-1 of `blob <size>`, a NUL and its bytes), lower-case hexadecimal: what a file holds when its URL
     /// names the 40-digit commit it is read at.
     GitBlob {

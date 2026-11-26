@@ -591,6 +591,47 @@ fn a_file_checked_by_its_git_blob_id_is_kept_when_the_id_matches_and_refused_whe
 }
 
 #[test]
+fn a_file_is_checked_by_whichever_algorithm_its_publisher_states() {
+    use md5::Digest as _;
+    let host = fixture("algorithms", world());
+    let file = canoa::store::models::ModelFile::new(
+        format!("{VOICES_ORIGIN}{}", VOICE_FILES[1].0),
+        "kept.onnx.json",
+        None,
+        "",
+    );
+    let fetch = |check: canoa::store::Check| {
+        host.stores.programs.fetch_models_in(
+            "piper",
+            &[VOICES_ORIGIN.to_owned()],
+            std::slice::from_ref(&file),
+            Some(&[check]),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+    };
+    let hex = |bytes: &[u8]| data_encoding::HEXLOWER.encode(bytes);
+    let md5 = hex(&md5::Md5::digest(VOICE_JSON));
+    let sha512 = hex(&sha2::Sha512::digest(VOICE_JSON));
+    let wrong_md5 = hex(&md5::Md5::digest(b"another file"));
+    let refused =
+        fetch(canoa::store::Check::Md5 { value: wrong_md5 }).expect_err("another file's MD5");
+    assert!(refused.to_string().contains("checksum"), "{refused}");
+    assert!(!host.folder("piper").join("kept.onnx.json").exists());
+    fetch(canoa::store::Check::Md5 { value: md5 })
+        .expect("the file's own MD5, which is all its publisher states");
+    assert_eq!(
+        std::fs::read(host.folder("piper").join("kept.onnx.json")).expect("kept"),
+        VOICE_JSON
+    );
+    let refused = fetch(canoa::store::Check::Sha512 {
+        value: "0".repeat(128),
+    })
+    .expect_err("not its SHA-512");
+    assert!(refused.to_string().contains("checksum"), "{refused}");
+    fetch(canoa::store::Check::Sha512 { value: sha512 }).expect("the file's own SHA-512");
+}
+
+#[test]
 fn a_file_that_does_not_match_its_digest_is_refused_and_leaves_nothing() {
     let mut served = world();
     served.put(

@@ -18,7 +18,7 @@ impl canoa::store::recipe::Recipe for GrokRecipe { /* every required method */ }
 
 - `PRESET`: how the host runs Grok when `canoa.cfg` does not name it: through the `grok` harness provider (`grok agent stdio`), searched for in `~/.grok/bin`.
 - `ACCESS`: how an access setting (sandbox, network, approvals) is said in Grok's own words, under the AOS harness id `grok`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
-- `GrokRecipe`: Grok's Store recipe: one binary per platform from the publisher's storage; channels `stable`, `alpha`, `enterprise`. The releases are the catalog of its scope (`grok`): `GrokReleases` (a `catalog_source`, id `grok_releases`, default label `xai`) reads each channel's one-line file and lists the builds. The publisher gives no checksum, so every file is listed as one nothing checks, and it is installed only from an entry that says `trusted = true` (`[store.grok.catalogs.xai]` with `provider = "grok_releases"`).
+- `GrokRecipe`: Grok's Store recipe: one binary per platform from the publisher's storage; channels `stable`, `alpha`, `enterprise`. The releases are the catalog of its scope (`grok`): `GrokReleases` (a `catalog_source`, id `grok_releases`, default label `xai`) reads each channel's one-line file and lists the builds. The publisher gives no checksum, so every file is listed as one nothing checks, and it is offered as not verified (`[store.grok.catalogs.xai]` with `provider = "grok_releases"`).
 
 Each item is public at this one path. `GrokRecipe` is made a Store provider by `canoa::store_provider!`: `GrokStore` is the guatiao provider `grok_store` over it, offered by this crate's library.
 

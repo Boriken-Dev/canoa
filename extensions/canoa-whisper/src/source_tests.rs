@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use canoa::store::catalog::{MODELS_FORMAT, Trust, parse_models};
+use canoa::store::catalog::{MODELS_FORMAT, parse_models};
 use coqui_acp_harness::LocalSpawner;
 
 use super::*;
@@ -116,7 +116,7 @@ fn the_default_catalog_lists_the_eight_models_with_their_reviewed_digests() {
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/{REVISION}/ggml-{id}.bin"
             )
         );
-        assert_eq!(item.trust(false), Ok(Trust::Verified), "{id}");
+        assert_eq!(item.verified_with().as_deref(), Some("SHA-256"), "{id}");
         assert!(item.tags.iter().any(|tag| tag == "speech-to-text"));
     }
 }

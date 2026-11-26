@@ -26,6 +26,7 @@ use canoa::store::{
 };
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::ProviderError;
+use md5::Md5;
 use sha2::{Digest, Sha256, Sha512};
 
 /// Limits a host puts on what a store fetches and unpacks. Each has a default and no floor.
@@ -715,20 +716,23 @@ fn safe_part(part: &str) -> bool {
     !device && !part.ends_with(' ') && !part.ends_with('.')
 }
 
-/// What a download is hashed with, as it is written.
+/// What a download is hashed with, as it is written: its SHA-256 always (the record of what was fetched) and the algorithm the
+/// check names, when that is another.
 #[allow(
     clippy::large_enum_variant,
     reason = "one lives on the stack for one download"
 )]
 enum Hashes {
     Plain(Sha256),
-    Both(Sha256, Sha512),
+    Sha512(Sha256, Sha512),
+    Md5(Sha256, Md5),
 }
 
 impl Hashes {
     fn for_check(check: &Check) -> Self {
         match check {
-            Check::Sha512 { .. } => Self::Both(Sha256::new(), Sha512::new()),
+            Check::Sha512 { .. } => Self::Sha512(Sha256::new(), Sha512::new()),
+            Check::Md5 { .. } => Self::Md5(Sha256::new(), Md5::new()),
             _ => Self::Plain(Sha256::new()),
         }
     }
@@ -736,28 +740,38 @@ impl Hashes {
     fn update(&mut self, bytes: &[u8]) {
         match self {
             Self::Plain(a) => a.update(bytes),
-            Self::Both(a, b) => {
+            Self::Sha512(a, b) => {
+                a.update(bytes);
+                b.update(bytes);
+            }
+            Self::Md5(a, b) => {
                 a.update(bytes);
                 b.update(bytes);
             }
         }
     }
 
+    /// The SHA-256 of what was written, and whether `check`'s own digest matches (true for a check made of neither: the git blob
+    /// id is compared by the caller, and an unverified download has nothing to match).
     fn finish(self, check: &Check) -> (String, bool) {
+        let hex = |bytes: &[u8]| data_encoding::HEXLOWER.encode(bytes);
         match (self, check) {
             (Self::Plain(a), Check::Sha256 { value }) => {
-                let sha = data_encoding::HEXLOWER.encode(&a.finalize());
+                let sha = hex(&a.finalize());
                 let ok = sha.eq_ignore_ascii_case(value);
                 (sha, ok)
             }
-            (Self::Both(a, b), Check::Sha512 { value }) => {
-                let ok = data_encoding::HEXLOWER
-                    .encode(&b.finalize())
-                    .eq_ignore_ascii_case(value);
-                (data_encoding::HEXLOWER.encode(&a.finalize()), ok)
+            (Self::Sha512(a, b), Check::Sha512 { value }) => {
+                let ok = hex(&b.finalize()).eq_ignore_ascii_case(value);
+                (hex(&a.finalize()), ok)
             }
-            (Self::Plain(a), _) => (data_encoding::HEXLOWER.encode(&a.finalize()), true),
-            (Self::Both(a, _), _) => (data_encoding::HEXLOWER.encode(&a.finalize()), true),
+            (Self::Md5(a, b), Check::Md5 { value }) => {
+                let ok = hex(&b.finalize()).eq_ignore_ascii_case(value);
+                (hex(&a.finalize()), ok)
+            }
+            (Self::Plain(a) | Self::Sha512(a, _) | Self::Md5(a, _), _) => {
+                (hex(&a.finalize()), true)
+            }
         }
     }
 }

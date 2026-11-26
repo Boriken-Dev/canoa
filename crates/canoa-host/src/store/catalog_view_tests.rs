@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::view;
 use crate::store::catalog_run::Reading;
@@ -48,7 +48,7 @@ fn models() -> String {
 }
 
 #[test]
-fn every_item_says_the_catalog_it_came_from_and_how_far_its_digests_can_be_believed() {
+fn every_item_says_the_catalog_it_came_from_and_which_algorithm_checks_its_files() {
     let mine = entry(json!({"mine": {"provider": "hub"}}));
     let shown = view(&kind("canoa.models/1"), &mine, &reading(models())).expect("a view");
     assert_eq!(shown["revision"], "r1");
@@ -60,33 +60,28 @@ fn every_item_says_the_catalog_it_came_from_and_how_far_its_digests_can_be_belie
         assert_eq!(item["catalog"]["origin"], "added");
         assert_eq!(item["catalog"]["revision"], "r1");
     }
-    assert_eq!(items[0]["trust"], "verified");
-    assert!(items[0].get("problem").is_none());
-    for refused in [&items[1], &items[2]] {
-        assert!(refused.get("trust").is_none(), "{refused}");
-        assert!(
-            refused["problem"]
-                .as_str()
-                .is_some_and(|why| why.contains("trusted = true")),
-            "{refused}"
-        );
-    }
-    assert_eq!(items[2]["files"][0]["trust"], "verified");
+    assert_eq!(items[0]["verified"], "SHA-256");
+    assert_eq!(
+        items[1]["verified"],
+        Value::Null,
+        "no digest: offered, not verified"
+    );
+    assert_eq!(items[2]["verified"], Value::Null, "one file with none");
+    assert_eq!(items[2]["files"][0]["verified"], "SHA-256");
+    assert_eq!(items[2]["files"][1]["verified"], Value::Null);
+    assert_eq!(shown["catalog"]["trust"], Value::Null);
 }
 
 #[test]
-fn an_entry_that_is_trusted_takes_files_with_no_digest_and_they_are_drawn_unverified() {
-    let mine = entry(json!({"mine": {"provider": "hub", "trusted": true}}));
+fn a_pinned_catalog_says_so() {
+    let mut mine = entry(json!({"mine": {"provider": "hub"}}));
+    mine.pin = Some("abc".to_owned());
     let shown = view(&kind("canoa.models/1"), &mine, &reading(models())).expect("a view");
-    let items = shown["items"].as_array().expect("items");
-    assert_eq!(items[0]["trust"], "verified");
-    assert_eq!(items[1]["trust"], "unverified");
-    assert_eq!(items[2]["trust"], "unverified", "the weakest file decides");
-    assert_eq!(shown["catalog"]["trust"], "unverified");
+    assert_eq!(shown["catalog"]["trust"], "pinned");
 }
 
 #[test]
-fn a_releases_catalog_lists_each_version_with_its_platforms_and_the_weakest_trust() {
+fn a_releases_catalog_lists_each_version_with_its_platforms_and_how_each_is_checked() {
     let text = json!({"format": "canoa.releases/1", "channels": {"stable": "1.0.1"}, "releases": [
         {"version": "1.0.1", "channels": ["stable"], "platforms": {"windows-x86_64": {"launch": "p.exe", "parts": [
             {"url": "https://x.example/p.exe", "path": "p.exe", "executable": true, "check": {"sha256": SHA}}]}}},
@@ -103,12 +98,16 @@ fn a_releases_catalog_lists_each_version_with_its_platforms_and_the_weakest_trus
         json!({"by": "5A3F", "over": "manifest.json"})
     );
     let releases = shown["releases"].as_array().expect("releases");
-    assert_eq!(releases[0]["trust"], "verified");
+    assert_eq!(releases[0]["verified"], "SHA-256");
     assert_eq!(
         releases[0]["platforms"]["windows-x86_64"]["parts"][0]["executable"],
         true
     );
-    assert!(releases[1]["problem"].is_string(), "no digest, not trusted");
+    assert_eq!(
+        releases[1]["verified"],
+        Value::Null,
+        "no digest, still listed"
+    );
     assert_eq!(releases[1]["catalog"]["origin"], "replaced");
 }
 

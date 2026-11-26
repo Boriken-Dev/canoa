@@ -72,6 +72,12 @@
             },
             {
               "type": "object",
+              "required": ["md5"],
+              "additionalProperties": false,
+              "properties": { "md5": { "type": "string", "pattern": "^[0-9a-fA-F]{32}$" } }
+            },
+            {
+              "type": "object",
               "required": ["git_blob"],
               "additionalProperties": false,
               "properties": {

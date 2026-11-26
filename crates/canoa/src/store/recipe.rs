@@ -326,6 +326,9 @@ fn check_of(file: &catalog::CatalogFile) -> Check {
         Some(catalog::FileCheck::Sha512(value)) => Check::Sha512 {
             value: value.clone(),
         },
+        Some(catalog::FileCheck::Md5(value)) => Check::Md5 {
+            value: value.clone(),
+        },
         Some(catalog::FileCheck::GitBlob(value)) => Check::GitBlob {
             value: value.clone(),
         },

@@ -242,6 +242,7 @@ impl<R: Recipe> Engine<R> {
             let how = match &part.download.check {
                 Check::Sha256 { .. } => "SHA-256 checked".to_owned(),
                 Check::Sha512 { .. } => "SHA-512 checked".to_owned(),
+                Check::Md5 { .. } => "MD5 checked".to_owned(),
                 Check::GitBlob { .. } => "git blob id checked".to_owned(),
                 Check::Unverified { why } => format!("not verified: {why}"),
             };
@@ -450,6 +451,7 @@ fn token_of(
         let check = match &part.download.check {
             Check::Sha256 { value } => format!("sha256:{value}"),
             Check::Sha512 { value } => format!("sha512:{value}"),
+            Check::Md5 { value } => format!("md5:{value}"),
             Check::GitBlob { value } => format!("gitblob:{value}"),
             _ => "unverified".to_owned(),
         };

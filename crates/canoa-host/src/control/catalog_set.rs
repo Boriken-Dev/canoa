@@ -20,7 +20,7 @@ impl Control {
 
     /// `store/catalog_set` `{"type", "label", "entry"}` -> `{"ok": true, "type", "label", "catalogs": [row, ...]}`, where `entry` is
     /// what `[store.<type>.catalogs.<label>]` becomes: `false` turns the catalog of that label off (a default stays listed, off),
-    /// a string or a table (`{provider?, ...fields, pin?, trusted?, ttl?, keys?}`) replaces the default of that label or adds one,
+    /// a string or a table (`{provider?, ...fields, pin?, ttl?, keys?, endpoints?}`) replaces the default of that label or adds one,
     /// and null takes the entry out of canoa.cfg (a default of that label is on again). A catalog that runs a program, or reads
     /// through an extension's source, takes the `hosting` grant, as writing it with `config/set` does. Needs `config.write`.
     pub(super) fn store_catalog_set(&self, caller: &Caller, params: &Value) -> Outcome {

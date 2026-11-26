@@ -1,13 +1,12 @@
 //! What the control channel says of a catalog read in one of the host's formats: its items (models) or releases (a program's
 //! versions), each with the catalog it came from and how far its digest can be believed.
 //!
-//! An item whose files carry no digest is listed with the reason and no trust word, and is not installable unless the catalog's entry
-//! says `trusted = true`; one whose files all carry a digest is `verified` (a publisher's), `pinned` (derived at a pinned commit) or,
-//! when the entry is trusted and a file has none, `unverified`.
+//! An item whose files all carry a digest the publisher states says which algorithm in `verified` (`"SHA-256"`, `"MD5"`, ...); one
+//! with a file that has none says null, and is offered all the same.
 
 use canoa::store::catalog::{
-    CatalogFile, FileCheck, MODELS_FORMAT, ModelItem, RELEASES_FORMAT, Release, Trust,
-    parse_models, parse_releases,
+    CatalogFile, FileCheck, MODELS_FORMAT, ModelItem, RELEASES_FORMAT, Release, parse_models,
+    parse_releases, verified_with,
 };
 use serde_json::{Value, json};
 
@@ -19,25 +18,22 @@ fn check_json(check: Option<&FileCheck>) -> Value {
     match check {
         Some(FileCheck::Sha256(value)) => json!({"kind": "sha256", "value": value}),
         Some(FileCheck::Sha512(value)) => json!({"kind": "sha512", "value": value}),
+        Some(FileCheck::Md5(value)) => json!({"kind": "md5", "value": value}),
         Some(FileCheck::GitBlob(value)) => json!({"kind": "git_blob", "value": value}),
         Some(FileCheck::Unverified(why)) => json!({"kind": "unverified", "value": why}),
         _ => Value::Null,
     }
 }
 
-fn file_json(file: &CatalogFile, trusted: bool) -> Value {
-    let mut shown = json!({
+fn file_json(file: &CatalogFile) -> Value {
+    json!({
         "url": file.url,
         "file": file.file,
         "bytes": file.bytes,
         "check": check_json(file.check.as_ref()),
         "derived": file.derived,
-    });
-    match file.trust(trusted) {
-        Ok(trust) => shown["trust"] = json!(trust.word()),
-        Err(why) => shown["problem"] = json!(why),
-    }
-    shown
+        "verified": file.verified_with(),
+    })
 }
 
 /// Which catalog an item came from and how it was read: the label, its provider, whether it is the type's own, what it is pinned at,
@@ -57,34 +53,21 @@ pub(crate) fn catalog_info(entry: &Entry, revision: Option<&str>, reading: &Read
     })
 }
 
-/// The weakest trust in `trusts`, or the reason of the first file refused.
-fn weakest(trusts: impl IntoIterator<Item = Result<Trust, String>>) -> Result<Trust, String> {
-    let mut least = Trust::Verified;
-    for trust in trusts {
-        least = least.min(trust?);
-    }
-    Ok(least)
-}
-
-fn item_json(item: &ModelItem, entry: &Entry, catalog: &Value) -> Value {
-    let mut shown = json!({
+fn item_json(item: &ModelItem, catalog: &Value) -> Value {
+    json!({
         "id": item.id,
         "label": item.label,
         "by": item.by,
         "tags": item.tags,
         "license": item.license,
         "facts": item.facts.iter().map(|(label, value)| json!({"label": label, "value": value})).collect::<Vec<_>>(),
-        "files": item.files.iter().map(|file| file_json(file, entry.trusted)).collect::<Vec<_>>(),
+        "files": item.files.iter().map(file_json).collect::<Vec<_>>(),
+        "verified": item.verified_with(),
         "catalog": catalog,
-    });
-    match item.trust(entry.trusted) {
-        Ok(trust) => shown["trust"] = json!(trust.word()),
-        Err(why) => shown["problem"] = json!(why),
-    }
-    shown
+    })
 }
 
-fn release_json(release: &Release, entry: &Entry, catalog: &Value) -> Value {
+fn release_json(release: &Release, catalog: &Value) -> Value {
     let platforms: serde_json::Map<String, Value> = release
         .platforms
         .iter()
@@ -94,7 +77,7 @@ fn release_json(release: &Release, entry: &Entry, catalog: &Value) -> Value {
                 json!({
                     "launch": platform.launch,
                     "parts": platform.parts.iter().map(|part| {
-                        let mut shown = file_json(&part.file, entry.trusted);
+                        let mut shown = file_json(&part.file);
                         shown["path"] = json!(part.path);
                         shown["executable"] = json!(part.executable);
                         shown
@@ -103,23 +86,21 @@ fn release_json(release: &Release, entry: &Entry, catalog: &Value) -> Value {
             )
         })
         .collect();
-    let trusts = release
-        .platforms
-        .values()
-        .flat_map(|platform| platform.parts.iter())
-        .map(|part| part.file.trust(entry.trusted));
-    let mut shown = json!({
+    let verified = verified_with(
+        release
+            .platforms
+            .values()
+            .flat_map(|platform| platform.parts.iter())
+            .map(|part| &part.file),
+    );
+    json!({
         "version": release.version,
         "channels": release.channels,
         "notices": release.notices,
         "platforms": platforms,
+        "verified": verified,
         "catalog": catalog,
-    });
-    match weakest(trusts) {
-        Ok(trust) => shown["trust"] = json!(trust.word()),
-        Err(why) => shown["problem"] = json!(why),
-    }
-    shown
+    })
 }
 
 /// The answer of `store/catalog` for a scope whose catalogs answer in a format of the host's: the catalog's own facts, and its items
@@ -140,7 +121,7 @@ pub(crate) fn view(kind: &TypeCatalogs, entry: &Entry, reading: &Reading) -> Res
                 "format": MODELS_FORMAT,
                 "revision": catalog.revision,
                 "catalog": info,
-                "items": catalog.items.iter().map(|item| item_json(item, entry, &info)).collect::<Vec<_>>(),
+                "items": catalog.items.iter().map(|item| item_json(item, &info)).collect::<Vec<_>>(),
             }))
         }
         Some(RELEASES_FORMAT) => {
@@ -154,7 +135,7 @@ pub(crate) fn view(kind: &TypeCatalogs, entry: &Entry, reading: &Reading) -> Res
                 "channels": catalog.channels,
                 "signed": catalog.signed.as_ref().map(|(by, over)| json!({"by": by, "over": over})),
                 "catalog": info,
-                "releases": catalog.releases.iter().map(|release| release_json(release, entry, &info)).collect::<Vec<_>>(),
+                "releases": catalog.releases.iter().map(|release| release_json(release, &info)).collect::<Vec<_>>(),
             }))
         }
         _ => Err(format!(

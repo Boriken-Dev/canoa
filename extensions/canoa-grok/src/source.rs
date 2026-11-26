@@ -1,7 +1,6 @@
 //! Where Grok's releases are listed: its publisher's own storage, which names the version each channel is at in a one-line file
 //! (`<origin>/stable`, `alpha`, `enterprise`) and serves one program for each platform at `<origin>/grok-<version>-<os>-<arch>`.
-//! The publisher gives no checksum for any of it, so every file is listed as one nothing checks, and a person installs it by
-//! saying in canoa.cfg that the entry is trusted.
+//! The publisher gives no checksum for any of it, so every file is listed as one nothing checks, and is offered as not verified.
 
 use alloc::collections::BTreeMap;
 
@@ -95,7 +94,7 @@ canoa::catalog_source!(
     GrokReleases,
     "grok_releases",
     "Grok releases from xAI",
-    "The version each channel is at and the program for each platform, from the publisher's storage. It gives no checksum, so an entry takes it only when it says trusted = true.",
+    "The version each channel is at and the program for each platform, from the publisher's storage. It gives no checksum, so what it lists is offered as not verified.",
     "grok",
     GrokSettings,
     places = ["https://x.ai/cli/"],

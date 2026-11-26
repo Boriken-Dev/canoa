@@ -22,7 +22,7 @@ use guatiao_intake::Screen;
 pub const KIND: &str = "catalog_source";
 
 /// The keys of a catalog's entry in canoa.cfg that the host owns, so no source's form may use one as a field name.
-pub const HOST_KEYS: [&str; 6] = ["provider", "pin", "trusted", "ttl", "keys", "endpoints"];
+pub const HOST_KEYS: [&str; 5] = ["provider", "pin", "ttl", "keys", "endpoints"];
 
 /// What a source provider is, from [`CatalogSourceProvider::describe`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]

@@ -1,4 +1,4 @@
-use canoa::store::catalog::{FileCheck, Trust, parse_releases};
+use canoa::store::catalog::{FileCheck, parse_releases};
 use canoa::store::feed::FixedReleases;
 use canoa::store::recipe::Recipe;
 use canoa::store::{Check, Platform};
@@ -35,7 +35,7 @@ fn each_channel_names_its_version_and_a_version_two_channels_share_is_listed_onc
 }
 
 #[test]
-fn every_file_is_one_nothing_checks_so_it_is_refused_unless_the_entry_is_trusted() {
+fn every_file_is_one_nothing_checks_so_it_is_not_verified() {
     let catalog = catalog();
     let part = &catalog.releases[0].platforms["windows-aarch64"].parts[0];
     assert_eq!(
@@ -45,8 +45,7 @@ fn every_file_is_one_nothing_checks_so_it_is_refused_unless_the_entry_is_trusted
     assert_eq!(part.path, "grok.exe");
     assert!(part.executable);
     assert!(matches!(part.file.check, Some(FileCheck::Unverified(_))));
-    assert!(part.file.trust(false).is_err());
-    assert_eq!(part.file.trust(true), Ok(Trust::Unverified));
+    assert_eq!(part.file.verified_with(), None);
     let linux = &catalog.releases[0].platforms["linux-x86_64"].parts[0];
     assert_eq!(linux.file.url, "https://x.ai/cli/grok-1.0.92-linux-x86_64");
 }

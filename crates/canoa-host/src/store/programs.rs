@@ -11,7 +11,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::time::Duration;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,8 +69,6 @@ pub enum StoreError {
     },
     /// The store's answer does not hold what the host checks.
     Contract(String),
-    /// The plan has downloads nothing checks, and the host was not told to take those.
-    Unverified(Vec<String>),
 }
 
 impl fmt::Display for StoreError {
@@ -109,11 +107,6 @@ impl fmt::Display for StoreError {
                 }
                 Ok(())
             }
-            Self::Unverified(urls) => write!(
-                f,
-                "the publisher gives nothing to check these downloads against: {}; they are taken only when allowed",
-                urls.join(", ")
-            ),
             Self::Contract(why) => write!(f, "the store broke its contract: {why}"),
         }
     }
@@ -388,10 +381,6 @@ pub struct Programs {
     extras: Mutex<Vec<Arc<Registry>>>,
     transport: Arc<dyn Transport>,
     options: Options,
-    /// The programs whose scope has a catalog entry that says `trusted = true` (`[store.<program>.catalogs.<label>]`): an install of
-    /// one may take a download nothing checks. The plan names each such download, and `current.json` records that a file was not
-    /// verified.
-    trusted: RwLock<BTreeSet<String>>,
     releases: RwLock<Option<Releases>>,
     places: RwLock<BTreeMap<String, Vec<String>>>,
     /// How long a lookup waits to connect and for an answer; `[host.store] connect_timeout` and `lookup_timeout`.
@@ -427,7 +416,6 @@ impl Programs {
             extras: Mutex::new(Vec::new()),
             transport: Arc::new(HttpTransport::default()),
             options: Options::default(),
-            trusted: RwLock::new(BTreeSet::new()),
             releases: RwLock::new(None),
             places: RwLock::new(BTreeMap::new()),
             lookups: Mutex::new((
@@ -544,24 +532,10 @@ impl Programs {
         }
     }
 
-    /// Takes `programs` as the ones whose installs may take a download nothing checks, in place of the ones named before: the
-    /// programs whose scope in canoa.cfg has a trusted catalog entry.
-    pub fn trust(&self, programs: impl IntoIterator<Item = String>) {
-        *self.trusted.write().unwrap_or_else(PoisonError::into_inner) =
-            programs.into_iter().collect();
-    }
-
     /// Takes `places` as the further origins each program's files may be downloaded from: the ones the enabled catalog entries of its
     /// scope in canoa.cfg name with `endpoints`, in place of the ones named before.
     pub(crate) fn download_from(&self, places: BTreeMap<String, Vec<String>>) {
         *self.places.write().unwrap_or_else(PoisonError::into_inner) = places;
-    }
-
-    fn is_trusted(&self, program: &str) -> bool {
-        self.trusted
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains(program)
     }
 
     /// The transport every fetch of this store goes through, which a source's `fetch` shares.
@@ -602,7 +576,7 @@ impl Programs {
             endpoints.extend(more.iter().cloned());
         }
         self.tools_at(&endpoints)
-            .allow_unverified(self.is_trusted(&info.program))
+            .allow_unverified(true)
             .releases_from(reader)
     }
 
@@ -1048,15 +1022,6 @@ impl Programs {
         {
             return Err(StoreError::Elevated);
         }
-        let unchecked: Vec<String> = plan
-            .downloads
-            .iter()
-            .filter(|d| d.is_unverified())
-            .map(|d| d.url.clone())
-            .collect();
-        if !unchecked.is_empty() && !self.is_trusted(&info.program) {
-            return Err(StoreError::Unverified(unchecked));
-        }
         // One install at a time on the shelf: two measured together would each see the other's changes.
         let _one_at_a_time = self.shelf.apply_lock()?;
         let program = self.shelf.program(&info.program)?;
@@ -1301,7 +1266,7 @@ impl Programs {
                 "a model's files and the checks that go with them differ in number".to_owned(),
             ));
         }
-        // A file nothing checks is taken only from a catalog entry that says it is trusted: the checks name it, and the plan did.
+        // A file nothing checks is taken, and the row says it is not verified.
         let unchecked = checks.is_some_and(|checks| {
             checks
                 .iter()

@@ -3,7 +3,7 @@
 //!
 //! A label's value is a source the `read` provider reads (a bare string, written `{ provider = "read", source = "..." }` in full),
 //! a table naming a provider and the fields its form asks for, or `false`, which turns a default catalog off. The host keeps four
-//! keys of a table for itself, which no provider's form may use: `pin`, `trusted`, `ttl` and `keys`. One reader serves every type,
+//! keys of a table for itself, which no provider's form may use: `pin`, `ttl`, `keys` and `endpoints`. One reader serves every type,
 //! so a catalog written under one type is never listed under another.
 //!
 //! A type's catalogs are its defaults (what its extension registers, in the order registered), then canoa.cfg's entries by label:
@@ -46,7 +46,7 @@ pub(crate) fn schema() -> Result<GuatiaoValue, ValueError> {
 pub(crate) const READ: &str = "read";
 
 /// The keys of a catalog's table that the host owns.
-const HOST_KEYS: [&str; 5] = ["pin", "trusted", "ttl", "keys", "endpoints"];
+const HOST_KEYS: [&str; 4] = ["pin", "ttl", "keys", "endpoints"];
 
 /// Where a catalog of a type comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,14 +79,12 @@ pub(crate) struct Entry {
     pub(crate) fields: Map<String, Value>,
     /// What fixes its answer: a revision the provider understands, or `sha256:<hex>` of the catalog's text.
     pub(crate) pin: Option<String>,
-    /// Whether an item with no digest is accepted from it.
-    pub(crate) trusted: bool,
     /// Seconds before it is read again, in place of `[host.store] source_ttl`.
     pub(crate) ttl: Option<u64>,
     /// The publisher key fingerprints it demands a signature from, in place of its provider's.
     pub(crate) keys: Vec<String>,
-    /// Further `https` origins or prefixes its files may be downloaded from, beyond the ones its type names. Taken only from an entry
-    /// that is `trusted` or pinned: a person who wrote one has said where the files are, and what is fetched is checked by its digest.
+    /// Further `https` origins or prefixes its files may be downloaded from, beyond the ones its type names: a person who wrote
+    /// one has said where the files are, and what is fetched is checked by its digest.
     pub(crate) endpoints: Vec<String>,
     pub(crate) origin: Origin,
     /// False for a catalog turned off with `label = false`.
@@ -106,7 +104,6 @@ impl Entry {
     pub(crate) fn spec(&self) -> String {
         if self.provider == READ
             && self.pin.is_none()
-            && !self.trusted
             && self.keys.is_empty()
             && self.endpoints.is_empty()
             && let Some(source) = self.source().filter(|_| self.fields.len() == 1)
@@ -115,11 +112,10 @@ impl Entry {
         }
         let sorted: alloc::collections::BTreeMap<_, _> = self.fields.iter().collect();
         format!(
-            "{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}",
             self.provider,
             serde_json::to_string(&sorted).unwrap_or_default(),
             self.pin.as_deref().unwrap_or_default(),
-            self.trusted,
             self.keys.join(","),
             self.endpoints.join(",")
         )
@@ -141,7 +137,6 @@ impl Entry {
             provider: provider.to_owned(),
             fields,
             pin: None,
-            trusted: false,
             ttl: None,
             keys: Vec::new(),
             endpoints: Vec::new(),
@@ -164,15 +159,12 @@ impl Entry {
         entry
     }
 
-    /// How far the catalog's items are taken on trust, for the badge a Sources page draws: one whose entry accepts files with no
-    /// digest is `unverified`, a pinned one is `pinned`, and any other needs a digest on every file, `verified`.
-    pub(crate) const fn trust(&self) -> &'static str {
-        if self.trusted {
-            "unverified"
-        } else if self.pin.is_some() {
-            "pinned"
+    /// What the badge a Sources page draws says of the catalog: `pinned` when its answer is fixed to a revision, else nothing.
+    pub(crate) const fn trust(&self) -> Option<&'static str> {
+        if self.pin.is_some() {
+            Some("pinned")
         } else {
-            "verified"
+            None
         }
     }
 }
@@ -296,11 +288,6 @@ pub(crate) fn read_all(table: &Value) -> Vec<Parsed> {
                             return Err(problem("pin is a revision, or sha256: and a digest"));
                         }
                     };
-                    entry.trusted = match table.get("trusted") {
-                        None | Some(Value::Null) => false,
-                        Some(Value::Bool(trusted)) => *trusted,
-                        Some(_) => return Err(problem("trusted is true or false")),
-                    };
                     entry.ttl = match table.get("ttl") {
                         None | Some(Value::Null) => None,
                         Some(seconds) => Some(
@@ -320,27 +307,23 @@ pub(crate) fn read_all(table: &Value) -> Vec<Parsed> {
                     };
                     entry.endpoints = match table.get("endpoints") {
                         None | Some(Value::Null) => Vec::new(),
-                        Some(Value::Array(places)) => {
-                            let places = places
-                                .iter()
-                                .map(|place| place.as_str().map(str::to_owned))
-                                .collect::<Option<Vec<_>>>()
-                                .filter(|places| {
-                                    places
-                                        .iter()
-                                        .all(|place| canoa::store::source::is_endpoint(place))
-                                })
-                                .ok_or_else(|| {
-                                    problem("endpoints is a list of https origins or prefixes")
-                                })?;
-                            if !places.is_empty() && !entry.trusted && entry.pin.is_none() {
-                                return Err(problem(
-                                    "endpoints names where files are downloaded from, which an entry may do when it is trusted or pinned",
-                                ));
-                            }
-                            places
+                        Some(Value::Array(places)) => places
+                            .iter()
+                            .map(|place| place.as_str().map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()
+                            .filter(|places| {
+                                places
+                                    .iter()
+                                    .all(|place| canoa::store::source::is_endpoint(place))
+                            })
+                            .ok_or_else(|| {
+                                problem("endpoints is a list of https origins or prefixes")
+                            })?,
+                        Some(_) => {
+                            return Err(problem(
+                                "endpoints is a list of https origins or prefixes",
+                            ));
                         }
-                        Some(_) => return Err(problem("endpoints is a list of https origins or prefixes")),
                     };
                     Ok(entry)
                 }
@@ -572,7 +555,6 @@ pub(crate) fn row_of(kind: &TypeCatalogs, merged: &Merged) -> Value {
         "default": entry.origin == Origin::Default,
         "origin": entry.origin.word(),
         "enabled": entry.enabled,
-        "trusted": entry.trusted,
     });
     if let Some(source) = entry.source() {
         row["source"] = json!(source);

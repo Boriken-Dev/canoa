@@ -3,7 +3,7 @@
 //! publisher's release feed) is normalised into, so the host and the application know the formats and never a model or program.
 //!
 //! The JSON Schema of each is [`MODELS_SCHEMA`] and [`RELEASES_SCHEMA`]; the parsers below check what a schema cannot (a digest's
-//! length, a revision in a URL). A file with no digest parses, with no check: whether the host takes it is the entry's decision.
+//! length, a revision in a URL). A file with no digest parses, with no check, and is offered as not verified.
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -29,7 +29,7 @@ pub const RELEASES_SCHEMA: &str = include_str!("../../include/canoa.releases.sch
 /// How far a catalog's own list of files or items is read: more is refused, so a source cannot hand the host a document it cannot hold.
 const MAX_ITEMS: usize = 5000;
 
-/// What checks one file.
+/// What checks one file: the digest the publisher states, named by its algorithm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FileCheck {
@@ -37,32 +37,24 @@ pub enum FileCheck {
     Sha256(String),
     /// Its SHA-512, in lower-case hexadecimal.
     Sha512(String),
+    /// Its MD5, in lower-case hexadecimal.
+    Md5(String),
     /// A git SHA-1 blob id, which says what the file holds only because its URL names a full commit.
     GitBlob(String),
     /// The publisher gives nothing to check it against, for the reason given.
     Unverified(String),
 }
 
-/// How far a file's digest can be believed, weakest first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub enum Trust {
-    /// No digest: accepted only because the catalog's entry says `trusted = true`.
-    Unverified,
-    /// The digest is one the host or the extension derived from content at a pinned address, not one a publisher gave.
-    Pinned,
-    /// A digest the publisher gives, or a git blob id under a pinned commit.
-    Verified,
-}
-
-impl Trust {
-    /// The word the control channel and the application use.
+impl FileCheck {
+    /// The name of the algorithm the publisher's digest is made with, as people write it; none for a file nothing checks.
     #[must_use]
-    pub const fn word(self) -> &'static str {
+    pub const fn algorithm(&self) -> Option<&'static str> {
         match self {
-            Self::Unverified => "unverified",
-            Self::Pinned => "pinned",
-            Self::Verified => "verified",
+            Self::Sha256(_) => Some("SHA-256"),
+            Self::Sha512(_) => Some("SHA-512"),
+            Self::Md5(_) => Some("MD5"),
+            Self::GitBlob(_) => Some("git blob id"),
+            Self::Unverified(_) => None,
         }
     }
 }
@@ -84,29 +76,24 @@ pub struct CatalogFile {
 }
 
 impl CatalogFile {
-    /// How far this file's check can be believed, or why it has none the host accepts: no digest and no reason is a refusal
-    /// unless the entry is `trusted`.
-    ///
-    /// # Errors
-    ///
-    /// The reason the file is not accepted.
-    pub fn trust(&self, trusted: bool) -> Result<Trust, String> {
-        match &self.check {
-            Some(FileCheck::Sha256(_) | FileCheck::Sha512(_)) if self.derived => Ok(Trust::Pinned),
-            Some(FileCheck::Sha256(_) | FileCheck::Sha512(_) | FileCheck::GitBlob(_)) => {
-                Ok(Trust::Verified)
-            }
-            Some(FileCheck::Unverified(_)) | None if trusted => Ok(Trust::Unverified),
-            Some(FileCheck::Unverified(why)) => Err(format!(
-                "{} has no checksum ({why}); the catalog's entry says trusted = true to take it",
-                self.file
-            )),
-            None => Err(format!(
-                "{} has no checksum; the catalog's entry says trusted = true to take it",
-                self.file
-            )),
+    /// The algorithm of the digest this file is downloaded against; none when the publisher states no digest.
+    #[must_use]
+    pub fn verified_with(&self) -> Option<&'static str> {
+        self.check.as_ref().and_then(FileCheck::algorithm)
+    }
+}
+
+/// The algorithm each of `files` is checked with, each name once and joined by `, `; none when there is no file or one has no digest.
+#[must_use]
+pub fn verified_with<'a>(files: impl IntoIterator<Item = &'a CatalogFile>) -> Option<String> {
+    let mut names: Vec<&'static str> = Vec::new();
+    for file in files {
+        let name = file.verified_with()?;
+        if !names.contains(&name) {
+            names.push(name);
         }
     }
+    (!names.is_empty()).then(|| names.join(", "))
 }
 
 /// One model, voice or other file set a models catalog lists.
@@ -130,17 +117,10 @@ pub struct ModelItem {
 }
 
 impl ModelItem {
-    /// The least believable of its files' checks, or why one is refused.
-    ///
-    /// # Errors
-    ///
-    /// The reason a file is not accepted.
-    pub fn trust(&self, trusted: bool) -> Result<Trust, String> {
-        let mut least = Trust::Verified;
-        for file in &self.files {
-            least = least.min(file.trust(trusted)?);
-        }
-        Ok(least)
+    /// The algorithms its files' digests are made with; none when a file has no digest.
+    #[must_use]
+    pub fn verified_with(&self) -> Option<String> {
+        verified_with(&self.files)
     }
 }
 
@@ -271,6 +251,7 @@ fn check_of(
     let one = match kinds.as_slice() {
         ["sha256"] => FileCheck::Sha256(digest("sha256", 64)?),
         ["sha512"] => FileCheck::Sha512(digest("sha512", 128)?),
+        ["md5"] => FileCheck::Md5(digest("md5", 32)?),
         ["git_blob"] => {
             if !names_commit(url) {
                 return Err(format!(
@@ -288,7 +269,7 @@ fn check_of(
         ),
         other => {
             return Err(format!(
-                "{what}: a check is one of sha256, sha512, git_blob or unverified, not {}",
+                "{what}: a check is one of sha256, sha512, md5, git_blob or unverified, not {}",
                 other.join(", ")
             ));
         }
@@ -593,6 +574,7 @@ impl CatalogFile {
         let (key, text) = match &self.check {
             Some(FileCheck::Sha256(value)) => ("sha256", value),
             Some(FileCheck::Sha512(value)) => ("sha512", value),
+            Some(FileCheck::Md5(value)) => ("md5", value),
             Some(FileCheck::GitBlob(value)) => ("git_blob", value),
             Some(FileCheck::Unverified(why)) => ("unverified", why),
             None => return Value::Object(map),
@@ -868,45 +850,50 @@ mod tests {
         assert_eq!(catalog.revision.as_deref(), Some("5359861c"));
         let item = &catalog.items[0];
         assert_eq!(item.files[0].check, Some(FileCheck::Sha256(SHA256.into())));
-        assert_eq!(item.trust(false), Ok(Trust::Verified));
+        assert_eq!(item.verified_with().as_deref(), Some("SHA-256"));
         assert_eq!(item.facts, [("Language".to_owned(), "every".to_owned())]);
     }
 
     #[test]
-    fn a_file_with_no_digest_is_refused_unless_the_entry_is_trusted() {
+    fn a_file_with_no_digest_is_offered_as_not_verified() {
         let catalog = parse_models(&models("")).expect("a document");
-        let item = &catalog.items[0];
-        assert!(
-            item.trust(false)
-                .is_err_and(|why| why.contains("trusted = true"))
-        );
-        assert_eq!(item.trust(true), Ok(Trust::Unverified));
+        assert_eq!(catalog.items[0].verified_with(), None);
     }
 
     #[test]
-    fn a_digest_weaker_than_the_contract_is_no_digest() {
-        let weak = parse_models(&models(
-            r#","check":{"md5":"d41d8cd98f00b204e9800998ecf8427e"}"#,
-        ));
-        assert!(weak.is_err_and(|why| why.contains("md5")));
+    fn a_digest_is_named_by_its_algorithm_whichever_it_is() {
+        let sha512 = format!(r#","check":{{"sha512":"{}"}}"#, "ab".repeat(64));
+        let md5 = r#","check":{"md5":"d41d8cd98f00b204e9800998ecf8427e"}"#;
+        for (check, name) in [(sha512.as_str(), "SHA-512"), (md5, "MD5")] {
+            let catalog = parse_models(&models(check)).expect("a document");
+            assert_eq!(catalog.items[0].verified_with().as_deref(), Some(name));
+        }
+        let short = parse_models(&models(r#","check":{"md5":"d41d8cd9"}"#));
+        assert!(short.is_err_and(|why| why.contains("32 hexadecimal")));
+    }
+
+    #[test]
+    fn an_item_with_one_unchecked_file_is_not_verified() {
+        let mut item = ModelItem::new("x", "X");
+        item.files = vec![
+            CatalogFile::new("https://x.example/a", "a").checked(FileCheck::Sha256(SHA256.into())),
+            CatalogFile::new("https://x.example/b", "b"),
+        ];
+        assert_eq!(item.verified_with(), None);
+        item.files[1] = CatalogFile::new("https://x.example/b", "b")
+            .checked(FileCheck::Md5("d41d8cd98f00b204e9800998ecf8427e".into()));
+        assert_eq!(item.verified_with().as_deref(), Some("SHA-256, MD5"));
     }
 
     #[test]
     fn a_git_blob_id_needs_a_url_that_names_a_commit() {
         let blob = r#","check":{"git_blob":"1799aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#;
         assert_eq!(
-            parse_models(&models(blob)).map(|catalog| catalog.items[0].trust(false)),
-            Ok(Ok(Trust::Verified))
+            parse_models(&models(blob)).map(|catalog| catalog.items[0].verified_with()),
+            Ok(Some("git blob id".to_owned()))
         );
         let moving = models(blob).replace("5359861c5359861c5359861c5359861c5359861c", "main");
         assert!(parse_models(&moving).is_err_and(|why| why.contains("commit")));
-    }
-
-    #[test]
-    fn a_derived_digest_is_pinned_not_verified() {
-        let derived = format!(r#","derived":true,"check":{{"sha256":"{SHA256}"}}"#);
-        let catalog = parse_models(&models(&derived)).expect("a document");
-        assert_eq!(catalog.items[0].trust(false), Ok(Trust::Pinned));
     }
 
     #[test]
