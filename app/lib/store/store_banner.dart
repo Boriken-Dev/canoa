@@ -217,11 +217,14 @@ class _StoreBannerState extends State<StoreBanner> {
 class StoreTile extends StatelessWidget {
   const StoreTile({super.key, required this.leading, required this.title, required this.by, required this.installed,
       required this.onOpen, required this.onInstall, this.summary, this.needs, this.busy = false, this.installKey, this.onRemove,
-      this.removeKey, this.onUpdate, this.updateKey});
+      this.removeKey, this.onUpdate, this.updateKey, this.verified});
 
   final Widget leading;
   final String title;
   final String? summary;
+
+  /// The algorithm the item's files are checked with; a check mark beside the title says so. Null shows none.
+  final String? verified;
 
   /// What it needs of this computer or the agent, one line; null when nothing is said.
   final String? needs;
@@ -254,7 +257,17 @@ class StoreTile extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(oneLine(title), style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
+                Row(children: [
+                  Flexible(child: Text(oneLine(title), style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  if (verified case final algorithm?)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Tooltip(
+                        message: context.t('store.verified_with', {'algorithm': algorithm}),
+                        child: Icon(Icons.verified_outlined, key: const Key('verified-mark'), size: 16, color: scheme.primary),
+                      ),
+                    ),
+                ]),
                 if (summary != null) Text(oneLine(summary!), style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
                 Text(oneLine(by), key: const Key('provenance'),
                     style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),

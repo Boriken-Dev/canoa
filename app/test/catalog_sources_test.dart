@@ -26,8 +26,8 @@ void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/catalog_sources_test.dart')));
 
   group('the controller', () {
-    test('reads each type with the origin, pin and trust of every catalog', () async {
-      final host = ScriptedCatalogs()..table['whisper'] = {'mine': {'provider': 'whisper_hf', 'repo': 'me/models', 'trusted': true}};
+    test('reads each type with the origin and pin of every catalog', () async {
+      final host = ScriptedCatalogs()..table['whisper'] = {'mine': {'provider': 'whisper_hf', 'repo': 'me/models', 'pin': '9d8c7b6a5f4e3d2c1b0a99887766554433221100'}};
       final sources = _sources(host);
       await sources.load();
       expect(sources.types.map((type) => type.id), ['overlays', 'whisper']);
@@ -37,7 +37,7 @@ void main() {
       expect((acme.label, acme.origin, acme.enabled, acme.pin, acme.trust, acme.from), ('acme', 'default', true, '5359861c', 'pinned', 'snapshot'));
       expect(acme.hasSnapshot, isTrue);
       final mine = whisper.rows.last;
-      expect((mine.origin, mine.trusted, mine.trust, mine.spec?.provider), ('added', true, 'unverified', 'whisper_hf'));
+      expect((mine.origin, mine.trust, mine.spec?.provider), ('added', 'pinned', 'whisper_hf'));
       expect(sources.types.first.format, isNull);
       expect(sources.types.first.rows.first.trust, isNull, reason: 'a type the host reads itself has no trust to say');
       sources.dispose();
@@ -118,7 +118,7 @@ void main() {
       expect(find.descendant(of: _tile('whisper', 'acme'), matching: find.text('default')), findsOneWidget);
     });
 
-    testWidgets('a source is added: a bare address is a string, a pin or a trusted entry is a table', (tester) async {
+    testWidgets('a source is added: a bare address is a string, a pin makes it a table', (tester) async {
       final (host, _) = await open(tester);
       await tester.tap(find.byKey(const Key('catalog-add-overlays')));
       await tester.pumpAndSettle();
@@ -131,20 +131,20 @@ void main() {
 
       await tester.tap(find.byKey(const Key('catalog-add-whisper')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('catalog-entry-trusted')), findsOneWidget, reason: 'a type whose catalogs answer in a format may take files with no checksum');
+      expect(find.byKey(const Key('catalog-entry-trusted')), findsNothing, reason: 'a file with no checksum needs no say');
       await tester.enterText(find.byKey(const Key('catalog-entry-label')), 'mine');
       await tester.tap(find.byKey(const Key('catalog-entry-provider')));
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('A Hugging Face repository').last);
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('catalog-entry-whisper_hf-field-repo')), 'me/models');
-      await tester.tap(find.byKey(const Key('catalog-entry-trusted')));
+      await tester.enterText(find.byKey(const Key('catalog-entry-pin')), '9d8c7b6a5f4e3d2c1b0a99887766554433221100');
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('catalog-entry-save')));
       await tester.pumpAndSettle();
       final entry = host.calls.where((call) => call.$1 == 'store/catalog_set').last.$2['entry']! as Map;
-      expect(entry['trusted'], isTrue);
-      expect(find.descendant(of: _tile('whisper', 'mine'), matching: find.text('unverified')), findsOneWidget);
+      expect(entry['pin'], '9d8c7b6a5f4e3d2c1b0a99887766554433221100');
+      expect(find.descendant(of: _tile('whisper', 'mine'), matching: find.text('pinned')), findsOneWidget);
       expect(find.byKey(const Key('catalog-trust-whisper-mine')), findsOneWidget);
     });
 
@@ -165,12 +165,12 @@ void main() {
       final sources = _sources(host);
       await sources.load();
       final at = DateTime(2026, 6, 15, 9, 5).millisecondsSinceEpoch;
-      final row = CatalogRow(label: 'read-one', spec: const CatalogSpec('read', {'source': 'x'}), origin: 'added', trust: 'verified', fetched: at, from: 'cache');
+      final row = CatalogRow(label: 'read-one', spec: const CatalogSpec('read', {'source': 'x'}), origin: 'added', trust: 'pinned', fetched: at, from: 'cache');
       final type = CatalogType(id: 'whisper', title: 'Whisper', words: const CatalogWords(noun: 'source', plural: 'sources', lists: 'models'), format: 'canoa.models/1', rows: [row]);
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: _Shown(sources: _Fixed([type])))));
       await tester.pumpAndSettle();
       expect(find.textContaining('Read 2026-06-15 09:05'), findsOneWidget);
-      expect(find.text('verified'), findsOneWidget);
+      expect(find.text('pinned'), findsOneWidget);
     });
   });
 
@@ -178,7 +178,7 @@ void main() {
     testWidgets('golden at $label width', (tester) async {
       final host = ScriptedCatalogs()
         ..table['whisper'] = {
-          'mine': {'provider': 'whisper_hf', 'repo': 'me/models', 'pin': '9d8c7b6a5f4e3d2c1b0a99887766554433221100', 'trusted': true},
+          'mine': {'provider': 'whisper_hf', 'repo': 'me/models', 'pin': '9d8c7b6a5f4e3d2c1b0a99887766554433221100'},
           'mirror': {'provider': 'whisper_hf', 'repo': 'corp/whisper-mirror'},
         }
         ..table['overlays'] = {'boriken': false, 'team': 'https://example.org/o.git@main#catalog.toml'};

@@ -96,9 +96,9 @@ final class ScriptedCatalogs {
     for (final base in defaults) {
       final entry = held(base['label']! as String);
       if (entry == null) {
-        rows.add({...base, 'default': true, 'origin': 'default', 'enabled': true, 'trusted': false, if (format) 'trust': 'pinned', if (format) 'snapshot': true, if (format) 'fetched': 0, if (format) 'from': 'snapshot'});
+        rows.add({...base, 'default': true, 'origin': 'default', 'enabled': true, if (format) 'trust': 'pinned', if (format) 'snapshot': true, if (format) 'fetched': 0, if (format) 'from': 'snapshot'});
       } else if (entry['value'] == false) {
-        rows.add({...base, 'default': true, 'origin': 'default', 'enabled': false, 'trusted': false, if (format) 'trust': 'pinned'});
+        rows.add({...base, 'default': true, 'origin': 'default', 'enabled': false, if (format) 'trust': 'pinned'});
       } else {
         rows.add(_row(entry['label']! as String, entry['value'], 'replaced', format: format));
       }
@@ -113,7 +113,7 @@ final class ScriptedCatalogs {
   Map<String, Object?> _row(String label, Object? value, String origin, {required bool format}) {
     final table = value is Map ? value.cast<String, Object?>() : {'provider': 'read', 'source': value};
     final provider = table['provider'] as String? ?? 'read';
-    final fields = {for (final MapEntry(:key, :value) in table.entries) if (!{'provider', 'pin', 'trusted', 'ttl', 'keys'}.contains(key)) key: value};
+    final fields = {for (final MapEntry(:key, :value) in table.entries) if (!{'provider', 'pin', 'ttl', 'keys'}.contains(key)) key: value};
     return {
       'label': label,
       'provider': provider,
@@ -122,9 +122,8 @@ final class ScriptedCatalogs {
       'default': false,
       'origin': origin,
       'enabled': true,
-      'trusted': table['trusted'] == true,
       if (table['pin'] != null) 'pin': table['pin'],
-      if (format) 'trust': table['trusted'] == true ? 'unverified' : (table['pin'] != null ? 'pinned' : 'verified'),
+      if (format && table['pin'] != null) 'trust': 'pinned',
     };
   }
 }

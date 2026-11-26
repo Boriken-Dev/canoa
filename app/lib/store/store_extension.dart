@@ -15,10 +15,14 @@ import 'store_view.dart';
 /// One item of a store type an extension adds: what its tile shows, the catalog that lists it and what + does.
 final class ExtensionStoreItem {
   const ExtensionStoreItem({required this.catalog, required this.name, required this.by, this.summary, this.tags = const [],
-      this.installed = false, this.install, this.remove, this.leading, this.details});
+      this.installed = false, this.verified, this.install, this.remove, this.leading, this.details});
 
   final String catalog, name, by;
   final String? summary;
+
+  /// The algorithm the digests of its files are made with, when every file has one the download is checked against; the tile then
+  /// shows a check mark that says so.
+  final String? verified;
   final List<String> tags;
   final bool installed;
 
@@ -200,6 +204,7 @@ class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveCl
             summary: item.summary,
             by: item.by,
             installed: item.installed,
+            verified: item.verified,
             busy: _installing.contains('${item.catalog}/${item.name}'),
             installKey: Key('store-entry-install-${item.catalog}-${item.name}'),
             onOpen: item.details == null

@@ -58,7 +58,6 @@ final class CatalogRow {
     this.origin = 'added',
     this.enabled = true,
     this.pin,
-    this.trusted = false,
     this.ttl,
     this.trust,
     this.fetched,
@@ -87,13 +86,10 @@ final class CatalogRow {
   /// What fixes its answer (a revision, or `sha256:` and a digest), when the entry or the default says one.
   final String? pin;
 
-  /// Whether the entry takes files that publish no checksum.
-  final bool trusted;
-
   /// Seconds before it is read again, when the entry says.
   final int? ttl;
 
-  /// How far its items are taken on trust: `verified`, `pinned` or `unverified`; null for a type the host reads itself.
+  /// `pinned` when its answer is fixed to a revision; null otherwise, and for a type the host reads itself.
   final String? trust;
 
   /// When it was last read, in milliseconds since the epoch (0 for a shipped copy), and where from: `cache` or `snapshot`.
@@ -148,7 +144,6 @@ final class CatalogType {
               origin: row['origin'] is String ? row['origin'] as String : (row['default'] == true ? 'default' : 'added'),
               enabled: row['enabled'] != false,
               pin: row['pin'] as String?,
-              trusted: row['trusted'] == true,
               ttl: (row['ttl'] as num?)?.toInt(),
               trust: row['trust'] as String?,
               fetched: (row['fetched'] as num?)?.toInt(),

@@ -217,6 +217,34 @@ void main() {
     shown.dispose();
   });
 
+  testWidgets('a model whose files are checked shows a check mark that names the algorithm, and one with none shows no mark', (tester) async {
+    _tall(tester);
+    final host = _host([
+      {..._row('checked', by: 'big'), 'verified': 'SHA-256'},
+      {..._row('mixed'), 'verified': 'SHA-256, MD5'},
+      _row('bare'),
+    ]);
+    final shown = _models(host);
+    final page = _typeOf(shown);
+    await tester.runAsync(page.load!);
+    expect(page.items().map((each) => each.verified), ['SHA-256', 'SHA-256, MD5', null]);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: page, view: StoreView(modelsTypeId)))));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const Key('store-entry-Runner-checked')), matching: find.byKey(const Key('verified-mark'))), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('store-entry-Runner-bare')), matching: find.byKey(const Key('verified-mark'))), findsNothing);
+    final mark = find.descendant(of: find.byKey(const Key('store-entry-Runner-mixed')), matching: find.byType(Tooltip));
+    expect(tester.widget<Tooltip>(mark.first).message, 'Verified with SHA-256, MD5');
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_models_verified_desktop.png'));
+
+    for (final (id, field) in [('checked', 'SHA-256'), ('bare', 'No')]) {
+      final item = page.items().firstWhere((each) => each.name == id);
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => item.details!(context, null))));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Verified: $field', findRichText: true), findsOneWidget, reason: '$id: the page says how its files are checked, or No');
+    }
+    shown.dispose();
+  });
+
   testWidgets('a type that failed shows a notice with Retry next to the models of one that worked, and no row of its own', (tester) async {
     var down = true;
     final host = FakeStoreHost([])

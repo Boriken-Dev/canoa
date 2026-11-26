@@ -87,25 +87,20 @@ class CatalogSources extends ChangeNotifier {
   }
 }
 
-/// The word and the mark of how far a catalog's items are taken on trust.
+/// The word and the mark of a catalog whose answer is fixed to a revision.
 class TrustBadge extends StatelessWidget {
   const TrustBadge({super.key, required this.trust});
 
-  /// `verified`, `pinned` or `unverified`.
+  /// `pinned`.
   final String trust;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final (icon, color) = switch (trust) {
-      'verified' => (Icons.verified_outlined, scheme.primary),
-      'pinned' => (Icons.push_pin_outlined, scheme.tertiary),
-      _ => (Icons.warning_amber_outlined, scheme.error),
-    };
+    final color = Theme.of(context).colorScheme.tertiary;
     return Tooltip(
       message: context.t('catalogs.trust.$trust.help'),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 14, color: color),
+        Icon(Icons.push_pin_outlined, size: 14, color: color),
         const SizedBox(width: 2),
         Text(context.t('catalogs.trust.$trust'), style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color)),
       ]),
@@ -113,7 +108,7 @@ class TrustBadge extends StatelessWidget {
   }
 }
 
-/// Settings, Catalog sources: each Store type's catalogs with where each comes from, how far it is trusted and when it was read.
+/// Settings, Catalog sources: each Store type's catalogs with where each comes from, whether it is pinned and when it was read.
 class CatalogSourcesSection extends StatefulWidget {
   const CatalogSourcesSection({super.key, required this.sources});
 
@@ -170,7 +165,7 @@ class _CatalogSourcesSectionState extends State<CatalogSourcesSection> {
   );
 }
 
-/// One catalog: its label, where it comes from and how far it is trusted on the first line; where it reads from, what pins it and when
+/// One catalog: its label, where it comes from and whether it is pinned on the first line; where it reads from, what pins it and when
 /// it was read below; and what can be done with it at the right.
 class _CatalogSourceTile extends StatelessWidget {
   const _CatalogSourceTile({super.key, required this.sources, required this.type, required this.row, required this.onEdit});
@@ -275,8 +270,7 @@ class _Chip extends StatelessWidget {
 }
 
 /// The dialog that replaces a default (the label is its own) or adds a catalog: the label, the source that reads it among those that
-/// serve the type and that source's own form, what pins it and, for a type whose catalogs answer in a format, whether it may hand over
-/// files that publish no checksum.
+/// serve the type and that source's own form, and what pins it.
 class CatalogEntryDialog extends StatefulWidget {
   const CatalogEntryDialog({super.key, required this.sources, required this.type, this.replacing});
 
@@ -299,7 +293,7 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
   };
   late String? _chosen = widget.replacing?.spec?.provider;
   String? _problem;
-  var _trusted = false, _saving = false;
+  var _saving = false;
   final _generation = 0;
 
   @override
@@ -339,8 +333,8 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
     }
     final kept = collectSchemaValues(form.schema, form.form, values);
     final pin = _pin.text.trim();
-    final bare = form.id == readProvider && pin.isEmpty && !_trusted && kept.length == 1 && kept['source'] is String;
-    final entry = bare ? kept['source'] : <String, Object?>{'provider': form.id, ...kept, if (pin.isNotEmpty) 'pin': pin, if (_trusted) 'trusted': true};
+    final bare = form.id == readProvider && pin.isEmpty && kept.length == 1 && kept['source'] is String;
+    final entry = bare ? kept['source'] : <String, Object?>{'provider': form.id, ...kept, if (pin.isNotEmpty) 'pin': pin};
     setState(() {
       _saving = true;
       _problem = null;
@@ -402,15 +396,6 @@ class _CatalogEntryDialogState extends State<CatalogEntryDialog> {
               controller: _pin,
               decoration: InputDecoration(labelText: context.t('catalogs.pin'), helperText: context.t('catalogs.pin_help')),
             ),
-            if (widget.type.format != null)
-              SwitchListTile(
-                key: const Key('catalog-entry-trusted'),
-                contentPadding: EdgeInsets.zero,
-                title: Text(context.t('catalogs.trusted')),
-                subtitle: Text(context.t('catalogs.trusted_help')),
-                value: _trusted,
-                onChanged: (on) => setState(() => _trusted = on),
-              ),
             if (_problem case final problem?)
               Padding(
                 padding: const EdgeInsets.only(top: 8),

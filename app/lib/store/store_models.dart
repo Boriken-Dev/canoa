@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../desktop/control_client.dart';
 import '../forms/schema_fields.dart';
+import '../l10n/app_text.dart';
 import '../selectable.dart';
 import 'entry_details.dart';
 import 'programs.dart';
@@ -89,6 +90,7 @@ final class StoreModel {
     this.tags = const [],
     this.on = false,
     this.state,
+    this.verified,
     this.facts = const [],
     this.actions = const [],
     this.sections = const [],
@@ -103,6 +105,7 @@ final class StoreModel {
     tags: [for (final tag in json['tags'] is List ? json['tags']! as List : const []) if (tag is String) tag],
     on: json['on'] == true,
     state: _text(json['state']),
+    verified: _text(json['verified']),
     facts: _list(json['facts'], (fact) => fact['label'] is String ? ModelFact(fact['label']! as String, '${fact['value'] ?? ''}') : null),
     actions: _list(
       json['actions'],
@@ -139,6 +142,9 @@ final class StoreModel {
 
   /// Its state in a word, when it has one worth a badge.
   final String? state;
+
+  /// The algorithm its files' digests are made with (`SHA-256`, `MD5`), the checks the download makes; null when a file has none.
+  final String? verified;
   final List<ModelFact> facts;
 
   /// What it can do; + does the first that is not a removal.
@@ -350,6 +356,7 @@ List<ExtensionStoreItem> _itemsOf(TypeModels models) {
         summary: model.summary,
         tags: model.tags,
         installed: model.on,
+        verified: model.verified,
         install: model.installAction == null ? null : (context) => _choose(context, models, model, model.installAction!),
         remove: model.removeAction == null ? null : (context) => _choose(context, models, model, model.removeAction!),
         details: (context, config) => ModelPage(models: models, id: model.id),
@@ -510,7 +517,10 @@ class _ModelPageState extends State<ModelPage> {
         from: widget.models.catalog,
         summary: model.summary,
         state: model.state,
-        overview: {for (final fact in model.facts) fact.label: fact.value},
+        overview: {
+          for (final fact in model.facts) fact.label: fact.value,
+          context.t('store.verified'): model.verified ?? context.t('store.verified_no'),
+        },
         contents: false,
         sections: [
           if (speech != null && widget.models.speech)
