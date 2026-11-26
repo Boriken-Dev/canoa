@@ -1,4 +1,5 @@
 // Project trust, and every layer merged from where it really lives: the overlays a host installed, read from its folder.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
@@ -46,7 +47,10 @@ unset = ["context"]
 remove = true
 ''');
       final disk = DiskOverlays('${configDir.path}/overlays');
-      final home = IoProfileHome(configDir.path, overlays: disk);
+      // The host keeps the record of trusted projects; here a record in memory stands for it.
+      String? record;
+      ProjectTrust kept() => ProjectTrust(read: () async => record, write: (text) async => record = text);
+      final home = IoProfileHome(configDir.path, overlays: disk, trust: kept());
       final team = config.overlays['team']! as GitOverlay;
       disk.install('team', team, {'overlay.cfg': teamConfig, 'CONTEXT.md': 'Be brief.\n', 'skills/review/SKILL.md': '# Review\n'});
 
@@ -105,9 +109,24 @@ remove = true
       expect(result.project!.state, TrustState.untrusted);
       expect(result.effective.view()['mode'], isNull);
 
-      final reread = IoProfileHome(configDir.path);
+      final reread = IoProfileHome(configDir.path, trust: kept());
       await reread.trust.load();
       expect(reread.trust.projects, isEmpty, reason: 'revoking is kept');
+    });
+
+    test('a home with no host trusts nothing, and a trust.json left beside canoa.cfg is not read', () async {
+      final configDir = Directory('${temp.path}/bare')..createSync();
+      final project = Directory('${temp.path}/bare_project')..createSync();
+      final profile = utf8.encode('mode = "plan"\n');
+      File('${configDir.path}/trust.json').writeAsStringSync(jsonEncode({
+        'version': 1,
+        'projects': [{'directory': project.path, 'sha256': ProjectTrust.digest(profile)}],
+      }));
+      final home = IoProfileHome(configDir.path);
+      await home.trust.load();
+      expect(home.trust.projects, isEmpty);
+      expect(home.trust.state(project.path, profile), TrustState.untrusted);
+      await expectLater(home.trust.trust(project.path, profile), throwsStateError);
     });
 
     test('an installed overlay from another source than canoa.cfg names is left out until synced', () async {

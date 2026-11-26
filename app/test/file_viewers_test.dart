@@ -18,7 +18,6 @@ import 'package:canoa/highlight/syntax.dart' show languageForInfo;
 import 'package:canoa/highlight/syntax_theme.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLook;
 import 'package:canoa/served/host_files.dart';
-import 'package:canoa/shell/layout_state.dart' show MemoryLayoutBackend;
 import 'package:canoa/surfaces/files_surface.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:material_ui/material_ui.dart';
@@ -171,20 +170,19 @@ void main() {
       expect(registry.choose(long)!.id, 'markdown', reason: 'a choice of a viewer that cannot show the file is not followed');
     });
 
-    test('keeps the choices where the backend puts them, and reads them back', () async {
-      final backend = MemoryLayoutBackend();
-      await ViewerChoices(backend: backend).choose('application/json', 'text');
-      final again = ViewerChoices(backend: backend);
-      expect(again.chosen('application/json'), isNull, reason: 'not read yet');
-      await again.load();
+    test('hands the choices to where they are kept, and reads them back from there', () async {
+      var kept = <String, String>{};
+      ViewerChoices over() => ViewerChoices(read: () => kept, write: (all) async => kept = all);
+      await over().choose('application/json', 'text');
+      expect(kept, {'application/json': 'text'});
+      final again = over();
       expect(again.chosen('application/json'), 'text');
       await again.choose('application/json', null);
-      final last = ViewerChoices(backend: backend);
-      await last.load();
-      expect(last.chosen('application/json'), isNull);
-      final broken = ViewerChoices(backend: MemoryLayoutBackend()..kept = 'not json');
-      await broken.load();
-      expect(broken.chosen('application/json'), isNull, reason: 'a document that cannot be read is no choice');
+      expect(kept, isEmpty);
+      expect(over().chosen('application/json'), isNull);
+      // What was kept elsewhere (the settings page's reset) is what the next read sees.
+      kept = {'text/markdown': 'text'};
+      expect(again.chosen('text/markdown'), 'text');
     });
 
     test('takes a viewer another party registers by type or by extension, and drops it again', () {
@@ -261,8 +259,9 @@ void main() {
     });
 
     testWidgets('a switch changes the viewer and is remembered for the type, in a panel opened later', (tester) async {
-      final backend = MemoryLayoutBackend();
-      final registry = standardViewerRegistry(choices: ViewerChoices(backend: backend));
+      var kept = <String, String>{};
+      ViewerChoices over() => ViewerChoices(read: () => kept, write: (all) async => kept = all);
+      final registry = standardViewerRegistry(choices: over());
       final disk = {'a.json': _text(_json), 'b.json': _text('{"x": 1}'), 'c.yaml': _text(_yaml)};
       await _open(tester, disk, 'a.json', viewers: registry);
       expect(_key('tree rows'), findsOneWidget);
@@ -272,11 +271,11 @@ void main() {
       expect(_key('files text'), findsOneWidget);
       expect(registry.choices.chosen('application/json'), 'text');
 
-      // Another JSON file, and a new panel on a registry that reads the same backend.
-      final later = standardViewerRegistry(choices: ViewerChoices(backend: backend));
+      // Another JSON file, and a new panel on a registry that reads the same choices.
+      final later = standardViewerRegistry(choices: over());
       await _open(tester, disk, 'b.json', viewers: later);
       await tester.pumpAndSettle();
-      expect(_key('files text'), findsOneWidget, reason: 'the choice came back from the backend');
+      expect(_key('files text'), findsOneWidget, reason: 'the choice came back from where it is kept');
       await tester.tap(_key('viewer switch tree'));
       await tester.pumpAndSettle();
       expect(_key('tree rows'), findsOneWidget);

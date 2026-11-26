@@ -10,26 +10,23 @@ import 'profile.dart';
 import 'profile_home.dart';
 import 'project_trust.dart';
 
-/// The profile home beside canoa.cfg at [configPath]: overlays in `overlays/`, trusted projects in `trust.json`.
+/// The profile home beside canoa.cfg at [configPath]: overlays in `overlays/`.
 ///
-/// [overlays] is the host's manager of overlays; the git work is the host's, so none without a host.
+/// [overlays] is the host's manager of overlays; the git work is the host's, so none without a host. The record of trusted projects
+/// is `[project_trust]` of canoa.cfg, which the host keeps: without a host nothing is trusted.
 ProfileHome? platformProfileHome({String? configPath, OverlayManager overlays = const NoOverlays()}) =>
     configPath == null ? null : IoProfileHome(File(configPath).parent.path, overlays: overlays);
 
 final class IoProfileHome implements ProfileHome {
-  IoProfileHome(this.configDir, {this.overlays = const NoOverlays()}) {
-    final record = File('$configDir${Platform.pathSeparator}trust.json');
-    trust = ProjectTrust(
-      read: () async => record.existsSync() ? record.readAsString() : null,
-      write: (text) async {
-        await record.parent.create(recursive: true);
-        final next = File('${record.path}.new');
-        await next.writeAsString(text, flush: true);
-        await next.rename(record.path);
-      },
-      caseInsensitive: Platform.isWindows || Platform.isMacOS,
-    );
-  }
+  /// [trust] is the record of trusted projects; the default trusts nothing and cannot be written, since the host keeps it.
+  IoProfileHome(this.configDir, {this.overlays = const NoOverlays(), ProjectTrust? trust})
+      : trust = trust ?? _hostKeeps;
+
+  static final ProjectTrust _hostKeeps = ProjectTrust(
+    read: () async => null,
+    write: (_) async => throw StateError('The host keeps the record of trusted projects'),
+    caseInsensitive: Platform.isWindows || Platform.isMacOS,
+  );
 
   @override
   final String configDir;
@@ -38,7 +35,7 @@ final class IoProfileHome implements ProfileHome {
   @override
   final OverlayManager overlays;
   @override
-  late final ProjectTrust trust;
+  final ProjectTrust trust;
 
   @override
   String join(String dir, String relative) =>

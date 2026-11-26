@@ -275,4 +275,24 @@ provider = "echo_provider"
     expect(() => CanoaConfig.parse('[appearance]\nopen_in = "tabs"\n'), throwsFormatException);
     expect(() => CanoaConfig.parse('[appearance]\nopen_in = true\n'), throwsFormatException);
   });
+  test('[appearance.viewers] is the viewer chosen for each type of file, kept through a write and left out when none is chosen', () {
+    expect(const CanoaConfig().viewers, isEmpty);
+    expect(const CanoaConfig().encode().contains('viewers'), isFalse);
+    final chosen = CanoaConfig.parse('[appearance]\nlook = "canoa"\n[appearance.viewers]\n"application/json" = "text"\n"text/markdown" = "markdown"\n');
+    expect(chosen.viewers, {'application/json': 'text', 'text/markdown': 'markdown'});
+    expect(CanoaConfig.parse(chosen.encode()).viewers, chosen.viewers);
+    expect(chosen.copyWith(viewers: {...chosen.viewers}..remove('text/markdown')).viewers, {'application/json': 'text'});
+    expect(chosen.copyWith(viewers: const {}).encode().contains('viewers'), isFalse);
+    expect(chosen.documentToWrite['appearance'], containsPair('viewers', {'application/json': 'text', 'text/markdown': 'markdown'}));
+    expect(() => CanoaConfig.parse('[appearance.viewers]\n"text/plain" = 3\n'), throwsFormatException);
+  });
+  test('[project_trust] and [host.native] program and args are the host\'s and stay as found through a write', () {
+    final read = CanoaConfig.parse(
+      "[project_trust]\n'C:\\work' = \"${'a' * 64}\"\n[host.native]\nprogram = \"canoa\"\nargs = [\"serve\"]\n",
+    );
+    final again = CanoaConfig.parse(read.encode());
+    expect(again.tables['project_trust'], {'C:\\work': 'a' * 64});
+    expect((again.host?['native'] as Map?)?['program'], 'canoa');
+    expect((again.host?['native'] as Map?)?['args'], ['serve']);
+  });
 }

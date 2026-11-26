@@ -343,6 +343,22 @@ void main() {
       expect(changedTables(every, h.last), {'appearance'});
       expect(find.textContaining('return a + b;'), findsOneWidget);
     });
+
+    testWidgets('Open files with lists the viewer chosen for each type of file and Reset takes one out of [appearance.viewers]', (tester) async {
+      final h = await openSettings(tester, config: CanoaConfig.parse('[appearance.viewers]\n"application/json" = "text"\n"text/markdown" = "markdown"\n'), section: 'appearance');
+      expect(find.text('application/json'), findsOneWidget);
+      expect(find.text('markdown'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const Key('settings-viewer-reset-application/json')));
+      await tester.tap(find.byKey(const Key('settings-viewer-reset-application/json')));
+      await tester.pumpAndSettle();
+      expect(h.last.viewers, {'text/markdown': 'markdown'});
+      expect(find.text('application/json'), findsNothing);
+      await tester.tap(find.byKey(const Key('settings-viewer-reset-text/markdown')));
+      await tester.pumpAndSettle();
+      expect(h.last.viewers, isEmpty);
+      expect(find.text('No viewer chosen for any type of file'), findsOneWidget);
+      expect(h.last.encode().contains('viewers'), isFalse);
+    });
   });
 
   group('Notifications', () {

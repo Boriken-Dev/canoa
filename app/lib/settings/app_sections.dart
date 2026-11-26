@@ -319,6 +319,21 @@ class AppearanceSection extends StatelessWidget {
             onChanged: (v) => controller.change((c) => c.copyWith(openIn: v)),
           ),
         ]),
+        SettingsGroup(title: context.t('settings.viewers'), children: [
+          if (config.viewers.isEmpty)
+            SettingsRow(title: context.t('settings.viewers_none'), description: context.t('settings.viewers_description'))
+          else
+            for (final MapEntry(key: type, value: viewer) in config.viewers.entries)
+              SettingsRow(
+                title: type,
+                description: viewer,
+                control: TextButton(
+                  key: Key('settings-viewer-reset-$type'),
+                  onPressed: () => controller.change((c) => c.copyWith(viewers: {...c.viewers}..remove(type))),
+                  child: Text(context.t('settings.viewers_reset')),
+                ),
+              ),
+        ]),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
           child: Text('Preview', style: Theme.of(context).textTheme.titleSmall),

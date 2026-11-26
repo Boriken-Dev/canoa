@@ -1,9 +1,6 @@
-import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 
-import '../../shell/layout_state.dart' show LayoutBackend, MemoryLayoutBackend;
 import 'file_sample.dart';
 
 /// What a viewer is asked to draw: the file, its MIME type and, for a document with sections, the one to open at.
@@ -67,14 +64,15 @@ abstract class FileViewer {
   Widget build(BuildContext context, FileViewRequest request);
 }
 
-/// The viewer the person chose for each type of file, kept as one JSON document (`{"application/json": "text"}`) where the
-/// [LayoutBackend] puts it. Nothing is kept for a type the person never chose.
+/// The viewer the person chose for each type of file (`[appearance.viewers]` of canoa.cfg: `"application/json" = "text"`). The choices
+/// are read from [read] each time and handed to [write] whole when one changes; with neither they are kept in this object. Nothing is
+/// kept for a type the person never chose.
 class ViewerChoices extends ChangeNotifier {
-  ViewerChoices({LayoutBackend? backend}) : _backend = backend ?? MemoryLayoutBackend();
+  ViewerChoices({this._read, this._write});
 
-  final LayoutBackend _backend;
-  final Map<String, String> _byType = {};
-  Future<void>? _loading;
+  final Map<String, String> Function()? _read;
+  final Future<void> Function(Map<String, String>)? _write;
+  Map<String, String> _own = {};
   bool _disposed = false;
 
   @override
@@ -83,42 +81,23 @@ class ViewerChoices extends ChangeNotifier {
     super.dispose();
   }
 
+  /// Every choice, by MIME type.
+  Map<String, String> get all => Map.unmodifiable(_read?.call() ?? _own);
+
   /// The id of the viewer chosen for [type], or null.
-  String? chosen(String type) => _byType[type];
-
-  /// Reads the choices once; a document that cannot be read leaves them empty.
-  Future<void> load() => _loading ??= _read();
-
-  Future<void> _read() async {
-    try {
-      final raw = await _backend.read();
-      if (raw == null) return;
-      final json = jsonDecode(raw);
-      if (json is Map) {
-        for (final MapEntry(:key, :value) in json.entries) {
-          if (key is String && value is String) _byType.putIfAbsent(key, () => value);
-        }
-        if (!_disposed) notifyListeners();
-      }
-    } on Object {
-      // A choice that cannot be read is not made: the registry's order shows the file.
-    }
-  }
+  String? chosen(String type) => all[type];
 
   /// Makes [viewerId] the viewer of files of [type], or none of them for null.
   Future<void> choose(String type, String? viewerId) async {
-    await load();
+    final next = {...all};
     if (viewerId == null) {
-      _byType.remove(type);
+      next.remove(type);
     } else {
-      _byType[type] = viewerId;
+      next[type] = viewerId;
     }
+    _own = next;
     if (!_disposed) notifyListeners();
-    try {
-      await _backend.write(jsonEncode(_byType));
-    } on Object {
-      // Kept for this run; the next run reads the old choice.
-    }
+    await _write?.call(next);
   }
 }
 

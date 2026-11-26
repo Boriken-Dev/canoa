@@ -183,7 +183,6 @@ class _FilesPanelState extends State<FilesPanel> {
   @override
   void initState() {
     super.initState();
-    unawaited(_viewers.choices.load());
     _viewers.addListener(_viewersChanged);
     unawaited(_start());
   }
@@ -254,7 +253,6 @@ class _FilesPanelState extends State<FilesPanel> {
     if (old.viewers != widget.viewers) {
       (old.viewers ?? _own)?.removeListener(_viewersChanged);
       _viewers.addListener(_viewersChanged);
-      unawaited(_viewers.choices.load());
     }
     if (old.files != widget.files || old.root != widget.root) {
       _top = null;
