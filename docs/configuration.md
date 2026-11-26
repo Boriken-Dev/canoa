@@ -1368,6 +1368,17 @@ phrase in the app's language, and never names a command, a path or anything an a
 is focused, and the host tells nobody, through any notifier, of an event of that session. Settings,
 Notifications edits all of this, and its Test button sends a notice of the words "Test" to one notifier.
 
+### File viewers from extensions
+
+The Files surface shows a file with the viewer the person chose for its type, else the first that suits it. An extension adds viewers: a
+provider of the `file_viewer` kind names the MIME types and extensions it shows and answers a file either as an A2UI surface, which
+{{ name }} draws in its own widgets and the colours of your theme, or as one self-contained page, which opens in your browser from a
+button. {{ name }} never runs an extension's code: the host does, handing the extension the file's name, type and bytes (never its
+path), and a page is sealed by the host so that it can make no request. An extension's viewers join the file's switch by their own
+names, and with more than four the switch is an Open with menu. Your choice is kept per type, like the built-in ones. The web build
+cannot open a page, since a page opened from its own origin would reach what it keeps in the browser; surfaces draw there as anywhere.
+The host lists the viewers with `file_viewers/list` and draws a file with `file_viewers/render`, which needs the key to hold `files`.
+
 ### Panel tabs from extensions
 
 The bottom panel of a conversation is one bar of tabs. Its + menu offers Terminal (and Terminal in each shell the host lists), the host's

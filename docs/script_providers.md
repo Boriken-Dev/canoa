@@ -18,6 +18,7 @@ A script is shared between hosts as the files it is.
 | `settings_section` | a page, or a group on a page, of Settings | `SettingsSection` |
 | `notifier` | somewhere a notice about what happened on the host is sent | `Notifier` |
 | `panel_tab` | a kind of tab of the bottom panel | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` |
+| `file_viewer` | a way to show a file of some type in the Files surface | `FileViewer`, `SurfaceViewer`, `PageViewer` |
 | `speech_provider`, `speech_output` | dictation and a voice | `SpeechProvider`, `SpeechOutput` |
 | `account_speech` | the speech-to-text services the accounts of some kinds can call | `AccountSpeech` |
 
