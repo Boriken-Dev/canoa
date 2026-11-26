@@ -263,7 +263,8 @@ fn a_proxy_stops_listening_while_another_holder_still_has_its_socket() {
     drop(copy);
 }
 
-/// A resolver of routes by name over `settings`; the host's own (no name) is the process's network, as it is with no routes installed.
+/// A resolver of routes by name over `settings`. The proxies the host runs for sessions are shared by route name, so each test names its
+/// routes for itself; the host's own (no name) is the process's network, as it is with no routes installed.
 fn routes(
     settings: Vec<(&'static str, NetworkSettings)>,
 ) -> impl Fn(Option<&str>) -> Result<Resolved, String> {
@@ -426,7 +427,7 @@ fn a_pac_route_chooses_the_proxy_for_each_destination_and_logs_in() {
     )
     .expect("writes");
     let mut asked = RouteEffect::new();
-    asked.routes = vec![rule("script")];
+    asked.routes = vec![rule("pac-by-host")];
     let mut pac = NetworkSettings::default();
     pac.proxy = ProxyChoice::Pac(script.to_string_lossy().into_owned());
     pac.proxy_user = Some(USER.to_owned());
@@ -435,7 +436,7 @@ fn a_pac_route_chooses_the_proxy_for_each_destination_and_logs_in() {
         &asked,
         &[],
         &Services::default(),
-        &routes(vec![("script", pac)]),
+        &routes(vec![("pac-by-host", pac)]),
     )
     .expect("starts");
     let url = session
@@ -512,14 +513,14 @@ fn a_socks_upstream_carries_what_a_program_asks_the_session_proxy_for() {
     )
     .expect("writes");
     let mut asked = RouteEffect::new();
-    asked.routes = vec![rule("script")];
+    asked.routes = vec![rule("pac-by-socks")];
     let mut pac = NetworkSettings::default();
     pac.proxy = ProxyChoice::Pac(script.to_string_lossy().into_owned());
     let session = start_with(
         &asked,
         &[],
         &Services::default(),
-        &routes(vec![("script", pac)]),
+        &routes(vec![("pac-by-socks", pac)]),
     )
     .expect("starts");
     let url = session
