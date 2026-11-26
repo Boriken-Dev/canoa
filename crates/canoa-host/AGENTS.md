@@ -209,3 +209,25 @@ A site names no directories of its own: `additionalDirectories` is removed from 
 - The page's key lives in the browser under the page's origin, `http://127.0.0.1:7800` by default. While the host is not running, any program of any user on this machine that binds that port serves its own page in that origin, which can use the key paired with this host. On a machine others use, serve over HTTPS with a certificate the browser trusts and a key only you can read, or use the extension.
 - The policy allows `'wasm-unsafe-eval'` and inline styles, which Flutter's web build needs, and no inline or evaluated script: build the app with `flutter build web --csp --no-web-resources-cdn`, or its code and CanvasKit are refused. The app carries its Roboto font (`app/assets/fonts`) and points the engine's fallback fonts at the site (`app/web/flutter_bootstrap.js`), so that build fetches nothing from outside the site. `python app/tool/build.py` puts the fallback fonts the engine asks for (every script, CJK and emoji: 724 files, 20.7 MiB) in `assets/fonts/fallback/` from the deps mirror and deletes `flutter_service_worker.js`: a build made with `flutter build web` alone has neither, and a symbol Roboto lacks then draws as a box. The app registers no service worker (the ETag and 304 answers below are its cache), and `splash.js` unregisters one an earlier build left, which Flutter's loader would otherwise register again and wait for up to 4 seconds.
   `app/web/index.html` shows a loading screen (the mark and "Loading Canoa…", light or dark by `prefers-color-scheme`) from `app/web/splash.css` and takes it away on Flutter's first frame in `app/web/splash.js`: both are files of the site's own origin, so the policy needs nothing added.
+
+## Files the host keeps
+
+A setting is a key of canoa.cfg, read and written through the configuration store (the trusted projects `[project_trust]`, the viewers `[appearance.viewers]`, the permission rules `[permissions.rules.ID]`, what Start runs `[host.native]`, a project's profile the `[profile]` of its own canoa.cfg, the portal `[portal]`). What stays a file is data: history, a cache, a counter, a key, a record a ceremony made, or what another program owns. `tests/home_files.rs` fails when the code names a file that is not in this table.
+
+| File | Holds | Why it is data |
+| --- | --- | --- |
+| `canoa.cfg` | the settings themselves | the file the store reads and writes; the Office add-in reads its `[host.native]` |
+| `current.json` | what the Store installed of a program | derived from what was installed; rebuilt |
+| `index.json` | a Store source's catalog of what it offers | content of a source, not the person's choice |
+| `apply.lock`, `canoa-store-check-registry.lock` | which process is applying a Store change | runtime lock |
+| `host.lock`, `holder.json` | which process runs this home | runtime |
+| `ledger.json` | the session list of an older version, read once when it is brought in | history |
+| `origins.json` | the extension origins the native host admitted | a record of pairing, read back at start |
+| `admitted.json` | the page keys the Office add-in admitted | a record of pairing, read back at start |
+| `ca.pem`, `client.pem`, `session-ca.pem`, `session-roots.pem` | what one session's proxy made | per session, removed with it |
+| `daemon.json` | Foundry Local's own record of its service | another program's file |
+| `config.json`, `tokenizer.json` | a speech model's files as its publisher ships them | content of the model, checked by digest |
+| `package.json`, `package-lock.json` | a profile's npm install of its tools | made by npm |
+| `launcher.log`, `office-addin.log` | what the Office launcher and add-in did | a log |
+| `permissions-use.json` | how often each remembered rule fired, and when it last did | a counter, in the host's state |
+| `permissions-log.jsonl` | what each remembered rule decided | an append-only log |
