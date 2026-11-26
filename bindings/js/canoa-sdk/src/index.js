@@ -35,6 +35,7 @@ export {
   nameOf,
   release,
 } from './secret.js';
+export { Notifier, delivery, noticeOf, settingsOf } from './notifier.js';
 export { LogPanelTab, MAX_TAIL_LINES, PagePanelTab, PanelTab, TerminalPanelTab } from './panel.js';
 export {
   EnvProfileItem,

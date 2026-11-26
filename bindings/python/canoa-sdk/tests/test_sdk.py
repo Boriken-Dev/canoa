@@ -840,3 +840,30 @@ def test_a_source_describes_the_places_it_fetches_from_and_the_keys_it_verifies_
 
     described = Hub().describe()
     assert list(described["endpoints"]) == ["https://huggingface.co/"] and list(described["keys"]) == ["AB12"]
+
+
+def test_a_notifier_describes_itself_and_a_slot_left_in_place_is_refused() -> None:
+    class Webhook(sdk.Notifier):
+        notifier = "webhook"
+        title = "Webhook"
+        events = ["finished", "failed"]
+        values = RegionValues
+
+        def send(self, request: Any) -> Any:
+            notice = sdk.notice_of(request)
+            return sdk.delivery(notice["id"])
+
+    described = Webhook().describe()
+    assert described["id"] == "webhook" and described["events"] == ["finished", "failed"]
+    assert described["replies"] is False and described["schema"]["required"] == ["name"]
+    request = {"settings": '{"name": "x"}', "notice": {"id": "n1", "event": "finished", "title": "T", "body": "B"}}
+    assert sdk.settings_of(request) == {"name": "x"}
+    assert Webhook().send(request) == {"id": "n1", "replies": False}
+    assert Webhook().reply(request) is None and Webhook().withdraw(request) is None
+    assert provide.library("notifiers", "1", providers=[Webhook]).kinds == ("notifier",)
+
+    with pytest.raises(TypeError, match="send"):
+
+        class Silent(sdk.Notifier):
+            notifier = "silent"
+            title = "Silent"

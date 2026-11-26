@@ -1116,6 +1116,53 @@ export interface ModelStoreRemote extends k.RemoteBase<typeof ModelStore> {
 export declare const ModelStore: k.DescribedKind<ModelStore, ModelStoreRemote, false>;
 
 /**
+ * A place notices are sent to.
+ *
+ * `describe` answers the same on every call with nothing run. `reply` and `withdraw` have defaults that say there is no answer and
+ * nothing to take away.
+ *
+ * The `notifier` kind: what a provider of it implements.
+ */
+export interface Notifier {
+  /** What this notifier is and the settings it takes. */
+  describe(): unknown;
+  /** Delivers one notice. The host calls it on a thread of its own and does not retry a failure. */
+  send(request: g.Ref): unknown;
+  /** The person's answer to a delivered notice, waiting at most `wait_ms`. The default: none. */
+  reply?(request: g.Ref): unknown;
+  /** Takes a delivered notice away, when it was answered somewhere else. The default: nothing. */
+  withdraw?(request: g.Ref): void;
+}
+
+/** A caller's handle on a `notifier` table: a method per slot. */
+export interface NotifierRemote extends k.RemoteBase<typeof Notifier> {
+  /** What this notifier is and the settings it takes. */
+  describe(): g.Value;
+  /** Delivers one notice. The host calls it on a thread of its own and does not retry a failure. */
+  send(request: unknown): g.Value;
+  /**
+   * The person's answer to a delivered notice, waiting at most `wait_ms`. The default: none.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  reply(request: unknown): g.Value;
+  /**
+   * Takes a delivered notice away, when it was answered somewhere else. The default: nothing.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  withdraw(request: unknown): void;
+}
+
+/**
+ * A place notices are sent to.
+ *
+ * `describe` answers the same on every call with nothing run. `reply` and `withdraw` have defaults that say there is no answer and
+ * nothing to take away.
+ */
+export declare const Notifier: k.DescribedKind<Notifier, NotifierRemote, false>;
+
+/**
  * A kind of tab.
  *
  * `describe` answers the same on every call with nothing run. `tail` is asked only of a [`Shows::Log`] kind.

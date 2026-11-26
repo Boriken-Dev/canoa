@@ -1103,6 +1103,64 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "notifier",
+      "floor_hash": 3855728562,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "send",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "reply",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "withdraw",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "panel_tab",
       "floor_hash": 1639328444,
       "object": false,
@@ -2330,6 +2388,14 @@ export const HistoryDb = described["history_db"];
  * its reason; the host asks neither unless `describe` offers it.
  */
 export const ModelStore = described["model_store"];
+
+/**
+ * A place notices are sent to.
+ *
+ * `describe` answers the same on every call with nothing run. `reply` and `withdraw` have defaults that say there is no answer and
+ * nothing to take away.
+ */
+export const Notifier = described["notifier"];
 
 /**
  * A kind of tab.

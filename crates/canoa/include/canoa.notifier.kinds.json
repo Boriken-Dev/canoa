@@ -1,0 +1,67 @@
+{
+  "kinds": [
+    {
+      "name": "notifier",
+      "floor_hash": 3855728562,
+      "object": false,
+      "doc": "A place notices are sent to.\n\n`describe` answers the same on every call with nothing run. `reply` and `withdraw` have defaults that say there is no answer and\nnothing to take away.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this notifier is and the settings it takes."
+        },
+        {
+          "name": "send",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Delivers one notice. The host calls it on a thread of its own and does not retry a failure."
+        },
+        {
+          "name": "reply",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The person's answer to a delivered notice, waiting at most `wait_ms`. The default: none."
+        },
+        {
+          "name": "withdraw",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Takes a delivered notice away, when it was answered somewhere else. The default: nothing."
+        }
+      ]
+    }
+  ]
+}

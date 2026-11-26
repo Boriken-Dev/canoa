@@ -1,7 +1,7 @@
 """Write a Canoa provider in Python: subclass a kind's base class, set a few attributes or override a few methods, and list the class
 in the module's `__all__`; a guatiao source loads the module like any other, and the host offers the provider.
 
-Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.settings`, `.panel`, `.usage`, `.account`, `.gateway`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
+Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.settings`, `.panel`, `.notifier`, `.usage`, `.account`, `.gateway`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
 is written on a dataclass with `canoa_sdk.forms`. `canoa_sdk.kinds` holds the typed `Protocol` classes written from the kinds'
 descriptions, which the base classes sit on.
 """
@@ -37,6 +37,7 @@ from .account import (
 )
 from .forms import Section, form_meta, form_of, section, ui
 from .gateway import GatewayInfo, GatewayLease, ModelGateway, request_of
+from .notifier import Notifier, delivery, notice_of, settings_of
 from .panel import LogPanelTab, PagePanelTab, PanelTab, TerminalPanelTab
 from .profile import (
     EnvProfileItem,
@@ -107,6 +108,7 @@ __all__ = [
     "ModelLimits",
     "NetworkEffect",
     "NetworkProfileItem",
+    "Notifier",
     "OpenUrl",
     "PagePanelTab",
     "PanelTab",
@@ -136,6 +138,7 @@ __all__ = [
     "VendorInfo",
     "bucket",
     "credential_schema",
+    "delivery",
     "effect",
     "failed",
     "fields_of",
@@ -148,12 +151,14 @@ __all__ = [
     "models_listed",
     "models_unknown",
     "name_of",
+    "notice_of",
     "reading",
     "release",
     "renew_unchanged",
     "renewed",
     "request_of",
     "section",
+    "settings_of",
     "text_of",
     "ui",
     "usage_unsupported",

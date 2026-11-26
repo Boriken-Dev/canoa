@@ -763,6 +763,36 @@ class ModelStore(KindProtocol, Protocol, kind="model_store", floor_hash=21618444
         ...
 
 
+class Notifier(KindProtocol, Protocol, kind="notifier", floor_hash=3855728562):
+    """A place notices are sent to.
+
+    `describe` answers the same on every call with nothing run. `reply` and `withdraw` have defaults that say there is no answer and
+    nothing to take away.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this notifier is and the settings it takes."""
+        ...
+
+    @required
+    @fallible
+    def send(self, request: Ref) -> ValueAnswer:
+        """Delivers one notice. The host calls it on a thread of its own and does not retry a failure."""
+        ...
+
+    @fallible
+    def reply(self, request: Ref) -> ValueAnswer:
+        """The person's answer to a delivered notice, waiting at most `wait_ms`. The default: none."""
+        ...
+
+    @fallible
+    def withdraw(self, request: Ref) -> None:
+        """Takes a delivered notice away, when it was answered somewhere else. The default: nothing."""
+        ...
+
+
 class PanelTab(KindProtocol, Protocol, kind="panel_tab", floor_hash=1639328444):
     """A kind of tab.
 
@@ -1369,4 +1399,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

@@ -12,7 +12,8 @@
     feature = "usage",
     feature = "gateway",
     feature = "environment",
-    feature = "config-store"
+    feature = "config-store",
+    feature = "notifier"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -31,6 +32,10 @@ use canoa::environment::{
     ListDir, Listing, ReadFile, State as EnvironmentState, WriteFile,
 };
 use canoa::gateway::{GatewayInfo, GatewayLeaseVtable, GatewayRequest, ModelGatewayVtable};
+use canoa::notifier::{
+    Action, WithdrawRequest, Delivery, Notice, NotifierInfo, NotifierVtable, Reply, ReplyRequest,
+    ReplyTo, SendRequest, SessionRef, Urgency,
+};
 use canoa::panel_tab::{PanelTabVtable, Shows, TabInfo, TailRequest};
 use canoa::profile_item::{
     ApplyRequest, ClientCertificateHost, ItemEffect, ItemInfo, NetworkEffect, ProfileItemVtable,
@@ -343,6 +348,34 @@ fn the_committed_settings_section_schemas_are_what_this_build_describes() {
         &schemas(vec![
             ("SectionInfo", schema_of::<SectionInfo>()),
             ("Stored", schema_of::<Stored>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_notifier_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.notifier.kinds.json",
+        &document(&NotifierVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_notifier_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.notifier.schemas.json",
+        &schemas(vec![
+            ("NotifierInfo", schema_of::<NotifierInfo>()),
+            ("SendRequest", schema_of::<SendRequest>()),
+            ("Notice", schema_of::<Notice>()),
+            ("SessionRef", schema_of::<SessionRef>()),
+            ("Action", schema_of::<Action>()),
+            ("ReplyTo", schema_of::<ReplyTo>()),
+            ("Urgency", schema_of::<Urgency>()),
+            ("Delivery", schema_of::<Delivery>()),
+            ("ReplyRequest", schema_of::<ReplyRequest>()),
+            ("Reply", schema_of::<Reply>()),
+            ("WithdrawRequest", schema_of::<WithdrawRequest>()),
         ]),
     );
 }

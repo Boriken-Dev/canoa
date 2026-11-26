@@ -1,0 +1,467 @@
+{
+  "NotifierInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id a notifier entry names it by in `canoa.cfg`: 1 to 32 lower-case ASCII letters, digits and `_`."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying where it sends notices and what that service sees of them."
+      },
+      "events": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        },
+        "description": "The event ids it takes; none takes any."
+      },
+      "replies": {
+        "type": "boolean",
+        "description": "Whether the person can answer a notice through it, which [`Notifier::reply`] then takes.",
+        "default": false
+      },
+      "schema": {
+        "description": "The settings it takes, as a guatiao schema of an object; a sensitive member is kept by the host as a secret."
+      },
+      "form": {
+        "description": "How the schema is shown, as a guatiao-intake form document; none shows the form the schema implies."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title"
+    ]
+  },
+  "SendRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "settings": {
+        "type": "string",
+        "description": "The notifier entry's settings as a JSON object keyed by the schema's members, a sensitive member resolved from the host's secret."
+      },
+      "notice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for this notice, unique among the ones it sent."
+          },
+          "event": {
+            "type": "string",
+            "description": "The event it is for: a word of lower-case letters, digits and `_` (`permission`, `finished`, `host_restarted`)."
+          },
+          "title": {
+            "type": "string",
+            "description": "One line: who it is about and what happened."
+          },
+          "body": {
+            "type": "string",
+            "description": "One line: the event's fixed phrase, with the figures it carries."
+          },
+          "session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The id the host and the application know the session by."
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The session's title as the person or the agent gave it, when it has one."
+              },
+              "agent": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The agent's name for people."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "description": "The session it is about, when it is about one."
+          },
+          "urgency": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ],
+            "x-enum-labels": {
+              "low": "Something that happened on the host itself.",
+              "normal": "A turn finished, a limit is near, an update failed.",
+              "high": "The person is needed: an approval, a question, a failure, a limit reached."
+            },
+            "description": "How much it matters.",
+            "default": "normal"
+          },
+          "at": {
+            "type": "integer",
+            "minimum": -9223372036854775808,
+            "maximum": 9223372036854775807,
+            "description": "When it happened, in seconds since the Unix epoch."
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The id the answer is returned by."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "What the person reads on the button."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "label"
+              ]
+            },
+            "description": "What the person may answer with. Only the host sets it, for an approval; a notifier that takes no replies ignores it.",
+            "default": []
+          },
+          "reply": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "nonce": {
+                "type": "string",
+                "description": "An unguessable value an answer carries back, so nothing else can answer for the person."
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "nonce"
+            ],
+            "description": "Where an answer is matched to the notice; set with `actions`."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "event",
+          "title",
+          "body",
+          "at"
+        ],
+        "description": "What to tell."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "settings",
+      "notice"
+    ]
+  },
+  "Notice": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The host's id for this notice, unique among the ones it sent."
+      },
+      "event": {
+        "type": "string",
+        "description": "The event it is for: a word of lower-case letters, digits and `_` (`permission`, `finished`, `host_restarted`)."
+      },
+      "title": {
+        "type": "string",
+        "description": "One line: who it is about and what happened."
+      },
+      "body": {
+        "type": "string",
+        "description": "One line: the event's fixed phrase, with the figures it carries."
+      },
+      "session": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The id the host and the application know the session by."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The session's title as the person or the agent gave it, when it has one."
+          },
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent's name for people."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "description": "The session it is about, when it is about one."
+      },
+      "urgency": {
+        "type": "string",
+        "enum": [
+          "low",
+          "normal",
+          "high"
+        ],
+        "x-enum-labels": {
+          "low": "Something that happened on the host itself.",
+          "normal": "A turn finished, a limit is near, an update failed.",
+          "high": "The person is needed: an approval, a question, a failure, a limit reached."
+        },
+        "description": "How much it matters.",
+        "default": "normal"
+      },
+      "at": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it happened, in seconds since the Unix epoch."
+      },
+      "actions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The id the answer is returned by."
+            },
+            "label": {
+              "type": "string",
+              "description": "What the person reads on the button."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "description": "What the person may answer with. Only the host sets it, for an approval; a notifier that takes no replies ignores it.",
+        "default": []
+      },
+      "reply": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "description": "An unguessable value an answer carries back, so nothing else can answer for the person."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "nonce"
+        ],
+        "description": "Where an answer is matched to the notice; set with `actions`."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "event",
+      "title",
+      "body",
+      "at"
+    ]
+  },
+  "SessionRef": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id the host and the application know the session by."
+      },
+      "title": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The session's title as the person or the agent gave it, when it has one."
+      },
+      "agent": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The agent's name for people."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ]
+  },
+  "Action": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id the answer is returned by."
+      },
+      "label": {
+        "type": "string",
+        "description": "What the person reads on the button."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "label"
+    ]
+  },
+  "ReplyTo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "nonce": {
+        "type": "string",
+        "description": "An unguessable value an answer carries back, so nothing else can answer for the person."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "nonce"
+    ]
+  },
+  "Urgency": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "low",
+      "normal",
+      "high"
+    ],
+    "x-enum-labels": {
+      "low": "Something that happened on the host itself.",
+      "normal": "A turn finished, a limit is near, an update failed.",
+      "high": "The person is needed: an approval, a question, a failure, a limit reached."
+    },
+    "properties": {}
+  },
+  "Delivery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The notifier's own id for the delivered notice, which [`Notifier::reply`] and [`Notifier::withdraw`] name it by."
+      },
+      "replies": {
+        "type": "boolean",
+        "description": "Whether an answer can come back for this delivery.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ]
+  },
+  "ReplyRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "settings": {
+        "type": "string",
+        "description": "The notifier entry's settings, as for [`SendRequest`]."
+      },
+      "delivery": {
+        "type": "string",
+        "description": "The [`Delivery::id`] to wait on."
+      },
+      "wait_ms": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most milliseconds to wait for an answer."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "settings",
+      "delivery",
+      "wait_ms"
+    ]
+  },
+  "Reply": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "description": "The id of the [`Action`] the person chose."
+      },
+      "nonce": {
+        "type": "string",
+        "description": "The [`ReplyTo::nonce`] the answer carried."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "action",
+      "nonce"
+    ]
+  },
+  "WithdrawRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "settings": {
+        "type": "string",
+        "description": "The notifier entry's settings, as for [`SendRequest`]."
+      },
+      "delivery": {
+        "type": "string",
+        "description": "The [`Delivery::id`] to take away."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "settings",
+      "delivery"
+    ]
+  }
+}
