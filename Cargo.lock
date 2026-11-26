@@ -1102,6 +1102,7 @@ dependencies = [
  "canoa-piper",
  "canoa-powershell",
  "canoa-python",
+ "canoa-sqlite",
  "canoa-whispercpp",
  "clap",
  "coqui-a2a",
