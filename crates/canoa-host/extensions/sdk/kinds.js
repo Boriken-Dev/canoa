@@ -530,6 +530,49 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "catalog_generator",
+      "floor_hash": 1677861760,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "generate",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "host",
+              "type": "object",
+              "kind": "content_host",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ]
+    },
+    {
       "name": "catalog_source",
       "floor_hash": 11332496,
       "object": false,
@@ -673,6 +716,207 @@ const described = kindsOf({
           "required": true,
           "fallible": true,
           "args": [],
+          "answer": {
+            "type": "text"
+          }
+        }
+      ]
+    },
+    {
+      "name": "content_source",
+      "floor_hash": 3712946889,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "stat",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "target",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "list",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "resolve",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "target",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
+      "name": "content_host",
+      "floor_hash": 1967041331,
+      "object": true,
+      "slots": [
+        {
+          "name": "stat",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "list",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_entries",
+              "type": "u32"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open_text",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "open_json",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "open_bytes",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "resolve",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "child",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "base",
+              "type": "str"
+            },
+            {
+              "name": "name",
+              "type": "str"
+            }
+          ],
           "answer": {
             "type": "text"
           }
@@ -2321,6 +2565,17 @@ export const AccountSpeech = described["account_speech"];
 export const AccountSpeechOutput = described["account_speech_output"];
 
 /**
+ * Where a catalog's text is made from what a content source holds.
+ *
+ * `generate` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last
+ * good catalog it keeps. It reads through the `host` it is handed, which keeps to the entry's `source` and the generator's
+ * `endpoints`. A generator that runs a program or reads a file does it through the `spawner`, which is the host's and has the
+ * person's own reach (`spawn`, and `read_file` by absolute path; writing and removing are refused). The generator destroys both
+ * objects, even when it refuses.
+ */
+export const CatalogGenerator = described["catalog_generator"];
+
+/**
  * Where a catalog comes from.
  *
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
@@ -2351,6 +2606,20 @@ export const SourceFetch = described["source_fetch"];
  * what it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]).
  */
 export const ConfigStore = described["config_store"];
+
+/**
+ * Where the data of a content source comes from, as a Store type's catalogs name it.
+ *
+ * Reads and answers, never writes: nothing in Canoa publishes content.
+ */
+export const ContentSource = described["content_source"];
+
+/**
+ * What the host lends a [`CatalogGeneratorProvider`] to read with: any registered scheme, through the same registry, route and
+ * trust rules as the host's own readers, and only the places the generator may read (the entry's `source` and below, and the
+ * `endpoints` the generator declares). A generator never opens a connection by itself. It destroys the object when it is done.
+ */
+export const ContentHost = described["content_host"];
 
 /**
  * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).
