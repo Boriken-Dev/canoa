@@ -193,7 +193,10 @@ final class StoreModel {
   final List<ModelAction> actions;
 
   /// What + does: the first action that does not take the model away, if there is one.
-  ModelAction? get installAction => actions.where((action) => !action.steps.contains(deleteFilesStep)).firstOrNull;
+  ModelAction? get installAction => removeAction != null ? null : actions.firstOrNull;
+
+  /// What an installed model offers besides its removal: writing the files an engine reads, from the ones already downloaded.
+  List<ModelAction> get addActions => removeAction == null ? const [] : [for (final action in actions) if (!action.steps.contains(deleteFilesStep)) action];
 
   /// What the tile's remove does: the action that takes the model away, if there is one.
   ModelAction? get removeAction => actions.where((action) => action.steps.contains(deleteFilesStep)).firstOrNull;
@@ -496,7 +499,7 @@ Future<void> _choose(BuildContext context, TypeModels models, StoreModel model, 
   if (!context.mounted) return;
   // A removal asks nothing of the engines: only what + installs is written in a form.
   final installs = !action.steps.contains(deleteFilesStep);
-  final picks = await _confirm(context, title: action.title, text: action.confirm, action: action.label, engines: installs ? model.engines : const []);
+  final picks = await _confirm(context, title: action.title, text: action.confirm, action: action.label, engines: installs ? [for (final engine in model.engines) if (!engine.installed) engine] : const []);
   if (picks == null || !context.mounted) return;
   await _run(context, models, model, action, picks);
 }
@@ -630,6 +633,21 @@ class _ModelPageState extends State<ModelPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(problem, key: const Key('model-speech-failed'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+            ]),
+          if (model.addActions.isNotEmpty)
+            DetailSection(key: const Key('model-engines'), title: 'Engines', children: [
+              for (final (at, action) in model.addActions.indexed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.tonal(
+                      key: Key('model-add-engine-$at'),
+                      onPressed: () => unawaited(_choose(context, widget.models, model, action)),
+                      child: Text(action.title),
+                    ),
+                  ),
                 ),
             ]),
           for (final (at, section) in model.sections.indexed)

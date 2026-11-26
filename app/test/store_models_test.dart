@@ -591,6 +591,34 @@ void main() {
     shown.dispose();
   });
 
+  testWidgets('an installed model whose engine is only available offers to write the file of that engine from the folder already there', (tester) async {
+    _tall(tester);
+    final row = engineRow('m', installed: true);
+    row['actions'] = [
+      {'title': 'Remove m', 'confirm': 'The files are deleted.', 'label': 'Remove', 'steps': ['delete_files']},
+      {'title': 'Add Beta to m', 'confirm': 'The file Beta reads is written from the files already downloaded.', 'label': 'Write', 'steps': ['write']},
+    ];
+    final host = _host([row]);
+    final shown = _models(host);
+    final type = _typeOf(shown);
+    await tester.runAsync(type.load!);
+    final item = type.items().single;
+    expect(item.install, isNull, reason: 'the tile of an installed model installs nothing');
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => item.details!(context, null))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('model-add-engine-0')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('model-choice-second')), findsOneWidget, reason: 'the engine that is not there asks for its form');
+    await tester.tap(find.byKey(const Key('model-variant-second-half')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('model-confirm-yes')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['store/model']!.map((given) => given['action']), ['write'], reason: 'nothing is downloaded again');
+    expect(host.params['store/model']!.single['options'], {'second': 'half'});
+    shown.dispose();
+  });
+
   testWidgets('a model with no choice asks for none, and its steps carry no options', (tester) async {
     final host = _host([_row('big:2')]);
     final shown = _models(host);

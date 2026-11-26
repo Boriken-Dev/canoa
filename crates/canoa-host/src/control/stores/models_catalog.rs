@@ -168,13 +168,29 @@ fn row_of(
     if checks.is_some() {
         row.on = done;
         row.state = done.then(|| "installed".to_owned());
-        row.actions = vec![if done {
-            RowAction::new(
+        row.actions = if done {
+            let mut actions = vec![RowAction::new(
                 format!("Remove {}", item.label),
                 "The files of this model are deleted from this computer.",
                 "Remove",
                 [STEP_DELETE_FILES],
-            )
+            )];
+            // An engine added to the host after the download has nothing to read yet: its action writes the files it reads from
+            // the ones already here, so the model need not be downloaded again.
+            for (engine, shown) in item.engines.iter().zip(&row.engines) {
+                if let Some(make) = engine.make.as_ref().filter(|_| shown.state != "installed") {
+                    actions.push(RowAction::new(
+                        format!("Add {} to {}", engine.label, item.label),
+                        format!(
+                            "The file {} reads is written from the files already downloaded.",
+                            engine.label
+                        ),
+                        "Write",
+                        [make.as_str()],
+                    ));
+                }
+            }
+            actions
         } else {
             let mut confirm = match verified {
                 Some(algorithm) => format!(
@@ -192,13 +208,13 @@ fn row_of(
                     engine.label
                 ));
             }
-            RowAction::new(
+            vec![RowAction::new(
                 format!("Install {}", item.label),
                 confirm,
                 "Install",
                 install_steps(item),
-            )
-        }];
+            )]
+        };
     } else {
         row.state = Some("not installable".to_owned());
         row.facts.push(Fact::new(

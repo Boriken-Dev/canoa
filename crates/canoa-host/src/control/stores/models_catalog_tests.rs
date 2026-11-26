@@ -508,6 +508,18 @@ fn a_row_shows_the_engines_its_catalog_names_and_installing_writes_what_the_seco
         "available",
         "the second is not written yet"
     );
+    assert_eq!(
+        row["actions"][0]["steps"],
+        json!(["delete_files"]),
+        "an installed row removes first"
+    );
+    assert_eq!(
+        row["actions"][1]["steps"],
+        json!(["make"]),
+        "and offers to write what the engine that is only available reads, from the files already here"
+    );
+    assert_eq!(row["actions"][1]["title"], "Add Second to M");
+    assert_eq!(row["actions"].as_array().map(Vec::len), Some(2), "{row}");
 
     host.act_with("m", "make", &json!({"second": "small"}))
         .expect("written");
@@ -517,7 +529,13 @@ fn a_row_shows_the_engines_its_catalog_names_and_installing_writes_what_the_seco
         "{\"second\":\"small\"}",
         "the provider was handed the choice and the models folder"
     );
-    assert_eq!(pills(&host.row("m").expect("a row"))[1].2, "installed");
+    let written = host.row("m").expect("a row");
+    assert_eq!(pills(&written)[1].2, "installed");
+    assert_eq!(
+        written["actions"].as_array().map(Vec::len),
+        Some(1),
+        "nothing is left to write: {written}"
+    );
 
     host.act("m", "delete_files").expect("removed");
     assert!(!made.exists(), "what an engine wrote goes with the row");
