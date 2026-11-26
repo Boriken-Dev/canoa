@@ -125,9 +125,10 @@ fn the_editor_offers_only_keys_the_host_reads() {
     for table in TABLES {
         let name = named(table);
         let Some((_, keys)) = known.iter().find(|(each, _)| *each == name) else {
-            // Free-form entries ([host.tools.NAME]) are read by hand, and `[harnesses]` is the application's, not a struct of the host's.
+            // Free-form entries ([host.tools.NAME]) are read by hand, `[harnesses]` is the application's, and `[portal]` is read by the
+            // portal's own settings (`portal_page_lists_every_key_the_portal_reads`), not a struct of this reader.
             assert!(
-                matches!(name.as_str(), "host.tools.NAME" | "harnesses"),
+                matches!(name.as_str(), "host.tools.NAME" | "harnesses" | "portal"),
                 "{name} is not a table the host's reader lists"
             );
             continue;
@@ -138,5 +139,38 @@ fn the_editor_offers_only_keys_the_host_reads() {
                 "{name} offers {field}, which the host does not read"
             );
         }
+    }
+}
+
+/// `[portal]` is read by the portal's own reader, so the page that shows it lists the keys that reader names.
+#[test]
+fn portal_page_lists_every_key_the_portal_reads() {
+    let source = include_str!("../portal/settings.rs");
+    let start = source
+        .find("struct Raw {")
+        .expect("the portal's raw settings");
+    let body = &source[start..];
+    let body = &body[..body.find("\n}").expect("the struct ends")];
+    let read: Vec<&str> = body
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.trim().split_once(':').map(|(key, _)| key.trim()))
+        .collect();
+    let page = TABLES
+        .iter()
+        .find(|table| table.path == ["portal"])
+        .expect("the editor lists [portal]");
+    let offered: Vec<&str> = page.fields.iter().map(|(name, _)| *name).collect();
+    for key in &read {
+        assert!(
+            offered.contains(key),
+            "the portal reads {key}, which its page does not list"
+        );
+    }
+    for key in &offered {
+        assert!(
+            read.contains(key),
+            "the page lists {key}, which the portal does not read"
+        );
     }
 }

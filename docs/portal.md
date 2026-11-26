@@ -348,9 +348,9 @@ you want to protect, and loosen it for the first passkey only for as long as tha
 one from the command line, since a passkey is made by the person's device:
 
 ```sh
-{{ program }} portal --config /etc/{{ program }}/portal.toml passkeys list                  # one JSON line per passkey: user, id, label, added, last_used, synced, disabled; never a key
-{{ program }} portal --config /etc/{{ program }}/portal.toml passkeys remove alice ID       # one passkey of alice
-{{ program }} portal --config /etc/{{ program }}/portal.toml passkeys remove alice          # every passkey of alice
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} passkeys list                  # one JSON line per passkey: user, id, label, added, last_used, synced, disabled; never a key
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} passkeys remove alice ID       # one passkey of alice
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} passkeys remove alice          # every passkey of alice
 ```
 
 The command refuses to run as an account that does not own the provider's files (`source`, `pending`, `ceremonies`, and their
@@ -551,12 +551,12 @@ an administrator does**. Two purposes, because they are not the same trust:
 `{{ program }} portal --config FILE factor ...`, run as the portal's account, is the administrator's way:
 
 ```sh
-{{ program }} portal --config /etc/{{ program }}/portal.toml factor list                    # one JSON line per account: id, user, enrolled, disabled, waiting, reset
-{{ program }} portal --config /etc/{{ program }}/portal.toml factor enrol alice              # prints the link and the recovery codes, once; refused for an account that has a code: reset it first
-{{ program }} portal --config /etc/{{ program }}/portal.toml factor enrol alice --code 123456  # the first code from the app confirms it
-{{ program }} portal --config /etc/{{ program }}/portal.toml factor reset alice              # removes the code, its recovery codes and any setup waiting
-{{ program }} portal --config /etc/{{ program }}/portal.toml factor reset --id 1000:alice    # the same by the id `list` shows, for an account that is gone
-{{ program }} portal --config /etc/{{ program }}/portal.toml factor unlock alice             # clears the account's failure counts, after its password was changed
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} factor list                    # one JSON line per account: id, user, enrolled, disabled, waiting, reset
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} factor enrol alice              # prints the link and the recovery codes, once; refused for an account that has a code: reset it first
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} factor enrol alice --code 123456  # the first code from the app confirms it
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} factor reset alice              # removes the code, its recovery codes and any setup waiting
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} factor reset --id 1000:alice    # the same by the id `list` shows, for an account that is gone
+{{ program }} portal --config /etc/{{ program }}/{{ config_file }} factor unlock alice             # clears the account's failure counts, after its password was changed
 ```
 
 After `reset`, the sessions that used the code end at their next use (a channel within a few seconds), and the account is
@@ -598,7 +598,15 @@ named in {{ config_file }}: the limit is the portal's sign-in, not the key.
 
 ## Setting it up
 
-The portal's settings are a TOML file; every key is optional.
+The portal's settings are the `[portal]` table of the system's {{ config_file }} (`/etc/{{ program }}/{{ config_file }}` on Linux,
+or the files `--config` names, the last highest); every key is optional, and every key of this guide is a key of that table. A
+`[portal]` in the account's own {{ config_file }} is ignored with a word on standard error: a person must not set what the
+portal enforces. The same file is read by every user's host, so it is readable by all of them: a provider's `config` names the
+environment variable that holds a secret (`bind_password_env`) and never the secret, and the portal refuses a `config` that holds
+one as text. `{{ program }} portal config get [KEY]`, `set KEY VALUE` (checked against the whole table first) and `unset KEY`
+read and change the table, as an account that may write the file; Settings, Advanced, Portal shows it and does not write it.
+When `systemctl` is the root helper `canoa-instance`, `min_uid` and `groups` must say what its `MIN_UID` and `ALLOWED_GROUPS` say,
+and the portal does not start when they differ.
 
 ```toml
 socket = "/run/{{ program }}-portal/portal.sock"   # what the proxy reaches the portal at
@@ -750,7 +758,7 @@ Group={{ program }}-proxy
 SupplementaryGroups={{ program }}
 RuntimeDirectory={{ program }}-portal
 RuntimeDirectoryMode=0750
-ExecStart=/opt/{{ program }}/{{ program }} portal --config /etc/{{ program }}/portal.toml
+ExecStart=/opt/{{ program }}/{{ program }} portal --config /etc/{{ program }}/{{ config_file }}
 UMask=077
 NoNewPrivileges=yes
 ProtectSystem=strict

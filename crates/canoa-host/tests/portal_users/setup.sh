@@ -54,6 +54,7 @@ program = "/opt/canoatest/stdio_agent"
 EOF
 
 cat > /opt/canoatest/portal.toml <<EOF
+[portal]
 socket = "/run/canoatest-portal/portal.sock"
 socket_group = "$tester_group"
 site = "/opt/canoatest/site"
@@ -86,11 +87,11 @@ authenticators = [
     config = { trust = "pinned", source = { file = { path = "/var/lib/canoatest-portal/certificates.toml", format = "toml" } } } },
 ]
 
-[[sign_in_policy.config.rule]]
+[[portal.sign_in_policy.config.rule]]
 networks = ["10.0.0.0/8"]
 allow = [["password"], ["certificate"]]
 
-[[sign_in_policy.config.rule]]
+[[portal.sign_in_policy.config.rule]]
 allow = [["certificate"]]
 EOF
 } > /opt/canoatest/portal_network.toml
@@ -110,7 +111,7 @@ matcher = [
   { by = "name", template = "{san.upn|local}", domain = "corp.example" },
 ]
 
-[[sign_in_policy.config.rule]]
+[[portal.sign_in_policy.config.rule]]
 allow = [["certificate"]]
 EOF
 } > /opt/canoatest/portal_matcher.toml

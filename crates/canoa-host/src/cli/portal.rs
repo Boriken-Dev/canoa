@@ -6,7 +6,7 @@
 )]
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::commands::print;
 use super::{Failed, Front};
@@ -14,9 +14,11 @@ use super::{Failed, Front};
 /// What `canoa portal` takes.
 #[derive(clap::Args, Debug)]
 pub(super) struct PortalArgs {
-    /// The portal's settings, a TOML file; every key has a default.
-    #[arg(long, value_name = "FILE")]
-    config: Option<PathBuf>,
+    /// The canoa.cfg files whose `[portal]` table is the portal's settings, as `serve --config` names them (a list split at `;` on
+    /// Windows and `:` elsewhere, the last highest); every key has a default. Without it the portal reads the installed and the
+    /// system's canoa.cfg: a `[portal]` in the account's own file is ignored, since a person must not set what the portal enforces.
+    #[arg(long, value_name = "FILES", env = canoa::brand::CONFIG)]
+    config: Option<String>,
     /// The web app's build to serve, in place of the file's `site`.
     #[arg(long, value_name = "DIR")]
     site: Option<PathBuf>,
@@ -44,6 +46,35 @@ enum PortalAction {
     Passkeys {
         #[command(subcommand)]
         action: PasskeyAction,
+    },
+    /// The portal's settings, the `[portal]` table of the system's canoa.cfg (the last file `--config` names): read what the portal
+    /// would run with, or change one key. Run as an account that may write that file.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+/// `canoa portal config`.
+#[derive(clap::Subcommand, Debug)]
+enum ConfigAction {
+    /// Print the `[portal]` table the layers give, as one JSON object, or one key of it (`a.b` for a key inside a table).
+    Get {
+        /// The key; the whole table when it is left out.
+        key: Option<String>,
+    },
+    /// Set one key of `[portal]` in the file that is written, after checking that the portal would take the whole table.
+    Set {
+        /// The key (`a.b` for a key inside a table).
+        key: String,
+        /// The value as JSON (`300`, `true`, `["a","b"]`, `{"k": 1}`), or text.
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
+    /// Take one key out of `[portal]`, so its default applies again.
+    Unset {
+        /// The key (`a.b` for a key inside a table).
+        key: String,
     },
 }
 
@@ -103,17 +134,83 @@ enum FactorAction {
     },
 }
 
-/// The settings `canoa portal` runs with: the file, then the command line over it.
-fn portal_settings(args: &PortalArgs) -> Result<crate::portal::Settings, Failed> {
-    use crate::portal::Settings;
-    let mut settings = match &args.config {
-        Some(file) => {
-            let text = std::fs::read_to_string(file)
-                .map_err(|error| Failed::usage(format!("{}: {error}", file.display())))?;
-            Settings::from_toml(&text).map_err(Failed::usage)?
+/// The files `[portal]` is read from, lowest first, and the one `portal config` writes. With `--config` every file named is the
+/// administrator's and the last is written; without it the installed and the system's canoa.cfg are read, the system's is
+/// written, and the account's own file is left out.
+fn portal_layers(args: &PortalArgs) -> Result<(Vec<PathBuf>, PathBuf, Option<PathBuf>), Failed> {
+    use crate::config::Layers;
+    let named = args.config.as_deref().filter(|value| !value.is_empty());
+    let layers = Layers::resolve(named, false).map_err(Failed::usage)?;
+    if named.is_some() {
+        return Ok((layers.files.clone(), layers.own.clone(), None));
+    }
+    let system = anycfg::system_config_path(Some(Path::new(crate::config::layers::NAME)));
+    let read = layers
+        .files
+        .iter()
+        .filter(|file| **file != layers.own || **file == system)
+        .cloned()
+        .collect();
+    let own = (layers.own != system).then(|| layers.own.clone());
+    Ok((read, system, own))
+}
+
+/// The `[portal]` table of one file; none when the file is not there or has none.
+fn portal_table_of(file: &Path) -> Result<Option<toml::Table>, Failed> {
+    use canoa::config_store::{ConfigStore as _, Key, json_of};
+    if !file.exists() {
+        return Ok(None);
+    }
+    let held = crate::config_store::FileStore::at(file)
+        .get(Key::new(["portal"]))
+        .map_err(|error| Failed::usage(format!("{}: {error}", file.display())))?;
+    Ok(held
+        .value
+        .and_then(|value| json_of(&value))
+        .and_then(|json| crate::accounts::commands::toml_value(&json))
+        .and_then(|value| match value {
+            toml::Value::Table(table) => Some(table),
+            _ => None,
+        }))
+}
+
+/// The `[portal]` tables of `files` merged, the one above replacing the one below key by key.
+fn portal_table(files: &[PathBuf]) -> Result<toml::Table, Failed> {
+    let mut merged = toml::Value::Table(toml::Table::new());
+    for file in files {
+        if let Some(table) = portal_table_of(file)? {
+            crate::config::layers::merge_into(&mut merged, toml::Value::Table(table));
         }
-        None => Settings::default(),
-    };
+    }
+    match merged {
+        toml::Value::Table(table) => Ok(table),
+        _ => Ok(toml::Table::new()),
+    }
+}
+
+/// Says that the account's own canoa.cfg holds a `[portal]` the portal does not read.
+fn say_ignored(ignored: Option<PathBuf>, front: &dyn Front) -> Result<(), Failed> {
+    if let Some(own) = ignored
+        && portal_table_of(&own)?.is_some()
+    {
+        front.say(&format!(
+            "canoa portal: ignoring [portal] in {}: it is read from the system's canoa.cfg only, or from the files --config names",
+            own.display()
+        ));
+    }
+    Ok(())
+}
+
+/// The settings `canoa portal` runs with: `[portal]` of the layers, then the command line over it.
+fn portal_settings(
+    args: &PortalArgs,
+    front: &dyn Front,
+) -> Result<crate::portal::Settings, Failed> {
+    use crate::portal::Settings;
+    let (files, _, ignored) = portal_layers(args)?;
+    say_ignored(ignored, front)?;
+    let mut settings = Settings::from_table(&portal_table(&files)?)
+        .map_err(|why| Failed::usage(format!("[portal] {why}")))?;
     if let Some(site) = &args.site {
         settings.site = Some(site.clone());
     }
@@ -124,6 +221,92 @@ fn portal_settings(args: &PortalArgs) -> Result<crate::portal::Settings, Failed>
         settings.socket = Some(socket.clone());
     }
     Ok(settings)
+}
+
+/// `canoa portal config`: reads and changes `[portal]` in the file the portal's administrator writes.
+fn portal_config(
+    args: &PortalArgs,
+    action: &ConfigAction,
+    front: &dyn Front,
+) -> Result<(), Failed> {
+    use canoa::config_store::{Changes, ConfigStore as _, Op, value_of};
+    let (files, target, ignored) = portal_layers(args)?;
+    say_ignored(ignored, front)?;
+    let merged = portal_table(&files)?;
+    let path_of = |key: &str| -> Result<Vec<String>, Failed> {
+        let keys: Vec<String> = key.split('.').map(str::to_owned).collect();
+        if keys.iter().any(String::is_empty) {
+            return Err(Failed::usage("a key is words joined by dots"));
+        }
+        Ok(keys)
+    };
+    match action {
+        ConfigAction::Get { key } => {
+            let mut here = serde_json::to_value(&merged).map_err(Failed::run)?;
+            if let Some(key) = key {
+                for word in path_of(key)? {
+                    here = here
+                        .get(&word)
+                        .cloned()
+                        .ok_or_else(|| Failed::run(format!("{key}: not set")))?;
+                }
+            }
+            print(front, &here.to_string())
+        }
+        ConfigAction::Set { key, value } => {
+            let keys = path_of(key)?;
+            let json: serde_json::Value = serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.clone()));
+            let mut after = merged;
+            let toml_value = crate::accounts::commands::toml_value(&json)
+                .ok_or_else(|| Failed::usage("a null is no setting"))?;
+            set_in(&mut after, &keys, toml_value);
+            crate::portal::Settings::from_table(&after)
+                .map_err(|why| Failed::usage(format!("{key}: not taken: {why}")))?;
+            crate::config_store::FileStore::at(&target)
+                .change(Changes::of(vec![Op::set(
+                    keys.iter().map(String::as_str),
+                    value_of(&json),
+                )]))
+                .map_err(|error| Failed::run(format!("{}: {error}", target.display())))?;
+            print(
+                front,
+                &serde_json::json!({"set": key, "file": target}).to_string(),
+            )
+        }
+        ConfigAction::Unset { key } => {
+            let keys = path_of(key)?;
+            crate::config_store::FileStore::at(&target)
+                .change(Changes::of(vec![Op::remove(
+                    keys.iter().map(String::as_str),
+                )]))
+                .map_err(|error| Failed::run(format!("{}: {error}", target.display())))?;
+            print(
+                front,
+                &serde_json::json!({"unset": key, "file": target}).to_string(),
+            )
+        }
+    }
+}
+
+/// Puts `value` at `keys` below `[portal]`'s table, making the tables on the way.
+fn set_in(table: &mut toml::Table, keys: &[String], value: toml::Value) {
+    let Some((first, rest)) = keys.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        table.insert(first.clone(), value);
+        return;
+    }
+    let inner = table
+        .entry(first.clone())
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if !inner.is_table() {
+        *inner = toml::Value::Table(toml::Table::new());
+    }
+    if let toml::Value::Table(inner) = inner {
+        set_in(inner, rest, value);
+    }
 }
 
 /// `canoa portal factor`: an administrator's way to set up, list and reset one-time codes, in the files the portal reads.
@@ -275,13 +458,18 @@ fn portal_passkeys(
 
 pub(super) fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
     use crate::portal::{Portal, Systemd};
-    let settings = portal_settings(args)?;
+    // `config` writes the table and reads it as it is, so it does not need it to be one the portal would run with.
+    if let Some(PortalAction::Config { action }) = &args.action {
+        return portal_config(args, action, front);
+    }
+    let settings = portal_settings(args, front)?;
+    settings.check_helper().map_err(Failed::usage)?;
     match &args.action {
         Some(PortalAction::Factor { action }) => return portal_factor(&settings, action, front),
         Some(PortalAction::Passkeys { action }) => {
             return portal_passkeys(&settings, action, front);
         }
-        None => {}
+        Some(PortalAction::Config { .. }) | None => {}
     }
     let (socket, tcp) = (settings.socket.clone(), settings.listen);
     let accounts = crate::portal::Access::new(&settings).map_err(Failed::usage)?;

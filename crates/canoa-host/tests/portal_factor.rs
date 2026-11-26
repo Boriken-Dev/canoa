@@ -68,11 +68,11 @@ fn portal_toml(with_codes: bool) -> (Folder, PathBuf) {
     } else {
         String::new()
     };
-    let file = dir.join("portal.toml");
+    let file = dir.join("canoa.cfg");
     std::fs::write(
         &file,
         format!(
-            "listen = \"127.0.0.1:0\"\nsite = \"{}\"\nlibraries_any_owner = true\nmin_uid = {}\nauthenticators = [{{ provider = \"coqui_access_system\" }}{codes}]\n",
+            "[portal]\nlisten = \"127.0.0.1:0\"\nsite = \"{}\"\nlibraries_any_owner = true\nmin_uid = {}\nauthenticators = [{{ provider = \"coqui_access_system\" }}{codes}]\n",
             dir.display(),
             my_uid().max(1)
         ),
@@ -266,11 +266,11 @@ fn the_command_refuses_to_run_as_an_account_that_does_not_own_the_code_files() {
     let dir = std::env::temp_dir().join(format!("canoa-factor-owner-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let folder = Folder(dir.clone());
-    let config = dir.join("portal.toml");
+    let config = dir.join("canoa.cfg");
     std::fs::write(
         &config,
         format!(
-            "listen = \"127.0.0.1:0\"\nsite = \"{}\"\nlibraries_any_owner = true\nmin_uid = {}\nauthenticators = [{{ provider = \"coqui_access_system\" }}, {{ provider = \"coqui_access_totp\", library = \"{}\", config = {{ source = {{ file = {{ path = \"/tmp/{name}\", format = \"toml\" }} }} }} }}]\n",
+            "[portal]\nlisten = \"127.0.0.1:0\"\nsite = \"{}\"\nlibraries_any_owner = true\nmin_uid = {}\nauthenticators = [{{ provider = \"coqui_access_system\" }}, {{ provider = \"coqui_access_totp\", library = \"{}\", config = {{ source = {{ file = {{ path = \"/tmp/{name}\", format = \"toml\" }} }} }} }}]\n",
             dir.display(),
             my_uid().max(1),
             plugin().display()

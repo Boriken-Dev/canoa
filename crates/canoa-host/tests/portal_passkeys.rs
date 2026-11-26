@@ -78,11 +78,11 @@ fn portal_toml(with_passkeys: bool) -> (Folder, PathBuf) {
     } else {
         String::new()
     };
-    let file = dir.join("portal.toml");
+    let file = dir.join("canoa.cfg");
     std::fs::write(
         &file,
         format!(
-            "listen = \"127.0.0.1:0\"\nsite = \"{}\"\nlibraries_any_owner = true\nmin_uid = {}\nauthenticators = [{{ provider = \"coqui_access_system\" }}{passkeys}]\n",
+            "[portal]\nlisten = \"127.0.0.1:0\"\nsite = \"{}\"\nlibraries_any_owner = true\nmin_uid = {}\nauthenticators = [{{ provider = \"coqui_access_system\" }}{passkeys}]\n",
             dir.display(),
             my_uid().max(1)
         ),
@@ -110,7 +110,8 @@ fn lines(output: &Output) -> Vec<serde_json::Value> {
 
 /// Adds a passkey to `name` as the portal's page does: the provider's options, the device's answer, the confirmation.
 fn add(config: &Path, name: &str, label: &str) -> String {
-    let settings = Settings::from_toml(&std::fs::read_to_string(config).unwrap()).unwrap();
+    let table: toml::Table = toml::from_str(&std::fs::read_to_string(config).unwrap()).unwrap();
+    let settings = Settings::from_table(table["portal"].as_table().unwrap()).unwrap();
     let access = Access::new(&settings).unwrap();
     let mut device = device::Device::new();
     let options = access.begin_passkey(name, my_uid()).unwrap();

@@ -123,6 +123,65 @@ pub(crate) const TABLES: &[Table] = &[
         ],
     },
     Table {
+        path: &["portal"],
+        shape: Shape::Flat,
+        fields: &[
+            ("socket", Text),
+            ("socket_group", Text),
+            ("listen", Text),
+            ("site", Text),
+            ("brand", Text),
+            ("base_path", Text),
+            ("adjust_contrast", Bool),
+            ("socket_dir", Text),
+            ("unit", Text),
+            ("systemctl", Text),
+            ("elevate", Lines),
+            ("pam_service", Text),
+            ("min_uid", Int),
+            ("groups", Lines),
+            ("authenticators", Json),
+            ("sign_in_policy", Json),
+            ("matcher", Json),
+            ("certificate_header", Text),
+            ("enrol_seconds", Int),
+            ("pending_seconds", Int),
+            ("max_pending_tries", Int),
+            ("max_factor_failures_per_person", Int),
+            ("max_factor_failures_per_day", Int),
+            ("factor_day_seconds", Int),
+            ("libraries_any_owner", Bool),
+            ("hosts", Lines),
+            ("trusted_proxies", Lines),
+            ("client_address_header", Text),
+            ("session_seconds", Int),
+            ("idle_seconds", Int),
+            ("start_seconds", Int),
+            ("pair_seconds", Int),
+            ("max_failures_per_pair", Int),
+            ("max_failures_per_address", Int),
+            ("slow_after_user_failures", Int),
+            ("slow_seconds", Int),
+            ("failure_window_seconds", Int),
+            ("failure_floor_seconds", Int),
+            ("max_connections", Int),
+            ("max_sign_ins", Int),
+            ("max_sessions", Int),
+            ("max_passkey_ceremonies", Int),
+            ("max_sessions_per_user", Int),
+            ("max_hosts", Int),
+            ("max_relays_per_user", Int),
+            ("max_message_bytes", Int),
+            ("ping_seconds", Int),
+            ("request_seconds", Int),
+            ("keep_alive_seconds", Int),
+            ("max_requests", Int),
+            ("office", Bool),
+            ("office_frames", Lines),
+            ("office_handoff_seconds", Int),
+        ],
+    },
+    Table {
         path: &["host", "native"],
         shape: Shape::Flat,
         fields: &[
@@ -775,6 +834,13 @@ impl Files {
                 ),
             ));
         };
+        // The portal enforces what a person must not set, so it reads `[portal]` from the system's canoa.cfg alone, which this page
+        // does not write: it shows what is there, and `canoa portal config set` changes it.
+        if path.first().map(String::as_str) == Some("portal") {
+            return Err(refused(
+                "the portal reads [portal] from the system's canoa.cfg only: change it with `canoa portal config set KEY VALUE`, as an account that may write that file",
+            ));
+        }
         let value = params.get("value").unwrap_or(&Value::Null);
         let keys: Vec<&str> = path.iter().map(String::as_str).collect();
         let ops = if value.is_null() && !(table.shape == Shape::Flat && keys == ["host"]) {

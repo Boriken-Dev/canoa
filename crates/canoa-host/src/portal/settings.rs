@@ -1,4 +1,4 @@
-//! The portal's settings: a TOML file of its own, every one with a default.
+//! The portal's settings: the `[portal]` table of canoa.cfg's system layer, every key with a default.
 
 use core::net::{IpAddr, SocketAddr};
 use core::time::Duration;
@@ -365,7 +365,20 @@ impl Settings {
     /// A message naming the key, never its value, for text that is not TOML, a key the portal does not know, a `listen`
     /// beyond loopback, a unit with no `{user}`, or a limit of zero.
     pub fn from_toml(text: &str) -> Result<Self, String> {
-        let raw: Raw = toml::from_str(text).map_err(|error| error.message().to_owned())?;
+        let table: toml::Table =
+            toml::from_str(text).map_err(|error| error.message().to_owned())?;
+        Self::from_table(&table)
+    }
+
+    /// The settings the `[portal]` table of canoa.cfg says, the rest at their defaults.
+    ///
+    /// # Errors
+    ///
+    /// As [`Settings::from_toml`], and for a provider's `config` that holds a secret as text.
+    pub fn from_table(table: &toml::Table) -> Result<Self, String> {
+        let raw: Raw = toml::Value::Table(table.clone())
+            .try_into()
+            .map_err(|error: toml::de::Error| error.message().to_owned())?;
         let mut settings = Self::default();
         settings.socket = raw.socket.or(settings.socket);
         settings.socket_group = raw.socket_group.or(settings.socket_group);
@@ -566,6 +579,23 @@ impl Settings {
                 return Err("sign_in_policy: `library` is an absolute path".to_owned());
             }
         }
+        // canoa.cfg's system layer is read by every user's host, so a provider names a variable that holds a secret and never holds it.
+        for (what, config) in self
+            .authenticators
+            .iter()
+            .map(|entry| ("authenticators", &entry.config))
+            .chain(
+                self.sign_in_policy
+                    .iter()
+                    .map(|entry| ("sign_in_policy", &entry.config)),
+            )
+        {
+            if let Some(key) = literal_secret(config) {
+                return Err(format!(
+                    "{what}: `{key}` holds a secret as text; name the environment variable that holds it (`{key}_env`), since every user's host reads this file"
+                ));
+            }
+        }
         for entry in &self.authenticators {
             if entry.provider.is_empty() {
                 return Err("authenticators: a provider id".to_owned());
@@ -645,9 +675,136 @@ impl Settings {
     }
 }
 
+/// The key of the first value in `config` that looks like a secret written out: a text under a name with `password`, `secret`,
+/// `token` or `key` among its words, unless the last word says it names a place (`_env`, `_file`, `_path`, `_var`).
+fn literal_secret(config: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    for (key, value) in config {
+        let lower = key.to_ascii_lowercase();
+        let words: Vec<&str> = lower.split(['_', '-', '.']).collect();
+        let names_a_place = words
+            .last()
+            .is_some_and(|last| matches!(*last, "env" | "file" | "path" | "var" | "name" | "id"));
+        let secret = words
+            .iter()
+            .any(|word| matches!(*word, "password" | "secret" | "token" | "key"));
+        match value {
+            serde_json::Value::String(text) if secret && !names_a_place && !text.is_empty() => {
+                return Some(key.clone());
+            }
+            serde_json::Value::Object(inner) => {
+                if let Some(found) = literal_secret(inner) {
+                    return Some(format!("{key}.{found}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+impl Settings {
+    /// Refuses a root helper (`systemctl` when it is `canoa-instance`) whose `MIN_UID` or `ALLOWED_GROUPS` is not this
+    /// portal's `min_uid` or `groups`: the helper is root's own copy, which the portal cannot write, and the two must say the
+    /// same. A helper that cannot be read, or is another program, is not checked.
+    ///
+    /// # Errors
+    ///
+    /// A message naming the setting and the helper's value.
+    pub fn check_helper(&self) -> Result<(), String> {
+        if self.systemctl.file_name().and_then(|name| name.to_str()) != Some("canoa-instance") {
+            return Ok(());
+        }
+        let Ok(text) = std::fs::read_to_string(&self.systemctl) else {
+            return Ok(());
+        };
+        let value = |name: &str| {
+            text.lines()
+                .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+                .map(|value| value.trim().trim_matches('"').to_owned())
+        };
+        if let Some(min) = value("MIN_UID")
+            && min.parse::<u32>().ok() != Some(self.min_uid)
+        {
+            return Err(format!(
+                "min_uid: {} here, {min} in {}: root's copy and this one must say the same",
+                self.min_uid,
+                self.systemctl.display()
+            ));
+        }
+        if let Some(allowed) = value("ALLOWED_GROUPS") {
+            let mut theirs: Vec<&str> = allowed.split_whitespace().collect();
+            let mut ours: Vec<&str> = self.groups.iter().map(String::as_str).collect();
+            theirs.sort_unstable();
+            ours.sort_unstable();
+            if theirs != ours {
+                return Err(format!(
+                    "groups: {ours:?} here, {theirs:?} in {}: root's copy and this one must say the same",
+                    self.systemctl.display()
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Settings;
+
+    #[test]
+    fn a_table_of_canoa_cfg_is_read_as_the_file_was() {
+        let table: toml::Table = toml::from_str(
+            "idle_seconds = 5\n[[authenticators]]\nprovider = \"coqui_access_system\"\n[authenticators.config]\nbind_password_env = \"LDAP_PASSWORD\"\n",
+        )
+        .unwrap();
+        let settings = Settings::from_table(&table).unwrap();
+        assert_eq!(settings.idle.as_secs(), 5);
+        assert_eq!(settings.authenticators.len(), 1);
+        assert_eq!(settings, Settings::from_toml(&table.to_string()).unwrap());
+    }
+
+    #[test]
+    fn a_secret_written_out_in_a_providers_config_is_refused_and_a_variable_is_not() {
+        for text in [
+            "[[authenticators]]\nprovider = \"p\"\n[authenticators.config]\nbind_password = \"hunter2\"\n",
+            "[[authenticators]]\nprovider = \"p\"\n[authenticators.config.ldap]\napi_token = \"abc\"\n",
+            "[sign_in_policy.config]\nsecret = \"x\"\n",
+        ] {
+            let refused = Settings::from_toml(text).expect_err(text);
+            assert!(refused.contains("environment variable"), "{refused}");
+            assert!(
+                !refused.contains("hunter2"),
+                "a value is never printed: {refused}"
+            );
+        }
+        let fine = "[[authenticators]]\nprovider = \"p\"\n[authenticators.config]\nbind_password_env = \"X\"\nkey_file = \"/etc/k\"\nhost = \"ldap\"\n";
+        Settings::from_toml(fine).unwrap();
+    }
+
+    #[test]
+    fn the_root_helper_and_the_portal_must_say_the_same_min_uid_and_groups() {
+        let dir = std::env::temp_dir().join(format!("canoa-helper-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let helper = dir.join("canoa-instance");
+        std::fs::write(
+            &helper,
+            "#!/bin/sh\nMIN_UID=1000\nPREFIX=canoa\nALLOWED_GROUPS=\"b a\"\n",
+        )
+        .unwrap();
+        let mut settings = Settings::default();
+        settings.systemctl = helper.clone();
+        settings.min_uid = 1000;
+        settings.groups = vec!["a".to_owned(), "b".to_owned()];
+        settings.check_helper().unwrap();
+        settings.min_uid = 500;
+        assert!(settings.check_helper().unwrap_err().starts_with("min_uid"));
+        settings.min_uid = 1000;
+        settings.groups = vec!["a".to_owned()];
+        assert!(settings.check_helper().unwrap_err().starts_with("groups"));
+        settings.systemctl = dir.join("systemctl");
+        settings.check_helper().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn an_empty_file_is_the_defaults() {
