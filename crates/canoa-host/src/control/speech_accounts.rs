@@ -120,7 +120,7 @@ impl Services {
             .iter()
             .filter(|service| same(&service.url, url))
             .flat_map(|service| service.models.iter())
-            .map(|model| json!({"id": model.id, "label": model.label}))
+            .map(|model| json!({"id": model.id, "label": model.label, "capabilities": ["speech_to_text"]}))
             .collect()
     }
 

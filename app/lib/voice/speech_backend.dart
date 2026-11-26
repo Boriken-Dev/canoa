@@ -37,9 +37,26 @@ final class SpeechWhere {
 
 /// One thing a backend offers to choose from: a model, a language or an input device.
 final class SpeechChoice {
-  const SpeechChoice(this.id, this.label);
+  const SpeechChoice(this.id, this.label, [this.capabilities = const []]);
   final String id, label;
+
+  /// What the host says the model can do (`speech_to_text`, `text_to_speech`); empty when it says nothing, which is not the same as
+  /// none.
+  final List<String> capabilities;
+
+  /// Whether the host says what the model can do.
+  bool get reportsCapabilities => capabilities.isNotEmpty;
+
+  /// Whether the model reports [capability].
+  bool can(String capability) => capabilities.contains(capability);
 }
+
+/// The [models] a use that needs [capability] can pick from: the ones that report it, then the ones that report nothing (kept apart
+/// by the caller's list, and any typed name is still taken). A model that reports what it does and not this is left out.
+({List<SpeechChoice> offered, List<SpeechChoice> unreported}) speechModelsFor(Iterable<SpeechChoice> models, String capability) => (
+  offered: [for (final model in models) if (model.can(capability)) model],
+  unreported: [for (final model in models) if (!model.reportsCapabilities) model],
+);
 
 /// What the person says of their own voice, so a provider can understand them better. It is only what they wrote in Settings,
 /// never something worked out from their audio.

@@ -9,7 +9,8 @@ import 'package:material_ui/material_ui.dart';
 import '../chat/cache_lifetime.dart';
 import '../config/canoa_config.dart';
 import '../forms/schema_fields.dart';
-import '../sources/source_choices.dart' show ModelChoice;
+import '../l10n/app_text.dart';
+import '../sources/source_choices.dart' show ModelChoice, ModelsFor, modelsFor;
 import 'profile.dart' show ProfileAccess;
 import 'profile_items.dart';
 
@@ -24,6 +25,10 @@ final class ProfileChoices {
 
   final List<ModelChoice> models;
   final List<(String, String)> modes;
+
+  /// The models a session can use as its model: the ones that report they chat, and apart from them the ones that report nothing
+  /// (a model that reports what it does and does not chat, an embedding model, is not offered).
+  ModelsFor get chatModels => modelsFor(models, 'chat');
 
   /// The efforts to offer for [model]: those that model takes when it is listed, else every effort any listed model takes.
   List<String> effortsFor(String? model) {
@@ -235,7 +240,8 @@ class _ProfileEditorState extends State<ProfileEditor> {
               id: 'model',
               label: 'Model',
               controller: _model,
-              choices: [for (final model in _offered?.models ?? const <ModelChoice>[]) (model.id, model.name == model.id ? model.id : '${model.name} (${model.id})')],
+              choices: [for (final model in _offered?.chatModels.offered ?? const <ModelChoice>[]) (model.id, _modelLabel(model))],
+              unreported: [for (final model in _offered?.chatModels.unreported ?? const <ModelChoice>[]) (model.id, _modelLabel(model))],
               onPicked: () => setState(() {}),
             ),
           ),
@@ -359,14 +365,20 @@ class _ProfileEditorState extends State<ProfileEditor> {
 
 /// A box that takes any text, with a menu of what the agent is known to offer beside it: picking fills the box, and what is typed that
 /// the agent did not list is kept as typed.
+String _modelLabel(ModelChoice model) => model.name == model.id ? model.id : '${model.name} (${model.id})';
+
 class _ChoiceField extends StatelessWidget {
-  const _ChoiceField({required this.id, required this.label, required this.controller, required this.choices, required this.onPicked});
+  const _ChoiceField({required this.id, required this.label, required this.controller, required this.choices, required this.onPicked, this.unreported = const []});
 
   final String id, label;
   final TextEditingController controller;
 
   /// (value, label) of what the agent offers; empty when it is not known, which leaves only the box.
   final List<(String, String)> choices;
+
+  /// (value, label) of what the agent lists without saying what it does: offered under their own heading, and a typed value is
+  /// taken whatever the lists hold.
+  final List<(String, String)> unreported;
   final VoidCallback onPicked;
 
   @override
@@ -376,7 +388,7 @@ class _ChoiceField extends StatelessWidget {
     decoration: InputDecoration(
       labelText: label,
       hintText: 'The agent\'s own',
-      suffixIcon: choices.isEmpty
+      suffixIcon: choices.isEmpty && unreported.isEmpty
           ? null
           : PopupMenuButton<String>(
               key: Key('profile-edit-$id-pick'),
@@ -386,7 +398,11 @@ class _ChoiceField extends StatelessWidget {
                 controller.text = value;
                 onPicked();
               },
-              itemBuilder: (context) => [for (final (value, title) in choices) PopupMenuItem<String>(value: value, child: Text(title))],
+              itemBuilder: (context) => [
+                for (final (value, title) in choices) PopupMenuItem<String>(value: value, child: Text(title)),
+                if (unreported.isNotEmpty) PopupMenuItem<String>(enabled: false, child: Text(context.t('model.unreported'), key: Key('profile-edit-$id-unreported'))),
+                for (final (value, title) in unreported) PopupMenuItem<String>(value: value, child: Text(title)),
+              ],
             ),
     ),
   );

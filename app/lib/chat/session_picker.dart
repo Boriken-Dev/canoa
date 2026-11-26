@@ -10,6 +10,7 @@ import '../accounts/add_account_dialog.dart';
 import '../accounts/usage_view.dart' show windowSummary;
 import '../history/agent_switch.dart' show cannotTake;
 import '../session_store.dart';
+import '../sources/source_choices.dart' show ModelChoice;
 import '../sources/source_icons.dart';
 import '../sources/sources.dart';
 import 'agent_events.dart' show Choice, ConfigOption;
@@ -69,6 +70,12 @@ EntryPool? chosenPool(AccountsController accounts, String entry, String? account
 }
 
 /// One row of the model list: a model of the chosen agent, or, under Favourites, of any agent whose models are held.
+
+/// Whether a session may be started on [listed], the model a source's provider listed (null: it listed none of that name). A
+/// session chats, so a model that says what it does and does not chat (an embedding model on a proxy's list) is not one to start it
+/// on; one that says nothing stays, and the person may still name any.
+bool offeredForSession(ModelChoice? listed) => listed == null || !listed.reportsCapabilities || listed.can('chat');
+
 class _ModelRow {
   const _ModelRow({required this.value, required this.label, this.detail, this.source, this.number});
 
@@ -144,6 +151,7 @@ class _SessionPickerState extends State<SessionPicker> {
       final models = source == null ? null : store.choicesOf(source)?.models;
       for (final choice in option?.choices ?? const <Choice>[]) {
         final listed = models?.where((each) => each.id == choice.value).firstOrNull;
+        if (!offeredForSession(listed)) continue;
         // The models of a pool say which of its accounts list each.
         final detail = [
           ?listed?.description,

@@ -38,7 +38,14 @@ class _HostOffersGroupState extends State<HostOffersGroup> {
 
   HostSpeechCatalog get _catalog => widget.catalog;
 
-  String _modelOf(SpeechOffer offer) => _model[offer.id] ?? offer.defaultModel ?? offer.models.firstOrNull?.id ?? '';
+  /// The models dictation can use: a model the host says does something else (a voice, a chat model) is not offered, and one that
+  /// says nothing stays.
+  List<SpeechChoice> _dictation(SpeechOffer offer) {
+    final split = speechModelsFor(offer.models, 'speech_to_text');
+    return [...split.offered, ...split.unreported];
+  }
+
+  String _modelOf(SpeechOffer offer) => _model[offer.id] ?? offer.defaultModel ?? _dictation(offer).firstOrNull?.id ?? '';
 
   Future<void> _run(String id, Future<void> Function() work) async {
     setState(() {
@@ -97,10 +104,10 @@ class _HostOffersGroupState extends State<HostOffersGroup> {
 
   Widget _modelChoice(SpeechOffer offer, {bool enabled = true}) => DropdownButton<String>(
     key: Key('offer-model-${offer.id}'),
-    value: offer.models.any((m) => m.id == _modelOf(offer)) ? _modelOf(offer) : null,
+    value: _dictation(offer).any((m) => m.id == _modelOf(offer)) ? _modelOf(offer) : null,
     isDense: true,
     isExpanded: true,
-    items: [for (final m in offer.models) DropdownMenuItem(value: m.id, child: Text(m.label, overflow: TextOverflow.ellipsis))],
+    items: [for (final m in _dictation(offer)) DropdownMenuItem(value: m.id, child: Text(m.label, overflow: TextOverflow.ellipsis))],
     onChanged: enabled ? (id) => setState(() => _model[offer.id] = id!) : null,
   );
 

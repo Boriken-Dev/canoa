@@ -470,7 +470,7 @@ fn the_foundry_offer_says_what_is_missing_and_lists_only_the_whisper_models_the_
     assert_eq!(foundry["installed"], true);
     assert_eq!(
         foundry["models"],
-        json!([{"id": "openai-whisper-tiny-generic-cpu", "label": "openai-whisper-tiny-generic-cpu"}])
+        json!([{"id": "openai-whisper-tiny-generic-cpu", "label": "openai-whisper-tiny-generic-cpu", "capabilities": ["speech_to_text"]}])
     );
     assert_eq!(foundry["default_model"], "openai-whisper-tiny-generic-cpu");
     for path in [&home.root, &nothing, &running] {
@@ -866,7 +866,7 @@ fn a_library_that_runs_a_program_is_offered_for_install_and_is_not_enabled_befor
     );
     assert_eq!(
         talk["models"],
-        json!([{"id": "tiny", "label": "Tiny"}, {"id": "large", "label": "Large"}])
+        json!([{"id": "tiny", "label": "Tiny", "capabilities": ["speech_to_text"]}, {"id": "large", "label": "Large", "capabilities": ["speech_to_text"]}])
     );
     assert_eq!(talk["default_model"], "tiny");
     assert!(
@@ -999,7 +999,7 @@ fn an_account_whose_kind_a_description_names_is_offered_and_one_whose_kind_it_do
     assert_eq!(plain["default_model"], "m1");
     assert_eq!(
         plain["models"],
-        json!([{"id": "m1", "label": "Model one"}, {"id": "m2", "label": "Model two"}])
+        json!([{"id": "m1", "label": "Model one", "capabilities": ["speech_to_text"]}, {"id": "m2", "label": "Model two", "capabilities": ["speech_to_text"]}])
     );
     assert!(
         plain["where"]

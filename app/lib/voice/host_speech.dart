@@ -101,7 +101,12 @@ final class HostSpeechProvider {
 List<SpeechChoice> _choices(Object? rows) => [
   if (rows is List)
     for (final row in rows)
-      if (row is Map && row['id'] is String) SpeechChoice(row['id']! as String, row['label'] is String ? row['label']! as String : row['id']! as String),
+      if (row is Map && row['id'] is String)
+        SpeechChoice(
+          row['id']! as String,
+          row['label'] is String ? row['label']! as String : row['id']! as String,
+          [if (row['capabilities'] is List) for (final each in row['capabilities'] as List) if (each is String) each],
+        ),
 ];
 
 /// One speech-to-text provider Canoa offers out of the box: a local engine the host installs through its Store, or a named service

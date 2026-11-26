@@ -227,6 +227,21 @@ void main() {
     expect(find.byKey(const Key('offer-in-use')), findsOneWidget);
   });
 
+  testWidgets('dictation is offered the models that transcribe, and not one the host says does something else', (tester) async {
+    final foundry = _foundry(models: ['whisper-tiny', 'a-voice', 'unlabelled']);
+    foundry['models'] = [
+      {'id': 'whisper-tiny', 'label': 'whisper-tiny', 'capabilities': ['speech_to_text']},
+      {'id': 'a-voice', 'label': 'a-voice', 'capabilities': ['text_to_speech']},
+      {'id': 'unlabelled', 'label': 'unlabelled'},
+    ];
+    await _page(tester, host: OffersHost(more: [foundry]));
+    await tester.tap(find.byKey(const Key('offer-model-foundry')));
+    await _settle(tester);
+    expect(find.text('whisper-tiny'), findsWidgets);
+    expect(find.text('unlabelled'), findsWidgets, reason: 'a model that says nothing is still one the person may choose');
+    expect(find.text('a-voice'), findsNothing, reason: 'the host says it speaks, which dictation does not use');
+  });
+
   testWidgets('each OpenAI API key account is an offer named for the account, one that is no API key says why, and Add uses the account\'s key without asking for one', (tester) async {
     final speech = OffersHost(more: [
       _account('work'),

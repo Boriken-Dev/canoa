@@ -110,4 +110,26 @@ void main() {
     expect(find.byKey(const Key('profile-edit-effort-pick')), findsNothing);
     expect(find.byKey(const Key('profile-edit-mode-pick')), findsNothing);
   });
+
+  testWidgets('a model that says it does something else is not offered as the model, and one that says nothing is offered apart', (tester) async {
+    await _pump(
+      tester,
+      choicesFor: (_) async => const ProfileChoices(
+        models: [
+          ModelChoice(id: 'sonnet', name: 'Sonnet', capabilities: ['chat', 'tool_use']),
+          ModelChoice(id: 'embed-3', name: 'Embed 3', capabilities: ['embed']),
+          ModelChoice(id: 'mystery', name: 'mystery'),
+        ],
+      ),
+    );
+    await tester.tap(find.byKey(const Key('profile-edit-model-pick')));
+    await tester.pumpAndSettle();
+    expect(find.text('Sonnet (sonnet)'), findsOneWidget);
+    expect(find.textContaining('embed-3'), findsNothing, reason: 'an embedding model is not a model to chat with');
+    expect(find.byKey(const Key('profile-edit-model-unreported')), findsOneWidget);
+    expect(find.text('Other models (capabilities not reported)'), findsOneWidget);
+    await tester.tap(find.text('mystery'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const Key('profile-edit-model'))).controller!.text, 'mystery');
+  });
 }

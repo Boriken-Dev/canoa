@@ -402,7 +402,7 @@ fn account_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, St
             let models: Vec<Value> = service
                 .models
                 .iter()
-                .map(|model| json!({"id": model.id, "label": model.label}))
+                .map(|model| json!({"id": model.id, "label": model.label, "capabilities": ["speech_to_text"]}))
                 .collect();
             rows.push(json!({
                 "id": id,
@@ -449,7 +449,7 @@ fn model_choices(report: &Result<ServiceReport, String>) -> Vec<Value> {
             report
                 .models
                 .iter()
-                .map(|model| json!({"id": model.id, "label": model.label}))
+                .map(|model| json!({"id": model.id, "label": model.label, "capabilities": ["speech_to_text"]}))
                 .collect()
         })
         .unwrap_or_default()
