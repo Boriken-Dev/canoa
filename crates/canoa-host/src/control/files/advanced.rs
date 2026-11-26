@@ -160,8 +160,12 @@ pub(crate) const TABLES: &[Table] = &[
             ("lookup_timeout", Int),
             ("tools", Bool),
             ("verify_copies", Bool),
-            ("source_ttl", Int),
         ],
+    },
+    Table {
+        path: &["host", "content"],
+        shape: Shape::Flat,
+        fields: &[("ttl", Int), ("document_bytes", Int)],
     },
     Table {
         path: &["host", "delegate"],

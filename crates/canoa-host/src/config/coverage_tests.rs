@@ -45,6 +45,7 @@ fn tables() -> Vec<(&'static str, Vec<String>)> {
         ("host.control", keys_of("RawControl")),
         ("host.native", keys_of("RawNative")),
         ("host.store", keys_of("RawStore")),
+        ("host.content", keys_of("RawContent")),
         ("host.delegate", keys_of("RawDelegate")),
         ("host.kb", keys_of("RawKb")),
         ("host.kb.embedder", keys_of("RawKbEmbedder")),

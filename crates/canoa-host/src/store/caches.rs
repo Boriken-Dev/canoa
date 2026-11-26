@@ -73,6 +73,8 @@ pub(crate) struct StoreCaches {
     pub(crate) dir: Option<PathBuf>,
     /// How long a catalog read through a source provider answers without asking it, unless the entry says its own `ttl`.
     pub(crate) source_ttl: Duration,
+    /// The most a document read through the content sources may hold unless the reader names less; none is the default.
+    pub(crate) document_bytes: Option<u64>,
 }
 
 impl StoreCaches {
@@ -93,7 +95,15 @@ impl StoreCaches {
             lookup_response: DEFAULT_LOOKUP_TIMEOUT,
             dir,
             source_ttl: super::catalog_run::DEFAULT_SOURCE_TTL,
+            document_bytes: None,
         }
+    }
+
+    /// These caches reading documents of at most `bytes` through the content sources.
+    #[must_use]
+    pub(crate) const fn with_document_bytes(mut self, bytes: Option<u64>) -> Self {
+        self.document_bytes = bytes;
+        self
     }
 
     /// These caches asking a catalog's source again after `ttl`.

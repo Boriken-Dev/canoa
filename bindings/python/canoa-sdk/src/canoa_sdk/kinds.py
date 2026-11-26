@@ -1065,7 +1065,7 @@ class SpeechOutput(KindProtocol, Protocol, kind="speech_output", floor_hash=2737
 
         `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
         refuses. `fetch` is the host's too: an `https` document read through the host's own client and proxy, from the places
-        [`OutputInfo::endpoints`] declares and nowhere else, kept by the host for `[host.store] source_ttl`. The provider destroys
+        [`OutputInfo::endpoints`] declares and nowhere else, kept by the host for `[host.content] ttl`. The provider destroys
         it as it does the spawner.
         """
         ...

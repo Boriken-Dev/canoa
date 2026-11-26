@@ -56,13 +56,13 @@ use sections::{
 };
 pub(crate) use sections::{check_label, check_name, plain_absolute};
 pub use types::{
-    AgentProfile, AssistChoice, AssistConfig, AssistPool, Config, ControlConfig, DEFAULT_CHOICE,
-    DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS, DEFAULT_MAX_SESSIONS, DEFAULT_PRESET,
-    DelegateConfig, Extension, ExtensionCheck, HarnessTable, HistoryConfig, KbConfig, KbEmbedder,
-    KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig,
-    NativeConfig, NetworkConfig, NotificationsConfig, NotifierConfig, OpenerConfig, Preset,
-    RemoteAgent, ResolvedLoadout, SdkTable, StoreConfig, UnknownLoadout, UnknownPreset,
-    UsageConfig, WorktreeConfig,
+    AgentProfile, AssistChoice, AssistConfig, AssistPool, Config, ContentConfig, ControlConfig,
+    DEFAULT_CHOICE, DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS, DEFAULT_MAX_SESSIONS,
+    DEFAULT_PRESET, DelegateConfig, Extension, ExtensionCheck, HarnessTable, HistoryConfig,
+    KbConfig, KbEmbedder, KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE,
+    McpChoice, McpListConfig, NativeConfig, NetworkConfig, NotificationsConfig, NotifierConfig,
+    OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable, StoreConfig, UnknownLoadout,
+    UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
@@ -85,6 +85,7 @@ struct TopLevel {
 
 struct Subsystems {
     store: StoreConfig,
+    content: ContentConfig,
     network: NetworkConfig,
     kb: KbConfig,
     mcp_list: McpListConfig,
@@ -289,6 +290,7 @@ impl Config {
             worktrees: sub.worktrees,
             usage: sub.usage,
             store: sub.store,
+            content: sub.content,
             disabled: crate::disabled::Disabled::new(disabled),
             network: sub.network,
             kb: sub.kb,
@@ -1062,7 +1064,13 @@ fn build_subsystems(
             lookup_timeout: raw.lookup_timeout,
             tools: raw.tools,
             verify_copies: raw.verify_copies,
-            source_ttl: raw.source_ttl,
+        });
+    let content = host
+        .content
+        .take()
+        .map_or_else(ContentConfig::default, |raw| ContentConfig {
+            ttl: raw.ttl,
+            document_bytes: raw.document_bytes,
         });
     let network = host
         .network
@@ -1197,6 +1205,7 @@ fn build_subsystems(
         .transpose()?;
     Ok(Subsystems {
         store,
+        content,
         network,
         kb,
         mcp_list,

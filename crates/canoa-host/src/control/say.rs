@@ -685,7 +685,7 @@ impl Say {
 
     /// What `provider` has now, `{voices, models}`, from what was listed lately when the table is the same. A provider that declares
     /// `endpoints` reads documents through the host's fetch, and its answer is kept as long as a catalog read through a source is
-    /// (`[host.store] source_ttl`); the others are asked again after a short while.
+    /// (`[host.content] ttl`); the others are asked again after a short while.
     fn voices_of(
         &self,
         name: &str,

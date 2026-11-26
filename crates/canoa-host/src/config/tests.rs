@@ -2105,6 +2105,60 @@ fn the_store_takes_a_time_for_each_thing_it_keeps_and_one_for_renewing_them() {
 }
 
 #[test]
+fn the_content_table_takes_a_time_for_a_catalog_and_the_most_a_document_may_hold() {
+    let none = parse(
+        "[host.store]
+protected = []
+",
+    )
+    .expect("parses");
+    assert_eq!(none.content, ContentConfig::default());
+    let set = parse(
+        "[host.content]
+ttl = 60
+document_bytes = 1024
+",
+    )
+    .expect("parses");
+    assert_eq!(set.content.ttl, Some(60));
+    assert_eq!(set.content.document_bytes, Some(1024));
+    assert!(
+        parse(
+            "[host.content]
+ttl = \"1h\"
+"
+        )
+        .is_err()
+    );
+    assert!(
+        parse(
+            "[host.content]
+other = 1
+"
+        )
+        .is_err()
+    );
+    // The Store's own key for it is gone, and what is off is named by kind and provider as for every kind.
+    assert!(
+        parse(
+            "[host.store]
+source_ttl = 60
+"
+        )
+        .is_err()
+    );
+    let off = parse(
+        "[host.disabled]
+content_source = [\"git\"]
+catalog_generator = [\"command\"]
+",
+    )
+    .expect("parses");
+    assert!(off.disabled.is_off("content_source", "git"));
+    assert!(off.disabled.is_off("catalog_generator", "command"));
+}
+
+#[test]
 fn the_store_reads_the_files_of_its_copies_only_when_told_to() {
     let none = parse("[host.store]\nprotected = []\n").expect("parses");
     assert_eq!(none.store.verify_copies, None);

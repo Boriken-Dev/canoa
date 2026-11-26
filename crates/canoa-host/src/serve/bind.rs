@@ -869,9 +869,10 @@ fn store_caches(
         seconds(config.store.lookup_timeout, DEFAULT_LOOKUP_TIMEOUT),
     )
     .with_source_ttl(seconds(
-        config.store.source_ttl,
+        config.content.ttl,
         crate::store::catalog_run::DEFAULT_SOURCE_TTL,
     ))
+    .with_document_bytes(config.content.document_bytes)
 }
 
 #[allow(clippy::too_many_arguments)]

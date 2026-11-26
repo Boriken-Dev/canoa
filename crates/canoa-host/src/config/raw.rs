@@ -103,7 +103,13 @@ pub(super) struct RawStore {
     pub(super) lookup_timeout: Option<u64>,
     pub(super) tools: Option<bool>,
     pub(super) verify_copies: Option<bool>,
-    pub(super) source_ttl: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawContent {
+    pub(super) ttl: Option<u64>,
+    pub(super) document_bytes: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -237,6 +243,7 @@ pub(super) struct RawHost {
     pub(super) worktrees: Option<RawWorktrees>,
     pub(super) usage: Option<RawHostUsage>,
     pub(super) store: Option<RawStore>,
+    pub(super) content: Option<RawContent>,
     /// `[host.disabled]`: provider ids by kind name that are not offered or run.
     #[serde(default)]
     pub(super) disabled: IndexMap<String, Vec<String>>,
