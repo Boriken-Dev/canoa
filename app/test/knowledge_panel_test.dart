@@ -12,7 +12,8 @@ void main() {
   Future<void> show(WidgetTester tester, CanoaConfig config) async {
     saved.clear();
     refuseWith = null;
-    await tester.binding.setSurfaceSize(const Size(900, 900));
+    // The page is long: every part of it is on screen.
+    await tester.binding.setSurfaceSize(const Size(900, 3000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(

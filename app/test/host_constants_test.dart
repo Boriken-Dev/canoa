@@ -72,4 +72,20 @@ void main() {
       contains('pub const SERVER_ID: &str = "server";'),
     );
   });
+
+  test('every key of [assist_harness.NAME] and [assist_pool] and [assist.OPERATION] the app edits is one the host reads', () {
+    final raw = _host('config/raw.rs');
+    Set<String> fieldsOf(String struct) {
+      final body = RegExp('struct $struct \\{([^}]+)\\}').firstMatch(raw);
+      expect(body, isNotNull, reason: struct);
+      return {
+        for (final field in RegExp(r'^\s*(?:pub(?:\([a-z]+\))?\s+)?(?:r#)?(\w+):', multiLine: true).allMatches(body!.group(1)!)) field.group(1)!,
+      };
+    }
+
+    expect(fieldsOf('RawAssistHarness').containsAll(CanoaConfig.assistHarnessKeys), isTrue);
+    expect(fieldsOf('RawAssistPool').containsAll(['idle_seconds', 'max_sessions']), isTrue);
+    expect(fieldsOf('RawAssist').containsAll(['use', 'fallback']), isTrue);
+  });
 }
+

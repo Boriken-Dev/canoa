@@ -531,6 +531,79 @@ final class CanoaConfig {
     return withHost(copy.isEmpty ? null : copy)._withTable('sdk', sdk);
   }
 
+  /// `[assist.OPERATION]`: for each operation (`complete`, `embed`, `rerank`) the backend the host asks first (`use`) and the ones it
+  /// asks after it (`fallback`), in order.
+  Map<String, ({String? use, List<String> fallback})> get assistOperations {
+    final table = tables['assist'];
+    return {
+      if (table is Map)
+        for (final MapEntry(:key, :value) in table.entries)
+          if (value is Map)
+            '$key': (
+              use: value['use'] is String ? value['use'] as String : null,
+              fallback: [if (value['fallback'] is List) for (final each in value['fallback'] as List) if (each is String) each],
+            ),
+    };
+  }
+
+  /// This configuration with `[assist.OPERATION]` as [operations] says; an operation that names no backend and no fallback goes.
+  CanoaConfig withAssistOperations(Map<String, ({String? use, List<String> fallback})> operations) {
+    final raw = _deepCopy((tables['assist'] as Map?) ?? const {});
+    for (final MapEntry(:key, :value) in operations.entries) {
+      final held = raw[key] is Map ? Map<String, dynamic>.of((raw[key] as Map).cast<String, dynamic>()) : <String, dynamic>{};
+      final use = value.use?.trim() ?? '';
+      use.isEmpty ? held.remove('use') : held['use'] = use;
+      value.fallback.isEmpty ? held.remove('fallback') : held['fallback'] = [...value.fallback];
+      held.isEmpty ? raw.remove(key) : raw[key] = held;
+    }
+    return _withTable('assist', raw);
+  }
+
+  /// The keys of an `[assist_harness.NAME]` table, which the Settings page edits.
+  static const assistHarnessKeys = ['source', 'title', 'profile', 'account', 'model', 'effort'];
+
+  /// `[assist_harness.NAME]`: each agent harness offered as a backend, by name, with the keys it sets (text only).
+  Map<String, Map<String, String>> get assistHarnesses {
+    final table = tables['assist_harness'];
+    return {
+      if (table is Map)
+        for (final MapEntry(:key, :value) in table.entries)
+          if (value is Map)
+            '$key': {
+              for (final field in assistHarnessKeys)
+                if (value[field] is String && (value[field] as String).isNotEmpty) field: value[field] as String,
+            },
+    };
+  }
+
+  /// This configuration with `[assist_harness]` as [harnesses] says, the keys the page does not edit of a table kept as they were.
+  CanoaConfig withAssistHarnesses(Map<String, Map<String, String>> harnesses) {
+    final held = _deepCopy((tables['assist_harness'] as Map?) ?? const {});
+    final raw = <String, dynamic>{};
+    for (final MapEntry(:key, :value) in harnesses.entries) {
+      final fields = held[key] is Map ? Map<String, dynamic>.of((held[key] as Map).cast<String, dynamic>()) : <String, dynamic>{};
+      for (final field in assistHarnessKeys) {
+        final text = value[field]?.trim() ?? '';
+        text.isEmpty ? fields.remove(field) : fields[field] = text;
+      }
+      raw[key] = fields;
+    }
+    return _withTable('assist_harness', raw);
+  }
+
+  /// `[assist_pool]`: how long a warm harness session is kept unasked (`idleSeconds`) and how many are kept (`maxSessions`).
+  ({int? idleSeconds, int? maxSessions}) get assistPool {
+    final table = tables['assist_pool'];
+    int? number(String key) => table is Map && table[key] is int ? table[key] as int : null;
+    return (idleSeconds: number('idle_seconds'), maxSessions: number('max_sessions'));
+  }
+
+  /// This configuration with `[assist_pool]` as given; a value that is null goes, and a table with none goes.
+  CanoaConfig withAssistPool({int? idleSeconds, int? maxSessions}) => _withTable('assist_pool', {
+    'idle_seconds': ?idleSeconds,
+    'max_sessions': ?maxSessions,
+  });
+
   /// This configuration with the option values [options] for the overlay [name], or none when [options] is empty. A string
   /// entry `NAME = "source"` becomes `{ source }` to carry them.
   CanoaConfig withOverlayOptions(String name, Map<String, Object?> options) {

@@ -85,6 +85,14 @@ void main() {
       expect(text.symbol('settings'), isA<IconSymbol>().having((symbol) => symbol.icon, 'icon', baseSymbols['settings']));
     });
 
+    test('every word of the knowledge search page and the model pickers is in English and in Spanish', () {
+      final english = baseStrings['en']!.keys.where((key) => key.startsWith('kb.') || key == 'model.unreported');
+      expect(english, isNotEmpty);
+      for (final key in english) {
+        expect(baseStrings['es']!.containsKey(key), isTrue, reason: '$key has no Spanish');
+      }
+    });
+
     test('every key the base has in another language is a key of the English', () {
       final english = baseStrings[baseLanguage]!.keys.toSet();
       for (final MapEntry(key: language, value: table) in baseStrings.entries) {

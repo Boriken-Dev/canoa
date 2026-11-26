@@ -34,7 +34,6 @@
   "lib/client/start_picker.dart": 1,
   "lib/connect_dialog.dart": 26,
   "lib/desktop/hosting_panel.dart": 33,
-  "lib/desktop/knowledge_panel.dart": 4,
   "lib/extension/local_host_banner.dart": 3,
   "lib/extension/tab_bridge.dart": 1,
   "lib/extension/tab_header.dart": 2,
