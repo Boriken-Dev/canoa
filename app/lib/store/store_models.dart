@@ -68,16 +68,21 @@ final class ModelEngine {
   final bool installed;
 
   /// The forms its file is written in at install, the first the default; empty when the install offers no choice.
-  final List<ModelVariant> variants;
+  final List<ModelBuild> builds;
 }
 
 /// What + does for a model once the person has read what it takes.
 final class ModelAction {
-  const ModelAction({required this.title, required this.confirm, required this.label, required this.steps});
+  const ModelAction({required this.title, required this.confirm, required this.label, required this.steps, this.removes = false});
 
   /// The confirmation's title and text, what its button says, and the actions the host is asked for in order.
   final String title, confirm, label;
   final List<String> steps;
+
+  /// Whether it takes the model away: the library says so, or one of its steps is the host's own removal of the files.
+  final bool removes;
+
+  bool get takesAway => removes || steps.contains(deleteFilesStep);
 }
 
 /// The steps of an action the host does itself: it downloads the files the model is made of, which needs the type's program, and
@@ -103,6 +108,83 @@ final class ModelSpeech {
   final String? caution;
 }
 
+List<ModelAction> _actions(Object? value) => _list(
+  value,
+  (action) => ModelAction(
+    title: '${action['title'] ?? ''}',
+    confirm: '${action['confirm'] ?? ''}',
+    label: '${action['label'] ?? ''}',
+    steps: [for (final step in action['steps'] is List ? action['steps']! as List : const []) if (step is String) step],
+    removes: action['removes'] == true,
+  ),
+);
+
+List<ModelFact> _facts(Object? value) => _list(value, (fact) => fact['label'] is String ? ModelFact(fact['label']! as String, '${fact['value'] ?? ''}') : null);
+
+List<ModelSection> _sections(Object? value) => _list(
+  value,
+  (section) => ModelSection(
+    title: '${section['title'] ?? ''}',
+    facts: _facts(section['facts']),
+    paragraphs: [for (final each in section['paragraphs'] is List ? section['paragraphs']! as List : const []) if (each is String) each],
+    settings: section['settings'] == true,
+  ),
+);
+
+ModelSpeech? _speech(Object? value) => value is Map ? ModelSpeech(text: '${value['text'] ?? ''}', caution: _text(value['caution'])) : null;
+
+/// One build of a model for some hardware (a CPU, a GPU or an NPU build), inside the model's entry: it has its own state, buttons,
+/// part of the page and settings, kept under its own id.
+final class ModelBuild {
+  const ModelBuild({
+    required this.id,
+    required this.label,
+    this.summary = '',
+    this.installed = false,
+    this.state,
+    this.facts = const [],
+    this.actions = const [],
+    this.sections = const [],
+    this.speech,
+    this.values = const {},
+  });
+
+  factory ModelBuild.fromJson(Map<Object?, Object?> json) => ModelBuild(
+    id: json['id']! as String,
+    label: _text(json['label']) ?? json['id']! as String,
+    summary: json['summary'] is String ? json['summary']! as String : '',
+    installed: json['installed'] == true,
+    state: _text(json['state']),
+    facts: _facts(json['facts']),
+    actions: _actions(json['actions']),
+    sections: _sections(json['sections']),
+    speech: _speech(json['speech']),
+    values: _map(json['values']),
+  );
+
+  /// The name the host's calls take for this build.
+  final String id;
+
+  /// What tells it from the model's other builds.
+  final String label;
+
+  /// Where it stands and what it is, in a line.
+  final String summary;
+
+  /// Whether it is on this computer.
+  final bool installed;
+  final String? state;
+  final List<ModelFact> facts;
+  final List<ModelAction> actions;
+  final List<ModelSection> sections;
+
+  /// Present when this build may be used as the person's speech-to-text.
+  final ModelSpeech? speech;
+
+  /// What canoa.cfg keeps for it, by the members of the type's settings.
+  final Map<String, Object?> values;
+}
+
 /// One model, as the host listed it.
 final class StoreModel {
   const StoreModel({
@@ -119,6 +201,7 @@ final class StoreModel {
     this.sections = const [],
     this.speech,
     this.values = const {},
+    this.builds = const [],
   });
 
   factory StoreModel.fromJson(Map<Object?, Object?> json) => StoreModel(
@@ -145,27 +228,15 @@ final class StoreModel {
             )
           : null,
     ),
-    facts: _list(json['facts'], (fact) => fact['label'] is String ? ModelFact(fact['label']! as String, '${fact['value'] ?? ''}') : null),
-    actions: _list(
-      json['actions'],
-      (action) => ModelAction(
-        title: '${action['title'] ?? ''}',
-        confirm: '${action['confirm'] ?? ''}',
-        label: '${action['label'] ?? ''}',
-        steps: [for (final step in action['steps'] is List ? action['steps']! as List : const []) if (step is String) step],
-      ),
-    ),
-    sections: _list(
-      json['sections'],
-      (section) => ModelSection(
-        title: '${section['title'] ?? ''}',
-        facts: _list(section['facts'], (fact) => fact['label'] is String ? ModelFact(fact['label']! as String, '${fact['value'] ?? ''}') : null),
-        paragraphs: [for (final each in section['paragraphs'] is List ? section['paragraphs']! as List : const []) if (each is String) each],
-        settings: section['settings'] == true,
-      ),
-    ),
-    speech: json['speech'] is Map ? ModelSpeech(text: '${(json['speech']! as Map)['text'] ?? ''}', caution: _text((json['speech']! as Map)['caution'])) : null,
+    facts: _facts(json['facts']),
+    actions: _actions(json['actions']),
+    sections: _sections(json['sections']),
+    speech: _speech(json['speech']),
     values: _map(json['values']),
+    builds: [
+      for (final each in json['builds'] is List ? json['builds']! as List : const [])
+        if (each is Map && each['id'] is String) ModelBuild.fromJson(each),
+    ],
   );
 
   /// The name the host's calls take.
@@ -199,7 +270,7 @@ final class StoreModel {
   List<ModelAction> get addActions => removeAction == null ? const [] : [for (final action in actions) if (!action.steps.contains(deleteFilesStep)) action];
 
   /// What the tile's remove does: the action that takes the model away, if there is one.
-  ModelAction? get removeAction => actions.where((action) => action.steps.contains(deleteFilesStep)).firstOrNull;
+  ModelAction? get removeAction => actions.where((action) => action.takesAway).firstOrNull;
   final List<ModelSection> sections;
 
   /// Present when it may be used as the person's speech-to-text.
@@ -207,6 +278,9 @@ final class StoreModel {
 
   /// What canoa.cfg keeps for it, by the members of the type's settings.
   final Map<String, Object?> values;
+
+  /// The builds of the model for each kind of hardware, when it has several: each is installed, removed and set up on its own.
+  final List<ModelBuild> builds;
 }
 
 /// The settings a type keeps for each model: a guatiao schema and a guatiao-intake form, drawn by the one renderer.
@@ -403,8 +477,8 @@ List<ExtensionStoreItem> _itemsOf(TypeModels models) {
         installed: model.on,
         verified: model.verified,
         engines: [for (final engine in model.engines) StoreEngine(id: engine.id, label: engine.label, installed: engine.installed)],
-        install: model.installAction == null ? null : (context) => _choose(context, models, model, model.installAction!),
-        remove: model.removeAction == null ? null : (context) => _choose(context, models, model, model.removeAction!),
+        install: model.installAction == null ? null : (context) => _choose(context, models, model.id, model.installAction!),
+        remove: model.removeAction == null ? null : (context) => _choose(context, models, model.id, model.removeAction!),
         details: (context, config) => ModelPage(models: models, id: model.id),
       ),
   ];
@@ -474,9 +548,9 @@ Future<void> _failed(BuildContext context, String title, Object error) => showSe
   ),
 );
 
-/// What + does for [model]: [action], once the person has read what it takes, one step at a time. A model that is downloaded
+/// What + does for the model or build [id]: [action], once the person has read what it takes, one step at a time. A model that is downloaded
 /// for a program that is not on the host asks for that program first, in the one confirmation that shows the program's plan.
-Future<void> _choose(BuildContext context, TypeModels models, StoreModel model, ModelAction action) async {
+Future<void> _choose(BuildContext context, TypeModels models, String id, ModelAction action, [List<ModelEngine> engines = const []]) async {
   final program = models.program;
   final programs = models.programs;
   final needs = program != null && !program.installed && action.steps.contains(fetchFilesStep);
@@ -492,22 +566,22 @@ Future<void> _choose(BuildContext context, TypeModels models, StoreModel model, 
       if (!context.mounted) return;
       final installed = await runProgramAction(context, programs, status, 'install', also: '${action.title}. ${action.confirm}');
       if (!installed || !context.mounted) return;
-      await _run(context, models, model, action, const {});
+      await _run(context, models, id, action, const {});
       return;
     }
   }
   if (!context.mounted) return;
   // A removal asks nothing of the engines: only what + installs is written in a form.
-  final installs = !action.steps.contains(deleteFilesStep);
-  final picks = await _confirm(context, title: action.title, text: action.confirm, action: action.label, engines: installs ? [for (final engine in model.engines) if (!engine.installed) engine] : const []);
+  final installs = !action.takesAway;
+  final picks = await _confirm(context, title: action.title, text: action.confirm, action: action.label, engines: installs ? [for (final engine in engines) if (!engine.installed) engine] : const []);
   if (picks == null || !context.mounted) return;
-  await _run(context, models, model, action, picks);
+  await _run(context, models, id, action, picks);
 }
 
-Future<void> _run(BuildContext context, TypeModels models, StoreModel model, ModelAction action, Map<String, String> options) async {
+Future<void> _run(BuildContext context, TypeModels models, String id, ModelAction action, Map<String, String> options) async {
   try {
     for (final step in action.steps) {
-      await models.run(model.id, step, options: options);
+      await models.run(id, step, options: options);
     }
   } on Object catch (error) {
     if (context.mounted) await _failed(context, action.title, error);
@@ -540,10 +614,10 @@ class _ModelPageState extends State<ModelPage> {
     return null;
   }
 
-  Future<String?> _save(Map<String, Object?> values) async {
+  Future<String?> _save(String id, Map<String, Object?> values) async {
     setState(() => _said = null);
     try {
-      final kept = await widget.models.setSettings(widget.id, values);
+      final kept = await widget.models.setSettings(id, values);
       if (mounted) setState(() => _said = kept.note ?? (kept.values.isEmpty ? 'The settings are removed.' : 'Saved.'));
       return null;
     } on Object catch (error) {
@@ -551,13 +625,13 @@ class _ModelPageState extends State<ModelPage> {
     }
   }
 
-  Future<void> _use() async {
+  Future<void> _use(String id) async {
     setState(() {
       _busy = true;
       _speechProblem = null;
     });
     try {
-      final name = await widget.models.useForSpeech(widget.id);
+      final name = await widget.models.useForSpeech(id);
       if (mounted) setState(() => _made = name);
     } on Object catch (error) {
       if (mounted) setState(() => _speechProblem = hostWords(error));
@@ -566,22 +640,85 @@ class _ModelPageState extends State<ModelPage> {
     }
   }
 
-  Widget _settingsForm(StoreModel model, ModelSettings settings) => Padding(
+  Widget _settingsForm(String id, Map<String, Object?> values, ModelSettings settings) => Padding(
     padding: const EdgeInsets.only(top: 8),
     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (settings.help case final help?) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(help, key: const Key('model-setting-help'))),
       SchemaSettingsForm(
-        key: ValueKey('${model.id} ${model.values}'),
+        key: ValueKey('$id $values'),
         schema: settings.schema,
         form: settings.form,
-        name: model.id,
-        values: model.values,
+        name: id,
+        values: values,
         keyPrefix: 'model-setting',
-        onSave: (values, cleared, from) => _save(values),
+        onSave: (given, cleared, from) => _save(id, given),
       ),
       if (_said != null) Text(_said!, key: const Key('model-setting-said')),
     ]),
   );
+
+  /// What a page says of using [id] as the person's speech-to-text, and the button that makes the provider; [suffix] tells the keys
+  /// of one build's from those of the model's own.
+  List<Widget> _speechChildren(String id, ModelSpeech speech, String suffix) => [
+    Padding(padding: const EdgeInsets.only(top: 4), child: Text(speech.text)),
+    if (speech.caution case final caution?)
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(caution, key: Key('model-speech-caution$suffix'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      ),
+    Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FilledButton(key: Key('model-use-speech$suffix'), onPressed: _busy ? null : () => unawaited(_use(id)), child: const Text('Use as speech provider')),
+      ),
+    ),
+    if (_made case final made?)
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text('Added as the provider "$made". Choose it in Settings, Voice.', key: Key('model-speech-done$suffix')),
+      ),
+    if (_speechProblem case final problem?)
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(problem, key: Key('model-speech-failed$suffix'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+      ),
+  ];
+
+  /// One part of the page for each build of the model: where it stands, its facts, a button for each thing it can do (install,
+  /// load, remove), what it can be used for and the form of its own settings.
+  List<Widget> _buildSections(StoreModel model, ModelSettings? settings) => [
+    for (final build in model.builds)
+      DetailSection(key: Key('model-build-${build.id}'), title: build.label, children: [
+        Padding(padding: const EdgeInsets.only(top: 4), child: Text(build.summary, key: Key('model-build-summary-${build.id}'))),
+        for (final fact in build.facts) DetailField(label: fact.label, value: fact.value),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final action in build.actions)
+              if (action.takesAway)
+                OutlinedButton(
+                  key: Key('model-build-${build.id}-${action.steps.isEmpty ? 'none' : action.steps.first}'),
+                  onPressed: () => unawaited(_choose(context, widget.models, build.id, action)),
+                  child: Text(action.label),
+                )
+              else
+                FilledButton(
+                  key: Key('model-build-${build.id}-${action.steps.isEmpty ? 'none' : action.steps.first}'),
+                  onPressed: () => unawaited(_choose(context, widget.models, build.id, action)),
+                  child: Text(action.label),
+                ),
+          ]),
+        ),
+        if (build.speech case final speech? when widget.models.speech) ..._speechChildren(build.id, speech, '-${build.id}'),
+        for (final section in build.sections) ...[
+          if (section.title.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 12), child: Text(section.title, style: const TextStyle(fontWeight: FontWeight.w600))),
+          for (final fact in section.facts) DetailField(label: fact.label, value: fact.value),
+          for (final paragraph in section.paragraphs) Padding(padding: const EdgeInsets.only(top: 8), child: Text(paragraph)),
+          if (section.settings && settings != null) _settingsForm(build.id, build.values, settings),
+        ],
+      ]),
+  ];
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -609,32 +746,7 @@ class _ModelPageState extends State<ModelPage> {
         },
         contents: false,
         sections: [
-          if (speech != null && widget.models.speech)
-            DetailSection(key: const Key('model-speech'), title: 'Speech to text', children: [
-              Padding(padding: const EdgeInsets.only(top: 4), child: Text(speech.text)),
-              if (speech.caution case final caution?)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(caution, key: const Key('model-speech-caution'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                ),
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilledButton(key: const Key('model-use-speech'), onPressed: _busy ? null : () => unawaited(_use()), child: const Text('Use as speech provider')),
-                ),
-              ),
-              if (_made case final made?)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text('Added as the provider "$made". Choose it in Settings, Voice.', key: const Key('model-speech-done')),
-                ),
-              if (_speechProblem case final problem?)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(problem, key: const Key('model-speech-failed'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                ),
-            ]),
+          if (speech != null && widget.models.speech) DetailSection(key: const Key('model-speech'), title: 'Speech to text', children: _speechChildren(widget.id, speech, '')),
           if (model.addActions.isNotEmpty)
             DetailSection(key: const Key('model-engines'), title: context.t('store.engines'), children: [
               for (final (at, action) in model.addActions.indexed)
@@ -644,7 +756,7 @@ class _ModelPageState extends State<ModelPage> {
                     alignment: Alignment.centerLeft,
                     child: FilledButton.tonal(
                       key: Key('model-add-engine-$at'),
-                      onPressed: () => unawaited(_choose(context, widget.models, model, action)),
+                      onPressed: () => unawaited(_choose(context, widget.models, model.id, action, model.engines)),
                       child: Text(action.title),
                     ),
                   ),
@@ -654,8 +766,9 @@ class _ModelPageState extends State<ModelPage> {
             DetailSection(key: Key('model-section-$at'), title: section.title, children: [
               for (final fact in section.facts) DetailField(label: fact.label, value: fact.value),
               for (final paragraph in section.paragraphs) Padding(padding: const EdgeInsets.only(top: 8), child: Text(paragraph)),
-              if (section.settings && settings != null) _settingsForm(model, settings),
+              if (section.settings && settings != null) _settingsForm(model.id, model.values, settings),
             ]),
+          if (model.builds.isNotEmpty) ..._buildSections(model, settings),
         ],
       );
     },

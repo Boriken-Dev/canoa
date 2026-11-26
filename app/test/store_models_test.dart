@@ -632,4 +632,97 @@ void main() {
     expect(host.params['store/model']!.every((given) => !given.containsKey('options')), isTrue);
     shown.dispose();
   });
+
+  testWidgets('a model is one entry with its builds inside: the tile installs and removes the whole, each build has buttons and settings of its own', (tester) async {
+    _tall(tester);
+    var installed = false;
+    Map<String, Object?> action(String name, String id, {bool removes = false}) => {
+      'title': '$name $id',
+      'confirm': '$name $id in Foundry Local\'s cache.',
+      'label': name,
+      'steps': [removes ? 'remove' : 'download'],
+      if (removes) 'removes': true,
+    };
+    Map<String, Object?> build(String id, String label, {List<Object?> sections = const []}) => {
+      'id': id,
+      'label': label,
+      'summary': installed ? 'Downloaded · 5.0 GB' : 'Not downloaded · 5.0 GB',
+      'installed': installed,
+      'state': installed ? 'Downloaded' : null,
+      'facts': [
+        {'label': 'Hardware', 'value': label},
+      ],
+      'actions': [installed ? action('Remove', id, removes: true) : action('Install', id)],
+      'sections': sections,
+      'values': sections.isEmpty ? <String, Object?>{} : {'window': 4096},
+    };
+    final host = FakeStoreHost([]);
+    host.modelsAnswer = (given) => {
+      'type': given['type'],
+      'catalog': 'Runner',
+      'publisher': 'Acme',
+      'missing': 'Not installed.',
+      'unavailable': null,
+      'settings': _settings,
+      'speech': false,
+      'models': [
+        {
+          'id': 'alias',
+          'summary': '${installed ? 'Downloaded' : 'Not downloaded'} · chat, cpu/gpu, 5.0 GB',
+          'tags': ['chat', 'cpu', 'gpu'],
+          'on': installed,
+          'state': installed ? 'Downloaded' : null,
+          'verified': null,
+          'actions': [installed ? action('Remove', 'alias', removes: true) : action('Install', 'alias')],
+          'builds': [
+            build('alias-cpu:1', 'CPU'),
+            build('alias-gpu:1', 'GPU', sections: [
+              {'title': 'Window', 'paragraphs': ['A longer window lets a longer prompt through.'], 'settings': true},
+            ]),
+          ],
+        },
+      ],
+    };
+    host.onModel = (given) => installed = given['action'] == 'download';
+    host.onSetting = (given) => {'ok': true, 'model': given['model'], 'values': given['values'], 'note': null};
+    final shown = _models(host);
+    final type = _typeOf(shown);
+    await tester.runAsync(type.load!);
+
+    var item = type.items().single;
+    expect((item.name, item.installed, item.verified), ('alias', false, null), reason: 'one tile, and no check mark: the program states no digest');
+    expect(item.install, isNotNull);
+    expect(item.remove, isNull);
+    await _open(tester, item);
+    expect(find.text('Install alias'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('model-confirm-yes')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['store/model']!.single, {'type': _type, 'model': 'alias', 'action': 'download'});
+    item = type.items().single;
+    expect(item.installed, isTrue);
+    expect(item.install, isNull, reason: 'an installed model offers its removal, not an install');
+    expect(item.remove, isNotNull, reason: 'the library marked its action as the removal');
+
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => item.details!(context, null))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('model-build-alias-cpu:1')), findsOneWidget);
+    expect(find.byKey(const Key('model-build-alias-gpu:1')), findsOneWidget);
+    expect(find.text('Downloaded · 5.0 GB'), findsNWidgets(2));
+    await tester.tap(find.byKey(const Key('model-build-alias-gpu:1-remove')));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove alias-gpu:1'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('model-confirm-yes')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['store/model']!.last, {'type': _type, 'model': 'alias-gpu:1', 'action': 'remove'}, reason: 'a build is moved by its own name');
+    expect(shown.models.single.builds.map((each) => each.installed), [false, false]);
+
+    await tester.enterText(find.byKey(const Key('model-setting-field-window')), '2048');
+    await tester.tap(find.byKey(const Key('model-setting-save')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['store/model_setting']!.single, {'type': _type, 'model': 'alias-gpu:1', 'values': {'window': 2048}}, reason: 'the window is kept under the build');
+    shown.dispose();
+  });
 }
