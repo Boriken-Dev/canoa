@@ -571,7 +571,7 @@ mod tests {
         let list = &metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"];
         let histogram = &list[0]["histogram"]["dataPoints"][0];
         assert_eq!(histogram["count"], "1");
-        assert_eq!(histogram["bucketCounts"][1], "1", "0.7 s is in (0.5, 1]");
+        assert_eq!(histogram["bucketCounts"][2], "1", "0.7 s is in (0.5, 1]");
         assert_eq!(list[1]["sum"]["isMonotonic"], true);
         let logs = documents.logs.expect("logs");
         assert_eq!(
