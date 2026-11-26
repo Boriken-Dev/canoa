@@ -279,7 +279,7 @@ fn a_writer_waits_for_another_and_then_answers_busy_with_when_to_retry() {
         other => panic!("not Busy: {other:?}"),
     }
     assert!(
-        started.elapsed() >= std::time::Duration::from_millis(100),
+        started.elapsed() >= core::time::Duration::from_millis(100),
         "it waited for the writer before answering"
     );
 
@@ -290,4 +290,12 @@ fn a_writer_waits_for_another_and_then_answers_busy_with_when_to_retry() {
         2,
         "the store works again once the writer is done"
     );
+}
+
+#[test]
+fn a_history_is_stored_as_rows_and_read_back_as_it_went_in() {
+    let folder = Folder::new("documents");
+    let db = open(&folder, "{}").expect("opened");
+    db.migrate(schema::v1()).expect("schema");
+    contract::run_documents(&db);
 }

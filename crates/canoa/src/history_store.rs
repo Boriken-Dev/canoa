@@ -12,6 +12,7 @@
 
 pub mod contract;
 mod eval;
+pub mod files;
 pub mod memory;
 pub mod rows;
 pub mod schema;

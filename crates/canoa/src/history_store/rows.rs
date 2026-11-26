@@ -14,7 +14,7 @@ use coqui_acp_history::{ATTACHMENT_META_KEY, Body, Document, HistoryError, Trigg
 use serde_json::Value;
 
 use super::schema::{ATTACHMENTS, EVENT_ATTACHMENTS, EVENTS, SESSIONS, TURNS};
-use super::{Cell, Change, StoreError};
+use super::{Cell, Change, HistoryDb, StoreError};
 
 type Row = BTreeMap<String, Cell>;
 
@@ -337,4 +337,45 @@ pub fn to_document<'a>(
     lines: impl IntoIterator<Item = &'a str>,
 ) -> Result<Document, HistoryError> {
     document_text(header, lines).parse()
+}
+
+/// The history of the session `id`, read from the rows of `db`: the stored header, then every stored line in order.
+///
+/// # Errors
+///
+/// The store refuses a read, or what it holds is not a history of the format.
+pub fn read_document(db: &dyn HistoryDb, id: &str) -> Result<Option<Document>, StoreError> {
+    use super::{Cond, Order, Select, all_of};
+    let found = db
+        .select(
+            Select::new(SESSIONS, 1).filtered(all_of(alloc::vec![Cond::eq("id", Cell::text(id))])),
+        )
+        .map_err(StoreError::from)?;
+    let Some(header) = found
+        .get(0, "header")
+        .and_then(Cell::as_text)
+        .map(str::to_owned)
+    else {
+        return Ok(None);
+    };
+    let mut lines: Vec<String> = Vec::new();
+    let mut page = Select::new(EVENTS, 1000)
+        .filtered(all_of(alloc::vec![Cond::eq("session_id", Cell::text(id))]))
+        .ordered(alloc::vec![Order::asc("seq")]);
+    page.columns = alloc::vec!["line".to_string()];
+    loop {
+        let rows = db.select(page.clone()).map_err(StoreError::from)?;
+        lines.extend(
+            rows.rows
+                .iter()
+                .filter_map(|row| row.first().and_then(Cell::as_text).map(str::to_owned)),
+        );
+        match rows.next {
+            Some(next) => page.after = Some(next),
+            None => break,
+        }
+    }
+    to_document(&header, lines.iter().map(String::as_str))
+        .map(Some)
+        .map_err(|e| StoreError::Corrupt(format!("a stored history is not in the format: {e}")))
 }

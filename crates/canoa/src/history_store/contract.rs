@@ -688,3 +688,119 @@ fn requirements_and_refusals(db: &dyn HistoryDb) {
     assert!(matches!(error, StoreError::Bad(_)));
     db.close().expect("close");
 }
+
+/// Runs the document half of the contract on `db`, which holds schema version 1 (a store made with [`schema::v1`], or one that is the
+/// canonical schema by nature): a history is stored as rows and read back as the same text, grows by lines and counters, and is
+/// removed with everything that hangs off it.
+///
+/// # Panics
+///
+/// When the store breaks a rule of the kind.
+pub fn run_documents(db: &dyn HistoryDb) {
+    use coqui_acp_history::{Document, Header, Line, Origin, StopReason};
+
+    use super::rows::{Source, read_document, to_rows};
+
+    let id = "5f0f6d6e-3f3c-4f1a-8a52-1c1e6f0b9a77";
+    let source = Source {
+        entry: "claude".to_string(),
+        agent_session: "a1".to_string(),
+        origin: "recorded".to_string(),
+        imported_from: None,
+        now_ms: 1000,
+    };
+    let say = |text: &str| {
+        Line::update(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": text},
+        }))
+    };
+    let end = || Line::turn_end(coqui_acp_history::Stop::Acp(StopReason::EndTurn));
+    let mut document = Document::new(Header::new(id, Origin::new("claude")));
+    document.lines = alloc::vec![Line::text_prompt("hi"), say("ok"), end()];
+    let rows = to_rows(&document, &source).expect("rows");
+    must(db, rows.inserts());
+    let back = read_document(db, id)
+        .expect("read")
+        .expect("the history is there");
+    assert_eq!(back, document, "a history comes back as it went in");
+    assert_eq!(
+        back.to_string().expect("text"),
+        document.to_string().expect("text"),
+        "byte for byte"
+    );
+    assert!(
+        read_document(db, "no-such-session")
+            .expect("read")
+            .is_none()
+    );
+
+    // A second turn arrives as lines and counters.
+    document
+        .lines
+        .extend([Line::text_prompt("again"), say("sure"), end()]);
+    let grown = to_rows(&document, &source).expect("rows");
+    let mut ops: Vec<Change> = grown.events[3..]
+        .iter()
+        .map(|event| insert(EVENTS, event.clone()))
+        .collect();
+    ops.push(insert(TURNS, grown.turns[1].clone()));
+    ops.push(Change::Update {
+        update: Update {
+            table: SESSIONS.to_string(),
+            filter: all_of(alloc::vec![Cond::eq("id", Cell::text(id))]),
+            set: BTreeMap::new(),
+            add: BTreeMap::from([("events".to_string(), 3), ("turns".to_string(), 1)]),
+        },
+    });
+    must(db, ops);
+    assert_eq!(
+        read_document(db, id).expect("read").expect("there"),
+        document,
+        "a history grows by lines"
+    );
+    let session = select(
+        db,
+        Select::new(SESSIONS, 1).filtered(all_of(alloc::vec![Cond::eq("id", Cell::text(id))])),
+    );
+    assert_eq!(session.get(0, "events"), Some(&Cell::int(6)));
+    assert_eq!(session.get(0, "turns"), Some(&Cell::int(2)));
+    let hits = select(
+        db,
+        events_where(
+            id,
+            alloc::vec![Cond::new("text", Op::Contains, Cell::text("sure"))],
+        ),
+    );
+    assert_eq!(
+        hits.rows.len(),
+        1,
+        "what an agent said is found by its text"
+    );
+
+    // Removing a history removes everything that hangs off it.
+    let removal = |table: &str, column: &str| Change::Delete {
+        table: table.to_string(),
+        filter: all_of(alloc::vec![Cond::eq(column, Cell::text(id))]),
+    };
+    must(
+        db,
+        alloc::vec![
+            removal(EVENTS, "session_id"),
+            removal(TURNS, "session_id"),
+            removal(SESSIONS, "id"),
+        ],
+    );
+    assert!(
+        read_document(db, id).expect("read").is_none(),
+        "the history is gone"
+    );
+    assert_eq!(
+        db.count(
+            Select::new(TURNS, 1)
+                .filtered(all_of(alloc::vec![Cond::eq("session_id", Cell::text(id))]))
+        )
+        .expect("count"),
+        0
+    );
+}

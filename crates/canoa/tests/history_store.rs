@@ -101,6 +101,7 @@ impl HistoryDb for NotAtomic {
 }
 
 #[test]
+#[allow(clippy::std_instead_of_core, reason = "catch_unwind is std's")]
 fn the_contract_catches_a_provider_whose_batch_is_not_atomic() {
     let broken = NotAtomic(MemoryDb::new());
     let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| contract::run(&broken)))
