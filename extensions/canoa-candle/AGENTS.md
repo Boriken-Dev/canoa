@@ -56,13 +56,14 @@ pub mod catalog {
     pub fn repositories(listing: &str, include: &[String], exclude: &[String]) -> Result<Vec<String>, String>;   // `*` patterns on the name after the owner
     pub fn model_of(description: &str) -> Result<Option<Model>, String>;     // none when the repository lacks the three files
     pub fn models_of<'a>(descriptions: impl IntoIterator<Item = &'a str>) -> Result<Vec<Model>, String>;
+    pub fn runs_model(id: &str) -> bool;   // false for an English-only model (`.en`): the engine detects the language from tokens it lacks
     pub fn id_of(repository: &str) -> String; pub fn describe_id(id: &str) -> String; pub fn wildcard(pattern: &str, text: &str) -> bool;
 }
 ```
 
 ## The models page and the speech offer
 
-The type has no program: the host keeps its files under its own id in the shelf (`<shelf>/whispercandle/models`). The page's rows are the catalogs' (`whispercandle_hf` reads the publisher's repositories at the branch they serve; no model is named in this crate). Each model is a folder `<id>/` of three files: the repository's `config.json`, `tokenizer.json` and `model.safetensors` at the commit the listing was read at, each checked against what the listing states for it (the SHA-256 of a large file, the git blob id of a small one). A model is installed when all three are there; its row offers `fetch_files` until then and `delete_files` once they are. `act` and `keep` refuse `UNSUPPORTED`. `describe().speech` is `SpeechService::in_process(.., "speech_whisper_candle")`; `service` lists the installed models and answers `settings` for the model asked for, else the first installed, or `unavailable` in its own words.
+The type has no program: the host keeps its files under its own id in the shelf (`<shelf>/whispercandle/models`). The type registers no catalog (its page is empty: the Whisper type of `canoa-whisper` lists the models, and this one stays for its speech offer and for a catalog canoa.cfg adds; `default_catalog()` describes the one it had). The rows a catalog gives are (`whispercandle_hf` reads the publisher's repositories at the branch they serve; no model is named in this crate). Each model is a folder `<id>/` of three files: the repository's `config.json`, `tokenizer.json` and `model.safetensors` at the commit the listing was read at, each checked against what the listing states for it (the SHA-256 of a large file, the git blob id of a small one). A model is installed when all three are there; its row offers `fetch_files` until then and `delete_files` once they are. `act` and `keep` refuse `UNSUPPORTED`. `describe().speech` is `SpeechService::in_process(.., "speech_whisper_candle")`; `service` lists the installed models and answers `settings` for the model asked for, else the first installed, or `unavailable` in its own words.
 
 ## The provider
 

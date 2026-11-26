@@ -14,19 +14,18 @@ use crate::speech::WhisperSpeech;
 /// Adds the whisper.cpp type to the Store: the models whisper.cpp runs. The type has no program store, because the speech runs
 /// inside the host.
 #[derive(Default, Debug, Clone, Copy, Provider)]
-#[provider(StoreExtension, id = "whisper_extension", crate = ::coqui_acp_api::guatiao)]
+#[provider(StoreExtension, id = "whispercpp_extension", crate = ::coqui_acp_api::guatiao)]
 pub struct WhisperExtension;
 
 impl StoreExtension for WhisperExtension {
     fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
         let mut local = ExtensionType::new(STORE_TYPE, "whisper.cpp", [] as [&str; 0]);
         local.icon = Some("chip".to_owned());
-        local.models = Some("whisper_models".to_owned());
-        local.catalogs = Some(
-            CatalogWords::new("catalog", "catalogs", "models")
-                .in_format(MODELS_FORMAT)
-                .registering([crate::catalog::default_catalog()]),
-        );
+        local.models = Some("whispercpp_models".to_owned());
+        // The page of the whole Whisper type (`canoa-whisper`) lists the models; this type registers no catalog of its own, so its page
+        // is empty unless canoa.cfg adds one.
+        local.catalogs =
+            Some(CatalogWords::new("catalog", "catalogs", "models").in_format(MODELS_FORMAT));
         Ok(ExtensionInfo::new(
             "whisper.cpp",
             "Boriken Dev",
@@ -62,7 +61,11 @@ mod tests {
     #[test]
     fn the_library_offers_the_type_the_models_the_type_names_and_the_provider_that_transcribes() {
         let registry = registry();
-        assert!(registry.offer::<dyn ModelStore>("whisper_models").is_some());
+        assert!(
+            registry
+                .offer::<dyn ModelStore>("whispercpp_models")
+                .is_some()
+        );
         assert!(
             registry
                 .offer::<dyn SpeechProvider>(crate::PROVIDER)
@@ -75,6 +78,6 @@ mod tests {
         assert_eq!(kind.id, STORE_TYPE);
         assert_eq!(kind.problem(), None);
         assert!(kind.stores.is_empty(), "no program to install");
-        assert_eq!(kind.models.as_deref(), Some("whisper_models"));
+        assert_eq!(kind.models.as_deref(), Some("whispercpp_models"));
     }
 }

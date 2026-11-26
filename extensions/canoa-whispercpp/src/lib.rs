@@ -23,6 +23,12 @@ pub use providers::{WhisperExtension, library};
 pub use source::{SOURCE, WhisperHf, WhisperHfSettings, catalog_of};
 pub use speech::{IDLE, PROVIDER, WhisperSettings, WhisperSpeech, is_loaded, unload};
 
+/// The file a model's folder holds when the Hugging Face folder of the model was converted at install: `<models>/<id>/ggml.bin`.
+pub const GGML_FILE: &str = "ggml.bin";
+
+/// What was recorded of that conversion, beside it: a JSON object with `precision`, `bytes` and the file's `sha256`.
+pub const GGML_RECORD: &str = "ggml.json";
+
 /// The name this crate's library is registered under.
 pub const LIBRARY: &str = "canoa-whispercpp";
 
@@ -30,4 +36,4 @@ pub const LIBRARY: &str = "canoa-whispercpp";
 pub const NAME: &str = "whisper.cpp";
 
 /// The id of the Store type that lists whisper.cpp's models, and so the id of its speech offer.
-pub const STORE_TYPE: &str = "whisper";
+pub const STORE_TYPE: &str = "whispercpp";

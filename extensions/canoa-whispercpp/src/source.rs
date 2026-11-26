@@ -22,7 +22,7 @@ use crate::STORE_TYPE;
 use crate::catalog::{DEFAULT_REPO, MODELS_API};
 
 /// The id of the source, which canoa.cfg names as `provider`.
-pub const SOURCE: &str = "whisper_hf";
+pub const SOURCE: &str = "whispercpp_hf";
 
 /// The most the listing of a repository is read for.
 const MOST_LISTING: u64 = 4 << 20;
@@ -53,7 +53,7 @@ pub struct WhisperHfSettings {
 
 /// The models of a Hugging Face repository, as a catalog of the Whisper type.
 #[derive(Default, Debug, Clone, Copy, Provider)]
-#[provider(CatalogSourceProvider, id = "whisper_hf", crate = ::coqui_acp_api::guatiao)]
+#[provider(CatalogSourceProvider, id = "whispercpp_hf", crate = ::coqui_acp_api::guatiao)]
 pub struct WhisperHf;
 
 impl CatalogSourceProvider for WhisperHf {

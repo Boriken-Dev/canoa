@@ -7,7 +7,7 @@ use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
 
 use crate::model_store::WhisperCandleModels;
-use crate::source::{WhisperCandleHf, default_catalog};
+use crate::source::WhisperCandleHf;
 use crate::speech::WhisperCandleSpeech;
 use crate::{NAME, STORE_TYPE};
 
@@ -22,11 +22,10 @@ impl StoreExtension for WhisperCandleExtension {
         let mut local = ExtensionType::new(STORE_TYPE, NAME, [] as [&str; 0]);
         local.icon = Some("chip".to_owned());
         local.models = Some("whispercandle_models".to_owned());
-        local.catalogs = Some(
-            CatalogWords::new("catalog", "catalogs", "models")
-                .in_format(MODELS_FORMAT)
-                .registering([default_catalog()]),
-        );
+        // The page of the whole Whisper type (`canoa-whisper`) lists the models; this type registers no catalog of its own, so its page
+        // is empty unless canoa.cfg adds one.
+        local.catalogs =
+            Some(CatalogWords::new("catalog", "catalogs", "models").in_format(MODELS_FORMAT));
         Ok(ExtensionInfo::new(NAME, "Boriken Dev", vec![local]))
     }
 }

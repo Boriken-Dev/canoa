@@ -311,9 +311,9 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
     let answer = ask(&control, &owner, "speech/offers", json!({}));
     let offers = answer["result"]["offers"].as_array().expect("offers");
     let by_id = |id: &str| offers.iter().find(|offer| offer["id"] == id).expect(id);
-    let whisper = by_id("whisper");
+    let whisper = by_id("whispercpp");
     assert_eq!(whisper["local"], true);
-    assert_eq!(whisper["service"], "whisper", "it runs inside the host");
+    assert_eq!(whisper["service"], "whispercpp", "it runs inside the host");
     assert!(whisper["store"].is_null(), "there is no program to install");
     assert_eq!(whisper["installed"], false);
     assert!(
@@ -336,7 +336,7 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
         &control,
         &owner,
         "speech/enable",
-        json!({"offer": "whisper"}),
+        json!({"offer": "whispercpp"}),
     );
     assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
     let answer = ask(
@@ -347,13 +347,13 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
     );
     assert_eq!(answer["error"]["code"], NOT_FOUND, "{answer}");
     // A model in the host's models folder is what makes it ready: the provider then runs inside the host with that model.
-    let models = tmp.join("programs/whisper/models");
+    let models = tmp.join("programs/whispercpp/models");
     fs::create_dir_all(&models).expect("the models folder");
     fs::write(models.join("ggml-tiny.bin"), b"a stand-in").expect("a model");
     let answer = ask(&control, &owner, "speech/offers", json!({}));
     let whisper = answer["result"]["offers"]
         .as_array()
-        .and_then(|offers| offers.iter().find(|offer| offer["id"] == "whisper"))
+        .and_then(|offers| offers.iter().find(|offer| offer["id"] == "whispercpp"))
         .cloned()
         .expect("offered");
     assert_eq!(whisper["installed"], true, "{whisper}");
@@ -365,7 +365,7 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
         &control,
         &owner,
         "speech/enable",
-        json!({"offer": "whisper", "model": "tiny"}),
+        json!({"offer": "whispercpp", "model": "tiny"}),
     );
     assert_eq!(answer["result"]["provider"], "speech_whisper", "{answer}");
     assert_eq!(answer["result"]["model"], "tiny", "{answer}");
@@ -373,8 +373,76 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
     assert!(
         written.contains("provider = \"speech_whisper\"")
             && written.contains("model = \"tiny\"")
+            && written.contains("offer = \"whispercpp\""),
+        "{written}"
+    );
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+/// The files of a model the Whisper type installed: the three Candle reads, and the GGML file the install wrote.
+fn install_whisper_model(models: &std::path::Path, id: &str, ggml: bool) {
+    let folder = models.join(id);
+    fs::create_dir_all(&folder).expect("a model folder");
+    for name in ["config.json", "tokenizer.json", "model.safetensors"] {
+        fs::write(folder.join(name), b"a stand-in").expect("a file");
+    }
+    if ggml {
+        fs::write(folder.join("ggml.bin"), b"a stand-in").expect("a file");
+    }
+}
+
+#[test]
+fn the_whisper_offer_lists_each_engine_an_installed_model_runs_on_and_enables_the_one_picked() {
+    let tmp = dir("offer-whisper");
+    let control = control_with_empty_store(&tmp);
+    let owner = Caller::Owner;
+    let offers = |control: &Control| {
+        let answer = ask(control, &owner, "speech/offers", json!({}));
+        answer["result"]["offers"]
+            .as_array()
+            .and_then(|offers| offers.iter().find(|offer| offer["id"] == "whisper"))
+            .cloned()
+            .expect("offered")
+    };
+    let before = offers(&control);
+    assert_eq!(before["local"], true, "{before}");
+    assert_eq!(before["installed"], false, "{before}");
+    assert_eq!(before["title"], "Whisper", "one offer for the type");
+    let models = tmp.join("programs/whisper/models");
+    install_whisper_model(&models, "tiny", true);
+    let after = offers(&control);
+    assert_eq!(after["installed"], true, "{after}");
+    let ids: Vec<&str> = after["models"]
+        .as_array()
+        .expect("models")
+        .iter()
+        .filter_map(|model| model["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["candle:tiny", "whispercpp:tiny"], "{after}");
+    let answer = ask(
+        &control,
+        &owner,
+        "speech/enable",
+        json!({"offer": "whisper", "model": "whispercpp:tiny"}),
+    );
+    assert_eq!(answer["result"]["provider"], "speech_whisper", "{answer}");
+    assert_eq!(answer["result"]["model"], "tiny", "{answer}");
+    let written = fs::read_to_string(tmp.join("canoa.cfg")).expect("canoa.cfg");
+    assert!(
+        written.contains("provider = \"speech_whisper\"")
             && written.contains("offer = \"whisper\""),
         "{written}"
+    );
+    // The same model on the other engine is another provider of the same offer.
+    let answer = ask(
+        &control,
+        &owner,
+        "speech/enable",
+        json!({"offer": "whisper", "model": "candle:tiny", "name": "candle"}),
+    );
+    assert_eq!(
+        answer["result"]["provider"], "speech_whisper_candle",
+        "{answer}"
     );
     let _ = fs::remove_dir_all(&tmp);
 }

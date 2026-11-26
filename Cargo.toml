@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-sqlite", "extensions/canoa-whispercpp", "extensions/canoa-candle"]
+members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-sqlite", "extensions/canoa-whispercpp", "extensions/canoa-candle", "extensions/canoa-whisper"]
 exclude = ["third_party/whisper-rs-sys"]
 
 [workspace.package]
@@ -198,6 +198,7 @@ canoa-python = { path = "extensions/canoa-python" }
 canoa-sqlite = { path = "extensions/canoa-sqlite" }
 canoa-whispercpp = { path = "extensions/canoa-whispercpp" }
 canoa-candle = { path = "extensions/canoa-candle" }
+canoa-whisper = { path = "extensions/canoa-whisper" }
 canoa-piper = { path = "extensions/canoa-piper" }
 
 # The bridge library (coqui-acp-bridge) takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph

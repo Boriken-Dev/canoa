@@ -94,9 +94,16 @@ impl WhisperSettings {
         }
     }
 
-    /// The model file these settings name.
+    /// The model file these settings name: the one written into the model's own folder when it was installed, else the
+    /// `ggml-<model>.bin` of the folder.
     fn file(&self) -> PathBuf {
-        Path::new(&self.models_dir).join(alloc::format!("ggml-{}.bin", self.model))
+        let folder = Path::new(&self.models_dir);
+        let written = folder.join(&self.model).join(crate::GGML_FILE);
+        if written.is_file() {
+            written
+        } else {
+            folder.join(alloc::format!("ggml-{}.bin", self.model))
+        }
     }
 
     fn threads(&self) -> i32 {
@@ -498,6 +505,23 @@ mod tests {
         assert_eq!(own.file(), Path::new("/models/ggml-small-q5_1.bin"));
         let other = WhisperSettings::new("mine", "/models");
         assert_eq!(other.file(), Path::new("/models/ggml-mine.bin"));
+    }
+
+    #[test]
+    fn a_model_written_at_install_is_the_file_in_its_own_folder() {
+        let root =
+            std::env::temp_dir().join(format!("canoa-whispercpp-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("tiny")).expect("a model folder");
+        let settings = WhisperSettings::new("tiny", root.to_string_lossy());
+        assert_eq!(
+            settings.file(),
+            root.join("ggml-tiny.bin"),
+            "the file of the folder until one is written"
+        );
+        std::fs::write(root.join("tiny").join(crate::GGML_FILE), b"g").expect("written");
+        assert_eq!(settings.file(), root.join("tiny").join(crate::GGML_FILE));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

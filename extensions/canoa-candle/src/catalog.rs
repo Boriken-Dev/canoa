@@ -157,6 +157,13 @@ pub fn id_of(repository: &str) -> String {
     name.strip_prefix("whisper-").unwrap_or(name).to_owned()
 }
 
+/// Whether the engine can run the model called `id`: it detects the language from the model's language tokens, which the English-only
+/// models (their id ends in `.en`) do not have.
+#[must_use]
+pub fn runs_model(id: &str) -> bool {
+    !id.ends_with(".en")
+}
+
 /// What a model's id says it is, in words: `large-v3-turbo` is "Large v3 turbo, every language", and one ending in `.en` is English
 /// only.
 #[must_use]

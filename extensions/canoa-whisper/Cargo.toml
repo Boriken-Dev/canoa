@@ -1,0 +1,38 @@
+[package]
+name = "canoa-whisper"
+description = "Whisper for Canoa: one Store type for OpenAI's Whisper models read from Hugging Face, one download that both engines (Candle and whisper.cpp) run"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["canoa", "speech-to-text", "whisper"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# Canoa itself is not published yet.
+publish = false
+
+[features]
+default = ["whispercpp"]
+# whisper.cpp as the second engine: installing a model also writes the GGML file it reads. Without it the crate has no C or C++ to
+# build, and the models run on Candle alone.
+whispercpp = ["dep:canoa-whispercpp"]
+
+[dependencies]
+canoa = { workspace = true, features = ["store", "speech"] }
+canoa-candle.workspace = true
+canoa-whispercpp = { workspace = true, optional = true }
+coqui-acp-api.workspace = true
+guatiao.workspace = true
+guatiao-intake.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+coqui-acp-harness.workspace = true
+half.workspace = true
+safetensors.workspace = true
+
+[lints]
+workspace = true

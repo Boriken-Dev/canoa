@@ -19,23 +19,25 @@ Compiling the crate compiles whisper.cpp (C and C++), so a build needs a C++ too
 ```rust
 pub const LIBRARY: &str = "canoa-whispercpp";   // the name `library` is registered under
 pub const NAME: &str = "whisper.cpp";        // what it is called to the person: its rows, facts and speech offer
-pub const STORE_TYPE: &str = "whisper";      // the id of the Store type, and of its speech offer
+pub const STORE_TYPE: &str = "whispercpp";   // the id of the Store type, and of its speech offer
+pub const GGML_FILE: &str = "ggml.bin";      // the file `canoa-whisper`'s install writes in a model's folder: <models>/<id>/ggml.bin
+pub const GGML_RECORD: &str = "ggml.json";   // what it recorded of it: `precision`, `bytes`, `sha256`
 pub const PROVIDER: &str = "speech_whisper"; // the id of the speech provider
 pub const IDLE: Duration;                    // 5 minutes: how long a loaded model is kept without a recording
 
 /// What a host links: handed to `Registry::register_local`.
 pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // WhisperExtension, WhisperModels, WhisperHf, WhisperSpeech
 
-pub struct WhisperExtension;   // a `store_extension`, id "whisper_extension": the type `whisper` ("whisper.cpp", icon `chip`, no program store, models `whisper_models`)
-pub struct WhisperModels;      // a `model_store`, id "whisper_models": the speech offer's side of the type (its endpoints, `service`); the page's rows are the catalogs'
+pub struct WhisperExtension;   // a `store_extension`, id "whispercpp_extension": the type `whispercpp` ("whisper.cpp", icon `chip`, no program store, models `whisper_models`)
+pub struct WhisperModels;      // a `model_store`, id "whispercpp_models": the speech offer's side of the type (its endpoints, `service`); the page's rows are the catalogs'
 pub struct WhisperSpeech;      // a `speech_provider`, id "speech_whisper", built `From<WhisperSettings>`
 pub struct WhisperSettings { pub model: String, pub models_dir: String, pub threads: Option<u32>, pub beam_size: u32, pub flash_attention: bool }   // `WhisperSettings::new(model, models_dir)`; beam_size defaults to 5, flash_attention to true
 pub fn unload();               // frees the model held
 pub fn is_loaded() -> bool;    // whether a model is held
 
-pub struct WhisperHf;          // a `catalog_source`, id "whisper_hf", serving the type `whisper`: the `ggml-*.bin` files of a Hugging Face repository, from its file listing at a revision
+pub struct WhisperHf;          // a `catalog_source`, id "whispercpp_hf", serving the type `whispercpp`: the `ggml-*.bin` files of a Hugging Face repository, from its file listing at a revision
 pub struct WhisperHfSettings { pub repo: String, pub include: Vec<String>, pub exclude: Vec<String> }   // repo `ggerganov/whisper.cpp`; patterns with `*` on file names, none meaning every `ggml-*.bin`
-pub const SOURCE: &str = "whisper_hf";
+pub const SOURCE: &str = "whispercpp_hf";
 pub fn catalog_of(repo: &str, revision: &str, listing: &str, include: &[String], exclude: &[String]) -> Result<ModelsCatalog, String>;   // what the source makes of a listing
 
 /// A Hugging Face Whisper folder as whisper.cpp's GGML file.
@@ -44,7 +46,7 @@ pub enum ConvertError { Io(std::io::Error), Unsupported(String) }   // Display s
 pub fn convert(folder: &Path, output: &Path, precision: Precision) -> Result<(), ConvertError>;
 
 pub mod catalog {
-    pub const LABEL: &str = "ggerganov";    // the default catalog's label: `[store.whisper.catalogs.ggerganov]`
+    pub const LABEL: &str = "ggerganov";    // the default catalog's label: `[store.whispercpp.catalogs.ggerganov]`
     pub const DEFAULT_REPO: &str;           // ggerganov/whisper.cpp
     pub const ENDPOINTS: [&str; 6];         // where the files are downloaded from: the repository's files and the hosts Hugging Face sends a download on to
     pub fn default_catalog() -> DefaultCatalog;
@@ -53,7 +55,7 @@ pub mod catalog {
 
 ## The models page and the speech offer
 
-The type has no program: `WhisperExtension` names no store, and the host keeps the type's files under its own id in the shelf (`<shelf>/whisper/models`). It holds no model, size or digest: the type registers one catalog, `ggerganov` (`CatalogWords` in `canoa.models/1`), whose source `whisper_hf` reads Hugging Face's file listing of the repository at the entry's `pin`, or `main` when it has none (`GET /api/models/<repo>/tree/<revision>`), takes each large file's SHA-256 from `lfs.oid`, and names a model from its file name (`ggml-small-q5_1.bin` is `small-q5_1`, "Small, every language, compressed"). The default lists every `ggml-*.bin` file of the listing and ships no list: with no network and nothing read before, the page is empty, with the reason. A person's entry replaces the catalog by its label, adds another repository, or narrows `include`. The host lists the catalog's models on the page with their badge and downloads a row's file checked by that digest. `WhisperModels::list` answers no row of its own.
+The type has no program: `WhisperExtension` names no store, and the host keeps the type's files under its own id in the shelf (`<shelf>/whispercpp/models`). It holds no model, size or digest: the type registers no catalog (its page is empty: the Whisper type of `canoa-whisper` lists the models, and this one stays for its speech offer and for a catalog canoa.cfg adds); the catalog `catalog::default_catalog()` describes, `ggerganov` (`CatalogWords` in `canoa.models/1`), has a source that `whisper_hf` reads Hugging Face's file listing of the repository at the entry's `pin`, or `main` when it has none (`GET /api/models/<repo>/tree/<revision>`), takes each large file's SHA-256 from `lfs.oid`, and names a model from its file name (`ggml-small-q5_1.bin` is `small-q5_1`, "Small, every language, compressed"). The default lists every `ggml-*.bin` file of the listing and ships no list: with no network and nothing read before, the page is empty, with the reason. A person's entry replaces the catalog by its label, adds another repository, or narrows `include`. The host lists the catalog's models on the page with their badge and downloads a row's file checked by that digest. `WhisperModels::list` answers no row of its own.
 
 `describe().speech` is `SpeechService::in_process(.., "speech_whisper")`. `service` lists, with `query.models`, the models installed in the folder (every `ggml-<id>.bin`, the default catalog's first) and answers `settings`: the `speech_whisper` settings for `query.model` when that is installed, else for the first that is (`model`, `models_dir`); with no folder or no model it answers `unavailable` in its own words. The host writes the person's provider from those settings.
 
@@ -66,7 +68,7 @@ The type has no program: `WhisperExtension` names no store, and the host keeps t
 ## Gotchas
 
 - Logs from whisper.cpp and ggml are discarded (`whisper_rs::install_logging_hooks`), so nothing is written to the host's standard streams.
-- A model is the file `ggml-<id>.bin` in the folder, whatever catalog it came from, so a file the person drops there runs.
+- A model is the file `<models_dir>/<id>/ggml.bin` when that exists (what `canoa-whisper`'s install wrote), else `ggml-<id>.bin` in the folder, whatever catalog it came from, so a file the person drops there runs.
 - The provider's tests that run a model (`tests/speech.rs`) download `tiny` (from the address a recorded listing gives) and a recording with `curl` into a temporary folder, check the model's SHA-256, and are ignored without the network: `cargo test -p canoa-whispercpp -- --ignored`.
 - When a `whisper-rs-sys` that bundles whisper.cpp 1.9 or later is published, drop the `[patch.crates-io]` entry and `third_party/whisper-rs-sys`.
 

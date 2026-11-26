@@ -1103,6 +1103,7 @@ dependencies = [
  "canoa-powershell",
  "canoa-python",
  "canoa-sqlite",
+ "canoa-whisper",
  "canoa-whispercpp",
  "clap",
  "coqui-a2a",
@@ -1357,6 +1358,23 @@ dependencies = [
  "guatiao-intake",
  "rusqlite",
  "serde_json",
+]
+
+[[package]]
+name = "canoa-whisper"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "canoa-candle",
+ "canoa-whispercpp",
+ "coqui-acp-api",
+ "coqui-acp-harness",
+ "guatiao",
+ "guatiao-intake",
+ "half",
+ "safetensors",
+ "serde_json",
+ "sha2 0.11.1",
 ]
 
 [[package]]

@@ -34,7 +34,7 @@ const NO_MODEL: &str = "no model is installed: install one from the Models page"
 
 /// The models of whisper.cpp, as the person's speech-to-text. The page's rows are the catalogs'.
 #[derive(Default, Debug, Clone, Copy, Provider)]
-#[provider(ModelStore, id = "whisper_models", crate = ::coqui_acp_api::guatiao)]
+#[provider(ModelStore, id = "whispercpp_models", crate = ::coqui_acp_api::guatiao)]
 pub struct WhisperModels;
 
 fn unsupported(why: &str) -> ProviderError {

@@ -5,7 +5,7 @@
 
 use canoa::store::extension::DefaultCatalog;
 
-/// What canoa.cfg calls the default catalog, `[store.whisper.catalogs.ggerganov]`.
+/// What canoa.cfg calls the default catalog, `[store.whispercpp.catalogs.ggerganov]`.
 pub const LABEL: &str = "ggerganov";
 
 /// The publisher's repository.
