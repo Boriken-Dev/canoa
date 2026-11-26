@@ -1,4 +1,4 @@
-//! The models that install on their own, through the host's calls: whisper.cpp's and Piper's own `model_store` providers over small
+//! The models that install on their own, through the host's calls: Whisper's and Piper's own `model_store` providers over small
 //! lists of their own, with the publishers' files served from a world of documents. Nothing is downloaded from the network, and
 //! nothing of the person's is read.
 //!
@@ -18,7 +18,7 @@ use canoa::store::recipe::{Recipe, Release};
 use canoa::store::{InstallTools, LatestReport, MANAGER_UNKNOWN, Platform, StoreInfo, Updatable};
 use canoa_piper::PiperModels;
 use canoa_piper::store::Catalog;
-use canoa_whispercpp::WhisperModels;
+use canoa_whisper::WhisperModels;
 use coqui_acp_api::Environment;
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
@@ -41,7 +41,8 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 /// Where the stand-in models are downloaded from: the publisher's repository at a revision, as the default catalog's files are.
-const MODELS_ORIGIN: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/";
+const MODELS_ORIGIN: &str =
+    "https://huggingface.co/openai/whisper-base/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/";
 
 /// The two stand-in models: id and file.
 const WHISPER_MODELS: [(&str, &str); 2] =
@@ -188,7 +189,7 @@ struct TestExtension;
 
 impl StoreExtension for TestExtension {
     fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
-        let mut speech = ExtensionType::new("whisper", "whisper.cpp", [] as [&str; 0]);
+        let mut speech = ExtensionType::new("whisper", "Whisper", [] as [&str; 0]);
         speech.models = Some("test_whisper_models".to_owned());
         let mut voice = ExtensionType::new("piper", "Piper", ["test_piper_store"]);
         voice.models = Some("test_piper_voices".to_owned());
@@ -537,7 +538,7 @@ fn a_whisper_model_needs_no_program_and_comes_only_from_the_origins_its_library_
         .programs
         .fetch_models_in(
             "whisper",
-            &canoa_whispercpp::catalog::ENDPOINTS.map(str::to_owned),
+            &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
             &outside,
             None,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -729,7 +730,7 @@ fn a_name_that_leaves_the_models_folder_is_refused() {
         .programs
         .fetch_models_in(
             "whisper",
-            &canoa_whispercpp::catalog::ENDPOINTS.map(str::to_owned),
+            &canoa_whisper::catalog::ENDPOINTS.map(str::to_owned),
             &escaping,
             None,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),

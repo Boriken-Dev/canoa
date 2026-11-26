@@ -7,7 +7,7 @@
 //! reads a file, a clock or the network.
 
 use canoa_candle::Engine;
-use canoa_candle::catalog::{
+use canoa_whisper::catalog::{
     Check, DEFAULT_AUTHOR, DEFAULT_EXCLUDE, DEFAULT_SEARCH, ENDPOINTS, MODELS_API, models_of,
     repositories as repositories_of,
 };

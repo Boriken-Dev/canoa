@@ -31,14 +31,7 @@ pub const DEFAULT_SEARCH: &str = "whisper";
 /// Repositories the default listing leaves out: the English-only models, which have no language tokens for the engine to detect with.
 pub const DEFAULT_EXCLUDE: [&str; 1] = ["*.en"];
 
-/// The names of a model's files, which the folder `<id>/` of the models folder holds.
-pub const CONFIG: &str = "config.json";
-/// The tokenizer's file.
-pub const TOKENIZER: &str = "tokenizer.json";
-/// The weights' file.
-pub const WEIGHTS: &str = "model.safetensors";
-/// The three together.
-pub const FILE_NAMES: [&str; 3] = [CONFIG, TOKENIZER, WEIGHTS];
+pub use canoa_candle::{CONFIG, FILE_NAMES, TOKENIZER, WEIGHTS};
 
 /// What a repository's listing states of one file.
 #[derive(Debug, Clone, PartialEq, Eq)]

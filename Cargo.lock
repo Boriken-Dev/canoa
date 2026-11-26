@@ -979,8 +979,6 @@ dependencies = [
  "guatiao-intake",
  "rayon",
  "serde_json",
- "sha1 0.11.0",
- "sha2 0.11.1",
  "tokenizers",
 ]
 
@@ -1390,7 +1388,6 @@ dependencies = [
  "memmap2",
  "safetensors",
  "serde_json",
- "sha2 0.11.1",
  "whisper-rs",
  "whisper-rs-sys",
 ]

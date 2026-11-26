@@ -12,11 +12,11 @@
 
 use std::path::Path;
 
+use crate::catalog::{ENDPOINTS, FILE_NAMES, describe_id, runs_model};
 use canoa::store::models::{
     ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelStore, ModelStoreInfo,
     ServedModel, ServiceQuery, ServiceReport, SpeechService,
 };
-use canoa_candle::catalog::{ENDPOINTS, FILE_NAMES, describe_id, runs_model};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status, ToValue};

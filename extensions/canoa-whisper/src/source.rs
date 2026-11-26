@@ -8,14 +8,14 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use crate::catalog::{
+    self, Check, DEFAULT_AUTHOR, DEFAULT_SEARCH, FILE_NAMES, MODELS_API, Model, runs_model,
+};
 #[cfg(feature = "whispercpp")]
 use canoa::store::catalog::EngineVariant;
 use canoa::store::catalog::{CatalogFile, FileCheck, ItemEngine, ModelItem, ModelsCatalog};
 use canoa::store::extension::DefaultCatalog;
 use canoa::store::source::{CatalogSourceProvider, ReadRequest, SourceFetch, SourceInfo};
-use canoa_candle::catalog::{
-    self, Check, DEFAULT_AUTHOR, DEFAULT_SEARCH, FILE_NAMES, MODELS_API, Model, runs_model,
-};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Status, ToValue};

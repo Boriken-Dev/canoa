@@ -1,6 +1,6 @@
 [package]
 name = "canoa-candle"
-description = "Whisper in pure Rust (Candle) for Canoa: its models as a Store type, and the speech-to-text provider that runs them inside the host"
+description = "Whisper in pure Rust (Candle) for Canoa: the engine, and the speech-to-text provider that runs a Whisper model inside the host"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,7 +15,7 @@ publish = false
 
 [features]
 default = ["host"]
-# The Store type, the models page and the speech provider. Without it the crate is the engine alone, which compiles to
+# The speech provider. Without it the crate is the engine alone, which compiles to
 # WebAssembly: Whisper over bytes (a model, its tokenizer and configuration) and 16 kHz samples.
 host = ["dep:canoa", "dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:rayon"]
 
@@ -34,8 +34,6 @@ rayon = { workspace = true, optional = true }
 [dev-dependencies]
 coqui-acp-harness.workspace = true
 coqui-acp-api.workspace = true
-sha2 = { workspace = true }
-sha1 = { workspace = true }
 guatiao.workspace = true
 
 [lints]

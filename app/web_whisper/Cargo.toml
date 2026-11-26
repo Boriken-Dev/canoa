@@ -17,6 +17,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 canoa-candle = { path = "../../extensions/canoa-candle", default-features = false }
+canoa-whisper = { path = "../../extensions/canoa-whisper", default-features = false }
 # Exactly the wasm-bindgen command line's version, which has to match it.
 wasm-bindgen = "=0.2.130"
 serde_json = "1"

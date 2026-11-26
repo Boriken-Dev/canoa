@@ -60,11 +60,11 @@ const fn default_flash() -> bool {
 #[form(section(id = "whisper", label = "whisper.cpp"))]
 #[non_exhaustive]
 pub struct WhisperSettings {
-    /// The model: one of the Models page, `base` by default for the speech offer. It is the file `ggml-<model>.bin` of the folder.
+    /// The model: the id of an installed Whisper model, `base` by default for the speech offer. Its file is `<model>/ggml.bin` in the folder.
     #[schema(section = "whisper", title = "Model")]
     #[form(placeholder = "base")]
     pub model: String,
-    /// The folder the model files are in: the one the host keeps the Models page's downloads in.
+    /// The folder the model files are in: the one the host keeps the Whisper models in.
     #[schema(section = "whisper", title = "Models folder")]
     pub models_dir: String,
     /// How many threads a recording uses; none takes the number of processors, up to eight.
@@ -94,16 +94,11 @@ impl WhisperSettings {
         }
     }
 
-    /// The model file these settings name: the one written into the model's own folder when it was installed, else the
-    /// `ggml-<model>.bin` of the folder.
+    /// The model file these settings name: the one the install wrote into the model's own folder.
     fn file(&self) -> PathBuf {
-        let folder = Path::new(&self.models_dir);
-        let written = folder.join(&self.model).join(crate::GGML_FILE);
-        if written.is_file() {
-            written
-        } else {
-            folder.join(alloc::format!("ggml-{}.bin", self.model))
-        }
+        Path::new(&self.models_dir)
+            .join(&self.model)
+            .join(crate::GGML_FILE)
     }
 
     fn threads(&self) -> i32 {
@@ -166,7 +161,7 @@ impl SpeechProvider for WhisperSpeech {
         let file = self.settings.file();
         if !file.is_file() {
             return Err(bad_value(alloc::format!(
-                "the model {} is not installed: install it from the Models page ({} is not there)",
+                "the model {} is not installed: install it from the Whisper models in the Store, with whisper.cpp ticked ({} is not there)",
                 self.settings.model,
                 file.display()
             )));
@@ -512,28 +507,14 @@ mod tests {
     }
 
     #[test]
-    fn the_model_file_is_ggml_and_the_id() {
-        let own = WhisperSettings::new("small-q5_1", "/models");
-        assert_eq!(own.file(), Path::new("/models/ggml-small-q5_1.bin"));
-        let other = WhisperSettings::new("mine", "/models");
-        assert_eq!(other.file(), Path::new("/models/ggml-mine.bin"));
-    }
-
-    #[test]
-    fn a_model_written_at_install_is_the_file_in_its_own_folder() {
-        let root =
-            std::env::temp_dir().join(format!("canoa-whispercpp-file-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("tiny")).expect("a model folder");
-        let settings = WhisperSettings::new("tiny", root.to_string_lossy());
+    fn the_model_file_is_the_one_written_in_its_own_folder() {
+        let settings = WhisperSettings::new("small-q5_1", "/models");
         assert_eq!(
             settings.file(),
-            root.join("ggml-tiny.bin"),
-            "the file of the folder until one is written"
+            Path::new("/models")
+                .join("small-q5_1")
+                .join(crate::GGML_FILE)
         );
-        std::fs::write(root.join("tiny").join(crate::GGML_FILE), b"g").expect("written");
-        assert_eq!(settings.file(), root.join("tiny").join(crate::GGML_FILE));
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

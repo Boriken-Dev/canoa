@@ -196,7 +196,7 @@ canoa-powershell = { path = "extensions/canoa-powershell" }
 canoa-python = { path = "extensions/canoa-python" }
 canoa-sqlite = { path = "extensions/canoa-sqlite" }
 canoa-whispercpp = { path = "extensions/canoa-whispercpp" }
-canoa-candle = { path = "extensions/canoa-candle" }
+canoa-candle = { path = "extensions/canoa-candle", default-features = false }
 canoa-whisper = { path = "extensions/canoa-whisper" }
 canoa-piper = { path = "extensions/canoa-piper" }
 

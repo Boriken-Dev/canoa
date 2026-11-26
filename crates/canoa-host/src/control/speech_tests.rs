@@ -302,83 +302,6 @@ fn the_offers_need_the_voice_grant_and_enabling_one_needs_the_setup_grant() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
-#[test]
-fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_before_it_is_installed()
- {
-    let tmp = dir("offers");
-    let control = control_with_empty_store(&tmp);
-    let owner = Caller::Owner;
-    let answer = ask(&control, &owner, "speech/offers", json!({}));
-    let offers = answer["result"]["offers"].as_array().expect("offers");
-    let by_id = |id: &str| offers.iter().find(|offer| offer["id"] == id).expect(id);
-    let whisper = by_id("whispercpp");
-    assert_eq!(whisper["local"], true);
-    assert_eq!(whisper["service"], "whispercpp", "it runs inside the host");
-    assert!(whisper["store"].is_null(), "there is no program to install");
-    assert_eq!(whisper["installed"], false);
-    assert!(
-        whisper["models"].as_array().expect("models").is_empty(),
-        "only an installed model is offered: {whisper}"
-    );
-    assert!(
-        whisper["unavailable"]
-            .as_str()
-            .is_some_and(|why| why.contains("no model")),
-        "{whisper}"
-    );
-    assert!(whisper["provider"].is_null(), "{whisper}");
-    assert!(
-        offers.iter().all(|offer| offer["id"] != "openai"),
-        "no service is offered that no library or account describes: {offers:?}"
-    );
-    // Nothing is installed, so there is nothing to make a provider of.
-    let answer = ask(
-        &control,
-        &owner,
-        "speech/enable",
-        json!({"offer": "whispercpp"}),
-    );
-    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
-    let answer = ask(
-        &control,
-        &owner,
-        "speech/enable",
-        json!({"offer": "elsewhere"}),
-    );
-    assert_eq!(answer["error"]["code"], NOT_FOUND, "{answer}");
-    // A model in the host's models folder is what makes it ready: the provider then runs inside the host with that model.
-    let models = tmp.join("programs/whispercpp/models");
-    fs::create_dir_all(&models).expect("the models folder");
-    fs::write(models.join("ggml-tiny.bin"), b"a stand-in").expect("a model");
-    let answer = ask(&control, &owner, "speech/offers", json!({}));
-    let whisper = answer["result"]["offers"]
-        .as_array()
-        .and_then(|offers| offers.iter().find(|offer| offer["id"] == "whispercpp"))
-        .cloned()
-        .expect("offered");
-    assert_eq!(whisper["installed"], true, "{whisper}");
-    assert_eq!(
-        whisper["models"],
-        json!([{"id": "tiny", "label": "Tiny, every language", "capabilities": ["speech_to_text"]}])
-    );
-    let answer = ask(
-        &control,
-        &owner,
-        "speech/enable",
-        json!({"offer": "whispercpp", "model": "tiny"}),
-    );
-    assert_eq!(answer["result"]["provider"], "speech_whisper", "{answer}");
-    assert_eq!(answer["result"]["model"], "tiny", "{answer}");
-    let written = fs::read_to_string(tmp.join("canoa.cfg")).expect("canoa.cfg");
-    assert!(
-        written.contains("provider = \"speech_whisper\"")
-            && written.contains("model = \"tiny\"")
-            && written.contains("offer = \"whispercpp\""),
-        "{written}"
-    );
-    let _ = fs::remove_dir_all(&tmp);
-}
-
 /// The files of a model the Whisper type installed: the three Candle reads, and the GGML file the install wrote.
 fn install_whisper_model(models: &std::path::Path, id: &str, ggml: bool) {
     let folder = models.join(id);
@@ -408,6 +331,43 @@ fn the_whisper_offer_lists_each_engine_an_installed_model_runs_on_and_enables_th
     assert_eq!(before["local"], true, "{before}");
     assert_eq!(before["installed"], false, "{before}");
     assert_eq!(before["title"], "Whisper", "one offer for the type");
+    assert_eq!(before["service"], "whisper", "it runs inside the host");
+    assert!(before["store"].is_null(), "there is no program to install");
+    assert!(
+        before["models"].as_array().expect("models").is_empty(),
+        "only an installed model is offered: {before}"
+    );
+    assert!(
+        before["unavailable"]
+            .as_str()
+            .is_some_and(|why| why.contains("no model")),
+        "{before}"
+    );
+    assert!(before["provider"].is_null(), "{before}");
+    let all = ask(&control, &owner, "speech/offers", json!({}));
+    assert!(
+        all["result"]["offers"]
+            .as_array()
+            .expect("offers")
+            .iter()
+            .all(|offer| offer["id"] != "openai"),
+        "no service is offered that no library or account describes: {all}"
+    );
+    // Nothing is installed, so there is nothing to make a provider of.
+    let answer = ask(
+        &control,
+        &owner,
+        "speech/enable",
+        json!({"offer": "whisper"}),
+    );
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+    let answer = ask(
+        &control,
+        &owner,
+        "speech/enable",
+        json!({"offer": "elsewhere"}),
+    );
+    assert_eq!(answer["error"]["code"], NOT_FOUND, "{answer}");
     let models = tmp.join("programs/whisper/models");
     install_whisper_model(&models, "tiny", true);
     let after = offers(&control);

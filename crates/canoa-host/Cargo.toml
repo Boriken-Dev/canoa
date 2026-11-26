@@ -70,7 +70,7 @@ canoa-powershell.workspace = true
 canoa-python.workspace = true
 canoa-sqlite.workspace = true
 canoa-whispercpp.workspace = true
-canoa-candle.workspace = true
+canoa-candle = { workspace = true, features = ["host"] }
 canoa-whisper.workspace = true
 clap.workspace = true
 coqui-acp = { workspace = true, features = ["secret"] }

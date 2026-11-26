@@ -29,8 +29,8 @@ use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
 use guatiao_intake::Form;
 
-use crate::catalog;
 use crate::engine::Engine;
+use crate::{CONFIG, FILE_NAMES, TOKENIZER, WEIGHTS};
 
 /// The id of the provider, which a table names and the Store type's speech offer builds.
 pub const PROVIDER: &str = "speech_whisper_candle";
@@ -52,11 +52,11 @@ const THREADS: usize = 8;
 #[form(section(id = "whispercandle", label = "Whisper (Candle)"))]
 #[non_exhaustive]
 pub struct WhisperCandleSettings {
-    /// The model: one of the Models page, `base` by default for the speech offer. Its files are in the folder `<model>/`.
+    /// The model: the id of an installed Whisper model, `base` by default for the speech offer. Its files are in the folder `<model>/`.
     #[schema(section = "whispercandle", title = "Model")]
     #[form(placeholder = "base")]
     pub model: String,
-    /// The folder the model folders are in: the one the host keeps the Models page's downloads in.
+    /// The folder the model folders are in: the one the host keeps the Whisper models in.
     #[schema(section = "whispercandle", title = "Models folder")]
     pub models_dir: String,
     /// The language to read the recording in when the person has not said one: a code such as `es`, or none to let the model tell.
@@ -142,13 +142,13 @@ impl SpeechProvider for WhisperCandleSpeech {
             return Err(bad_value("the recording has no sample rate"));
         }
         let folder = self.settings.folder();
-        if let Some(missing) = catalog::FILE_NAMES
+        if let Some(missing) = FILE_NAMES
             .iter()
             .map(|name| folder.join(name))
             .find(|file| !file.is_file())
         {
             return Err(bad_value(alloc::format!(
-                "the model {} is not installed: install it from the Models page ({} is not there)",
+                "the model {} is not installed: install it from the Whisper models in the Store ({} is not there)",
                 self.settings.model,
                 missing.display()
             )));
@@ -319,11 +319,7 @@ fn loaded(folder: &Path, threads: usize) -> Result<Arc<Loaded>, ProviderError> {
         .num_threads(threads)
         .build()
         .map_err(|error| internal(alloc::format!("the threads could not start: {error}")))?;
-    let (config, tokenizer, weights) = (
-        read(catalog::CONFIG)?,
-        read(catalog::TOKENIZER)?,
-        read(catalog::WEIGHTS)?,
-    );
+    let (config, tokenizer, weights) = (read(CONFIG)?, read(TOKENIZER)?, read(WEIGHTS)?);
     let engine = pool
         .install(|| Engine::load(&config, &tokenizer, weights))
         .map_err(|error| {

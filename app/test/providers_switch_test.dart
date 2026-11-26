@@ -33,7 +33,7 @@ final class ScriptedProviders {
     ('account_provider', 'claude_accounts', 'Claude accounts', 'canoa-claude', ['claude-login']),
     ('account_provider', 'litellm_accounts', 'LiteLLM', 'canoa-litellm', ['litellm']),
     ('acp_harness', 'claude', 'Claude', 'canoa-claude', <String>[]),
-    ('store_extension', 'whisper_extension', 'whisper.cpp', 'canoa-whispercpp', <String>[]),
+    ('store_extension', 'whisper_extension', 'Whisper', 'canoa-whisper', <String>[]),
     ('speech_output', 'speech_say_piper', 'Piper', 'canoa-piper', <String>[]),
   ];
 

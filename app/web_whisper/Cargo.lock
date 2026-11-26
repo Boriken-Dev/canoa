@@ -170,10 +170,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-whisper"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa-candle",
+ "serde_json",
+]
+
+[[package]]
 name = "canoa-whisper-web"
 version = "0.0.0-alpha.0"
 dependencies = [
  "canoa-candle",
+ "canoa-whisper",
  "getrandom 0.3.4",
  "serde_json",
  "wasm-bindgen",

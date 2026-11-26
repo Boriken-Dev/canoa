@@ -14,20 +14,23 @@ exclude = [".*", "*.local.*"]
 publish = false
 
 [features]
-default = ["whispercpp"]
+default = ["host", "whispercpp"]
+# The Store type, its models page and its source. Without it the crate is the `catalog` of models alone, which compiles to
+# WebAssembly: the repositories a Hugging Face listing names and what checks each file.
+host = ["canoa-candle/host", "dep:canoa", "dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:sha2"]
 # whisper.cpp as the second engine: installing a model also writes the GGML file it reads. Without it the crate has no C or C++ to
 # build, and the models run on Candle alone.
-whispercpp = ["dep:canoa-whispercpp"]
+whispercpp = ["host", "dep:canoa-whispercpp"]
 
 [dependencies]
-canoa = { workspace = true, features = ["store", "speech"] }
+canoa = { workspace = true, features = ["store", "speech"], optional = true }
 canoa-candle.workspace = true
 canoa-whispercpp = { workspace = true, optional = true }
-coqui-acp-api.workspace = true
-guatiao.workspace = true
-guatiao-intake.workspace = true
+coqui-acp-api = { workspace = true, optional = true }
+guatiao = { workspace = true, optional = true }
+guatiao-intake = { workspace = true, optional = true }
 serde_json.workspace = true
-sha2.workspace = true
+sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 coqui-acp-harness.workspace = true

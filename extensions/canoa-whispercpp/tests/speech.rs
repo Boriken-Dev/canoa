@@ -1,5 +1,5 @@
 //! whisper.cpp inside this process, against the `tiny` model and a recording of President Kennedy (public domain): the model is
-//! downloaded into a folder of the test's own with `curl`, checked against the catalog's SHA-256, and removed at the end. Nothing is
+//! downloaded as Hugging Face's folder into a folder of the test's own with `curl`, converted to the GGML file the install writes, and removed at the end. Nothing is
 //! committed. The tests are ignored for what they need; run them with `--ignored`.
 #![allow(
     clippy::std_instead_of_core,
@@ -17,16 +17,11 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use canoa::speech::{AudioFormat, Hints, OpenRequest, PCM_S16LE, SpeechProvider};
-use canoa::store::catalog::FileCheck;
-use canoa_whispercpp::catalog::DEFAULT_REPO;
-use canoa_whispercpp::catalog_of;
-use canoa_whispercpp::{WhisperSettings, WhisperSpeech, is_loaded, unload};
+use canoa_whispercpp::{
+    GGML_FILE, Precision, WhisperSettings, WhisperSpeech, convert, is_loaded, unload,
+};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_harness::LocalSpawner;
-use sha2::{Digest, Sha256};
-
-/// The revision the recorded listing was taken at.
-const REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
 
 const CLIP: &str = "https://raw.githubusercontent.com/ggml-org/whisper.cpp/master/samples/jfk.wav";
 
@@ -48,28 +43,15 @@ fn fixture(name: &str) -> (PathBuf, Vec<u8>) {
     let dir = std::env::temp_dir().join(format!("canoa-whisper-it-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a folder");
-    let listing = include_str!("fixtures/hf_tree_5359861c.json");
-    let include = ["ggml-tiny.bin".to_owned()];
-    let catalog = catalog_of(DEFAULT_REPO, REVISION, listing, &include, &[]).expect("the catalog");
-    let tiny = catalog
-        .items
-        .iter()
-        .find(|item| item.id == "tiny")
-        .expect("the catalog has tiny")
-        .files[0]
-        .clone();
-    let file = dir.join(&tiny.file);
-    fetch(&tiny.url, &file);
-    let bytes = std::fs::read(&file).expect("the model");
-    let digest: String = Sha256::digest(&bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    assert_eq!(
-        Some(FileCheck::Sha256(digest)),
-        tiny.check,
-        "the model is the one the catalog names"
-    );
+    let model = dir.join("tiny");
+    std::fs::create_dir_all(&model).expect("a model folder");
+    for file in ["config.json", "tokenizer.json", "model.safetensors"] {
+        fetch(
+            &format!("https://huggingface.co/openai/whisper-tiny/resolve/main/{file}"),
+            &model.join(file),
+        );
+    }
+    convert(&model, &model.join(GGML_FILE), Precision::F16).expect("the model converts");
     let wav = dir.join("clip.wav");
     fetch(CLIP, &wav);
     let wav = std::fs::read(&wav).expect("the clip");
@@ -94,7 +76,7 @@ fn open(
 }
 
 #[test]
-#[ignore = "needs curl and the network: downloads the tiny model and a recording"]
+#[ignore = "needs curl and the network: downloads the tiny model's folder and a recording"]
 fn the_recording_is_turned_into_text_inside_this_process_and_the_model_is_kept_and_freed() {
     let _one = ONE_AT_A_TIME
         .lock()
@@ -129,7 +111,7 @@ fn the_recording_is_turned_into_text_inside_this_process_and_the_model_is_kept_a
 }
 
 #[test]
-#[ignore = "needs curl and the network: downloads the tiny model and a recording"]
+#[ignore = "needs curl and the network: downloads the tiny model's folder and a recording"]
 fn a_language_a_vocabulary_and_another_rate_are_taken_and_a_missing_model_is_said_when_it_opens() {
     let _one = ONE_AT_A_TIME
         .lock()
