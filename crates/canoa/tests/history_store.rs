@@ -3,7 +3,11 @@
 
 use canoa::history_store::memory::{MemoryDb, MemoryStore};
 use canoa::history_store::schema::{self, TURNS};
-use canoa::history_store::{HistoryStore, OpenRequest, contract};
+use canoa::history_store::{
+    Aggregate, Compacted, HistoryDb, HistoryStore, Migration, OpenRequest, Rows, SchemaState,
+    Select, Sql, Stats, Write, Written, contract,
+};
+use coqui_acp_api::guatiao::library::ProviderError;
 
 #[test]
 fn the_memory_store_passes_the_contract() {
@@ -50,4 +54,64 @@ fn a_turn_carries_every_property_of_the_turn_record() {
         let column = turns.column(name).unwrap_or_else(|| panic!("turns.{name}"));
         assert!(column.nullable, "{name} is null when it was not reported");
     }
+}
+
+/// A store that is the memory store except that a batch is applied one change at a time, so a failure part way keeps what came
+/// before it.
+struct NotAtomic(MemoryDb);
+
+impl HistoryDb for NotAtomic {
+    fn schema(&self) -> Result<SchemaState, ProviderError> {
+        self.0.schema()
+    }
+    fn migrate(&self, migration: Migration) -> Result<(), ProviderError> {
+        self.0.migrate(migration)
+    }
+    fn select(&self, select: Select) -> Result<Rows, ProviderError> {
+        self.0.select(select)
+    }
+    fn count(&self, select: Select) -> Result<u64, ProviderError> {
+        self.0.count(select)
+    }
+    fn aggregate(&self, aggregate: Aggregate) -> Result<Rows, ProviderError> {
+        self.0.aggregate(aggregate)
+    }
+    fn write(&self, write: Write) -> Result<Written, ProviderError> {
+        let mut affected = 0;
+        for op in write.ops {
+            affected += self.0.write(Write { ops: vec![op] })?.affected;
+        }
+        Ok(Written { affected })
+    }
+    fn sql(&self, sql: Sql) -> Result<Rows, ProviderError> {
+        self.0.sql(sql)
+    }
+    fn revision(&self) -> Result<String, ProviderError> {
+        self.0.revision()
+    }
+    fn stats(&self) -> Result<Stats, ProviderError> {
+        self.0.stats()
+    }
+    fn compact(&self) -> Result<Compacted, ProviderError> {
+        self.0.compact()
+    }
+    fn close(&self) -> Result<(), ProviderError> {
+        self.0.close()
+    }
+}
+
+#[test]
+fn the_contract_catches_a_provider_whose_batch_is_not_atomic() {
+    let broken = NotAtomic(MemoryDb::new());
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| contract::run(&broken)))
+        .expect_err("the contract passed a store that keeps half a batch");
+    let said = caught
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| caught.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_default();
+    assert!(
+        said.contains("a batch with a failed op leaves nothing"),
+        "{said}"
+    );
 }

@@ -252,3 +252,42 @@ fn unknown_settings_are_refused() {
         assert!(options(&folder.request(settings)).is_err(), "{settings}");
     }
 }
+
+#[test]
+fn a_writer_waits_for_another_and_then_answers_busy_with_when_to_retry() {
+    let folder = Folder::new("busy");
+    let db = open(&folder, r#"{"busy_timeout_ms": 120, "journal": "delete"}"#).expect("opened");
+    db.migrate(schema::v1()).expect("schema");
+    put(&db, "a");
+
+    // A second writer, here a plain connection to the same file, holds the write lock.
+    let other =
+        rusqlite::Connection::open(folder.0.join("sessions.sqlite3")).expect("another connection");
+    other
+        .execute_batch("BEGIN IMMEDIATE")
+        .expect("the lock is taken");
+
+    let started = std::time::Instant::now();
+    let error = StoreError::from(
+        db.write(Write {
+            ops: vec![insert("b")],
+        })
+        .expect_err("a write while another writer holds the database"),
+    );
+    match error {
+        StoreError::Busy { retry_ms, .. } => assert_eq!(retry_ms, 120),
+        other => panic!("not Busy: {other:?}"),
+    }
+    assert!(
+        started.elapsed() >= std::time::Duration::from_millis(100),
+        "it waited for the writer before answering"
+    );
+
+    other.execute_batch("COMMIT").expect("released");
+    put(&db, "b");
+    assert_eq!(
+        count(&db),
+        2,
+        "the store works again once the writer is done"
+    );
+}
