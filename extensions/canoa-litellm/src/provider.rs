@@ -202,8 +202,13 @@ impl AccountProvider for LiteLlmAccounts {
     ) -> Result<ModelListing, ProviderError> {
         drop((spawner, keeper));
         let (base, key) = proxy_of(&query.account)?;
-        // One list serves both APIs: the proxy lists what it serves, whichever API a program asks it through.
-        Ok(openai_models(&base, &key))
+        // One list serves both APIs: the proxy lists what it serves, whichever API a program asks it through. What each model does
+        // is the proxy's `/model/info`, which a proxy that does not answer leaves unsaid.
+        Ok(crate::capabilities::with_details(
+            openai_models(&base, &key),
+            &base,
+            &key,
+        ))
     }
 }
 

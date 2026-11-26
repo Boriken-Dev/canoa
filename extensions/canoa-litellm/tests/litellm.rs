@@ -288,6 +288,27 @@ fn the_models_are_the_proxys_list_for_the_key_and_a_refused_key_is_said() {
         .map(|model| model.id.as_str())
         .collect();
     assert_eq!(ids, ["claude-y", "gpt-x"]);
+    // What each does is the proxy's `/model/info`: the chat model is a chat model and the other only embeds, so a chat picker
+    // offers one and an embeddings picker the other.
+    let by = |id: &str| {
+        listing
+            .models
+            .iter()
+            .find(|model| model.id == id)
+            .expect("listed")
+    };
+    assert_eq!(
+        by("claude-y").capabilities,
+        ["chat", "image_input", "tool_use"]
+    );
+    assert_eq!(by("gpt-x").capabilities, ["embed"]);
+    assert_eq!(
+        by("gpt-x")
+            .limits
+            .as_ref()
+            .and_then(|limits| limits.dimensions),
+        Some(1536)
+    );
     let refused = LiteLlmAccounts
         .models(
             AccountModelsQuery::new(grant(&proxy.address, &[(API_KEY, "sk-not-a-key")])),

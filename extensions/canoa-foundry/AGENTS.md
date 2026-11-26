@@ -41,7 +41,7 @@ pub mod openai {      // POST /v1/chat/completions, GET /v1/models
     pub fn stream_body(done: &Completion, with_usage: bool) -> String;   // chunks, then `data: [DONE]`
     pub fn stream_error(error: &ApiError) -> String;
     pub fn wants_usage(request: &Value) -> bool;                         // stream_options.include_usage
-    pub fn model_list(models: &[ModelInfo]) -> Value;                    // each with capabilities {tools, images}
+    pub fn model_list(models: &[ModelInfo]) -> Value;                    // each with capabilities {tools, images}; `ModelInfo::task` (the catalog's, when the engine knows it: the SDK engine reads it from the model) becomes the `capabilities` and the context length the `limits` of the account's model list
     pub fn model_entry(model: &ModelInfo) -> Value;
     pub fn dropped_note(dropped: &[String]) -> Option<String>;           // one line for a header
 }
@@ -69,7 +69,7 @@ pub trait Engine: Send + Sync + 'static {
 #[derive(Clone, Default)] pub struct Cancel;                              // Cancel::new(); .cancel() runs what was registered, once; .is_cancelled(); .on_cancel(hook) runs at once if already cancelled
 pub fn lock_unless_cancelled(lock: &Mutex<()>, cancel: &Cancel) -> Result<MutexGuard<'_, ()>, EngineError>;   // an engine's one-at-a-time turn, given up when the request is cancelled while it waits
 pub fn is_cut_tool_call(reason: &str) -> bool;                           // Foundry's 500 "Tool-call output was interrupted": a tool call cut by the answer's token allowance
-#[non_exhaustive] pub struct ModelInfo { pub id: String, pub tools: bool, pub images: bool, pub context: Option<u64> }   // ModelInfo::new(id).tools(b).images(b).context(n)
+#[non_exhaustive] pub struct ModelInfo { pub id: String, pub tools: bool, pub images: bool, pub context: Option<u64>, pub task: Option<String> }   // ModelInfo::new(id).tools(b).images(b).context(n).task(t)
 #[non_exhaustive] pub enum EngineError { Cancelled, CutToolCall(String), NotLoaded(String), Refused(String), Failed(String) }   // CutToolCall: the gateway answers it as a stop for length, never as an error
 pub fn running_endpoint(home: &Path) -> Option<String>;                  // web_urls of <home>/.foundry/daemon.json
 
@@ -138,6 +138,7 @@ pub mod models {
     pub fn rows(answer: &Value) -> Vec<Row>;                      // a list, or an object holding one under models/items/data/results
     pub fn merge(all: Vec<Row>, cached: &[Row], loaded: &[Row]) -> Vec<Model>;   // loaded first, then downloaded, then by id
     pub fn describe(row: &Row) -> String;                         // "chat, gpu, 9.9 GB"
+    pub fn capabilities_of(task: &str) -> Vec<&'static str>;      // a catalog task as the capabilities a picker filters by: chat, embedding (`embed`), speech (`speech_to_text`); a task it does not know says nothing, so the model reports none and is never taken for a chat model; `Row::capabilities()` is the same for a row
     pub fn plain(text: &str, most: usize) -> String;              // a program's words without terminal escapes
     #[non_exhaustive] pub struct Row { pub id, pub alias, pub task, pub device, pub size_mb }
     #[non_exhaustive] pub struct Model { pub row: Row, pub cached: bool, pub loaded: bool }

@@ -30,7 +30,7 @@ use crate::{Cancel, Engine, EngineError, ModelInfo};
 /// A model's description as the worker's first line carries it.
 #[must_use]
 pub fn model_json(model: &ModelInfo) -> Value {
-    json!({"id": model.id, "tools": model.tools, "images": model.images, "context": model.context})
+    json!({"id": model.id, "tools": model.tools, "images": model.images, "context": model.context, "task": model.task})
 }
 
 /// Reads what [`model_json`] wrote.
@@ -41,6 +41,9 @@ pub fn model_from(value: &Value) -> Option<ModelInfo> {
         .images(value.get("images").and_then(Value::as_bool) == Some(true));
     if let Some(context) = value.get("context").and_then(Value::as_u64) {
         model = model.context(context);
+    }
+    if let Some(task) = value.get("task").and_then(Value::as_str) {
+        model = model.task(task);
     }
     Some(model)
 }

@@ -171,6 +171,32 @@ pub fn rows(answer: &Value) -> Vec<Row> {
         .collect()
 }
 
+/// What a catalog task says a model can do, as the ids a picker filters by: `chat` for the models that answer a prompt, `embed` for
+/// the ones that make vectors and `speech_to_text` for the ones that transcribe. A task this does not know says nothing, so the model
+/// is listed as one that reports no capabilities, never guessed to be a chat model.
+#[must_use]
+pub fn capabilities_of(task: &str) -> Vec<&'static str> {
+    match task.trim().to_ascii_lowercase().as_str() {
+        "chat" | "chat-completion" | "chat-completions" | "text-generation" => vec!["chat"],
+        "embedding" | "embeddings" | "text-embedding" => vec!["embed"],
+        "speech" | "speech-to-text" | "audio-transcription" | "transcription" => {
+            vec!["speech_to_text"]
+        }
+        _ => Vec::new(),
+    }
+}
+
+impl Row {
+    /// What the row's task says the model can do ([`capabilities_of`]); empty when it names none or one this does not know.
+    #[must_use]
+    pub fn capabilities(&self) -> Vec<&'static str> {
+        self.task
+            .as_deref()
+            .map(capabilities_of)
+            .unwrap_or_default()
+    }
+}
+
 /// A model as the person is shown it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -331,5 +357,20 @@ mod tests {
             "error: no space"
         );
         assert_eq!(plain("abcdef", 3), "abc");
+    }
+
+    #[test]
+    fn a_catalog_task_says_what_a_model_does_and_one_nobody_knows_says_nothing() {
+        assert_eq!(capabilities_of("chat"), ["chat"]);
+        assert_eq!(capabilities_of("Embedding"), ["embed"]);
+        assert_eq!(capabilities_of("speech"), ["speech_to_text"]);
+        assert!(capabilities_of("image-diffusion").is_empty());
+        let listed = rows(&json!([
+            {"id": "qwen", "task": "chat"},
+            {"id": "bge", "task": "embedding"},
+            {"id": "mystery"},
+        ]));
+        let by: Vec<_> = listed.iter().map(Row::capabilities).collect();
+        assert_eq!(by, [vec!["chat"], vec!["embed"], Vec::<&str>::new()]);
     }
 }

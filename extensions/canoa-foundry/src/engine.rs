@@ -28,6 +28,8 @@ pub struct ModelInfo {
     pub images: bool,
     /// How many tokens it holds at once, when the engine knows.
     pub context: Option<u64>,
+    /// What the catalog says it is for (`chat`, `embedding`, `speech`), when the engine knows.
+    pub task: Option<String>,
 }
 
 impl ModelInfo {
@@ -39,7 +41,15 @@ impl ModelInfo {
             tools: false,
             images: false,
             context: None,
+            task: None,
         }
+    }
+
+    /// Sets what the catalog says the model is for.
+    #[must_use]
+    pub fn task(mut self, task: impl Into<String>) -> Self {
+        self.task = Some(task.into());
+        self
     }
 
     /// Says whether the model returns structured tool calls.

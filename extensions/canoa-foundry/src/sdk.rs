@@ -385,6 +385,9 @@ impl SdkEngine {
         if let Some(context) = self.model.context_length() {
             info = info.context(context);
         }
+        if let Ok(Some(task)) = self.model.get_string_property("task") {
+            info = info.task(task);
+        }
         info
     }
 }

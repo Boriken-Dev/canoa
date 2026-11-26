@@ -279,6 +279,25 @@ fn handle(state: &Mutex<State>, address: &str, mut stream: TcpStream) {
                 &json!({"object": "list", "data": [{"id": "claude-y"}, {"id": "gpt-x"}]}),
             );
         }
+        ("GET", "/model/info") => {
+            if !valid {
+                return respond(
+                    &mut stream,
+                    "401 Unauthorized",
+                    &json!({"error": "bad key"}),
+                );
+            }
+            respond(
+                &mut stream,
+                "200 OK",
+                &json!({"data": [
+                    {"model_name": "claude-y", "model_info": {"mode": "chat", "max_input_tokens": 200000,
+                        "max_output_tokens": 8192, "supports_function_calling": true, "supports_vision": true}},
+                    {"model_name": "gpt-x", "model_info": {"mode": "embedding", "max_input_tokens": 8191,
+                        "output_vector_size": 1536}},
+                ]}),
+            );
+        }
         ("POST", "/v1/messages" | "/v1/responses") => {
             if !valid {
                 return respond(

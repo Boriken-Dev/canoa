@@ -12,6 +12,7 @@
 extern crate alloc;
 
 pub mod account;
+pub mod capabilities;
 mod provider;
 pub mod sso;
 pub mod usage;

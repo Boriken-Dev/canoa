@@ -159,6 +159,28 @@ fn listing(models: Vec<crate::ModelInfo>, serving: &str) -> ModelListing {
             .map(|model| {
                 let mut info = coqui_acp_api::ModelInfo::new(model.id.clone());
                 info.is_default = model.id == serving;
+                // What the catalog says the model is for: a chat picker leaves an embedding model out. A task nobody here knows
+                // leaves the model reporting nothing.
+                if let Some(task) = model.task.as_deref() {
+                    let mut capabilities: Vec<&str> = crate::models::capabilities_of(task);
+                    if capabilities.contains(&"chat") {
+                        if model.tools {
+                            capabilities.push("tool_use");
+                        }
+                        if model.images {
+                            capabilities.push("image_input");
+                        }
+                    }
+                    if !capabilities.is_empty() {
+                        info = info.with_capabilities(
+                            capabilities,
+                            coqui_acp_api::CapabilitiesSource::Listed,
+                        );
+                    }
+                }
+                if let Some(window) = model.context {
+                    info = info.with_limits(coqui_acp_api::ModelLimits::new().context(window));
+                }
                 let mut can = Vec::new();
                 if model.tools {
                     can.push("tools".to_owned());
@@ -745,5 +767,43 @@ mod tests {
         assert!(log.contains("/v1/models"), "{log}");
         drop(lease);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn the_listing_carries_what_the_catalog_says_each_model_is_for_and_its_window() {
+        let listed = listing(
+            vec![
+                ModelInfo::new("qwen")
+                    .task("chat")
+                    .tools(true)
+                    .context(8192),
+                ModelInfo::new("bge").task("embedding"),
+                ModelInfo::new("whisper").task("speech"),
+                ModelInfo::new("mystery"),
+            ],
+            "qwen",
+        );
+        let by = |id: &str| {
+            listed
+                .models
+                .iter()
+                .find(|model| model.id == id)
+                .expect("listed")
+        };
+        assert_eq!(by("qwen").capabilities, ["chat", "tool_use"]);
+        assert_eq!(
+            by("qwen")
+                .limits
+                .as_ref()
+                .and_then(|limits| limits.context_tokens),
+            Some(8192)
+        );
+        assert_eq!(by("bge").capabilities, ["embed"]);
+        assert_eq!(by("whisper").capabilities, ["speech_to_text"]);
+        assert!(
+            !by("mystery").reports_capabilities(),
+            "a task nobody knows is not guessed"
+        );
+        assert!(by("qwen").is_default);
     }
 }
