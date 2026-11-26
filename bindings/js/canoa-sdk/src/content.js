@@ -40,6 +40,18 @@ import { dataOf } from './model.js';
 import { release } from './source.js';
 
 /**
+ * @typedef {object} ContentHostHandle what the host lends `generate` to read through, which the generator releases
+ * @property {(uri: string) => object} stat
+ * @property {(uri: string, maxEntries: number) => object} list
+ * @property {(uri: string, maxBytes: bigint) => string} openText
+ * @property {(uri: string, maxBytes: bigint) => string} openJson
+ * @property {(uri: string, maxBytes: bigint) => Uint8Array} openBytes
+ * @property {(uri: string) => object} resolve
+ * @property {(base: string, name: string) => string} child
+ * @property {() => void} destroy
+ */
+
+/**
  * One URI scheme a content source serves.
  * @param {string} name
  * @param {string} title
@@ -207,7 +219,7 @@ export class CatalogGenerator extends Provider {
    * The catalog's text.
    * @param {{kind: string, label: string, source?: string, fields: string}} _request
    * @param {{ destroy(): void }} spawner
-   * @param {{ destroy(): void }} host
+   * @param {ContentHostHandle} host
    * @returns {string}
    */
   generate(_request, spawner, host) {

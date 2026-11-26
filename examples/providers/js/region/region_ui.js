@@ -103,13 +103,14 @@ export class TeamListing extends CatalogGenerator {
   static grammar = 'team://name';
 
   /**
-   * @param {{source: string}} request
+   * @param {{kind: string, label: string, source?: string, fields: string}} request
    * @param {{destroy(): void}} spawner
-   * @param {{child(base: string, name: string): string, openText(uri: string, max: bigint): string, destroy(): void}} host
+   * @param {import('../../../../bindings/js/canoa-sdk/src/content.js').ContentHostHandle} host
+   * @returns {string}
    */
   generate(request, spawner, host) {
     try {
-      return host.openText(host.child(request.source, 'skills.json'), 1048576n);
+      return host.openText(host.child(request.source ?? '', 'skills.json'), 1048576n);
     } finally {
       release(spawner);
       release(host);
