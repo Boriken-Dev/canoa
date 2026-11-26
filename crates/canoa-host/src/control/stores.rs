@@ -181,7 +181,12 @@ impl Stores {
                 caches.lookup_connect,
                 caches.lookup_response,
             ))
-            .content_in(folder.as_deref(), caches.document_bytes);
+            .content_in(
+                folder.as_deref(),
+                caches.document_bytes,
+                caches.cache_bytes,
+                caches.source_ttl,
+            );
         self.caches = caches;
         self.arm()
     }

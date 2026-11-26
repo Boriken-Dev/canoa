@@ -373,6 +373,31 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_extension_catalogs,
     ),
     rpc(
+        "content/stat",
+        Access::Require(Grant::Hosting),
+        Control::r_content_stat,
+    ),
+    rpc(
+        "content/list",
+        Access::Require(Grant::Hosting),
+        Control::r_content_list,
+    ),
+    rpc(
+        "content/read",
+        Access::Require(Grant::Hosting),
+        Control::r_content_read,
+    ),
+    rpc(
+        "content/resolve",
+        Access::Require(Grant::Hosting),
+        Control::r_content_resolve,
+    ),
+    rpc(
+        "content/cache",
+        Access::Require(Grant::Hosting),
+        Control::r_content_cache,
+    ),
+    rpc(
         "content/schemes",
         Access::Require(Grant::ConfigRead),
         Control::r_content_schemes,

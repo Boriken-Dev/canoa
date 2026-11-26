@@ -1071,6 +1071,7 @@ fn build_subsystems(
         .map_or_else(ContentConfig::default, |raw| ContentConfig {
             ttl: raw.ttl,
             document_bytes: raw.document_bytes,
+            cache_bytes: raw.cache_bytes,
         });
     let network = host
         .network

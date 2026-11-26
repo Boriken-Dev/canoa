@@ -345,13 +345,21 @@ impl Sources {
         &self.content
     }
 
-    /// These sources keeping fetched repositories in `folder`, and reading documents of at most `bytes` unless asked for less.
+    /// These sources keeping fetched repositories and cached documents under `folder`, reading documents of at most `bytes` unless
+    /// asked for less, and keeping at most `cache_bytes` of them for `ttl`.
     pub(crate) fn content_in(
         mut self,
         folder: Option<&std::path::Path>,
         bytes: Option<u64>,
+        cache_bytes: Option<u64>,
+        ttl: core::time::Duration,
     ) -> Self {
-        self.content = self.content.keeping_in(folder).document_bytes(bytes);
+        let documents = folder.map(|folder| folder.join("documents"));
+        self.content = self
+            .content
+            .keeping_in(folder.map(|folder| folder.join("git")).as_deref())
+            .document_bytes(bytes)
+            .caching_in(documents.as_deref(), cache_bytes, ttl);
         self
     }
 

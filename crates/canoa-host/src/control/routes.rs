@@ -378,6 +378,51 @@ impl Control {
         self.extension_catalogs(caller, params)
     }
 
+    pub(super) fn r_content_stat(
+        &self,
+        _caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.content_stat(params)
+    }
+
+    pub(super) fn r_content_list(
+        &self,
+        _caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.content_list(params)
+    }
+
+    pub(super) fn r_content_read(
+        &self,
+        _caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.content_read(params)
+    }
+
+    pub(super) fn r_content_resolve(
+        &self,
+        _caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.content_resolve(params)
+    }
+
+    pub(super) fn r_content_cache(
+        &self,
+        _caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.content_cache(params)
+    }
+
     pub(super) fn r_content_schemes(
         &self,
         _caller: &Caller,

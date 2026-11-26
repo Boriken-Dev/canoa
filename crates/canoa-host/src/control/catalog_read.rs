@@ -102,6 +102,7 @@ impl Control {
             answer["type"] = json!(id);
             answer["label"] = json!(entry.label);
             answer["provider"] = json!(entry.provider);
+            answer["generator"] = json!(entry.generator);
             Ok(answer)
         })
     }

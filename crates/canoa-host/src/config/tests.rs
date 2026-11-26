@@ -2117,11 +2117,13 @@ protected = []
         "[host.content]
 ttl = 60
 document_bytes = 1024
+cache_bytes = 2048
 ",
     )
     .expect("parses");
     assert_eq!(set.content.ttl, Some(60));
     assert_eq!(set.content.document_bytes, Some(1024));
+    assert_eq!(set.content.cache_bytes, Some(2048));
     assert!(
         parse(
             "[host.content]

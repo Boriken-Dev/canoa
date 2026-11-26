@@ -165,7 +165,7 @@ pub(crate) const TABLES: &[Table] = &[
     Table {
         path: &["host", "content"],
         shape: Shape::Flat,
-        fields: &[("ttl", Int), ("document_bytes", Int)],
+        fields: &[("ttl", Int), ("document_bytes", Int), ("cache_bytes", Int)],
     },
     Table {
         path: &["host", "delegate"],

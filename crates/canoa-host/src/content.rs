@@ -13,6 +13,7 @@
     reason = "files and processes are std's"
 )]
 
+mod cache;
 mod command;
 mod data;
 mod file;
@@ -120,6 +121,19 @@ pub(crate) struct Content {
     built: Built,
     /// The most a document read without a limit of its own may hold.
     document_bytes: Option<u64>,
+    /// Where documents are kept for a reader that asks for caching, and how long they stay fresh.
+    cache: Option<cache::ContentCache>,
+    ttl: core::time::Duration,
+}
+
+/// A document read through [`Content::read_cached`].
+#[derive(Clone, Debug)]
+pub(crate) struct Read {
+    pub(crate) bytes: Vec<u8>,
+    /// `cache` or `fetched`.
+    pub(crate) from: &'static str,
+    /// What the provider knew of the file when it was read; none when the answer came from the cache.
+    pub(crate) stat: Option<Stat>,
 }
 
 impl Default for Content {
@@ -244,6 +258,8 @@ impl Content {
             refused: Vec::new(),
             built: Built::default(),
             document_bytes: None,
+            cache: None,
+            ttl: core::time::Duration::from_secs(3600),
         };
         content.build(Built {
             fetching,
@@ -295,6 +311,33 @@ impl Content {
     pub(crate) const fn document_bytes(mut self, bytes: Option<u64>) -> Self {
         self.document_bytes = bytes;
         self
+    }
+
+    /// These providers keeping documents in `folder` (at most `bytes` of them, 512 MiB unless named) for `ttl`.
+    pub(crate) fn caching_in(
+        mut self,
+        folder: Option<&Path>,
+        bytes: Option<u64>,
+        ttl: core::time::Duration,
+    ) -> Self {
+        self.cache = folder.map(|folder| {
+            cache::ContentCache::new(folder.to_path_buf(), bytes.unwrap_or(cache::CACHE_BYTES))
+        });
+        self.ttl = ttl;
+        self
+    }
+
+    /// How many documents the cache keeps, the bytes they take and the most it may hold; none when nothing is kept.
+    pub(crate) fn cache_stats(&self) -> Option<(usize, u64, u64)> {
+        self.cache.as_ref().map(|cache| {
+            let (entries, bytes) = cache.stats();
+            (entries, bytes, cache.max_bytes())
+        })
+    }
+
+    /// Forgets every kept document; how many there were.
+    pub(crate) fn clear_cache(&self) -> usize {
+        self.cache.as_ref().map_or(0, cache::ContentCache::clear)
     }
 
     /// The most a document read without a limit of its own may hold.
@@ -525,11 +568,25 @@ impl Content {
         person: bool,
         max_entries: u32,
     ) -> Result<Listing, Refusal> {
+        self.list_page(uri, person, max_entries, None)
+    }
+
+    /// One page of what is under `uri`, from the page `cursor` names (the first when none).
+    ///
+    /// # Errors
+    ///
+    /// As [`stat`](Self::stat).
+    pub(crate) fn list_page(
+        &self,
+        uri: &str,
+        person: bool,
+        max_entries: u32,
+        cursor: Option<String>,
+    ) -> Result<Listing, Refusal> {
         let held = self.route(uri)?;
-        let mut listing = Self::ask(held, |provider| {
-            provider.list(ListRequest::of(Self::target(uri, person), max_entries))
-        })?
-        .into_result()?;
+        let mut request = ListRequest::of(Self::target(uri, person), max_entries);
+        request.cursor = cursor;
+        let mut listing = Self::ask(held, |provider| provider.list(request))?.into_result()?;
         // A name that is not one path component is not an entry.
         listing
             .entries
@@ -548,21 +605,71 @@ impl Content {
         person: bool,
         max_bytes: u64,
     ) -> Result<Vec<u8>, Refusal> {
+        self.open_full(uri, person, max_bytes)
+            .map(|(bytes, _)| bytes)
+    }
+
+    /// As [`open_bytes`](Self::open_bytes), with what the provider knew of the file; a document the cache holds that is still fresh
+    /// is answered from it unless `refresh`, and what is read is kept. `from` says which.
+    ///
+    /// # Errors
+    ///
+    /// As [`open_bytes`](Self::open_bytes).
+    pub(crate) fn read_cached(
+        &self,
+        uri: &str,
+        person: bool,
+        max_bytes: u64,
+        refresh: bool,
+    ) -> Result<Read, Refusal> {
+        if !refresh
+            && let Some(cache) = &self.cache
+            && let Some(kept) = cache.get(uri)
+            && kept.body.len() as u64 <= max_bytes
+            && (kept.immutable
+                || u128::from(cache::now_ms().saturating_sub(kept.fetched_ms))
+                    < self.ttl.as_millis())
+        {
+            return Ok(Read {
+                bytes: kept.body,
+                from: "cache",
+                stat: None,
+            });
+        }
+        let (bytes, stat) = self.open_full(uri, person, max_bytes)?;
+        if let Some(cache) = &self.cache {
+            cache.put(uri, &bytes, stat.immutable);
+        }
+        Ok(Read {
+            bytes,
+            from: "fetched",
+            stat: Some(stat),
+        })
+    }
+
+    fn open_full(
+        &self,
+        uri: &str,
+        person: bool,
+        max_bytes: u64,
+    ) -> Result<(Vec<u8>, Stat), Refusal> {
         let held = self.route(uri)?;
         let opened = Self::ask(held, |provider| {
             provider.open(OpenRequest::of(Self::target(uri, person), max_bytes))
         })?
         .into_result()?;
+        let stat = opened.stat;
         if let Some(inline) = opened.delivery.inline {
             return if inline.0.len() as u64 > max_bytes {
                 Err(too_large(max_bytes, uri))
             } else {
-                Ok(inline.0)
+                Ok((inline.0, stat))
             };
         }
         if let Some(locator) = opened.delivery.locator {
             let allowed = held.info.endpoints.clone();
-            return https::get_bytes(&self.built.fetching, &locator.url, allowed, max_bytes);
+            return https::get_bytes(&self.built.fetching, &locator.url, allowed, max_bytes)
+                .map(|bytes| (bytes, stat));
         }
         Err(Refusal::new(
             RefusalKind::BadReply,

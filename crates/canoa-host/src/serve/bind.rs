@@ -872,7 +872,7 @@ fn store_caches(
         config.content.ttl,
         crate::store::catalog_run::DEFAULT_SOURCE_TTL,
     ))
-    .with_document_bytes(config.content.document_bytes)
+    .with_content_limits(config.content.document_bytes, config.content.cache_bytes)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -110,6 +110,7 @@ pub(super) struct RawStore {
 pub(super) struct RawContent {
     pub(super) ttl: Option<u64>,
     pub(super) document_bytes: Option<u64>,
+    pub(super) cache_bytes: Option<u64>,
 }
 
 #[derive(Deserialize)]

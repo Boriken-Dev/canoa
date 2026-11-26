@@ -1149,6 +1149,9 @@ mod changes;
 #[cfg(test)]
 mod changes_tests;
 mod choices;
+mod content_read;
+#[cfg(test)]
+mod content_read_tests;
 mod content_schemes;
 #[cfg(test)]
 mod content_schemes_tests;

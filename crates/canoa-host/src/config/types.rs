@@ -877,6 +877,8 @@ pub struct ContentConfig {
     /// `document_bytes`: the most a document read into memory (a catalog, a listing) may hold unless the reader names less
     /// (default 8 MiB).
     pub document_bytes: Option<u64>,
+    /// `cache_bytes`: the most the content cache keeps on disk, the oldest documents going first (default 512 MiB).
+    pub cache_bytes: Option<u64>,
 }
 
 /// Guatiao-derived schema for `[host.content]`.
@@ -889,6 +891,7 @@ pub struct ContentConfig {
 struct ContentSectionSchema {
     ttl: Option<u64>,
     document_bytes: Option<u64>,
+    cache_bytes: Option<u64>,
 }
 
 impl ContentConfig {

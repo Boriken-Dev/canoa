@@ -75,6 +75,8 @@ pub(crate) struct StoreCaches {
     pub(crate) source_ttl: Duration,
     /// The most a document read through the content sources may hold unless the reader names less; none is the default.
     pub(crate) document_bytes: Option<u64>,
+    /// The most the content cache keeps; none is the default.
+    pub(crate) cache_bytes: Option<u64>,
 }
 
 impl StoreCaches {
@@ -96,13 +98,19 @@ impl StoreCaches {
             dir,
             source_ttl: super::catalog_run::DEFAULT_SOURCE_TTL,
             document_bytes: None,
+            cache_bytes: None,
         }
     }
 
     /// These caches reading documents of at most `bytes` through the content sources.
     #[must_use]
-    pub(crate) const fn with_document_bytes(mut self, bytes: Option<u64>) -> Self {
-        self.document_bytes = bytes;
+    pub(crate) const fn with_content_limits(
+        mut self,
+        document_bytes: Option<u64>,
+        cache_bytes: Option<u64>,
+    ) -> Self {
+        self.document_bytes = document_bytes;
+        self.cache_bytes = cache_bytes;
         self
     }
 
