@@ -186,13 +186,13 @@ fn leave_console(command: &mut Command) {
     command.process_group(0);
 }
 
-/// The program `home` records for starting Canoa, else `program` with `serve`.
+/// The program `[host.native]` records for starting Canoa, else `program` with `serve`.
 pub(crate) fn launch_of(
-    home: &Home,
+    layers: &crate::config::Layers,
     program: &crate::cli::Program,
     config: Option<&str>,
 ) -> Launch {
-    if let Ok(recorded) = Launch::read(home) {
+    if let Ok(recorded) = Launch::read(layers) {
         return recorded;
     }
     let mut args: Vec<String> = program

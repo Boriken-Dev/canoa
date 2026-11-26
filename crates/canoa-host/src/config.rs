@@ -313,6 +313,19 @@ impl Config {
     }
 }
 
+/// `[project_trust]`: a directory and the SHA-256 of its project profile as the person trusted it, in hex.
+fn project_trust_ok(trust: &IndexMap<String, String>) -> Result<(), ConfigError> {
+    for (directory, digest) in trust {
+        if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: format!("[project_trust] {directory:?} is the SHA-256 of a profile, in hex"),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigError> {
     let secrets = raw
         .secrets
@@ -346,6 +359,7 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
                     .to_owned(),
         });
     }
+    project_trust_ok(&raw.project_trust)?;
     let skill_pins = skill_pins_of(core::mem::take(&mut raw.skill_pins))?;
     local_profiles.skill_pins.clone_from(&skill_pins);
     let options = overlay_options_of(&raw.overlays)?;

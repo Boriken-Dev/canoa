@@ -125,7 +125,12 @@ pub(crate) const TABLES: &[Table] = &[
     Table {
         path: &["host", "native"],
         shape: Shape::Flat,
-        fields: &[("enabled", Bool), ("control", Lines)],
+        fields: &[
+            ("enabled", Bool),
+            ("control", Lines),
+            ("program", Text),
+            ("args", Lines),
+        ],
     },
     Table {
         path: &["host", "network"],
@@ -319,6 +324,7 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "profile",
             "overlays",
             "skill_pins",
+            "project_trust",
             "loadouts",
             "defaults",
             "profiles",

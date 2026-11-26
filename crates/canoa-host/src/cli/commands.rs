@@ -295,12 +295,22 @@ pub(super) fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     Ok(())
 }
 
+/// The canoa.cfg layers a `native` command records the launch in: `--config`, else `CANOA_CONFIG`, else the user's own.
+fn native_layers(scope: &super::args::NativeScope) -> Result<Layers, Failed> {
+    Layers::resolve(
+        scope.config.as_deref().filter(|value| !value.is_empty()),
+        false,
+    )
+    .map_err(Failed::usage)
+}
+
 /// `canoa native`.
 pub(super) fn native(action: NativeAction, front: &dyn Front) -> Result<(), Failed> {
     let home = home_of(front)?;
     match action {
         NativeAction::Install(args) => {
             let program = std::env::current_exe().map_err(Failed::run)?;
+            let layers = native_layers(&args.scope)?;
             let launch = match args.launch {
                 Some(program) => Some(crate::native::Launch {
                     program,
@@ -334,18 +344,28 @@ pub(super) fn native(action: NativeAction, front: &dyn Front) -> Result<(), Fail
                 launch,
                 profiles: args.scope.profile,
             };
-            for written in crate::native::install(&home, &program, &options).map_err(Failed::run)? {
+            for written in
+                crate::native::install(&home, &layers, &program, &options).map_err(Failed::run)?
+            {
                 print(front, &written)?;
             }
             Ok(())
         }
-        NativeAction::Uninstall(scope) => {
-            crate::native::uninstall(&home, scope.name.as_deref(), &scope.profile)
-                .map_err(Failed::run)
-        }
+        NativeAction::Uninstall(scope) => crate::native::uninstall(
+            &home,
+            &native_layers(&scope)?,
+            scope.name.as_deref(),
+            &scope.profile,
+        )
+        .map_err(Failed::run),
         NativeAction::Status(scope) => {
-            let status = crate::native::status(&home, scope.name.as_deref(), &scope.profile)
-                .map_err(Failed::run)?;
+            let status = crate::native::status(
+                &home,
+                &native_layers(&scope)?,
+                scope.name.as_deref(),
+                &scope.profile,
+            )
+            .map_err(Failed::run)?;
             print(
                 front,
                 &serde_json::json!({
@@ -365,8 +385,17 @@ pub(super) fn native(action: NativeAction, front: &dyn Front) -> Result<(), Fail
 /// What a browser starts: relays native messages on this process's standard streams to the host of the home.
 pub(super) fn native_host(origin: &str, front: &dyn Front) -> Result<(), Failed> {
     let home = home_of(front)?;
+    let layers = Layers::resolve(
+        std::env::var(canoa::brand::CONFIG)
+            .ok()
+            .as_deref()
+            .filter(|value| !value.is_empty()),
+        false,
+    )
+    .map_err(Failed::usage)?;
     crate::native::relay(
         &home,
+        &layers,
         origin,
         &mut std::io::stdin().lock(),
         std::io::stdout(),

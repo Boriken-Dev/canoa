@@ -484,6 +484,7 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
         ])
         .arg(&config)
         .env("COQUI_AGENTIC_PEER_HOME", &home)
+        .env("CANOA_CONFIG", &config)
         .output()
         .expect("native install runs");
     let name = format!("dev.boriken.canoa_test_{}", std::process::id());
@@ -492,6 +493,7 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
             .args(["native", "uninstall", "--name", &name, "--profile"])
             .arg(scratch.0.join("profile"))
             .env("COQUI_AGENTIC_PEER_HOME", &home)
+            .env("CANOA_CONFIG", &config)
             .output()
             .expect("native uninstall runs")
     };
@@ -500,8 +502,16 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
         panic!("{}", String::from_utf8_lossy(&install.stderr));
     }
 
-    let relay = Relay::start(&home, ORIGIN);
+    let relay = Relay::start_with(&home, ORIGIN, &[("CANOA_CONFIG", &config)]);
     assert_eq!(relay.ask(&json!({ "op": "hello" }))["running"], false);
+    // What Start runs is in canoa.cfg's [host.native], and nothing is written under the home for it.
+    let written = std::fs::read_to_string(&config).expect("canoa.cfg");
+    assert!(written.contains("[host.native]"), "{written}");
+    assert!(written.contains("program"), "{written}");
+    assert!(
+        !home.join("native").join("launch.json").exists(),
+        "no launch.json is written"
+    );
     let started = relay.ask(&json!({ "op": "start" }));
     let pid = started["started"].as_u64();
     let outcome = std::panic::catch_unwind(|| {
@@ -538,7 +548,17 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
 #[test]
 fn start_without_a_recorded_program_starts_nothing() {
     let scratch = Scratch::new();
-    let relay = Relay::start(&scratch.0.join("home"), ORIGIN);
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(&config, "").expect("a configuration");
+    // A launch.json an older version left is not read.
+    let home = scratch.0.join("home");
+    std::fs::create_dir_all(home.join("native")).expect("native folder");
+    std::fs::write(
+        home.join("native").join("launch.json"),
+        r#"{"program":"/bin/true","args":[]}"#,
+    )
+    .expect("an old record");
+    let relay = Relay::start_with(&home, ORIGIN, &[("CANOA_CONFIG", &config)]);
     let reply = relay.ask(&json!({ "op": "start" }));
     assert!(
         reply["error"].is_string() && reply["started"].is_null(),
@@ -552,6 +572,8 @@ fn install_status_and_uninstall_leave_nothing_behind() {
     let home = scratch.0.join("home");
     let name = format!("dev.boriken.canoa_test_{}_a", std::process::id());
     let profile = scratch.0.join("profile");
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(&config, "# mine\n").expect("a configuration");
     let run = |args: &[&str]| {
         Command::new(host_binary())
             .arg("native")
@@ -559,6 +581,7 @@ fn install_status_and_uninstall_leave_nothing_behind() {
             .args(["--name", &name, "--profile"])
             .arg(&profile)
             .env("COQUI_AGENTIC_PEER_HOME", &home)
+            .env("CANOA_CONFIG", &config)
             .output()
             .expect("canoa native runs")
     };
@@ -583,7 +606,8 @@ fn install_status_and_uninstall_leave_nothing_behind() {
         ])
         .arg(&profile)
         .args(["--extension-id", &"b".repeat(32)])
-        .env("COQUI_AGENTIC_PEER_HOME", &home);
+        .env("COQUI_AGENTIC_PEER_HOME", &home)
+        .env("CANOA_CONFIG", &config);
     let installed = installed.output().expect("canoa native install runs");
     let outcome = std::panic::catch_unwind(|| {
         assert!(
@@ -634,6 +658,9 @@ fn install_status_and_uninstall_leave_nothing_behind() {
         "{gone}"
     );
     assert!(gone["launch"].is_null(), "{gone}");
+    let left = std::fs::read_to_string(&config).expect("canoa.cfg");
+    assert!(left.starts_with("# mine"), "its comment stays: {left:?}");
+    assert!(!left.contains("program"), "the launch is gone: {left:?}");
     outcome.expect("the registration was as asked");
 }
 

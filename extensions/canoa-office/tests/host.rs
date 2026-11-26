@@ -146,7 +146,13 @@ fn a_running_host_is_found_through_its_door_with_no_address_given_and_its_secret
             json!({ "url": "https://localhost:7800", "office": true, "office_local": true }),
         ),
     );
-    let found = locate_with(&home.0, Duration::from_secs(1), &never_start).expect("found");
+    let found = locate_with(
+        &home.0,
+        &home.0.join("canoa.cfg"),
+        Duration::from_secs(1),
+        &never_start,
+    )
+    .expect("found");
     assert_eq!(
         found.web,
         Web {
@@ -164,11 +170,17 @@ fn a_running_host_is_found_through_its_door_with_no_address_given_and_its_secret
 #[test]
 fn with_no_host_the_recorded_program_is_started_and_the_door_waited_for() {
     let home = Home::new();
+    let config = home.0.join("canoa.cfg");
+    std::fs::write(
+        &config,
+        "[host.native]\nprogram = 'C:\\somewhere\\canoa.exe'\nargs = [\"serve\", \"--until-stdin-closes\"]\n",
+    )
+    .unwrap();
+    // A launch.json an older version wrote is not read.
     std::fs::create_dir_all(home.0.join("native")).unwrap();
     std::fs::write(
         home.0.join("native").join("launch.json"),
-        json!({ "program": r"C:\somewhere\canoa.exe", "args": ["serve", "--until-stdin-closes"] })
-            .to_string(),
+        json!({ "program": "old", "args": [] }).to_string(),
     )
     .unwrap();
     let started = Cell::new(0);
@@ -193,8 +205,8 @@ fn with_no_host_the_recorded_program_is_started_and_the_door_waited_for() {
         door.set(Some(handle));
         Ok(4242)
     };
-    let found =
-        locate_with(&home.0, Duration::from_secs(10), &starter).expect("found after the start");
+    let found = locate_with(&home.0, &config, Duration::from_secs(10), &starter)
+        .expect("found after the start");
     assert_eq!(started.get(), 1, "started once");
     assert_eq!(found.web.url, "http://localhost:8123");
     assert_eq!(found.secret, None, "no secret file, no secret");
@@ -205,7 +217,12 @@ fn with_no_host_the_recorded_program_is_started_and_the_door_waited_for() {
 fn with_no_host_and_no_recorded_program_it_says_so_and_starts_nothing() {
     let home = Home::new();
     assert_eq!(
-        locate_with(&home.0, Duration::from_millis(100), &never_start),
+        locate_with(
+            &home.0,
+            &home.0.join("canoa.cfg"),
+            Duration::from_millis(100),
+            &never_start
+        ),
         Err(Failure::NotRunning)
     );
 }
@@ -213,20 +230,16 @@ fn with_no_host_and_no_recorded_program_it_says_so_and_starts_nothing() {
 #[test]
 fn a_host_that_cannot_be_started_is_said_not_to_have_started() {
     let home = Home::new();
-    std::fs::create_dir_all(home.0.join("native")).unwrap();
-    std::fs::write(
-        home.0.join("native").join("launch.json"),
-        json!({ "program": "x" }).to_string(),
-    )
-    .unwrap();
+    let config = home.0.join("canoa.cfg");
+    std::fs::write(&config, "[host.native]\nprogram = \"x\"\n").unwrap();
     let refused = |_: &Launch| Err(std::io::Error::other("no such program"));
-    match locate_with(&home.0, Duration::from_millis(100), &refused) {
+    match locate_with(&home.0, &config, Duration::from_millis(100), &refused) {
         Err(Failure::NotStarted(why)) => assert!(why.contains("no such program"), "{why}"),
         other => panic!("{other:?}"),
     }
     // One that starts and never opens a door.
     let silent = |_: &Launch| Ok(1);
-    match locate_with(&home.0, Duration::from_millis(600), &silent) {
+    match locate_with(&home.0, &config, Duration::from_millis(600), &silent) {
         Err(Failure::NotStarted(why)) => assert!(why.contains("did not open its door"), "{why}"),
         other => panic!("{other:?}"),
     }
@@ -303,8 +316,10 @@ fn the_recorded_program_is_started_detached_with_its_arguments() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(marker.exists(), "the program ran");
-    assert_eq!(Launch::read(&home.0), None, "no record, no launch");
-    std::fs::create_dir_all(home.0.join("native")).unwrap();
-    std::fs::write(home.0.join("native").join("launch.json"), "not json").unwrap();
-    assert_eq!(Launch::read(&home.0), None);
+    let config = home.0.join("canoa.cfg");
+    assert_eq!(Launch::read(&config), None, "no record, no launch");
+    std::fs::write(&config, "not toml [").unwrap();
+    assert_eq!(Launch::read(&config), None);
+    std::fs::write(&config, "[host.native]\nenabled = true\n").unwrap();
+    assert_eq!(Launch::read(&config), None, "no program, no launch");
 }

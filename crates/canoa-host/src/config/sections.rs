@@ -84,9 +84,14 @@ pub(super) fn native_of(raw: RawNative) -> Result<NativeConfig, ConfigError> {
             set
         }
     };
+    let launch = raw.program.map(|program| crate::native::Launch {
+        program: program.into(),
+        args: raw.args.unwrap_or_default(),
+    });
     Ok(NativeConfig {
         enabled: raw.enabled.unwrap_or(default.enabled),
         control,
+        launch,
     })
 }
 

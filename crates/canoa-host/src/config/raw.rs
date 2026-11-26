@@ -136,6 +136,9 @@ pub(super) struct RawFile {
     pub(super) overlays: IndexMap<String, toml::Value>,
     #[serde(default)]
     pub(super) skill_pins: toml::Table,
+    /// `[project_trust]`: the project profiles the person trusts, by directory, each with the SHA-256 it was trusted at.
+    #[serde(default)]
+    pub(super) project_trust: IndexMap<String, String>,
     /// `[loadouts.NAME]`: the named collections a session starts with.
     #[serde(default)]
     pub(super) loadouts: IndexMap<String, toml::Value>,
@@ -689,6 +692,8 @@ pub(super) fn assist_of(
 pub(super) struct RawNative {
     pub(super) enabled: Option<bool>,
     pub(super) control: Option<Vec<String>>,
+    pub(super) program: Option<String>,
+    pub(super) args: Option<Vec<String>>,
 }
 
 /// `[host.usage]`.

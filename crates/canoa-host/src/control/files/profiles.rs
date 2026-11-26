@@ -9,7 +9,6 @@
     reason = "files are std's"
 )]
 
-use canoa::brand::CONFIG_FILE;
 use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -18,10 +17,14 @@ use coqui_aos::{self as aos, Limit, Settings, StdFs};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
+use canoa::config_store::{Changes, Op, value_of};
+
+use super::config::store_failed;
 use super::{Files, Outcome, plain, refused, text_of};
 use crate::control::{Caller, bad, text_param};
 
-/// The project profile file in a working directory.
+/// The table of canoa.cfg that records the projects whose profiles the person trusts: directory to the profile's SHA-256.
+const PROJECT_TRUST: &str = "project_trust";
 /// The most bytes a project profile may hold.
 const MAX_PROFILE_BYTES: u64 = 1024 * 1024;
 /// What an overlay may hold, as `overlay/check` allows.
@@ -148,54 +151,57 @@ impl Files {
         }))
     }
 
-    fn trust_path(&self) -> Result<PathBuf, (i32, String)> {
-        self.config
-            .as_deref()
-            .and_then(Path::parent)
-            .map(|dir| dir.join("trust.json"))
-            .ok_or_else(|| {
-                refused(&format!(
-                    "this host was not started with a {CONFIG_FILE} to keep trust beside"
-                ))
-            })
-    }
-
-    /// `trust/list` -> `{"projects": [{directory, sha256, trusted?}]}`: the directories whose project profiles the person trusts.
+    /// `trust/list` -> `{"projects": [{directory, sha256}]}`: the directories whose project profiles the person trusts, as
+    /// `[project_trust]` of the person's own canoa.cfg records them.
     pub(crate) fn trust_list(&self) -> Outcome {
-        Ok(json!({"projects": self.trusted()?}))
+        Ok(json!({"projects": self.trusted()}))
     }
 
-    fn trusted(&self) -> Result<Vec<Value>, (i32, String)> {
-        let path = self.trust_path()?;
-        let Ok(bytes) = fs::read(&path) else {
-            return Ok(Vec::new());
+    /// The trusted projects, by directory. A record that cannot be read trusts nothing.
+    fn trusted(&self) -> Vec<Value> {
+        let Ok(table) = self.own_tables() else {
+            return Vec::new();
         };
-        // A record that cannot be read trusts nothing.
-        let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&bytes) else {
-            return Ok(Vec::new());
+        let Some(held) = table.get(PROJECT_TRUST).and_then(toml::Value::as_table) else {
+            return Vec::new();
         };
-        Ok(record
-            .get("projects")
-            .and_then(Value::as_array)
-            .map(|projects| {
-                projects
-                    .iter()
-                    .filter(|project| {
-                        project.get("directory").is_some_and(Value::is_string)
-                            && project.get("sha256").is_some_and(Value::is_string)
-                    })
-                    .cloned()
-                    .collect()
+        held.iter()
+            .filter_map(|(directory, digest)| {
+                Some(json!({"directory": directory, "sha256": digest.as_str()?}))
             })
-            .unwrap_or_default())
+            .collect()
     }
 
-    fn save_trusted(&self, projects: &[Value]) -> Result<(), (i32, String)> {
-        let path = self.trust_path()?;
-        let text = serde_json::to_vec_pretty(&json!({"version": 1, "projects": projects}))
-            .map_err(|error| refused(&error.to_string()))?;
-        crate::replace::write_file(&path, &text, crate::replace::SHARED)
-            .map_err(|error| refused(&format!("trust.json: {error}")))
+    /// Takes `forget` out of `[project_trust]` and puts `trust` in, in one change of canoa.cfg.
+    fn change_trusted(
+        &self,
+        forget: &[String],
+        trust: Option<(&str, &str)>,
+    ) -> Result<(), (i32, String)> {
+        let mut ops: Vec<Op> = forget
+            .iter()
+            .map(|directory| Op::remove([PROJECT_TRUST, directory.as_str()]))
+            .collect();
+        if let Some((directory, digest)) = trust {
+            ops.push(Op::set(
+                [PROJECT_TRUST, directory],
+                value_of(&Value::String(digest.to_owned())),
+            ));
+        }
+        self.store()?
+            .change(Changes::of(ops))
+            .map(|_| ())
+            .map_err(store_failed)
+    }
+
+    /// The directories of `[project_trust]` that name the same place as `names`.
+    fn trusted_as(&self, names: &[&str]) -> Vec<String> {
+        self.trusted()
+            .iter()
+            .filter_map(|project| project["directory"].as_str())
+            .filter(|held| names.iter().any(|name| same_place(held, name)))
+            .map(str::to_owned)
+            .collect()
     }
 
     /// `trust/set` `{"directory", "sha256"}` -> the list: trusts the folder's project profile as the person was shown it. The
@@ -217,15 +223,8 @@ impl Files {
             ));
         }
         let name = text_of(&real);
-        let mut projects = self.trusted()?;
-        projects.retain(|project| !same_place(project["directory"].as_str().unwrap_or(""), &name));
-        projects.push(json!({
-            "directory": name,
-            "sha256": digest,
-            "trusted": crate::control::overlays::iso_now(),
-        }));
-        self.save_trusted(&projects)?;
-        Ok(json!({"projects": projects}))
+        self.change_trusted(&self.trusted_as(&[&name]), Some((&name, &digest)))?;
+        Ok(json!({"projects": self.trusted()}))
     }
 
     /// `trust/revoke` `{"directory"}` -> the list: stops trusting the folder, which need no longer be there.
@@ -236,16 +235,10 @@ impl Files {
             .writing
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut projects = self.trusted()?;
-        projects.retain(|project| {
-            let held = project["directory"].as_str().unwrap_or("");
-            !same_place(held, asked)
-                && !resolved
-                    .as_deref()
-                    .is_some_and(|real| same_place(held, real))
-        });
-        self.save_trusted(&projects)?;
-        Ok(json!({"projects": projects}))
+        let mut names = vec![asked];
+        names.extend(resolved.as_deref());
+        self.change_trusted(&self.trusted_as(&names), None)?;
+        Ok(json!({"projects": self.trusted()}))
     }
 }
 

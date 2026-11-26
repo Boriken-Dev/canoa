@@ -568,6 +568,8 @@ pub struct NativeConfig {
     pub enabled: bool,
     /// What a browser key paired through the door may do on `@control`.
     pub control: BTreeSet<crate::control::Grant>,
+    /// What the extension's Start button runs, recorded by `canoa native install`.
+    pub launch: Option<crate::native::Launch>,
 }
 
 impl NativeConfig {
@@ -599,6 +601,7 @@ impl Default for NativeConfig {
         Self {
             enabled: true,
             control: Self::default_control(),
+            launch: None,
         }
     }
 }

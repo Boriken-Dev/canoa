@@ -239,6 +239,15 @@ fn a_project_profile_is_trusted_as_it_was_shown_and_revoked() {
     );
     assert!(said["result"]["profile"].is_null(), "{said}");
 
+    // A trust.json an older version left is not read.
+    write(
+        &tmp.join("cfg").join("trust.json"),
+        &format!(
+            r#"{{"version":1,"projects":[{{"directory":{},"sha256":"{}"}}]}}"#,
+            json!(text(&work)),
+            sha(body)
+        ),
+    );
     let said = ask(&control, &owner, "trust/list", json!({}));
     assert_eq!(said["result"]["projects"], json!([]), "{said}");
 
@@ -262,10 +271,16 @@ fn a_project_profile_is_trusted_as_it_was_shown_and_revoked() {
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0]["directory"], text(&work));
     assert_eq!(projects[0]["sha256"], sha(body));
+    // The record is canoa.cfg's [project_trust], and no file of its own is written.
+    let cfg = tmp.join("cfg");
+    let kept = fs::read_to_string(cfg.join("canoa.cfg")).expect("canoa.cfg");
+    assert!(kept.contains("[project_trust]"), "{kept}");
+    assert!(kept.contains(&sha(body)), "{kept}");
     assert!(
-        projects[0]["trusted"]
-            .as_str()
-            .is_some_and(|at| at.ends_with('Z'))
+        fs::read_to_string(cfg.join("trust.json"))
+            .expect("the planted file")
+            .contains(&sha(body)),
+        "trust.json is left as it was"
     );
 
     // Trusting again replaces the record, and a key holding the read grant sees it.

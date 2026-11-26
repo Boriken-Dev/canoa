@@ -24,6 +24,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
+use canoa::config_store::{Changes, ConfigStore as _, Key, Op, json_of, value_of};
+
+use crate::config::Layers;
+use crate::config_store::FileStore;
 use crate::control::discover;
 use crate::home::{Home, LockError};
 use crate::pipe::{self, PipeName, Stream};
@@ -381,7 +385,7 @@ fn hello(home: &Home, origin: &str) -> Value {
     }
 }
 
-/// What `op:start` runs, kept in the home by `native install`.
+/// What `op:start` runs, kept in canoa.cfg's `[host.native]` (`program`, `args`) by `native install`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Launch {
     /// The program.
@@ -395,26 +399,60 @@ fn native_dir(home: &Home) -> PathBuf {
     home.dir().join("native")
 }
 
-fn launch_file(home: &Home) -> PathBuf {
-    native_dir(home).join("launch.json")
-}
+/// The table of canoa.cfg that holds the launch.
+const LAUNCH_TABLE: [&str; 2] = ["host", "native"];
 
 impl Launch {
-    /// The launch `native install` recorded in `home`.
+    /// The launch `native install` recorded in `layers`' `[host.native]`.
     ///
     /// # Errors
-    /// When none was recorded, or the file is not a launch.
-    pub fn read(home: &Home) -> io::Result<Self> {
-        let text = fs::read_to_string(launch_file(home))?;
-        serde_json::from_str(&text).map_err(io::Error::other)
+    /// When none was recorded, or canoa.cfg cannot be read.
+    pub fn read(layers: &Layers) -> io::Result<Self> {
+        let store = FileStore::of(layers);
+        let held = |key: &str| {
+            store
+                .get(Key::new(LAUNCH_TABLE.iter().copied().chain([key])))
+                .map_err(io::Error::other)
+        };
+        let program = held("program")?
+            .value
+            .and_then(|value| json_of(&value))
+            .and_then(|value| value.as_str().map(PathBuf::from))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no program is recorded"))?;
+        let args = held("args")?
+            .value
+            .and_then(|value| json_of(&value))
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default();
+        Ok(Self { program, args })
     }
 
-    fn write(&self, home: &Home) -> io::Result<()> {
-        fs::create_dir_all(native_dir(home))?;
-        fs::write(
-            launch_file(home),
-            serde_json::to_string_pretty(self).map_err(io::Error::other)?,
-        )
+    fn write(&self, layers: &Layers) -> io::Result<()> {
+        let program = self.program.to_string_lossy().into_owned();
+        FileStore::of(layers)
+            .change(Changes::of(vec![
+                Op::set(
+                    LAUNCH_TABLE.iter().copied().chain(["program"]),
+                    value_of(&json!(program)),
+                ),
+                Op::set(
+                    LAUNCH_TABLE.iter().copied().chain(["args"]),
+                    value_of(&json!(self.args)),
+                ),
+            ]))
+            .map(|_| ())
+            .map_err(io::Error::other)
+    }
+
+    /// Forgets the recorded launch.
+    fn forget(layers: &Layers) -> io::Result<()> {
+        FileStore::of(layers)
+            .change(Changes::of(vec![
+                Op::remove(LAUNCH_TABLE.iter().copied().chain(["program"])),
+                Op::remove(LAUNCH_TABLE.iter().copied().chain(["args"])),
+            ]))
+            .map(|_| ())
+            .map_err(io::Error::other)
     }
 
     /// Starts the program detached from this process and from the job the browser put it in, so it outlives both. Returns its
@@ -485,6 +523,7 @@ fn detach_in_job(command: &mut Command) {
 /// The native messages a relay takes before a link is open.
 struct Relay<W: Write + Send + 'static> {
     home: Home,
+    layers: Layers,
     origin: String,
     output: Arc<Mutex<W>>,
 }
@@ -501,7 +540,7 @@ impl<W: Write + Send + 'static> Relay<W> {
                 None
             }
             Some("start") => {
-                let started = Launch::read(&self.home)
+                let started = Launch::read(&self.layers)
                     .map_err(|_| "no program was registered to start Canoa".to_owned())
                     .and_then(|launch| launch.start(&self.home));
                 let message = match started {
@@ -595,6 +634,7 @@ const MAX_FROM_BROWSER: usize = companion::MAX_REPLY + 1024;
 /// When the browser's stream fails or a message is longer than a browser sends.
 pub fn relay<W: Write + Send + 'static>(
     home: &Home,
+    layers: &Layers,
     origin: &str,
     input: &mut impl Read,
     output: W,
@@ -602,6 +642,7 @@ pub fn relay<W: Write + Send + 'static>(
 ) -> io::Result<()> {
     let relay = Relay {
         home: home.clone(),
+        layers: layers.clone(),
         origin: origin.to_owned(),
         output: Arc::new(Mutex::new(output)),
     };
@@ -712,37 +753,44 @@ fn registration(home: &Home, program: &Path, options: &Install) -> Result<Regist
     Ok(registration)
 }
 
-/// Registers `program` as the native host for this user, and records what `op:start` runs. Returns what it wrote.
+/// Registers `program` as the native host for this user, and records what `op:start` runs in `[host.native]`. Returns what it wrote.
 ///
 /// # Errors
 /// When a file or the registry refuses, or no browser profile exists to register in.
-pub fn install(home: &Home, program: &Path, options: &Install) -> Result<Vec<String>, Error> {
+pub fn install(
+    home: &Home,
+    layers: &Layers,
+    program: &Path,
+    options: &Install,
+) -> Result<Vec<String>, Error> {
     let registration = registration(home, program, options)?;
     fs::create_dir_all(native_dir(home)).map_err(|error| {
         Error::Discovery(format!("the native folder could not be made: {error}"))
     })?;
     let mut wrote = companion::install(&registration)?;
     if let Some(launch) = &options.launch {
-        launch.write(home).map_err(|error| {
-            Error::Discovery(format!("launch.json could not be written: {error}"))
+        launch.write(layers).map_err(|error| {
+            Error::Discovery(format!("[host.native] could not be written: {error}"))
         })?;
-        wrote.push(launch_file(home).to_string_lossy().into_owned());
+        wrote.push("[host.native] program, args".to_owned());
     }
     Ok(wrote)
 }
 
-/// Removes what [`install`] wrote under `name`, and the launch record, leaving an empty `native` folder out.
+/// Removes what [`install`] wrote under `name`, and the launch recorded in `[host.native]`, leaving an empty `native` folder out.
 ///
 /// # Errors
 /// When a file exists and cannot be removed.
-pub fn uninstall(home: &Home, name: Option<&str>, profiles: &[PathBuf]) -> Result<(), Error> {
+pub fn uninstall(
+    home: &Home,
+    layers: &Layers,
+    name: Option<&str>,
+    profiles: &[PathBuf],
+) -> Result<(), Error> {
     companion::uninstall(name.unwrap_or(HOST_NAME), Some(&native_dir(home)), profiles)?;
-    let removed = fs::remove_file(launch_file(home));
-    if let Err(error) = removed
-        && error.kind() != io::ErrorKind::NotFound
-    {
+    if let Err(error) = Launch::forget(layers) {
         return Err(Error::Discovery(format!(
-            "launch.json could not be removed: {error}"
+            "[host.native] could not be cleared: {error}"
         )));
     }
     // Empty or not there; a folder with something else in it stays.
@@ -769,14 +817,19 @@ pub struct Status {
 ///
 /// # Errors
 /// When the registry cannot be read.
-pub fn status(home: &Home, name: Option<&str>, profiles: &[PathBuf]) -> Result<Status, Error> {
+pub fn status(
+    home: &Home,
+    layers: &Layers,
+    name: Option<&str>,
+    profiles: &[PathBuf],
+) -> Result<Status, Error> {
     Ok(Status {
         registered: companion::installed(
             name.unwrap_or(HOST_NAME),
             Some(&native_dir(home)),
             profiles,
         )?,
-        launch: Launch::read(home).ok(),
+        launch: Launch::read(layers).ok(),
         running: running(home),
         holder: home.holder(),
         door_error: door_error(home.dir()),

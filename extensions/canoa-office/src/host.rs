@@ -3,7 +3,7 @@
 //! The host that holds a home opens a door in it: a named pipe whose name is made from the home's path, which the browser
 //! extension's native host also uses. Its `@hello` says, among other things, where the host's web app is. The home is the one
 //! `canoa` itself uses (`COQUI_AGENTIC_PEER_HOME`, else `.canoa` in the user's folder). With no host running, the program the
-//! home recorded for starting one (`<home>/native/launch.json`) is started detached, so that sessions outlive Office.
+//! canoa.cfg recorded for starting one (`[host.native]` `program` and `args`) is started detached, so that sessions outlive Office.
 
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
@@ -16,6 +16,8 @@ use sha2::{Digest as _, Sha256};
 
 /// The environment variable that names a home other than the user's own.
 pub const HOME_ENV: &str = "COQUI_AGENTIC_PEER_HOME";
+/// The variable that names the canoa.cfg files, as `canoa` reads it.
+pub const CONFIG_ENV: &str = "CANOA_CONFIG";
 
 /// The most a door's answer may weigh.
 const MAX_HELLO: usize = 64 * 1024;
@@ -239,7 +241,7 @@ pub fn secret(home: &Path) -> Option<String> {
     (!text.is_empty()).then(|| text.to_owned())
 }
 
-/// What starting a host runs: `<home>/native/launch.json`, which `canoa native install` writes.
+/// What starting a host runs: `[host.native]` `program` and `args` of canoa.cfg, which `canoa native install` writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Launch {
     /// The program.
@@ -249,15 +251,16 @@ pub struct Launch {
 }
 
 impl Launch {
-    /// The launch recorded in `home`, or `None` when there is none or it is not a launch.
+    /// The launch recorded in the canoa.cfg at `config`, or `None` when there is none, the file is not TOML, or it records no program.
     #[must_use]
-    pub fn read(home: &Path) -> Option<Self> {
-        let text = std::fs::read_to_string(home.join("native").join("launch.json")).ok()?;
-        let value: Value = serde_json::from_str(&text).ok()?;
-        let program = PathBuf::from(value.get("program")?.as_str()?);
-        let args = value
+    pub fn read(config: &Path) -> Option<Self> {
+        let text = std::fs::read_to_string(config).ok()?;
+        let table: toml::Table = text.parse().ok()?;
+        let native = table.get("host")?.get("native")?;
+        let program = PathBuf::from(native.get("program")?.as_str()?);
+        let args = native
             .get("args")
-            .and_then(Value::as_array)
+            .and_then(toml::Value::as_array)
             .map(|args| {
                 args.iter()
                     .filter_map(|arg| arg.as_str().map(str::to_owned))
@@ -297,6 +300,35 @@ impl Launch {
     }
 }
 
+/// The person's own canoa.cfg: the last file `CANOA_CONFIG` lists, else `Canoa\canoa.cfg` in the roaming application data folder.
+#[must_use]
+pub fn config_file() -> Option<PathBuf> {
+    config_file_from(
+        std::env::var_os(CONFIG_ENV).filter(|value| !value.is_empty()),
+        std::env::var_os("APPDATA").map(PathBuf::from),
+    )
+}
+
+/// [`config_file`] from the variable's value and the application data folder.
+#[must_use]
+pub fn config_file_from(
+    variable: Option<std::ffi::OsString>,
+    appdata: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match variable {
+        Some(listed) => {
+            let files: Vec<PathBuf> = std::env::split_paths(&listed)
+                .filter(|path| !path.as_os_str().is_empty())
+                .collect();
+            files.last().map(|path| {
+                let text = path.to_string_lossy();
+                PathBuf::from(text.strip_prefix('+').unwrap_or(&text))
+            })
+        }
+        None => appdata.map(|dir| dir.join("Canoa").join("canoa.cfg")),
+    }
+}
+
 /// Finds the host of `home`, starting one with `starter` when no door answers and waiting up to `wait` for it to open its door.
 ///
 /// # Errors
@@ -304,6 +336,7 @@ impl Launch {
 /// A [`Failure`] saying why there is no web app to show.
 pub fn locate_with(
     home: &Path,
+    config: &Path,
     wait: Duration,
     starter: &dyn Fn(&Launch) -> io::Result<u32>,
 ) -> Result<Located, Failure> {
@@ -311,7 +344,7 @@ pub fn locate_with(
     let answer = match hello(&pipe) {
         Ok(answer) => answer,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let launch = Launch::read(home).ok_or(Failure::NotRunning)?;
+            let launch = Launch::read(config).ok_or(Failure::NotRunning)?;
             starter(&launch).map_err(|error| Failure::NotStarted(error.to_string()))?;
             let until = Instant::now() + wait;
             loop {
@@ -344,5 +377,6 @@ pub fn locate_with(
 /// A [`Failure`] saying why there is no web app to show.
 pub fn locate() -> Result<Located, Failure> {
     let home = home_dir().ok_or(Failure::NoHome)?;
-    locate_with(&home, START_WAIT, &Launch::start)
+    let config = config_file().ok_or(Failure::NoHome)?;
+    locate_with(&home, &config, START_WAIT, &Launch::start)
 }

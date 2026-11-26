@@ -419,6 +419,9 @@ pub(super) struct NativeScope {
     /// A browser's --user-data-dir, where Chromium on Linux and macOS reads native hosts when it is started with one.
     #[arg(long, value_name = "DIR")]
     pub(super) profile: Vec<PathBuf>,
+    /// The canoa.cfg files whose `[host.native]` records what Start runs, as `serve --config` names them.
+    #[arg(long, env = canoa::brand::CONFIG)]
+    pub(super) config: Option<String>,
 }
 
 /// `canoa native install`.

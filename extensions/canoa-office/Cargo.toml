@@ -21,6 +21,7 @@ crate-type = ["cdylib", "rlib"]
 windows-core.workspace = true
 windows-registry.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 sha2.workspace = true
 url.workspace = true
 percent-encoding.workspace = true

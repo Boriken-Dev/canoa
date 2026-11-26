@@ -56,7 +56,11 @@ pub(super) fn office_launcher(args: &LauncherArgs, front: &dyn Front) -> Result<
     let program = front
         .program()
         .map_err(|error| Failed::run(format!("this program cannot find itself: {error}")))?;
-    let launch = crate::launcher::launch_of(&home, &program, args.config.as_deref());
+    let launch = crate::launcher::launch_of(
+        &super::commands::layers_of(args, front, false)?,
+        &program,
+        args.config.as_deref(),
+    );
     crate::launcher::run(
         &web,
         &home.dir().join("office"),
