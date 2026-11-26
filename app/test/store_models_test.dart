@@ -233,7 +233,7 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('store-entry-Runner-checked')), matching: find.byKey(const Key('verified-mark'))), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('store-entry-Runner-bare')), matching: find.byKey(const Key('verified-mark'))), findsNothing);
     final mark = find.descendant(of: find.byKey(const Key('store-entry-Runner-mixed')), matching: find.byType(Tooltip));
-    expect(tester.widget<Tooltip>(mark.first).message, 'Verified with SHA-256, MD5');
+    expect(tester.widget<Tooltip>(mark.first).message, 'SHA-256, MD5 verified');
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_models_verified_desktop.png'));
 
     for (final (id, field) in [('checked', 'SHA-256'), ('bare', 'No')]) {
@@ -490,6 +490,118 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
     await tester.pumpAndSettle();
     expect(find.text('this host was not started with a canoa.cfg a page may edit'), findsOneWidget);
+    shown.dispose();
+  });
+
+  /// A not yet installed row whose data lists the engines that run it, as a library's catalog says them: the second writes its file at
+  /// install, in a form picked in the dialog.
+  Map<String, Object?> engineRow(String id, {bool installed = false, bool second = false}) => {
+    'id': id,
+    'summary': 'Speech to text',
+    'tags': ['speech'],
+    'on': installed,
+    'state': installed ? 'installed' : null,
+    'verified': 'git blob id, SHA-256',
+    'engines': [
+      {'id': 'first', 'label': 'Alpha', 'state': installed ? 'installed' : 'available'},
+      {
+        'id': 'second',
+        'label': 'Beta',
+        'state': second ? 'installed' : 'available',
+        'variants': [
+          {'id': 'full', 'label': 'full', 'detail': 'Full precision: the largest file.'},
+          {'id': 'half', 'label': 'half', 'detail': 'About 40% of the size of full.'},
+        ],
+      },
+    ],
+    'actions': [
+      {
+        'title': 'Install $id',
+        'confirm': 'The files are downloaded and checked against the git blob id, SHA-256 digest the catalog gives. Then the file Beta reads is written from them.',
+        'label': 'Install',
+        'steps': ['fetch_files', 'write'],
+      },
+    ],
+    'facts': <Object?>[],
+    'sections': <Object?>[],
+    'values': <String, Object?>{},
+  };
+
+  testWidgets('a tile draws a pill for each engine its data lists, filled once installed and outlined while only available', (tester) async {
+    _tall(tester);
+    final host = _host([engineRow('both', installed: true, second: true), engineRow('alone', installed: true), engineRow('none')]);
+    final shown = _models(host);
+    final page = _typeOf(shown);
+    await tester.runAsync(page.load!);
+    expect(page.items().map((each) => [for (final engine in each.engines) (engine.label, engine.installed)]), [
+      [('Alpha', true), ('Beta', true)],
+      [('Alpha', true), ('Beta', false)],
+      [('Alpha', false), ('Beta', false)],
+    ]);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: page, view: StoreView(modelsTypeId)))));
+    await tester.pumpAndSettle();
+    final tile = find.byKey(const Key('store-entry-Runner-alone'));
+    expect(find.descendant(of: tile, matching: find.byKey(const Key('engine-pill-first'))), findsOneWidget);
+    expect(find.descendant(of: tile, matching: find.text('Alpha')), findsOneWidget);
+    expect(find.descendant(of: tile, matching: find.text('Beta')), findsOneWidget);
+    final filled = tester.widget<Container>(find.descendant(of: tile, matching: find.byKey(const Key('engine-pill-first'))));
+    final outlined = tester.widget<Container>(find.descendant(of: tile, matching: find.byKey(const Key('engine-pill-second'))));
+    expect((filled.decoration! as BoxDecoration).color, isNotNull, reason: 'an installed engine is filled');
+    expect((outlined.decoration! as BoxDecoration).color, isNull, reason: 'an available one is outlined');
+    expect((outlined.decoration! as BoxDecoration).border, isNotNull);
+    final pill = find.descendant(of: tile, matching: find.byType(Tooltip));
+    expect(tester.widget<Tooltip>(pill.at(1)).message, 'Alpha is installed');
+    expect(tester.widget<Tooltip>(pill.at(2)).message, 'Beta is available');
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_models_engines_desktop.png'));
+    shown.dispose();
+  });
+
+  testWidgets('the install dialog offers each form an engine writes its file in, and the steps are asked with the one picked', (tester) async {
+    _tall(tester);
+    final host = _host([engineRow('m')]);
+    final shown = _models(host);
+    final type = _typeOf(shown);
+    await tester.runAsync(type.load!);
+    await _open(tester, type.items().single);
+    expect(find.byKey(const Key('model-choice-second')), findsOneWidget);
+    expect(find.byKey(const Key('model-choice-first')), findsNothing, reason: 'an engine with no forms asks nothing');
+    expect(find.text('Beta file'), findsOneWidget);
+    expect(find.text('Full precision: the largest file.'), findsOneWidget);
+    expect(tester.widget<RadioGroup<String>>(find.byType(RadioGroup<String>)).groupValue, 'full', reason: 'the first form is the default');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(host.params['store/model'], isNull, reason: 'Cancel runs nothing');
+
+    await _open(tester, type.items().single);
+    await tester.tap(find.byKey(const Key('model-variant-second-half')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<RadioGroup<String>>(find.byType(RadioGroup<String>)).groupValue, 'half');
+    await tester.tap(find.byKey(const Key('model-confirm-yes')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['store/model']!.map((given) => given['action']), ['fetch_files', 'write']);
+    expect(
+      host.params['store/model']!.map((given) => given['options']),
+      [
+        {'second': 'half'},
+        {'second': 'half'},
+      ],
+      reason: 'each step is told what the person picked, by the engine\'s id',
+    );
+    shown.dispose();
+  });
+
+  testWidgets('a model with no choice asks for none, and its steps carry no options', (tester) async {
+    final host = _host([_row('big:2')]);
+    final shown = _models(host);
+    final type = _typeOf(shown);
+    await tester.runAsync(type.load!);
+    await _open(tester, type.items().single);
+    expect(find.byKey(const Key('model-choice-second')), findsNothing);
+    await tester.tap(find.byKey(const Key('model-confirm-yes')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['store/model']!.every((given) => !given.containsKey('options')), isTrue);
     shown.dispose();
   });
 }

@@ -9,6 +9,7 @@ import '../selectable.dart';
 import 'entry_details.dart';
 import 'programs.dart';
 import 'programs_view.dart';
+import 'store_banner.dart' show StoreEngine;
 import 'store_extension.dart';
 
 // The models of a Store type, as its library lists them: what the host's `store/models` answers (rows with a line, tags, what + does,
@@ -47,6 +48,27 @@ final class ModelSection {
 
   /// Whether the form of the model's settings is drawn in it.
   final bool settings;
+}
+
+/// One form an engine's file is written in, which the install dialog offers.
+final class ModelVariant {
+  const ModelVariant({required this.id, required this.label, this.detail});
+
+  final String id, label;
+
+  /// What the dialog says beside it.
+  final String? detail;
+}
+
+/// One way a model runs: a pill on its tile, installed once what it reads is there and available until then.
+final class ModelEngine {
+  const ModelEngine({required this.id, required this.label, required this.installed, this.variants = const []});
+
+  final String id, label;
+  final bool installed;
+
+  /// The forms its file is written in at install, the first the default; empty when the install offers no choice.
+  final List<ModelVariant> variants;
 }
 
 /// What + does for a model once the person has read what it takes.
@@ -91,6 +113,7 @@ final class StoreModel {
     this.on = false,
     this.state,
     this.verified,
+    this.engines = const [],
     this.facts = const [],
     this.actions = const [],
     this.sections = const [],
@@ -106,6 +129,22 @@ final class StoreModel {
     on: json['on'] == true,
     state: _text(json['state']),
     verified: _text(json['verified']),
+    engines: _list(
+      json['engines'],
+      (engine) => engine['id'] is String
+          ? ModelEngine(
+              id: engine['id']! as String,
+              label: _text(engine['label']) ?? engine['id']! as String,
+              installed: engine['state'] == 'installed',
+              variants: _list(
+                engine['variants'],
+                (variant) => variant['id'] is String
+                    ? ModelVariant(id: variant['id']! as String, label: _text(variant['label']) ?? variant['id']! as String, detail: _text(variant['detail']))
+                    : null,
+              ),
+            )
+          : null,
+    ),
     facts: _list(json['facts'], (fact) => fact['label'] is String ? ModelFact(fact['label']! as String, '${fact['value'] ?? ''}') : null),
     actions: _list(
       json['actions'],
@@ -145,6 +184,9 @@ final class StoreModel {
 
   /// The algorithm its files' digests are made with (`SHA-256`, `MD5`), the checks the download makes; null when a file has none.
   final String? verified;
+
+  /// The ways it runs, as the type's data says: each is a pill on its tile.
+  final List<ModelEngine> engines;
   final List<ModelFact> facts;
 
   /// What it can do; + does the first that is not a removal.
@@ -288,10 +330,10 @@ class TypeModels extends ChangeNotifier {
 
   /// Asks the host to run [action] on [model], on a link of its own since a download takes long; throws what it refuses with. The
   /// list is read again after, whatever came of it.
-  Future<void> run(String model, String action) async {
+  Future<void> run(String model, String action, {Map<String, String> options = const {}}) async {
     final client = await _open();
     try {
-      await client.call('store/model', {'type': type, 'model': model, 'action': action}, null, modelWait);
+      await client.call('store/model', {'type': type, 'model': model, 'action': action, if (options.isNotEmpty) 'options': options}, null, modelWait);
     } finally {
       unawaited(client.close());
       await refresh();
@@ -357,6 +399,7 @@ List<ExtensionStoreItem> _itemsOf(TypeModels models) {
         tags: model.tags,
         installed: model.on,
         verified: model.verified,
+        engines: [for (final engine in model.engines) StoreEngine(id: engine.id, label: engine.label, installed: engine.installed)],
         install: model.installAction == null ? null : (context) => _choose(context, models, model, model.installAction!),
         remove: model.removeAction == null ? null : (context) => _choose(context, models, model, model.removeAction!),
         details: (context, config) => ModelPage(models: models, id: model.id),
@@ -364,20 +407,58 @@ List<ExtensionStoreItem> _itemsOf(TypeModels models) {
   ];
 }
 
-Future<bool> _confirm(BuildContext context, {required String title, required String text, required String action}) async {
+/// The confirmation of what + takes. An engine whose file the install writes in a form the person picks is asked about here, so the
+/// answer maps each such engine's id to the variant picked; null when the person cancels.
+Future<Map<String, String>?> _confirm(
+  BuildContext context, {
+  required String title,
+  required String text,
+  required String action,
+  List<ModelEngine> engines = const [],
+}) async {
+  final picks = {for (final engine in engines) if (engine.variants.isNotEmpty) engine.id: engine.variants.first.id};
   final answer = await showSelectableDialog<bool>(
     context: context,
-    builder: (dialog) => AlertDialog(
-      key: const Key('model-confirm'),
-      title: Text(title),
-      content: Text(text),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
-        FilledButton(key: const Key('model-confirm-yes'), onPressed: () => Navigator.pop(dialog, true), child: Text(action)),
-      ],
+    builder: (dialog) => StatefulBuilder(
+      builder: (dialog, setPicked) => AlertDialog(
+        key: const Key('model-confirm'),
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(text),
+            for (final engine in engines)
+              if (engine.variants.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Column(key: Key('model-choice-${engine.id}'), crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${engine.label} file', style: Theme.of(dialog).textTheme.titleSmall),
+                    RadioGroup<String>(
+                      groupValue: picks[engine.id],
+                      onChanged: (value) => setPicked(() => picks[engine.id] = value ?? picks[engine.id]!),
+                      child: Column(children: [
+                        for (final variant in engine.variants)
+                          RadioListTile<String>(
+                            key: Key('model-variant-${engine.id}-${variant.id}'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            value: variant.id,
+                            title: Text(variant.label),
+                            subtitle: variant.detail == null ? null : Text(variant.detail!),
+                          ),
+                      ]),
+                    ),
+                  ]),
+                ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
+          FilledButton(key: const Key('model-confirm-yes'), onPressed: () => Navigator.pop(dialog, true), child: Text(action)),
+        ],
+      ),
     ),
   );
-  return answer == true;
+  return answer == true ? picks : null;
 }
 
 Future<void> _failed(BuildContext context, String title, Object error) => showSelectableDialog<void>(
@@ -408,20 +489,22 @@ Future<void> _choose(BuildContext context, TypeModels models, StoreModel model, 
       if (!context.mounted) return;
       final installed = await runProgramAction(context, programs, status, 'install', also: '${action.title}. ${action.confirm}');
       if (!installed || !context.mounted) return;
-      await _run(context, models, model, action);
+      await _run(context, models, model, action, const {});
       return;
     }
   }
   if (!context.mounted) return;
-  if (!await _confirm(context, title: action.title, text: action.confirm, action: action.label)) return;
-  if (!context.mounted) return;
-  await _run(context, models, model, action);
+  // A removal asks nothing of the engines: only what + installs is written in a form.
+  final installs = !action.steps.contains(deleteFilesStep);
+  final picks = await _confirm(context, title: action.title, text: action.confirm, action: action.label, engines: installs ? model.engines : const []);
+  if (picks == null || !context.mounted) return;
+  await _run(context, models, model, action, picks);
 }
 
-Future<void> _run(BuildContext context, TypeModels models, StoreModel model, ModelAction action) async {
+Future<void> _run(BuildContext context, TypeModels models, StoreModel model, ModelAction action, Map<String, String> options) async {
   try {
     for (final step in action.steps) {
-      await models.run(model.id, step);
+      await models.run(model.id, step, options: options);
     }
   } on Object catch (error) {
     if (context.mounted) await _failed(context, action.title, error);

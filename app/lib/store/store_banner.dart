@@ -212,12 +212,52 @@ class _StoreBannerState extends State<StoreBanner> {
   }
 }
 
+/// One way an item runs, which its tile shows as a pill: filled once what it reads is installed, outlined while it is only available.
+/// The type's data names the engines; the application knows none.
+final class StoreEngine {
+  const StoreEngine({required this.id, required this.label, required this.installed});
+
+  final String id, label;
+  final bool installed;
+}
+
+class _EnginePill extends StatelessWidget {
+  const _EnginePill({required this.engine});
+
+  final StoreEngine engine;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final installed = engine.installed;
+    return Tooltip(
+      message: context.t(installed ? 'store.engine_installed' : 'store.engine_available', {'engine': engine.label}),
+      child: Container(
+        key: Key('engine-pill-${engine.id}'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: installed ? scheme.secondaryContainer : null,
+          border: installed ? null : Border.all(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          engine.label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: installed ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+            fontWeight: installed ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// An item of an opened store: a rounded icon tile, the name, a line or two about it, who it is by, and a square + at the top
 /// right that installs it, which is a check once it is here. The card opens the item's page.
 class StoreTile extends StatelessWidget {
   const StoreTile({super.key, required this.leading, required this.title, required this.by, required this.installed,
       required this.onOpen, required this.onInstall, this.summary, this.needs, this.busy = false, this.installKey, this.onRemove,
-      this.removeKey, this.onUpdate, this.updateKey, this.verified});
+      this.removeKey, this.onUpdate, this.updateKey, this.verified, this.engines = const []});
 
   final Widget leading;
   final String title;
@@ -225,6 +265,9 @@ class StoreTile extends StatelessWidget {
 
   /// The algorithm the item's files are checked with; a check mark beside the title says so. Null shows none.
   final String? verified;
+
+  /// The ways the item runs, a pill each: filled once installed, outlined while only available.
+  final List<StoreEngine> engines;
 
   /// What it needs of this computer or the agent, one line; null when nothing is said.
   final String? needs;
@@ -269,6 +312,11 @@ class StoreTile extends StatelessWidget {
                     ),
                 ]),
                 if (summary != null) Text(oneLine(summary!), style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
+                if (engines.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 2),
+                    child: Wrap(spacing: 6, runSpacing: 4, children: [for (final engine in engines) _EnginePill(engine: engine)]),
+                  ),
                 Text(oneLine(by), key: const Key('provenance'),
                     style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
                 if (installed && onUpdate != null)
