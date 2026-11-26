@@ -6,15 +6,13 @@
     reason = "the links are the host's"
 )]
 
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use canoa::notifier::{Delivery, Notice, Notifier, NotifierError, NotifierInfo, SendRequest};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
-use serde_json::{Value, json};
-
-use super::directory::HOST_KEY;
+use serde_json::json;
 
 /// The most notices held for one window that does not read them.
 const QUEUED: usize = 64;
@@ -83,24 +81,6 @@ impl Links {
     }
 }
 
-static HOSTS: Mutex<BTreeMap<u64, Weak<Links>>> = Mutex::new(BTreeMap::new());
-
-/// Makes the windows of host `id` the ones the `desktop` notifier tells while they exist.
-pub(crate) fn register(id: u64, links: &Arc<Links>) {
-    HOSTS
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(id, Arc::downgrade(links));
-}
-
-fn links_of(id: u64) -> Option<Arc<Links>> {
-    HOSTS
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&id)
-        .and_then(Weak::upgrade)
-}
-
 /// The notice as the line a window reads: no actions, which a window answers in its own way.
 pub(crate) fn line_of(notice: &Notice) -> Vec<u8> {
     let session = notice
@@ -135,23 +115,23 @@ impl Notifier for Desktop {
         Ok(info)
     }
 
-    fn send(&self, request: SendRequest) -> Result<Delivery, ProviderError> {
-        let settings: Value = serde_json::from_str(&request.settings).unwrap_or(Value::Null);
-        let links = settings
-            .get(HOST_KEY)
-            .and_then(Value::as_u64)
-            .and_then(links_of)
-            .map(|links| links.all())
-            .unwrap_or_default();
-        if links.is_empty() {
-            return Err(NotifierError::Unavailable("no window is open".to_owned()).into());
-        }
-        let line = line_of(&request.notice);
-        for link in &links {
-            link.push(line.clone());
-        }
-        Ok(Delivery::new(request.notice.id))
+    /// The host that owns the windows delivers to them itself (see [`push`]); asked by anything else, there is no window to tell.
+    fn send(&self, _request: SendRequest) -> Result<Delivery, ProviderError> {
+        Err(NotifierError::Unavailable("no window is open".to_owned()).into())
     }
+}
+
+/// Pushes `notice` to every window of `links`, or says that none is open.
+pub(crate) fn push(links: &Links, notice: &Notice) -> Result<(), String> {
+    let windows = links.all();
+    if windows.is_empty() {
+        return Err("no window is open".to_owned());
+    }
+    let line = line_of(notice);
+    for window in &windows {
+        window.push(line.clone());
+    }
+    Ok(())
 }
 
 coqui_acp_api::guatiao::local_providers!(

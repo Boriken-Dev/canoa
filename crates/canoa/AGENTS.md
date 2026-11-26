@@ -268,7 +268,7 @@ impl Notice { pub fn new(id, event, title, body, at) -> Self }
 pub fn is_word(word: &str) -> bool;   // 1 to 32 lower-case letters, digits and `_`
 ```
 
-- `NotifierInfo::problem` says why a description cannot be used (a bad id, no title, an event that is no word, a schema its form does not fit). `events` limits the events a notifier takes; none takes any. A sensitive member of the schema is kept by the host as the secret `notifiers/NAME/MEMBER` and filled into `settings` when a notice is sent. The settings also carry a key of the host's own, `_host`, which the provider the host carries (`desktop`) reads and others ignore. No timeout is fixed by the kind: each provider declares its own as settings.
+- `NotifierInfo::problem` says why a description cannot be used (a bad id, no title, an event that is no word, a schema its form does not fit). `events` limits the events a notifier takes; none takes any. A sensitive member of the schema is kept by the host as the secret `notifiers/NAME/MEMBER` and filled into `settings` when a notice is sent. No timeout is fixed by the kind: each provider declares its own as settings.
 - `NotifierError` is what a failure is called: `Unavailable` (no window is open, the service cannot be reached; `GUATIAO_ERR_GONE`), `Auth` and `Rejected` (`GUATIAO_ERR_INTERNAL` with a prefix), `Bad` (the settings do not fit; `GUATIAO_ERR_BAD_VALUE`). Each message is one line with no secret. The slot that takes a delivery away is `withdraw`: `close` is a name Guatiao's JavaScript binding keeps for a remote's own.
 
 ## `canoa::environment` (feature `environment`)

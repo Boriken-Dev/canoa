@@ -53,7 +53,12 @@ void main() {
   late WebPeerBridge browser;
   final started = <Process>[];
 
-  Map<String, String> home() => {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'};
+  // The host reads no canoa.cfg of the person's who runs the test: it is given an empty one of its own.
+  Map<String, String> home() {
+    final config = File('${dir.path}/empty.cfg');
+    if (!config.existsSync()) config.writeAsStringSync('');
+    return {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home', 'CANOA_CONFIG': config.path};
+  }
 
   Future<Process> run(List<String> args) async {
     final process = await Process.start(_host!, args, environment: home());

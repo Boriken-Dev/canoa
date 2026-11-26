@@ -18,9 +18,6 @@ use crate::config::{Config, NotificationsConfig, NotifierConfig};
 /// The origin of the providers the host itself carries.
 pub(crate) const BUILT_IN: &str = "built-in";
 
-/// The key under which the host tells a built-in provider which host it serves.
-pub(crate) const HOST_KEY: &str = "_host";
-
 /// Answers the secret named `notifiers/NAME/MEMBER`, or `None` when none is kept.
 pub(crate) type Keeping = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 

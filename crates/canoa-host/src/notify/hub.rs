@@ -15,7 +15,7 @@ use canoa::notifier::{Notice, SessionRef};
 use serde_json::Value;
 
 use super::desktop::{LinkState, Links};
-use super::directory::{Directory, HOST_KEY};
+use super::directory::{BUILT_IN, Directory, Offered};
 use super::events;
 use super::words::{self, Facts};
 
@@ -24,8 +24,6 @@ const REMEMBERED: usize = 1024;
 
 /// Reads what `[notifications]` and the libraries say now.
 pub(crate) type Source = Box<dyn Fn() -> Result<Arc<Directory>, String> + Send + Sync>;
-
-static HUBS: AtomicU64 = AtomicU64::new(1);
 
 /// What became of the notice for one notifier.
 #[derive(Debug, PartialEq, Eq)]
@@ -49,7 +47,8 @@ pub(crate) struct Occurrence {
 
 /// The host's way of telling the person.
 pub(crate) struct Hub {
-    id: u64,
+    /// Tells this hub's notices from another's: when it was made, in nanoseconds.
+    id: u128,
     links: Arc<Links>,
     seen: Mutex<VecDeque<String>>,
     sequence: AtomicU64,
@@ -76,8 +75,9 @@ impl Hub {
     /// A hub that reads what to do from `source` each time an event fires.
     pub(crate) fn new(source: Source) -> Arc<Self> {
         let links = Arc::new(Links::default());
-        let id = HUBS.fetch_add(1, Ordering::Relaxed);
-        super::desktop::register(id, &links);
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
         Arc::new(Self {
             id,
             links,
@@ -198,10 +198,19 @@ impl Hub {
         Some(std::thread::spawn(move || hub.deliver(&notice)))
     }
 
-    /// The settings a provider is handed: the entry's, and which host asks, which a provider the host carries uses to reach it.
-    fn settings_text(&self, mut settings: serde_json::Map<String, Value>) -> String {
-        settings.insert(HOST_KEY.to_owned(), Value::from(self.id));
-        Value::Object(settings).to_string()
+    /// Delivers `notice` through `offered`: the host's own provider (the windows) is told by the host that owns the windows.
+    fn dispatch(
+        links: &Links,
+        offered: &Offered,
+        settings: serde_json::Map<String, Value>,
+        notice: Notice,
+    ) -> Result<(), String> {
+        if offered.origin == BUILT_IN {
+            return super::desktop::push(links, &notice);
+        }
+        offered
+            .send(Value::Object(settings).to_string(), notice)
+            .map(|_| ())
     }
 
     fn deliver(&self, notice: &Notice) -> Vec<Delivered> {
@@ -235,17 +244,17 @@ impl Hub {
             {
                 continue;
             }
-            let text = self.settings_text(resolved.settings);
+            let settings = resolved.settings;
+            let links = Arc::clone(&self.links);
             let directory = Arc::clone(&directory);
             let notice = notice.clone();
             let notifier = name.clone();
             sending.push((
                 name,
                 std::thread::spawn(move || {
-                    let outcome = directory
-                        .resolve(&notifier)
-                        .and_then(|resolved| resolved.offered.send(text, notice))
-                        .map(|_| ());
+                    let outcome = directory.resolve(&notifier).and_then(|resolved| {
+                        Self::dispatch(&links, resolved.offered, settings, notice)
+                    });
                     if let Err(why) = &outcome {
                         tracing::warn!(notifier, "a notice was not delivered: {why}");
                     }
@@ -270,7 +279,6 @@ impl Hub {
     pub(crate) fn test(&self, name: &str) -> Result<(), String> {
         let directory = self.directory()?;
         let resolved = directory.resolve(name)?;
-        let text = self.settings_text(resolved.settings);
         let (title, body) = if self.language().starts_with("es") {
             ("Canoa", "Prueba")
         } else {
@@ -278,6 +286,6 @@ impl Hub {
         };
         let mut notice = Notice::new(format!("test-{}", self.id), "test", title, body, now());
         notice.urgency = canoa::notifier::Urgency::Low;
-        resolved.offered.send(text, notice).map(|_| ())
+        Self::dispatch(&self.links, resolved.offered, resolved.settings, notice)
     }
 }

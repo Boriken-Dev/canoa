@@ -69,9 +69,9 @@ workspace = "\${documents}/mine/\${session}"
 "my-agent" = "claude"
 
 [notifications]
-permission = true
-question = false
-finished = true
+permission = ["desktop"]
+question = []
+finished = ["desktop"]
 
 [voice]
 backend = "local"

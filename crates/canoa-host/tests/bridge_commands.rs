@@ -20,11 +20,16 @@ use serde_json::Value;
 use support::{Scratch, WAIT, example, host_binary};
 
 fn canoa(home: &Path) -> Command {
+    // The program reads no canoa.cfg of the person's who runs the test: it is given an empty one of its own.
+    let config = home.join("empty.cfg");
+    if !config.exists() {
+        std::fs::write(&config, "").expect("an empty canoa.cfg");
+    }
     let mut command = Command::new(host_binary());
     command
         .env("COQUI_AGENTIC_PEER_HOME", home)
         .env("COQUI_ACP_DESCRIPTORS", home.join("descriptors"))
-        .env_remove("CANOA_CONFIG");
+        .env("CANOA_CONFIG", &config);
     command
 }
 
