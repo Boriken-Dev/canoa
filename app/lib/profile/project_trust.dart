@@ -2,8 +2,11 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
-/// The file in a working directory that holds its project profile.
-const projectProfileFile = '.canoa/profile.toml';
+import '../brand.dart';
+
+/// The file in a working directory that holds its project profile: a canoa.cfg in the brand's folder, whose `[profile]` table is the
+/// profile.
+const projectProfileFile = '${Brand.homeDir}/${Brand.configFile}';
 
 /// A directory the person trusts, and the project profile it held when they did.
 final class TrustedProject {

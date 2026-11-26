@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 
+import '../brand.dart';
+import '../config/config_layers.dart' show decodeConfig;
 import '../providers/provider_catalog.dart';
 import 'aos_support.dart';
 import 'overlay_layer.dart';
@@ -222,13 +224,26 @@ Future<ProfileLayers> profileLayers({
   return ProfileLayers(layers, notes, project: project);
 }
 
+/// The `[profile]` table of a project's canoa.cfg, in whichever format its first line names, as a layer.
 Layer? _parse(List<int> bytes, LayerId id, String directory, List<LayerNote> notes) {
+  final String text;
   try {
-    return Layer(id, Profile.parse(utf8.decode(bytes), id.kind), dir: directory);
-  } on ProfileException catch (error) {
-    notes.add(LayerNote(id, 'Refused, so left out: $error'));
+    text = utf8.decode(bytes);
   } on FormatException {
     notes.add(LayerNote(id, 'Refused, so left out: the profile is not UTF-8'));
+    return null;
+  }
+  try {
+    final table = decodeConfig(text, name: Brand.configFile).data['profile'];
+    if (table != null && table is! Map) {
+      notes.add(LayerNote(id, 'Refused, so left out: [profile] is not a table'));
+      return null;
+    }
+    return Layer(id, Profile.fromMap(table as Map<dynamic, dynamic>? ?? const {}, id.kind), dir: directory);
+  } on ProfileException catch (error) {
+    notes.add(LayerNote(id, 'Refused, so left out: $error'));
+  } on FormatException catch (error) {
+    notes.add(LayerNote(id, 'Refused, so left out: ${error.message}'));
   }
   return null;
 }

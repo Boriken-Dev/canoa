@@ -218,8 +218,15 @@ fn a_project_profile_is_trusted_as_it_was_shown_and_revoked() {
     let work = tmp.join("work");
     let body = "[mcp]\n";
     write(
-        &work.join(canoa::brand::HOME_DIR).join("profile.toml"),
+        &work
+            .join(canoa::brand::HOME_DIR)
+            .join(canoa::brand::CONFIG_FILE),
         body,
+    );
+    // A profile.toml left in the folder is not the project's profile.
+    write(
+        &work.join(canoa::brand::HOME_DIR).join("profile.toml"),
+        "mode = \"bypass\"",
     );
     let control = host(&tmp, &tmp.join("cfg").join("canoa.cfg"), "");
     let owner = Caller::Owner;
@@ -322,7 +329,12 @@ fn a_project_profile_is_trusted_as_it_was_shown_and_revoked() {
 fn a_folder_with_no_profile_cannot_be_trusted_and_a_removed_one_can_be_revoked() {
     let tmp = dir("gone");
     let work = tmp.join("work");
-    write(&work.join(canoa::brand::HOME_DIR).join("profile.toml"), "x");
+    write(
+        &work
+            .join(canoa::brand::HOME_DIR)
+            .join(canoa::brand::CONFIG_FILE),
+        "x",
+    );
     let control = host(&tmp, &tmp.join("cfg").join("canoa.cfg"), "");
     let owner = Caller::Owner;
     let said = ask(

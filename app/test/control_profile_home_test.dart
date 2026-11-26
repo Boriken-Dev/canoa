@@ -22,7 +22,7 @@ final class _Host implements HostLink {
   final overlayFiles = <String, Map<String, String>>{
     '/ov/mine': {'overlay.cfg': '[harness.claude-code]\nmodel = "from-the-host"\n'},
   };
-  final profiles = <String, String>{'/real/work': 'model = "project-model"\n'};
+  final profiles = <String, String>{'/real/work': '[profile]\nmodel = "project-model"\n'};
   final links = {'/work': '/real/work'};
   final trusted = <Map<String, Object?>>[];
   final asked = <String>[];
@@ -120,7 +120,7 @@ void main() {
     expect(shown.layers.singleWhere((layer) => layer.id.kind == LayerKind.project).profile.model, 'project-model');
 
     // A profile that changed on the host since is not trusted until it is trusted again.
-    host.profiles['/real/work'] = 'model = "other"\n';
+    host.profiles['/real/work'] = '[profile]\nmodel = "other"\n';
     expect((await layers()).project?.state, TrustState.changed);
 
     await home.trust.revoke('/real/work');
@@ -146,7 +146,7 @@ void main() {
 
   test('names a folder the host will not name as no folder', () async {
     expect(await home.canonicalDirectory('/nowhere'), isNull);
-    expect(await home.readBytes('/nowhere/.canoa/profile.toml'), isNull);
+    expect(await home.readBytes('/nowhere/$projectProfileFile'), isNull);
     expect(await home.readBytes('/work/other.txt'), isNull, reason: 'only a project profile is read this way');
   });
 }

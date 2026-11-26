@@ -153,7 +153,7 @@ model = "claude-x"
     addTearDown(tester.view.reset);
     final home = FakeHome({
       for (final MapEntry(:key, :value) in teamFiles.entries) '/overlays/team/$key': value,
-      '/work/.canoa/profile.toml': 'mode = "plan"\n',
+      '/work/$projectProfileFile': '[profile]\nmode = "plan"\n',
     });
     final pins = <(String, String)>[];
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: ProfilesPanel(
@@ -235,7 +235,7 @@ model = "claude-x"
 
     await tester.tap(find.byKey(const Key('profile-trust')));
     await tester.pumpAndSettle();
-    expect(find.text('mode = "plan"\n'), findsOneWidget, reason: 'what is trusted is shown');
+    expect(find.text('[profile]\nmode = "plan"\n'), findsOneWidget, reason: 'what is trusted is shown');
     await tester.tap(find.text('Trust').last);
     await tester.pumpAndSettle();
     expect(layerOf(tester, 'mode'), 'project');
@@ -273,7 +273,7 @@ model = "claude-x"
 
   testWidgets('what is trusted is shown with its invisible characters named', (tester) async {
     final (home, _) = await open(tester);
-    home.files['/work/.canoa/profile.toml'] = 'mode = "plan"\n# \u202Eevil\n';
+    home.files['/work/$projectProfileFile'] = '[profile]\nmode = "plan"\n# \u202Eevil\n';
     await tester.tap(find.byKey(const Key('profile-directory')));
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();

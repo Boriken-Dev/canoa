@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:canoa/brand.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home_io.dart';
@@ -56,7 +57,7 @@ remove = true
 
       final project = Directory('${temp.path}/project')..createSync();
       final projectFile = File('${project.path}/$projectProfileFile')..parent.createSync();
-      projectFile.writeAsStringSync('mode = "plan"\n[env.RUST_LOG]\nvalue = "debug"\n[mcp.docs]\nremove = true\n');
+      projectFile.writeAsStringSync('[profile]\nmode = "plan"\n[profile.env.RUST_LOG]\nvalue = "debug"\n[profile.mcp.docs]\nremove = true\n');
 
       Future<ProfileLayers> layers() => profileLayers(
         overlays: config.overlays,
@@ -96,7 +97,7 @@ remove = true
         {'key': 'skills.review', 'layer': 'agent:Claude', 'was': 'overlay:team'},
       ]);
 
-      projectFile.writeAsStringSync('mode = "plan"\n[mcp.evil]\ntype = "stdio"\ncommand = "evil"\n');
+      projectFile.writeAsStringSync('[profile]\nmode = "plan"\n[profile.mcp.evil]\ntype = "stdio"\ncommand = "evil"\n');
       result = await layers();
       expect(result.project!.state, TrustState.changed);
       expect(result.effective.view()['mcp'], [contains('name')], reason: 'the changed profile adds nothing');
@@ -127,6 +128,34 @@ remove = true
       expect(home.trust.projects, isEmpty);
       expect(home.trust.state(project.path, profile), TrustState.untrusted);
       await expectLater(home.trust.trust(project.path, profile), throwsStateError);
+    });
+
+    test('a project profile is the [profile] of its canoa.cfg in any format, and a profile.toml left in the folder is not read', () async {
+      final project = Directory('${temp.path}/cfg_project')..createSync();
+      final file = File('${project.path}/$projectProfileFile')..parent.createSync();
+      File('${project.path}/${Brand.homeDir}/profile.toml').writeAsStringSync('mode = "bypass"\n');
+      String? record;
+      final home = IoProfileHome('${temp.path}/config', trust: ProjectTrust(read: () async => record, write: (text) async => record = text));
+      Future<ProfileLayers> layers() =>
+          profileLayers(overlays: const {}, user: const Profile(), agents: const {}, agent: 'a', home: home, workingDirectory: project.path);
+      Future<Object?> modeOf() async {
+        final result = await layers();
+        await home.trust.trust(result.project!.directory, result.project!.profile ?? const []);
+        return (await layers()).effective.view()['mode'];
+      }
+
+      expect((await layers()).project!.state, TrustState.none, reason: 'only a profile.toml is there');
+      file.writeAsStringSync('[host]\nlisten = "x"\n[profile]\nmode = "plan"\n');
+      expect(await modeOf(), {'value': 'plan', 'layer': 'project'}, reason: 'the other tables of the file are not the profile');
+      file.writeAsStringSync('#!yaml\nprofile:\n  mode: acceptEdits\n');
+      expect(await modeOf(), {'value': 'acceptEdits', 'layer': 'project'});
+      file.writeAsStringSync('profile = 3\n');
+      final refused = await (() async {
+        final result = await layers();
+        await home.trust.trust(result.project!.directory, result.project!.profile!);
+        return layers();
+      })();
+      expect(refused.notes.single.text, contains('[profile] is not a table'));
     });
 
     test('an installed overlay from another source than canoa.cfg names is left out until synced', () async {

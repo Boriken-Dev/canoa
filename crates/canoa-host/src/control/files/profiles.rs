@@ -141,7 +141,7 @@ impl Files {
     }
 
     /// `profile/project` `{"directory"}` -> `{"directory", "profile": base64|null}`: the folder's resolved name, which this key may
-    /// name as `fs/list` does, and the bytes of its `.canoa/profile.toml`, null when it has none.
+    /// name as `fs/list` does, and the bytes of its canoa.cfg in the brand's folder (`.canoa/canoa.cfg`), null when it has none.
     pub(crate) fn profile_project(&self, caller: &Caller, params: &Value) -> Outcome {
         let asked = text_param(params, "directory")?.ok_or_else(|| bad("directory is needed"))?;
         let real = self.place(caller, asked)?;
@@ -244,7 +244,9 @@ impl Files {
 
 /// The bytes of `folder`'s project profile; none when it has none, an error for one that is not a plain file or is too large.
 fn project_profile(folder: &Path) -> Result<Option<Vec<u8>>, (i32, String)> {
-    let path = folder.join(canoa::brand::HOME_DIR).join("profile.toml");
+    let path = folder
+        .join(canoa::brand::HOME_DIR)
+        .join(canoa::brand::CONFIG_FILE);
     let Ok(meta) = fs::symlink_metadata(&path) else {
         return Ok(None);
     };
