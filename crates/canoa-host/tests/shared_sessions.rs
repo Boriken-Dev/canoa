@@ -698,7 +698,7 @@ fn without_a_kept_log_a_cursor_from_before_the_restart_is_refused_not_replayed_f
 
 fn control_call(
     url: &str,
-    key: &coqui_link::auth::Identity,
+    key: &cabuya::auth::Identity,
     host: &Host,
     method: &str,
     params: Value,
@@ -715,7 +715,7 @@ fn user_says(text: &'static str) -> impl Fn(&Value) -> bool {
     }
 }
 
-fn watch_entry(grants: &[(&coqui_link::auth::Identity, &str)]) -> String {
+fn watch_entry(grants: &[(&cabuya::auth::Identity, &str)]) -> String {
     let listed: Vec<String> = grants
         .iter()
         .map(|(key, names)| format!("\"{}\" = [{names}]", key.peer_id()))

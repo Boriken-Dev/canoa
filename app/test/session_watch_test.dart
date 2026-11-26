@@ -5,8 +5,8 @@ import 'package:canoa/chat/inspector.dart';
 import 'package:canoa/chat/session_watch.dart';
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/theme/look.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'fixtures/task_agent.dart';
 

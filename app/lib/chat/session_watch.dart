@@ -1,7 +1,7 @@
 import 'dart:async' show unawaited;
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../desktop/control_client.dart' show hostWords;
 import '../l10n/app_text.dart';
