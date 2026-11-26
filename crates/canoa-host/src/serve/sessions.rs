@@ -34,6 +34,7 @@ use super::watch::{self, Check, Watch};
 use super::{FIRST_MESSAGE, Served, Shared};
 use crate::control::{self, Grant, SharedSessions};
 use crate::local::{self, Link};
+use crate::usage_splice::TreeUse;
 
 /// How often the driver and each client's writer look up to see whether anything ended.
 const POLL: Duration = Duration::from_millis(50);
@@ -354,6 +355,8 @@ pub(super) struct Session {
     /// The agent's process id once a program entry's agent has started; 0 before, after, and for an agent that is no process
     /// of this computer's own (a harness in the host, or one in an environment).
     agent_pid: Arc<AtomicU32>,
+    /// What the agent's processes use now; it reads the process table, so it is never called with `state` held.
+    read_processes: fn(u32) -> TreeUse,
     state: Mutex<State>,
 }
 
@@ -386,7 +389,7 @@ impl Session {
         }
         let pid = self.agent_pid.load(Ordering::Relaxed);
         if pid != 0 {
-            let used = crate::usage_splice::tree_use(pid);
+            let used = (self.read_processes)(pid);
             out["processes"] = json!({
                 "count": used.processes,
                 "cpuMs": used.cpu_ms,
@@ -416,7 +419,7 @@ impl Session {
                             .to_owned(),
                     ));
                 }
-                Some(crate::usage_splice::tree_use(pid))
+                Some((self.read_processes)(pid))
             }
             _ => None,
         };
@@ -954,7 +957,7 @@ impl Session {
     /// A watch's due check. The agent's processes, when its conditions read them, are read before the session's lock is taken.
     fn watch_check(&self, measure: bool) {
         let pid = self.agent_pid.load(Ordering::Relaxed);
-        let processes = (measure && pid != 0).then(|| crate::usage_splice::tree_use(pid));
+        let processes = (measure && pid != 0).then(|| (self.read_processes)(pid));
         let mut guard = self.lock();
         let state = &mut *guard;
         let now = self.now_ms();
@@ -1362,6 +1365,7 @@ fn open<C: Channel>(
         max_line: shared.max_line,
         access,
         agent_pid: Arc::new(AtomicU32::new(0)),
+        read_processes: crate::usage_splice::tree_use,
         state: Mutex::new(State {
             phase: Phase::Boot(Box::new(Boot {
                 creator: id.clone(),
@@ -1536,6 +1540,126 @@ mod tests {
             permits(true, true, &opener, &none, &Action::Prompt),
             Verdict::Allow
         ));
+    }
+
+    /// Lets every action: these tests are about the watch, not the policy.
+    #[derive(Debug)]
+    struct Anyone;
+
+    impl Policy for Anyone {
+        fn check(&self, _: &Client, _: &Action) -> Verdict {
+            Verdict::Allow
+        }
+    }
+
+    /// The session the probing reader looks at, and what it found: whether `state` was free while it read.
+    static PROBED: Mutex<Option<Arc<Session>>> = Mutex::new(None);
+    static FREE_WHILE_READING: AtomicBool = AtomicBool::new(false);
+    static READS: AtomicUsize = AtomicUsize::new(0);
+
+    fn probing_reader(_: u32) -> TreeUse {
+        READS.fetch_add(1, Ordering::SeqCst);
+        let probed = PROBED.lock().unwrap_or_else(PoisonError::into_inner);
+        let session = probed.as_ref().expect("a session to probe");
+        FREE_WHILE_READING.store(session.state.try_lock().is_ok(), Ordering::SeqCst);
+        TreeUse::default()
+    }
+
+    fn unopened_session(read_processes: fn(u32) -> TreeUse) -> Arc<Session> {
+        let (driver, _host) = local::pair(1024, Arc::new(AtomicBool::new(false)));
+        let who = Client::new("key".to_owned());
+        Arc::new(Session {
+            entry: "shared".to_owned(),
+            epoch: Instant::now(),
+            idle: None,
+            permission_window_ms: None,
+            started_unix_ms: 1_000_000,
+            agent: driver,
+            kept: None,
+            log_bounds: (None, None),
+            max_line: 1024,
+            access: Arc::new(Anyone),
+            agent_pid: Arc::new(AtomicU32::new(4242)),
+            read_processes,
+            state: Mutex::new(State {
+                phase: Phase::Boot(Box::new(Boot {
+                    creator: who.id.clone(),
+                    who,
+                    initialize: None,
+                    answer: None,
+                    opening: None,
+                    swallow: Vec::new(),
+                    cwd: None,
+                    opening_message: None,
+                    restored: None,
+                })),
+                clients: BTreeMap::new(),
+                next_generation: 0,
+                id: None,
+                cwd: None,
+                title: None,
+                initialize: None,
+                keeper: None,
+                watch: None,
+                watch_asks: BTreeSet::new(),
+                watch_count: 0,
+            }),
+        })
+    }
+
+    #[test]
+    fn the_agents_processes_are_read_with_the_sessions_state_free_and_only_for_a_watch_that_reads_them()
+     {
+        let session = unopened_session(probing_reader);
+        *PROBED.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&session));
+        let arm = |params: Value| {
+            let config = watch::Config::from_params(&params)
+                .expect("a watch")
+                .expect("enabled");
+            let client = Client::new("key".to_owned());
+            session.lock().watch = Some(Watching {
+                watch: Watch::new(config, "key".to_owned(), 0, None).expect("armed"),
+                client,
+            });
+        };
+
+        // A watch that reads processes has them read while the lock is free.
+        arm(json!({"everyMs": 1, "whileChildren": true}));
+        let measure = session
+            .lock()
+            .watch
+            .as_ref()
+            .map(|w| w.watch.measures_processes());
+        assert_eq!(measure, Some(true));
+        session.watch_check(true);
+        assert_eq!(READS.load(Ordering::SeqCst), 1);
+        assert!(
+            FREE_WHILE_READING.load(Ordering::SeqCst),
+            "the session's state was held while the process table was read"
+        );
+
+        // One that does not read them never has them read.
+        arm(json!({"everyMs": 1, "quietMs": 10}));
+        let measure = session
+            .lock()
+            .watch
+            .as_ref()
+            .map(|w| w.watch.measures_processes());
+        assert_eq!(measure, Some(false));
+        session.watch_check(false);
+        assert_eq!(READS.load(Ordering::SeqCst), 1);
+
+        // Arming one that reads them takes its baseline, also with the lock free.
+        FREE_WHILE_READING.store(false, Ordering::SeqCst);
+        session
+            .configure_watch(
+                Client::new("key".to_owned()),
+                &json!({"session": "s", "whileChildren": true}),
+            )
+            .expect_err("the session is not open yet");
+        assert_eq!(READS.load(Ordering::SeqCst), 2);
+        assert!(FREE_WHILE_READING.load(Ordering::SeqCst));
+        PROBED.lock().unwrap_or_else(PoisonError::into_inner).take();
     }
 
     #[test]

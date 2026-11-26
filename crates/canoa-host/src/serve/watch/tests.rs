@@ -251,3 +251,45 @@ fn stop_on_input_ends_the_watch_at_the_persons_next_message() {
     assert_eq!(status["nextCheckAt"], serde_json::Value::Null);
     assert_eq!(status["stopped"], "you wrote in the session");
 }
+
+#[test]
+fn the_persons_numbers_are_taken_as_they_are_with_no_floor_or_ceiling() {
+    let mut watch = watch(
+        json!({"everyMs": 1, "maxPrompts": 4_000_000_000_u64, "quietMs": 86_400_000_000_u64}),
+        0,
+        None,
+    );
+    assert!(!watch.due(0));
+    assert!(watch.due(1));
+    let status = watch.status();
+    assert_eq!(status["schedule"]["everyMs"], 1);
+    assert_eq!(status["maxPrompts"], 4_000_000_000_u64);
+    assert_eq!(status["quietMs"], 86_400_000_000_u64);
+    assert!(matches!(watch.check(1, &quiet()), Check::Skip(_)));
+}
+
+#[test]
+fn a_watch_reads_the_processes_only_when_a_condition_needs_them() {
+    for (params, reads) in [
+        (json!({"everyMs": 10}), false),
+        (
+            json!({"everyMs": 10, "quietMs": 5, "whenIdle": false}),
+            false,
+        ),
+        (json!({"everyMs": 10, "whileChildren": true}), true),
+        (json!({"everyMs": 10, "cpuBelowMs": 5}), true),
+        (json!({"everyMs": 10, "memoryNotShrinking": true}), true),
+    ] {
+        assert_eq!(
+            watch(params.clone(), 0, None).measures_processes(),
+            reads,
+            "{params}"
+        );
+    }
+    // Before its time a watch is not due, so nothing is read for it; after a check the next time is a whole interval on.
+    let mut watch = watch(json!({"everyMs": 100, "whileChildren": true}), 0, None);
+    assert!(!watch.due(99));
+    assert!(watch.due(100));
+    watch.check(100, &Sample::default());
+    assert!(!watch.due(199));
+}
