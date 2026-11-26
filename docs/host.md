@@ -755,6 +755,8 @@ The API header lists every setting.
 [host.native]
 enabled = true                                 # false closes the door the browser's native host reaches
 control = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "discover"]   # the default
+program = "/usr/bin/{{ program }}"             # what the extension's Start button runs; `native install` writes it
+args = ["serve"]
 ```
 
 `control` is what a browser key may do on the control channel; it cannot hold `config.write.sessions`, `overlay.write`, `host.restart` or `upload`. A key paired this way works only from the extension that paired it. `{{ program }} native status` shows what is registered and what Start would run, and `{{ program }} native uninstall` removes it. Chrome, Edge and Chromium installed as Flatpak or Snap cannot start a native host. See [browser integration](browser.md#{{ name }}-on-this-computer).
