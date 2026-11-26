@@ -55,6 +55,7 @@ built_in_sections! {
     Notifications("notifications", "Notifications", "App", "notifications", "alerts permission question finished browser toast");
     Voice("voice", "Voice", "App", "mic", "dictation speech microphone input device language push to talk transcribe audio read aloud voice speak speaker playback tts text to speech");
     Shortcuts("shortcuts", "Shortcuts", "App", "keyboard", "keyboard keys chords hotkeys");
+    Telemetry("telemetry", "Telemetry", "App", "cloud", "telemetry export traces metrics logs opentelemetry otlp share data privacy recorded exporter file");
     Sources("sources", "Sources", "Agents", "hub", "agents providers programs command install update version ready");
     Profiles("profiles", "Profiles", "Agents", "layers", "overlays layers model effort mode skills trusted directories project");
     Mcp("mcp", "MCP servers", "Agents", "extension", "tools servers mcp allowed per agent");

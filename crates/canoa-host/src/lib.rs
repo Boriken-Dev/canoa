@@ -70,6 +70,7 @@ mod speech_scripts;
 #[cfg(test)]
 mod statics_tests;
 pub mod store;
+mod telemetry;
 mod terminal;
 pub mod tool;
 mod transport;
@@ -89,7 +90,14 @@ pub use config::{
     Settings, StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, WebConfig, WebMode,
     cache_lifetime_label, cache_lifetime_name, cache_lifetime_named, merge_into,
 };
+pub use config::{TelemetryConfig, TelemetryExporterConfig};
 pub use serve::MAX_MESSAGE_META;
+/// The digest of the list of what the host records, which `[host.telemetry] acknowledged` holds once the person has accepted that
+/// list; the same as `telemetry/catalog` answers.
+#[must_use]
+pub fn telemetry_digest() -> String {
+    telemetry::catalog::digest()
+}
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.
 pub const DELEGATE_META: &str = delegate::META;

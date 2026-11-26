@@ -192,10 +192,11 @@ impl Control {
     /// `config/change`: ops made in the person's own layer.
     pub(super) fn r_config_change(
         &self,
-        _: &Caller,
+        caller: &Caller,
         _: &str,
         params: &Value,
     ) -> Result<Value, (i32, String)> {
+        guard_telemetry_switch(caller, params)?;
         self.files.config_change(params)
     }
 
@@ -212,11 +213,30 @@ impl Control {
     /// `config/advanced_set`: one of those tables or entries made, changed or taken out.
     pub(super) fn r_config_advanced_set(
         &self,
-        _: &Caller,
+        caller: &Caller,
         _: &str,
         params: &Value,
     ) -> Result<Value, (i32, String)> {
+        guard_telemetry_switch(caller, params)?;
         self.files.advanced_set(params)
+    }
+
+    /// `telemetry/catalog`, `telemetry/status` and `telemetry/test`.
+    pub(super) fn r_telemetry(
+        &self,
+        _: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        match method {
+            "telemetry/catalog" => Ok(crate::telemetry::catalog_answer()),
+            "telemetry/status" => Ok(crate::telemetry::status_answer(&self.loaded_config()?)),
+            _ => {
+                let name = super::text_param(params, "name")?
+                    .ok_or_else(|| super::bad("name is needed"))?;
+                Ok(crate::telemetry::test_answer(&self.loaded_config()?, name))
+            }
+        }
     }
 
     pub(super) fn r_config_set(
@@ -1038,6 +1058,45 @@ fn names_host(params: &Value) -> bool {
 }
 
 /// The table a request names when it is one only the app this host runs in edits and the caller is that app.
+/// Whether `path`, the keys of a write from the top, sets `enabled` or `acknowledged` of `[host.telemetry]`, or the table whole.
+fn path_sets_telemetry_switch(path: Option<&Value>, value: Option<&Value>) -> bool {
+    let keys: Vec<&str> = path
+        .and_then(Value::as_array)
+        .map(|keys| keys.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    match keys.as_slice() {
+        ["host"] => value
+            .and_then(Value::as_object)
+            .is_some_and(|host| host.contains_key("telemetry")),
+        ["host", "telemetry"] => true,
+        ["host", "telemetry", key, ..] => matches!(*key, "enabled" | "acknowledged"),
+        _ => false,
+    }
+}
+
+/// Turning export on and accepting the list of what is recorded are the person's own, on their own link: a paired key is refused.
+pub(super) fn guard_telemetry_switch(caller: &Caller, params: &Value) -> Result<(), (i32, String)> {
+    if matches!(caller, Caller::Owner) {
+        return Ok(());
+    }
+    let touches = path_sets_telemetry_switch(params.get("path"), params.get("value"))
+        || params
+            .get("ops")
+            .and_then(Value::as_array)
+            .is_some_and(|ops| {
+                ops.iter()
+                    .any(|op| path_sets_telemetry_switch(op.get("path"), op.get("value")))
+            });
+    if touches {
+        return Err((
+            DENIED,
+            "only the person running this host turns telemetry export on or accepts what it records"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn owner_section<'a>(caller: &Caller, params: &'a Value) -> Option<&'a str> {
     let section = params.get("section").and_then(Value::as_str)?;
     (matches!(caller, Caller::Owner) && files::OWNER_SECTIONS.contains(&section)).then_some(section)

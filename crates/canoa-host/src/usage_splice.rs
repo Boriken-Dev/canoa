@@ -38,7 +38,7 @@ use crate::usage_log::UsageLog;
 
 mod members;
 mod reader;
-mod tap;
+pub(crate) mod tap;
 
 pub(crate) use members::{TreeUse, tree_use};
 pub(crate) use reader::{Launch, Quota, Reader, Starter};
@@ -391,6 +391,8 @@ pub(crate) struct Splice {
     profile: Option<String>,
     /// The warnings of limits this connection has put in a session already: `(session, limit, window)`.
     told: Mutex<BTreeSet<(String, String, i64)>>,
+    /// What this connection tells the telemetry the host exports, when it does.
+    watch: Option<crate::telemetry::watch::Watch>,
 }
 
 impl Drop for Splice {
@@ -441,6 +443,7 @@ impl Splice {
             tap: None,
             profile: None,
             told: Mutex::new(BTreeSet::new()),
+            watch: None,
         }
     }
 
@@ -452,6 +455,13 @@ impl Splice {
             .take()
             .map(|tap| tap.under_profile(profile.clone()));
         self.profile = profile;
+        self
+    }
+
+    /// This connection telling the host's telemetry of its sessions, turns, tool calls and permissions, as the agent `harness`.
+    #[must_use]
+    pub(crate) fn watching(mut self, harness: &str) -> Self {
+        self.watch = crate::telemetry::watch::Watch::new(harness);
         self
     }
 
@@ -518,6 +528,9 @@ impl Splice {
         }
         if let Some(tap) = &self.tap {
             tap.heard_client(message);
+        }
+        if let Some(watch) = &self.watch {
+            watch.heard_client(message);
         }
         if contains(message, b"initialize")
             && let Ok(value) = serde_json::from_slice::<Value>(message)
@@ -958,6 +971,9 @@ impl Splice {
     ) -> Result<(), Failure> {
         if let Some(tap) = &self.tap {
             tap.heard_agent(message);
+        }
+        if let Some(watch) = &self.watch {
+            watch.heard_agent(message);
         }
         if self.unwanted_notice(message) {
             return Ok(());

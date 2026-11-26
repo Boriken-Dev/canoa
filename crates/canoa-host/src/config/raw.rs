@@ -286,6 +286,34 @@ pub(super) struct RawHost {
     pub(super) mcp_list: Option<RawMcpList>,
     #[serde(default)]
     pub(super) environments: IndexMap<String, RawEnvironment>,
+    pub(super) telemetry: Option<RawTelemetry>,
+}
+
+/// `[host.telemetry]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawTelemetry {
+    pub(super) enabled: Option<bool>,
+    pub(super) acknowledged: Option<String>,
+    pub(super) record: Option<Vec<String>>,
+    pub(super) stop_wait_seconds: Option<u64>,
+    #[serde(default)]
+    pub(super) exporters: IndexMap<String, RawTelemetryExporter>,
+}
+
+/// `[host.telemetry.exporters.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawTelemetryExporter {
+    pub(super) provider: Option<String>,
+    pub(super) library: Option<String>,
+    pub(super) source: Option<String>,
+    pub(super) source_settings: Option<toml::Table>,
+    pub(super) import_search: Option<String>,
+    pub(super) settings: Option<toml::Table>,
+    pub(super) queue: Option<u64>,
+    pub(super) batch_seconds: Option<u64>,
+    pub(super) sample: Option<f64>,
 }
 
 /// `[host.environments.NAME]`: `kind`, and every other key is the provider's own setting.

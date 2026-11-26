@@ -99,6 +99,8 @@ const OWNER_NETWORK_MSG: &str =
 const OWNER_PUBLISH_MSG: &str = "only the person running this host commits, pushes or opens a pull request with their own git and gh";
 const OWNER_SCHEDULES_MSG: &str =
     "only the person running this host sets what it runs on a schedule, which runs as them";
+const OWNER_TELEMETRY_MSG: &str =
+    "only the person running this host reads what it exports or sends a test record";
 const OWNER_HISTORY_MSG: &str =
     "only the person running this host reads or moves a recorded session";
 const OWNER_LIMITS_MSG: &str = "only the person running this host lets a turn through a limit";
@@ -693,6 +695,21 @@ pub(super) static ROUTES: &[Route] = &[
             Grant::OverlayWrite,
         ]),
         Control::r_store_index,
+    ),
+    rpc(
+        "telemetry/catalog",
+        Access::Owner(OWNER_TELEMETRY_MSG),
+        Control::r_telemetry,
+    ),
+    rpc(
+        "telemetry/status",
+        Access::Owner(OWNER_TELEMETRY_MSG),
+        Control::r_telemetry,
+    ),
+    rpc(
+        "telemetry/test",
+        Access::Owner(OWNER_TELEMETRY_MSG),
+        Control::r_telemetry,
     ),
     rpc(
         "history/export",

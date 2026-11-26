@@ -38,6 +38,8 @@ pub(crate) enum Kind {
     Lines,
     /// Free-form: a table or a list the host reads whatever its keys, shown and edited as JSON.
     Json,
+    /// A number that need not be whole.
+    Number,
 }
 
 /// One table the generic editor offers.
@@ -353,6 +355,31 @@ pub(crate) const TABLES: &[Table] = &[
             ("hook_handlers", Int),
             ("hook_seconds", Int),
             ("settings", Json),
+        ],
+    },
+    Table {
+        path: &["host", "telemetry"],
+        shape: Shape::Flat,
+        fields: &[
+            ("enabled", Bool),
+            ("acknowledged", Text),
+            ("record", Lines),
+            ("stop_wait_seconds", Int),
+        ],
+    },
+    Table {
+        path: &["host", "telemetry", "exporters"],
+        shape: Shape::Entries,
+        fields: &[
+            ("provider", Text),
+            ("library", Text),
+            ("source", Text),
+            ("source_settings", Json),
+            ("import_search", Text),
+            ("settings", Json),
+            ("queue", Int),
+            ("batch_seconds", Int),
+            ("sample", Number),
         ],
     },
     Table {

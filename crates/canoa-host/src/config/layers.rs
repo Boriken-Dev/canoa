@@ -165,6 +165,7 @@ pub const ENTRIES: &[&[&str]] = &[
     &["host", "accounts", "*"],
     &["host", "pools", "*"],
     &["host", "environments", "*"],
+    &["host", "telemetry", "exporters", "*"],
     &["agents", "*"],
     &["profile", "mcp", "*"],
     &["profile", "skills", "*"],

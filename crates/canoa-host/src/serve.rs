@@ -690,6 +690,7 @@ impl Serving {
         }
         // The stop that ended the listeners may still be ending agents on its own thread.
         stopper.stop_agents();
+        crate::telemetry::stop();
     }
 }
 

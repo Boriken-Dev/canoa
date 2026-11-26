@@ -34,6 +34,7 @@ use canoa::store::extension::StoreExtensionVtable;
 use canoa::store::models::ModelStoreVtable;
 use canoa::store::source::{CatalogSourceProviderVtable, SourceFetchVtable};
 use canoa::store::{InstallPrompterVtable, InstallToolsVtable, ProgramStoreVtable};
+use canoa::telemetry::TelemetryExporterVtable;
 use canoa::usage_reader::{ProcessMembersVtable, UsageReaderVtable, UsageReadingVtable};
 use canoa::vendor::AgentVendorVtable;
 use coqui_acp_api::{
@@ -65,6 +66,7 @@ pub(crate) fn document() -> String {
         NotifierVtable::description(),
         FileViewerVtable::description(),
         ApproverVtable::description(),
+        TelemetryExporterVtable::description(),
         ModelGatewayVtable::description(),
         GatewayLeaseVtable::description(),
         NetworkRouteVtable::description(),
@@ -159,6 +161,7 @@ mod tests {
             "notifier",
             "file_viewer",
             "approver",
+            "telemetry_exporter",
             "model_gateway",
             "gateway_lease",
             "acp_harness",

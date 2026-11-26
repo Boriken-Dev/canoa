@@ -451,7 +451,7 @@ impl Tap {
     }
 }
 
-fn config_option_value<'a>(value: &'a Value, id: &str) -> Option<&'a str> {
+pub(crate) fn config_option_value<'a>(value: &'a Value, id: &str) -> Option<&'a str> {
     value
         .get("configOptions")
         .and_then(Value::as_array)?
@@ -466,7 +466,7 @@ fn token_u64(map: &Value, keys: &[&str]) -> u64 {
         .unwrap_or(0)
 }
 
-fn parse_acp_usage(session: &str, usage: &Value) -> Option<Spend> {
+pub(crate) fn parse_acp_usage(session: &str, usage: &Value) -> Option<Spend> {
     if !usage.is_object() {
         return None;
     }
@@ -499,7 +499,7 @@ fn parse_acp_usage(session: &str, usage: &Value) -> Option<Spend> {
     has_spend(&spend).then_some(spend)
 }
 
-fn parse_state_spend(session: &str, update: &Value) -> Option<Spend> {
+pub(crate) fn parse_state_spend(session: &str, update: &Value) -> Option<Spend> {
     let mut spend = update
         .get("usage")
         .and_then(|usage| parse_acp_usage(session, usage))
@@ -534,7 +534,7 @@ fn parse_state_spend(session: &str, update: &Value) -> Option<Spend> {
     has_spend(&spend).then_some(spend)
 }
 
-fn parse_cost_micro_usd(cost: Option<&Value>) -> Option<u64> {
+pub(crate) fn parse_cost_micro_usd(cost: Option<&Value>) -> Option<u64> {
     let cost = cost?;
     let currency = cost.get("currency").and_then(Value::as_str);
     if matches!(currency, Some(other) if !other.eq_ignore_ascii_case("USD")) {
@@ -559,11 +559,11 @@ fn has_tokens(spend: &Spend) -> bool {
         || !spend.by_model.is_empty()
 }
 
-fn has_spend(spend: &Spend) -> bool {
+pub(crate) fn has_spend(spend: &Spend) -> bool {
     has_tokens(spend) || spend.cost_micro_usd.is_some()
 }
 
-fn merge_acp_spend(target: &mut Spend, next: &Spend) {
+pub(crate) fn merge_acp_spend(target: &mut Spend, next: &Spend) {
     if has_tokens(next) {
         target.input = next.input;
         target.output = next.output;

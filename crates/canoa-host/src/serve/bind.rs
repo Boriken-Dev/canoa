@@ -1206,6 +1206,7 @@ impl Serving {
                 }),
             );
         }
+        crate::telemetry::start(config, options.state_dir.as_deref());
         let agents = Arc::new(Mutex::new(Agents::default()));
         let missing_of: BTreeMap<&str, &Vec<String>> = sources
             .iter()

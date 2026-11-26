@@ -91,6 +91,20 @@ const builtInSectionsListing = r'''
       "collection": null
     },
     {
+      "id": "telemetry",
+      "title": "Telemetry",
+      "help": null,
+      "icon": "cloud",
+      "group": "App",
+      "under": null,
+      "keywords": "telemetry export traces metrics logs opentelemetry otlp share data privacy recorded exporter file",
+      "origin": "built-in",
+      "stored": "config",
+      "schema": null,
+      "form": null,
+      "collection": null
+    },
+    {
       "id": "sources",
       "title": "Sources",
       "help": null,

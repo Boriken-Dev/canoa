@@ -55,7 +55,7 @@ use profiles::{
 };
 use raw::{
     RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawEnvironment, RawExtension, RawFile,
-    RawHost, RawKb, RawLines, RawPool, RawProvider, RawRole, assist_of, network_of, schedules_of,
+    RawHost, RawKb, RawLines, RawPool, RawProvider, RawRole, RawTelemetry, assist_of, network_of, schedules_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
@@ -75,7 +75,9 @@ pub use types::{
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
     DEFAULT_MAX_PREPARED, DEFAULT_MAX_TOOL_SESSIONS, DEFAULT_OUTPUT_BYTES,
-    DEFAULT_PREPARED_SECONDS, DEFAULT_SCROLLBACK_BYTES, EnvironmentConfig,
+    DEFAULT_PREPARED_SECONDS, DEFAULT_SCROLLBACK_BYTES, DEFAULT_TELEMETRY_BATCH_SECONDS,
+    DEFAULT_TELEMETRY_QUEUE, DEFAULT_TELEMETRY_STOP_WAIT_SECONDS, EnvironmentConfig,
+    TELEMETRY_SAMPLE_ALL, TelemetryConfig, TelemetryExporterConfig,
 };
 
 struct TopLevel {
@@ -297,6 +299,7 @@ impl Config {
                 ));
             }
         }
+        let telemetry = telemetry_of(host.telemetry.take(), base, &directory)?;
         let openers = raw::openers_of(host.openers.take())?;
         let max_message_bytes = host.max_message_bytes.unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
         if max_message_bytes == 0 {
@@ -322,6 +325,7 @@ impl Config {
             openers,
             max_message_bytes,
             environments,
+            telemetry,
             keep_awake: top.keep_awake,
             local_agents: top.local_agents,
             remote_agents: top.remote_agents,
@@ -662,6 +666,115 @@ fn environment_of(
         hook_read_ms: raw.hook_read_ms,
         hook_handlers: raw.hook_handlers,
         hook_seconds: raw.hook_seconds,
+    })
+}
+
+/// The names an exporter may have: 1 to 32 lower-case letters, digits, hyphens and underscores.
+fn telemetry_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 32
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+        })
+}
+
+/// `[host.telemetry]`. Errors name a key, never a value: an exporter's settings may hold a credential.
+fn telemetry_of(
+    raw: Option<RawTelemetry>,
+    base: &Path,
+    directory: &Path,
+) -> Result<TelemetryConfig, ConfigError> {
+    let Some(raw) = raw else {
+        return Ok(TelemetryConfig::default());
+    };
+    let refused = |what: String| ConfigError::Invalid {
+        entry: None,
+        what: format!("telemetry: {what}"),
+    };
+    let defaults = TelemetryConfig::default();
+    let record = match raw.record {
+        None => defaults.record,
+        Some(groups) => {
+            let mut kept: Vec<String> = Vec::new();
+            for group in groups {
+                if !matches!(group.as_str(), "spans" | "metrics" | "logs") {
+                    return Err(refused(
+                        "record names a group that is not spans, metrics or logs".to_owned(),
+                    ));
+                }
+                if !kept.contains(&group) {
+                    kept.push(group);
+                }
+            }
+            kept
+        }
+    };
+    let mut exporters = IndexMap::new();
+    for (name, each) in raw.exporters {
+        if !telemetry_name_ok(&name) {
+            return Err(refused(
+                "an exporter's name is 1 to 32 lower-case letters, digits, - and _".to_owned(),
+            ));
+        }
+        let exporter_refused = |what: &str| refused(format!("exporter {name}: {what}"));
+        let Some(provider) = each.provider.filter(|provider| !provider.is_empty()) else {
+            return Err(exporter_refused("provider is missing or empty"));
+        };
+        let origin = origin_of(
+            &name,
+            base,
+            directory,
+            OriginKeys {
+                library: each.library.as_deref(),
+                source: each.source.as_deref(),
+                source_settings: each.source_settings,
+                import_search: each.import_search.as_deref(),
+            },
+        )?;
+        let settings = settings_of(&name, each.settings.unwrap_or_default())?;
+        let queue = match each.queue {
+            None => DEFAULT_TELEMETRY_QUEUE,
+            Some(0) => return Err(exporter_refused("queue must be at least 1")),
+            Some(queue) => usize::try_from(queue).unwrap_or(usize::MAX),
+        };
+        let batch_seconds = match each.batch_seconds {
+            None => DEFAULT_TELEMETRY_BATCH_SECONDS,
+            Some(0) => return Err(exporter_refused("batch_seconds must be at least 1")),
+            Some(seconds) => seconds,
+        };
+        let sample = match each.sample {
+            None => TELEMETRY_SAMPLE_ALL,
+            Some(fraction) if (0.0..=1.0).contains(&fraction) => {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "a fraction between 0 and 1, scaled to millionths"
+                )]
+                let millionths = (fraction * f64::from(TELEMETRY_SAMPLE_ALL)).round() as u32;
+                millionths
+            }
+            Some(_) => return Err(exporter_refused("sample is a fraction from 0 to 1")),
+        };
+        exporters.insert(
+            name,
+            TelemetryExporterConfig {
+                provider,
+                origin,
+                settings,
+                queue,
+                batch_seconds,
+                sample,
+            },
+        );
+    }
+    Ok(TelemetryConfig {
+        enabled: raw.enabled.unwrap_or(false),
+        acknowledged: raw.acknowledged.unwrap_or_default(),
+        record,
+        stop_wait_seconds: raw
+            .stop_wait_seconds
+            .unwrap_or(DEFAULT_TELEMETRY_STOP_WAIT_SECONDS),
+        exporters,
     })
 }
 

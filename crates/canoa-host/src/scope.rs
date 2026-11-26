@@ -50,6 +50,8 @@ pub(crate) struct Scope {
     documents: Option<PathBuf>,
     /// The host's usage log and the harness this entry runs, which its connections record the agent's spend in.
     log: Option<(Arc<UsageLog>, String)>,
+    /// The harness this entry runs, which its connections tell the host's telemetry.
+    harness: Option<String>,
     /// The session a delegated task's connection was started from.
     parent: Option<String>,
     /// Who hears each turn of this entry's sessions end.
@@ -80,6 +82,7 @@ impl Scope {
             usage: Arc::new(Inference::default()),
             documents: None,
             log: None,
+            harness: None,
             parent: None,
             ends: None,
             entry: None,
@@ -104,6 +107,7 @@ impl Scope {
     #[must_use]
     pub(crate) fn usage_log(mut self, log: Option<Arc<UsageLog>>, harness: &str) -> Self {
         self.log = log.map(|log| (log, harness.to_owned()));
+        self.harness = Some(harness.to_owned());
         self
     }
 
@@ -145,6 +149,10 @@ impl Scope {
     /// One connection's share in the entry's inferred usage.
     pub(crate) fn splice(&self) -> Splice {
         let splice = Splice::new(Arc::clone(&self.usage), self.account.clone());
+        let splice = match &self.harness {
+            Some(harness) => splice.watching(harness),
+            None => splice,
+        };
         // A session with no profile of its own runs on the host's own sources.
         let own = Some(crate::profile::hosted::LOCAL_PROFILE.to_owned());
         match &self.log {

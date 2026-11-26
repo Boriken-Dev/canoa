@@ -69,6 +69,8 @@ pub struct Config {
     /// `[host.environments]`, by name, in the file's order: the places an agent may work besides this computer (`here`, which needs no
     /// entry). Each is made by the environment provider its `kind` names.
     pub environments: IndexMap<String, EnvironmentConfig>,
+    /// `[host.telemetry]`: whether the host exports traces, metrics and events, and to where. Off unless the person turned it on.
+    pub telemetry: TelemetryConfig,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
     /// `[host.content]`: how long and how much a catalog read through the content sources is kept and may hold.
@@ -140,6 +142,7 @@ impl Default for Config {
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             keep_awake: false,
             environments: Default::default(),
+            telemetry: Default::default(),
             store: Default::default(),
             content: Default::default(),
             disabled: Default::default(),
@@ -787,6 +790,62 @@ pub const DEFAULT_PREPARED_SECONDS: u64 = 600;
 
 /// How many commands of the take-over's hook may wait to run at once when `max_prepared` is not set: 256.
 pub const DEFAULT_MAX_PREPARED: u64 = 256;
+
+/// How long the host waits for the exporters to finish what they hold when it stops, in seconds, unless `stop_wait_seconds` says.
+pub const DEFAULT_TELEMETRY_STOP_WAIT_SECONDS: u64 = 5;
+/// How many signals an exporter's queue holds unless its table says (`queue`).
+pub const DEFAULT_TELEMETRY_QUEUE: usize = 4096;
+/// How often an exporter is handed a batch, in seconds, unless its table says (`batch_seconds`).
+pub const DEFAULT_TELEMETRY_BATCH_SECONDS: u64 = 5;
+/// The most `sample` can be, in millionths: every session.
+pub const TELEMETRY_SAMPLE_ALL: u32 = 1_000_000;
+
+/// `[host.telemetry]`: exporting is off unless `enabled` is true, and then only while `acknowledged` is the digest of the list of what
+/// is recorded and at least one exporter is named.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TelemetryConfig {
+    /// `enabled`: the switch; false when the table is absent.
+    pub enabled: bool,
+    /// `acknowledged`: the digest of the list of what is recorded that the person accepted; empty when none was.
+    pub acknowledged: String,
+    /// `record`: which groups of signals are recorded, of `spans`, `metrics` and `logs`; all three when the key is absent.
+    pub record: Vec<String>,
+    /// `stop_wait_seconds`: how long the host waits at a clean stop for exporters to finish.
+    pub stop_wait_seconds: u64,
+    /// `[host.telemetry.exporters.NAME]`, by name, in the file's order.
+    pub exporters: IndexMap<String, TelemetryExporterConfig>,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            acknowledged: String::new(),
+            record: ["spans", "metrics", "logs"].map(str::to_owned).to_vec(),
+            stop_wait_seconds: DEFAULT_TELEMETRY_STOP_WAIT_SECONDS,
+            exporters: IndexMap::new(),
+        }
+    }
+}
+
+/// One `[host.telemetry.exporters.NAME]`: somewhere signals are delivered, made by a `telemetry_exporter` provider.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TelemetryExporterConfig {
+    /// The id of the provider that makes it.
+    pub provider: String,
+    /// Where the provider's code comes from when it is no bundled one.
+    pub origin: Option<Origin>,
+    /// The provider's settings, checked against the schema it declares when the host starts.
+    pub settings: Settings,
+    /// `queue`: how many signals wait for the exporter before the oldest is let go.
+    pub queue: usize,
+    /// `batch_seconds`: how often a batch is handed over.
+    pub batch_seconds: u64,
+    /// `sample`: the fraction of sessions whose spans are exported, in millionths ([`TELEMETRY_SAMPLE_ALL`] for every one).
+    pub sample: u32,
+}
 
 /// One `[host.environments.NAME]`: a place an agent works, made by an `environment` provider.
 #[derive(Clone, Debug, PartialEq, Eq)]

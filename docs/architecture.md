@@ -57,7 +57,7 @@ See [interop.md](interop.md) for the minimum interoperability profile.
 
 - **Discovery, not fixed lists:** Each `canoa-<vendor>` crate and bundled integration crate (`canoa-foundry`, `canoa-litellm`, `canoa-openai`, `canoa-whisper`, `canoa-whispercpp`, `canoa-candle`) registers its providers through `crates/canoa-host/src/bundled.rs` via the same registration path an external Guatiao library or JavaScript/Python script package uses (`providers/list`).
 - **Accounts and standards:** An `account_provider` declares credential standards; `api-gateway` (`canoa::api_gateway`) covers any multi-standard proxy endpoint; `account_speech` (`canoa::speech::account`) matches transcription offers to accounts by standard and endpoint.
-- **Sessions and Store types:** `agent_vendor` supplies agent metadata, skill/hook delivery, access vocabulary translation, and session history import; `program_store`, `model_store`, `profile_item`, `settings_section`, `panel_tab`, `file_viewer`, `secret_provider`, `catalog_source`, `speech_provider`, `speech_output`, `model_gateway`, and `usage_reader` let both bundled crates and user extensions participate uniformly.
+- **Sessions and Store types:** `agent_vendor` supplies agent metadata, skill/hook delivery, access vocabulary translation, and session history import; `program_store`, `model_store`, `profile_item`, `settings_section`, `panel_tab`, `file_viewer`, `telemetry_exporter` `secret_provider`, `catalog_source`, `speech_provider`, `speech_output`, `model_gateway`, and `usage_reader` let both bundled crates and user extensions participate uniformly.
 
 ## Authentication and transport layering
 

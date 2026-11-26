@@ -1304,6 +1304,8 @@ mod skill_search;
 #[cfg(test)]
 mod skills_tests;
 mod stores;
+#[cfg(test)]
+mod telemetry_tests;
 pub(crate) mod tunnel;
 #[cfg(test)]
 mod tunnel_tests;
