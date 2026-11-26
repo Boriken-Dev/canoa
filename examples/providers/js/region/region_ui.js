@@ -105,6 +105,7 @@ export class TeamChat extends Notifier {
   static help = "Sends each notice to the team's chat.";
   static events = ['finished', 'failed'];
 
+  /** @param {unknown} request */
   send(request) {
     return delivery(noticeOf(request).id);
   }

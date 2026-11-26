@@ -54,6 +54,10 @@
       "types": "./types/section.d.ts",
       "import": "./src/section.js"
     },
+    "./notifier": {
+      "types": "./types/notifier.d.ts",
+      "import": "./src/notifier.js"
+    },
     "./panel": {
       "types": "./types/panel.d.ts",
       "import": "./src/panel.js"
