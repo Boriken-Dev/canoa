@@ -2067,3 +2067,5 @@ fn the_sweep_of_what_a_killed_host_left_is_started_once() {
     connect(&temp, None, &real).expect("prepared");
     assert_eq!(counted::sweeps(), 1);
 }
+
+mod approvers;

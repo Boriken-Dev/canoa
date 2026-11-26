@@ -630,10 +630,10 @@ pub(crate) fn variables_of(applied: &[Applied]) -> Vec<(&str, &Variable)> {
     out
 }
 
-/// The items a host offers, held by the profiles it serves: the built-in and bundled items alone until the host has opened its
-/// extensions' libraries.
+/// What a host offers its profiles from the libraries it opened: the items, and the registries the approvers of a session are found
+/// in. The built-in and bundled items alone until the host has opened its extensions' libraries.
 #[derive(Clone, Default)]
-pub struct ItemSet(Option<Arc<ItemCatalog>>);
+pub struct ItemSet(Option<Arc<ItemCatalog>>, Vec<Arc<Registry>>);
 
 impl core::fmt::Debug for ItemSet {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -643,6 +643,11 @@ impl core::fmt::Debug for ItemSet {
 
 impl PartialEq for ItemSet {
     fn eq(&self, other: &Self) -> bool {
+        let same = self.1.len() == other.1.len()
+            && self.1.iter().zip(&other.1).all(|(a, b)| Arc::ptr_eq(a, b));
+        if !same {
+            return false;
+        }
         match (&self.0, &other.0) {
             (None, None) => true,
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -656,17 +661,33 @@ impl Eq for ItemSet {}
 impl ItemSet {
     /// The items `config`'s libraries offer, with the built-in and bundled ones.
     pub(crate) fn of(config: &Config) -> Self {
-        Self(Some(Arc::new(ItemCatalog::of(config))))
+        let registries = crate::control::providers::loaded(config)
+            .iter()
+            .map(|(_, registry)| Arc::clone(registry))
+            .collect();
+        Self(Some(Arc::new(ItemCatalog::of(config))), registries)
     }
 
     /// The items of `catalog`.
     #[cfg(test)]
     pub(crate) fn with(catalog: ItemCatalog) -> Self {
-        Self(Some(Arc::new(catalog)))
+        Self(Some(Arc::new(catalog)), Vec::new())
     }
 
     /// The catalog these are.
     pub(crate) fn catalog(&self) -> Arc<ItemCatalog> {
         self.0.clone().unwrap_or_else(ItemCatalog::built_in)
+    }
+
+    /// The registries of the libraries the host opened, which the approvers of a session are found in besides the host's own.
+    pub(crate) fn registries(&self) -> &[Arc<Registry>] {
+        &self.1
+    }
+
+    /// These items with `registries` as the libraries the host opened.
+    #[cfg(test)]
+    pub(crate) fn with_registries(mut self, registries: Vec<Arc<Registry>>) -> Self {
+        self.1 = registries;
+        self
     }
 }

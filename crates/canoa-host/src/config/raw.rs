@@ -215,6 +215,21 @@ pub(super) struct RawPower {
 pub(super) struct RawPermissions {
     #[serde(default)]
     pub(super) protected: Option<RawLines>,
+    /// `[permissions.approvers.NAME]`: who else answers a permission request.
+    #[serde(default)]
+    pub(super) approvers: Option<IndexMap<String, RawApprover>>,
+}
+
+/// One `[permissions.approvers.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawApprover {
+    pub(super) provider: Option<String>,
+    pub(super) settings: Option<toml::Table>,
+    pub(super) notifier: Option<String>,
+    pub(super) detail: Option<String>,
+    pub(super) timeout_seconds: Option<u64>,
+    pub(super) only_when_away: Option<bool>,
 }
 
 /// `[usage]`: the app reads `warn_permille`, so only the key the host acts on is named and the others are let go by.

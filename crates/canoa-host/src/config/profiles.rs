@@ -108,6 +108,7 @@ pub(super) fn profile_of(
         items: crate::profile::ItemSet::default(),
         session: None,
         protected: None,
+        approvers: crate::approve::Approvers::default(),
     })
 }
 
@@ -197,6 +198,7 @@ pub(super) fn local_profiles_of(
         client_loadouts: BTreeMap::new(),
         presets: IndexMap::new(),
         protected: None,
+        approvers: crate::approve::Approvers::default(),
     })
 }
 

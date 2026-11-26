@@ -268,6 +268,8 @@ pub struct LocalProfiles {
     pub presets: IndexMap<String, Preset>,
     /// `[permissions] protected`: the places a hook's allow never answers for.
     pub protected: Option<Vec<String>>,
+    /// `[permissions.approvers]`: who else answers a permission request.
+    pub approvers: crate::approve::Approvers,
 }
 
 /// One `[profiles.NAME]`: the values a new session starts with, chosen by name. It is the session's layer, which sits above the
@@ -538,6 +540,7 @@ impl LocalProfiles {
             items: crate::profile::ItemSet::default(),
             session: None,
             protected: self.protected.clone(),
+            approvers: self.approvers.clone(),
         })
     }
 

@@ -433,7 +433,18 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
     ),
     ("settings", &["power"]),
     ("settings.power", &["keep_awake"]),
-    ("permissions", &["protected"]),
+    ("permissions", &["protected", "approvers"]),
+    (
+        "permissions.approvers.NAME",
+        &[
+            "provider",
+            "settings",
+            "notifier",
+            "detail",
+            "timeout_seconds",
+            "only_when_away",
+        ],
+    ),
     ("usage", &["limit_phrases", "warn_permille"]),
     ("notifications", &["notifiers"]),
     (

@@ -83,6 +83,7 @@ struct TopLevel {
     limit_phrases: Option<Vec<String>>,
     warn_permille: u32,
     protected_paths: Option<Vec<String>>,
+    approvers: crate::approve::Approvers,
     keep_awake: bool,
     local_agents: Vec<Entry>,
     remote_agents: Vec<RemoteAgent>,
@@ -391,9 +392,13 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
         .and_then(|settings| settings.power)
         .and_then(|power| power.keep_awake)
         .unwrap_or(false);
-    let protected_paths = raw
-        .permissions
-        .take()
+    let permissions = raw.permissions.take();
+    let approvers = approvers_of(
+        permissions
+            .as_ref()
+            .and_then(|each| each.approvers.as_ref()),
+    )?;
+    let protected_paths = permissions
         .and_then(|permissions| permissions.protected)
         .map(RawLines::lines);
     let local_agents = local_agents_of(&raw.agents)?;
@@ -425,12 +430,14 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
         default_loadout_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
     local_profiles.client_loadouts = client_loadouts_of(raw.defaults.as_ref())?;
     local_profiles.protected.clone_from(&protected_paths);
+    local_profiles.approvers.clone_from(&approvers);
     Ok(TopLevel {
         network,
         secrets,
         limit_phrases,
         warn_permille,
         protected_paths,
+        approvers,
         keep_awake,
         local_agents,
         remote_agents,
@@ -471,6 +478,7 @@ fn build_host_profiles(
         profile.options.clone_from(&top.options);
         profile.kb_choice.clone_from(&top.kb_choice);
         profile.protected.clone_from(&top.protected_paths);
+        profile.approvers.clone_from(&top.approvers);
         profiles.insert(name, profile);
     }
     Ok(profiles)
@@ -1311,4 +1319,35 @@ fn build_subsystems(
         usage,
         web,
     })
+}
+
+/// `[permissions.approvers.NAME]`, checked.
+fn approvers_of(
+    raw: Option<&IndexMap<String, raw::RawApprover>>,
+) -> Result<crate::approve::Approvers, ConfigError> {
+    let entries = raw
+        .into_iter()
+        .flatten()
+        .map(|(name, entry)| {
+            (
+                name.clone(),
+                crate::approve::config::RawEntry {
+                    provider: entry.provider.clone(),
+                    settings: entry
+                        .settings
+                        .as_ref()
+                        .and_then(|table| serde_json::to_value(table).ok())
+                        .and_then(|value| match value {
+                            serde_json::Value::Object(map) => Some(map),
+                            _ => None,
+                        }),
+                    notifier: entry.notifier.clone(),
+                    detail: entry.detail.clone(),
+                    timeout_seconds: entry.timeout_seconds,
+                    only_when_away: entry.only_when_away,
+                },
+            )
+        })
+        .collect();
+    crate::approve::config::read(entries).map_err(|what| ConfigError::Invalid { entry: None, what })
 }

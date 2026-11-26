@@ -275,6 +275,8 @@ pub struct HostProfile {
     /// `[permissions] protected`: the places a hook's allow never answers for, in gitignore syntax; none leaves it to the
     /// host's recommended places.
     pub protected: Option<Vec<String>>,
+    /// `[permissions.approvers]`: who else answers a permission request, besides the window.
+    pub approvers: crate::approve::Approvers,
 }
 
 impl HostProfile {

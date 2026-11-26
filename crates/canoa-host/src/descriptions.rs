@@ -13,6 +13,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use canoa::approver::ApproverVtable;
 use canoa::content::{
     CatalogGeneratorProviderVtable, ContentHostVtable, ContentSourceProviderVtable,
 };
@@ -63,6 +64,7 @@ pub(crate) fn document() -> String {
         PanelTabVtable::description(),
         NotifierVtable::description(),
         FileViewerVtable::description(),
+        ApproverVtable::description(),
         ModelGatewayVtable::description(),
         GatewayLeaseVtable::description(),
         NetworkRouteVtable::description(),
@@ -156,6 +158,7 @@ mod tests {
             "panel_tab",
             "notifier",
             "file_viewer",
+            "approver",
             "model_gateway",
             "gateway_lease",
             "acp_harness",

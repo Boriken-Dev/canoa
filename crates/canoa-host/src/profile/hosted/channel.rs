@@ -533,6 +533,8 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
         // What the harness's own hooks have reported since the last look: run before anything else moves.
         self.drain_forwarded();
+        // What approvers have answered since the last look: the agent is answered and the client told, before anything else moves.
+        self.settle_approvals()?;
         let first = {
             let mut hold = self.hold();
             if let Some(line) = hold.launch.take() {

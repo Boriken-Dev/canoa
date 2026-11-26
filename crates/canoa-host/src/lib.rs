@@ -5,6 +5,7 @@ extern crate alloc;
 
 mod accounts;
 mod addresses;
+pub mod approve;
 mod assist;
 mod awake;
 mod bundled;

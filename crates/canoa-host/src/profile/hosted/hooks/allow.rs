@@ -95,6 +95,15 @@ fn named(call: &Value) -> Vec<String> {
     out
 }
 
+/// The files `call` names, placed against `cwd` and written as text, for those that can be placed.
+pub(super) fn placed(call: &Value, cwd: &Path) -> Vec<String> {
+    named(call)
+        .iter()
+        .filter_map(|path| place(cwd, path, cfg!(windows)))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
 /// `path` made absolute against `cwd` with `.` and `..` worked out; none for one that cannot be placed: empty, holding a
 /// zero byte, starting with `~` (which a shell expands and this does not), or climbing above its root.
 fn place(cwd: &Path, path: &str, windows: bool) -> Option<PathBuf> {

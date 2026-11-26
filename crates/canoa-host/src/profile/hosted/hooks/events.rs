@@ -6,15 +6,21 @@
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
 
+use canoa::approver::{self, Choice};
 use coqui_aos::{Decision, FiredEvent, HookEvent};
-use coqui_transport::Channel;
+use coqui_transport::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
-use super::forward::Forward;
 use super::{Firing, report_item};
+use super::{allow, forward::Forward};
+use crate::approve;
+use crate::approve::catalog::Catalog;
+use crate::approve::chain::{Asking, Chain, Outcome, Presence, Settle, Settled};
 use crate::profile::hosted::project_context;
 use crate::profile::hosted::{
     Hosted, Item, LayerId, LayerKind, SESSION_METHODS, State, Written, error,
@@ -72,6 +78,29 @@ pub(in crate::profile::hosted) struct Tool {
     input: Value,
 }
 
+/// A permission request as the agent asked it, for the approvers.
+struct Asked<'a> {
+    id: &'a Value,
+    /// The agent's id for the session.
+    agent: &'a str,
+    session: &'a SessionHooks,
+    call: Option<&'a Value>,
+    tool: &'a Tool,
+    options: Option<&'a [Value]>,
+    protected: bool,
+}
+
+/// A request the approvers are answering beside the window.
+#[derive(Debug)]
+pub(in crate::profile::hosted) struct Pending {
+    asking: Asking,
+    /// The request's id, which the agent is answered under.
+    id: Value,
+    agent: String,
+    call: Option<Value>,
+    options: Vec<Value>,
+}
+
 /// What a connection's hooks remember between messages.
 #[derive(Debug, Default)]
 pub(in crate::profile::hosted) struct Book {
@@ -99,9 +128,25 @@ pub(in crate::profile::hosted) struct Book {
     forward: Option<Forward>,
     /// The plugins of hooks written for each session, by Canoa's id for it: removed with it.
     plugins: BTreeMap<String, Vec<(Written, serde_json::Value)>>,
+    /// The approvers of this connection, made when the first request needs them.
+    chain: Option<Arc<Chain>>,
+    /// Requests approvers are answering beside the window, by the request's id.
+    asking: BTreeMap<String, Pending>,
+    /// Requests approvers settled whose late answer from the client is dropped, by the request's id.
+    settled: BTreeSet<String>,
+    /// What the approvers answered, which `settle_approvals` reads.
+    outbox: Arc<Mutex<VecDeque<(String, Settled)>>>,
+    /// Messages for the client, sent before it is read from again.
+    to_client: VecDeque<Vec<u8>>,
 }
 
 impl Book {
+    /// How many requests approvers are answering beside the window.
+    #[cfg(test)]
+    pub(in crate::profile::hosted) fn waiting(&self) -> usize {
+        self.asking.len()
+    }
+
     /// The oldest message Canoa has for the agent.
     pub(in crate::profile::hosted) fn next_injected(&mut self) -> Option<Vec<u8>> {
         self.inject.pop_front()
@@ -321,6 +366,15 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             .unwrap_or("")
             .to_owned();
         let id = value.get("id").cloned();
+        // A client's answer to a request approvers were answering ends their wait; one that comes after they settled it is dropped,
+        // since the agent has its answer. A cancelled turn ends the waits of its session.
+        if method.is_empty() && id.as_ref().is_some_and(|id| self.client_answered(id)) {
+            return Err(Vec::new());
+        }
+        if method == "session/cancel" {
+            let agent = value.pointer("/params/sessionId").and_then(Value::as_str);
+            self.end_asking(agent);
+        }
         let rewritten = if SESSION_METHODS.contains(&method.as_str()) {
             self.session_start(&mut value, &method, id.as_ref(), offered)?
         } else if method == "session/prompt" && self.tracking() {
@@ -340,7 +394,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
     /// Whether the host has anything to do with what the agent says and what the client asks after a session opens: an overlay has
     /// hooks, or a session it opened has something to follow or to report.
     fn tracking(&self) -> bool {
-        self.connection.hooks.any() || {
+        self.connection.hooks.any() || !self.connection.host.approvers.is_empty() || {
             let hold = self.hold();
             !hold.book.sessions.is_empty() || !hold.book.opening.is_empty()
         }
@@ -610,6 +664,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         else {
             return;
         };
+        self.end_asking(Some(&agent));
         let session = self.hold().book.sessions.remove(&agent);
         if let Some(session) = session {
             self.end(&session);
@@ -634,6 +689,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
 
     /// The connection ends: every session still open ends with it, best effort.
     pub(in crate::profile::hosted) fn end_all(&self) {
+        self.end_asking(None);
         let open: Vec<SessionHooks> = {
             let mut hold = self.hold();
             core::mem::take(&mut hold.book.sessions)
@@ -707,19 +763,21 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         Some(Later::TurnEnd(agent))
     }
 
-    /// The agent asks permission for a tool call: `pre-tool`.
+    /// The agent asks permission for a tool call: the overlays' `pre-tool` hooks first, then the approvers the person added.
     fn asked(&self, value: &Value, id: Option<&Value>) -> Seen {
         let id = id.cloned().unwrap_or(Value::Null);
         let params = value.get("params").unwrap_or(&Value::Null);
         let Some(agent) = params.get("sessionId").and_then(Value::as_str) else {
             return Seen::Passed(None);
         };
+        let listens = |session: &SessionHooks| {
+            self.connection
+                .hooks
+                .listens(HookEvent::PreTool, &session.allowed)
+        };
+        let approvers = !self.connection.host.approvers.is_empty();
         let session = self.session_for(agent);
-        if !self
-            .connection
-            .hooks
-            .listens(HookEvent::PreTool, &session.allowed)
-        {
+        if !approvers && !listens(&session) {
             return Seen::Passed(None);
         }
         // ACP v1 puts the call at `toolCall`, v2 at `subject.toolCall`; a v2 subject that is no tool call (a command, say)
@@ -729,9 +787,50 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             .or_else(|| params.pointer("/subject/toolCall"))
             .filter(|call| call.is_object());
         let tool = tool_of(call.unwrap_or(&Value::Null), self.tool_name_pointer());
+        let options = params
+            .get("options")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice);
+        // An allow never answers for a place the person protects, a request to widen the sandbox, or a call the host cannot read:
+        // those go to the person as they would have.
+        let protected = call.is_none_or(|call| {
+            self.connection
+                .hooks
+                .protects(call, Path::new(&session.cwd))
+        });
+        if listens(&session)
+            && let Some(seen) = self.hooked(&id, &session, &tool, options, protected)
+        {
+            return seen;
+        }
+        if !approvers {
+            return Seen::Passed(None);
+        }
+        let asked = Asked {
+            id: &id,
+            agent,
+            session: &session,
+            call,
+            tool: &tool,
+            options,
+            protected,
+        };
+        self.approve(&asked)
+    }
+
+    /// The hooks' answer to a request, when they give one; none when the question goes on. No decision is not an approval: it goes to
+    /// the client as it would have without the hooks, and `ask` is that same question.
+    fn hooked(
+        &self,
+        id: &Value,
+        session: &SessionHooks,
+        tool: &Tool,
+        options: Option<&[Value]>,
+        protected: bool,
+    ) -> Option<Seen> {
         let fired = self.fire(
             HookEvent::PreTool,
-            &session,
+            session,
             &[(
                 "tool",
                 json!({"kind": tool.kind, "name": tool.name, "input": tool.input}),
@@ -741,40 +840,12 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         );
         let mut hold = self.hold();
         hold.book.remember(fired.reports.iter().map(report_item));
-        // No decision is not an approval: the question goes to the client as it would have without the hooks, and `ask` is
-        // that same question.
-        let options = params.get("options").and_then(Value::as_array);
-        let option = |kind: &str| {
-            options
-                .into_iter()
-                .flatten()
-                .find(|option| option.get("kind").and_then(Value::as_str) == Some(kind))
-                .and_then(|option| option.get("optionId").cloned())
-        };
         let outcome = match fired.decision {
-            Some(Decision::Deny) => match option("reject_once").or_else(|| option("reject_always"))
-            {
-                Some(option) => json!({"outcome": "selected", "optionId": option}),
-                None => json!({"outcome": "cancelled"}),
-            },
+            Some(Decision::Deny) => approve::options::reject(options),
             Some(Decision::Allow) => {
                 // An allow answers for the person only with the option that allows this once, never one that remembers the
-                // choice, and never for a place the person protects: those go to them as they would have.
-                let protected = call.is_none_or(|call| {
-                    self.connection
-                        .hooks
-                        .protects(call, Path::new(&session.cwd))
-                });
-                // An option whose id another option shares could be read as either.
-                let single = |id: &Value| {
-                    options
-                        .into_iter()
-                        .flatten()
-                        .filter(|each| each.get("optionId") == Some(id))
-                        .count()
-                        == 1
-                };
-                let Some(allowing) = option("allow_once").filter(|id| !protected && single(id))
+                // choice.
+                let Some(allowing) = approve::options::allow_once(options).filter(|_| !protected)
                 else {
                     let by = fired.by.clone().unwrap_or_default();
                     let why = if protected {
@@ -788,14 +859,13 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                         State::Unsupported,
                         format!("hook-not-applied: allow, {why}, so the person is asked"),
                     )]);
-                    return Seen::Passed(None);
+                    return None;
                 };
-                json!({"outcome": "selected", "optionId": allowing})
+                allowing
             }
-            _ => return Seen::Passed(None),
+            _ => return None,
         };
-        let answer = json!({"jsonrpc": "2.0", "id": id, "result": {"outcome": outcome}});
-        if let Ok(answer) = serde_json::to_vec(&answer) {
+        if let Some(answer) = approve::options::answer(id, &outcome) {
             hold.book.inject.push_back(answer);
         }
         tracing::info!(
@@ -807,7 +877,210 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 "denied"
             }
         );
-        Seen::Dropped
+        Some(Seen::Dropped)
+    }
+
+    /// Puts a request to the approvers the person added: the ones that answer on the spot first, in order, and then the ones that
+    /// wait for someone beside the window, whose first answer is read by `settle_approvals`.
+    fn approve(&self, asked: &Asked<'_>) -> Seen {
+        let host = &self.connection.host;
+        let chain = {
+            let mut hold = self.hold();
+            Arc::clone(hold.book.chain.get_or_insert_with(|| {
+                let catalog = Catalog::of(host.items.registries());
+                Arc::new(Chain::new(&host.approvers, &catalog))
+            }))
+        };
+        if chain.is_empty() {
+            return Seen::Passed(None);
+        }
+        let mut random = [0_u8; 8];
+        let _ = getrandom::fill(&mut random);
+        let mut request = self.request_of(
+            format!("canoa-approval-{}", data_encoding::HEXLOWER.encode(&random)),
+            asked,
+        );
+        request.protected = asked.protected;
+        let can_allow = approve::options::allow_once(asked.options).is_some();
+        if let Some((by, choice)) = chain.instant(&request, can_allow) {
+            let outcome = match choice {
+                Choice::Allow => approve::options::allow_once(asked.options),
+                Choice::Reject => None,
+            }
+            .unwrap_or_else(|| approve::options::reject(asked.options));
+            let settled = Settled {
+                by,
+                outcome: match choice {
+                    Choice::Allow => Outcome::Allowed,
+                    Choice::Reject => Outcome::Rejected,
+                },
+            };
+            let mut hold = self.hold();
+            if let Some(answer) = approve::options::answer(asked.id, &outcome) {
+                hold.book.inject.push_back(answer);
+            }
+            if let Some(notice) = approve::notice::approved(asked.agent, asked.call, &settled) {
+                hold.book.to_client.push_back(notice);
+            }
+            tracing::info!(
+                entry = self.connection.entry,
+                by = settled.by,
+                "a permission request was answered by an approver"
+            );
+            return Seen::Dropped;
+        }
+        let key = asked.id.to_string();
+        let outbox = Arc::clone(&self.hold().book.outbox);
+        let settle: Settle = {
+            let key = key.clone();
+            Arc::new(move |settled| {
+                outbox
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push_back((key.clone(), settled));
+            })
+        };
+        // The window is attached while the client's connection is; whether it reports attending the session comes with the
+        // notifications' `notify/attended`.
+        let presence = Presence {
+            window: true,
+            attended: false,
+        };
+        if let Some(waiting) = chain.asking(&request, can_allow, presence, settle) {
+            let mut hold = self.hold();
+            if hold.book.asking.len() < MAX_TRACKED {
+                hold.book.asking.insert(
+                    key,
+                    Pending {
+                        asking: waiting,
+                        id: asked.id.clone(),
+                        agent: asked.agent.to_owned(),
+                        call: asked.call.cloned(),
+                        options: asked.options.map(<[Value]>::to_vec).unwrap_or_default(),
+                    },
+                );
+            }
+        }
+        Seen::Passed(None)
+    }
+
+    /// What the approvers have answered since the last look: the agent is answered with it, and the client is told the request is
+    /// closed and by whom. Called before a message of the client's is read.
+    pub(in crate::profile::hosted) fn settle_approvals(&self) -> Result<(), Failure> {
+        let notices: Vec<Vec<u8>> = {
+            let mut hold = self.hold();
+            if hold.book.asking.is_empty() && hold.book.to_client.is_empty() {
+                return Ok(());
+            }
+            let settled: Vec<(String, Settled)> = hold
+                .book
+                .outbox
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .drain(..)
+                .collect();
+            for (key, settled) in settled {
+                // A request the window answered first is no longer here: its late answer settles nothing.
+                let Some(pending) = hold.book.asking.remove(&key) else {
+                    continue;
+                };
+                let options = Some(pending.options.as_slice());
+                let outcome = match settled.outcome {
+                    Outcome::Allowed => approve::options::allow_once(options)
+                        .unwrap_or_else(|| approve::options::reject(options)),
+                    Outcome::Rejected | Outcome::Refused => approve::options::reject(options),
+                };
+                if let Some(answer) = approve::options::answer(&pending.id, &outcome) {
+                    hold.book.inject.push_back(answer);
+                }
+                for notice in [
+                    approve::notice::approved(&pending.agent, pending.call.as_ref(), &settled),
+                    approve::notice::closed(&pending.agent, &pending.id, &settled, &outcome),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    hold.book.to_client.push_back(notice);
+                }
+                if hold.book.settled.len() >= MAX_TRACKED {
+                    hold.book.settled.clear();
+                }
+                hold.book.settled.insert(key);
+                tracing::info!(
+                    entry = self.connection.entry,
+                    by = settled.by,
+                    "a permission request was settled without the window"
+                );
+            }
+            hold.book.to_client.drain(..).collect()
+        };
+        for notice in notices {
+            self.send_profiled(&notice)?;
+        }
+        Ok(())
+    }
+
+    /// The client answered the request `id` itself, or sent a message the approvers' answer already made unnecessary: true when
+    /// the message is a late answer to a request an approver settled, which the agent must not get twice.
+    fn client_answered(&self, id: &Value) -> bool {
+        let key = id.to_string();
+        let mut hold = self.hold();
+        if let Some(pending) = hold.book.asking.remove(&key) {
+            // The window answered first: every approver withdraws what it waits for.
+            pending.asking.end();
+            return false;
+        }
+        hold.book.settled.remove(&key)
+    }
+
+    /// Ends the requests of the agent's session `agent` that approvers are answering (a cancelled turn, a closed session), or of
+    /// every session when none is named.
+    fn end_asking(&self, agent: Option<&str>) {
+        let mut hold = self.hold();
+        let keys: Vec<String> = hold
+            .book
+            .asking
+            .iter()
+            .filter(|(_, pending)| agent.is_none_or(|agent| pending.agent == agent))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            if let Some(pending) = hold.book.asking.remove(&key) {
+                pending.asking.end();
+            }
+        }
+    }
+
+    /// The request as an approver is shown it: the tool's kind, name and title, the command and the placed files (which an approver
+    /// is given only when its entry asks), and the options without their ids, every text of the agent's made safe to show.
+    fn request_of(&self, id: String, asked: &Asked<'_>) -> approver::Request {
+        let title = asked
+            .call
+            .and_then(|call| call.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or(&asked.tool.name);
+        let mut tool = approver::Tool::new(&asked.tool.kind, &asked.tool.name, title);
+        tool.command = asked
+            .tool
+            .input
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        tool.paths = asked
+            .call
+            .map(|call| allow::placed(call, Path::new(&asked.session.cwd)))
+            .unwrap_or_default();
+        let mut request = approver::Request::new(
+            id,
+            approver::SessionRef::new(&asked.session.id, &self.connection.entry),
+            tool,
+        );
+        request.options = approve::options::refs(asked.options)
+            .into_iter()
+            .map(|(kind, name)| approver::OptionRef::new(kind, name))
+            .collect();
+        request.protected = asked.protected;
+        request.clean()
     }
 
     /// A session update: the start of a tool call is remembered, its end is `post-tool`.
