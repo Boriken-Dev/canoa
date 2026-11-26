@@ -27,9 +27,4 @@ Each type has **Installed** and **Discover** tabs and a search box. Open an entr
 
     Removing it from **Installed** takes it away again.
 
-**Settings, Store** explains where the catalogs are kept: each type lists its own, and you add one in that type's settings.
-
-![Settings, Store, which opens the Store](../assets/screens/store-catalogs-dark.png#only-dark)
-![Settings, Store, which opens the Store](../assets/screens/store-catalogs-light.png#only-light)
-
-Catalogs and what they may install are also settings of the host, which [the host's page](../host.md) describes for people who run one.
+Each Store type lists its own catalogs, and you add one in that type's settings. Catalogs and what they may install are also settings of the host, which [the host's page](../host.md) describes for people who run one.
