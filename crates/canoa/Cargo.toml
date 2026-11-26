@@ -87,6 +87,9 @@ rustix = { workspace = true, features = ["process", "net"], optional = true }
 [target.'cfg(windows)'.dependencies]
 coqui-syshttp = { workspace = true, features = ["negotiate"], optional = true }
 
+[build-dependencies]
+serde_json = { workspace = true }
+
 [dev-dependencies]
 guatiao-serde = { workspace = true }
 coqui-acp-harness = { workspace = true }

@@ -1,0 +1,14 @@
+{
+  "name": "AgentUI",
+  "short_name": "AgentUI",
+  "executable": "AgentUI",
+  "id": "dev.example.agentui",
+  "env_prefix": "AGENTUI",
+  "icon": "agentui.svg",
+  "accent": "#3D6DAF",
+  "accent_on_dark": "#8DB4EB",
+  "program": "agents",
+  "config_file": "agents.cfg",
+  "folder": "agents",
+  "home_dir": ".agentui"
+}

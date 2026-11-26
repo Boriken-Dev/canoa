@@ -6,5 +6,9 @@
   "env_prefix": "CANOA",
   "icon": "assets/icons/canoa.svg",
   "accent": "#3DAFA1",
-  "accent_on_dark": "#6DE2D2"
+  "accent_on_dark": "#6DE2D2",
+  "program": "canoa",
+  "config_file": "canoa.cfg",
+  "folder": "Canoa",
+  "home_dir": ".canoa"
 }
