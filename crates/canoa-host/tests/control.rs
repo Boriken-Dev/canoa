@@ -34,13 +34,8 @@ fn the_ledger_is_kept_over_a_link_by_name_and_the_host_stopping_ends_the_link() 
     assert_eq!(listed["records"][0]["owner"], "local");
     assert_eq!(listed["records"][0]["record"]["title"], "Fix the build");
 
-    // The file is the host's own, in its home.
-    let file = host
-        .scratch
-        .0
-        .join("home")
-        .join("control")
-        .join("ledger.json");
+    // The records are in the host's own store, in its home.
+    let file = host.scratch.0.join("home").join("sessions.sqlite3");
     assert!(file.exists(), "{}", file.display());
 
     // A second link sees the same ledger.

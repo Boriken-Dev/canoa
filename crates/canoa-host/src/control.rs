@@ -6,7 +6,6 @@
     reason = "files, locks and clocks are std's"
 )]
 
-use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::BTreeSet;
 use std::fs;
@@ -35,7 +34,7 @@ use grants::GRANT_SPECS;
 pub use grants::Grant;
 use grants::allow;
 pub(crate) use import::{Homes, IMPORT_KEY};
-use ledger::{File, Stored, private_file};
+use ledger::private_file;
 pub(crate) use moves::Moves;
 pub(crate) use overlays::{OverlayLimits, Overlays, valid_skill_name};
 pub(crate) use registry::Registry;
@@ -190,7 +189,8 @@ pub(crate) struct Control {
     path: Option<PathBuf>,
     max_records: usize,
     max_record_bytes: usize,
-    ledger: Mutex<BTreeMap<String, Stored>>,
+    /// The store the session list is kept in: the host's own when it has one, else one in memory.
+    ledger: Mutex<crate::history::Db>,
     /// The documents `state/*` keeps in the home.
     state: state::State,
     /// What `host/pair` pairs by, once the host has its identity and a home.
@@ -222,57 +222,19 @@ impl Control {
         entries: Vec<EntryRoots>,
     ) -> Result<Self, ControlError> {
         let path = dir.map(|dir| dir.join("ledger.json"));
-        let mut ledger = BTreeMap::new();
+        let memory = canoa::history_store::memory::MemoryDb::new();
+        canoa::history_store::HistoryDb::migrate(&memory, canoa::history_store::schema::v1())
+            .map_err(|error| ControlError {
+                path: PathBuf::new(),
+                what: error.message.to_string(),
+            })?;
+        let ledger = crate::history::Db::new(memory);
         if let Some(path) = &path {
-            match fs::read(path) {
-                Ok(bytes) => match serde_json::from_slice::<File>(&bytes) {
-                    Ok(file) => {
-                        ledger = file.records;
-                        for stored in ledger.values_mut() {
-                            if stored.size == 0 {
-                                stored.size =
-                                    serde_json::to_vec(&stored.record).map_or(0, |b| b.len());
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        // A ledger that cannot be read must not keep the host from starting: it is kept beside, and a new one begins.
-                        let aside = path.with_extension(format!("json.bad-{}", now_millis()));
-                        fs::rename(path, &aside).map_err(|error| ControlError {
-                            path: path.clone(),
-                            what: format!(
-                                "is not the host's ledger and could not be moved aside: {error}"
-                            ),
-                        })?;
-                        tracing::warn!(
-                            "the session ledger {} could not be read ({error}); it was moved to {} and a new one begun",
-                            path.display(),
-                            aside.display()
-                        );
-                    }
-                },
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    // A ledger the host cannot read at all (a directory, say) is kept beside like one it cannot parse.
-                    let aside = path.with_extension(format!("json.bad-{}", now_millis()));
-                    fs::rename(path, &aside).map_err(|moved| ControlError {
-                        path: path.clone(),
-                        what: format!("cannot be read ({error}) or moved aside ({moved})"),
-                    })?;
-                    tracing::warn!(
-                        "the session ledger {} could not be read ({error}); it was moved to {} and a new one begun",
-                        path.display(),
-                        aside.display()
-                    );
-                }
-            }
+            Self::move_old_ledger(&ledger, path);
         }
         if let Some(parent) = path.as_ref().and_then(|path| path.parent()) {
-            // Whoever made them before this host did may have made them open; they are this user's alone.
+            // Whoever made it before this host did may have made it open; it is this user's alone.
             let _ = restrict(parent, 0o700);
-            if let Some(path) = &path {
-                let _ = restrict(path, 0o600);
-            }
         }
         Ok(Self {
             sessions: None,
@@ -469,6 +431,16 @@ impl Control {
     /// Answers `history/*` from the recorded histories, moving a session to one of the harnesses it names.
     #[must_use]
     pub(crate) fn with_history(mut self, history: Moves) -> Self {
+        // The session list lives in the same store as the histories, so one file holds what the person has done.
+        if let Some(db) = history.store.db() {
+            if let Some(path) = &self.path {
+                Self::move_old_ledger(db, path);
+            }
+            *self
+                .ledger
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = db.clone();
+        }
         self.history = Some(history);
         self
     }

@@ -250,12 +250,15 @@ in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`
   nothing installed is removed. A fetch locks its own overlay or catalog only. A failure says git's first 300 characters, controls made spaces.
 - Skills fetched from elsewhere are not part of this: a page gets none, and an overlay that names one reports it as not delivered.
 
-**The ledger** is the list of the person's sessions, kept by the host in its home (`control/ledger.json`, written whole, atomically)
-as opaque JSON objects the host never reads into: it keeps an `id`, the record, who put it and when.
+**The ledger** is the list of the person's sessions, kept by the host in its history store (the `listings` table: one row per record,
+with the columns a list is filtered by taken out of the record and the whole record beside them) as JSON objects the host never reads
+into: it keeps an `id`, the record, who put it and when. The first start of a version that has the store reads an earlier version's
+`control/ledger.json` into it once (a record the store holds is kept; the file is never changed or removed, and a record the person
+removes later is not brought back by the next start).
 
 - Every record has an **owner**: `"local"` for the app, else the peer's id. A peer sees and changes only the records it owns, and
   `put` makes it the owner whatever the request says; the owner (the app) sees and changes all.
-- **Quotas.** `max_records` and 64 MiB of records are each owner's own (the app's, and each key's), the whole ledger holds 256 MiB, and the last 64 MiB are the app's alone, so a full ledger never refuses the app. A bad `ledger.json` is moved to `ledger.json.bad-<ms>` and an empty ledger begins (logged at `warn`); the file is written, synced and renamed, and `control/` and the file are `0700`/`0600` on Unix. A key's connection silent for 15 minutes is ended.
+- **Quotas.** `max_records` and 64 MiB of records are each owner's own (the app's, and each key's), the whole ledger holds 256 MiB, and the last 64 MiB are the app's alone, so a full ledger never refuses the app. A file that is not an old ledger is left where it is and not read (logged at `warn`); `control/` is `0700` on Unix. A key's connection silent for 15 minutes is ended.
 - `ledger/list` returns the caller's own records only; the owner (the app) asks for every owner's with `"all": true`, which a key's request cannot do. The app reads only its own, so nothing a key put is ever taken for a session. `{"after"?: id, "limit"?: 1..=500, default 100}` -> `{"records": [{"id", "updated", "owner", "record"}], "next"?: id}`,
   newest `updated` first; `next` is the `after` of the following page.
 - `ledger/put` `{"id": text of 1 to 128 characters with no control character, "record": object}` -> `{"id", "updated"}`; replaces the
@@ -282,9 +285,12 @@ the `usage` grant (above).
 keep_days = 400                     # a month's file is removed at start once all of it is older; at least 1
 ```
 
-**Session history.** The host records each session it serves in the session-history format (`coqui-acp-history`) in its home,
-`history/`, one `<sha256 of entry and session id>.jsonl` a session in a directory and files only this user reads (`0700`/`0600`
-on Unix). A turn is written when it ends, and a connection that ends inside one writes it as ended with an error, so a stop
+**Session history.** The host records each session it serves in the session-history format (`coqui-acp-history`) in a
+`history_store`: the provider `[host.history] store` names, else the one that says it is the default (SQLite, `sessions.sqlite3` in
+the home, `0600` on Unix; `store_settings` is that provider's settings). A session is a row, its turns and lines rows beside it, each
+turn with who served it and what it cost, as `canoa::history_store::schema` says. A store a newer version made is opened read-only,
+logged at `warn`, and nothing is recorded into it. The first start moves an earlier version's `history/*.jsonl` into the store once, under the entry
+the old ledger names for each, and leaves the files as they are. A turn is written when it ends, and a connection that ends inside one writes it as ended with an error, so a stop
 loses at most the turn in flight. It records what reaches the agent and what the agent says, after the host's own checks, and
 never a message over the limit: a session that passes a limit keeps what it had and nothing more.
 
@@ -300,12 +306,15 @@ record = true                       # false records nothing
 max_session_bytes = 16777216        # one session's history; no ceiling (a history is read whole to be moved, so a large one costs memory then)
 max_sessions = 1000                 # sessions with a history; a new one past it is not recorded
 max_total_bytes = 1073741824        # every history together
+# store = "sqlite"                  # the history_store provider; the default one when absent
+# [host.history.store_settings]     # its settings (SQLite: path, busy_timeout_ms, journal, synchronous, read_only)
 ```
 
 | Method | Params | Result |
 | --- | --- | --- |
 | `history/export` | `entry`, `session`, `max_bytes`? (1 to 4 MiB, default 1 MiB), `after`? | `{"id", "text", "next"?}`: one page of whole lines of the history as it is, the first with the header; `next` is the `after` of the following page |
 | `history/move` | `entry`, `session`, `to` (an entry that runs a harness), `cwd`? (absolute; the history's own by default, and under the target's working roots; needed when the host has no record of the session) | `{"session", "entry", "cwd", "replayed", "compacted", "seededFrom"?, "recorded", "via": "record" or "provider", "losses": [{"kind", "count", "detail"?}]}`: the history this host recorded, else the one `entry`'s own agent exports for `session` in `cwd`; a provider that can do neither is refused with its reason |
+| `history/status` | none | `{"recording", "writable", "notice"}`: whether sessions are being recorded, whether the store may be changed, and a sentence for the person when the store is read-only (a newer version made it) or could not be opened, else `null` |
 | `history/portable` | none | `{"entries": {NAME: {"export", "import", "replay", "why"?}}}` for every entry that runs a harness: whether its provider exports a session in the standard format and imports one (`replay`: only as context in the first prompt, where `replay_max_bytes` is set). Found by asking the provider about a session that cannot exist, so a provider that is not local to this machine, or Pi's where the spawner is remote, answers its own refusal in `why` |
 | `history/account` | `entry`, `session`, `cwd` (absolute), `from`? (an account of the entry's provider, listed by the entry or not; the entry's first by default, else the login the program has where it runs), `to` (another; `null` for either is that login) | `{"moved": false, "session", "cwd"}` when neither account has a folder of its own (they keep conversations in one place, so the session resumes as it is), else `{"moved": true, "session" (a new id), "cwd", "via": "provider" or "record", "replayed", "losses"}`: the provider's `export_session` from `from`'s folder, imported by `import_session` into `to`'s at a new id; where the provider cannot export, the history this host recorded stands in, and where neither exists the answer is `-32002` saying why. `from` and `to` are held for the call, so a connection still running on one makes it wait up to 5 seconds |
 | `history/importable` | `harness` (an agent whose crate's `agent_vendor` provider finds its program's sessions: `providers/list` says `imports`), `entry` | `{"harness", "entry", "found", "sessions": [{"id", "title"?, "cwd"?, "bytes", "updated", "imported"}]}`: the sessions in that program's own folder, newest first, at most 500; titles and folders only, never what was said |

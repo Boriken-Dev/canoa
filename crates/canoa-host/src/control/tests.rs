@@ -289,51 +289,102 @@ fn the_limits_are_refused_at_not_dropped_to() {
     );
 }
 
-#[test]
-fn the_ledger_is_kept_across_a_reopen_and_a_file_that_is_not_one_is_said() {
-    let dir = std::env::temp_dir().join(format!("canoa-control-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    {
-        let control = Control::open(
-            Some(&dir),
-            DEFAULT_MAX_RECORDS,
-            DEFAULT_MAX_RECORD_BYTES,
-            Vec::new(),
-        )
-        .expect("opens");
-        put(&control, &Caller::Owner, "kept");
-        put(&control, &peer("k", &[Grant::LedgerWrite]), "theirs");
-    }
-    let again = Control::open(
-        Some(&dir),
+/// A control channel whose session list is kept in the store under `home`, with an old ledger file in `old` when there is one.
+fn kept_in(home: &Path, old: Option<&Path>) -> Control {
+    let store = Arc::new(crate::history::Store::open(
+        Some(home.to_path_buf()),
+        crate::config::HistoryConfig::default(),
+    ));
+    Control::open(
+        old,
         DEFAULT_MAX_RECORDS,
         DEFAULT_MAX_RECORD_BYTES,
         Vec::new(),
     )
-    .expect("opens again");
+    .expect("opens")
+    .with_history(moves::Moves {
+        store,
+        targets: std::collections::BTreeMap::new(),
+        homes: import::Homes::default(),
+    })
+}
+
+#[test]
+fn the_ledger_is_kept_in_the_store_across_a_reopen() {
+    let dir = std::env::temp_dir().join(format!("canoa-control-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    {
+        let control = kept_in(&dir, None);
+        put(&control, &Caller::Owner, "kept");
+        put(&control, &peer("k", &[Grant::LedgerWrite]), "theirs");
+    }
+    let again = kept_in(&dir, None);
     let listed = ask(&again, &Caller::Owner, "ledger/list", json!({"all": true}));
     let mut found = ids(&listed);
     found.sort_unstable();
     assert_eq!(found, ["kept", "theirs"]);
-    // A file that is not a ledger does not stop the host: it is kept beside and a new ledger begins.
-    fs::write(dir.join("ledger.json"), "[1, 2]").expect("written");
-    let fresh = Control::open(Some(&dir), 1, 1, Vec::new()).expect("opens empty");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_old_ledger_file_is_moved_into_the_store_once_and_left_as_it_is() {
+    let root = std::env::temp_dir().join(format!("canoa-control-old-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let (home, old) = (root.join("home"), root.join("control"));
+    fs::create_dir_all(&old).expect("a folder");
+    let file = old.join("ledger.json");
+    let text = r#"{"records":{
+        "s/one":{"owner":"local","updated":5,"record":{"entry":"Claude","sessionId":"a","title":"First","pinned":true}},
+        "s/two":{"owner":"local","updated":9,"record":{"entry":"Codex","sessionId":"b"}}}}"#;
+    fs::write(&file, text).expect("a ledger");
+    {
+        let control = kept_in(&home, Some(&old));
+        let listed = ask(&control, &Caller::Owner, "ledger/list", json!({}));
+        assert_eq!(ids(&listed), ["s/two", "s/one"], "newest first");
+        assert_eq!(listed["result"]["records"][1]["record"]["title"], "First");
+        let removed = ask(
+            &control,
+            &Caller::Owner,
+            "ledger/remove",
+            json!({"id": "s/one"}),
+        );
+        assert_eq!(removed["result"]["removed"], true);
+    }
+    assert_eq!(
+        fs::read_to_string(&file).expect("kept"),
+        text,
+        "the old file is untouched"
+    );
+    // A record the person removed since is not brought back by the next start.
+    let again = kept_in(&home, Some(&old));
+    let listed = ask(&again, &Caller::Owner, "ledger/list", json!({}));
+    assert_eq!(ids(&listed), ["s/two"]);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_file_that_is_not_an_old_ledger_does_not_stop_the_host_and_is_left_alone() {
+    let root = std::env::temp_dir().join(format!("canoa-control-bad-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let (home, old) = (root.join("home"), root.join("control"));
+    fs::create_dir_all(&old).expect("a folder");
+    fs::write(old.join("ledger.json"), "[1, 2]").expect("written");
+    let control = kept_in(&home, Some(&old));
     assert!(
         ids(&ask(
-            &fresh,
+            &control,
             &Caller::Owner,
             "ledger/list",
             json!({"all": true})
         ))
         .is_empty()
     );
-    let aside = fs::read_dir(&dir)
-        .expect("listed")
-        .filter_map(Result::ok)
-        .any(|entry| entry.file_name().to_string_lossy().contains("json.bad-"));
-    assert!(aside, "the unreadable file is kept");
-    put(&fresh, &Caller::Owner, "after");
-    let _ = fs::remove_dir_all(&dir);
+    put(&control, &Caller::Owner, "after");
+    assert_eq!(
+        fs::read_to_string(old.join("ledger.json")).expect("kept"),
+        "[1, 2]"
+    );
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -708,39 +759,18 @@ fn a_key_may_not_run_a_program_through_store_report() {
     }
 }
 
-#[test]
-fn a_ledger_the_host_cannot_read_at_all_is_moved_aside_too() {
-    let dir = std::env::temp_dir().join(format!("canoa-control-dir-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(dir.join("ledger.json")).expect("a directory where the file goes");
-    let control = Control::open(Some(&dir), 10, 1024, Vec::new()).expect("opens empty");
-    assert!(
-        put(&control, &Caller::Owner, "after")
-            .get("result")
-            .is_some()
-    );
-    let aside = fs::read_dir(&dir)
-        .expect("listed")
-        .filter_map(Result::ok)
-        .any(|entry| entry.file_name().to_string_lossy().contains("json.bad-"));
-    assert!(aside);
-    let _ = fs::remove_dir_all(&dir);
-}
-
 #[cfg(unix)]
 #[test]
-fn the_ledger_and_its_folder_are_made_private_whenever_the_host_opens_them() {
+fn the_folder_of_an_old_ledger_is_made_private_whenever_the_host_opens_it() {
     use std::os::unix::fs::PermissionsExt as _;
     let dir = std::env::temp_dir().join(format!("canoa-control-mode-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("a folder");
     fs::write(dir.join("ledger.json"), r#"{"records":{}}"#).expect("a ledger");
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("open");
-    fs::set_permissions(dir.join("ledger.json"), fs::Permissions::from_mode(0o644)).expect("open");
     let _control = Control::open(Some(&dir), 10, 1024, Vec::new()).expect("opens");
     let mode = |path: &Path| fs::metadata(path).expect("there").permissions().mode() & 0o777;
     assert_eq!(mode(&dir), 0o700);
-    assert_eq!(mode(&dir.join("ledger.json")), 0o600);
     let _ = fs::remove_dir_all(&dir);
 }
 
