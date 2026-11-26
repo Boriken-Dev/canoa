@@ -18,6 +18,21 @@ use crate::config::{AccountConfig, Config};
 use crate::kind::{Harness, Login, LoginProbe};
 use crate::makers::Makers;
 
+#[cfg(test)]
+thread_local! {
+    /// What a unit test makes of every bundled agent's program: found, so that no test looks at this computer's programs.
+    static TEST_MISSING: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Runs `f` with every bundled agent's program standing as missing (or found), for a unit test.
+#[cfg(test)]
+pub(crate) fn with_programs_missing<T>(missing: bool, f: impl FnOnce() -> T) -> T {
+    let before = TEST_MISSING.with(|slot| slot.replace(missing));
+    let out = f();
+    TEST_MISSING.with(|slot| slot.set(before));
+    out
+}
+
 /// What a provider says of its accounts: the standards it accepts, and the kinds and sign-in methods its account provider offers.
 #[derive(Clone)]
 struct Known {
@@ -243,15 +258,42 @@ impl<'a> Catalogs<'a> {
     /// login is not on this computer.
     pub(crate) fn local_kind(&self, harness: &str) -> Option<AccountKindInfo> {
         let known = self.known(harness)?;
-        if !known.login()?.listed() {
+        if !self.login(harness)?.listed() {
             return None;
         }
         known.listing.kind(coqui_acp_api::HARNESS_LOGIN).cloned()
     }
 
     /// How the login of `harness` stands, as its account provider answers; `None` when it offers none as the account `local`.
+    ///
+    /// A provider that could not tell whether the login is there is taken as signed out while the program itself is not on this
+    /// computer: there is nothing to be signed in to, and the Store already says it is not installed.
     pub(crate) fn login(&self, harness: &str) -> Option<Login> {
-        self.known(harness)?.login()
+        let login = self.known(harness)?.login()?;
+        if matches!(login, Login::Unknown(_)) && self.program_missing(harness) {
+            return Some(Login::SignedOut(
+                "its program is not installed on this computer".to_owned(),
+            ));
+        }
+        Some(login)
+    }
+
+    /// Whether `harness` is one of the bundled agents whose program this computer lacks, as the Store finds it.
+    #[cfg(test)]
+    fn program_missing(&self, _: &str) -> bool {
+        TEST_MISSING.with(core::cell::Cell::get)
+    }
+
+    /// Whether `harness` is one of the bundled agents whose program this computer lacks, as the Store finds it.
+    #[cfg(not(test))]
+    fn program_missing(&self, harness: &str) -> bool {
+        let Some((name, _)) = crate::bundled::harness_sources().find(|(_, id)| *id == harness)
+        else {
+            return false;
+        };
+        crate::sources::entries(self.config)
+            .iter()
+            .any(|source| source.entry.name == name && !source.missing.is_empty())
     }
 
     /// The automatic `local` account of every harness whose provider offers its own login: the harness and the kind that login is. Only a login
@@ -270,7 +312,7 @@ impl<'a> Catalogs<'a> {
     /// A harness lists first what it was made for, but a harness also takes the APIs others do, so the login is the first standard
     /// it accepts that no other harness accepts: one only its own login makes. `None` when it has no such login.
     pub(crate) fn login_standard(&self, harness: &str) -> Option<String> {
-        if !self.known(harness)?.login()?.listed() {
+        if !self.login(harness)?.listed() {
             return None;
         }
         let others: Vec<Vec<String>> = self

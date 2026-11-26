@@ -489,4 +489,34 @@ mod login {
         assert!(!shown);
         assert_eq!(login, Some(Login::SignedOut("none".into())));
     }
+
+    #[test]
+    fn a_login_that_cannot_be_looked_for_is_not_listed_while_the_program_is_not_installed() {
+        let config = crate::config::Config::default();
+        let unknown = || Login::Unknown("the folder was assumed".into());
+        let shown = |missing: bool| {
+            crate::accounts::matching::with_programs_missing(missing, || {
+                with_login(unknown(), || {
+                    Catalogs::new(&config)
+                        .locals()
+                        .iter()
+                        .any(|(harness, _)| harness == "grok")
+                })
+            })
+        };
+        assert!(shown(false), "installed, an unknown login is listed");
+        assert!(
+            !shown(true),
+            "not installed, there is nothing to sign in to"
+        );
+        let signed_in = crate::accounts::matching::with_programs_missing(true, || {
+            with_login(Login::SignedIn(None), || {
+                Catalogs::new(&config)
+                    .locals()
+                    .iter()
+                    .any(|(harness, _)| harness == "grok")
+            })
+        });
+        assert!(signed_in, "a login that is there is listed");
+    }
 }
