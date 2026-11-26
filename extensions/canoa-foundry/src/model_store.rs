@@ -1,6 +1,8 @@
-//! Foundry Local's models as a Store page: what its command line lists, what `+` does for each, the window a model is run with and
-//! the Whisper models that may be the person's speech-to-text. The host knows none of it: it asks this provider through the
-//! `model_store` kind and draws what it answers.
+//! Foundry Local's models as a Store page: what its command line lists (one entry for each alias, the builds for each kind of
+//! hardware inside it), what installing and removing do, the window a build is run with and the Whisper models that may be the
+//! person's speech-to-text. The Store is only a front end: every list and every change is the program's own command, run through the
+//! spawner the host hands this provider, and nothing here names a model. The host asks this provider through the `model_store` kind
+//! and draws what it answers.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -12,8 +14,8 @@ use std::time::Duration;
 
 use canoa::store::models::{
     Fact, ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
-    ModelSettings, ModelStore, ModelStoreInfo, RowAction, Section, ServedModel, ServiceQuery,
-    ServiceReport, SpeechService, SpeechUse, last_words, run,
+    ModelSettings, ModelStore, ModelStoreInfo, ModelVariant, RowAction, Section, ServedModel,
+    ServiceQuery, ServiceReport, SpeechService, SpeechUse, last_words, run,
 };
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -31,9 +33,8 @@ const DOWNLOAD_TIME: Duration = Duration::from_secs(4 * 60 * 60);
 const LOAD_TIME: Duration = Duration::from_secs(15 * 60);
 const UNLOAD_TIME: Duration = Duration::from_secs(2 * 60);
 
-/// What the page says when the program is not found.
-const MISSING: &str =
-    "Not installed: install it from the Store's Programs list, and its models are listed here.";
+/// What the page says when the program is not found: why there is no list, and where the program comes from.
+const MISSING: &str = "Foundry Local's program (`foundry`) is not installed, and it is what lists these models and downloads them: the Store only shows its answers. Install it from the Store's Programs list and the models are listed here.";
 
 /// What a load leaves behind, for the confirmation and the note after it.
 const MEMORY: &str = "A loaded model stays in memory until Foundry Local's service is stopped (`foundry server stop`), and takes about as much as its download.";
@@ -91,18 +92,27 @@ fn tokens(value: Option<u64>) -> String {
 }
 
 /// The program's refusal in its own words: the end of what it wrote, which is where a program says why it stopped.
-fn refusal(what: &str, program: &str, done: &canoa::store::models::Finished) -> ProviderError {
-    refused_with(what, program, done.code, &done.out, &done.err)
+fn refusal(
+    what: &str,
+    program: &str,
+    asked: (Option<ModelAction>, Option<&str>),
+    done: &canoa::store::models::Finished,
+) -> ProviderError {
+    refused_with(what, program, asked, done.code, &done.out, &done.err)
 }
 
+/// What the program refused with: its own error and what its exit code means for what was asked (`action` on `model`, none for a
+/// listing), else the end of what it wrote.
 fn refused_with(
     what: &str,
     program: &str,
+    asked: (Option<ModelAction>, Option<&str>),
     code: Option<i64>,
     out: &str,
     err: &str,
 ) -> ProviderError {
-    let said = last_words(&format!("{out}\n{err}"), MOST_WORDS);
+    let said = models::refusal_words(asked.0, asked.1, code, out, err)
+        .unwrap_or_else(|| last_words(&format!("{out}\n{err}"), MOST_WORDS));
     let how = code.map_or_else(|| "was ended".to_owned(), |code| format!("exited {code}"));
     failed(if said.is_empty() {
         format!("{what}: {program} {how}")
@@ -151,43 +161,95 @@ fn not_json_of(what: &str, out: &str, err: &str) -> ProviderError {
     })
 }
 
-fn size_of(row: &models::Row) -> String {
-    match row.size_mb {
-        Some(mb) if mb >= 1024 => format!(" ({:.1} GB)", mb as f64 / 1024.0),
-        Some(mb) => format!(" ({mb} MB)"),
-        None => String::new(),
+fn size_text(mb: u64) -> String {
+    if mb >= 1024 {
+        format!("{:.1} GB", mb as f64 / 1024.0)
+    } else {
+        format!("{mb} MB")
     }
 }
 
-/// What a click on a model's `+` does, as the person confirms it.
-fn action_of(model: &models::Model) -> RowAction {
+fn size_of(row: &models::Row) -> String {
+    row.size_mb
+        .map_or_else(String::new, |mb| format!(" ({})", size_text(mb)))
+}
+
+/// How much a model takes, as one size or the range its variants span.
+fn span_of(entry: &models::Entry) -> Option<String> {
+    entry.sizes_mb().map(|(least, most)| {
+        if least == most {
+            size_text(least)
+        } else {
+            format!("{} to {}", size_text(least), size_text(most))
+        }
+    })
+}
+
+/// What `+` of a model does for the whole of it: Foundry Local downloads the build that suits this computer, or takes what is
+/// downloaded out of its cache.
+fn entry_actions(entry: &models::Entry) -> Vec<RowAction> {
+    let id = &entry.id;
+    if entry.cached() {
+        return vec![
+            RowAction::new(
+                format!("Remove {id}"),
+                format!("Foundry Local takes {id} out of its cache (`foundry cache rm`)."),
+                "Remove",
+                ["remove"],
+            )
+            .removing(),
+        ];
+    }
+    let size = span_of(entry).map_or_else(String::new, |size| format!(" ({size})"));
+    vec![RowAction::new(
+        format!("Install {id}"),
+        format!(
+            "Foundry Local downloads {id}{size} into its cache, choosing the build that suits this computer. The download is Foundry Local's own and Canoa checks nothing of it, so it is shown as not verified. It can take long."
+        ),
+        "Install",
+        ["download"],
+    )]
+}
+
+/// What the buttons of one build do: install it, or load it, unload it and take it out of the cache.
+fn variant_actions(model: &models::Model) -> Vec<RowAction> {
     let id = &model.row.id;
-    let (title, confirm, label, steps) = if model.loaded {
-        (
+    if !model.cached {
+        return vec![RowAction::new(
+            format!("Install {id}"),
+            format!(
+                "Foundry Local downloads {id}{} into its cache. The download is Foundry Local's own and Canoa checks nothing of it, so it is shown as not verified. It can take long.",
+                size_of(&model.row)
+            ),
+            "Install",
+            ["download"],
+        )];
+    }
+    let move_in = if model.loaded {
+        RowAction::new(
             format!("Unload {id}"),
-            "Foundry Local takes the model out of memory. The service may keep what it reserved until it is stopped.".to_owned(),
+            "Foundry Local takes the model out of memory. The service may keep what it reserved until it is stopped.",
             "Unload",
-            vec!["unload"],
+            ["unload"],
         )
-    } else if model.cached {
-        (
+    } else {
+        RowAction::new(
             format!("Load {id}"),
             format!("Foundry Local loads {id}. {MEMORY}"),
             "Load",
-            vec!["load"],
-        )
-    } else {
-        (
-            format!("Download and load {id}"),
-            format!(
-                "Foundry Local downloads {id}{} into its cache, which can take long, and then loads it. {MEMORY}",
-                size_of(&model.row)
-            ),
-            "Download and load",
-            vec!["download", "load"],
+            ["load"],
         )
     };
-    RowAction::new(title, confirm, label, steps)
+    vec![
+        move_in,
+        RowAction::new(
+            format!("Remove {id}"),
+            format!("Foundry Local takes {id} out of its cache (`foundry cache rm`)."),
+            "Remove",
+            ["remove"],
+        )
+        .removing(),
+    ]
 }
 
 /// The page's window section: what the model's own files say, and the form that sets the one it is run with.
@@ -227,8 +289,8 @@ fn window_section(model: &models::Model, home: Option<&Path>) -> Section {
     section
 }
 
-/// A model's row: where it stands, what it is, what `+` does and what its page shows.
-fn row_of(model: &models::Model, home: Option<&Path>) -> ModelRow {
+/// One build of a model: where it stands, what hardware it is for, what its buttons do and what its part of the page shows.
+fn variant_of(model: &models::Model, home: Option<&Path>) -> ModelVariant {
     let row = &model.row;
     let stand = if model.loaded {
         "Loaded"
@@ -237,47 +299,126 @@ fn row_of(model: &models::Model, home: Option<&Path>) -> ModelRow {
     } else {
         "Not downloaded"
     };
-    let described = models::describe(row);
-    let summary = if described.is_empty() {
-        stand.to_owned()
-    } else {
-        format!("{stand} · {described}")
-    };
+    let device = row.device.as_deref().map(str::to_ascii_uppercase);
+    let runtime = row
+        .provider
+        .as_deref()
+        .map(|provider| provider.trim_end_matches("ExecutionProvider"));
+    let label = [device.as_deref(), runtime]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let size = row.size_mb.map(size_text);
+    let summary = std::iter::once(stand)
+        .chain(size.as_deref())
+        .collect::<Vec<_>>()
+        .join(" · ");
     let whisper = format!("{} {}", row.id, row.alias.as_deref().unwrap_or_default())
         .to_ascii_lowercase()
         .contains("whisper");
-    let mut facts = Vec::new();
-    for (label, value) in [
-        ("Alias", row.alias.as_deref()),
-        ("Task", row.task.as_deref()),
-        ("Device", row.device.as_deref()),
-    ] {
-        if let Some(value) = value {
-            facts.push(Fact::new(label, value));
-        }
-    }
-    let mut shown = ModelRow::new(row.id.clone(), summary);
-    shown.by.clone_from(&row.alias);
-    shown.tags = [row.task.clone(), row.device.clone()]
-        .into_iter()
-        .flatten()
-        .collect();
-    shown.on = model.loaded;
-    shown.state = if model.loaded {
+    let mut variant = ModelVariant::new(
+        row.id.clone(),
+        if label.is_empty() {
+            row.id.clone()
+        } else {
+            label
+        },
+        summary,
+    );
+    variant.installed = model.cached;
+    variant.state = if model.loaded {
         Some("Loaded".to_owned())
     } else if model.cached {
         Some("Downloaded".to_owned())
     } else {
         None
     };
-    shown.facts = facts;
-    shown.actions = vec![action_of(model)];
-    shown.sections = vec![window_section(model, home)];
-    shown.speech = whisper.then(|| {
-        let mut speech = SpeechUse::new("Dictation can send its audio to this model through the Foundry Local service on the host: the audio is written to a temporary file there, handed to the service and removed afterwards, and nothing is sent to another service. Canoa never loads a model for you, so load it with + on the list first.");
+    for (label, value) in [
+        ("Name", Some(row.id.as_str())),
+        ("Hardware", row.device.as_deref()),
+        ("Runtime", row.provider.as_deref()),
+        ("Task", row.task.as_deref()),
+        ("License", row.license.as_deref()),
+    ] {
+        if let Some(value) = value {
+            variant.facts.push(Fact::new(label, value));
+        }
+    }
+    if let Some(size) = &size {
+        variant.facts.push(Fact::new("Size", size.clone()));
+    }
+    variant.actions = variant_actions(model);
+    variant.sections = vec![window_section(model, home)];
+    variant.speech = whisper.then(|| {
+        let mut speech = SpeechUse::new("Dictation can send its audio to this model through the Foundry Local service on the host: the audio is written to a temporary file there, handed to the service and removed afterwards, and nothing is sent to another service. Canoa never loads a model for you, so load it on this page first.");
         speech.caution = (!model.loaded).then(|| "It is not loaded now.".to_owned());
         speech
     });
+    variant
+}
+
+/// A model's row: one for each alias, where it stands, what it is, what `+` does and the builds for each kind of hardware inside it.
+/// It lists no file, so the host shows it as not verified: Foundry Local fetches its own files and states no digest for the large ones.
+fn row_of(entry: &models::Entry, home: Option<&Path>) -> ModelRow {
+    let stand = if entry.loaded() {
+        "Loaded"
+    } else if entry.cached() {
+        "Downloaded"
+    } else {
+        "Not downloaded"
+    };
+    let devices = entry.devices();
+    let described = [
+        entry.task().map(str::to_owned),
+        (!devices.is_empty()).then(|| devices.join("/")),
+        span_of(entry),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ");
+    let summary = if described.is_empty() {
+        stand.to_owned()
+    } else {
+        format!("{stand} · {described}")
+    };
+    let mut shown = ModelRow::new(entry.id.clone(), summary);
+    shown.tags = entry
+        .task()
+        .map(str::to_owned)
+        .into_iter()
+        .chain(devices.iter().cloned())
+        .collect();
+    shown.on = entry.cached();
+    shown.state = if entry.loaded() {
+        Some("Loaded".to_owned())
+    } else if entry.cached() {
+        Some("Downloaded".to_owned())
+    } else {
+        None
+    };
+    for (label, value) in [
+        ("Task", entry.task().map(str::to_owned)),
+        (
+            "Hardware",
+            (!devices.is_empty()).then(|| devices.join(", ")),
+        ),
+        ("License", entry.license().map(str::to_owned)),
+    ] {
+        if let Some(value) = value {
+            shown.facts.push(Fact::new(label, value));
+        }
+    }
+    shown
+        .facts
+        .push(Fact::new("Builds", entry.variants.len().to_string()));
+    shown.actions = entry_actions(entry);
+    shown.variants = entry
+        .variants
+        .iter()
+        .map(|variant| variant_of(variant, home))
+        .collect();
     shown
 }
 
@@ -315,7 +456,12 @@ impl ModelStore for FoundryModels {
         let ask = |which: Listing| run(&spawner, &program, &models::list_args(which), LIST_TIME);
         let all = ask(Listing::All)?;
         if all.code != Some(0) {
-            return Err(refusal("the model catalog was not listed", &program, &all));
+            return Err(refusal(
+                "the model catalog was not listed",
+                &program,
+                (None, None),
+                &all,
+            ));
         }
         let all =
             rows_of(&all.out).ok_or_else(|| not_json("the model catalog was not listed", &all))?;
@@ -324,6 +470,7 @@ impl ModelStore for FoundryModels {
             return Err(refusal(
                 "the downloaded models were not listed",
                 &program,
+                (None, None),
                 &cached,
             ));
         }
@@ -343,9 +490,9 @@ impl ModelStore for FoundryModels {
             Vec::new()
         };
         let mut list = ModelList::default();
-        list.models = models::merge(all, &cached, &loaded)
+        list.models = models::group(models::merge(all, &cached, &loaded))
             .iter()
-            .map(|model| row_of(model, home.as_deref()))
+            .map(|entry| row_of(entry, home.as_deref()))
             .collect();
         Ok(list)
     }
@@ -365,20 +512,23 @@ impl ModelStore for FoundryModels {
         let limit = match action {
             ModelAction::Download => DOWNLOAD_TIME,
             ModelAction::Load => LOAD_TIME,
-            ModelAction::Unload => UNLOAD_TIME,
+            ModelAction::Unload | ModelAction::Remove => UNLOAD_TIME,
         };
         let done = run(&spawner, &program, &args, limit)?;
         if done.code != Some(0) {
             return Err(refusal(
                 &format!("{} {}", request.action, request.model),
                 &program,
+                (Some(action), Some(&request.model)),
                 &done,
             ));
         }
+        // What the program printed last: a download rewrites its percentage line, so its closing sentence or last progress.
+        let said = models::outcome_line(&done.out);
         let mut acted = ModelActed::default();
         acted.note = match action {
             ModelAction::Load => Some(MEMORY.to_owned()),
-            ModelAction::Download => Some("The model is in Foundry Local's cache.".to_owned()),
+            ModelAction::Download | ModelAction::Remove => said,
             ModelAction::Unload => None,
         };
         Ok(acted)
@@ -539,6 +689,7 @@ mod tests {
         let why = refused_with(
             "the model catalog was not listed",
             "foundry",
+            (None, None),
             Some(1),
             &banner,
             "error: the catalog is not reachable\n",
@@ -547,16 +698,17 @@ mod tests {
         .to_owned();
         assert!(why.contains("the catalog is not reachable"), "{why}");
         let long = format!("{}error: out of space\n", "chatter\n".repeat(200));
-        let why = refused_with("a", "foundry", Some(1), "", &long)
+        let why = refused_with("a", "foundry", (None, None), Some(1), "", &long)
             .message()
             .to_owned();
         assert!(why.ends_with("error: out of space"), "{why}");
     }
 
-    fn model(id: &str, cached: bool, loaded: bool) -> models::Model {
-        let rows = models::rows(
-            &json!([{"id": id, "alias": "qwen3-14b", "task": "chat", "device": "gpu", "fileSizeMb": 10137}]),
-        );
+    fn build(id: &str, device: &str, mb: u64, cached: bool, loaded: bool) -> models::Model {
+        let rows = models::rows(&json!([{
+            "variantId": id, "alias": "qwen3-14b", "type": "chat", "device": device,
+            "executionProvider": "SomeExecutionProvider", "fileSizeMb": mb, "license": "mit"
+        }]));
         models::merge(rows, &[], &[])
             .into_iter()
             .map(|mut model| {
@@ -568,39 +720,130 @@ mod tests {
             .expect("a model")
     }
 
-    #[test]
-    fn what_plus_does_follows_where_the_model_stands() {
-        let steps =
-            |cached, loaded| action_of(&model("qwen3-14b-generic-gpu:2", cached, loaded)).steps;
-        assert_eq!(steps(false, false), ["download", "load"]);
-        assert_eq!(steps(true, false), ["load"]);
-        assert_eq!(steps(true, true), ["unload"]);
-        let first = action_of(&model("qwen3-14b-generic-gpu:2", false, false));
-        assert!(first.confirm.contains("(9.9 GB)"), "{}", first.confirm);
+    fn entry(variants: Vec<models::Model>) -> models::Entry {
+        models::group(variants)
+            .into_iter()
+            .next()
+            .expect("one entry")
     }
 
     #[test]
-    fn a_row_says_where_the_model_stands_and_a_whisper_model_may_be_used_for_speech() {
-        let row = row_of(&model("qwen3-14b-generic-gpu:2", true, false), None);
-        assert_eq!(row.summary, "Downloaded · chat, gpu, 9.9 GB");
-        assert_eq!(row.by.as_deref(), Some("qwen3-14b"));
-        assert_eq!(row.tags, ["chat", "gpu"]);
-        assert!(row.speech.is_none());
-        let speech = row_of(
-            &model("openai-whisper-tiny-generic-cpu:1", true, false),
-            None,
+    fn what_the_buttons_do_follows_where_the_model_and_each_build_stand() {
+        let one = |cached, loaded| {
+            entry(vec![build(
+                "qwen3-14b-generic-gpu:2",
+                "Gpu",
+                10137,
+                cached,
+                loaded,
+            )])
+        };
+        let words = |actions: &[RowAction]| -> Vec<(Vec<String>, bool)> {
+            actions
+                .iter()
+                .map(|action| (action.steps.clone(), action.removes))
+                .collect()
+        };
+        let install = entry_actions(&one(false, false));
+        assert_eq!(words(&install), [(vec!["download".to_owned()], false)]);
+        assert!(
+            install[0].confirm.contains("(9.9 GB)"),
+            "{}",
+            install[0].confirm
         );
         assert!(
-            speech
+            install[0].confirm.contains("checks nothing"),
+            "{}",
+            install[0].confirm
+        );
+        assert_eq!(
+            words(&entry_actions(&one(true, false))),
+            [(vec!["remove".to_owned()], true)],
+            "a downloaded model offers its removal, never an install"
+        );
+        let build_of = |cached, loaded| {
+            let model = build("qwen3-14b-generic-gpu:2", "Gpu", 10137, cached, loaded);
+            variant_actions(&model)
+        };
+        assert_eq!(
+            words(&build_of(false, false)),
+            [(vec!["download".to_owned()], false)]
+        );
+        assert_eq!(
+            words(&build_of(true, false)),
+            [
+                (vec!["load".to_owned()], false),
+                (vec!["remove".to_owned()], true)
+            ]
+        );
+        assert_eq!(
+            words(&build_of(true, true)),
+            [
+                (vec!["unload".to_owned()], false),
+                (vec!["remove".to_owned()], true)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_row_is_one_model_with_its_builds_inside_and_lists_no_file() {
+        let both = entry(vec![
+            build("qwen3-14b-generic-gpu:2", "Gpu", 10137, true, false),
+            build("qwen3-14b-generic-cpu:3", "Cpu", 5000, false, false),
+        ]);
+        let row = row_of(&both, None);
+        assert_eq!(
+            row.id, "qwen3-14b",
+            "the row is named by the alias the builds share"
+        );
+        assert_eq!(row.summary, "Downloaded · chat, cpu/gpu, 4.9 GB to 9.9 GB");
+        assert_eq!(row.tags, ["chat", "cpu", "gpu"]);
+        assert!(row.on && row.state.as_deref() == Some("Downloaded"));
+        assert!(
+            row.files.is_empty(),
+            "no file of its own, so the host shows it as not verified"
+        );
+        let ids: Vec<_> = row
+            .variants
+            .iter()
+            .map(|variant| variant.id.as_str())
+            .collect();
+        assert_eq!(ids, ["qwen3-14b-generic-cpu:3", "qwen3-14b-generic-gpu:2"]);
+        assert_eq!(row.variants[1].label, "GPU · Some");
+        assert!(row.variants[1].installed && !row.variants[0].installed);
+        assert!(row.variants.iter().all(|variant| variant.speech.is_none()));
+        assert_eq!(
+            row.variants[1]
+                .sections
+                .iter()
+                .map(|section| section.settings)
+                .collect::<Vec<_>>(),
+            [true],
+            "each build keeps its own window"
+        );
+    }
+
+    #[test]
+    fn a_whisper_build_may_be_used_for_speech() {
+        let whisper = |loaded| {
+            let rows = models::rows(
+                &json!([{"variantId": "openai-whisper-tiny-generic-cpu:1", "alias": "whisper-tiny"}]),
+            );
+            let mut model = models::merge(rows, &[], &[]).remove(0);
+            model.cached = true;
+            model.loaded = loaded;
+            variant_of(&model, None)
+        };
+        assert!(
+            whisper(false)
                 .speech
-                .as_ref()
                 .is_some_and(|speech| speech.caution.is_some())
         );
-        let loaded = row_of(
-            &model("openai-whisper-tiny-generic-cpu:1", true, true),
-            None,
+        assert!(
+            whisper(true)
+                .speech
+                .is_some_and(|speech| speech.caution.is_none())
         );
-        assert!(loaded.on && loaded.speech.is_some_and(|speech| speech.caution.is_none()));
     }
 
     #[test]
@@ -615,3 +858,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "model_store_cli_tests.rs"]
+mod cli_tests;

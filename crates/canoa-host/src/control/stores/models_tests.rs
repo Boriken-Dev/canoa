@@ -15,6 +15,8 @@ use crate::store::programs::{Options, Programs};
 use crate::store::shelf::Shelf;
 
 const ID: &str = "qwen3-14b-generic-gpu:2";
+/// The alias the one build `ID` has: the row of the model is named by it.
+const ALIAS: &str = "qwen3-14b";
 const TYPE: &str = "foundry";
 
 fn standin() -> PathBuf {
@@ -175,7 +177,11 @@ fn marks(listed: &Value) -> Vec<(String, bool, bool)> {
 }
 
 fn steps(row: &Value) -> Vec<String> {
-    row["actions"][0]["steps"]
+    steps_of(&row["actions"][0])
+}
+
+fn steps_of(action: &Value) -> Vec<String> {
+    action["steps"]
         .as_array()
         .expect("steps")
         .iter()
@@ -238,33 +244,46 @@ fn a_library_that_names_models_has_the_type_say_who_lists_them() {
 }
 
 #[test]
-fn a_model_is_downloaded_then_loaded_then_unloaded_and_the_listing_follows() {
+fn a_model_is_installed_then_loaded_then_unloaded_then_removed_and_the_listing_follows() {
     let held = fixture("flow", true);
     let listed = held.list().expect("listed");
     assert_eq!(listed["unavailable"], Value::Null);
     assert_eq!(listed["catalog"], "Foundry Local");
-    assert_eq!(marks(&listed).len(), 3);
+    assert_eq!(marks(&listed).len(), 3, "one row for each alias");
     assert!(
         marks(&listed)
             .iter()
             .all(|(_, cached, loaded)| !cached && !loaded)
     );
-    let first = held.row(ID);
-    assert_eq!(first["by"], "qwen3-14b");
+    let first = held.row(ALIAS);
+    assert_eq!(first["by"], Value::Null);
     assert_eq!(first["summary"], "Not downloaded · chat, gpu, 9.9 GB");
     assert_eq!(first["tags"], json!(["chat", "gpu"]));
-    assert_eq!(steps(&first), ["download", "load"]);
+    assert_eq!(steps(&first), ["download"]);
+    assert_eq!(first["actions"][0]["removes"], false);
+    assert_eq!(first["variants"][0]["id"], ID);
+    assert_eq!(first["variants"][0]["label"], "GPU");
+    assert_eq!(
+        first["verified"],
+        Value::Null,
+        "Foundry Local states no digest"
+    );
     assert_eq!(first["values"], json!({}));
+    assert_eq!(first["variants"][0]["values"], json!({}));
 
     // A model that is not downloaded is refused with the program's own words, and stays unloaded.
     let early = held.act(ID, "load").expect_err("not downloaded");
     assert_eq!(early.0, REFUSED);
     assert!(early.1.contains("is not downloaded"), "{}", early.1);
 
-    let done = held.act(ID, "download").expect("downloaded");
+    // The alias installs whichever build suits the computer; the cache listing is what says it is installed.
+    let done = held.act(ALIAS, "download").expect("downloaded");
     assert_eq!(done["ok"], true);
-    assert!(marks(&held.list().expect("listed")).contains(&(ID.to_owned(), true, false)));
-    assert_eq!(steps(&held.row(ID)), ["load"]);
+    assert!(marks(&held.list().expect("listed")).contains(&(ALIAS.to_owned(), true, true)));
+    let installed = held.row(ALIAS);
+    assert_eq!(steps(&installed), ["remove"]);
+    assert_eq!(installed["actions"][0]["removes"], true);
+    assert_eq!(steps_of(&installed["variants"][0]["actions"][0]), ["load"]);
 
     let done = held.act(ID, "load").expect("loaded");
     assert!(
@@ -273,8 +292,9 @@ fn a_model_is_downloaded_then_loaded_then_unloaded_and_the_listing_follows() {
             .is_some_and(|note| note.contains("server stop")),
         "{done}"
     );
-    assert!(
-        marks(&held.list().expect("listed")).contains(&(ID.to_owned(), true, false)),
+    assert_eq!(
+        held.row(ALIAS)["state"],
+        "Downloaded",
         "with no service running nothing is asked to be in memory"
     );
     std::fs::write(
@@ -283,15 +303,34 @@ fn a_model_is_downloaded_then_loaded_then_unloaded_and_the_listing_follows() {
     )
     .expect("a daemon file");
     let listed = held.list().expect("listed");
+    assert_eq!(listed["models"][0]["id"], ALIAS, "loaded first");
+    assert_eq!(listed["models"][0]["state"], "Loaded");
     assert_eq!(
-        marks(&listed)[0],
-        (ID.to_owned(), true, true),
-        "loaded first"
+        steps_of(&held.row(ALIAS)["variants"][0]["actions"][0]),
+        ["unload"]
     );
-    assert_eq!(steps(&held.row(ID)), ["unload"]);
 
     held.act(ID, "unload").expect("unloaded");
-    assert!(marks(&held.list().expect("listed")).contains(&(ID.to_owned(), true, false)));
+    assert_eq!(held.row(ALIAS)["state"], "Downloaded");
+
+    let removed = held.act(ALIAS, "remove").expect("removed");
+    assert!(
+        removed["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("Removed 'qwen3-14b' from the cache")),
+        "{removed}"
+    );
+    assert!(marks(&held.list().expect("listed")).contains(&(ALIAS.to_owned(), false, false)));
+    assert_eq!(steps(&held.row(ALIAS)), ["download"]);
+    let again = held.act(ALIAS, "remove").expect_err("not in the cache");
+    assert_eq!(again.0, REFUSED);
+    assert!(
+        again.1.contains("that model is not in the cache") && again.1.contains("INVALID_ARGUMENT"),
+        "{}",
+        again.1
+    );
+    let unknown = held.act("no-such-model", "remove").expect_err("unknown");
+    assert!(unknown.1.contains("MODEL_NOT_FOUND"), "{}", unknown.1);
 }
 
 #[test]
@@ -322,7 +361,7 @@ fn a_program_that_is_not_there_is_said_and_one_that_fails_is_shown_in_its_own_wo
     assert!(
         listed["unavailable"]
             .as_str()
-            .is_some_and(|why| why.contains("Not installed")),
+            .is_some_and(|why| why.contains("not installed") && why.contains("Programs list")),
         "{listed}"
     );
     let refused = none.act(ID, "load").expect_err("refused");
@@ -408,8 +447,8 @@ fn a_downloaded_model_page_says_its_own_window_and_where_the_form_goes() {
     let held = fixture("page", true);
     held.cached_model(ID, 40960, 8192);
     held.act(ID, "download").expect("downloaded");
-    let row = held.row(ID);
-    let window = &row["sections"][0];
+    let row = held.row(ALIAS);
+    let window = &row["variants"][0]["sections"][0];
     assert_eq!(window["title"], "Window");
     assert_eq!(window["settings"], true);
     assert_eq!(
@@ -425,13 +464,14 @@ fn a_downloaded_model_page_says_its_own_window_and_where_the_form_goes() {
         json!(["integer", "null"])
     );
     assert!(listed["settings"]["form"].is_object());
-    // Whisper is the only family that may be the person's speech-to-text.
+    // Whisper is the only family that may be the person's speech-to-text, and it is a build that is.
     let speech: Vec<&str> = listed["models"]
         .as_array()
         .expect("rows")
         .iter()
-        .filter(|row| row["speech"].is_object())
-        .filter_map(|row| row["id"].as_str())
+        .flat_map(|row| row["variants"].as_array().expect("builds"))
+        .filter(|build| build["speech"].is_object())
+        .filter_map(|build| build["id"].as_str())
         .collect();
     assert_eq!(speech, ["openai-whisper-tiny-generic-cpu:1"]);
     assert_eq!(listed["speech"], true);
@@ -450,7 +490,11 @@ fn a_setting_is_kept_in_canoa_cfg_per_model_held_to_the_models_own_limit_and_tak
     );
     let text = held.config();
     assert!(text.contains("models") && text.contains("16384"), "{text}");
-    assert_eq!(held.row(ID)["values"], json!({"window": 16384}));
+    assert_eq!(
+        held.row(ALIAS)["variants"][0]["values"],
+        json!({"window": 16384}),
+        "a build keeps its settings under its own id"
+    );
 
     let capped = held.set(ID, &json!({"window": 100_000})).expect("kept");
     assert_eq!(
@@ -464,7 +508,10 @@ fn a_setting_is_kept_in_canoa_cfg_per_model_held_to_the_models_own_limit_and_tak
             .is_some_and(|note| note.contains("100000")),
         "{capped}"
     );
-    assert_eq!(held.row(ID)["values"], json!({"window": 40960}));
+    assert_eq!(
+        held.row(ALIAS)["variants"][0]["values"],
+        json!({"window": 40960})
+    );
 
     // A model that is not downloaded has no limit to check against, so the number is kept as given.
     held.set("other:1", &json!({"window": 5000})).expect("kept");
@@ -730,5 +777,5 @@ fn the_renewal_lists_the_models_of_a_type_again_once_their_time_is_past_with_no_
         .models
         .get(TYPE, false, || Err((REFUSED, "asked again".to_owned())))
         .expect("answered from what the renewal kept");
-    assert!(kept.models.iter().any(|row| row.id == ID));
+    assert!(kept.models.iter().any(|row| row.id == ALIAS));
 }

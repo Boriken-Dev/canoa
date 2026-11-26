@@ -1,8 +1,9 @@
 //! A stand-in for Foundry Local's command line, for the tests of the host's model calls. It holds a three-model catalog and keeps
 //! which are downloaded and loaded in the files `cached` and `loaded` of its own folder, one model a line, so a test copies it into a
-//! folder of its own. A file `sleep_ms` there (a number) makes every `model` action wait that long first; a file `fail` makes `list`
-//! fail; a file `daemon` makes `list` start a copy of this program that keeps the pipes it inherited open for up to 30 seconds,
-//! or until a file `daemon_stop` appears, as Foundry Local's service does. It loads nothing and downloads nothing.
+//! folder of its own. `model` and `cache` commands take a model's alias or its variant's id, as the real program's do. A file
+//! `sleep_ms` there (a number) makes every `model` action wait that long first; a file `fail` makes `list` fail; a file `daemon`
+//! makes `list` start a copy of this program that keeps the pipes it inherited open for up to 30 seconds, or until a file
+//! `daemon_stop` appears, as Foundry Local's service does. It loads nothing and downloads nothing.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -49,6 +50,20 @@ fn keep(name: &str, lines: &[String]) {
     }
 }
 
+/// The variant a name stands for: its id, or its alias.
+fn variant_of(name: &str) -> Option<&'static str> {
+    CATALOG
+        .iter()
+        .find(|(id, alias, ..)| *id == name || *alias == name)
+        .map(|(id, ..)| *id)
+}
+
+/// The program's refusal in `-o json`, and its exit code.
+fn refuse(code: u8, word: &str, message: &str) -> ExitCode {
+    println!("{{\"error\": {{\"code\": \"{word}\", \"message\": \"{message}\"}}}}");
+    ExitCode::from(code)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let word = |at: usize| args.get(at).map(String::as_str);
@@ -65,7 +80,7 @@ fn main() -> ExitCode {
         println!("0.14.0");
         return ExitCode::SUCCESS;
     }
-    if word(0) != Some("model") || !args.iter().any(|arg| arg == "json") {
+    if !matches!(word(0), Some("model" | "cache")) || !args.iter().any(|arg| arg == "json") {
         eprintln!("unexpected arguments: {args:?}");
         return ExitCode::from(2);
     }
@@ -76,32 +91,65 @@ fn main() -> ExitCode {
         std::thread::sleep(std::time::Duration::from_millis(ms));
     }
     let (cached, loaded) = (lines("cached"), lines("loaded"));
-    match word(1) {
-        Some("list") => {
-            if state("fail").is_some_and(|path| path.exists()) {
-                eprintln!("\u{1b}[31merror:\u{1b}[0m the catalog is not reachable");
-                return ExitCode::from(1);
-            }
-            let rows: Vec<serde_json::Value> = CATALOG
-                .iter()
-                .filter(|(id, ..)| {
-                    (!args.iter().any(|a| a == "--cached") || cached.iter().any(|c| c == id))
-                        && (!args.iter().any(|a| a == "--loaded") || loaded.iter().any(|l| l == id))
-                })
-                .map(|(id, alias, task, device, mb)| {
-                    serde_json::json!({"id": id, "alias": alias, "task": task, "device": device, "fileSizeMb": mb})
-                })
-                .collect();
-            println!("{}", serde_json::Value::Array(rows));
-            if state("daemon").is_some_and(|path| path.exists())
-                && let Ok(exe) = std::env::current_exe()
-            {
-                let _ = std::process::Command::new(exe).arg("--daemon").spawn();
-            }
+    let listing = |only_cached: bool, only_loaded: bool| {
+        if state("fail").is_some_and(|path| path.exists()) {
+            eprintln!("\u{1b}[31merror:\u{1b}[0m the catalog is not reachable");
+            return ExitCode::from(1);
         }
-        Some(action @ ("download" | "load" | "unload")) => {
-            let Some(model) = word(2).filter(|id| CATALOG.iter().any(|(each, ..)| each == id))
-            else {
+        let rows: Vec<serde_json::Value> = CATALOG
+            .iter()
+            .filter(|(id, ..)| {
+                (!only_cached || cached.iter().any(|c| c == id))
+                    && (!only_loaded || loaded.iter().any(|l| l == id))
+            })
+            .map(|(id, alias, task, device, mb)| {
+                serde_json::json!({"id": id, "alias": alias, "task": task, "device": device, "fileSizeMb": mb})
+            })
+            .collect();
+        println!("{}", serde_json::Value::Array(rows));
+        if state("daemon").is_some_and(|path| path.exists())
+            && let Ok(exe) = std::env::current_exe()
+        {
+            let _ = std::process::Command::new(exe).arg("--daemon").spawn();
+        }
+        ExitCode::SUCCESS
+    };
+    match (word(0), word(1)) {
+        (Some("model"), Some("list")) => {
+            return listing(
+                args.iter().any(|a| a == "--cached"),
+                args.iter().any(|a| a == "--loaded"),
+            );
+        }
+        (Some("cache"), Some("list")) => return listing(true, false),
+        (Some("cache"), Some("rm")) => {
+            let Some(model) = word(2).and_then(variant_of) else {
+                return refuse(3, "MODEL_NOT_FOUND", "no such model");
+            };
+            if !cached.iter().any(|each| each == model) {
+                return refuse(2, "INVALID_ARGUMENT", "that model is not in the cache");
+            }
+            keep(
+                "cached",
+                &cached
+                    .into_iter()
+                    .filter(|each| each != model)
+                    .collect::<Vec<_>>(),
+            );
+            keep(
+                "loaded",
+                &loaded
+                    .into_iter()
+                    .filter(|each| each != model)
+                    .collect::<Vec<_>>(),
+            );
+            println!(
+                "{{\"success\": true, \"message\": \"Removed '{}' from the cache.\"}}",
+                word(2).unwrap_or_default()
+            );
+        }
+        (Some("model"), Some(action @ ("download" | "load" | "unload"))) => {
+            let Some(model) = word(2).and_then(variant_of) else {
                 eprintln!("no such model: {:?}", word(2));
                 return ExitCode::from(1);
             };

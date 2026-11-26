@@ -1,0 +1,16 @@
+{
+ "variants": [
+  {
+   "alias": "deepseek-r1-14b",
+   "source": "Public",
+   "variantName": "deepseek-r1-distill-qwen-14b-qnn-npu",
+   "variantId": "deepseek-r1-distill-qwen-14b-qnn-npu:2",
+   "type": "Chat",
+   "device": "Npu",
+   "executionProvider": "QNNExecutionProvider",
+   "fileSizeMb": 7290,
+   "cached": true,
+   "license": "MIT"
+  }
+ ]
+}

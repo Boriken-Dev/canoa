@@ -1,5 +1,8 @@
 //! Foundry Local's models as the command line lists and moves them: which arguments ask, and what the answers say.
 //!
+//! The command line is the only source: a model, an alias or a device build is named here only as the program's own answer names
+//! it, and one model is the variants that share an alias ([`group`]).
+//!
 //! The command line's `-o json` answers are read for what they name, not for one fixed shape: a list of rows, or an object
 //! holding the list under `models`, `items`, `data` or `results`. A row's identity is the first of `id`, `variantId`, `modelId`
 //! and `name`; the other keys are optional. Nothing here starts a process.
@@ -35,6 +38,8 @@ impl core::error::Error for Error {}
 pub enum ModelAction {
     /// `foundry model download`: fetch the model into the cache, which can be many gigabytes.
     Download,
+    /// `foundry cache rm`: take the model out of the cache.
+    Remove,
     /// `foundry model load`: put a downloaded model in memory, where it stays until the service stops.
     Load,
     /// `foundry model unload`: take it out of memory again (the service keeps what the runtime reserved).
@@ -47,6 +52,7 @@ impl ModelAction {
     pub fn parse(word: &str) -> Option<Self> {
         match word {
             "download" => Some(Self::Download),
+            "remove" => Some(Self::Remove),
             "load" => Some(Self::Load),
             "unload" => Some(Self::Unload),
             _ => None,
@@ -58,6 +64,7 @@ impl ModelAction {
     pub const fn word(self) -> &'static str {
         match self {
             Self::Download => "download",
+            Self::Remove => "remove",
             Self::Load => "load",
             Self::Unload => "unload",
         }
@@ -75,7 +82,7 @@ pub fn valid_model(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"._-:+/".contains(&b))
 }
 
-/// The arguments that make the program do `action` to `model`, with its answer as JSON.
+/// The arguments that make the program do `action` to `model` (an alias or a variant's id), with its answer as JSON.
 ///
 /// # Errors
 ///
@@ -84,20 +91,24 @@ pub fn action_args(action: ModelAction, model: &str) -> Result<Vec<String>, Erro
     if !valid_model(model) {
         return Err(Error::InvalidModel);
     }
-    Ok(["model", action.word(), model, "-o", "json"]
-        .map(str::to_owned)
-        .to_vec())
+    let words: [&str; 5] = match action {
+        ModelAction::Remove => ["cache", "rm", model, "-o", "json"],
+        ModelAction::Download | ModelAction::Load | ModelAction::Unload => {
+            ["model", action.word(), model, "-o", "json"]
+        }
+    };
+    Ok(words.map(str::to_owned).to_vec())
 }
 
-/// The arguments that list the catalog's variants, those in the cache (`cached`), or those in memory (`loaded`).
+/// The arguments that list the catalog's variants, those in the cache (`foundry cache list`), or those in memory (`loaded`).
 #[must_use]
 pub fn list_args(which: Listing) -> Vec<String> {
-    let mut args: Vec<String> = ["model", "list", "--variants"].map(str::to_owned).to_vec();
-    match which {
-        Listing::All => {}
-        Listing::Cached => args.push("--cached".to_owned()),
-        Listing::Loaded => args.push("--loaded".to_owned()),
-    }
+    let words: &[&str] = match which {
+        Listing::All => &["model", "list", "--variants"],
+        Listing::Cached => &["cache", "list", "--variants"],
+        Listing::Loaded => &["model", "list", "--variants", "--loaded"],
+    };
+    let mut args: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
     args.extend(["-o", "json"].map(str::to_owned));
     args
 }
@@ -125,6 +136,10 @@ pub struct Row {
     pub task: Option<String>,
     /// The hardware it runs on: cpu, gpu, npu.
     pub device: Option<String>,
+    /// The runtime that runs it on that hardware, as the program names it.
+    pub provider: Option<String>,
+    /// Its licence, as the catalog states it.
+    pub license: Option<String>,
     /// Its size on disk, in megabytes.
     pub size_mb: Option<u64>,
 }
@@ -164,6 +179,8 @@ pub fn rows(answer: &Value) -> Vec<Row> {
                 alias: text(row, &["alias"]).filter(|alias| *alias != id),
                 task: text(row, &["task", "type"]),
                 device: text(row, &["device", "deviceType", "device_type"]),
+                provider: text(row, &["executionProvider", "execution_provider"]),
+                license: text(row, &["license"]),
                 size_mb: number(row, &["fileSizeMb", "sizeMb", "size_mb", "fileSizeMB"]),
                 id,
             })
@@ -234,6 +251,212 @@ pub fn merge(all: Vec<Row>, cached: &[Row], loaded: &[Row]) -> Vec<Model> {
             .then_with(|| a.row.id.cmp(&b.row.id))
     });
     models
+}
+
+/// One model as the person is shown it: the variants that share an alias, each the build for some hardware. A variant with no alias
+/// is a model of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Entry {
+    /// The alias the variants share (or the one variant's own name): what `download` and `cache rm` take for the model as a whole,
+    /// where the program picks the variant that suits this computer.
+    pub id: String,
+    /// The builds, by hardware and then name.
+    pub variants: Vec<Model>,
+}
+
+impl Entry {
+    /// Whether any variant is downloaded.
+    #[must_use]
+    pub fn cached(&self) -> bool {
+        self.variants.iter().any(|variant| variant.cached)
+    }
+
+    /// Whether any variant is in memory.
+    #[must_use]
+    pub fn loaded(&self) -> bool {
+        self.variants.iter().any(|variant| variant.loaded)
+    }
+
+    /// What the model is for, as its first variant that names one.
+    #[must_use]
+    pub fn task(&self) -> Option<&str> {
+        self.variants
+            .iter()
+            .find_map(|variant| variant.row.task.as_deref())
+    }
+
+    /// Its licence, as its first variant that states one does.
+    #[must_use]
+    pub fn license(&self) -> Option<&str> {
+        self.variants
+            .iter()
+            .find_map(|variant| variant.row.license.as_deref())
+    }
+
+    /// The hardware its variants run on, each once, in lower case, in the order the variants have them.
+    #[must_use]
+    pub fn devices(&self) -> Vec<String> {
+        let mut seen: Vec<String> = Vec::new();
+        for device in self
+            .variants
+            .iter()
+            .filter_map(|variant| variant.row.device.as_deref())
+        {
+            let device = device.to_ascii_lowercase();
+            if !seen.contains(&device) {
+                seen.push(device);
+            }
+        }
+        seen
+    }
+
+    /// The smallest and the largest size of its variants, in megabytes; none when none states one.
+    #[must_use]
+    pub fn sizes_mb(&self) -> Option<(u64, u64)> {
+        let sizes = self
+            .variants
+            .iter()
+            .filter_map(|variant| variant.row.size_mb);
+        Some((sizes.clone().min()?, sizes.max()?))
+    }
+}
+
+/// The models grouped the way the person is shown them: one entry for each alias, its variants inside. Loaded entries first, then
+/// downloaded, then by name.
+#[must_use]
+pub fn group(models: Vec<Model>) -> Vec<Entry> {
+    let mut entries: Vec<Entry> = Vec::new();
+    for model in models {
+        let id = model
+            .row
+            .alias
+            .clone()
+            .unwrap_or_else(|| model.row.id.clone());
+        match entries.iter_mut().find(|entry| entry.id == id) {
+            Some(entry) => entry.variants.push(model),
+            None => entries.push(Entry {
+                id,
+                variants: vec![model],
+            }),
+        }
+    }
+    for entry in &mut entries {
+        let device = |model: &Model| {
+            model
+                .row
+                .device
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+        };
+        entry.variants.sort_by(|a, b| {
+            device(a)
+                .cmp(&device(b))
+                .then_with(|| a.row.id.cmp(&b.row.id))
+        });
+    }
+    entries.sort_by(|a, b| {
+        b.loaded()
+            .cmp(&a.loaded())
+            .then(b.cached().cmp(&a.cached()))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    entries
+}
+
+/// What the program said when it refused, from its `-o json` error `{"error": {"code", "message", "hint"}}` found in `out` or
+/// `err`: `(code, message, hint)`, each when it said one.
+#[must_use]
+pub fn error_of(out: &str, err: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    for text in [out, err] {
+        let mut at = 0;
+        for line in text.split_inclusive('\n') {
+            let start = at + (line.len() - line.trim_start().len());
+            at += line.len();
+            if !line.trim_start().starts_with('{') {
+                continue;
+            }
+            let Some(Ok(found)) = serde_json::Deserializer::from_str(&text[start..])
+                .into_iter::<Value>()
+                .next()
+            else {
+                continue;
+            };
+            if let Some(error) = found.get("error").filter(|error| error.is_object()) {
+                let word = |key: &str| {
+                    error
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .map(|word| plain(word, 400))
+                        .filter(|word| !word.is_empty())
+                };
+                return Some((word("code"), word("message"), word("hint")));
+            }
+        }
+    }
+    None
+}
+
+/// A refusal in words for the person: the program's own message and hint when it gave an error in JSON, with its exit code and
+/// error code, else what its exit code means for what was asked (3 is an unknown model, 2 a request the program did not accept,
+/// which for a removal is a model that is not in the cache). None when the program said neither, so its last words are shown.
+#[must_use]
+pub fn refusal_words(
+    action: Option<ModelAction>,
+    model: Option<&str>,
+    code: Option<i64>,
+    out: &str,
+    err: &str,
+) -> Option<String> {
+    let meaning = match (code, action) {
+        (Some(3), _) => model.map(|named| format!("Foundry Local does not know {named}")),
+        (Some(2), Some(ModelAction::Remove)) => {
+            model.map(|named| format!("{named} is not in Foundry Local's cache"))
+        }
+        (Some(2), _) => Some("Foundry Local did not accept the request".to_owned()),
+        _ => None,
+    };
+    let given = error_of(out, err);
+    let message = given.as_ref().and_then(|(_, message, hint)| {
+        let message = message.as_deref()?;
+        Some(match hint {
+            Some(hint) => format!("{message} {hint}"),
+            None => message.to_owned(),
+        })
+    });
+    let word = given.as_ref().and_then(|(word, _, _)| word.as_deref());
+    let tag = match (code, word) {
+        (Some(code), Some(word)) => format!(" (exit {code}, {word})"),
+        (Some(code), None) => format!(" (exit {code})"),
+        (None, _) => String::new(),
+    };
+    message.or(meaning).map(|said| format!("{said}{tag}"))
+}
+
+/// What a finished action says in a line, for the person to read afterwards: the program's own `message` when it answered in
+/// JSON, else the last line it printed (a download rewrites its percentage line with carriage returns, so the last piece is the
+/// last progress or the closing sentence).
+#[must_use]
+pub fn outcome_line(out: &str) -> Option<String> {
+    if let Some(message) = serde_json::from_str::<Value>(out.trim())
+        .ok()
+        .and_then(|answer| {
+            answer
+                .get("message")
+                .and_then(Value::as_str)
+                .map(|message| plain(message, 300))
+        })
+        .filter(|text| !text.is_empty())
+    {
+        return Some(message);
+    }
+    out.replace('\r', "\n")
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty() && !line.starts_with(['{', '}', '[', ']', '"']))
+        .map(|line| plain(line, 300))
+        .filter(|text| !text.is_empty())
 }
 
 /// What a model's row says of it in one line: `chat, gpu, 9.9 GB`.
@@ -372,5 +595,108 @@ mod tests {
         ]));
         let by: Vec<_> = listed.iter().map(Row::capabilities).collect();
         assert_eq!(by, [vec!["chat"], vec!["embed"], Vec::<&str>::new()]);
+    }
+
+    #[test]
+    fn the_commands_are_the_programs_own_listing_cache_and_download() {
+        assert_eq!(
+            list_args(Listing::All),
+            ["model", "list", "--variants", "-o", "json"]
+        );
+        assert_eq!(
+            list_args(Listing::Cached),
+            ["cache", "list", "--variants", "-o", "json"],
+            "what is installed is the cache's own listing"
+        );
+        assert_eq!(
+            list_args(Listing::Loaded),
+            ["model", "list", "--variants", "--loaded", "-o", "json"]
+        );
+        assert_eq!(
+            action_args(ModelAction::Download, "qwen:2").unwrap(),
+            ["model", "download", "qwen:2", "-o", "json"]
+        );
+        assert_eq!(
+            action_args(ModelAction::Remove, "qwen").unwrap(),
+            ["cache", "rm", "qwen", "-o", "json"]
+        );
+        assert_eq!(ModelAction::parse("remove"), Some(ModelAction::Remove));
+        assert!(action_args(ModelAction::Remove, "-f").is_err());
+    }
+
+    #[test]
+    fn builds_that_share_an_alias_are_one_entry_and_a_build_with_none_is_its_own() {
+        let found = merge(
+            rows(&json!([
+                {"variantId": "m-gpu:1", "alias": "m", "device": "Gpu", "type": "chat", "fileSizeMb": 900, "license": "mit"},
+                {"variantId": "m-cpu:1", "alias": "m", "device": "Cpu", "fileSizeMb": 300},
+                {"variantId": "other:1", "device": "Cpu"},
+                {"variantId": "z:1", "alias": "z", "device": "Cpu"}
+            ])),
+            &rows(&json!([{"variantId": "z:1", "alias": "z"}])),
+            &[],
+        );
+        let entries = group(found);
+        let ids: Vec<&str> = entries.iter().map(|entry| entry.id.as_str()).collect();
+        assert_eq!(ids, ["z", "m", "other:1"], "downloaded first, then by name");
+        let m = &entries[1];
+        let builds: Vec<&str> = m.variants.iter().map(|each| each.row.id.as_str()).collect();
+        assert_eq!(builds, ["m-cpu:1", "m-gpu:1"], "by hardware");
+        assert_eq!(m.devices(), ["cpu", "gpu"]);
+        assert_eq!(m.sizes_mb(), Some((300, 900)));
+        assert_eq!((m.task(), m.license()), (Some("chat"), Some("mit")));
+        assert!(!m.cached() && entries[0].cached());
+        assert_eq!(entries[2].sizes_mb(), None);
+    }
+
+    #[test]
+    fn an_exit_code_and_an_error_in_json_are_put_in_words() {
+        let error = r#"{"error":{"code":"MODEL_NOT_FOUND","message":"No such model.","hint":"Try the list."}}"#;
+        assert_eq!(
+            refusal_words(Some(ModelAction::Download), Some("m"), Some(3), error, "").as_deref(),
+            Some("No such model. Try the list. (exit 3, MODEL_NOT_FOUND)")
+        );
+        assert_eq!(
+            refusal_words(Some(ModelAction::Download), Some("m"), Some(3), "", "").as_deref(),
+            Some("Foundry Local does not know m (exit 3)")
+        );
+        assert_eq!(
+            refusal_words(Some(ModelAction::Remove), Some("m"), Some(2), "", "").as_deref(),
+            Some("m is not in Foundry Local's cache (exit 2)")
+        );
+        assert_eq!(
+            refusal_words(Some(ModelAction::Load), Some("m"), Some(2), "", "").as_deref(),
+            Some("Foundry Local did not accept the request (exit 2)")
+        );
+        assert_eq!(refusal_words(None, None, Some(1), "boom", ""), None);
+        assert_eq!(refusal_words(None, None, Some(3), "", ""), None);
+        let after_notice = format!("A new version is out.\n{error}\n");
+        assert_eq!(
+            error_of(&after_notice, "")
+                .and_then(|(code, _, _)| code)
+                .as_deref(),
+            Some("MODEL_NOT_FOUND")
+        );
+        assert_eq!(error_of("{\"success\": true}", "plain"), None);
+    }
+
+    #[test]
+    fn what_a_download_printed_last_is_its_closing_sentence_or_its_message() {
+        let text = "Downloading model (m, 1 GB)\n\rm: 15%\rm: 62%\rm: 100%\nDownloaded 'm' to the local cache.\n";
+        assert_eq!(
+            outcome_line(text).as_deref(),
+            Some("Downloaded 'm' to the local cache.")
+        );
+        assert_eq!(
+            outcome_line("Downloading model (m, 1 GB)\n\rm: 15%\rm: 62%").as_deref(),
+            Some("m: 62%"),
+            "a download cut short shows how far it got"
+        );
+        let pretty = "{\n  \"success\": true,\n  \"message\": \"Removed 'm' from the cache.\"\n}\n";
+        assert_eq!(
+            outcome_line(pretty).as_deref(),
+            Some("Removed 'm' from the cache.")
+        );
+        assert_eq!(outcome_line(" \n"), None);
     }
 }
