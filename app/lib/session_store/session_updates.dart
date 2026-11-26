@@ -129,6 +129,8 @@ extension SessionUpdates on SessionStore {
         _notify();
       case HubClosed():
         _closedElsewhere(session, client, event);
+      case HubApproved():
+        _approved(session, event);
       case HubEnded():
         session.others = const [];
         session.chat.note('The host ended this session, so nobody can go on with it.');
@@ -156,6 +158,23 @@ extension SessionUpdates on SessionStore {
         '$who answered "${shortLine(question.title) ?? 'a request'}"'
         '${how == null || how.isEmpty ? '' : ': $how'}.',
       );
+    }
+  }
+
+  /// An approver the person added settled a request this conversation was still asking: the card closes, and the conversation
+  /// says who settled it and how. A request is never settled by a timeout in favour of the agent: "refused" is a refusal.
+  void _approved(ChatSession session, HubApproved approved) {
+    final call = approved.toolCallId;
+    if (call == null) return;
+    for (final question in [...session.pendingPermissions]) {
+      if (question.toolCallId != call) continue;
+      final what = shortLine(question.title) ?? 'a request';
+      session.chat.settle(question, const AcpCancel());
+      session.chat.note(switch (approved.outcome) {
+        'allowed' => 'Approved from ${approved.by}: "$what".',
+        'rejected' => 'Refused from ${approved.by}: "$what".',
+        _ => 'Refused, no answer in time: "$what".',
+      });
     }
   }
 

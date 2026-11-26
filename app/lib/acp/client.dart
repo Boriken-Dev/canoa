@@ -22,7 +22,7 @@ import 'usage_wire.dart';
 export 'package:coqui_acp/coqui_acp.dart';
 export 'delegate.dart' show DelegateNotice;
 export 'mcp_list.dart' show McpInventory, McpResource, McpServerStatus, McpTool;
-export 'hub_wire.dart' show HubClient, HubClosed, HubEnded, HubEvent, HubPresence, HubWire;
+export 'hub_wire.dart' show HubApproved, HubClient, HubClosed, HubEnded, HubEvent, HubPresence, HubWire;
 export 'link_secret.dart' show LinkSecretIdentity, linkSecretIdentity;
 export 'secret_wire.dart' show AgentSecrets;
 

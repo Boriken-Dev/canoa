@@ -10,6 +10,9 @@ const String hubPresenceMethod = '_dev.boriken.coqui.acp/hub_presence';
 /// What the hub tells the other clients when one answered a permission request.
 const String hubPermissionClosedMethod = '_dev.boriken.coqui.acp/hub_permission_closed';
 
+/// What the host tells a client when an approver the person added, and not a window, settled a permission request.
+const String approvedMethod = '_dev.boriken.canoa/approved';
+
 /// What the hub tells every attached client when the agent's end of the session ended.
 const String hubEndedMethod = '_dev.boriken.coqui.acp/hub_ended';
 
@@ -77,6 +80,19 @@ final class HubClosed extends HubEvent {
   final Map<String, Object?>? outcome;
 }
 
+/// An approver settled the permission request that asks about [toolCallId]: the card closes and the conversation keeps the line.
+final class HubApproved extends HubEvent {
+  const HubApproved(super.sessionId, {required this.toolCallId, required this.by, required this.outcome});
+
+  final String? toolCallId;
+
+  /// The entry of `[permissions.approvers]` that answered, or `window` for the window's own timeout.
+  final String by;
+
+  /// `allowed`, `rejected`, or `refused` (nobody answered in time).
+  final String outcome;
+}
+
 /// The agent's end of [sessionId] ended, so nothing more will come of it.
 final class HubEnded extends HubEvent {
   const HubEnded(super.sessionId);
@@ -140,7 +156,7 @@ final class HubWire {
 
   /// Reads one message the host sent; the message goes on unchanged.
   String incoming(String message) {
-    if (!message.contains('hub')) return message;
+    if (!message.contains('hub') && !message.contains(approvedMethod)) return message;
     final Object? decoded;
     try {
       decoded = jsonDecode(message);
@@ -164,6 +180,13 @@ final class HubWire {
         if (session is String) _closed(session, params);
       case hubEndedMethod:
         if (session is String) _emit(HubEnded(session));
+      case approvedMethod:
+        final by = params['by'];
+        final outcome = params['outcome'];
+        final call = params['toolCallId'];
+        if (session is String && by is String && outcome is String) {
+          _emit(HubApproved(session, toolCallId: call is String ? call : null, by: by, outcome: outcome));
+        }
       case 'session/request_permission' when decoded['id'] is String && (decoded['id'] as String).startsWith(_requestPrefix):
         if (session is String) {
           _seen = true;

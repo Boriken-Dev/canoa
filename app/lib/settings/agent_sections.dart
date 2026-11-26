@@ -20,6 +20,7 @@ import '../sources/sources.dart';
 import '../store/programs.dart';
 import '../store/programs_view.dart';
 import '../theme/look.dart';
+import 'approvers_group.dart';
 import 'setting_layers.dart';
 import 'settings_controller.dart';
 import 'settings_row.dart';
@@ -526,6 +527,7 @@ class _PermissionsSectionState extends State<PermissionsSection> {
         ]),
         if (rules != null) _remembered(context, rules),
         _protectedPaths(context),
+        ApproversGroup(controller: c),
       ]);
     },
   );

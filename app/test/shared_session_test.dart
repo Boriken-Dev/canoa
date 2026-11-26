@@ -95,6 +95,13 @@ final class _Host {
     },
   });
 
+  /// The host says an approver the person added settled the request about [toolCall].
+  void approved(String toolCall, String by, String outcome) => _push({
+    'jsonrpc': '2.0',
+    'method': '_dev.boriken.canoa/approved',
+    'params': {'sessionId': 's1', 'toolCallId': toolCall, 'by': by, 'outcome': outcome},
+  });
+
   /// The link ends, as a closed connection does; the session goes on in the host.
   void dropLink() => unawaited(_toClient.close());
 
@@ -258,6 +265,42 @@ void main() {
       );
       // This client answers nothing for the host: what it sends is a refusal to choose, which the hub ignores once it is closed.
       expect((host.answers['hub-perm-3']!['result'] as Map)['outcome'], {'outcome': 'cancelled'});
+    });
+  });
+
+  group('a request an approver settled', () {
+    for (final (outcome, said) in [('allowed', 'Approved from phone'), ('rejected', 'Refused from phone'), ('refused', 'Refused, no answer in time')]) {
+      test('closes the card and says it was $outcome', () async {
+        final host = _Host()..otherSays('one');
+        final store = SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
+        final client = host.connect(store.askPermission);
+        await client.initialize();
+        final session = await store.reopen(_entry(store.ledger!), client, attach: true);
+        await _settle();
+
+        host.askPermission(3, 't1');
+        await _settle();
+        expect(session.pendingPermissions, hasLength(1));
+
+        host.approved('t1', 'phone', outcome);
+        await _settle();
+        expect(session.pendingPermissions, isEmpty);
+        expect(session.messages.map((message) => message.text), contains(allOf(contains(said), contains('Write a file'))));
+      });
+    }
+
+    test('another call is left open', () async {
+      final host = _Host()..otherSays('one');
+      final store = SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
+      final client = host.connect(store.askPermission);
+      await client.initialize();
+      final session = await store.reopen(_entry(store.ledger!), client, attach: true);
+      await _settle();
+      host.askPermission(3, 't1');
+      await _settle();
+      host.approved('t2', 'phone', 'allowed');
+      await _settle();
+      expect(session.pendingPermissions, hasLength(1));
     });
   });
 

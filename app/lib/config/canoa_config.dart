@@ -15,6 +15,7 @@ import 'connection.dart';
 import '../chat/modes.dart' show modeOrder;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
+import '../permissions/approvers.dart';
 import '../permissions/protected_paths.dart' show protectedLinesOf;
 import '../profile/skill_copies.dart' show skillKey, skillsDirectory, validSkillName;
 import '../profile/profile.dart';
@@ -59,6 +60,7 @@ final class CanoaConfig {
     this.defaultMode,
     this.allowOnceOnly = false,
     this.protectedPaths,
+    this.approvers = const Approvers(),
     this.voice = const VoiceSettings(),
     this.hiddenSources = const {},
     this.shortcuts = const {},
@@ -144,6 +146,9 @@ final class CanoaConfig {
   /// `protected_paths.dart`); null leaves the recommended list, and a list written here replaces it.
   final List<String>? protectedPaths;
 
+  /// `[permissions.approvers]`: somewhere else a permission request is answered from, besides the window.
+  final Approvers approvers;
+
   /// `[voice]`: the speech service and how dictation is held.
   final VoiceSettings voice;
 
@@ -179,7 +184,7 @@ final class CanoaConfig {
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? startAtLogin, bool? preferWebTransport, num? connectTimeout,
       LookId? look, bool? followProvider, String? brightness, ChatDensity? density, OpenIn? openIn, String? language, Map<String, String>? viewers, double? zoom, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
-      List<String>? protectedPaths, bool clearProtectedPaths = false,
+      List<String>? protectedPaths, bool clearProtectedPaths = false, Approvers? approvers,
       VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
@@ -207,6 +212,7 @@ final class CanoaConfig {
         defaultMode: clearDefaultMode ? null : defaultMode ?? this.defaultMode,
         allowOnceOnly: allowOnceOnly ?? this.allowOnceOnly,
         protectedPaths: clearProtectedPaths ? null : protectedPaths ?? this.protectedPaths,
+        approvers: approvers ?? this.approvers,
         voice: voice ?? this.voice,
         hiddenSources: hiddenSources ?? this.hiddenSources,
         shortcuts: shortcuts ?? this.shortcuts,
@@ -244,6 +250,7 @@ final class CanoaConfig {
     defaultMode: defaultMode,
     allowOnceOnly: allowOnceOnly,
     protectedPaths: protectedPaths,
+    approvers: approvers,
     voice: voice,
     hiddenSources: hiddenSources,
     shortcuts: shortcuts,
@@ -1390,6 +1397,7 @@ final class CanoaConfig {
     defaultMode: defaultMode,
     allowOnceOnly: allowOnceOnly,
     protectedPaths: protectedPaths,
+    approvers: approvers,
     voice: voice,
     hiddenSources: hiddenSources,
     shortcuts: shortcuts,
@@ -1421,7 +1429,7 @@ final class CanoaConfig {
     'network': {'prefer_webtransport', 'connect_timeout'},
     'appearance': {'look', 'follow_provider', 'brightness', 'density', 'open_in', 'language', 'viewers', 'zoom'},
     'sessions': {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'},
-    'permissions': {'default_mode', 'full_access', 'allow_once_only', 'protected'},
+    'permissions': {'default_mode', 'full_access', 'allow_once_only', 'protected', 'approvers'},
     'sources': {'hidden'},
     'attachments': {'paste_as_file', 'embed_limit'},
     'usage': {'warn_permille', 'limit_phrases'},
@@ -1701,6 +1709,7 @@ final class CanoaConfig {
     if (permissions['protected'] != null && protectedPaths == null) {
       throw const FormatException('${Brand.configFile}: permissions.protected must be text, or a list of text, with a path pattern a line');
     }
+    final approvers = Approvers.parse(permissions['approvers']);
     final rawStore = data['store'];
     if (rawStore != null && rawStore is! Map) throw const FormatException('${Brand.configFile}: store must be a table');
     if (rawStore is Map) StoreSettings.parse(rawStore);
@@ -1745,6 +1754,7 @@ final class CanoaConfig {
       defaultMode: defaultMode as String?,
       allowOnceOnly: flag(permissions, 'allow_once_only', false),
       protectedPaths: protectedPaths,
+      approvers: approvers,
       hiddenSources: {for (final name in hidden) name as String},
       shortcuts: shortcuts,
       pasteAsFile: limit('paste_as_file', defaultPasteAsFile),
@@ -1833,7 +1843,7 @@ ${sessions.workspace == defaultWorkspace ? '' : 'workspace = ${jsonEncode(sessio
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit
-${_voiceToml()}${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly && protectedPaths == null ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}${protectedPaths == null ? '' : 'protected = [\n${protectedPaths!.map((line) => '  ${jsonEncode(line)},\n').join()}]\n'}'}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${shortcuts.isEmpty ? '' : '\n[shortcuts]\n${shortcuts.entries.map((e) => '${jsonEncode(e.key)} = ${jsonEncode(e.value)}\n').join()}'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
+${_voiceToml()}${warnPermille == defaultWarnPermille && limitPhrases == null ? '' : '\n[usage]\n${warnPermille == defaultWarnPermille ? '' : 'warn_permille = $warnPermille\n'}${limitPhrases == null ? '' : 'limit_phrases = ${jsonEncode(limitPhrases)}\n'}'}${defaultMode == null && !allowOnceOnly && protectedPaths == null ? '' : '\n[permissions]\n${defaultMode == null ? '' : 'default_mode = ${jsonEncode(defaultMode)}\n'}${allowOnceOnly ? 'allow_once_only = true\n' : ''}${protectedPaths == null ? '' : 'protected = [\n${protectedPaths!.map((line) => '  ${jsonEncode(line)},\n').join()}]\n'}'}${approvers.toToml()}${hiddenSources.isEmpty ? '' : '\n[sources]\nhidden = ${jsonEncode(hiddenSources.toList())}\n'}${shortcuts.isEmpty ? '' : '\n[shortcuts]\n${shortcuts.entries.map((e) => '${jsonEncode(e.key)} = ${jsonEncode(e.value)}\n').join()}'}${sessions.harnesses.isEmpty ? '' : '\n[harnesses]\n${sessions.harnesses.entries.map((name) => '${jsonEncode(name.key)} = ${jsonEncode(name.value)}\n').join()}'}${agents.map((agent) => '''
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
