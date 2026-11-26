@@ -92,9 +92,10 @@ export class SpeechOutput extends Provider {
   /**
    * @param {unknown} _query
    * @param {Spawner} _spawner
+   * @param {object} _fetch the host's fetch of an `https` document, from the places `OutputInfo.endpoints` names
    * @returns {object} the `VoiceList`
    */
-  voices(_query, _spawner) {
+  voices(_query, _spawner, _fetch) {
     throw new Unsupported('voices is not implemented');
   }
 

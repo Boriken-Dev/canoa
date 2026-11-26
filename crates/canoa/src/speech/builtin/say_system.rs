@@ -13,6 +13,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use crate::store::source::SourceFetch;
 use coqui_acp_api::{Environment, ProcessSpawner, SpawnSpec};
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
@@ -172,6 +173,7 @@ impl SpeechOutput for SystemSpeech {
         &self,
         query: VoiceQuery,
         spawner: Object<dyn ProcessSpawner>,
+        _fetch: Object<dyn SourceFetch>,
     ) -> Result<VoiceList, ProviderError> {
         let family = Self::family(&spawner)?;
         let program = self.program(family);

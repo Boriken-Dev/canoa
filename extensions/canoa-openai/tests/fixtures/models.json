@@ -9,6 +9,7 @@
     {"id": "whisper-1", "object": "model", "created": 1677532384, "owned_by": "openai-internal"},
     {"id": "gpt-4o-mini-tts", "object": "model", "created": 1742403959, "owned_by": "system"},
     {"id": "tts-1", "object": "model", "created": 1681940951, "owned_by": "openai-internal"},
+    {"id": "gpt-4o-mini-tts-2025-12-15", "object": "model", "created": 1765800000, "owned_by": "system"},
     {"id": "some-new-model", "object": "model", "created": 1790000000, "owned_by": "system"}
   ]
 }

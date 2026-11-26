@@ -29,9 +29,11 @@ use canoa::speech::output::{
     Choice, Leaves, OutputInfo, READ_TIMED_OUT, SayRequest, SpeechOutput, SpeechOutputVtable,
     SpeechUtterance, SpeechUtteranceVtable, SpeedRange, Voice, VoiceList, VoiceQuery, sentences,
 };
+use canoa::store::source::SourceFetch;
 use coqui_acp_api::{ProcessSpawner, ProcessSpawnerVtable, SpawnedProcessVtable};
 use coqui_acp_harness::LocalSpawner;
-use guatiao::library::Object;
+use guatiao::Status;
+use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, Secret, ToValue};
 use guatiao_serde::Serializable;
 use serde_json::Value as Json;
@@ -173,6 +175,26 @@ fn spawner() -> Object<dyn ProcessSpawner> {
     LocalSpawner::new().into_object()
 }
 
+/// A fetch for a provider that reads no document: any address is refused.
+struct NoFetch;
+
+impl SourceFetch for NoFetch {
+    fn get_text(&self, url: &str, _max: u64) -> Result<String, ProviderError> {
+        Err(ProviderError::new(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            format!("no document is read: {url}").as_str(),
+        ))
+    }
+
+    fn get_json(&self, url: &str, max: u64) -> Result<String, ProviderError> {
+        self.get_text(url, max)
+    }
+}
+
+fn no_fetch() -> Object<dyn SourceFetch> {
+    NoFetch.into_object()
+}
+
 fn command(args: &[&str]) -> CommandSay {
     let mut settings = CommandSaySettings::new(standin());
     settings.args = args.iter().map(|arg| (*arg).to_owned()).collect();
@@ -265,7 +287,7 @@ fn a_command_lists_what_the_settings_say_and_refuses_what_they_do_not() {
     assert_eq!(info.leaves, Leaves::Maybe);
     assert!(info.uses.contains(&"voice".to_owned()) && !info.uses.contains(&"style".to_owned()));
     let voices = provider
-        .voices(VoiceQuery::default(), spawner())
+        .voices(VoiceQuery::default(), spawner(), no_fetch())
         .ok()
         .expect("listed");
     assert_eq!(
@@ -534,7 +556,7 @@ fn an_address_has_the_lists_the_settings_give_and_none_of_its_own() {
         assert_eq!(info.default_model, None);
         assert!(
             other
-                .voices(VoiceQuery::default(), spawner())
+                .voices(VoiceQuery::default(), spawner(), no_fetch())
                 .ok()
                 .expect("listed")
                 .voices
@@ -550,7 +572,7 @@ fn an_address_has_the_lists_the_settings_give_and_none_of_its_own() {
 fn the_system_voices_of_this_computer_speak() {
     let provider = SystemSpeech::from(SystemSettings::default());
     let voices = provider
-        .voices(VoiceQuery::default(), spawner())
+        .voices(VoiceQuery::default(), spawner(), no_fetch())
         .ok()
         .expect("listed")
         .voices;

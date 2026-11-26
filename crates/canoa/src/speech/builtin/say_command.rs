@@ -12,6 +12,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use crate::store::source::SourceFetch;
 use coqui_acp_api::{Environment, ProcessSpawner, SpawnSpec};
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
@@ -210,6 +211,7 @@ impl SpeechOutput for CommandSay {
         &self,
         query: VoiceQuery,
         _spawner: Object<dyn ProcessSpawner>,
+        _fetch: Object<dyn SourceFetch>,
     ) -> Result<VoiceList, ProviderError> {
         let voices = self
             .settings

@@ -17,6 +17,7 @@ use alloc::vec::Vec;
 use core::time::Duration;
 use std::path::{Path, PathBuf};
 
+use canoa::store::source::SourceFetch;
 use coqui_acp_api::{ProcessSpawner, SpawnSpec};
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
@@ -269,6 +270,7 @@ impl SpeechOutput for PiperSpeech {
         &self,
         query: VoiceQuery,
         _spawner: Object<dyn ProcessSpawner>,
+        _fetch: Object<dyn SourceFetch>,
     ) -> Result<VoiceList, ProviderError> {
         let mut voices = Vec::new();
         for (voice, model) in self.installed()? {

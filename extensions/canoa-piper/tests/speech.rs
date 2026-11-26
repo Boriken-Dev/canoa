@@ -19,10 +19,12 @@ use canoa::speech::AudioFormat;
 use canoa::speech::output::{
     READ_TIMED_OUT, SayRequest, SpeechOutput, SpeechUtterance, VoiceQuery,
 };
+use canoa::store::source::SourceFetch;
 use canoa_piper::{PiperSettings, PiperSpeech};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_harness::LocalSpawner;
-use guatiao::library::Object;
+use guatiao::Status;
+use guatiao::library::{Object, ProviderError};
 
 fn standin() -> String {
     let mut path = std::env::current_exe().expect("this test's path");
@@ -38,6 +40,26 @@ fn standin() -> String {
 
 fn spawner() -> Object<dyn ProcessSpawner> {
     LocalSpawner::new().into_object()
+}
+
+/// A fetch for a provider that reads no document: any address is refused.
+struct NoFetch;
+
+impl SourceFetch for NoFetch {
+    fn get_text(&self, url: &str, _max: u64) -> Result<String, ProviderError> {
+        Err(ProviderError::new(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            format!("no document is read: {url}").as_str(),
+        ))
+    }
+
+    fn get_json(&self, url: &str, max: u64) -> Result<String, ProviderError> {
+        self.get_text(url, max)
+    }
+}
+
+fn no_fetch() -> Object<dyn SourceFetch> {
+    NoFetch.into_object()
 }
 
 /// Every byte an utterance answers, read in small pieces; its error when it ends in one.
@@ -115,7 +137,7 @@ fn piper_lists_the_voices_in_its_folder_with_their_language_and_speakers() {
     ]);
     let provider = piper(&dir);
     let all = provider
-        .voices(VoiceQuery::default(), spawner())
+        .voices(VoiceQuery::default(), spawner(), no_fetch())
         .ok()
         .expect("listed");
     let ids: Vec<&str> = all.voices.iter().map(|v| v.id.as_str()).collect();
@@ -136,7 +158,7 @@ fn piper_lists_the_voices_in_its_folder_with_their_language_and_speakers() {
     assert_eq!(english.description.as_deref(), Some("medium quality"));
     assert!(all.voices[2].name.contains("bo"));
     let spanish = provider
-        .voices(VoiceQuery::in_language("es"), spawner())
+        .voices(VoiceQuery::in_language("es"), spawner(), no_fetch())
         .ok()
         .expect("listed");
     assert_eq!(
@@ -202,7 +224,7 @@ fn piper_without_its_program_or_voices_says_what_to_do() {
     let missing = PiperSpeech::from(PiperSettings::new(standin(), " "));
     assert!(
         missing
-            .voices(VoiceQuery::default(), spawner())
+            .voices(VoiceQuery::default(), spawner(), no_fetch())
             .err()
             .expect("refused")
             .message
@@ -228,7 +250,7 @@ fn piper_reads_every_folder_of_its_voices_and_a_folder_that_is_not_there_holds_n
     let folders = std::env::join_paths([&missing, &own, &copy]).expect("a search path");
     let provider = PiperSpeech::from(PiperSettings::new(standin(), folders.to_string_lossy()));
     let all = provider
-        .voices(VoiceQuery::default(), spawner())
+        .voices(VoiceQuery::default(), spawner(), no_fetch())
         .ok()
         .expect("listed");
     let ids: Vec<&str> = all.voices.iter().map(|v| v.id.as_str()).collect();
@@ -240,7 +262,7 @@ fn piper_reads_every_folder_of_its_voices_and_a_folder_that_is_not_there_holds_n
     let nowhere = PiperSpeech::from(PiperSettings::new(standin(), none.to_string_lossy()));
     assert!(
         nowhere
-            .voices(VoiceQuery::default(), spawner())
+            .voices(VoiceQuery::default(), spawner(), no_fetch())
             .err()
             .expect("refused")
             .message

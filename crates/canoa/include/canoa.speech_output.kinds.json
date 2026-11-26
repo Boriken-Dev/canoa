@@ -2,7 +2,7 @@
   "kinds": [
     {
       "name": "speech_output",
-      "floor_hash": 182687566,
+      "floor_hash": 2737329465,
       "object": false,
       "doc": "A provider of text to speech. One instance is one configuration of one provider.",
       "slots": [
@@ -31,12 +31,18 @@
               "type": "object",
               "kind": "process_spawner",
               "pass": "taken"
+            },
+            {
+              "name": "fetch",
+              "type": "object",
+              "kind": "source_fetch",
+              "pass": "taken"
             }
           ],
           "answer": {
             "type": "value"
           },
-          "doc": "The voices it has now, for `query`. A provider that learns them from a program or a server asks it here, so a listing\nmay take time and fail with the reason.\n\n`spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it\nrefuses."
+          "doc": "The voices it has now, for `query`. A provider that learns them from a program or a server asks it here, so a listing\nmay take time and fail with the reason.\n\n`spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it\nrefuses. `fetch` is the host's too: an `https` document read through the host's own client and proxy, from the places\n[`OutputInfo::endpoints`] declares and nowhere else, kept by the host for `[host.store] source_ttl`. The provider destroys\nit as it does the spawner."
         },
         {
           "name": "say",

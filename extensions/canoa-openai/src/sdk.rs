@@ -11,7 +11,7 @@ use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{CapabilitiesSource, ModelInfo, ModelLimits, standard};
 
-use crate::{ADDRESS, CREDENTIAL, SERVICE, STYLED_MODEL, STYLES, VOICES};
+use crate::{ADDRESS, CREDENTIAL, SERVICE, STYLES};
 
 /// Whether a model takes no temperature other than its default: the reasoning families.
 fn fixed_temperature(model: &str) -> bool {
@@ -40,13 +40,10 @@ pub fn rule(model: ModelInfo) -> ModelInfo {
     if id.contains("transcribe") || id.starts_with("whisper-") {
         return model.with_capabilities([capability::SPEECH_TO_TEXT, "audio_input"], declared);
     }
-    if id.starts_with("tts-") || id.ends_with("-tts") {
-        let styled = id == STYLED_MODEL;
-        let voices: Vec<&str> = if styled {
-            VOICES.to_vec()
-        } else {
-            VOICES[..9].to_vec()
-        };
+    if id.starts_with("tts-") || id.contains("-tts") {
+        // Which voices a model takes is prose in OpenAI's documentation, so none is declared: the service answers a pair it refuses.
+        // The same prose says `instructions` do not work with the `tts-` models.
+        let styled = !id.starts_with("tts-");
         let styles: Vec<&str> = if styled {
             STYLES
                 .iter()
@@ -57,7 +54,7 @@ pub fn rule(model: ModelInfo) -> ModelInfo {
         };
         return model
             .with_capabilities([capability::TEXT_TO_SPEECH, "audio_output"], declared)
-            .with_limits(ModelLimits::new().speaking(voices, styles));
+            .with_limits(ModelLimits::new().speaking(Vec::<&str>::new(), styles));
     }
     if id.contains("realtime") || id.contains("-audio-") {
         return model.with_capabilities(["audio_input", "audio_output"], declared);
@@ -190,18 +187,21 @@ mod tests {
         let styled = tts
             .offered
             .iter()
-            .find(|m| m.id == STYLED_MODEL)
+            .find(|m| m.id == "gpt-4o-mini-tts")
             .expect("styled");
         let plain = tts.offered.iter().find(|m| m.id == "tts-1").expect("plain");
         assert_eq!(styled.limits.as_ref().expect("limits").styles.len(), 4);
+        let dated = tts
+            .offered
+            .iter()
+            .find(|m| m.id == "gpt-4o-mini-tts-2025-12-15")
+            .expect("a dated snapshot is a speech model too");
+        assert_eq!(dated.limits.as_ref().expect("limits").styles.len(), 4);
         assert!(plain.limits.as_ref().expect("limits").styles.is_empty());
         assert!(
-            !plain
-                .limits
-                .as_ref()
-                .expect("limits")
-                .voices
-                .contains(&"marin".to_owned())
+            styled.limits.as_ref().expect("limits").voices.is_empty()
+                && plain.limits.as_ref().expect("limits").voices.is_empty(),
+            "no voice is declared per model"
         );
     }
 

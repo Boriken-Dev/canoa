@@ -263,6 +263,14 @@
         "minimum": 0,
         "maximum": 4294967295,
         "description": "The most characters one request takes; absent says no limit of its own."
+      },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `https` places the `fetch` that [`SpeechOutput::voices`] is handed may reach: an origin (`https://host`) or a prefix with a path (`https://host/repo/`) that a URL has to start with, redirects included. None says `voices` reads no document.",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -339,6 +347,36 @@
           ]
         },
         "description": "Every voice, in the order a person should see them.",
+        "default": []
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "What a request names."
+            },
+            "label": {
+              "type": "string",
+              "description": "What a person is shown."
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "One line on what it does."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "description": "The models as the provider knows them now, in the order a person should see them (a label may carry what a service says of one, such as the date it ends). Empty leaves the models [`OutputInfo::models`] lists.",
         "default": []
       }
     },

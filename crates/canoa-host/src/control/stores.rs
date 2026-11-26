@@ -300,6 +300,18 @@ impl Stores {
         }
     }
 
+    /// A fetch that reaches `endpoints` and nothing else, through the client and proxy the Store's own reads use, and how long what
+    /// it reads is kept (`[host.store] source_ttl`).
+    pub(crate) fn fetch_of(
+        &self,
+        endpoints: Vec<String>,
+    ) -> (
+        coqui_acp_api::guatiao::library::Object<dyn canoa::store::source::SourceFetch>,
+        Duration,
+    ) {
+        (self.sources.fetch_of(endpoints), self.caches.source_ttl)
+    }
+
     /// Forgets what the models pages and the catalogs' entries listed, since canoa.cfg's catalogs changed.
     pub(crate) fn forget_listings(&self) {
         self.caches.models.clear();

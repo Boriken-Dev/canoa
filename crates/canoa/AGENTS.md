@@ -847,7 +847,7 @@ and `include/canoa.speech_output.schemas.json`, checked current by `tests/speech
 #[guatiao::kind(name = "speech_output")]
 pub trait SpeechOutput: Send + Sync {
     fn describe(&self) -> Result<OutputInfo, ProviderError>;
-    fn voices(&self, query: VoiceQuery, spawner: Object<dyn ProcessSpawner>) -> Result<VoiceList, ProviderError>;
+    fn voices(&self, query: VoiceQuery, spawner: Object<dyn ProcessSpawner>, fetch: Object<dyn SourceFetch>) -> Result<VoiceList, ProviderError>;
     fn say(&self, request: SayRequest, spawner: Object<dyn ProcessSpawner>) -> Result<Object<dyn SpeechUtterance>, ProviderError>;
 }
 
@@ -859,8 +859,10 @@ pub trait SpeechUtterance: Send + Sync {
 }
 ```
 
-Every method is required and synchronous; the provider destroys the spawner it is handed, even when it refuses. `describe` is cheap and the same on every call.
-`voices` may run a program or ask a server, so it may take time and fail with the reason. `say` starts nothing for a request it refuses: `UNSUPPORTED`
+Every method is required and synchronous; the provider destroys the spawner and the fetch it is handed, even when it refuses. `describe` is cheap and the same on every call.
+`voices` may run a program or ask a server, so it may take time and fail with the reason. `fetch` is the catalog sources' `source_fetch` (the host's own client and proxy, `https` only, read-only
+documents), held to the places `OutputInfo::endpoints` declares; the host keeps what a provider that declares any answers for `[host.store] source_ttl`, and one that declares none is asked again
+after 30 seconds. A provider whose `voices` fails leaves the list empty with the reason (`voices_problem`), and what a person types by name is still sent. The feature `speech` needs `store` for `SourceFetch`. `say` starts nothing for a request it refuses: `UNSUPPORTED`
 (naming what it has) for a voice, model or style it does not list, `BAD_VALUE` for no text, too much text or a setting it cannot use. `read` answers the audio
 before an error that ended the utterance, so a client plays what there is and then hears why it stopped; after `stop`, or the end, it answers `0`. Dropping an
 utterance is a `stop`. Audio is `pcm_s16le` at the rate and channels `format` says.
@@ -875,9 +877,10 @@ pub enum Leaves { No /* default */, Maybe, Yes }                                
 pub struct SpeedRange { pub min: f64, pub max: f64 }                                                        // multiples of normal; ::new, .clamp(speed)
 pub struct OutputInfo { pub title: String, pub description: Option<String>, pub encodings: Vec<String>, pub models: Vec<Choice>,
                         pub default_model: Option<String>, pub styles: Vec<Choice>, pub speed: Option<SpeedRange>, pub uses: Vec<String>,
-                        pub leaves: Leaves, pub endpoint: Option<String>, pub words: Option<String>, pub max_chars: Option<u32> }  // OutputInfo::new(title, encodings)
+                        pub leaves: Leaves, pub endpoint: Option<String>, pub words: Option<String>, pub max_chars: Option<u32>,
+                        pub endpoints: Vec<String> /* the https places voices' fetch may reach */ }  // OutputInfo::new(title, encodings)
 pub struct VoiceQuery { pub language: Option<String> }                                                      // ::in_language(tag)
-pub struct VoiceList { pub voices: Vec<Voice> }                                                             // ::new(voices), .speaking(language)
+pub struct VoiceList { pub voices: Vec<Voice>, pub models: Vec<Choice> /* as the provider knows them now; empty keeps OutputInfo's */ }  // ::new(voices), .with_models(models), .speaking(language)
 pub struct SayRequest { pub text: String, pub voice: Option<String>, pub model: Option<String>, pub style: Option<String>,
                         pub speed: Option<f64>, pub language: Option<String> }                              // SayRequest::new(text)
 ```

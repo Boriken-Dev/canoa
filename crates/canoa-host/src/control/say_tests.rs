@@ -556,14 +556,21 @@ fn a_provider_that_cannot_be_built_is_listed_with_its_reason_and_refuses_to_spea
 #[test]
 fn a_library_a_build_carries_offers_its_voices_with_no_word_of_them_in_the_host() {
     let tmp = dir("openai");
-    let control = control(&tmp);
+    let asked = std::sync::Arc::new(core::sync::atomic::AtomicUsize::new(0));
+    let transport = Description {
+        answer: Ok(include_str!(
+            "../../../../extensions/canoa-openai/tests/fixtures/openapi.json"
+        )),
+        asked,
+    };
+    let control = control(&tmp).with_stores(stores_over(&tmp, std::sync::Arc::new(transport)));
     let owner = Caller::Owner;
     let saved = ask(
         &control,
         &owner,
         "speech/say_configure",
         json!({"name": "cloud", "provider": "speech_say_openai", "settings": {
-            "model": "tts-1", "api_key": "sk-test-0123456789"}}),
+            "model": "tts-1", "api_key": "sk-test-0123456789", "models": ["tts-1", "gpt-4o-mini-tts"]}}),
     );
     assert_eq!(saved["result"]["saved"], true, "{saved}");
     let listed = ask(
@@ -576,24 +583,14 @@ fn a_library_a_build_carries_offers_its_voices_with_no_word_of_them_in_the_host(
     let cloud = provider(&listed, "cloud");
     assert_eq!(cloud["secrets_set"], json!(["api_key"]), "{cloud}");
     assert_eq!(cloud["leaves"], "yes");
-    assert_eq!(cloud["models"].as_array().expect("models").len(), 3);
+    assert_eq!(cloud["models"].as_array().expect("models").len(), 2);
     let voices = cloud["voices"].as_array().expect("voices");
     assert_eq!(voices.len(), 13);
     let marin = voices.iter().find(|v| v["id"] == "marin").expect("marin");
-    assert_eq!(marin["models"], json!(["gpt-4o-mini-tts"]));
-    // The same request the library refuses before anything is sent.
-    let refused = say(
-        &control,
-        &owner,
-        json!({"provider": "cloud", "text": "Hi.", "voice": "marin", "model": "tts-1"}),
-    );
-    assert_eq!(refused["error"]["code"], REFUSED, "{refused}");
-    assert!(
-        refused["error"]["message"]
-            .as_str()
-            .expect("message")
-            .contains("gpt-4o-mini-tts"),
-        "{refused}"
+    assert_eq!(
+        marin["models"],
+        json!([]),
+        "no voice is tied to a model: OpenAI answers a pair it does not take"
     );
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -704,4 +701,134 @@ fn only_an_account_offer_loses_the_keys_the_host_wrote_and_a_table_the_person_wr
     );
     let written = json!({"provider": "speech_say_command", "title": "Mine", "credential": "c"});
     assert!(super::say::host_keys(&written).is_empty());
+}
+
+/// A Store whose fetches go through `transport`, as a host that reads documents for the voice providers does.
+fn stores_over(
+    root: &Path,
+    transport: std::sync::Arc<dyn crate::store::tools::Transport>,
+) -> Stores {
+    use crate::store::programs::Programs;
+    use crate::store::shelf::Shelf;
+
+    let registry = crate::store::registry::built_in().expect("the built-in stores");
+    let programs = Programs::new(Shelf::unchecked(root), registry).transport(transport);
+    Stores::new(std::sync::Arc::new(programs), Vec::new()).with_caches(std::sync::Arc::new(
+        crate::store::caches::StoreCaches::in_memory(),
+    ))
+}
+
+/// What OpenAI's API description answers (trimmed), counting the requests, or what the network says when it cannot.
+#[derive(Debug)]
+struct Description {
+    answer: Result<&'static str, &'static str>,
+    asked: std::sync::Arc<core::sync::atomic::AtomicUsize>,
+}
+
+impl crate::store::tools::Transport for Description {
+    fn get(
+        &self,
+        url: &str,
+        _limits: &crate::store::tools::ToolsLimits,
+    ) -> Result<crate::store::tools::Reply, String> {
+        assert!(
+            url.starts_with("https://raw.githubusercontent.com/openai/openai-openapi/"),
+            "only the place the provider declared is asked: {url}"
+        );
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.answer
+            .map(|text| crate::store::tools::Reply {
+                status: 200,
+                location: None,
+                body: Box::new(std::io::Cursor::new(text.as_bytes())),
+            })
+            .map_err(str::to_owned)
+    }
+}
+
+fn openai_control(tmp: &Path, stores: Stores) -> Control {
+    let cfg = tmp.join("canoa.cfg");
+    fs::write(
+        &cfg,
+        "[say.openai]\nprovider = \"speech_say_openai\"\nmodels = [\"tts-1\", \"new-tts\"]\n",
+    )
+    .expect("written");
+    Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(Files::new(
+        Some(tmp.to_path_buf()),
+        Vec::new(),
+        Some(cfg),
+        Some(tmp.join("uploads")),
+        UploadLimits::default(),
+    ))
+    .with_offered_voices(Vec::new())
+    .with_stores(stores)
+}
+
+#[test]
+fn a_provider_that_reads_a_document_is_handed_the_hosts_fetch_and_what_it_read_is_kept() {
+    let tmp = dir("document");
+    let asked = std::sync::Arc::new(core::sync::atomic::AtomicUsize::new(0));
+    let transport = Description {
+        answer: Ok(include_str!(
+            "../../../../extensions/canoa-openai/tests/fixtures/openapi.json"
+        )),
+        asked: std::sync::Arc::clone(&asked),
+    };
+    let control = openai_control(&tmp, stores_over(&tmp, std::sync::Arc::new(transport)));
+    let voice = key("sha256:bb", &[Grant::Voice]);
+    let listed = ask(&control, &voice, "speech/voices", json!({}));
+    let openai = provider(&listed, "openai");
+    let voices: Vec<&str> = openai["voices"]
+        .as_array()
+        .expect("voices")
+        .iter()
+        .filter_map(|voice| voice["id"].as_str())
+        .collect();
+    assert_eq!(voices.len(), 13, "{openai}");
+    assert!(voices.contains(&"marin") && voices.contains(&"nova"));
+    assert_eq!(openai["voices_problem"], Value::Null);
+    let models: Vec<(&str, &str)> = openai["models"]
+        .as_array()
+        .expect("models")
+        .iter()
+        .map(|model| {
+            (
+                model["id"].as_str().expect("id"),
+                model["label"].as_str().expect("label"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        models,
+        [("tts-1", "tts-1 (ends 2027-01-06)"), ("new-tts", "new-tts")]
+    );
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    // Listed again at once, nothing is read again: the answer is kept as a source's catalog is.
+    let again = ask(&control, &voice, "speech/voices", json!({}));
+    assert_eq!(provider(&again, "openai")["voices"], openai["voices"]);
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_document_out_of_reach_leaves_the_voice_list_empty_with_the_reason() {
+    let tmp = dir("unreachable");
+    let asked = std::sync::Arc::new(core::sync::atomic::AtomicUsize::new(0));
+    let transport = Description {
+        answer: Err("the network is down"),
+        asked,
+    };
+    let control = openai_control(&tmp, stores_over(&tmp, std::sync::Arc::new(transport)));
+    let voice = key("sha256:bb", &[Grant::Voice]);
+    let listed = ask(&control, &voice, "speech/voices", json!({}));
+    let openai = provider(&listed, "openai");
+    assert_eq!(openai["voices"], json!([]));
+    let why = openai["voices_problem"].as_str().expect("a reason");
+    assert!(why.contains("the network is down"), "{why}");
 }

@@ -320,6 +320,11 @@ impl Sources {
         Ok(())
     }
 
+    /// A fetch that reaches `endpoints` and nothing else, as one a source's `read` is handed.
+    pub(crate) fn fetch_of(&self, endpoints: Vec<String>) -> Object<dyn SourceFetch> {
+        self.fetching.object(endpoints)
+    }
+
     /// These sources reaching the network through `fetching`.
     pub(crate) fn fetching(mut self, fetching: Fetching) -> Self {
         self.fetching = fetching;

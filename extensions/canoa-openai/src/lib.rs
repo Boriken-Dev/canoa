@@ -4,17 +4,20 @@
 //! [`library`] is what a Canoa host loads: an `account_speech` provider that says which accounts those are (a kind that provides the
 //! OpenAI API at OpenAI's own address), where a recording is posted, which credential holds the key and which models transcribe.
 //! The host names none of it. The models and their end dates are OpenAI's, which it changes on its own schedule.
+//!
+//! The voices of [`OpenAiVoices`] and the models a key can speak with are not written here: the host lists the models from
+//! `GET /v1/models` with the account's key, and the voices and the models' end dates are read from OpenAI's API description.
 #![forbid(unsafe_code)]
 
+extern crate alloc;
+
+pub mod description;
 mod sdk;
 mod voices;
 
 pub use sdk::{OpenAiSdk, rule};
 
-pub use voices::{
-    OpenAiVoiceSettings, OpenAiVoices, SPEECH, SPEECH_MODELS, SPEECH_PROVIDER, STYLED_MODEL,
-    STYLES, VOICES,
-};
+pub use voices::{OpenAiVoiceSettings, OpenAiVoices, SPEECH, SPEECH_PROVIDER, STYLES};
 
 use canoa::speech::account::{
     AccountSpeech, AccountSpeechInfo, AccountSpeechModel, AccountSpeechService,

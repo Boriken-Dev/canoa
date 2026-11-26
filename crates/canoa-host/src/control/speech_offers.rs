@@ -242,6 +242,35 @@ impl<'a> Lend<'a> {
         super::speech_accounts::read_credential(&config, home, account_name, &credential)
     }
 
+    /// The models the account `account` lists that can turn text into speech, from the `sdk_provider` that serves the service
+    /// `service`: what the account's key lists, not a list of the host's.
+    pub(super) fn account_speech_models(
+        &self,
+        account: &str,
+        service: &str,
+    ) -> Result<Vec<String>, String> {
+        let config = self.config()?;
+        let assist = crate::assist::Assist::of(&config, self.accounts);
+        let id = format!("{service}:{account}");
+        let backend = assist
+            .backends()
+            .iter()
+            .find(|backend| backend.id() == id)
+            .ok_or_else(|| {
+                format!("no library lists the models of the account {account} for {service}")
+            })?;
+        let listing = backend
+            .models(&canoa::network::Network::current())
+            .map_err(|failure| failure.why)?;
+        Ok(
+            canoa::sdk::models_for(&listing.models, canoa::sdk::capability::TEXT_TO_SPEECH)
+                .offered
+                .into_iter()
+                .map(|model| model.id)
+                .collect(),
+        )
+    }
+
     /// The models of the service a recording is posted to at the address in `settings`: none for an address no library describes.
     pub(super) fn models_at(&self, settings: &Map<String, Value>) -> Vec<Value> {
         settings

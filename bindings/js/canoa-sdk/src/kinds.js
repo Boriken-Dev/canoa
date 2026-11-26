@@ -1319,7 +1319,7 @@ const described = kindsOf({
     },
     {
       "name": "speech_output",
-      "floor_hash": 182687566,
+      "floor_hash": 2737329465,
       "object": false,
       "slots": [
         {
@@ -1345,6 +1345,12 @@ const described = kindsOf({
               "name": "spawner",
               "type": "object",
               "kind": "process_spawner",
+              "pass": "taken"
+            },
+            {
+              "name": "fetch",
+              "type": "object",
+              "kind": "source_fetch",
               "pass": "taken"
             }
           ],

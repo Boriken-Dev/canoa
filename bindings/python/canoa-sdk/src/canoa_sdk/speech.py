@@ -131,7 +131,7 @@ class SpeechOutput(WithForm, provide.Provider, kinds.SpeechOutput, abstract=True
         return self.info()
 
     @abstract
-    def voices(self, query: Ref, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
+    def voices(self, query: Ref, spawner: Taken[kinds.ProcessSpawner], fetch: Taken[kinds.SourceFetch]) -> ValueAnswer:
         raise Unsupported("voices is not implemented")
 
     @abstract

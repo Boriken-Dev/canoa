@@ -16,6 +16,7 @@ use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
 
 use super::AudioFormat;
+use crate::store::source::SourceFetch;
 
 pub mod account;
 
@@ -154,6 +155,10 @@ pub struct OutputInfo {
     pub words: Option<String>,
     /// The most characters one request takes; absent says no limit of its own.
     pub max_chars: Option<u32>,
+    /// The `https` places the `fetch` that [`SpeechOutput::voices`] is handed may reach: an origin (`https://host`) or a prefix
+    /// with a path (`https://host/repo/`) that a URL has to start with, redirects included. None says `voices` reads no document.
+    #[map(default)]
+    pub endpoints: Vec<String>,
 }
 
 impl OutputInfo {
@@ -173,6 +178,7 @@ impl OutputInfo {
             endpoint: None,
             words: None,
             max_chars: None,
+            endpoints: Vec::new(),
         }
     }
 }
@@ -204,13 +210,27 @@ pub struct VoiceList {
     /// Every voice, in the order a person should see them.
     #[map(default)]
     pub voices: Vec<Voice>,
+    /// The models as the provider knows them now, in the order a person should see them (a label may carry what a service says of
+    /// one, such as the date it ends). Empty leaves the models [`OutputInfo::models`] lists.
+    #[map(default)]
+    pub models: Vec<Choice>,
 }
 
 impl VoiceList {
     /// These voices.
     #[must_use]
     pub const fn new(voices: Vec<Voice>) -> Self {
-        Self { voices }
+        Self {
+            voices,
+            models: Vec::new(),
+        }
+    }
+
+    /// These voices with the models as the provider knows them now.
+    #[must_use]
+    pub fn with_models(mut self, models: Vec<Choice>) -> Self {
+        self.models = models;
+        self
     }
 
     /// Without the voices that do not speak `language`: a voice with no language stays, and a tag matches by its primary
@@ -280,11 +300,14 @@ pub trait SpeechOutput: Send + Sync {
     /// may take time and fail with the reason.
     ///
     /// `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
-    /// refuses.
+    /// refuses. `fetch` is the host's too: an `https` document read through the host's own client and proxy, from the places
+    /// [`OutputInfo::endpoints`] declares and nowhere else, kept by the host for `[host.store] source_ttl`. The provider destroys
+    /// it as it does the spawner.
     fn voices(
         &self,
         query: VoiceQuery,
         spawner: Object<dyn ProcessSpawner>,
+        fetch: Object<dyn SourceFetch>,
     ) -> Result<VoiceList, ProviderError>;
 
     /// Starts speaking `request`. Nothing is started for a request it refuses: `UNSUPPORTED` for a choice it does not have,

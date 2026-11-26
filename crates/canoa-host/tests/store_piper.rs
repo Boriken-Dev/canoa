@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use canoa::store::engine::Engine;
 use canoa::store::recipe::Recipe;
+use canoa::store::source::SourceFetch;
 use canoa::store::{
     Action, ApplyRequest, Check, InstallPrompter, InstallTools, PlanRequest, Platform, Progress,
     STORE_GLYPHS, StoreSettings,
@@ -20,10 +21,31 @@ use canoa::store::{
 use canoa_host::store::contract::{World, WorldTransport, standin_bytes};
 use canoa_host::store::tools::LocalTools;
 use canoa_piper::store::{Catalog, Engine as Archive, PiperRecipe, VERSION};
+use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{LoginAnswer, LoginForm, ProcessSpawner};
 use coqui_acp_harness::LocalSpawner;
 use sha2::{Digest, Sha256};
+
+/// A fetch for a provider that reads no document: any address is refused.
+struct NoFetch;
+
+impl SourceFetch for NoFetch {
+    fn get_text(&self, url: &str, _max: u64) -> Result<String, ProviderError> {
+        Err(ProviderError::new(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            format!("no document is read: {url}").as_str(),
+        ))
+    }
+
+    fn get_json(&self, url: &str, max: u64) -> Result<String, ProviderError> {
+        self.get_text(url, max)
+    }
+}
+
+fn no_fetch() -> Object<dyn SourceFetch> {
+    NoFetch.into_object()
+}
 
 fn sha256(bytes: &[u8]) -> String {
     data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
@@ -373,7 +395,11 @@ fn the_real_release_installs_and_speaks() {
         copy.join("voices").to_string_lossy(),
     ));
     let voices = provider
-        .voices(VoiceQuery::default(), LocalSpawner::new().into_object())
+        .voices(
+            VoiceQuery::default(),
+            LocalSpawner::new().into_object(),
+            no_fetch(),
+        )
         .expect("listed")
         .voices;
     assert_eq!(

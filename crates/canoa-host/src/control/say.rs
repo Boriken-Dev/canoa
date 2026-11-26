@@ -70,8 +70,10 @@ pub const MAX_PER_KEY: usize = 4;
 pub const MAX_OPEN: usize = 16;
 /// How long an utterance may go with no call before the host ends it, so a page that closed leaves no program running.
 pub const IDLE: Duration = Duration::from_secs(120);
-/// How long a list of voices is kept before the provider is asked again.
+/// How long a list of voices is kept before the provider is asked again, when it reads no document.
 const VOICES_KEPT: Duration = Duration::from_secs(30);
+/// How long the models an account's key lists are kept: `[host.store] models_ttl`'s default.
+const MODELS_KEPT: Duration = Duration::from_secs(300);
 /// The most text one `speech/say` carries, in bytes.
 pub const MAX_TEXT: usize = 256 * 1024;
 
@@ -297,6 +299,12 @@ struct Kept {
     answer: Value,
 }
 
+/// The models an account's key lists for speech, or why it could not be asked, kept for a while.
+struct ModelsKept {
+    at: Instant,
+    answer: Result<Vec<String>, String>,
+}
+
 /// The tables the host offers for the Store types whose installed program reads text aloud: each named for its type, with the provider
 /// and the settings its library says.
 type Offered = Box<dyn Fn(Option<&Stores>) -> Vec<(String, Value)> + Send + Sync>;
@@ -323,6 +331,7 @@ pub(crate) struct Say {
     open: Mutex<BTreeMap<String, Open>>,
     next: AtomicU64,
     kept: Mutex<BTreeMap<String, Kept>>,
+    models: Mutex<BTreeMap<String, ModelsKept>>,
     offered: Offered,
     #[cfg(test)]
     output_services: Mutex<Option<super::speech_accounts::OutputServices>>,
@@ -334,6 +343,7 @@ impl Default for Say {
             open: Mutex::default(),
             next: AtomicU64::new(0),
             kept: Mutex::default(),
+            models: Mutex::default(),
             offered: Box::new(from_stores),
             #[cfg(test)]
             output_services: Mutex::new(None),
@@ -471,6 +481,13 @@ impl Say {
                     Value::String(lend.output_key(account, service, credential)?),
                 );
             }
+            if !map.contains_key("models")
+                && members_of(&resolved.schema).contains("models")
+                && let Some(Ok(models)) = self.account_models(lend, table)
+                && !models.is_empty()
+            {
+                map.insert("models".to_owned(), json!(models));
+            }
         }
         let (provider, code) = resolved.build(&settings)?;
         let built = Built {
@@ -478,6 +495,40 @@ impl Say {
             code: code.or(origin),
         };
         Ok((resolved, built))
+    }
+
+    /// The models the account `table` names lists for speech, kept for a while; none for a table that names no account.
+    fn account_models(
+        &self,
+        lend: &Lend<'_>,
+        table: &Value,
+    ) -> Option<Result<Vec<String>, String>> {
+        let account = table.get("account").and_then(Value::as_str)?;
+        let (service, _) = table
+            .get("offer")
+            .and_then(Value::as_str)
+            .and_then(|offer| offer.split_once(':'))?;
+        let key = format!("{service}:{account}");
+        {
+            let kept = self.models.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(kept) = kept.get(&key)
+                && kept.at.elapsed() < MODELS_KEPT
+            {
+                return Some(kept.answer.clone());
+            }
+        }
+        let answer = lend.account_speech_models(account, service);
+        self.models
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                key,
+                ModelsKept {
+                    at: Instant::now(),
+                    answer: answer.clone(),
+                },
+            );
+        Some(answer)
     }
 
     fn spawner() -> Object<dyn coqui_acp_api::ProcessSpawner> {
@@ -516,7 +567,7 @@ impl Say {
             }
             listed.push(self.entry(
                 files,
-                lend,
+                (lend, stores),
                 (name, table, in_file.contains_key(name)),
                 language,
                 &mut kinds,
@@ -542,7 +593,7 @@ impl Say {
     fn entry(
         &self,
         files: &Files,
-        lend: &Lend<'_>,
+        (lend, stores): (&Lend<'_>, Option<&Stores>),
         (name, table, written): (&str, &Value, bool),
         language: Option<&str>,
         kinds: &mut Vec<Resolved>,
@@ -589,8 +640,10 @@ impl Say {
             }
         };
         let provider = &made.provider;
+        let mut endpoints = Vec::new();
         match provider.describe() {
             Ok(info) => {
+                endpoints.clone_from(&info.endpoints);
                 let described = json_of(&info)?;
                 if let (Some(into), Value::Object(from)) = (entry.as_object_mut(), described) {
                     for (key, value) in from {
@@ -606,8 +659,22 @@ impl Say {
         if let Some(title) = table.get("title").and_then(Value::as_str) {
             entry["title"] = json!(title);
         }
-        match self.voices_of(name, table, provider, language) {
-            Ok(voices) => entry["voices"] = voices,
+        if let Ok((resolved, _)) = &found
+            && members_of(&resolved.schema).contains("models")
+            && let Some(Err(why)) = self.account_models(lend, table)
+        {
+            entry["models_problem"] = json!(why);
+        }
+        match self.voices_of(name, table, provider, language, (&endpoints, stores)) {
+            Ok(answer) => {
+                entry["voices"] = answer["voices"].clone();
+                if answer["models"]
+                    .as_array()
+                    .is_some_and(|each| !each.is_empty())
+                {
+                    entry["models"] = answer["models"].clone();
+                }
+            }
             Err(why) => {
                 entry["voices"] = json!([]);
                 entry["voices_problem"] = json!(why);
@@ -616,20 +683,35 @@ impl Say {
         Ok(entry)
     }
 
-    /// The voices `provider` has, from what was listed lately when the table is the same.
+    /// What `provider` has now, `{voices, models}`, from what was listed lately when the table is the same. A provider that declares
+    /// `endpoints` reads documents through the host's fetch, and its answer is kept as long as a catalog read through a source is
+    /// (`[host.store] source_ttl`); the others are asked again after a short while.
     fn voices_of(
         &self,
         name: &str,
         table: &Value,
         provider: &Provider,
         language: Option<&str>,
+        (endpoints, stores): (&[String], Option<&Stores>),
     ) -> Result<Value, String> {
         let key = format!("{name}\u{0}{}", language.unwrap_or(""));
+        let (fetch, kept_for) = match stores {
+            Some(stores) => stores.fetch_of(endpoints.to_vec()),
+            None => (
+                crate::store::sources::Sources::default().fetch_of(endpoints.to_vec()),
+                crate::store::catalog_run::DEFAULT_SOURCE_TTL,
+            ),
+        };
+        let kept_for = if endpoints.is_empty() {
+            VOICES_KEPT
+        } else {
+            kept_for
+        };
         {
             let kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(kept) = kept.get(&key)
                 && kept.table == *table
-                && kept.at.elapsed() < VOICES_KEPT
+                && kept.at.elapsed() < kept_for
             {
                 return Ok(kept.answer.clone());
             }
@@ -637,9 +719,9 @@ impl Say {
         let mut query = VoiceQuery::default();
         query.language = language.map(str::to_owned);
         let list = provider
-            .voices(query, Self::spawner())
+            .voices(query, Self::spawner(), fetch)
             .map_err(|error| error.to_string())?;
-        let answer = json_of(&list).map_err(|(_, why)| why)?["voices"].clone();
+        let answer = json_of(&list).map_err(|(_, why)| why)?;
         self.kept
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

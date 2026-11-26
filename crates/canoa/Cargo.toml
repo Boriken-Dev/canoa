@@ -41,7 +41,7 @@ session-service = ["dep:coqui-acp-api", "dep:guatiao", "dep:serde_json"]
 # The `sdk_provider` kind: a vendor's client for an account type (chat, embeddings, rerank), over HTTP the host lends, and the built-in `server`.
 sdk = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:serde_json"]
 # The `speech_provider` kind: audio streamed in, text and front matter out.
-speech = ["dep:guatiao", "dep:coqui-acp-api"]
+speech = ["store", "dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.
 speech-builtin = ["speech", "network", "dep:guatiao-intake", "dep:serde_json"]
 # The loopback HTTP server a host gives an agent: tools, or a local model's API, to a program of this user holding a bearer.

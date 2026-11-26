@@ -1373,9 +1373,11 @@ export interface SpeechOutput {
    * may take time and fail with the reason.
    *
    * `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
-   * refuses.
+   * refuses. `fetch` is the host's too: an `https` document read through the host's own client and proxy, from the places
+   * [`OutputInfo::endpoints`] declares and nowhere else, kept by the host for `[host.store] source_ttl`. The provider destroys
+   * it as it does the spawner.
    */
-  voices(query: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  voices(query: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>, fetch: k.ObjectHandle<typeof SourceFetch>): unknown;
   /**
    * Starts speaking `request`. Nothing is started for a request it refuses: `UNSUPPORTED` for a choice it does not have,
    * `BAD_VALUE` for a setting or a text it cannot use. The provider may start a process or open a connection here, and the
@@ -1395,9 +1397,11 @@ export interface SpeechOutputRemote extends k.RemoteBase<typeof SpeechOutput> {
    * may take time and fail with the reason.
    *
    * `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
-   * refuses.
+   * refuses. `fetch` is the host's too: an `https` document read through the host's own client and proxy, from the places
+   * [`OutputInfo::endpoints`] declares and nowhere else, kept by the host for `[host.store] source_ttl`. The provider destroys
+   * it as it does the spawner.
    */
-  voices(query: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  voices(query: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>, fetch: SourceFetch | k.ObjectHandle<typeof SourceFetch>): g.Value;
   /**
    * Starts speaking `request`. Nothing is started for a request it refuses: `UNSUPPORTED` for a choice it does not have,
    * `BAD_VALUE` for a setting or a text it cannot use. The provider may start a process or open a connection here, and the

@@ -1265,6 +1265,7 @@ dependencies = [
  "coqui-acp-harness",
  "guatiao",
  "guatiao-intake",
+ "serde_json",
 ]
 
 [[package]]

@@ -13,6 +13,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use crate::store::source::SourceFetch;
 use coqui_acp_api::ProcessSpawner;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, Secret, ToValue};
@@ -214,6 +215,7 @@ impl SpeechOutput for EndpointSay {
         &self,
         query: VoiceQuery,
         _spawner: Object<dyn ProcessSpawner>,
+        _fetch: Object<dyn SourceFetch>,
     ) -> Result<VoiceList, ProviderError> {
         Ok(VoiceList::new(self.settings.voice_list()).speaking(query.language.as_deref()))
     }

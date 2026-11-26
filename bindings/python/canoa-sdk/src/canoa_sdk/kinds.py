@@ -932,7 +932,7 @@ class SpeechUtterance(KindProtocol, Protocol, kind="speech_utterance", floor_has
         ...
 
 
-class SpeechOutput(KindProtocol, Protocol, kind="speech_output", floor_hash=182687566):
+class SpeechOutput(KindProtocol, Protocol, kind="speech_output", floor_hash=2737329465):
     """A provider of text to speech. One instance is one configuration of one provider."""
 
     @required
@@ -943,12 +943,14 @@ class SpeechOutput(KindProtocol, Protocol, kind="speech_output", floor_hash=1826
 
     @required
     @fallible
-    def voices(self, query: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+    def voices(self, query: Ref, spawner: Taken[ProcessSpawner], fetch: Taken[SourceFetch]) -> ValueAnswer:
         """The voices it has now, for `query`. A provider that learns them from a program or a server asks it here, so a listing
         may take time and fail with the reason.
 
         `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
-        refuses.
+        refuses. `fetch` is the host's too: an `https` document read through the host's own client and proxy, from the places
+        [`OutputInfo::endpoints`] declares and nowhere else, kept by the host for `[host.store] source_ttl`. The provider destroys
+        it as it does the spawner.
         """
         ...
 
