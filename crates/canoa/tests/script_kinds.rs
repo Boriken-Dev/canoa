@@ -1,7 +1,7 @@
 //! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`, `model_store`,
 //! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab`, `file_viewer`, `usage_reader`, `model_gateway` and
 //! `account_provider`), and their models' schemas: what such a library is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment,config-store,notifier,network-route --test script_kinds`.
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment,config-store,notifier,network-route,approver --test script_kinds`.
 #![cfg(all(
     feature = "store",
     feature = "vendor",
@@ -15,7 +15,8 @@
     feature = "environment",
     feature = "config-store",
     feature = "notifier",
-    feature = "network-route"
+    feature = "network-route",
+    feature = "approver"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -25,6 +26,10 @@
 
 use std::path::PathBuf;
 
+use canoa::approver::{
+    Answer as ApproverAnswer, ApproverInfo, ApproverVtable, Authority, Choice, OptionRef,
+    Request as ApproverRequest, SessionRef, Step, Ticket, Tool as ApproverTool,
+};
 use canoa::config_store::{
     Changed, Changes, ConfigStoreVtable, Held as ConfigHeld, Key as ConfigKey, Layer, LayerInfo,
     Op, Snapshot, StoreInfo as ConfigStoreInfo,
@@ -584,6 +589,33 @@ fn the_committed_environment_schemas_are_what_this_build_describes() {
             ("DirEntry", schema_of::<DirEntry>()),
             ("Call", schema_of::<Call>()),
             ("CallAnswer", schema_of::<CallAnswer>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_approver_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.approver.kinds.json",
+        &document(&ApproverVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_approver_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.approver.schemas.json",
+        &schemas(vec![
+            ("ApproverInfo", schema_of::<ApproverInfo>()),
+            ("Request", schema_of::<ApproverRequest>()),
+            ("SessionRef", schema_of::<SessionRef>()),
+            ("Tool", schema_of::<ApproverTool>()),
+            ("OptionRef", schema_of::<OptionRef>()),
+            ("Answer", schema_of::<ApproverAnswer>()),
+            ("Ticket", schema_of::<Ticket>()),
+            ("Authority", schema_of::<Authority>()),
+            ("Choice", schema_of::<Choice>()),
+            ("Step", schema_of::<Step>()),
         ]),
     );
 }

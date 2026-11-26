@@ -1,0 +1,367 @@
+{
+  "ApproverInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying what it is."
+      },
+      "answers_as": {
+        "type": "string",
+        "enum": [
+          "person",
+          "policy"
+        ],
+        "x-enum-labels": {
+          "person": "The person answers (a phone): its allow stands for the person's own, so it applies to a protected place too.",
+          "policy": "A rule the person wrote answers: its allow never applies to a protected place, a request to widen the sandbox or a call the host cannot read, which go on to the person."
+        },
+        "description": "Whose answer its allow is."
+      },
+      "instant": {
+        "type": "boolean",
+        "description": "Whether it answers from `ask` alone: an instant approver is asked first and in order, and never waits."
+      },
+      "wants_detail": {
+        "type": "boolean",
+        "description": "Whether it needs the command and the files of a call to answer (a rule that reads them): the host gives them to it whatever the entry's `detail` says. Only an approver that decides on the spot and sends the call nowhere should say so.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "answers_as",
+      "instant"
+    ]
+  },
+  "Request": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The host's id for this request, which names it in a reply."
+      },
+      "session": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's own id for the session."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the person calls it, when it has a name."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it runs."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "agent"
+        ],
+        "description": "The session it is from."
+      },
+      "tool": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The agent's kind of call (`read`, `edit`, `execute`, ...)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The tool's own name."
+          },
+          "title": {
+            "type": "string",
+            "description": "The call's title, on one line."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command, for an approver whose settings ask for the detail; absent otherwise."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files the call names, for an approver whose settings ask for the detail; empty otherwise.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "name",
+          "title"
+        ],
+        "description": "The call it is about."
+      },
+      "options": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "The agent's kind (`allow_once`, `allow_always`, `reject_once`, `reject_always`)."
+            },
+            "name": {
+              "type": "string",
+              "description": "Its name for people."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        "description": "What the agent offered.",
+        "default": []
+      },
+      "deadline": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When the host stops waiting for this approver, in Unix seconds; absent when it waits until the session ends."
+      },
+      "protected": {
+        "type": "boolean",
+        "description": "The host's own verdict: the call names a place the person protects, asks to widen the sandbox, or is not one the host can read. A [`Authority::Policy`] approver must not allow it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "session",
+      "tool",
+      "protected"
+    ]
+  },
+  "SessionRef": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The host's own id for the session."
+      },
+      "title": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What the person calls it, when it has a name."
+      },
+      "agent": {
+        "type": "string",
+        "description": "The agent it runs."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "agent"
+    ]
+  },
+  "Tool": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "The agent's kind of call (`read`, `edit`, `execute`, ...)."
+      },
+      "name": {
+        "type": "string",
+        "description": "The tool's own name."
+      },
+      "title": {
+        "type": "string",
+        "description": "The call's title, on one line."
+      },
+      "command": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The command, for an approver whose settings ask for the detail; absent otherwise."
+      },
+      "paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The files the call names, for an approver whose settings ask for the detail; empty otherwise.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "name",
+      "title"
+    ]
+  },
+  "OptionRef": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "The agent's kind (`allow_once`, `allow_always`, `reject_once`, `reject_always`)."
+      },
+      "name": {
+        "type": "string",
+        "description": "Its name for people."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "name"
+    ]
+  },
+  "Answer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "step": {
+        "type": "string",
+        "enum": [
+          "answered",
+          "waiting",
+          "abstain"
+        ],
+        "x-enum-labels": {
+          "answered": "It has answered: [`Answer::choice`] says how.",
+          "waiting": "It waits for someone: [`Answer::ticket`] names the wait.",
+          "abstain": "It has no answer and will not give one: a rule no request matched, a notice that could not be sent, a ticket that is gone."
+        },
+        "description": "Where the approver is."
+      },
+      "choice": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "allow",
+              "reject"
+            ],
+            "x-enum-labels": {
+              "allow": "Allow this call once.",
+              "reject": "Refuse this call once."
+            }
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "For [`Step::Answered`], what it said."
+      },
+      "ticket": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "For [`Step::Waiting`] from `ask`, what `wait` and `withdraw` name the wait by."
+      },
+      "note": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "One line for the host's log, never shown to the agent and never holding the request's text."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "step"
+    ]
+  },
+  "Ticket": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "ticket": {
+        "type": "string",
+        "description": "What [`Approver::ask`] gave."
+      },
+      "wait_ms": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most milliseconds [`Approver::wait`] may take to answer: the host's poll interval, at most 5000."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "ticket",
+      "wait_ms"
+    ]
+  },
+  "Authority": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "person",
+      "policy"
+    ],
+    "x-enum-labels": {
+      "person": "The person answers (a phone): its allow stands for the person's own, so it applies to a protected place too.",
+      "policy": "A rule the person wrote answers: its allow never applies to a protected place, a request to widen the sandbox or a call the host cannot read, which go on to the person."
+    },
+    "properties": {}
+  },
+  "Choice": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "allow",
+      "reject"
+    ],
+    "x-enum-labels": {
+      "allow": "Allow this call once.",
+      "reject": "Refuse this call once."
+    },
+    "properties": {}
+  },
+  "Step": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "answered",
+      "waiting",
+      "abstain"
+    ],
+    "x-enum-labels": {
+      "answered": "It has answered: [`Answer::choice`] says how.",
+      "waiting": "It waits for someone: [`Answer::ticket`] names the wait.",
+      "abstain": "It has no answer and will not give one: a rule no request matched, a notice that could not be sent, a ticket that is gone."
+    },
+    "properties": {}
+  }
+}

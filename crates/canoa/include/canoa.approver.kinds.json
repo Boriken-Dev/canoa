@@ -1,0 +1,67 @@
+{
+  "kinds": [
+    {
+      "name": "approver",
+      "floor_hash": 3596803942,
+      "object": false,
+      "doc": "An approver. One instance is one configuration of one provider (an entry of `[permissions.approvers]`); its settings are the\nprovider's own schema.\n\nAn error from `ask` or `wait` is an abstain: the host logs it and goes on to the others. It never answers.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What it is. Cheap, and the same on every call."
+        },
+        {
+          "name": "ask",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Puts `request` to it, and returns at once: an answer, a ticket to wait on, or an abstain."
+        },
+        {
+          "name": "wait",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "wait",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Looks at a wait it gave a ticket for, for up to `wait` milliseconds: still waiting, an answer, or an abstain for a ticket that\nis gone. An instant approver answers an abstain."
+        },
+        {
+          "name": "withdraw",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "ticket",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Ends a wait that is no longer needed (the request was answered elsewhere, or the turn ended); ending one that is gone is no\nerror."
+        }
+      ]
+    }
+  ]
+}
