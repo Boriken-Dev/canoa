@@ -164,7 +164,8 @@ pub struct Lookup {
     pub git_bash: Option<PathBuf>,
     /// See `git_bash`.
     pub powershell: Option<PathBuf>,
-    /// The WSL distributions installed, the default one first: the one a WSL `bash.exe` starts.
+    /// The WSL distributions installed, the default one first: the one a WSL `bash.exe` starts. [`Lookup::here`] leaves it
+    /// empty; [`Plan::report`] asks `wsl.exe` once.
     pub wsl: Vec<String>,
 }
 
@@ -201,11 +202,7 @@ impl Lookup {
             login: var("SHELL"),
             git_bash: crate::sources::managed_program("git-bash").map(|(path, _)| path),
             powershell: crate::sources::managed_program("powershell").map(|(path, _)| path),
-            wsl: if windows {
-                wsl_distributions()
-            } else {
-                Vec::new()
-            },
+            wsl: Vec::new(),
         }
     }
 
@@ -229,42 +226,36 @@ impl Lookup {
 }
 
 /// The names of the WSL distributions, the default first, as `wsl.exe --list --quiet` prints them; none when WSL is not there or
-/// does not answer within a few seconds (a frozen WSL VM hangs its commands). Asked once per process.
+/// does not answer within a few seconds (a frozen WSL VM hangs its commands).
 fn wsl_distributions() -> Vec<String> {
-    use std::sync::OnceLock;
-    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
-    NAMES
-        .get_or_init(|| {
-            let (send, receive) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let out = std::process::Command::new("wsl.exe")
-                    .args(["--list", "--quiet"])
-                    .stdin(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .output();
-                let _ = send.send(out);
-            });
-            let Ok(Ok(out)) = receive.recv_timeout(core::time::Duration::from_secs(4)) else {
-                return Vec::new();
-            };
-            if !out.status.success() {
-                return Vec::new();
-            }
-            // `wsl.exe` writes UTF-16LE.
-            let units: Vec<u16> = out
-                .stdout
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|pair| u16::from_le_bytes(*pair))
-                .collect();
-            String::from_utf16_lossy(&units)
-                .lines()
-                .map(|line| line.trim().trim_start_matches('\u{feff}').to_owned())
-                .filter(|line| !line.is_empty())
-                .collect()
-        })
-        .clone()
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = crate::spawn::Command::new("wsl.exe")
+            .args(["--list", "--quiet"])
+            .stdin(crate::spawn::Stdio::Null)
+            .stderr(crate::spawn::Stdio::Null)
+            .output();
+        let _ = send.send(out);
+    });
+    let Ok(Ok(out)) = receive.recv_timeout(core::time::Duration::from_secs(4)) else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    // `wsl.exe` writes UTF-16LE.
+    let units: Vec<u16> = out
+        .stdout
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
+        .collect();
+    String::from_utf16_lossy(&units)
+        .lines()
+        .map(|line| line.trim().trim_start_matches('\u{feff}').to_owned())
+        .filter(|line| !line.is_empty())
+        .collect()
 }
 
 /// The lower-case name of a program without its extension.
@@ -656,6 +647,8 @@ pub struct Plan {
     pub default: Option<String>,
     /// The harness entries, in canoa.cfg's order.
     pub agents: Vec<AgentShell>,
+    /// The WSL distributions, asked of `wsl.exe` the first time a report needs them.
+    wsl: alloc::sync::Arc<std::sync::OnceLock<Vec<String>>>,
 }
 
 /// One harness entry's say in which shell it uses.
@@ -674,13 +667,22 @@ impl Plan {
     /// A plan that says nothing.
     #[must_use]
     pub fn new(default: Option<String>, agents: Vec<AgentShell>) -> Self {
-        Self { default, agents }
+        Self {
+            default,
+            agents,
+            wsl: alloc::sync::Arc::default(),
+        }
     }
 
     /// `shell/list`: the shells found, the host's own choice, and for each agent entry which shell it uses and how its harness is
     /// told (the variables' names, never a value) or why it cannot be.
     #[must_use]
     pub fn report(&self, lookup: &Lookup, agents: &[(String, String)]) -> Value {
+        let mut lookup = lookup.clone();
+        if lookup.windows && lookup.wsl.is_empty() {
+            lookup.wsl = self.wsl.get_or_init(wsl_distributions).clone();
+        }
+        let lookup = &lookup;
         let found = detect(lookup);
         let default = self
             .default
@@ -716,15 +718,15 @@ impl Plan {
             line
         };
         // Every agent the host can run has a row: one for each of its entries, then one for each agent no entry runs.
-        let mut rows: Vec<Value> = self
-            .agents
+        let entries = &self.agents;
+        let mut rows: Vec<Value> = entries
             .iter()
             .map(|agent| line_for(Some(agent), &agent.harness))
             .collect();
         rows.extend(
             agents
                 .iter()
-                .filter(|(id, _)| self.agents.iter().all(|agent| &agent.harness != id))
+                .filter(|(id, _)| entries.iter().all(|agent| &agent.harness != id))
                 .map(|(id, _)| line_for(None, id)),
         );
         let mut report = json!({
