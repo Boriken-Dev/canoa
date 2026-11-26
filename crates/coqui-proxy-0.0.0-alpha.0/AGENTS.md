@@ -14,14 +14,18 @@ MSRV Rust 1.89, edition 2024. A default build depends on `http`, `percent-encodi
 | `tls` | `rustls` (ring), `rustls-platform-verifier` | `https:` proxies and PAC locations; `ProxyConnectorBuilder::proxy_tls`, `PacSettings::tls` |
 | `negotiate` | Unix: `libgssapi` | Negotiate and NTLM login (Windows SSPI needs no crate) |
 | `libproxy` | Unix: `libloading` | `system::LibProxySource` |
+| `tokio` | `tokio`, `tokio-rustls` | `asynch::*`: the connector on Tokio (an `https:` proxy also needs `tls`) |
+| `hyper` | `tokio`, `hyper`, `hyper-util`, `tower-service` | `hyper::Connector` |
+| `relay` | `hyper` (server, client, HTTP/1), `http-body-util`, `bytes`, `getrandom`, `subtle` | `relay::{Relay, RelayBuilder, RelayHandle}`: an in-process loopback proxy on a Tokio runtime |
+| `relay-blocking` | `httparse`, `getrandom`, `subtle` (no Tokio) | `relay::blocking::*`: the same relay on `std::net` and its own threads |
 
 Imports: the root re-exports `Resolver`, `ResolverBuilder`, `ProxySetting`, `OnMissingEngine`,
 `ChildEnvironment`, `Proxy`, `ProxyBuilder`, `ProxyScheme`, `Route`, `Credentials`, `Secret`,
 `BypassRules`, `Dialect`, `Environment`, `ProxyVariables`, `EnvSource`, `EnvSourceBuilder`,
 `ProxyConnector`, `ProxyConnectorBuilder`, `Connection`, `Negotiate`, `NegotiateBuilder`,
 `OriginAuth`, `OriginAuthBuilder`, `OriginLogin`, `ProxySource`, `ChainSource`, `Error`, `Reason`,
-`UnsupportedProxy`, `ConnectorSettings`, `PacSettings`, `ReaderSettings`, `ResolverSettings`,
-`VERSION`. Public modules: `auth`, `connect` (`core`, `socks`), `pac`, `settings`, `source`,
+`UnsupportedProxy`, `ConnectorSettings`, `PacSettings`, `ReaderSettings`, `RelaySettings`, `ResolverSettings`, `VERSION`. Public modules: `auth`, `connect`
+(`core`, `socks`), `pac`, `relay`, `settings`, `source`,
 `system`.
 
 `unsafe` is in `src/auth/sspi.rs` (SSPI with the logon session), `src/system/winhttp.rs`
@@ -181,23 +185,122 @@ discovers WPAD again after `wpad_cache_ttl`.
 
 ```rust
 ProxyConnector::default(); ProxyConnector::builder() -> ProxyConnectorBuilder
-ProxyConnectorBuilder::{timeout(Duration), user_agent(String), negotiate(Negotiate), settings(ConnectorSettings), proxy_tls(Arc<rustls::ClientConfig>) /*tls*/, non_defaults(), build()}
+ProxyConnectorBuilder::{failover(bool), bad_proxy_ttl(Duration), timeout(Duration), user_agent(String), negotiate(Negotiate), settings(ConnectorSettings), proxy_tls(Arc<rustls::ClientConfig>) /*tls*/, non_defaults(), build()}
 ProxyConnector::connect(&self, route: &Route, host: &str, port: u16) -> Result<Connection, Error>
 ProxyConnector::connect_url(&self, resolver: &Resolver, url: &str) -> Result<Connection, Error>
-ProxyConnector::{with_timeout(Duration), non_defaults()}
+ProxyConnector::{with_timeout(Duration), with_failover(bool, Duration), non_defaults()}
 enum Connection { Tcp(TcpStream), Tls(Box<StreamOwned<..>>) /*tls*/ }   // Read + Write; socket()
 ```
 
 `connect_url` takes the first route that works and reports each proxy that does not
-(`Resolver::report_failure`); a refused login stops the search. A plain `http:` origin is
+(`Resolver::report_failure`, and the connector's own memory: a clone of a connector shares it, a proxy
+that failed is tried last for `bad_proxy_ttl`, 300 s); with `failover(false)` only the first route is
+tried. A refused login stops the search. A plain `http:` origin is
 tunnelled too. With `tls`, an `https:` proxy is verified by the platform verifier unless
 `proxy_tls` gives a configuration.
+
+## Asynchronous connecting (`coqui_proxy::asynch`, feature `tokio`)
+
+```rust
+ProxyConnector::asynch(&self) -> asynch::ProxyConnector              // or asynch::ProxyConnector::from(connector)
+asynch::ProxyConnector::{connect(&Route, host, port), connect_url(&Resolver, url)}  // async fn -> Result<asynch::Connection, Error>
+asynch::ProxyConnector::{with_timeout(Duration), with_failover(bool, Duration), blocking() -> &ProxyConnector}
+asynch::lookup(&Resolver, url: &str) -> Result<Vec<Route>, Error>   // async; Resolver::lookup on spawn_blocking
+enum asynch::Connection { Tcp(tokio::net::TcpStream), Tls(Box<TlsStream<TcpStream>>) /*tls*/ }   // AsyncRead + AsyncWrite
+```
+
+The same settings, Negotiate policy, proxy TLS and failed-proxy memory as the blocking connector it
+is made from; Happy Eyeballs races addresses on tasks. It needs a Tokio runtime (multi-thread or
+current-thread) because the resolver is synchronous. `coqui_proxy::hyper::Connector::new(connector,
+resolver)` (feature `hyper`) is a `tower_service::Service<http::Uri>` answering `hyper::Tunnel`
+(hyper's `Read`/`Write`, `into_inner() -> asynch::Connection`); TLS to the origin is the caller's.
 
 The sans-I/O cores (`coqui_proxy::connect`): `core::{ConnectRequest, ConnectResponse, Progress<T>,
 ProxyLogin, Outcome, BodyFraming, decode_chunk_size}` and `socks::{Greeting, Method, PasswordLogin,
 Request, Version, Reply}`. Every `decode` takes the bytes read so far and returns
 `Progress::Incomplete(n)`, `Progress::Complete { value, consumed }` or an error; none panics on any
 input.
+
+## The in-process relay (`coqui_proxy::relay`, features `relay` and `relay-blocking`)
+
+Two relays with one security model, one `RelaySettings` and one behaviour: `relay::Relay` (feature `relay`) runs as
+tasks on a Tokio runtime over the asynchronous connector; `relay::blocking::Relay` (feature `relay-blocking`) runs on
+its own threads over the blocking connector and needs no Tokio (`cargo tree -e normal --no-default-features
+--features relay-blocking` lists none). The first half of this section is the asynchronous relay; the blocking one
+follows it.
+
+```rust
+Relay::builder(connector: asynch::ProxyConnector, resolver: Resolver) -> RelayBuilder
+RelayBuilder::{settings(RelaySettings), non_defaults() -> Vec<String>, build() -> Result<Relay, Error>, start() -> Result<RelayHandle, Error>}
+Relay::{start(self) -> Result<RelayHandle, Error>, start_on(self, &tokio::runtime::Handle) -> Result<RelayHandle, Error>, settings() -> &RelaySettings, not_applied() -> Vec<&'static str>}
+RelayBuilder::{start_on(&Handle), not_applied() -> Vec<&'static str>}
+RelayHandle::{address() -> SocketAddr, proxy_url() -> String, proxy() -> &Proxy, credentials() -> &Credentials, token_header() -> (&'static str, &str), shutdown(self) /* async */}
+relay::TOKEN_HEADER: &str   // "x-coqui-relay-token"
+```
+
+A loopback HTTP proxy that runs as tasks on the caller's Tokio runtime and sends every request
+through the connector (its routes, failover and `bad_proxy_ttl`, PAC, bypass rules, SOCKS and proxy
+login, `Direct`), for an HTTP client that cannot take a connector or retry a route. `start` does
+not wait and is not `async`, but needs a runtime (`Error::Io` otherwise, its message names `start_on`) and returns once the
+listener is bound. `start()` uses the runtime the calling thread is in; `start_on(&handle)` runs the relay on a runtime
+handle the caller names, from any thread (a client built on the main thread, a runtime owned elsewhere), and the runtime
+must outlive the relay's use. It stops, and ends every connection and tunnel it serves, when the
+`RelayHandle` is dropped or on `shutdown().await` (which returns when the listener is closed);
+keep the handle as long as the client.
+
+- `CONNECT host:port`: dialled through the connector (resolved as `https://host:port/`, `http:`
+  for port 80), `200`, spliced both ways. TLS to the destination is the client's.
+- Absolute-form `http://` request: dialled through the connector, forwarded in origin form with
+  `Host` set from the URL, without hop-by-hop headers (`Connection` and what it names,
+  `Keep-Alive`, `Proxy-*`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`), reply streamed back.
+  One destination connection per request; the client's connection to the relay is kept alive.
+  Upgrades other than `CONNECT` (WebSocket over plain `http:`) are not forwarded.
+- No route reaches the destination (including a refused proxy login): `502` with the error's text.
+  A malformed `CONNECT` target: `400`. Anything else, including an `https:` absolute form: `405`.
+- **Credential**: every request needs `Proxy-Authorization: Basic` with the relay's own
+  credential, user `coqui-relay` and a random 256-bit password from the operating system's
+  generator, compared in constant time; otherwise `407` with `Proxy-Authenticate`. `Debug` never
+  shows it; `proxy_url()` leaves it out; `proxy()` and `credentials()` carry it. It is never forwarded.
+  The same secret is also accepted as the value of the `x-coqui-relay-token` header (`token_header()`), for
+  a client that drops `Proxy-Authorization` when a redirect leads to another host (`reqwest` does, for
+  plain `http:` requests); the relay removes that header before forwarding.
+- **Loopback only**: `RelaySettings::address` must be a loopback address (`127.0.0.1` by default,
+  `::1` allowed); the credential is the only access control. `RelayBuilder::build` returns
+  `Error::Settings` for anything else, a zero count or time, or `max_head_bytes` under 8 KiB.
+
+`RelaySettings` (also at the crate root; `#[non_exhaustive]`, `Default`, `DEFAULT_*`, `non_defaults()`):
+`address` 127.0.0.1, `port` 0 (any free), `max_connections` 256 (more connections wait in the
+listener's backlog; the blocking relay answers `503` and closes them), `header_timeout` 30 s (a head sent slower is cut off), `idle_timeout` 300 s (no
+byte either way on the client's or the destination's connection closes it; a reply that begins
+later than this is cut), `max_head_bytes` 64 KiB (longer: `431`, minimum 8 KiB), `accept_retry`
+100 ms, `shutdown_wait` 5 s and `poll_interval` 10 ms (both blocking relay only, see below). Raising any of the
+first five, or `shutdown_wait`, is listed by `non_defaults()`. `not_applied()` on the async relay lists
+`shutdown_wait` and `poll_interval`; on the blocking one it is empty.
+
+### The blocking relay (`coqui_proxy::relay::blocking`, feature `relay-blocking`)
+
+```rust
+relay::blocking::Relay::builder(connector: ProxyConnector, resolver: Resolver) -> RelayBuilder
+RelayBuilder::{settings(RelaySettings), non_defaults() -> Vec<String>, not_applied() -> Vec<&'static str>, build() -> Result<Relay, Error>, start() -> Result<RelayHandle, Error>}
+Relay::{start(self) -> Result<RelayHandle, Error>, settings() -> &RelaySettings, not_applied()}
+RelayHandle::{address(), proxy_url(), proxy(), credentials(), token_header(), shutdown(self)}  // as the async handle; `shutdown` is a plain fn
+```
+
+Same requests, replies, `407`/`502`/`405`/`400`/`431` answers, credential and token header, and loopback rule as above
+(the code that checks the credential, strips hop-by-hop headers and sets `Host` is shared). Differences:
+
+- `std::net` listener on an accept thread; one thread per connection. A connection over `max_connections` is
+  answered `503` and closed at once.
+- Heads are read with `httparse`; a request whose body framing disagrees with itself (`Content-Length` with
+  `Transfer-Encoding`, two different lengths, a coding that does not end in `chunked`) is `400`. The destination is sent
+  `Connection: close`; a body is copied by length or by chunks, a reply with neither is copied to the end and the
+  client's connection is closed after it. `HEAD`, `204` and `304` replies have no body; interim `1xx` replies pass.
+- A `CONNECT` tunnel is spliced by two threads. When the destination connection is TLS (an `https:` proxy, feature
+  `tls`), one thread looks at both sides every `poll_interval` instead, because a TLS stream cannot be read and
+  written from two threads; `poll_interval` is the most latency that adds.
+- Dropping the handle (or `shutdown()`) closes the listener, shuts every connection's sockets and joins the threads, but
+  waits at most `shutdown_wait`; a thread still dialling a destination finishes on its own (`Duration::ZERO`: do not wait).
+- It never needs a runtime, and is `Send + Sync` (a `reqwest::Proxy::custom` closure may own it).
 
 ## Login (`coqui_proxy::auth`)
 
@@ -233,10 +336,14 @@ Every bound is a field with a `DEFAULT_*` constant; each type has `Default` and 
 | `::download_timeout`, `::max_redirects`, `::download_cache_ttl` | 10 s, 3, 300 s |
 | `::dns_timeout`, `::dns_cache_ttl`, `::dns_cache_capacity` | 2 s, 30 s, 256 |
 | `::wpad_probe_timeout`, `::browser_compatibility`, `::tls` | 3 s, false, system verifier |
-| `ConnectorSettings::timeout`, `::user_agent`, `::happy_eyeballs_delay` | 30 s, `coqui-proxy`, 250 ms |
+| `ConnectorSettings::timeout`, `::user_agent`, `::happy_eyeballs_delay`, `::failover`, `::bad_proxy_ttl` | 30 s, `coqui-proxy`, 250 ms, true, 300 s |
 | `::max_response_head_bytes`, `::max_response_headers`, `::max_response_body_bytes` | 64 KiB, 100, 64 KiB |
 | `Negotiate::max_legs`, `::max_token` | 5, 64 KiB |
 | `OriginAuth::max_body` | 1 MiB |
+| `RelaySettings::address`, `::port` | `127.0.0.1` (loopback only), 0 |
+| `::max_connections`, `::header_timeout`, `::idle_timeout` | 256, 30 s, 300 s |
+| `::max_head_bytes`, `::accept_retry` | 64 KiB (at least 8 KiB), 100 ms |
+| `::shutdown_wait`, `::poll_interval` | 5 s, 10 ms (blocking relay only; `poll_interval` must not be zero) |
 
 A whole PAC download may take three times `download_timeout`.
 
@@ -267,3 +374,6 @@ system readers `XDG_CONFIG_HOME` and `HOME` (KDE's `kioslaverc`). Helper program
 - The library prints nothing, exits never, and keeps no process-wide state.
 - `Resolver::lookup` blocks (DNS, downloads, helper programs); async callers use
   `spawn_blocking`.
+- A relay's `proxy_url()` carries no credential: a client must be given `credentials()` as proxy
+  login, or it gets `407` for everything. A relay serves only while its `RelayHandle` lives. `relay::Relay::start` outside a Tokio runtime is an error: use
+  `start_on` with a handle, or the blocking relay.

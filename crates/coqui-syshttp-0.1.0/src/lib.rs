@@ -11,10 +11,21 @@
 
 extern crate alloc;
 
+mod adapter;
 mod error;
+#[cfg(feature = "hyper")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hyper")))]
+pub mod hyper;
+#[cfg(feature = "reqwest")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
+pub mod reqwest;
+#[cfg(feature = "session")]
+#[cfg_attr(docsrs, doc(cfg(feature = "session")))]
+pub mod session;
 #[cfg(feature = "ureq")]
 pub mod ureq;
 
+pub use adapter::AdapterSettings;
 pub use coqui_proxy as proxy;
 #[cfg(feature = "pac")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pac")))]
@@ -41,3 +52,6 @@ pub use error::{Error, Reason};
 pub fn agent() -> Result<::ureq::Agent, Error> {
     ureq::AgentBuilder::new().build()
 }
+
+/// The version of this crate, `User-Agent` of the session layer included.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

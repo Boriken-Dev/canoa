@@ -7,11 +7,18 @@ use alloc::vec::Vec;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use std::sync::Mutex;
+use std::time::Instant;
+
 use crate::auth::Negotiate;
 use crate::error::{Error, Reason};
-use crate::proxy::Proxy;
+use crate::proxy::{Proxy, Route};
 use crate::settings::ConnectorSettings;
 
+#[cfg(feature = "tokio")]
+pub mod asynch;
 mod blocking;
 pub mod core;
 pub mod socks;
@@ -66,11 +73,12 @@ impl Write for Connection {
     }
 }
 
-/// Makes connections, through a proxy where a [`Route`](crate::Route) says so.
+/// Makes connections, through a proxy where a [`Route`] says so.
 #[derive(Debug, Clone)]
 pub struct ProxyConnector {
     settings: ConnectorSettings,
     negotiate: Option<Negotiate>,
+    failures: Arc<Mutex<BTreeMap<String, Instant>>>,
     #[cfg(feature = "tls")]
     proxy_tls: Option<alloc::sync::Arc<rustls::ClientConfig>>,
 }
@@ -99,6 +107,18 @@ impl ProxyConnectorBuilder {
     /// The `User-Agent` sent in a `CONNECT` (default `coqui-proxy`).
     pub fn user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.connector.settings.user_agent = user_agent.into();
+        self
+    }
+
+    /// Whether the next route of an answer is tried when one fails (default true).
+    pub fn failover(mut self, failover: bool) -> Self {
+        self.connector.settings.failover = failover;
+        self
+    }
+
+    /// How long a proxy that failed to connect is tried after the others (default 300 s).
+    pub fn bad_proxy_ttl(mut self, ttl: Duration) -> Self {
+        self.connector.settings.bad_proxy_ttl = ttl;
         self
     }
 
@@ -141,6 +161,7 @@ impl ProxyConnector {
             connector: Self {
                 settings: ConnectorSettings::default(),
                 negotiate: None,
+                failures: Arc::new(Mutex::new(BTreeMap::new())),
                 #[cfg(feature = "tls")]
                 proxy_tls: None,
             },
@@ -152,6 +173,9 @@ impl ProxyConnector {
     #[must_use]
     pub fn non_defaults(&self) -> Vec<String> {
         let mut loose = Vec::new();
+        if !self.settings.failover {
+            loose.push("failover(false): only the first route of an answer is tried".to_string());
+        }
         if self.negotiate.as_ref().is_some_and(Negotiate::plain_http) {
             loose.push(
                 "Negotiate::plain_http(true): a Negotiate or NTLM login may cross plain http"
@@ -161,11 +185,49 @@ impl ProxyConnector {
         loose
     }
 
+    /// The same connector with another failover choice and failed-proxy memory time. The memory of
+    /// failed proxies is shared with this connector.
+    #[must_use]
+    pub fn with_failover(&self, failover: bool, bad_proxy_ttl: Duration) -> Self {
+        let mut connector = self.clone();
+        connector.settings.failover = failover;
+        connector.settings.bad_proxy_ttl = bad_proxy_ttl;
+        connector
+    }
+
     /// The same connector with another time limit.
     pub fn with_timeout(&self, timeout: Duration) -> Self {
         let mut connector = self.clone();
         connector.settings.timeout = timeout;
         connector
+    }
+
+    /// The routes in the order to try them: those that failed within `bad_proxy_ttl` last, and
+    /// only the first when failover is off.
+    fn order(&self, mut routes: Vec<Route>) -> Vec<Route> {
+        let mut failures = self
+            .failures
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        failures.retain(|_, at| at.elapsed() < self.settings.bad_proxy_ttl);
+        if !failures.is_empty() {
+            routes.sort_by_key(|route| match route {
+                Route::Proxy(proxy) => failures.contains_key(&proxy.authority()),
+                Route::Direct => false,
+            });
+        }
+        if !self.settings.failover {
+            routes.truncate(1);
+        }
+        routes
+    }
+
+    /// Remembers that connecting through `proxy` failed.
+    fn note_failure(&self, proxy: &Proxy) {
+        self.failures
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(proxy.authority(), Instant::now());
     }
 
     #[cfg(feature = "tls")]

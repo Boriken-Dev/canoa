@@ -126,13 +126,14 @@ impl ProxyConnector {
     pub fn connect_url(&self, resolver: &Resolver, url: &str) -> Result<Connection, Error> {
         let (host, port) = super::split_url(url)?;
         let mut last = None;
-        for route in resolver.lookup(url)? {
+        for route in self.order(resolver.lookup(url)?) {
             match self.connect(&route, &host, port) {
                 Ok(connection) => return Ok(connection),
                 Err(error @ (Error::Login(_) | Error::Refused(_))) => return Err(error),
                 Err(error) => {
                     tracing::debug!(%error, "a route failed");
                     if let Route::Proxy(proxy) = &route {
+                        self.note_failure(proxy);
                         resolver.report_failure(proxy);
                     }
                     last = Some(error);
@@ -212,7 +213,7 @@ impl ProxyConnector {
 }
 
 /// The addresses with the families alternating, the first family first (RFC 8305).
-fn interleaved(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
+pub(super) fn interleaved(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
     let Some(first) = addresses.first().map(SocketAddr::is_ipv6) else {
         return addresses;
     };

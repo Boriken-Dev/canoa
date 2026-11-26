@@ -37,6 +37,10 @@ cargo add --git https://github.com/Boriken-Dev/coqui-proxy coqui-proxy
 | `tls` | `rustls` (ring), `rustls-platform-verifier`: `https:` proxies and PAC locations | off |
 | `negotiate` | Unix: `libgssapi`: Negotiate and NTLM login (Windows needs no crate) | off |
 | `libproxy` | `libloading`: `system::LibProxySource` (Unix) | off |
+| `tokio` | `tokio`, `tokio-rustls`: `asynch::ProxyConnector`, `asynch::lookup` | off |
+| `hyper` | `tokio`, `hyper`, `hyper-util`, `tower-service`: `hyper::Connector`, a `tower` service for hyper's client | off |
+| `relay` | `hyper` with its server and client, `http-body-util`, `bytes`, `getrandom`, `subtle`: `relay::Relay`, a loopback proxy started in-process on a Tokio runtime | off |
+| `relay-blocking` | `httparse`, `getrandom`, `subtle`: `relay::blocking::Relay`, the same relay on its own threads, with no Tokio | off |
 
 ## Quick start
 
@@ -64,6 +68,33 @@ use coqui_proxy::{ProxyConnector, Resolver};
 let resolver = Resolver::system();
 let stream = ProxyConnector::default().connect_url(&resolver, "https://example.com/")?;
 # let _ = stream;
+# Ok::<(), coqui_proxy::Error>(())
+```
+
+A client that cannot take a connector (`reqwest`) is given the relay: a loopback proxy started
+inside the process, protected by a random credential, that sends each request through the same
+connector, so failover, PAC, bypass rules and proxy login apply:
+
+```rust,ignore
+use coqui_proxy::{ProxyConnector, Resolver, relay::Relay};
+
+# async fn run() -> Result<(), coqui_proxy::Error> {
+let relay = Relay::builder(ProxyConnector::default().asynch(), Resolver::system()).start()?;
+// Hand `relay.proxy_url()` and `relay.credentials()` to the client; keep `relay` alive with it.
+# let _ = relay;
+# Ok(())
+# }
+```
+
+`start()` uses the Tokio runtime the caller is in; `start_on(&handle)` takes a runtime handle, for a client built
+outside it. A program with no Tokio uses `relay::blocking::Relay` (feature `relay-blocking`), which runs on its own
+threads over the blocking connector and stops, joining them, when its handle is dropped:
+
+```rust,ignore
+use coqui_proxy::{ProxyConnector, Resolver, relay::blocking::Relay};
+
+let relay = Relay::builder(ProxyConnector::default(), Resolver::system()).start()?;
+# let _ = relay;
 # Ok::<(), coqui_proxy::Error>(())
 ```
 
@@ -107,6 +138,9 @@ assert_eq!(resolver.lookup("https://a.corp.example/")?, [Route::Direct]);
 | `source` | `ProxySource`, `ChainSource`, `lookup`: anything that answers for a URL |
 | `system` | `SystemSettings`, `SystemSource`, `WinHttpSource`, `CfNetworkSource`, `LibProxySource` |
 | `pac` | `PacScript`, `PacSource`, `FindProxy`, `discover`, `builtin_names` (feature `pac`) |
+| `asynch` | the connector on Tokio: `ProxyConnector`, `Connection`, `lookup` (feature `tokio`) |
+| `hyper` | `Connector`, a `tower` service that returns a tunnel (feature `hyper`) |
+| `relay` | `Relay`, `RelayBuilder`, `RelayHandle`: a loopback proxy started in-process, for clients that cannot take a connector (feature `relay`); `relay::blocking` is the same without Tokio (feature `relay-blocking`) |
 | `connect` | the sans-I/O cores: `core::{ConnectRequest, ConnectResponse, ProxyLogin}`, `socks::{Greeting, Request, Reply}` |
 | `auth` | `Negotiate`, `OriginAuth`, `OriginLogin`, `negotiate_available` |
 

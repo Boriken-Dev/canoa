@@ -1,4 +1,4 @@
-# coqui-syshttp/. at 8c23a6af97be812dcee8a953a629c4d80eea0a2e, with what it inherits written out.
+# coqui-syshttp/. at 8622bc90110d43742dea63f2c8f603e1e5014f98, with what it inherits written out.
 [package]
 name = "coqui-syshttp"
 version = "0.1.0"
@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Boriken-Dev/coqui-syshttp"
 keywords = ["proxy", "pac", "tls", "client-certificate", "system"]
 categories = ["network-programming", "web-programming::http-client"]
-exclude = [".*", "*.local.*", "/tools/"]
+exclude = [".*", "*.local.*", "/tools/", "/packaging/"]
 [package.metadata]
 [package.metadata.docs]
 [package.metadata.docs.rs]
@@ -23,14 +23,25 @@ negotiate = ["coqui-proxy/negotiate"]
 tls = ["dep:coqui-sslcontext", "coqui-sslcontext/system", "coqui-proxy/tls"]
 pkcs11 = ["tls", "coqui-sslcontext/pkcs11"]
 ureq = ["tls", "dep:ureq", "dep:rustls"]
+hyper = ["tls", "coqui-proxy/hyper", "dep:hyper", "dep:hyper-util", "dep:tokio", "dep:tokio-rustls", "dep:tower-service"]
+reqwest = ["tls", "coqui-proxy/relay", "dep:reqwest", "dep:rustls", "dep:tracing", "dep:tokio"]
+reqwest-blocking = ["reqwest", "reqwest/blocking", "coqui-proxy/relay-blocking"]
+session = ["ureq", "dep:url", "dep:regex", "dep:flate2", "dep:percent-encoding", "dep:encoding_rs"]
+json = ["session", "dep:serde", "dep:serde_json"]
+session-reqwest = ["session", "reqwest", "reqwest/cookies"]
 [dependencies]
 thiserror = "2"
 [dependencies.coqui-proxy]
 git = "https://github.com/Boriken-Dev/coqui-proxy"
-rev = "ff844043be1f895022aef5ac24e97512cf723346"
+rev = "e66b9ce26b9f0d2dc18f2262ec015742b2fe4829"
 [dependencies.coqui-sslcontext]
 git = "https://github.com/Boriken-Dev/coqui-sslcontext"
 rev = "955cd9a455a288a523418daad7e846008c2bf291"
+optional = true
+[dependencies.tracing]
+version = "0.1"
+default-features = false
+features = ["std"]
 optional = true
 [dependencies.ureq]
 version = "3.5"
@@ -41,8 +52,62 @@ version = "0.23.46"
 default-features = false
 features = ["ring", "std", "tls12"]
 optional = true
+[dependencies.hyper]
+version = "1"
+default-features = false
+optional = true
+[dependencies.hyper-util]
+version = "0.1"
+default-features = false
+features = ["client-legacy", "http1", "http2", "tokio"]
+optional = true
+[dependencies.tokio]
+version = "1"
+default-features = false
+features = ["rt"]
+optional = true
+[dependencies.tokio-rustls]
+version = "0.26"
+default-features = false
+features = ["ring", "tls12"]
+optional = true
+[dependencies.tower-service]
+version = "0.3"
+optional = true
+[dependencies.reqwest]
+version = "0.13"
+default-features = false
+features = ["rustls-no-provider", "http2", "socks"]
+optional = true
+[dependencies.url]
+version = "2"
+optional = true
+[dependencies.regex]
+version = "1"
+optional = true
+[dependencies.flate2]
+version = "1"
+optional = true
+[dependencies.percent-encoding]
+version = "2"
+optional = true
+[dependencies.encoding_rs]
+version = "0.8"
+optional = true
+[dependencies.serde]
+version = "1"
+optional = true
+[dependencies.serde_json]
+version = "1"
+optional = true
 [dev-dependencies]
 rcgen = "0.14"
 tempfile = "3"
 http = "1"
 base64 = "0.22"
+http-body-util = "0.1"
+bytes = "1"
+proptest = "1"
+[dev-dependencies.tokio]
+version = "1"
+features = ["rt-multi-thread", "macros", "net", "io-util", "time"]

@@ -1,4 +1,4 @@
-# coqui-proxy/. at ff844043be1f895022aef5ac24e97512cf723346, with what it inherits written out.
+# coqui-proxy/. at e66b9ce26b9f0d2dc18f2262ec015742b2fe4829, with what it inherits written out.
 [package]
 name = "coqui-proxy"
 version = "0.0.0-alpha.0"
@@ -21,6 +21,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 pac = ["dep:boa_engine", "dep:boa_gc", "dep:gethostname"]
 tls = ["dep:rustls", "dep:rustls-platform-verifier"]
+tokio = ["dep:tokio", "dep:tokio-rustls"]
+hyper = ["tokio", "dep:hyper", "dep:hyper-util", "dep:tower-service"]
+relay = ["hyper", "tokio/sync", "hyper/server", "hyper/client", "hyper/http1", "dep:http-body-util", "dep:bytes", "dep:getrandom", "dep:subtle"]
+relay-blocking = ["dep:httparse", "dep:getrandom", "dep:subtle"]
 negotiate = ["dep:libgssapi"]
 libproxy = ["dep:libloading"]
 [dependencies]
@@ -53,6 +57,44 @@ optional = true
 [dependencies.rustls-platform-verifier]
 version = "0.7"
 optional = true
+[dependencies.tokio]
+version = "1"
+default-features = false
+features = ["net", "io-util", "time", "rt"]
+optional = true
+[dependencies.tokio-rustls]
+version = "0.26"
+default-features = false
+features = ["ring", "tls12"]
+optional = true
+[dependencies.hyper]
+version = "1"
+default-features = false
+optional = true
+[dependencies.hyper-util]
+version = "0.1"
+default-features = false
+features = ["tokio", "client-legacy"]
+optional = true
+[dependencies.tower-service]
+version = "0.3"
+optional = true
+[dependencies.http-body-util]
+version = "0.1"
+optional = true
+[dependencies.bytes]
+version = "1"
+optional = true
+[dependencies.getrandom]
+version = "0.3"
+optional = true
+[dependencies.subtle]
+version = "2"
+default-features = false
+optional = true
+[dependencies.httparse]
+version = "1"
+optional = true
 [target]
 [target."cfg(windows)"]
 [target."cfg(windows)".dependencies]
@@ -71,3 +113,7 @@ optional = true
 rcgen = "0.14"
 tempfile = "3"
 proptest = "1"
+tower-service = "0.3"
+[dev-dependencies.tokio]
+version = "1"
+features = ["rt-multi-thread", "macros", "net", "io-util", "time"]

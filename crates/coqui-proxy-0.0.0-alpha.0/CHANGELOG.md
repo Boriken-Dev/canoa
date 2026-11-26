@@ -22,5 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `Resolver::scheme_proxies`, `BypassRules` union, rotation and probing of answers.
 - PAC: custom builtins, files in UTF-8 or Latin-1, downloads, WPAD discovery, browser
   compatibility, reload of stale scripts.
+- `asynch` (feature `tokio`): the connector on Tokio over the same sans-I/O cores, Happy Eyeballs
+  (`ConnectorSettings::happy_eyeballs_delay`), `asynch::lookup`; `hyper::Connector` (feature
+  `hyper`), a `tower` service for hyper's client. `ConnectorSettings::{failover, bad_proxy_ttl}`
+  and `ProxyConnectorBuilder::{failover, bad_proxy_ttl}`: a connector remembers its own failed
+  proxies and can try only the first route.
 - Settings types for every bound (`ResolverSettings`, `ReaderSettings`, `PacSettings`,
   `ConnectorSettings`) and `non_defaults()` on resolvers and connectors.
+- `relay` (feature `relay`): `Relay`, `RelayBuilder`, `RelayHandle`, `RelaySettings`: a loopback HTTP proxy
+  started inside the process that sends `CONNECT` and absolute-form `http:` requests through the
+  connector, with a random per-relay `Proxy-Authorization: Basic` credential, for clients that cannot take
+  a connector (`reqwest`) but should still get failover, PAC, bypass rules and proxy login. The credential is
+  also accepted in the `x-coqui-relay-token` header, which a client keeps across a redirect to another host.
+- `relay::Relay::start_on` and `RelayBuilder::start_on`: start the relay on a Tokio runtime handle the caller names,
+  from any thread; `start()` outside a runtime now says to call it.
+- `relay::blocking` (feature `relay-blocking`, no Tokio): `Relay`, `RelayBuilder`, `RelayHandle`: the relay on `std::net`
+  with an accept thread and a thread for each connection, over the blocking connector, with the async relay's security
+  model and settings. A connection over `max_connections` is answered `503`; dropping the handle closes the listener,
+  ends the connections and joins the threads.
+- `RelaySettings::{shutdown_wait, poll_interval}` (blocking relay only) and `not_applied()` on both relays, which lists
+  the settings that mean nothing to that relay.
