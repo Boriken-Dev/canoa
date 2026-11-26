@@ -31,7 +31,7 @@ No `unsafe` code (`#![forbid(unsafe_code)]`).
 
 ## `canoa::brand`
 
-The names of the environment variables the host reads, with the build's prefix: `ENV_PREFIX` (`CANOA` unless the build set `BRAND_ENV_PREFIX`, upper-case letters and digits) and the constants `CONFIG`, `INSTALLED_DIR`, `LOG`, `HOST_LOG`, `CREDENTIAL_STORE`, `DELEGATE_URL` and `DELEGATE_TOKEN`, each `<ENV_PREFIX>_<NAME>`. A program that starts another passes these names, never literals.
+The names a build carries, from the brand file `BRAND_FILE` names when the crate is built (the copy of `app/brand.json` in `brand/` without one; `tests/brand_names.rs` and `app/tool/test_brand.py` hold its rules): `NAME`, `SHORT_NAME`, `EXECUTABLE`, `ID`, `PROGRAM` (the command line's name), `CONFIG_FILE`, `FOLDER` (the one folder under each operating system's configuration, system and data roots), `HOME_DIR` (the home under the person's own folder, dot first), `USER_CONFIG` (`FOLDER/CONFIG_FILE`), `JSON` (the brand file) and `ICON_SVG`. The names of the environment variables the host reads, with the build's prefix: `ENV_PREFIX` (`CANOA` unless the brand file says another, upper-case letters and digits) and the constants `CONFIG`, `INSTALLED_DIR`, `LOG`, `HOST_LOG`, `CREDENTIAL_STORE`, `DELEGATE_URL` and `DELEGATE_TOKEN`, each `<ENV_PREFIX>_<NAME>`. A program that starts another passes these names, never literals.
 
 ## `canoa::vendor` (feature `vendor`)
 

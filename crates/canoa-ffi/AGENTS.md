@@ -47,7 +47,7 @@ int32_t  canoa_ffi_child_main(void);
 
 | Key | Value | Default |
 | --- | --- | --- |
-| `args` | the command line without the program's name, as `canoa` takes it (see `crates/canoa-host/AGENTS.md`) | required |
+| `args` | the command line without the program's name, as the command line takes it (the brand's `program`, `canoa` by default) (see `crates/canoa-host/AGENTS.md`) | required |
 | `home` | the directory of the identity, trust store and lock | this user's home |
 | `holder` | what `serve` calls itself to another host that finds its home held | `an application` |
 | `program` | what runs the host's own `provider`, `tool`, `launch`, `mcp-bridge` and `hook-forward` | this application, with `--canoa-child` first |

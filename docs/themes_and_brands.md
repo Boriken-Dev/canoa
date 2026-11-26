@@ -61,10 +61,14 @@ of the base's symbols (`"like"`): the base symbols are `conversations`, `hosts`,
 | `executable` | the desktop program's name (`CanoaUI`), and the bundle's on macOS is `name` |
 | `id` | the reverse-DNS identifier; its last label is dropped to make the organisation `flutter create` is given |
 | `env_prefix` | the prefix of the environment variables the app and the host read: `CONFIG` is `<PREFIX>_CONFIG` |
+| `program` | the command line's name, lower-case letters, digits and hyphens (the lower-cased `name` when absent); the units and accounts derived from it on Linux |
+| `config_file` | the configuration file's name in every layer (`<program>.cfg` when absent) |
+| `folder` | the one folder under each operating system's configuration, system and data roots: `%APPDATA%`, `$XDG_CONFIG_HOME`, `%PROGRAMDATA%`, `/etc`, `%LOCALAPPDATA%`, `~/.local/share` (`name` when absent) |
+| `home_dir` | the home under the person's own folder, and the per-project folder beside a workspace, dot included (`.<program>` when absent) |
 | `icon` | an SVG with the paths `tools/canoa_mark.py` and the app's painter draw, relative to the brand file |
 | `accent`, `accent_on_dark` | the colour the build's icons are drawn in, and the one on the web app's dark background (the accent when absent) |
 
-The build gives the app these as `--dart-define`s, the host's build the prefix as `BRAND_ENV_PREFIX`, the runner its names
+The build gives the app these as `--dart-define`s, the host's build the file as `BRAND_FILE`, the runner its names
 (`name_runner.sh`) and the Windows program its icon (`canoa_mark.py --brand FILE --out DIR` renders the set; it needs Pillow). The
 tray icon is drawn at run time from the same mark in the accent of the look in force: an `.ico` of several sizes on Windows, a PNG
 elsewhere. `--portable` and the Office add-in's identifiers still name Canoa.
