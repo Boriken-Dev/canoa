@@ -329,6 +329,11 @@
                       "type": "string"
                     },
                     "description": "The actions [`ModelStore::act`] is asked for, in order; the next is asked only when the one before is done."
+                  },
+                  "removes": {
+                    "type": "boolean",
+                    "description": "Whether it takes the model away: the application offers it as Remove, beside an installed model, and never as `+`.",
+                    "default": false
                   }
                 },
                 "additionalProperties": false,
@@ -512,7 +517,189 @@
                   "sha256"
                 ]
               },
-              "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`].",
+              "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`]. A model whose program fetches and keeps its own files has none, and the host shows it as not verified.",
+              "default": []
+            },
+            "variants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "The name the other methods take for this build."
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "What tells it from the model's other builds, in a few words."
+                  },
+                  "summary": {
+                    "type": "string",
+                    "description": "Where it stands and what it is, in a line."
+                  },
+                  "installed": {
+                    "type": "boolean",
+                    "description": "Whether it is on this computer.",
+                    "default": false
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Its state in a word, when it has one worth a badge."
+                  },
+                  "facts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "description": "What it is."
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "What it holds."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "label",
+                        "value"
+                      ]
+                    },
+                    "description": "What its part of the page states.",
+                    "default": []
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "description": "The title of the confirmation."
+                        },
+                        "confirm": {
+                          "type": "string",
+                          "description": "What it takes, in the words the confirmation shows."
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "What the confirming button says."
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "The actions [`ModelStore::act`] is asked for, in order; the next is asked only when the one before is done."
+                        },
+                        "removes": {
+                          "type": "boolean",
+                          "description": "Whether it takes the model away: the application offers it as Remove, beside an installed model, and never as `+`.",
+                          "default": false
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "title",
+                        "confirm",
+                        "label",
+                        "steps"
+                      ]
+                    },
+                    "description": "What it can do; the removal, when it has one, is marked [`RowAction::removes`].",
+                    "default": []
+                  },
+                  "sections": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "description": "Its heading."
+                        },
+                        "facts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string",
+                                "description": "What it is."
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "What it holds."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "label",
+                              "value"
+                            ]
+                          },
+                          "description": "What it states, one label and value each.",
+                          "default": []
+                        },
+                        "paragraphs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "What it says, a paragraph each.",
+                          "default": []
+                        },
+                        "settings": {
+                          "type": "boolean",
+                          "description": "Whether the form of [`ModelSettings`] is drawn in it, after the paragraphs.",
+                          "default": false
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "title"
+                      ]
+                    },
+                    "description": "What its part of the page shows, in order; the form of the model's settings is drawn here for this build, which keeps them under its own `id`.",
+                    "default": []
+                  },
+                  "speech": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "description": "What the page says of using the model for speech, a paragraph."
+                      },
+                      "caution": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "What the page warns of now (the model is not ready), when it does."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "text"
+                    ],
+                    "description": "Present when this build may be used as the person's speech-to-text, under its own `id`."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label",
+                  "summary"
+                ]
+              },
+              "description": "The builds of the model, when it has several; `actions` then act on the model as a whole and the program picks the build.",
               "default": []
             }
           },
@@ -620,6 +807,11 @@
                 "type": "string"
               },
               "description": "The actions [`ModelStore::act`] is asked for, in order; the next is asked only when the one before is done."
+            },
+            "removes": {
+              "type": "boolean",
+              "description": "Whether it takes the model away: the application offers it as Remove, beside an installed model, and never as `+`.",
+              "default": false
             }
           },
           "additionalProperties": false,
@@ -803,7 +995,189 @@
             "sha256"
           ]
         },
-        "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`].",
+        "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`]. A model whose program fetches and keeps its own files has none, and the host shows it as not verified.",
+        "default": []
+      },
+      "variants": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The name the other methods take for this build."
+            },
+            "label": {
+              "type": "string",
+              "description": "What tells it from the model's other builds, in a few words."
+            },
+            "summary": {
+              "type": "string",
+              "description": "Where it stands and what it is, in a line."
+            },
+            "installed": {
+              "type": "boolean",
+              "description": "Whether it is on this computer.",
+              "default": false
+            },
+            "state": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Its state in a word, when it has one worth a badge."
+            },
+            "facts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "description": "What it is."
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "What it holds."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "label",
+                  "value"
+                ]
+              },
+              "description": "What its part of the page states.",
+              "default": []
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "The title of the confirmation."
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "What it takes, in the words the confirmation shows."
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "What the confirming button says."
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The actions [`ModelStore::act`] is asked for, in order; the next is asked only when the one before is done."
+                  },
+                  "removes": {
+                    "type": "boolean",
+                    "description": "Whether it takes the model away: the application offers it as Remove, beside an installed model, and never as `+`.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "title",
+                  "confirm",
+                  "label",
+                  "steps"
+                ]
+              },
+              "description": "What it can do; the removal, when it has one, is marked [`RowAction::removes`].",
+              "default": []
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "Its heading."
+                  },
+                  "facts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "description": "What it is."
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "What it holds."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "label",
+                        "value"
+                      ]
+                    },
+                    "description": "What it states, one label and value each.",
+                    "default": []
+                  },
+                  "paragraphs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "What it says, a paragraph each.",
+                    "default": []
+                  },
+                  "settings": {
+                    "type": "boolean",
+                    "description": "Whether the form of [`ModelSettings`] is drawn in it, after the paragraphs.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "title"
+                ]
+              },
+              "description": "What its part of the page shows, in order; the form of the model's settings is drawn here for this build, which keeps them under its own `id`.",
+              "default": []
+            },
+            "speech": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "What the page says of using the model for speech, a paragraph."
+                },
+                "caution": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "What the page warns of now (the model is not ready), when it does."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "text"
+              ],
+              "description": "Present when this build may be used as the person's speech-to-text, under its own `id`."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label",
+            "summary"
+          ]
+        },
+        "description": "The builds of the model, when it has several; `actions` then act on the model as a whole and the program picks the build.",
         "default": []
       }
     },
@@ -835,6 +1209,11 @@
           "type": "string"
         },
         "description": "The actions [`ModelStore::act`] is asked for, in order; the next is asked only when the one before is done."
+      },
+      "removes": {
+        "type": "boolean",
+        "description": "Whether it takes the model away: the application offers it as Remove, beside an installed model, and never as `+`.",
+        "default": false
       }
     },
     "additionalProperties": false,

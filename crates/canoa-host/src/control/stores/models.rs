@@ -295,7 +295,7 @@ impl Stores {
     /// `store/models` `{"type"}` -> `{"type", "provider", "title", "catalog", "publisher", "missing", "unavailable"?,
     /// "settings"?: {"help"?, "schema", "form"?}, "speech": bool, "sources": [{"label", "provider", "origin", "enabled", "trust",
     /// "pin", "fetched"?, "from"?, "stale"?, "items"?, "problem"?}], "models": [row, ...]}`, each row as `canoa::store::models::ModelRow`
-    /// with `"values"`, what canoa.cfg keeps for it, and for a row a catalog listed `"catalog"` (`label`, `provider`, `origin`,
+    /// with `"values"`, what canoa.cfg keeps for it (and each of its `"variants"` with its own), and for a row a catalog listed `"catalog"` (`label`, `provider`, `origin`,
     /// `trust`, `pin`, `revision`, `fetched`, `from`, `stale`) and `"verified"` (the algorithm its files' digests are made with, as
     /// `"SHA-256"` or `"MD5"`, several joined by `, `; null when a file has none). Runs the type's program as this user, and nothing else.
     pub(crate) fn models_read(&self, params: &Value, files: &Files) -> Result<Value, Failed> {
@@ -322,6 +322,17 @@ impl Stores {
                 .and_then(|kept| kept.get(&row.id))
                 .cloned()
                 .unwrap_or_else(|| json!({}));
+            // A build of a model keeps its settings under its own id.
+            if let Some(variants) = shown.get_mut("variants").and_then(Value::as_array_mut) {
+                for variant in variants {
+                    variant["values"] = variant
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .and_then(|id| kept.as_ref().and_then(|kept| kept.get(id)))
+                        .cloned()
+                        .unwrap_or_else(|| json!({}));
+                }
+            }
             rows.push(shown);
         }
         let settings = match &held.info.settings {

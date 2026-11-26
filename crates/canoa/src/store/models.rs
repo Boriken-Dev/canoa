@@ -223,6 +223,40 @@ pub struct RowAction {
     pub label: String,
     /// The actions [`ModelStore::act`] is asked for, in order; the next is asked only when the one before is done.
     pub steps: Vec<String>,
+    /// Whether it takes the model away: the application offers it as Remove, beside an installed model, and never as `+`.
+    #[map(default)]
+    pub removes: bool,
+}
+
+/// One build of a model that runs on other hardware or in another form (a CPU, a GPU or an NPU build of the same model), listed
+/// inside the row of the model. It has its own name for the other methods, its own state and its own actions.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct ModelVariant {
+    /// The name the other methods take for this build.
+    pub id: String,
+    /// What tells it from the model's other builds, in a few words.
+    pub label: String,
+    /// Where it stands and what it is, in a line.
+    pub summary: String,
+    /// Whether it is on this computer.
+    #[map(default)]
+    pub installed: bool,
+    /// Its state in a word, when it has one worth a badge.
+    pub state: Option<String>,
+    /// What its part of the page states.
+    #[map(default)]
+    pub facts: Vec<Fact>,
+    /// What it can do; the removal, when it has one, is marked [`RowAction::removes`].
+    #[map(default)]
+    pub actions: Vec<RowAction>,
+    /// What its part of the page shows, in order; the form of the model's settings is drawn here for this build, which keeps them
+    /// under its own `id`.
+    #[map(default)]
+    pub sections: Vec<Section>,
+    /// Present when this build may be used as the person's speech-to-text, under its own `id`.
+    pub speech: Option<SpeechUse>,
 }
 
 /// How a row may be used as the person's speech-to-text.
@@ -270,8 +304,12 @@ pub struct ModelRow {
     #[map(default)]
     pub engines: Vec<RowEngine>,
     /// The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`].
+    /// A model whose program fetches and keeps its own files has none, and the host shows it as not verified.
     #[map(default)]
     pub files: Vec<ModelFile>,
+    /// The builds of the model, when it has several; `actions` then act on the model as a whole and the program picks the build.
+    #[map(default)]
+    pub variants: Vec<ModelVariant>,
 }
 
 /// One way a row can be run, which the tile shows as a pill.
@@ -801,6 +839,36 @@ impl RowAction {
             confirm: confirm.into(),
             label: label.into(),
             steps: steps.into_iter().map(Into::into).collect(),
+            removes: false,
+        }
+    }
+
+    /// This action marked as the one that takes the model away.
+    #[must_use]
+    pub const fn removing(mut self) -> Self {
+        self.removes = true;
+        self
+    }
+}
+
+impl ModelVariant {
+    /// A build named `id`, told from the others by `label`, standing as `summary` says, with nothing else.
+    #[must_use]
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        summary: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            summary: summary.into(),
+            installed: false,
+            state: None,
+            facts: Vec::new(),
+            actions: Vec::new(),
+            sections: Vec::new(),
+            speech: None,
         }
     }
 }
@@ -833,6 +901,7 @@ impl ModelRow {
             speech: None,
             engines: Vec::new(),
             files: Vec::new(),
+            variants: Vec::new(),
         }
     }
 }
