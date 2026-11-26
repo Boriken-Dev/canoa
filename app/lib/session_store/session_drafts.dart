@@ -47,6 +47,7 @@ extension SessionDrafts on SessionStore {
       accountUsage[account] = report;
     }
     _watchExhaustion(session);
+    _watchRefusals(session);
     _notify();
   }
 

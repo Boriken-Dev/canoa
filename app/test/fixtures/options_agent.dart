@@ -21,6 +21,9 @@ final class OptionsAgent {
   /// Why starting it fails, when it should.
   String? failStart;
 
+  /// What it says, as a turn it refuses, in place of an answer: it ends the turn `refusal` with `_meta`, as a limit of the host does.
+  String? refusal;
+
   /// While set and not completed, a new session is not opened: a slow start.
   Completer<void>? holdSessionNew;
 
@@ -275,6 +278,11 @@ final class OptionsAgent {
             }
           case 'session/prompt':
             void end() {
+              if (refusal case final said?) {
+                update(session, {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': said}});
+                reply(id, {'stopReason': 'refusal'});
+                return;
+              }
               update(session, {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'Done.'}});
               reply(id, {'stopReason': 'end_turn'});
             }

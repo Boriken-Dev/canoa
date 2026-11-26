@@ -93,9 +93,34 @@ final class LimitRow {
 /// What the app asks the host with: `limits/state` and `limits/allow`.
 typedef LimitsCall = Future<Object?> Function(String method, Map<String, Object?> params);
 
+/// What a conversation asks of the host's limits when a turn is refused: what each says now, and one turn let through.
+abstract interface class LimitsLink {
+  /// `limits/state`: every limit as the host reads it now.
+  Future<List<LimitRow>> state();
+
+  /// `limits/allow`: lets one turn through the stop of [name], [session]'s next or any. Null when the host took it, else its words.
+  Future<String?> allow(String name, {String? session});
+}
+
+/// The limits link of whichever host holds the grant now: none reads no limit and lets nothing through.
+final class LimitsOf implements LimitsLink {
+  LimitsOf(this._held);
+
+  final LimitsLink? Function() _held;
+
+  @override
+  Future<List<LimitRow>> state() async => await _held()?.state() ?? const [];
+
+  @override
+  Future<String?> allow(String name, {String? session}) async {
+    final held = _held();
+    return held == null ? 'This key may not change the limits.' : held.allow(name, session: session);
+  }
+}
+
 /// The limits of the host: what each says now (`limits/state`) and the entries of `[host.usage.limits]` the person's own file holds,
 /// which are added, changed and removed through the host's configuration store as `config/advanced_set` does for any table.
-class LimitsController extends ChangeNotifier {
+class LimitsController extends ChangeNotifier implements LimitsLink {
   LimitsController(this._call, this._config);
 
   final LimitsCall _call;
@@ -146,9 +171,7 @@ class LimitsController extends ChangeNotifier {
     _loading = true;
     notifyListeners();
     try {
-      final answer = await _call('limits/state', const {});
-      final raw = answer is Map ? answer['limits'] : null;
-      _rows = [if (raw is List) for (final each in raw) if (each is Map) LimitRow.fromJson(each.cast<Object?, Object?>())];
+      _rows = await state();
       _problem = null;
       await _config.load();
     } on ControlFailed catch (error) {
@@ -175,7 +198,15 @@ class LimitsController extends ChangeNotifier {
     return refused;
   }
 
+  @override
+  Future<List<LimitRow>> state() async {
+    final answer = await _call('limits/state', const {});
+    final raw = answer is Map ? answer['limits'] : null;
+    return [if (raw is List) for (final each in raw) if (each is Map) LimitRow.fromJson(each.cast<Object?, Object?>())];
+  }
+
   /// Lets one turn through the stop of the limit [name], for [session] or any. Null when the host took it, else its words.
+  @override
   Future<String?> allow(String name, {String? session}) async {
     try {
       await _call('limits/allow', {'name': name, 'session': ?session});

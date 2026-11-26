@@ -8,7 +8,10 @@ import 'acp/local_agent.dart' show readLocalFile;
 import 'chat/timing_log.dart';
 import 'config/canoa_config.dart' show Preset;
 import 'acp/secret_wire.dart' show SecretIdentity;
+import 'package:coqui_acp/coqui_acp.dart' show AcpFailed;
 import 'package:coqui_acp/secret.dart';
+import 'usage/limit_rules.dart' show LimitsLink;
+import 'usage/limits_group.dart' show LimitStop;
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as model;
 import 'package:coqui_acp_chat/coqui_acp_chat.dart'
     show
@@ -83,6 +86,7 @@ part 'session_store/session_switching.dart';
 part 'session_store/session_sending.dart';
 part 'session_store/session_history.dart';
 part 'session_store/session_a2ui.dart';
+part 'session_store/session_limits.dart';
 
 /// Shared UI state for desktop, PWA and packaged Chromium extension: Canoa's conversations, each a `coqui_acp_chat` conversation
 /// with what is Canoa's own beside it. Transport, verified peers and persistence are intentionally outside it.
@@ -551,6 +555,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// The title a draft has until its first message names it.
   static const draftTitle = 'New session';
 
+
+  /// The host's limits, once the host grants them: a turn it refused is looked up here, and one turn let through.
+  LimitsLink? limits;
+
+  /// Opens the page of the limits, which the card of a refused turn offers.
+  VoidCallback? onOpenLimits;
+
+  /// The limit that refused the last turn of each session, by session id, until the next turn is sent.
+  final Map<String, LimitStop> _limitStops = {};
+  final Map<String, ({Object connection, List<StreamSubscription<Object?>> listening})> _refusals = {};
 
   /// What the sessions on each account last heard of its allowances, by the account's id as the host names it in a report.
   final Map<String, UsageReport> accountUsage = {};

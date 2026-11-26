@@ -140,6 +140,7 @@ import 'shell/hosts/hosts_section.dart';
 import 'shell/layout_backend.dart';
 import 'shell/layout_state.dart';
 import 'shell/surface.dart';
+import 'usage/limit_rules.dart' show LimitsOf;
 import 'usage/usage_model.dart';
 import 'usage/usage_section.dart';
 import 'usage/usage_warn.dart';
@@ -3186,6 +3187,8 @@ class _CanoaAppState extends State<CanoaApp> {
     store.queueDelivery = config.sessions.queueDelivery;
     scheduleMicrotask(() => unawaited(_decideStartAtLogin()));
     store.starter = _startDraft;
+    store.limits = LimitsOf(() => (_grants?.may(HostGrants.usage) ?? false) ? _services.limitsHeld : null);
+    store.onOpenLimits = () => _showSection('usage');
     // A view an agent draws, or one the Store opens, appears where it asks: the side panel, a tab of the bottom panel or a window.
     _a2uiOpened = store.a2uiOpened.listen((event) {
       if (_mode.chatOnly) return;

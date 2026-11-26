@@ -498,6 +498,10 @@ final class LimitStop {
   /// The `_meta` key of a refused turn's answer.
   static const metaKey = 'dev.boriken.canoa/limit';
 
+  /// The stop the limit [row] puts on a session, or null when it is not stopping.
+  static LimitStop? ofRow(LimitRow row) =>
+      row.state == LimitState.stop ? LimitStop(limit: row.name, usedPermille: row.permille ?? 0, resetsAt: row.resetsAt) : null;
+
   /// The stop a prompt's answer names, or null when it names none.
   static LimitStop? of(Object? result) {
     final meta = result is Map ? result['_meta'] : null;

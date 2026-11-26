@@ -25,6 +25,7 @@ extension SessionUpdates on SessionStore {
 
   /// A prompt of [session] is about to go: the disk as it is now is what the turn is measured from, and the ledger notes it.
   void _prompting(ChatSession session) {
+    _clearLimitStop(session);
     _gitBeforeTurn(session);
     if (session.peerId != null && session.remoteSessionId != null) {
       ledger?.touch(session.peerId!, session.remoteSessionId!);

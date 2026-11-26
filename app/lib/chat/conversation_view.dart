@@ -27,6 +27,7 @@ import '../surfaces/subagents_surface.dart' show SubagentsSurface;
 import '../surfaces/terminal_controller.dart' show TerminalWorkspace;
 import '../surfaces/terminal_surface.dart';
 import '../theme/look.dart';
+import '../usage/limits_group.dart' show LimitStopCard;
 import '../usage/spend_model.dart' show SpendRow;
 import '../workspace/open_in.dart' show workspaceOpener;
 import '../workspace/open_in_ui.dart';
@@ -496,6 +497,15 @@ class _ConversationViewState extends State<ConversationView> {
           ),
         if (session.accountOffer != null) SessionAccountOffer(store: widget.store, session: session),
         if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session, toComposer: _queuedToComposer),
+        if (widget.store.limitStop(session) case final stop?)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: LimitStopCard(
+              stop: stop,
+              onContinue: () => unawaited(widget.store.continueThroughLimit(session)),
+              onOpenLimits: widget.store.onOpenLimits,
+            ),
+          ),
         if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
         if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),
         if (session.pendingSecrets.isNotEmpty) SessionSecretCard(store: widget.store, session: session),
