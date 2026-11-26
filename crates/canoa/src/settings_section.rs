@@ -36,6 +36,117 @@ pub enum Stored {
     Provider,
 }
 
+/// A list of things a section manages by calling the control methods of a session service (`canoa::session_service`): the rows,
+/// what can be added and how, a check of one row and taking one away. The application draws the list and the add form from what the
+/// methods answer, and a kind's form with the renderer every such form is drawn with; it knows the section by this and nothing more.
+///
+/// `list` is asked with no parameters and answers an object whose member `items` names holds the rows (each an object with `name`,
+/// `state`, optionally `details`, an array of text, and the member `kind_member` naming its kind) and whose member `kinds` names
+/// holds the kinds a row may be of (each with `id`, `title`, optionally `description`, `schema` and `form`). `add` is asked with
+/// `name`, the kind under `kind_member`, and the values of the kind's form, and answers when it is done. `test` and `remove` are
+/// asked with the row's `name`; `test` answers `ok` and `message`, or `problem`.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct Collection {
+    /// The control method that lists the rows and kinds, `SERVICE/METHOD`.
+    pub list: String,
+    /// The control method that adds a row.
+    pub add: String,
+    /// The control method that takes a row away.
+    pub remove: String,
+    /// The control method that checks a row, when it has one.
+    pub test: Option<String>,
+    /// The member of `list`'s answer that holds the rows.
+    pub items: String,
+    /// The member of `list`'s answer that holds the kinds.
+    pub kinds: String,
+    /// The member of a row, and of `add`'s parameters, that names its kind.
+    pub kind_member: String,
+    /// What the button that adds a row says; the application's own word when none.
+    pub add_label: Option<String>,
+    /// What the list says when it has no row.
+    pub empty: Option<String>,
+    /// What the list says under that, to explain what is missing.
+    pub empty_help: Option<String>,
+    /// What the field that picks a kind is called.
+    pub kind_label: Option<String>,
+    /// What the button that checks a row says; the application's own word when none.
+    pub test_label: Option<String>,
+    /// What taking a row away does, said when the person is asked to confirm.
+    pub remove_note: Option<String>,
+}
+
+impl Collection {
+    /// A list read by `list`, added to by `add` and taken from by `remove`, whose answer holds `items` and `kinds` and whose rows
+    /// name their kind under `kind_member`.
+    #[must_use]
+    pub fn new(
+        list: impl Into<String>,
+        add: impl Into<String>,
+        remove: impl Into<String>,
+        items: impl Into<String>,
+        kinds: impl Into<String>,
+        kind_member: impl Into<String>,
+    ) -> Self {
+        Self {
+            list: list.into(),
+            add: add.into(),
+            remove: remove.into(),
+            test: None,
+            items: items.into(),
+            kinds: kinds.into(),
+            kind_member: kind_member.into(),
+            add_label: None,
+            empty: None,
+            empty_help: None,
+            kind_label: None,
+            test_label: None,
+            remove_note: None,
+        }
+    }
+
+    /// Why this description cannot be offered, or `None` when it can.
+    #[must_use]
+    pub fn problem(&self) -> Option<String> {
+        let word = |part: &str| {
+            !part.is_empty()
+                && part.len() <= 32
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        };
+        let method = |text: &str| {
+            text.split_once('/')
+                .is_some_and(|(service, name)| word(service) && word(name))
+        };
+        for (what, text) in [
+            ("list", Some(&self.list)),
+            ("add", Some(&self.add)),
+            ("remove", Some(&self.remove)),
+            ("test", self.test.as_ref()),
+        ] {
+            if let Some(text) = text
+                && !method(text)
+            {
+                return Some(alloc::format!(
+                    "the {what} method {text:?} is not SERVICE/METHOD of lower-case letters, digits and _"
+                ));
+            }
+        }
+        for (what, text) in [
+            ("items", &self.items),
+            ("kinds", &self.kinds),
+            ("kind member", &self.kind_member),
+        ] {
+            if text.trim().is_empty() {
+                return Some(alloc::format!("the collection names no {what} member"));
+            }
+        }
+        None
+    }
+}
+
 /// What a section is, from [`SettingsSection::describe`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
@@ -63,6 +174,8 @@ pub struct SectionInfo {
     pub schema: Option<Value>,
     /// How the schema is shown, a guatiao-intake form document; none shows the form the schema implies.
     pub form: Option<Value>,
+    /// A list of rows the section manages through a service's control methods, drawn above its form.
+    pub collection: Option<Collection>,
 }
 
 impl SectionInfo {
@@ -80,6 +193,7 @@ impl SectionInfo {
             stored: Stored::Config,
             schema: None,
             form: None,
+            collection: None,
         }
     }
 
@@ -137,6 +251,9 @@ impl SectionInfo {
                 "the section {:?} has an empty group",
                 self.id
             ));
+        }
+        if let Some(why) = self.collection.as_ref().and_then(Collection::problem) {
+            return Some(alloc::format!("the section {:?}: {why}", self.id));
         }
         crate::settings::problem(self.schema.as_ref(), self.form.as_ref())
     }
@@ -202,5 +319,31 @@ mod tests {
         let mut info = SectionInfo::new("a", "A");
         info.form = Some(Value::from(true));
         assert!(info.problem().is_some_and(|why| why.contains("no schema")));
+    }
+
+    #[test]
+    fn a_collection_names_service_methods_and_the_members_it_reads() {
+        let mut info = SectionInfo::new("a", "A");
+        info.collection = Some(Collection::new(
+            "box/list",
+            "box/add",
+            "box/remove",
+            "rows",
+            "kinds",
+            "kind",
+        ));
+        assert_eq!(info.problem(), None);
+        let mut collection =
+            Collection::new("box/list", "add", "box/remove", "rows", "kinds", "kind");
+        assert!(collection.problem().is_some_and(|why| why.contains("add")));
+        collection = Collection::new("box/list", "box/add", "box/remove", "rows", " ", "kind");
+        assert!(
+            collection
+                .problem()
+                .is_some_and(|why| why.contains("kinds"))
+        );
+        collection = Collection::new("box/list", "box/add", "box/remove", "rows", "kinds", "kind");
+        collection.test = Some("Box/Test".into());
+        assert!(collection.problem().is_some_and(|why| why.contains("test")));
     }
 }

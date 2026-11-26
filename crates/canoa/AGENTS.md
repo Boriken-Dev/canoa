@@ -197,7 +197,10 @@ pub const KIND: &str = "settings_section";   pub const DEFAULT_GROUP: &str = "Ex
 pub enum Stored { Config, Provider }    // where the values live: `[settings.ID]` of the host's canoa.cfg, or with the provider
 #[non_exhaustive] pub struct SectionInfo { pub id: String, pub title: String, pub help: Option<String>, pub icon: Option<String>,
     pub group: Option<String>, pub under: Option<String>, pub keywords: Option<String>, pub stored: Stored,
-    pub schema: Option<Value>, pub form: Option<Value> }
+    pub schema: Option<Value>, pub form: Option<Value>, pub collection: Option<Collection> }
+#[non_exhaustive] pub struct Collection { pub list: String, pub add: String, pub remove: String, pub test: Option<String>,
+    pub items: String, pub kinds: String, pub kind_member: String, pub add_label: Option<String>, pub empty: Option<String>,
+    pub empty_help: Option<String>, pub kind_label: Option<String>, pub test_label: Option<String>, pub remove_note: Option<String> }
 #[guatiao::kind(name = "settings_section")] pub trait SettingsSection: Send + Sync {
     fn describe(&self) -> Result<SectionInfo, ProviderError>;    // the same on every call, with nothing run
     fn read(&self) -> Result<Value, ProviderError>;              // `Stored::Provider`: an object of the values, a sensitive member left out
@@ -209,6 +212,7 @@ impl SectionInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Scre
 - `id` is a word of lower-case letters, digits and `_` (1 to 32). With no `under` the section is a page of its own in Settings' list under the heading `group` (`DEFAULT_GROUP` when none); with `under` naming one of the application's sections (or another provider's), it is a titled group inside that page. An `under` that names no section the application has makes it a page of its own.
 - `schema` is a guatiao schema of an object and `form` the guatiao-intake form that shows it, built from a type with `taking::<S>()` (`Schema` and `Form` derives); the application draws them with the renderer every such form is drawn with. A member the schema marks sensitive is never answered in clear: the host names it as set instead.
 - `Stored::Config` values are written by the host into `[settings.ID]` after it checked them, except a member the schema marks sensitive, which the host keeps as the named secret `settings/ID/MEMBER` of the secret providers (the system store by default) and never writes to the file; `read` and `write` are then not asked and answer nothing. `Stored::Provider` values are the provider's: the host calls `read` to show them and `write` with the checked values to keep them.
+- `collection` is a list of rows the section manages through the control methods of a session service (`SERVICE/METHOD`, answered under `services.setup`): `list` answers an object whose member `items` names holds the rows (`name`, `state`, optional `details`, and the member `kind_member` naming the row's kind, with an optional `<kind_member>_title`) and whose member `kinds` names holds the kinds a row may be of (`id`, `title`, optional `description`, `schema`, `form`); `add` takes `name`, the kind under `kind_member` and the values of the kind's form; `test` (optional) and `remove` take the row's `name`, and `test` answers `ok` with a `message`, or a `problem`. The application draws the rows and the add form, and knows nothing of what the rows are; the words (`add_label`, `empty`, `empty_help`, `kind_label`, `test_label`, `remove_note`) are the provider's, and the application's own where none is given. The values the section's own schema holds are drawn below it.
 - `SectionInfo::problem` says why a description cannot be used (a bad id, no title, a section under itself, an empty group, a form its schema does not fit).
 
 ## `canoa::panel_tab` (feature `panel-tab`)

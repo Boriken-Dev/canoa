@@ -1,6 +1,6 @@
 # `canoa-mail`
 
-The person's own mail as a Canoa session service: the `mail` provider of the `session_service` kind (`canoa::session_service`), which gives an agent's sessions the `canoa-mail` MCP server and answers the control methods `mail/accounts`, `mail/add`, `mail/test` and `mail/remove`, and the `mail` provider of the `settings_section` kind, the Mail page of Settings. Mailboxes are opened through the `mail_backend` providers the host loaded (`canoa-microsoft-mail` offers `ews`, `graph` and `outlook`; any library listed in `[host.extensions]` can add more).
+The person's own mail as a Canoa session service: the `mail` provider of the `session_service` kind (`canoa::session_service`), which gives an agent's sessions the `canoa-mail` MCP server and answers the control methods `mail/accounts`, `mail/add`, `mail/test` and `mail/remove`, and the `mail` provider of the `settings_section` kind, the Mail page of Settings: a section with no form of its own whose `collection` names the `mail/*` methods, so the application draws the mailboxes, the add form of the chosen backend, the sign-in test and Remove from what they answer and holds no mail code. Mailboxes are opened through the `mail_backend` providers the host loaded (`canoa-microsoft-mail` offers `ews`, `graph` and `outlook`; any library listed in `[host.extensions]` can add more).
 
 `canoa-host` carries it as a bundled library (`bundled::INCLUDED`); a host built without that line has no mail: no server, no `mail/*` methods, no Mail page. Nothing else in the host names mail.
 
@@ -43,7 +43,7 @@ Answered to a key holding the host's `services.setup` grant; an answer never car
 
 - `mail/accounts {}` -> `{accounts: [{name, backend, backend_title, state, details, settings, server?, email?, user?}], backends: [{id, title, description, no_secret_state, schema, form}], tools}`. `state` is `password stored`, `needs a password`, `password from VAR`, `needs VAR set`, or the backend's own words.
 - `mail/add {name, backend, settings.., password?, id?, password_env?, timeout_secs?}` -> `{account}`: validates through `MailBackend::validate`, keeps the password with the host (`put_secret`) under a new id when the backend needs one and none was given, writes the table, and forgets the password again if the table cannot be written. A backend that needs a secret and got none is a usage error.
-- `mail/test {name}` -> `{ok: true, folders}` or `{ok: false, problem}`: opens the mailbox and lists its folders; a sign-in that fails is an answer, not an error (`-32003` for an unknown name).
+- `mail/test {name}` -> `{ok: true, folders, message}` or `{ok: false, problem}`: opens the mailbox and lists its folders; a sign-in that fails is an answer, not an error (`-32003` for an unknown name).
 - `mail/remove {name}` -> `{removed: true}`: takes the table out and forgets the stored password.
 
 ## Tests

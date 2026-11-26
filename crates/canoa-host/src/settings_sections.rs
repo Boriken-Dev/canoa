@@ -93,6 +93,14 @@ impl Section<'_> {
             "origin": self.entry.origin,
             "stored": match info.stored { Stored::Config => "config", Stored::Provider => "provider" },
             "schema": described(&info.schema), "form": described(&info.form),
+            "collection": info.collection.as_ref().map(|collection| json!({
+                "list": collection.list, "add": collection.add, "remove": collection.remove,
+                "test": collection.test, "items": collection.items, "kinds": collection.kinds,
+                "kind_member": collection.kind_member, "add_label": collection.add_label,
+                "empty": collection.empty, "empty_help": collection.empty_help,
+                "kind_label": collection.kind_label, "test_label": collection.test_label,
+                "remove_note": collection.remove_note,
+            })),
         })
     }
 

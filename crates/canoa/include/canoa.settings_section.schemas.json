@@ -63,6 +63,97 @@
       },
       "form": {
         "description": "How the schema is shown, a guatiao-intake form document; none shows the form the schema implies."
+      },
+      "collection": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "list": {
+            "type": "string",
+            "description": "The control method that lists the rows and kinds, `SERVICE/METHOD`."
+          },
+          "add": {
+            "type": "string",
+            "description": "The control method that adds a row."
+          },
+          "remove": {
+            "type": "string",
+            "description": "The control method that takes a row away."
+          },
+          "test": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The control method that checks a row, when it has one."
+          },
+          "items": {
+            "type": "string",
+            "description": "The member of `list`'s answer that holds the rows."
+          },
+          "kinds": {
+            "type": "string",
+            "description": "The member of `list`'s answer that holds the kinds."
+          },
+          "kind_member": {
+            "type": "string",
+            "description": "The member of a row, and of `add`'s parameters, that names its kind."
+          },
+          "add_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the button that adds a row says; the application's own word when none."
+          },
+          "empty": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the list says when it has no row."
+          },
+          "empty_help": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the list says under that, to explain what is missing."
+          },
+          "kind_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the field that picks a kind is called."
+          },
+          "test_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the button that checks a row says; the application's own word when none."
+          },
+          "remove_note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What taking a row away does, said when the person is asked to confirm."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "list",
+          "add",
+          "remove",
+          "items",
+          "kinds",
+          "kind_member"
+        ],
+        "description": "A list of rows the section manages through a service's control methods, drawn above its form."
       }
     },
     "additionalProperties": false,

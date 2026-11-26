@@ -102,6 +102,12 @@ fn an_account_added_is_listed_tested_used_by_the_tools_and_removed_with_its_pass
         tested["folders"].as_u64().is_some_and(|n| n > 0),
         "{tested}"
     );
+    assert!(
+        tested["message"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("Signed in. ") && text.ends_with(" folders.")),
+        "{tested}"
+    );
 
     let outcome = MailService
         .call(
@@ -290,4 +296,28 @@ fn the_service_describes_the_server_its_tools_and_its_skill_and_the_section_is_t
     use canoa::settings_section::SettingsSection as _;
     let section = MailSection.describe().expect("describes");
     assert_eq!((section.id.as_str(), section.problem()), ("mail", None));
+}
+
+#[test]
+fn the_mail_section_is_a_collection_over_the_services_own_methods() {
+    use canoa::settings_section::SettingsSection as _;
+    let section = MailSection.describe().expect("describes");
+    let collection = section.collection.expect("a collection");
+    assert_eq!(
+        [
+            collection.list.as_str(),
+            collection.add.as_str(),
+            collection.remove.as_str(),
+            collection.test.as_deref().unwrap_or(""),
+        ],
+        ["mail/accounts", "mail/add", "mail/remove", "mail/test"]
+    );
+    assert_eq!(
+        (
+            collection.items.as_str(),
+            collection.kinds.as_str(),
+            collection.kind_member.as_str()
+        ),
+        ("accounts", "backends", "backend")
+    );
 }

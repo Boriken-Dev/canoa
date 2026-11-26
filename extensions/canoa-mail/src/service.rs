@@ -13,7 +13,7 @@ use canoa::session_service::{
     Context, ControlCall, ControlReply, Outcome, Refusal, Resume, ServiceHost, ServiceInfo,
     SessionService, SkillFile, ToolCall,
 };
-use canoa::settings_section::{SectionInfo, SettingsSection};
+use canoa::settings_section::{Collection, SectionInfo, SettingsSection};
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::{Map as GuatiaoMap, Provider, Value as GuatiaoValue};
 use serde::Deserialize;
@@ -235,7 +235,14 @@ impl MailService {
                 let outcome = open_account(&catalog, account, &**host)
                     .and_then(|backend| backend.folders().map_err(MailError::from));
                 Ok(match outcome {
-                    Ok(folders) => json!({"ok": true, "folders": folders.len()}),
+                    Ok(folders) => json!({
+                        "ok": true,
+                        "folders": folders.len(),
+                        "message": match folders.len() {
+                            1 => "Signed in. 1 folder.".to_owned(),
+                            count => format!("Signed in. {count} folders."),
+                        },
+                    }),
                     Err(error) => json!({
                         "ok": false,
                         "problem": tools::clean(&error.to_string(), 600, false),
@@ -266,6 +273,28 @@ impl SettingsSection for MailSection {
         let mut info = SectionInfo::new("mail", "Mail");
         info.group = Some("Agents".to_owned());
         info.icon = Some("mail".to_owned());
+        info.help = Some(
+            "An agent can search, read and draft in these mailboxes, and asks you before it moves or changes a message.              It never sends. Passwords stay in this computer's credential store, never in canoa.cfg."
+                .to_owned(),
+        );
+        let mut mailboxes = Collection::new(
+            "mail/accounts",
+            "mail/add",
+            "mail/remove",
+            "accounts",
+            "backends",
+            "backend",
+        );
+        mailboxes.test = Some("mail/test".to_owned());
+        mailboxes.add_label = Some("Add mailbox".to_owned());
+        mailboxes.empty = Some("No mailbox".to_owned());
+        mailboxes.empty_help = Some("Agents have no mail to use until one is added.".to_owned());
+        mailboxes.kind_label = Some("Backend".to_owned());
+        mailboxes.test_label = Some("Test sign-in".to_owned());
+        mailboxes.remove_note = Some(
+            "Takes the mailbox out of canoa.cfg and forgets any saved password. Nothing in the mailbox itself changes.".to_owned(),
+        );
+        info.collection = Some(mailboxes);
         info.keywords = Some(
             "email exchange outlook ews mailbox inbox messages password account add remove test sign in"
                 .to_owned(),

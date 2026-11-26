@@ -24,7 +24,8 @@ type Outcome = Result<Value, (i32, String)>;
 pub(crate) const TABLE: &str = "settings";
 
 /// `{"sections": [...]}`: each with its `id`, `title`, `help`, `icon`, `group`, `under`, `keywords`, `origin` (`bundled`, or the
-/// name of the entry or extension that loads it), `stored` (`config` or `provider`) and its form's `schema` and `form`.
+/// name of the entry or extension that loads it), `stored` (`config` or `provider`), its form's `schema` and `form`, and its `collection` (the lists a service's
+/// control methods manage: `list`, `add`, `remove`, `test`, `items`, `kinds`, `kind_member` and the words it says), null when it has none.
 ///
 /// With `all` false only the application's own pages are listed: the names, headings and icons of the preferences it draws itself,
 /// and none of what a provider adds.
