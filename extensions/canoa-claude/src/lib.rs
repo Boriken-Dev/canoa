@@ -8,6 +8,7 @@ extern crate alloc;
 
 mod behaviour;
 mod delivery;
+mod rules;
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -26,9 +27,9 @@ use canoa::store::{
 };
 use canoa::vendor::{
     AccessTarget, AgentVendor, GatewayRoute, HistoryAnswer, HistoryRequest, HookSupport,
-    HookSupportRequest, HooksDelivery, HooksRequest, LoginFile, ModeTitle, SessionListing,
-    SessionsRequest, ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle,
-    ToolHook, Variable, VendorInfo,
+    HookSupportRequest, HooksDelivery, HooksRequest, LoginFile, ModeTitle, PersonRule,
+    RulesRequest, SessionListing, SessionsRequest, ShellAdvice, ShellRequest, SkillsDelivery,
+    SkillsRequest, StandardTitle, ToolHook, Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::ProviderError;
@@ -128,6 +129,10 @@ impl AgentVendor for ClaudeVendor {
 
     fn tool_hook(&self) -> Result<Option<ToolHook>, ProviderError> {
         Ok(Some(delivery::tool_hook()))
+    }
+
+    fn person_rules(&self, request: RulesRequest) -> Result<Vec<PersonRule>, ProviderError> {
+        Ok(rules::person_rules(&request))
     }
 
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {

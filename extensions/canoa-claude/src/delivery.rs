@@ -23,6 +23,12 @@ const SHELL_TOOLS: [(&str, ShellFamily); 2] = [
     ("PowerShell", ShellFamily::Powershell),
 ];
 
+/// Its tool that starts a command to watch: it runs the command under Bash and takes the same rewritten input.
+const WATCH_TOOL: &str = "Monitor";
+
+/// The oldest Claude Code in which a hook with `"onFailure": "block"` refuses a call whose hook fails or times out.
+const ON_FAILURE_FROM: &str = "2.1.295";
+
 /// Claude Code's tools that act on nothing of the computer it runs on: tasks and subagents (whose own tools pass through the same
 /// hook), questions to the person, plan mode, the web, a background command's output (which the forwarder prints), and the
 /// resources of the session's MCP servers. Every tool not named here or below is refused.
@@ -49,6 +55,9 @@ const PASS_TOOLS: [&str; 18] = [
 
 /// The beginning of the name of every tool of an MCP server the session was given.
 const MCP_PREFIX: &str = "mcp__";
+
+/// What stands between an MCP server's name and its tool's in Claude Code's name for the tool.
+const MCP_SEPARATOR: &str = "__";
 
 /// Claude Code's tools that read, write, edit, search or list files where it runs.
 const FILE_TOOLS: [&str; 8] = [
@@ -183,6 +192,7 @@ pub(crate) fn tool_hook() -> ToolHook {
         SHELL_TOOLS
             .iter()
             .map(|(name, shell)| HookTool::shell(*name, "command", *shell))
+            .chain([HookTool::background(WATCH_TOOL, "command", ShellFamily::Bash)])
             .chain(FILE_TOOLS.iter().map(|name| HookTool::files(*name)))
             .chain(PASS_TOOLS.iter().map(|name| HookTool::passes(*name)))
             .collect(),
@@ -193,6 +203,16 @@ pub(crate) fn tool_hook() -> ToolHook {
         ),
         (rewrite.to_string(), "/hookSpecificOutput/updatedInput"),
     );
+    let ask = serde_json::json!({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "ask",
+        "permissionDecisionReason": "",
+    }});
+    hook.ask = Some(ask.to_string());
+    hook.ask_reason_at = Some("/hookSpecificOutput/permissionDecisionReason".to_owned());
+    hook.mcp_prefix = Some(MCP_PREFIX.to_owned());
+    hook.mcp_separator = Some(MCP_SEPARATOR.to_owned());
+    hook.min_version = Some(ON_FAILURE_FROM.to_owned());
     hook.pass_prefixes = vec![MCP_PREFIX.to_owned()];
     hook.mode_at = Some("/permission_mode".to_owned());
     hook.modes = [
@@ -326,11 +346,25 @@ mod tests {
             "{}",
             manifest.text
         );
-        // A tool that acts on this computer and is neither a shell nor a file tool is not let through.
-        for refused in ["LSP", "EnterWorktree", "ExitWorktree", "Monitor", "Skill"] {
+        assert!(
+            hook.tools
+                .iter()
+                .any(|tool| tool.name == "Monitor" && tool.command.as_deref() == Some("command")),
+            "Monitor takes the rewritten command: Claude Code applies a hook's updatedInput to it"
+        );
+        // A tool that acts on this computer and is neither a shell nor a file tool is not let through. A skill's `!` commands run
+        // before its text reaches the agent, on this computer and unseen by the hook.
+        for refused in ["LSP", "EnterWorktree", "ExitWorktree", "Skill"] {
             assert!(!names.contains(&refused), "{refused}");
         }
         assert_eq!(hook.pass_prefixes, ["mcp__"]);
+        assert_eq!(hook.mcp_prefix.as_deref(), Some("mcp__"));
+        assert_eq!(hook.mcp_separator.as_deref(), Some("__"));
+        assert_eq!(hook.min_version.as_deref(), Some("2.1.295"));
+        let ask: serde_json::Value =
+            serde_json::from_str(hook.ask.as_deref().expect("an ask answer")).expect("JSON");
+        assert_eq!(ask["hookSpecificOutput"]["permissionDecision"], "ask");
+        assert!(ask.pointer(hook.ask_reason_at.as_deref().expect("a place")).is_some());
     }
 
     #[test]

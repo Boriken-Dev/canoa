@@ -132,12 +132,13 @@ fn resolved(path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Whether the tools of an environment with `rules` may act on `path`, which `list` may protect.
+/// Whether `list` protects `path`, an environment's path judged by that environment's `rules`.
 ///
 /// # Errors
 ///
-/// Why not, for the agent: protected, or not a path that can be judged.
-pub(crate) fn judge(list: &Protected, rules: &Rules, path: &str) -> Result<(), String> {
+/// Why the path cannot be judged, for the agent: it cannot be placed, or it is relative where the list has lines anchored at a root
+/// or a home.
+pub(crate) fn protected(list: &Protected, rules: &Rules, path: &str) -> Result<bool, String> {
     if path.is_empty() || path.contains('\0') || path.starts_with('~') {
         return Err(format!(
             "{path:?} cannot be placed (empty, or starting with ~): give the path plainly"
@@ -151,13 +152,8 @@ pub(crate) fn judge(list: &Protected, rules: &Rules, path: &str) -> Result<(), S
             "{path} is relative, and the person's protected places include lines anchored at a root or a home, which a path relative to the environment's own folder cannot be judged by: give the full path"
         ));
     }
-    let protected = || {
-        format!(
-            "{path} is on the person's list of protected places ([permissions] protected), which this session's tools read or change only in the Bypass mode"
-        )
-    };
     if list.protects_parts(&parts, rules.home.as_deref()) {
-        return Err(protected());
+        return Ok(true);
     }
     if rules.local && absolute {
         let real = resolved(Path::new(path)).ok_or_else(|| {
@@ -165,8 +161,22 @@ pub(crate) fn judge(list: &Protected, rules: &Rules, path: &str) -> Result<(), S
         })?;
         let home = std::env::home_dir();
         if list.protects(&real, home.as_deref()) {
-            return Err(protected());
+            return Ok(true);
         }
+    }
+    Ok(false)
+}
+
+/// Whether the tools of an environment with `rules` may act on `path`, which `list` may protect.
+///
+/// # Errors
+///
+/// Why not, for the agent: protected, or not a path that can be judged.
+pub(crate) fn judge(list: &Protected, rules: &Rules, path: &str) -> Result<(), String> {
+    if protected(list, rules, path)? {
+        return Err(format!(
+            "{path} is on the person's list of protected places ([permissions] protected), which this session's tools read or change only in the Bypass mode"
+        ));
     }
     Ok(())
 }

@@ -1462,7 +1462,7 @@ class UsageReader(KindProtocol, Protocol, kind="usage_reader", floor_hash=179363
         ...
 
 
-class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=1770805046):
+class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=883587881):
     """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
     nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
     """
@@ -1544,6 +1544,15 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         """How the agent's own file and shell tools are taken over by a [`HookKind::PreTool`] hook, so that they act in the
         environment a session's tools are served from; `None` for an agent whose tools cannot be taken over. The default: they
         cannot.
+        """
+        ...
+
+    @fallible
+    def person_rules(self, request: Ref) -> ValueAnswer:
+        """The rules the person gave the agent that refuse or ask about a file, a folder or a command, read from the agent's own
+        settings as the agent reads them (every layer: the person's, the project's, the machine's). The host applies them to the
+        calls the agent makes to the tools it serves from an environment, which the agent's own rules cannot see into. The default:
+        none.
         """
         ...
 

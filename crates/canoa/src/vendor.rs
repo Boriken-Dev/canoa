@@ -588,6 +588,9 @@ pub enum HookKind {
 pub enum ToolRole {
     /// Runs a shell command, which [`HookTool::command`] names in its input.
     Shell,
+    /// Starts a shell command that goes on after the call and reports what it prints (a watcher), which [`HookTool::command`]
+    /// names in its input: taken over as a shell is, but not what a command to be waited for is run with.
+    Background,
     /// Reads, writes, edits, searches or lists files.
     Files,
     /// Acts on nothing of the computer it runs on (a list of tasks, a question to the person, a search of the web): it runs as it
@@ -617,6 +620,21 @@ impl HookTool {
         Self {
             name: name.into(),
             role: ToolRole::Shell,
+            command: Some(command.into()),
+            shell: Some(shell),
+        }
+    }
+
+    /// A tool that starts a command that goes on after the call, written for `shell`, held at `command` in its input.
+    #[must_use]
+    pub fn background(
+        name: impl Into<String>,
+        command: impl Into<String>,
+        shell: ShellFamily,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            role: ToolRole::Background,
             command: Some(command.into()),
             shell: Some(shell),
         }
@@ -695,6 +713,20 @@ pub struct ToolHook {
     pub rewrite: String,
     /// Where the new input goes in [`Self::rewrite`].
     pub rewrite_input_at: String,
+    /// The answer that makes the agent ask the person about the call whatever its mode and rules say, as JSON text; none when the
+    /// agent has no such answer, and the host then refuses where it would have asked.
+    pub ask: Option<String>,
+    /// Where the reason goes in [`Self::ask`].
+    pub ask_reason_at: Option<String>,
+    /// How the agent names a tool of an MCP server it is given: the name starts with this, then the server's name, then
+    /// [`Self::mcp_separator`], then the tool's. The host judges the calls of its own environment servers by the person's rules.
+    pub mcp_prefix: Option<String>,
+    /// What stands between an MCP server's name and its tool's in the agent's name for the tool.
+    pub mcp_separator: Option<String>,
+    /// The oldest version of the agent in which the hook's answers are honoured as described (a hook that fails or times out
+    /// refuses the call), as a dotted number; an older agent is not taken over. The version is read from the agent's
+    /// `initialize` answer: the first word of `agentInfo.title` that is a dotted number.
+    pub min_version: Option<String>,
 }
 
 impl ToolHook {
@@ -718,6 +750,84 @@ impl ToolHook {
             deny_reason_at: deny.1.to_owned(),
             rewrite: rewrite.0,
             rewrite_input_at: rewrite.1.to_owned(),
+            ask: None,
+            ask_reason_at: None,
+            mcp_prefix: None,
+            mcp_separator: None,
+            min_version: None,
+        }
+    }
+}
+
+/// What a rule of the person's decides about a call.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RuleDecision {
+    /// The call is refused.
+    Deny,
+    /// The person is asked about the call.
+    Ask,
+}
+
+/// What a rule of the person's is about.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RuleAccess {
+    /// Reading a file or listing a folder.
+    Read,
+    /// Writing, editing or patching a file.
+    Write,
+    /// Running a command.
+    Run,
+}
+
+/// One rule the person gave their agent (as its own settings say), in the host's terms: what it decides about which calls.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct PersonRule {
+    /// What it decides.
+    pub decision: RuleDecision,
+    /// What it is about.
+    pub access: RuleAccess,
+    /// For a file or folder: a line of the list of protected places (`.env`, `~/.ssh`, `/etc`, `**/secrets`), a name without a
+    /// slash meaning one anywhere; for a command: the whole command, the program and its arguments written with one space between
+    /// them, where `*` stands for any text. None: every file, folder or command.
+    pub pattern: Option<String>,
+}
+
+impl PersonRule {
+    /// A rule that `decision`s a call of `access` that `pattern` names.
+    #[must_use]
+    pub fn new(decision: RuleDecision, access: RuleAccess, pattern: Option<String>) -> Self {
+        Self {
+            decision,
+            access,
+            pattern,
+        }
+    }
+}
+
+/// Where the host asks an agent what its person's own rules say.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct RulesRequest {
+    /// The folder the agent keeps its own files in (its settings of the person's own), when the host knows it.
+    pub folder: Option<String>,
+    /// The folder the session works in on this computer, whose own settings the agent reads too.
+    pub cwd: String,
+}
+
+impl RulesRequest {
+    /// A request for the rules of a session that works in `cwd`, with the agent's own folder at `folder`.
+    #[must_use]
+    pub fn new(folder: Option<String>, cwd: impl Into<String>) -> Self {
+        Self {
+            folder,
+            cwd: cwd.into(),
         }
     }
 }
@@ -1014,6 +1124,15 @@ pub trait AgentVendor: Send + Sync {
     /// cannot.
     fn tool_hook(&self) -> Result<Option<ToolHook>, ProviderError> {
         Ok(None)
+    }
+
+    /// The rules the person gave the agent that refuse or ask about a file, a folder or a command, read from the agent's own
+    /// settings as the agent reads them (every layer: the person's, the project's, the machine's). The host applies them to the
+    /// calls the agent makes to the tools it serves from an environment, which the agent's own rules cannot see into. The default:
+    /// none.
+    fn person_rules(&self, request: RulesRequest) -> Result<Vec<PersonRule>, ProviderError> {
+        drop(request);
+        Ok(Vec::new())
     }
 
     /// How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:

@@ -34,6 +34,7 @@ pub(crate) mod intercept;
 pub(crate) mod layer;
 pub(crate) mod mcp;
 mod patch;
+mod person;
 mod places;
 pub(crate) mod remote;
 pub(crate) mod served;

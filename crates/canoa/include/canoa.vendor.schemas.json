@@ -830,11 +830,13 @@
         "type": "string",
         "enum": [
           "shell",
+          "background",
           "files",
           "pass"
         ],
         "x-enum-labels": {
           "shell": "Runs a shell command, which [`HookTool::command`] names in its input.",
+          "background": "Starts a shell command that goes on after the call and reports what it prints (a watcher), which [`HookTool::command`] names in its input: taken over as a shell is, but not what a command to be waited for is run with.",
           "files": "Reads, writes, edits, searches or lists files.",
           "pass": "Acts on nothing of the computer it runs on (a list of tasks, a question to the person, a search of the web): it runs as it is, wherever the session's tools are served from."
         },
@@ -915,11 +917,13 @@
               "type": "string",
               "enum": [
                 "shell",
+                "background",
                 "files",
                 "pass"
               ],
               "x-enum-labels": {
                 "shell": "Runs a shell command, which [`HookTool::command`] names in its input.",
+                "background": "Starts a shell command that goes on after the call and reports what it prints (a watcher), which [`HookTool::command`] names in its input: taken over as a shell is, but not what a command to be waited for is run with.",
                 "files": "Reads, writes, edits, searches or lists files.",
                 "pass": "Acts on nothing of the computer it runs on (a list of tasks, a question to the person, a search of the web): it runs as it is, wherever the session's tools are served from."
               },
@@ -1025,6 +1029,41 @@
       "rewrite_input_at": {
         "type": "string",
         "description": "Where the new input goes in [`Self::rewrite`]."
+      },
+      "ask": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The answer that makes the agent ask the person about the call whatever its mode and rules say, as JSON text; none when the agent has no such answer, and the host then refuses where it would have asked."
+      },
+      "ask_reason_at": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Where the reason goes in [`Self::ask`]."
+      },
+      "mcp_prefix": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "How the agent names a tool of an MCP server it is given: the name starts with this, then the server's name, then [`Self::mcp_separator`], then the tool's. The host judges the calls of its own environment servers by the person's rules."
+      },
+      "mcp_separator": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What stands between an MCP server's name and its tool's in the agent's name for the tool."
+      },
+      "min_version": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The oldest version of the agent in which the hook's answers are honoured as described (a hook that fails or times out refuses the call), as a dotted number; an older agent is not taken over. The version is read from the agent's `initialize` answer: the first word of `agentInfo.title` that is a dotted number."
       }
     },
     "additionalProperties": false,

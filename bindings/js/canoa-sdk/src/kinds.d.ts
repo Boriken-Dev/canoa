@@ -2184,6 +2184,13 @@ export interface AgentVendor {
    */
   toolHook?(): unknown;
   /**
+   * The rules the person gave the agent that refuse or ask about a file, a folder or a command, read from the agent's own
+   * settings as the agent reads them (every layer: the person's, the project's, the machine's). The host applies them to the
+   * calls the agent makes to the tools it serves from an environment, which the agent's own rules cannot see into. The default:
+   * none.
+   */
+  personRules?(request: g.Ref): unknown;
+  /**
    * How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
    * the account kind of its own that takes them. The default: it cannot.
    */
@@ -2292,6 +2299,15 @@ export interface AgentVendorRemote extends k.RemoteBase<typeof AgentVendor> {
    * Throws `Unsupported` when the table lacks it: `has()` asks first.
    */
   toolHook(): g.Value;
+  /**
+   * The rules the person gave the agent that refuse or ask about a file, a folder or a command, read from the agent's own
+   * settings as the agent reads them (every layer: the person's, the project's, the machine's). The host applies them to the
+   * calls the agent makes to the tools it serves from an environment, which the agent's own rules cannot see into. The default:
+   * none.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  personRules(request: unknown): g.Value;
   /**
    * How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
    * the account kind of its own that takes them. The default: it cannot.

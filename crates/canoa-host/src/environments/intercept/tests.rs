@@ -242,6 +242,7 @@ fn judged(env: &Env, mode: Mode, payload: &Value) -> Verdict {
         mode,
         payload,
         &mut |shell, command| rewritten(PREFIX, "ID", shell, command),
+        &mut |_, _| None,
     )
 }
 
@@ -392,7 +393,6 @@ fn every_tool_is_seen_and_only_those_that_act_on_nothing_here_pass() {
         "LSP",
         "EnterWorktree",
         "ExitWorktree",
-        "Monitor",
         "Skill",
         "SomeToolOfTomorrow",
     ] {
@@ -432,6 +432,7 @@ fn plan_mode_a_missing_capability_and_a_tool_not_described_are_refused_before_an
         mode,
         payload,
         never,
+        &mut |_, _| None,
     ) {
         Verdict::Deny(why) => why,
         other => panic!("not refused: {other:?}"),
@@ -575,16 +576,34 @@ fn opened_with(
     modes: &Arc<Modes>,
     extra: &str,
 ) -> (Interception, PathBuf) {
+    opened_in(name, max_bytes, modes, extra, "/w")
+}
+
+/// The same, for a session that works in the folder `cwd` of this computer.
+fn opened_in(
+    name: &str,
+    max_bytes: usize,
+    modes: &Arc<Modes>,
+    extra: &str,
+    cwd: &str,
+) -> (Interception, PathBuf) {
     let env = environments_with(max_bytes, extra).get(name).expect("made");
+    let servers = vec![(
+        super::super::mcp::server_name(name),
+        super::super::mcp::path_rules(&env),
+    )];
     let interception = Interception::open(
         env,
         ("claude", claude()),
         ("canoa", &[]),
+        servers,
         Arc::clone(modes),
         max_bytes,
     )
     .expect("the channel opens");
-    interception.plugin_for("1").expect("the plugin is written");
+    interception.plugin_for("1", cwd).expect("the plugin is written");
+    // A test never reads the folder of the person who runs it.
+    interception.shared.own_folder.store(false, Ordering::SeqCst);
     let channel = interception.channel_of("1").expect("a channel");
     (interception, channel)
 }
@@ -1135,4 +1154,170 @@ fn the_secret_never_crosses_the_channel_and_an_answer_not_signed_by_the_host_ref
     let (status, _, err) = forwarded(KIND_TOOL, &channel, None, bash("ls").to_string().as_bytes());
     assert_eq!(status, 0, "{err}");
     drop(interception);
+}
+
+/// A folder of this computer that holds `settings` as a project's own Claude settings, and is removed with its guard.
+struct Project(PathBuf);
+
+impl Project {
+    fn with(name: &str, settings: &Value) -> Self {
+        let dir = std::env::temp_dir().join(format!("canoa-person-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".claude")).expect("a project");
+        std::fs::write(dir.join(".claude").join("settings.json"), settings.to_string())
+            .expect("settings");
+        Self(dir)
+    }
+}
+
+impl Drop for Project {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn env_call(tool: &str, mode: &str, input: &Value) -> Value {
+    json!({"session_id": "s", "cwd": "/w", "permission_mode": mode, "hook_event_name": "PreToolUse",
+        "tool_name": format!("mcp__env_box__{tool}"), "tool_input": input})
+}
+
+/// What the forwarder prints for `payload`: the agent's answer as JSON, or nothing for a call that goes on as it is.
+fn answered(channel: &Path, payload: &Value) -> Option<Value> {
+    let (status, out, err) = forwarded(KIND_TOOL, channel, None, payload.to_string().as_bytes());
+    assert_eq!(status, 0, "{err}");
+    (!out.is_empty()).then(|| serde_json::from_slice(&out).expect("JSON"))
+}
+
+fn decision(answer: &Option<Value>) -> Option<&str> {
+    answer
+        .as_ref()?
+        .pointer("/hookSpecificOutput/permissionDecision")
+        .and_then(Value::as_str)
+}
+
+#[test]
+fn the_persons_own_deny_and_ask_rules_reach_the_environments_tools_in_every_mode() {
+    let project = Project::with(
+        "rules",
+        &json!({"permissions": {
+            "deny": ["Read(./.env)", "Edit(//work/locked/**)", "Bash(rm:*)"],
+            "ask": ["Bash(git push:*)", "Write(notes)"],
+            "allow": ["mcp__env_box"],
+        }}),
+    );
+    let modes = Arc::new(Modes::default());
+    let (_interception, channel) = opened_in(
+        "box",
+        1 << 20,
+        &modes,
+        "",
+        &project.0.to_string_lossy(),
+    );
+    for mode in [
+        "default",
+        "acceptEdits",
+        "auto",
+        "plan",
+        "dontAsk",
+        "bypassPermissions",
+    ] {
+        let read = answered(&channel, &env_call("fs_read", mode, &json!({"path": "/work/app/.env"})));
+        assert_eq!(decision(&read), Some("deny"), "{mode}: {read:?}");
+        let reason = read.as_ref().expect("an answer")["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("a reason");
+        assert!(reason.contains("/work/app/.env"), "{reason}");
+        let list = answered(&channel, &env_call("fs_list", mode, &json!({"path": "/work/app/.env"})));
+        assert_eq!(decision(&list), Some("deny"), "{mode}");
+        let edit = answered(
+            &channel,
+            &env_call(
+                "edit",
+                mode,
+                &json!({"path": "/work/locked/a.rs", "old_string": "a", "new_string": "b"}),
+            ),
+        );
+        assert_eq!(decision(&edit), Some("deny"), "{mode}");
+        let run = answered(
+            &channel,
+            &env_call("exec", mode, &json!({"program": "bash", "args": ["-c", "ls && rm -rf build"]})),
+        );
+        assert_eq!(decision(&run), Some("deny"), "{mode}");
+        let push = answered(
+            &channel,
+            &env_call("exec", mode, &json!({"program": "git", "args": ["push", "origin"]})),
+        );
+        assert_eq!(decision(&push), Some("ask"), "{mode}");
+        // What no rule names goes on as it is, and so does a write that is not one of the Edit rule's.
+        let fine = answered(&channel, &env_call("fs_read", mode, &json!({"path": "/work/app/main.rs"})));
+        assert_eq!(fine, None, "{mode}");
+        let written = answered(
+            &channel,
+            &env_call("fs_write", mode, &json!({"path": "/work/app/.env", "content": "x"})),
+        );
+        assert_eq!(written, None, "a Read rule is not a rule for writing ({mode})");
+    }
+    let asked = answered(
+        &channel,
+        &env_call("fs_write", "bypassPermissions", &json!({"path": "/work/notes", "content": "x"})),
+    );
+    assert_eq!(decision(&asked), Some("ask"));
+}
+
+#[test]
+fn without_the_persons_rules_the_environments_tools_pass_as_they_did() {
+    let project = Project::with("none", &json!({"permissions": {"allow": ["Bash"]}}));
+    let modes = Arc::new(Modes::default());
+    let (_interception, channel) =
+        opened_in("box", 1 << 20, &modes, "", &project.0.to_string_lossy());
+    let read = answered(&channel, &env_call("fs_read", "default", &json!({"path": "/work/.env"})));
+    assert_eq!(read, None);
+}
+
+#[test]
+fn the_rules_of_the_agents_own_folder_are_read_where_the_hook_runs_the_forwarder() {
+    let dir = std::env::temp_dir().join(format!("canoa-person-home-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a folder");
+    std::fs::write(
+        dir.join("settings.json"),
+        json!({"permissions": {"deny": ["Read(.ssh)"]}}).to_string(),
+    )
+    .expect("settings");
+    let (interception, _channel) = opened("box", 1 << 20, &Arc::new(Modes::default()));
+    let holder = lock(&interception.shared.secrets)
+        .values()
+        .next()
+        .expect("a session request")
+        .clone();
+    let input = json!({"path": "/home/me/.ssh/id"});
+    let input = input.as_object().expect("an object");
+    let home = dir.to_string_lossy().into_owned();
+    let found = interception.shared.person(
+        &holder,
+        Some(&home),
+        ("mcp__env_box__fs_read", input),
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(matches!(found, Some(Judged::Deny(_))), "{found:?}");
+}
+
+#[test]
+fn monitor_is_turned_to_the_environment_like_a_shell_but_is_not_offered_for_waiting_on_a_command() {
+    let box_ = env("box");
+    let payload = json!({"session_id": "s", "cwd": "/w", "permission_mode": "default", "hook_event_name": "PreToolUse",
+        "tool_name": "Monitor", "tool_input": {"command": "tail -f log", "description": "d", "timeout_ms": 5000}});
+    let Verdict::Rewrite(input) = judged(&box_, Mode::Manual, &payload) else {
+        panic!("rewritten")
+    };
+    let command = input["command"].as_str().expect("a command");
+    assert!(command.starts_with(PREFIX), "{command}");
+    assert!(command.ends_with("exit $?; tail -f log"), "{command}");
+    assert_eq!(input["timeout_ms"], 5000, "its other settings stay");
+    assert!(judged(&box_, Mode::Plan, &payload) != Verdict::Pass);
+    let refused = json!({"tool_name": "Grep", "tool_input": {"pattern": "x"}});
+    let Verdict::Deny(why) = judged(&box_, Mode::Bypass, &refused) else {
+        panic!("refused")
+    };
+    assert!(!why.contains("Monitor"), "{why}");
 }

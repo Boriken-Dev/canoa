@@ -48,6 +48,33 @@ pub(crate) fn server_name(name: &str) -> String {
     format!("{SERVER_PREFIX}{word}")
 }
 
+/// The path rules of `env`: its operating system as it describes itself, whether it shares this computer's files, and the folder
+/// `~/` means there. `~/` is this computer's home where the environment shares its files, and the `home` its `fs.read` capability
+/// names elsewhere; with neither, a `~/` line protects nothing there.
+pub(super) fn path_rules(env: &Env) -> Rules {
+    let info = env.info();
+    let local = info.local || env.name() == HERE;
+    let windows = if local {
+        cfg!(windows)
+    } else {
+        info.os == "windows"
+    };
+    let home = if local {
+        std::env::home_dir()
+            .and_then(|home| super::places::names(&home.to_string_lossy(), windows).ok())
+    } else {
+        info.capability(capability::FS_READ)
+            .and_then(|read| read.facts.get("home"))
+            .and_then(|home| super::places::names(home, windows).ok())
+    }
+    .map(|(names, _)| names);
+    Rules {
+        windows,
+        local,
+        home,
+    }
+}
+
 /// The person's protected places as the tools of an environment hold them, by the environment's path rules, and the modes of the
 /// connection's sessions.
 pub(crate) struct Guard {
@@ -674,29 +701,9 @@ impl Hub {
     /// the environment as it describes itself. `~/` is this computer's home where the environment shares its files, and the
     /// `home` its `fs.read` capability names elsewhere; with neither, a `~/` line protects nothing there.
     fn guard(&self, env: &Env, modes: &Arc<Modes>) -> Guard {
-        let info = env.info();
-        let local = info.local || env.name() == HERE;
-        let windows = if local {
-            cfg!(windows)
-        } else {
-            info.os == "windows"
-        };
-        let home = if local {
-            std::env::home_dir()
-                .and_then(|home| super::places::names(&home.to_string_lossy(), windows).ok())
-        } else {
-            info.capability(capability::FS_READ)
-                .and_then(|read| read.facts.get("home"))
-                .and_then(|home| super::places::names(home, windows).ok())
-        }
-        .map(|(names, _)| names);
         Guard {
             list: Arc::clone(&self.protected),
-            rules: Rules {
-                windows,
-                local,
-                home,
-            },
+            rules: path_rules(env),
             modes: Arc::clone(modes),
         }
     }
@@ -786,10 +793,17 @@ impl Hub {
                         )
                     })?;
                 let (program, before) = self.program();
+                // The environments whose tool servers the agent is given, with the path rules each is judged by.
+                let servers: Vec<(String, Rules)> = tools
+                    .iter()
+                    .chain(core::iter::once(&env))
+                    .map(|each| (server_name(each.name()), path_rules(each)))
+                    .collect();
                 let interception = Interception::open(
                     Arc::clone(&env),
                     (harness, hook),
                     (program, before),
+                    servers,
                     Arc::clone(&modes),
                     self.environments.message_bytes(),
                 )
@@ -1176,7 +1190,12 @@ impl Link {
         if self.is_closed() {
             return Err("the connection is closing".to_owned());
         }
-        let gained = interception.plugin_for(id)?;
+        let cwd = value
+            .pointer("/params/cwd")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let gained = interception.plugin_for(id, &cwd)?;
         let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) else {
             interception.answered(id, None);
             return Err("a session request with no parameters".to_owned());

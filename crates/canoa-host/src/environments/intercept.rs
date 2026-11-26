@@ -31,11 +31,15 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use canoa::environment::{EnvironmentInfo, capability};
-use canoa::vendor::{HookCommand, HookKind, HooksRequest, ShellFamily, ToolHook, ToolRole};
+use canoa::vendor::{
+    HookCommand, HookKind, HooksRequest, RulesRequest, ShellFamily, ToolHook, ToolRole,
+};
 use coqui_acp_api::{ErrorOutput, SpawnSpec};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
+use super::person::{self, Judged};
+use super::places::Rules;
 use super::remote::{Remote, code_of};
 use super::{Env, lock};
 use crate::profile::hosted::{
@@ -50,6 +54,9 @@ pub(crate) const KIND_EXEC: &str = "env-exec";
 pub(crate) const KIND_START: &str = "env-start";
 /// The file in a session request's directory that holds the channel.
 const CHANNEL_FILE: &str = "channel.json";
+/// The key under which a forwarder gives the host the value of the variable the agent's folder is named by, in the payload it sends
+/// (the agent's own payload never holds it: the forwarder takes it out first).
+const HOME_KEY: &str = "canoa_home";
 /// The longest channel file the forwarder reads: the host writes an address, a secret and two numbers.
 const MAX_CHANNEL_FILE: u64 = 4096;
 /// What a request adds to the payload it carries, and the most an answer's header may hold.
@@ -139,6 +146,8 @@ pub(crate) enum Verdict {
     Rewrite(Map<String, Value>),
     /// The tool acts on nothing of this computer's: it goes on as it is.
     Pass,
+    /// The person is asked about the call, whatever the agent's mode and rules say, for this reason.
+    Ask(String),
 }
 
 /// Whether `text` holds `word` as a word of its own, whatever its case.
@@ -257,19 +266,32 @@ fn files_refused(hook: &ToolHook, (env, info): (&str, &EnvironmentInfo), tool: &
     )
 }
 
+/// What the person's own rules make of a call of the tool `name` with the input: a refusal, a question, or nothing.
+type Person<'a> = &'a mut dyn FnMut(&str, &Map<String, Value>) -> Option<Judged>;
+
 /// What `payload`, a hook's payload in the terms `hook` describes, is answered, for a session in `session` mode, in the environment
 /// `env` as `info` described it when the take-over began: nothing here waits on the environment. `prepare` keeps a command for
-/// `env-exec` and gives the command that runs it, or why it cannot.
+/// `env-exec` and gives the command that runs it, or why it cannot. `person` is asked about every call first: the person's own
+/// rules reach the tools of an environment through it, whatever mode the agent is in.
 pub(crate) fn evaluate(
     hook: &ToolHook,
     (env, info): (&str, &EnvironmentInfo),
     session: Mode,
     payload: &Value,
     prepare: &mut dyn FnMut(ShellFamily, &str) -> Result<String, String>,
+    person: Person<'_>,
 ) -> Verdict {
     let Some(name) = payload.pointer(&hook.name_at).and_then(Value::as_str) else {
         return Verdict::Deny("the hook's payload names no tool".to_owned());
     };
+    if let Some(input) = payload.pointer(&hook.input_at).and_then(Value::as_object)
+        && let Some(judged) = person(name, input)
+    {
+        return match judged {
+            Judged::Deny(why) => Verdict::Deny(why),
+            Judged::Ask(why) => Verdict::Ask(why),
+        };
+    }
     if hook
         .pass_prefixes
         .iter()
@@ -305,7 +327,7 @@ pub(crate) fn evaluate(
     let mode = session.min(reported);
     match tool.role {
         ToolRole::Files => Verdict::Deny(files_refused(hook, (env, info), name)),
-        ToolRole::Shell => {
+        ToolRole::Shell | ToolRole::Background => {
             if let Err(why) = super::offered(env, info.clone(), capability::EXEC) {
                 return Verdict::Deny(why);
             }
@@ -341,6 +363,16 @@ pub(crate) fn answer(hook: &ToolHook, verdict: Verdict) -> Option<String> {
     let (form, at, value) = match verdict {
         Verdict::Pass => return Some(String::new()),
         Verdict::Deny(why) => (&hook.deny, &hook.deny_reason_at, Value::String(why)),
+        Verdict::Ask(why) => match (&hook.ask, &hook.ask_reason_at) {
+            (Some(form), Some(at)) => (form, at, Value::String(why)),
+            _ => (
+                &hook.deny,
+                &hook.deny_reason_at,
+                Value::String(format!(
+                    "{why} The agent has no way to ask the person about a call here, so it is refused."
+                )),
+            ),
+        },
         Verdict::Rewrite(input) => (&hook.rewrite, &hook.rewrite_input_at, Value::Object(input)),
     };
     let mut document: Value = serde_json::from_str(form).ok()?;
@@ -362,6 +394,8 @@ struct Op {
 struct Holder {
     /// The ACP session, once the agent has answered.
     session: Option<String>,
+    /// The folder the session works in on this computer, where the agent reads the project's own settings.
+    cwd: String,
     channel: PathBuf,
     /// The agent's session started with the hook in force: the plugin's start hook reported.
     started: bool,
@@ -373,6 +407,14 @@ struct Shared {
     /// What the environment said of itself when the take-over began, which a tool call is judged by.
     info: EnvironmentInfo,
     hook: ToolHook,
+    /// The agent the hook is for: its vendor reads the person's rules.
+    harness: String,
+    /// The path rules of each environment server's environment, by the server's name.
+    servers: Vec<(String, Rules)>,
+    /// The variable that names the folder the agent keeps its own files in, which the forwarder reads where the agent runs it.
+    home_variable: Option<String>,
+    /// Whether the agent's own folder is looked for where its process names none: the person's, as the agent finds it itself.
+    own_folder: AtomicBool,
     modes: Arc<Modes>,
     program: String,
     before: Vec<String>,
@@ -431,6 +473,7 @@ impl Interception {
         env: Arc<Env>,
         (harness, hook): (&str, ToolHook),
         (program, before): (&str, &[String]),
+        servers: Vec<(String, Rules)>,
         modes: Arc<Modes>,
         max_bytes: usize,
     ) -> std::io::Result<Self> {
@@ -452,6 +495,12 @@ impl Interception {
             env,
             info,
             hook,
+            harness: harness.to_owned(),
+            servers,
+            own_folder: AtomicBool::new(true),
+            home_variable: crate::vendors::by_agent(harness)
+                .and_then(|vendor| vendor.home_variable)
+                .map(str::to_owned),
             modes,
             program: program.to_owned(),
             before: before.to_vec(),
@@ -479,13 +528,13 @@ impl Interception {
         })
     }
 
-    /// The `_meta` a session request (its JSON-RPC id `request`) gains to load the plugin of the agent's hook, written for it with
-    /// a secret of its own.
+    /// The `_meta` a session request (its JSON-RPC id `request`, for a session that works in `cwd`) gains to load the plugin of the
+    /// agent's hook, written for it with a secret of its own.
     ///
     /// # Errors
     ///
     /// Why it cannot be given, for the client: the session would run the agent's tools on this computer, so it is refused.
-    pub(crate) fn plugin_for(&self, request: &str) -> Result<Value, String> {
+    pub(crate) fn plugin_for(&self, request: &str, cwd: &str) -> Result<Value, String> {
         let refused = |why: String| {
             format!(
                 "this session's tools are served from environment {}, and the hook that runs them there could not be given ({why})",
@@ -498,6 +547,7 @@ impl Interception {
             "secret": &secret,
             "max_bytes": self.shared.max_bytes,
             "seconds": self.shared.seconds,
+            "home_variable": self.shared.home_variable,
         })
         .to_string()
         .into_bytes();
@@ -535,6 +585,7 @@ impl Interception {
             secret.clone(),
             Holder {
                 session: None,
+                cwd: cwd.to_owned(),
                 channel: at,
                 started: false,
             },
@@ -764,7 +815,12 @@ fn handle(stream: &TcpStream, shared: &Shared) {
                 .session
                 .as_deref()
                 .map_or(Mode::Manual, |session| shared.modes.of(session));
-            let payload = payload.and_then(|text| serde_json::from_str::<Value>(text).ok());
+            let mut payload = payload.and_then(|text| serde_json::from_str::<Value>(text).ok());
+            let home = payload
+                .as_mut()
+                .and_then(Value::as_object_mut)
+                .and_then(|payload| payload.remove(HOME_KEY))
+                .and_then(|home| home.as_str().map(str::to_owned));
             let verdict = match &payload {
                 Some(payload) => evaluate(
                     &shared.hook,
@@ -772,6 +828,7 @@ fn handle(stream: &TcpStream, shared: &Shared) {
                     mode,
                     payload,
                     &mut |shell, command| shared.prepare(secret, &holder.channel, shell, command),
+                    &mut |name, input| shared.person(&holder, home.as_deref(), (name, input)),
                 ),
                 None => Verdict::Deny("the forwarder sent no payload".to_owned()),
             };
@@ -797,6 +854,39 @@ fn handle(stream: &TcpStream, shared: &Shared) {
 }
 
 impl Shared {
+    /// What the person's own rules make of the call `name` with `input` in the session `holder` is: only a call to a tool of an
+    /// environment is judged, by the rules the agent's vendor reads where the agent reads them (`home` is the agent's own folder
+    /// as the agent's process names it, when it does).
+    fn person(
+        &self,
+        holder: &Holder,
+        home: Option<&str>,
+        call: (&str, &Map<String, Value>),
+    ) -> Option<Judged> {
+        let load = || {
+            let folder = home
+                .filter(|home| Path::new(home).is_absolute())
+                .map(str::to_owned)
+                .or_else(|| {
+                    if !self.own_folder.load(Ordering::SeqCst) {
+                        return None;
+                    }
+                    crate::vendors::by_agent(&self.harness)
+                        .and_then(|vendor| {
+                            vendor.folder(std::env::home_dir().as_deref(), &|name| {
+                                std::env::var_os(name)
+                            })
+                        })
+                        .map(|folder| folder.to_string_lossy().into_owned())
+                });
+            let request = RulesRequest::new(folder, holder.cwd.clone());
+            crate::vendors::behave(&self.harness, |vendor| vendor.person_rules(request))
+                .and_then(Result::ok)
+                .unwrap_or_default()
+        };
+        person::judge(&self.hook, &self.servers, &load, call)
+    }
+
     /// Keeps `command` for an `env-exec` of the session holding `secret`, and gives the command that runs it.
     fn prepare(
         &self,
@@ -1007,6 +1097,8 @@ struct Channel {
     secret: String,
     max_bytes: usize,
     seconds: u64,
+    /// The variable whose value (the agent's own folder, in the agent's process) the forwarder gives the host.
+    home_variable: Option<String>,
 }
 
 fn read_channel(path: &Path) -> Result<Channel, String> {
@@ -1038,11 +1130,16 @@ fn read_channel(path: &Path) -> Result<Channel, String> {
         .and_then(Value::as_u64)
         .filter(|seconds| *seconds > 0)
         .ok_or("the channel names no time")?;
+    let home_variable = read
+        .get("home_variable")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     Ok(Channel {
         addr,
         secret,
         max_bytes,
         seconds,
+        home_variable,
     })
 }
 
@@ -1214,10 +1311,19 @@ fn tool(channel: &Path, stdin: impl Read) -> Result<String, String> {
             channel.max_bytes
         ));
     }
-    let payload: Value =
+    let mut payload: Value =
         serde_json::from_slice(&bytes).map_err(|_| "the call is not a JSON document".to_owned())?;
-    if !payload.is_object() {
+    let Some(object) = payload.as_object_mut() else {
         return Err("the call is not a JSON object".to_owned());
+    };
+    // The host reads the agent's own settings from the folder this process's environment names, which the agent set for its hook.
+    object.remove(HOME_KEY);
+    if let Some(home) = channel
+        .home_variable
+        .as_deref()
+        .and_then(|variable| std::env::var(variable).ok())
+    {
+        object.insert(HOME_KEY.to_owned(), Value::String(home));
     }
     let payload = payload.to_string();
     let nonce = random_hex().map_err(|error| error.to_string())?;
