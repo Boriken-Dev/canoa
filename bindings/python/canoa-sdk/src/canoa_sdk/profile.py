@@ -14,7 +14,7 @@ programs use and notes for the report. An item changes nothing outside the effec
 
 The classes that mirror what Canoa carries are `SettingProfileItem` (one text becomes one of the session's own settings, as the
 model, effort, mode and starting instructions items do), `EnvProfileItem` (values become environment variables, as the identity item
-does) and `NetworkProfileItem` (values become how the session's programs reach the network, as the proxy item does).
+does) and `NetworkProfileItem` (values become the routes the session's programs reach the network by, as the network item does).
 """
 
 from __future__ import annotations
@@ -36,9 +36,8 @@ from .forms import form_of
 __all__ = [
     "EnvProfileItem",
     "ItemEffect",
-    "NETWORK_MODES",
-    "NetworkEffect",
     "NetworkProfileItem",
+    "RouteEffect",
     "ProfileItem",
     "SettingProfileItem",
     "effect",
@@ -47,24 +46,15 @@ __all__ = [
     "words_of",
 ]
 
-#: The ways an effect says the session reaches the network.
-NETWORK_MODES = ("system", "none", "proxy", "pac", "command")
-
-
 @dataclass
-class NetworkEffect(Model):
-    """How the session's programs reach the network: `mode` is one of `NETWORK_MODES`; `url` is the proxy's address (`proxy`) or the PAC
-    script's location (`pac`); `command` the program and its arguments (`command`, with `{listen}` for the address it must listen on);
-    `bypass` the hosts that go direct, in the `NO_PROXY` form; `user` and `password_variable` the proxy login (the name of a host
-    variable holding the password, never the password); `intercept` the `{pattern, identity}` entries whose destinations get a
-    client certificate (`system` and `pac` only)."""
+class RouteEffect(Model):
+    """How the session's programs reach the network: `routes` the `{route, hosts}` rules, in order (`route` the name of a route the
+    host has, `hosts` the destinations it is for, none for every destination no other rule names); `bypass` the hosts that go direct,
+    in the `NO_PROXY` form; `intercept` the `{pattern, identity}` entries whose destinations get a client certificate. No routes
+    leaves the session on the host's own."""
 
-    mode: str
-    url: Optional[str] = None
-    command: List[str] = field(default_factory=list)
+    routes: List[Dict[str, Any]] = field(default_factory=list)
     bypass: List[str] = field(default_factory=list)
-    user: Optional[str] = None
-    password_variable: Optional[str] = None
     intercept: List[Dict[str, str]] = field(default_factory=list)
 
 
@@ -76,7 +66,7 @@ class ItemEffect(Model):
     env: List[Dict[str, str]] = field(default_factory=list)
     args: List[str] = field(default_factory=list)
     settings: List[Dict[str, str]] = field(default_factory=list)
-    network: Optional[NetworkEffect] = None
+    network: Optional[RouteEffect] = None
     notes: List[str] = field(default_factory=list)
 
 
@@ -84,7 +74,7 @@ def effect(
     env: Sequence[Mapping[str, str]] = (),
     args: Sequence[str] = (),
     settings: Sequence[Mapping[str, str]] = (),
-    network: Optional[NetworkEffect] = None,
+    network: Optional[RouteEffect] = None,
     notes: Sequence[str] = (),
 ) -> Dict[str, Any]:
     """An effect as the plain map the host reads."""
@@ -202,13 +192,22 @@ class EnvProfileItem(ProfileItem, abstract=True):
         return effect(env=env, notes=[self.note] if env else [])
 
 
-_NETWORK_NOTES = {
-    "none": "gives its programs no proxy",
-    "proxy": "gives its programs the proxy it names and uses it for the host's own requests for the session",
-    "pac": "gives its programs a proxy of the host's that chooses by the PAC script",
-    "command": "runs the program it names and gives it to its programs as their proxy",
-    "system": "gives its programs a proxy of the host's that follows the system",
-}
+def _routes(values: Mapping[str, Any], name: str) -> List[Dict[str, Any]]:
+    entries = values.get(name)
+    if entries is None:
+        return []
+    wrong = BadValue(f"each entry of {name} has a route and the hosts it is for")
+    if not isinstance(entries, list):
+        raise wrong
+    found: List[Dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("route"), str) or not entry["route"].strip():
+            raise wrong
+        hosts = entry.get("hosts")
+        if hosts is not None and not (isinstance(hosts, list) and all(isinstance(host, str) for host in hosts)):
+            raise wrong
+        found.append({"route": entry["route"].strip(), "hosts": list(hosts or [])})
+    return found
 
 
 def _certificate_hosts(values: Mapping[str, Any], name: str) -> List[Dict[str, str]]:
@@ -230,30 +229,21 @@ def _certificate_hosts(values: Mapping[str, Any], name: str) -> List[Dict[str, s
 
 
 class NetworkProfileItem(ProfileItem, abstract=True):
-    """Values become how the session's programs reach the network. The members are the proxy item's: `mode` (one of
-    `NETWORK_MODES`, `system` when absent), `url`, `command`, `bypass`, `user`, `password_variable` and `client_certificate_hosts`
-    (entries `{pattern, identity}`). The proxy itself is the host's: this only says which network the values ask for, which the host
-    checks and runs."""
+    """Values become the routes the session's programs reach the network by. The members are the network item's: `routes` (entries
+    `{route, hosts}`, the first with hosts that matches a destination deciding), `bypass` and `client_certificate_hosts` (entries
+    `{pattern, identity}`). A route is a name of the host's, never an address or a program: the host checks the names and opens them."""
 
     def apply(self, request: Ref) -> ValueAnswer:
         values = values_of(request)
-        mode = text_of(values, "mode") or "system"
-        if mode not in NETWORK_MODES:
-            raise BadValue(f"the network mode {json.dumps(mode)} is none of {json.dumps(list(NETWORK_MODES))}")
-        network = NetworkEffect(
-            mode=mode,
-            url=text_of(values, "url"),
-            command=words_of(values, "command"),
+        network = RouteEffect(
+            routes=_routes(values, "routes"),
             bypass=words_of(values, "bypass"),
-            user=text_of(values, "user"),
-            password_variable=text_of(values, "password_variable"),
             intercept=_certificate_hosts(values, "client_certificate_hosts"),
         )
-        if mode in ("proxy", "pac") and not network.url:
-            raise BadValue(f"the network mode {mode} needs an address")
-        if mode == "command" and not (network.command and network.command[0]):
-            raise BadValue("the network mode command needs a program")
-        notes = [_NETWORK_NOTES[mode]]
+        if sum(1 for rule in network.routes if not rule["hosts"]) > 1:
+            raise BadValue("only one route may name no hosts: it is the one for every other destination")
+        named = ", ".join(rule["route"] for rule in network.routes)
+        notes = [f"sends its programs' traffic by {named}" if named else "leaves its programs on the host's route"]
         ended = ", ".join(entry["pattern"].strip() for entry in network.intercept)
         if ended:
             notes.append(f"ends TLS for {ended} to present your client certificate to them")

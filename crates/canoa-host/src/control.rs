@@ -171,7 +171,7 @@ pub(crate) struct Control {
     fetch: fetch::Fetch,
     /// The connections the app makes to a remote host, carried through this host's network.
     tunnel: tunnel::Tunnel,
-    /// The client certificates a profile's proxy item may name.
+    /// The client certificates a profile's network item may name.
     client_certificates: client_certificates::ClientCertificates,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
@@ -1186,6 +1186,8 @@ mod looks;
 #[cfg(test)]
 mod looks_tests;
 mod network_routes;
+#[cfg(test)]
+mod network_routes_tests;
 pub(crate) mod notify;
 #[cfg(test)]
 mod notify_tests;

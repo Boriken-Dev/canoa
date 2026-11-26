@@ -25,7 +25,7 @@ fn the_list_is_what_the_loaded_providers_say_of_their_items() {
     assert_eq!(
         ids,
         [
-            "access", "context", "effort", "mode", "model", "identity", "proxy", "region"
+            "access", "context", "effort", "mode", "model", "identity", "network", "region"
         ]
     );
     let region = row(&answer, "region");
@@ -50,7 +50,7 @@ fn the_list_is_what_the_loaded_providers_say_of_their_items() {
     let access = row(&answer, "access");
     assert_eq!(access["stored"], "setting");
     assert_eq!(access["origin"], "built-in");
-    assert_eq!(row(&answer, "proxy")["origin"], "bundled");
+    assert_eq!(row(&answer, "network")["origin"], "bundled");
 }
 
 #[test]
@@ -100,16 +100,16 @@ fn the_list_is_read_with_the_grant_that_reads_the_configuration() {
     assert!(
         listed["result"]["items"]
             .as_array()
-            .is_some_and(|items| items.iter().any(|each| each["id"] == "proxy")),
+            .is_some_and(|items| items.iter().any(|each| each["id"] == "network")),
         "{listed}"
     );
 }
 
 #[test]
-fn the_proxy_item_asks_for_each_pattern_of_hosts_with_the_certificate_to_present_as_a_pick_from_the_hosts_list()
+fn the_network_item_asks_for_each_pattern_of_hosts_with_the_certificate_to_present_as_a_pick_from_the_hosts_list()
  {
     let answer = of(&ItemCatalog::built_in());
-    let proxy = row(&answer, "proxy");
+    let proxy = row(&answer, "network");
     let hosts = &proxy["schema"]["properties"]["client_certificate_hosts"];
     assert_eq!(hosts["type"], "array", "{hosts}");
     let entry = &hosts["items"];
@@ -124,11 +124,11 @@ fn the_proxy_item_asks_for_each_pattern_of_hosts_with_the_certificate_to_present
 }
 
 #[test]
-fn the_apps_fixture_is_the_proxy_item_this_build_lists() {
+fn the_apps_fixture_is_the_network_item_this_build_lists() {
     let answer = of(&ItemCatalog::built_in());
-    let listed = serde_json::json!({ "items": [row(&answer, "proxy")] });
+    let listed = serde_json::json!({ "items": [row(&answer, "network")] });
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../app/test/fixtures/profile_items_proxy.json");
+        .join("../../app/test/fixtures/profile_items_network.json");
     if std::env::var_os("CANOA_WRITE_PROFILE_ITEMS").is_some() {
         let mut text = serde_json::to_string_pretty(&listed).expect("rows are JSON");
         text.push('\n');

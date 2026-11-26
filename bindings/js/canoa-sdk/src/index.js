@@ -52,7 +52,6 @@ export { LogPanelTab, MAX_TAIL_LINES, PagePanelTab, PanelTab, TerminalPanelTab }
 export { FileViewer, MAX_RENDER_BYTES, PageViewer, SurfaceViewer, ViewedFile } from './viewer.js';
 export {
   EnvProfileItem,
-  NETWORK_MODES,
   NetworkProfileItem,
   ProfileItem,
   SettingProfileItem,

@@ -45,8 +45,8 @@ use canoa::notifier::{
 };
 use canoa::panel_tab::{PanelTabVtable, Shows, TabInfo, TailRequest};
 use canoa::profile_item::{
-    ApplyRequest, ClientCertificateHost, ItemEffect, ItemInfo, NetworkEffect, ProfileItemVtable,
-    Setting, Variable,
+    ApplyRequest, ClientCertificateHost, ItemEffect, ItemInfo, ProfileItemVtable, RouteEffect,
+    RouteRule, Setting, Variable,
 };
 use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
 use canoa::settings_section::{SectionInfo, SettingsSectionVtable, Stored};
@@ -305,7 +305,8 @@ fn the_committed_profile_item_schemas_are_what_this_build_describes() {
             ("ItemEffect", schema_of::<ItemEffect>()),
             ("Variable", schema_of::<Variable>()),
             ("Setting", schema_of::<Setting>()),
-            ("NetworkEffect", schema_of::<NetworkEffect>()),
+            ("RouteEffect", schema_of::<RouteEffect>()),
+            ("RouteRule", schema_of::<RouteRule>()),
             (
                 "ClientCertificateHost",
                 schema_of::<ClientCertificateHost>(),

@@ -10,7 +10,6 @@ import {
   CommandCatalogSource,
   EnvProfileItem,
   FormSecretProvider,
-  NETWORK_MODES,
   NetworkProfileItem,
   ProfileItem,
   ReadCatalogSource,
@@ -94,7 +93,6 @@ test('SecretProvider, FormSecretProvider, and SystemStoreSecretProvider validate
 });
 
 test('ProfileItem subclasses build settings, environment variables, and network effects', () => {
-  assert.deepEqual(NETWORK_MODES, ['system', 'none', 'proxy', 'pac', 'command']);
   assert.throws(() => valuesOf({ values: [] }), BadValue);
   assert.equal(textOf({ a: '  hi  ', b: '   ' }, 'a'), 'hi');
   assert.equal(textOf({ b: '   ' }, 'b'), undefined);
@@ -144,32 +142,30 @@ test('ProfileItem subclasses build settings, environment variables, and network 
   );
 
   class ProxyItem extends NetworkProfileItem {
-    static item = 'proxy';
-    static title = 'Proxy';
+    static item = 'network';
+    static title = 'Network';
   }
   assert.deepEqual(
     new ProxyItem().apply({
       harness: 'claude',
-      values: { mode: 'proxy', url: 'http://127.0.0.1:8888', client_certificate_hosts: [{ pattern: '*.corp' }] },
+      values: { routes: [{ route: 'corp', hosts: ['*.corp'] }], client_certificate_hosts: [{ pattern: '*.corp' }] },
     }),
     {
       env: [],
       args: [],
       settings: [],
       network: {
-        mode: 'proxy',
-        url: 'http://127.0.0.1:8888',
-        command: [],
+        routes: [{ route: 'corp', hosts: ['*.corp'] }],
         bypass: [],
         intercept: [{ pattern: '*.corp', identity: 'system' }],
       },
       notes: [
-        "gives its programs the proxy it names and uses it for the host's own requests for the session",
+        "sends its programs' traffic by corp",
         'ends TLS for *.corp to present your client certificate to them',
       ],
     },
   );
-  assert.throws(() => new ProxyItem().apply({ harness: 'claude', values: { mode: 'proxy' } }), BadValue);
+  assert.throws(() => new ProxyItem().apply({ harness: 'claude', values: { routes: [{ hosts: [] }] } }), BadValue);
   assert.deepEqual(effect({ args: ['--fast'] }), { env: [], args: ['--fast'], settings: [], notes: [] });
   assert.deepEqual(library('profile_test', '1', { providers: [ProfileItem, ModelItem] }).kinds, ['profile_item']);
 });

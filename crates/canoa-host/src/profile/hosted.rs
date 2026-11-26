@@ -446,14 +446,18 @@ impl Connection {
         })
     }
 
+    /// The network the session's programs are given, or why the session cannot start: a route its profile names that the host lacks,
+    /// or that does not open, refuses it, so no traffic leaves by a path the profile did not name.
     fn apply_session_network(
         applied: &[items::Applied],
-        lookup: &dyn Fn(&str) -> Option<String>,
+        account: (Option<&str>, &[(String, String)]),
         skills: &private::Private,
         env: &mut Vec<(String, Secret)>,
         notes: &mut Vec<Item>,
-    ) -> Option<crate::network::session::SessionNetwork> {
-        let asked = items::network_of(applied)?;
+    ) -> Result<Option<crate::network::session::SessionNetwork>, String> {
+        let Some(asked) = items::network_of(applied) else {
+            return Ok(None);
+        };
         let id = applied
             .iter()
             .rev()
@@ -474,11 +478,12 @@ impl Connection {
             Ok(dir) => crate::network::session::Services { private: *dir },
             Err(_) => crate::network::session::Services::default(),
         };
+        let extra = crate::network::session::account_rule(account.0, account.1);
         let made = match &private {
             Err(error) => Err(format!(
                 "the session's private directory could not be made: {error}"
             )),
-            Ok(_) => crate::network::session::start(asked, lookup, &services),
+            Ok(_) => crate::network::session::start(asked, &extra, &services),
         };
         match made {
             Ok(started) => {
@@ -493,16 +498,16 @@ impl Connection {
                     State::Applied,
                     format!("its programs reach the network {}", started.description),
                 ));
-                Some(started)
+                Ok(Some(started))
             }
             Err(why) => {
                 notes.push(Item::new(
                     format!("items.{id}.network"),
                     &layer,
                     State::Refused,
-                    why,
+                    why.clone(),
                 ));
-                None
+                Err(format!("the session's network: {why}"))
             }
         }
     }
@@ -691,8 +696,13 @@ impl Connection {
             );
             let mut env = resolved.env;
             put_first_on_path(&mut env, &command_dirs, lookup);
-            let session_network =
-                Self::apply_session_network(&applied, lookup, &skills, &mut env, &mut notes);
+            let session_network = Self::apply_session_network(
+                &applied,
+                (starting_with.who.account, &starting_with.account),
+                &skills,
+                &mut env,
+                &mut notes,
+            )?;
             (hooks, pre_env, scripts, env, session_network)
         };
         // An overlay prepared for this version tells its processes where its root and state directories are.

@@ -1,4 +1,4 @@
-//! `network/client_certificates`: the client certificates this host can present, for a profile's proxy item to offer as a person
+//! `network/client_certificates`: the client certificates this host can present, for a profile's network item to offer as a person
 //! offers a browser's: which one each pattern of hosts is given. What it lists is what the certificate says of itself and never a
 //! key.
 
@@ -30,7 +30,7 @@ impl ClientCertificates {
     }
 
     /// `{"certificates": [{"thumbprint", "subject", "issuer", "not_after", "source"}]}`, the ones expiring last first: `thumbprint`
-    /// is the SHA-256 of the certificate in lower-case hex, which a proxy item names a certificate by; `not_after` is seconds since
+    /// is the SHA-256 of the certificate in lower-case hex, which a network item names a certificate by; `not_after` is seconds since
     /// the Unix epoch; `source` says where it is held (the operating system's keystore, a PKCS#11 token, or the file
     /// `[host.network] client_certificate` names).
     pub(crate) fn list(&self) -> Value {

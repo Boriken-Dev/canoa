@@ -1,4 +1,4 @@
-//! `network/client_certificates` over stand-in keystores: what a profile's proxy item is offered to choose between.
+//! `network/client_certificates` over stand-in keystores: what a profile's network item is offered to choose between.
 
 use std::sync::Arc;
 

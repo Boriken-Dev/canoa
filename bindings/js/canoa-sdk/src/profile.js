@@ -13,15 +13,12 @@
 //
 // The classes that mirror what Canoa carries: `SettingProfileItem` (one text becomes one of the session's own settings, as the model,
 // effort, mode and starting instructions items do), `EnvProfileItem` (values become environment variables, as the identity item does)
-// and `NetworkProfileItem` (values become how the session's programs reach the network, as the proxy item does).
+// and `NetworkProfileItem` (values become the routes the session's programs reach the network by, as the network item does).
 import { BadValue, Unsupported } from 'guatiao';
 import { Provider } from 'guatiao/provide';
 
 import * as kinds from './kinds.js';
 import { dataOf } from './model.js';
-
-/** The ways an effect says the session reaches the network. */
-export const NETWORK_MODES = ['system', 'none', 'proxy', 'pac', 'command'];
 
 /**
  * The values a profile holds for the item, as an object keyed by the schema's member names: what `apply` is asked with.
@@ -172,41 +169,45 @@ function certificateHosts(values, name) {
   });
 }
 
-/** @type {Record<string, string>} */
-const NETWORK_NOTES = {
-  none: 'gives its programs no proxy',
-  proxy: 'gives its programs the proxy it names and uses it for the host\'s own requests for the session',
-  pac: 'gives its programs a proxy of the host\'s that chooses by the PAC script',
-  command: 'runs the program it names and gives it to its programs as their proxy',
-  system: 'gives its programs a proxy of the host\'s that follows the system',
-};
+/**
+ * The rules of the list `name`, each an object with a `route` (the name of one of the host's) and the `hosts` it is for.
+ * @param {Record<string, unknown>} values
+ * @param {string} name
+ * @returns {{route: string, hosts: string[]}[]}
+ */
+function routeRules(values, name) {
+  const list = values[name];
+  if (list === undefined || list === null) return [];
+  const wrong = () => new BadValue(`each entry of ${name} has a route and the hosts it is for`);
+  if (!Array.isArray(list)) throw wrong();
+  return list.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw wrong();
+    if (typeof entry.route !== 'string' || entry.route.trim() === '') throw wrong();
+    const hosts = entry.hosts ?? [];
+    if (!Array.isArray(hosts) || !hosts.every((host) => typeof host === 'string')) throw wrong();
+    return { route: entry.route.trim(), hosts };
+  });
+}
 
 /**
- * Values become how the session's programs reach the network. The members are the proxy item's: `mode` (one of `NETWORK_MODES`,
- * `system` when absent), `url`, `command`, `bypass`, `user`, `password_variable` and `client_certificate_hosts` (entries
- * `{ pattern, identity }`). The proxy itself is the host's: this only says which network the values ask for, which the host checks
- * and runs.
+ * Values become the routes the session's programs reach the network by. The members are the network item's: `routes` (entries
+ * `{ route, hosts }`, the first with hosts that matches a destination deciding), `bypass` and `client_certificate_hosts` (entries
+ * `{ pattern, identity }`). A route is a name of the host's, never an address or a program: the host checks the names and opens them.
  */
 export class NetworkProfileItem extends ProfileItem {
   /** @param {{harness: string, values: Record<string, unknown>}} request */
   apply(request) {
     const values = valuesOf(request);
-    const mode = textOf(values, 'mode') ?? 'system';
-    if (!NETWORK_MODES.includes(mode)) {
-      throw new BadValue(`the network mode ${JSON.stringify(mode)} is none of ${JSON.stringify(NETWORK_MODES)}`);
-    }
-    const network = /** @type {{mode: string, url?: string, command: string[], bypass?: string[], intercept: {pattern: string}[]}} */ (dataOf({
-      mode,
-      url: textOf(values, 'url'),
-      command: wordsOf(values, 'command'),
+    const network = /** @type {{routes: {route: string, hosts: string[]}[], bypass: string[], intercept: {pattern: string}[]}} */ (dataOf({
+      routes: routeRules(values, 'routes'),
       bypass: wordsOf(values, 'bypass'),
-      user: textOf(values, 'user'),
-      password_variable: textOf(values, 'password_variable'),
       intercept: certificateHosts(values, 'client_certificate_hosts'),
     }));
-    if ((mode === 'proxy' || mode === 'pac') && !network.url) throw new BadValue(`the network mode ${mode} needs an address`);
-    if (mode === 'command' && !network.command[0]) throw new BadValue('the network mode command needs a program');
-    const notes = [NETWORK_NOTES[mode]];
+    if (network.routes.filter((rule) => rule.hosts.length === 0).length > 1) {
+      throw new BadValue('only one route may name no hosts: it is the one for every other destination');
+    }
+    const named = network.routes.map((rule) => rule.route).join(', ');
+    const notes = [named === '' ? "leaves its programs on the host's route" : `sends its programs' traffic by ${named}`];
     const ended = network.intercept.map((/** @type {{pattern: string}} */ entry) => entry.pattern.trim()).join(', ');
     if (ended !== '') notes.push(`ends TLS for ${ended} to present your client certificate to them`);
     return effect({ network, notes });

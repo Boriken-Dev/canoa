@@ -246,3 +246,93 @@ fn a_manual_route_judges_its_settings_with_nothing_started() {
     assert!(!problems_of(&catalog, &config, "pac", &json("{}")).is_empty());
     assert!(!problems_of(&catalog, &config, "command", &json("{}")).is_empty());
 }
+
+/// The program a `command` route starts is this test binary, told by its last argument where to listen (the stand-in of the session
+/// tests, which returns at once when run by a person).
+fn stand_in_command() -> serde_json::Value {
+    let exe = std::env::current_exe().expect("this program");
+    serde_json::json!({"command": [
+        exe.to_string_lossy(),
+        "--exact",
+        "network::session::tests::stand_in_proxy_program",
+        "{listen}"
+    ]})
+}
+
+#[test]
+fn a_command_route_starts_its_program_where_it_is_told_to_listen_and_stops_it_with_its_lease() {
+    use std::net::{SocketAddr, TcpStream};
+    use std::time::{Duration, Instant};
+
+    use canoa::network_route::OpenRequest;
+
+    let catalog = RouteCatalog::built_in();
+    let route = catalog
+        .instance("command", &stand_in_command())
+        .expect("a route");
+    assert_eq!(
+        route.describe().expect("described").sharing,
+        canoa::network_route::Sharing::PerSession,
+        "a program is a session's own unless the route says it is shared"
+    );
+    let lease = route
+        .open(OpenRequest::new("session:1"))
+        .expect("starts and listens");
+    let listen = lease
+        .status()
+        .expect("a status")
+        .address
+        .expect("where it listens");
+    let target: SocketAddr = listen.parse().expect("the address it was told");
+    assert!(TcpStream::connect_timeout(&target, Duration::from_secs(2)).is_ok());
+    // The host's own requests for what holds it leave through the program too.
+    let reach = lease.reach().expect("a reach");
+    let network = Network::from_reach(&reach).expect("a network");
+    let chosen = network
+        .resolver()
+        .lookup("https://api.example.test/")
+        .expect("a route");
+    assert!(format!("{chosen:?}").contains(&listen), "{chosen:?}");
+    drop(lease);
+    let started = Instant::now();
+    while TcpStream::connect_timeout(&target, Duration::from_millis(200)).is_ok() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the program still listens after its lease ended"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn a_command_route_that_cannot_start_or_names_no_program_says_so() {
+    use canoa::network_route::OpenRequest;
+
+    let catalog = RouteCatalog::built_in();
+    let missing = catalog
+        .instance(
+            "command",
+            &serde_json::json!({"command": ["/no/such/program"]}),
+        )
+        .expect("a route");
+    let error = missing
+        .open(OpenRequest::new("host"))
+        .err()
+        .expect("refused");
+    assert!(
+        error.message().contains("could not start"),
+        "{}",
+        error.message()
+    );
+    let none = catalog
+        .instance("command", &serde_json::json!({}))
+        .expect("a route");
+    assert!(
+        !none
+            .check(OpenRequest::new("host"))
+            .expect("judged")
+            .problems
+            .is_empty()
+    );
+    assert!(none.open(OpenRequest::new("host")).is_err());
+}

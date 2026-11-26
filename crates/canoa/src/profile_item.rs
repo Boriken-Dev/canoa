@@ -168,70 +168,56 @@ impl Setting {
     }
 }
 
-/// How [`NetworkEffect::mode`] says the session reaches the network.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
-#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
+/// One route a session's programs leave by, and the destinations it is for.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
-pub enum NetworkMode {
-    /// The host runs a proxy on its loopback address for this session alone, which sends each connection as the host's own network
-    /// would (the system's proxy with its PAC, WPAD and login), and the session's programs are given it.
-    System,
-    /// The session's programs are given no proxy, and what they inherit is theirs.
-    None,
-    /// The proxy at `url`, given to the programs as it is and used by the host's own requests for the session.
-    Proxy,
-    /// As `system`, choosing by the PAC script at `url`.
-    Pac,
-    /// A program the host starts for the session, which listens where it is told and is given to the programs as their proxy.
-    Command,
+pub struct RouteRule {
+    /// The name of a route the host has: `system`, `direct` or one of `[network.routes]`. A route the host lacks, or one that does
+    /// not open, refuses the session's start.
+    pub route: String,
+    /// The destinations it is for, each a host name, `*.name`, an address or a regular expression ([`HostPattern`]); none means every
+    /// destination no other rule names.
+    #[map(default)]
+    pub hosts: Vec<String>,
 }
 
-impl NetworkMode {
-    /// All supported network modes.
-    pub const ALL: [Self; 5] = [
-        Self::System,
-        Self::None,
-        Self::Proxy,
-        Self::Pac,
-        Self::Command,
-    ];
-
-    /// The mode's canonical lower-case name.
+impl RouteRule {
+    /// `route` for every destination no other rule names.
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::System => "system",
-            Self::None => "none",
-            Self::Proxy => "proxy",
-            Self::Pac => "pac",
-            Self::Command => "command",
+    pub fn new(route: impl Into<String>) -> Self {
+        Self {
+            route: route.into(),
+            hosts: Vec::new(),
+        }
+    }
+
+    /// `route` for the destinations `hosts` name.
+    #[must_use]
+    pub fn for_hosts(route: impl Into<String>, hosts: Vec<String>) -> Self {
+        Self {
+            route: route.into(),
+            hosts,
         }
     }
 }
 
-/// How the session's programs reach the network.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+/// How the session's programs reach the network: the routes of the host that carry what they send, and what the host's proxy for the
+/// session does with it. The first rule with hosts that matches a destination decides; then the account's own route for its own
+/// addresses; then the rule with no hosts; then the host's route.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq, Default)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
-pub struct NetworkEffect {
-    /// How the session reaches the network.
-    pub mode: NetworkMode,
-    /// The proxy's address for `proxy`, or the PAC script's location for `pac`.
-    pub url: Option<String>,
-    /// For `command`: the program and its arguments, in which `{listen}` stands for the loopback address `host:port` the host
-    /// tells it to listen on.
+pub struct RouteEffect {
+    /// The routes, in order. Empty leaves the session on the host's route.
     #[map(default)]
-    pub command: Vec<String>,
-    /// Hosts that go direct, in the `NO_PROXY` form; empty keeps what the network chooses.
+    pub routes: Vec<RouteRule>,
+    /// Hosts that go direct, in the `NO_PROXY` form; empty keeps what the routes choose.
     #[map(default)]
     pub bypass: Vec<String>,
-    /// A user name for the proxy, for `proxy` and `pac`.
-    pub user: Option<String>,
-    /// The name of the host's environment variable that holds that user's password; the password itself is never in a profile.
-    pub password_variable: Option<String>,
     /// The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order:
-    /// the first entry whose pattern matches a destination says which certificate it gets. Only `system` and `pac`, which run that
-    /// proxy, take it; every destination no entry matches stays a tunnel the program's own TLS runs through.
+    /// the first entry whose pattern matches a destination says which certificate it gets; every destination no entry matches stays a
+    /// tunnel the program's own TLS runs through.
     #[map(default)]
     pub intercept: Vec<ClientCertificateHost>,
 }
@@ -455,54 +441,33 @@ impl HostPattern {
     }
 }
 
-impl NetworkEffect {
-    /// A network of `mode`.
+impl RouteEffect {
+    /// Routes that say nothing: the host's own.
     #[must_use]
-    pub const fn new(mode: NetworkMode) -> Self {
-        Self {
-            mode,
-            url: None,
-            command: Vec::new(),
-            bypass: Vec::new(),
-            user: None,
-            password_variable: None,
-            intercept: Vec::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Why this effect cannot be applied, or `None` when it can.
     #[must_use]
     pub fn problem(&self) -> Option<String> {
-        let needs = |what: &str, given: bool| {
-            (!given).then(|| alloc::format!("the network mode {} needs {what}", self.mode.as_str()))
-        };
-        if let Some(why) = self.intercept_problem() {
-            return Some(why);
+        let mut general = 0;
+        for rule in &self.routes {
+            if rule.route.trim().is_empty() {
+                return Some(String::from("a route of the network item has no name"));
+            }
+            if rule.hosts.is_empty() {
+                general += 1;
+            }
+            for host in &rule.hosts {
+                if let Err(error) = HostPattern::parse(host) {
+                    return Some(alloc::format!("the hosts of route {}: {error}", rule.route));
+                }
+            }
         }
-        match self.mode {
-            NetworkMode::Proxy | NetworkMode::Pac => needs(
-                "an address",
-                self.url.as_deref().is_some_and(|url| !url.is_empty()),
-            ),
-            NetworkMode::Command => needs(
-                "a program",
-                self.command.first().is_some_and(|word| !word.is_empty()),
-            ),
-            NetworkMode::System | NetworkMode::None => None,
-        }
-    }
-}
-
-impl NetworkEffect {
-    /// Why [`NetworkEffect::intercept`] cannot be used, or `None`.
-    fn intercept_problem(&self) -> Option<String> {
-        if self.intercept.is_empty() {
-            return None;
-        }
-        if !matches!(self.mode, NetworkMode::System | NetworkMode::Pac) {
-            return Some(alloc::format!(
-                "a client certificate is carried by the host's own proxy, which the network mode {} does not run: use system or pac",
-                self.mode.as_str()
+        if general > 1 {
+            return Some(String::from(
+                "only one route of the network item may name no hosts: it is the one for every other destination",
             ));
         }
         self.intercept.iter().find_map(|entry| {
@@ -531,8 +496,8 @@ pub struct ItemEffect {
     /// Values of the session's own settings.
     #[map(default)]
     pub settings: Vec<Setting>,
-    /// The network its programs use.
-    pub network: Option<NetworkEffect>,
+    /// The routes its programs' network leaves by.
+    pub network: Option<RouteEffect>,
     /// What the report says of it, a line each, in the person's words.
     #[map(default)]
     pub notes: Vec<String>,
@@ -579,7 +544,7 @@ impl ItemEffect {
         if self.args.iter().any(|arg| arg.contains('\0')) {
             return Some("an argument holds a NUL".into());
         }
-        self.network.as_ref().and_then(NetworkEffect::problem)
+        self.network.as_ref().and_then(RouteEffect::problem)
     }
 }
 
@@ -660,66 +625,59 @@ mod tests {
         let mut bad = ItemEffect::none();
         bad.env.push(Variable::new("A", "x\0"));
         assert!(bad.problem().is_some());
-        for mode in NetworkMode::ALL {
-            let mut with = ItemEffect::none();
-            let mut network = NetworkEffect::new(mode);
-            network.url = Some("http://proxy.example:3128".into());
-            network.command = alloc::vec!["proxy".into(), "{listen}".into()];
-            with.network = Some(network);
-            assert_eq!(with.problem(), None, "{}", mode.as_str());
-        }
-        for (mode, why) in [
-            (NetworkMode::Proxy, "an address"),
-            (NetworkMode::Pac, "an address"),
-            (NetworkMode::Command, "a program"),
-        ] {
-            let mut bare = ItemEffect::none();
-            bare.network = Some(NetworkEffect::new(mode));
-            assert!(
-                bare.problem().is_some_and(|text| text.contains(why)),
-                "{}",
-                mode.as_str()
-            );
-        }
-        assert!(NetworkMode::from_value(&Value::from("tor")).is_err());
+        let mut with = ItemEffect::none();
+        let mut network = RouteEffect::new();
+        network.routes = alloc::vec![
+            RouteRule::for_hosts("gateway", alloc::vec!["*.internal.example".into()]),
+            RouteRule::new("corp"),
+        ];
+        with.network = Some(network);
+        assert_eq!(with.problem(), None);
+        let mut nameless = ItemEffect::none();
+        let mut network = RouteEffect::new();
+        network.routes = alloc::vec![RouteRule::new(" ")];
+        nameless.network = Some(network);
+        assert!(
+            nameless
+                .problem()
+                .is_some_and(|text| text.contains("no name"))
+        );
+        let mut twice = ItemEffect::none();
+        let mut network = RouteEffect::new();
+        network.routes = alloc::vec![RouteRule::new("a"), RouteRule::new("b")];
+        twice.network = Some(network);
+        assert!(
+            twice
+                .problem()
+                .is_some_and(|text| text.contains("no hosts"))
+        );
+        let mut bad = ItemEffect::none();
+        let mut network = RouteEffect::new();
+        network.routes = alloc::vec![RouteRule::for_hosts("a", alloc::vec!["(".into()])];
+        bad.network = Some(network);
+        assert!(bad.problem().is_some());
     }
 
     #[test]
-    fn hosts_that_get_a_client_certificate_are_patterns_and_need_the_proxy_the_host_runs() {
-        for mode in [NetworkMode::System, NetworkMode::Pac] {
-            let mut network = NetworkEffect::new(mode);
-            network.url = Some("proxy.pac".into());
-            network.intercept = alloc::vec![
-                ClientCertificateHost::new("example.com"),
-                ClientCertificateHost::new("*.corp.example"),
-                ClientCertificateHost::new("10.0.0.7"),
-                ClientCertificateHost::new("::1"),
-                ClientCertificateHost::new("(api|auth)[.]example[.]com"),
-                ClientCertificateHost::new(".*"),
-                ClientCertificateHost::presenting("mtls[.].*", "AB:".repeat(31) + "AB"),
-            ];
-            assert_eq!(network.problem(), None, "{}", mode.as_str());
-        }
-        for mode in [NetworkMode::None, NetworkMode::Proxy, NetworkMode::Command] {
-            let mut network = NetworkEffect::new(mode);
-            network.url = Some("http://proxy.example:3128".into());
-            network.command = alloc::vec!["proxy".into()];
-            network.intercept = alloc::vec![ClientCertificateHost::new("example.com")];
-            assert!(
-                network
-                    .problem()
-                    .is_some_and(|why| why.contains("system or pac")),
-                "{}",
-                mode.as_str()
-            );
-        }
+    fn hosts_that_get_a_client_certificate_are_patterns() {
+        let mut network = RouteEffect::new();
+        network.intercept = alloc::vec![
+            ClientCertificateHost::new("example.com"),
+            ClientCertificateHost::new("*.corp.example"),
+            ClientCertificateHost::new("10.0.0.7"),
+            ClientCertificateHost::new("::1"),
+            ClientCertificateHost::new("(api|auth)[.]example[.]com"),
+            ClientCertificateHost::new(".*"),
+            ClientCertificateHost::presenting("mtls[.].*", "AB:".repeat(31) + "AB"),
+        ];
+        assert_eq!(network.problem(), None);
         for bad in ["", "(", "[a-", "*", "*.", "a{2,1}"] {
-            let mut network = NetworkEffect::new(NetworkMode::System);
+            let mut network = RouteEffect::new();
             network.intercept = alloc::vec![ClientCertificateHost::new(bad)];
             assert!(network.problem().is_some(), "{bad:?}");
         }
         for bad in ["me", "abcd", &"zz".repeat(32)] {
-            let mut network = NetworkEffect::new(NetworkMode::System);
+            let mut network = RouteEffect::new();
             network.intercept = alloc::vec![ClientCertificateHost::presenting(".*", bad)];
             assert!(
                 network

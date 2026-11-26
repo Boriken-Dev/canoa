@@ -44,8 +44,8 @@ class ProfileItem extends Provider {          // profile.js: one thing a profile
 }
 class SettingProfileItem extends ProfileItem  // one text becomes a session setting: static setting, member?, note
 class EnvProfileItem extends ProfileItem      // values become variables: static variables = {member: [NAMES]}, lines?, lineLabel, note
-class NetworkProfileItem extends ProfileItem  // values become a network effect, the proxy item's members (the proxy itself is the host's)
-valuesOf(request); textOf(values, name); wordsOf(values, name); effect({env, args, settings, network, notes}); NETWORK_MODES
+class NetworkProfileItem extends ProfileItem  // values become a route effect, the network item's members: `routes` ({route, hosts}), `bypass`, `client_certificate_hosts` (the routes are the host's)
+valuesOf(request); textOf(values, name); wordsOf(values, name); effect({env, args, settings, network, notes})
 class CatalogSource extends Provider {        // source.js: where a Store type's catalog comes from; read(request, spawner, fetch) -> the catalog's text
   static source; static title; static help; static types = [];     // source = the id canoa.cfg records; its provider id too
   static values; static form;

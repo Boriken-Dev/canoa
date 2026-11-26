@@ -176,7 +176,7 @@ context = "Answer briefly."
 What a profile may set is not a list in {{ name }}: each thing is an **item**, a provider of the `profile_item` kind that says its name, the
 harnesses it is for and the form it asks for, and that turns the values you gave it into what a session gets (environment
 variables, arguments for a program the host starts, values of the session's own settings, the network its programs use). The model,
-effort, mode, starting instructions and access are items {{ name }} carries, kept in a profile under their own keys; a proxy and an
+effort, mode, starting instructions and access are items {{ name }} carries, kept in a profile under their own keys; a network and an
 identity are items that ship with the host as scripts (JavaScript, offered as an extension's would be), and an extension of {{ config_file }}'s `[host.extensions]` (or a library or source
 an agent entry loads) adds more the same way. Settings → Profiles draws a form for each item the host lists
 (`profile_items/list`), and a profile keeps what you entered for an item under `items`:
@@ -191,9 +191,12 @@ email = "ana@example.test"
 account = "work"                       # what AGENTS_ACCOUNT says to the session's programs
 variables = ["TEAM=core"]              # any other NAME=value
 
-[profiles."Behind the gateway".items.proxy]
-mode = "system"                        # system (the default), none, proxy, pac or command
-client_certificate_hosts = [                       # system and pac: hosts the proxy presents a client certificate to, first match wins
+[profiles."Behind the gateway".items.network]
+routes = [                                          # routes of the host ([network.routes]), by name
+  { route = "gateway", hosts = ["*.internal.example"] },   # these destinations leave by gateway
+  { route = "corp" },                                      # every other destination of the session
+]
+client_certificate_hosts = [                       # hosts the host's proxy for the session presents a client certificate to, first match wins
   { pattern = "api.corp.example" },                # a host, *.name, an address or a regular expression matched against the whole host
   { pattern = "(db|cache)[.]corp[.]example", identity = "system" },   # system (the default) or a thumbprint the host lists
   { pattern = ".*", identity = "3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b" },   # every other host
@@ -209,28 +212,28 @@ extension back applies them again.
 **Identity** (`items.identity`): `name` and `email` become `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_AUTHOR_EMAIL` and
 `GIT_COMMITTER_EMAIL`; `account` is `AGENTS_ACCOUNT`; `variables` are further `NAME=value` lines.
 
-**Proxy** (`items.proxy`): how the session's programs reach the network, by `mode`:
+**Network** (`items.network`): the routes the session's programs leave by. A route is one of the host's (`system`, `direct`, or a table of
+`[network.routes]`: a proxy you typed, a PAC script, a program, or what an extension adds), defined once on this computer with its
+login and certificates, so a profile or an overlay shared between machines never carries a proxy address of its own. Which route
+carries a destination is decided in this order: the item's `routes` that name `hosts` (a host name, `*.name`, an address or a
+regular expression matched against the whole host), the first match winning; then the route of the account the session runs on, for
+the addresses that account sets for the agent; then the item's route with no `hosts`; then the host's route. `bypass` (in the
+`NO_PROXY` form) goes direct whatever the routes say. A route the host lacks, or one that does not open (a variable it names is not
+set, its program does not start), refuses the session's start and says which route and why, so traffic never leaves by a path the
+profile did not name.
 
-- `system` (the default): the host runs a proxy on its loopback address (the one other sessions with these settings share) and gives the programs
-  `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` for it (and `NO_PROXY` for this computer and `bypass`). It sends each connection
-  the way the host's own network does: the system's proxy chosen per destination (PAC, WPAD), logged in to as the host logs in
-  (Basic, Negotiate, NTLM) and carried through a CONNECT tunnel, with the hosts on `bypass` (in the `NO_PROXY` form) going
-  direct, so a program that only knows a plain proxy behaves as the system does. The programs' address carries a secret of the
-  proxy as its password, since the proxy answers with your own logon session: another process on this computer that
-  lacks it is refused. The proxy ends with the last session that uses it.
-- `none`: the programs are given `NO_PROXY=*` and no proxy: the host adds no system proxy to them, and a proxy variable they
-  inherit from you is overridden by it for a program that reads `NO_PROXY`. The host's own requests for the session (the
-  knowledge tools' search by meaning and by a model) go direct too.
-- `proxy`: the proxy at `url`, `[scheme://][user[:password]@]host[:port]`, given to the programs as it is; `user` and
-  `password_variable` (the name of a variable of the host that holds the password) log in to it.
-- `pac`: as `system`, choosing the route by the PAC script at `url` (an address, or a file), with `user` and `password_variable`
-  for a proxy it names.
-- `command`: a program of your own, `command` (the program first, then its arguments, in which `{listen}` is the `host:port` it
-  must listen on); the host starts it for the session, waits until it listens, gives its address to the programs and ends it with
-  the session.
+How the programs are given the network follows from what the routes are. One route for every destination that is a proxy is given as it
+is (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`, with the login in the address); a direct one is `NO_PROXY=*`, which the
+host adds no system proxy to. Anything else (the system's or a PAC script's choice, several routes, a client certificate) runs a
+proxy of the host's on its loopback address, shared by the sessions that make the same settings: the programs are given it for
+`HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`, and it sends each connection by the route that carries its destination, the system's
+proxy chosen per destination (PAC, WPAD), logged in to as the host logs in (Basic, Negotiate, NTLM) and carried through a CONNECT
+tunnel. The programs' address carries a secret of the proxy as its password, since the proxy answers with your own logon session:
+another process on this computer that lacks it is refused. The proxy ends with the last session that uses it. The host's own
+requests for the session (the knowledge tools' search by meaning and by a model) leave by the route with no `hosts`, else the host's.
 
-**A client certificate to an origin** (mTLS) is carried only where you ask, for the hosts `client_certificate_hosts` names, and only by
-the `system` and `pac` modes, whose proxy is the host's own. It is a list of entries, each a `pattern` and an `identity`; the first
+**A client certificate to an origin** (mTLS) is carried only where you ask, for the hosts `client_certificate_hosts` names, through the
+proxy the host runs for the session. It is a list of entries, each a `pattern` and an `identity`; the first
 entry whose pattern matches a destination decides, and a destination no entry matches is not touched. A `pattern` is a host name
 (`api.corp.example`), `*.name` for a name and everything under it, an address, or any other regular expression, which must match
 the whole host and ignores case (`(api|auth)[.]corp[.]example`; `.*` matches every host, so one entry can cover them all). It is
@@ -266,7 +269,7 @@ own trust (Windows' own tools, a browser) or pins the certificates it accepts fa
 that here. A host both matched here and on `bypass` is reached as the network chooses, not directly. What the session's report
 says of the proxy names the patterns it ends TLS for.
 
-**Sessions share a proxy.** The `system` and `pac` modes run one proxy for every session whose proxy item makes the same settings
+**Sessions share a proxy.** The host's proxy for a session is one proxy for every session whose proxy item makes the same settings
 (the routes, patterns and their certificates, and the network it follows), with a secret of its
 own: it starts when the first such session does and ends when the last does. `[network] idle_seconds` keeps it that
 long after its last session for the next one that asks (default 0: it ends with its last session).

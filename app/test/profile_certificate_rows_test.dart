@@ -8,8 +8,8 @@ import 'package:canoa/profile/profile_items.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// The proxy item as the host lists it (`profile_items/list`), written by canoa-host's own test from what the build answers.
-Object? _proxyAnswer() => jsonDecode(File('test/fixtures/profile_items_proxy.json').readAsStringSync());
+/// The network item as the host lists it (`profile_items/list`), written by canoa-host's own test from what the build answers.
+Object? _networkAnswer() => jsonDecode(File('test/fixtures/profile_items_network.json').readAsStringSync());
 
 /// What a stand-in host answers to `network/client_certificates`: one certificate that is good for years, one that has expired.
 Map<String, Object?> _certificatesAnswer() => {
@@ -34,9 +34,9 @@ Map<String, Object?> _certificatesAnswer() => {
 const _good = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
 const _old = '0f9e8d7c6b5a49382716a5b4c3d2e1f00f9e8d7c6b5a49382716a5b4c3d2e1f0';
 
-String _field(String suffix) => 'item-proxy-field-client_certificate_hosts-$suffix';
+String _field(String suffix) => 'item-network-field-client_certificate_hosts-$suffix';
 
-Preset _held(List<Map<String, Object?>> hosts) => Preset(items: {'proxy': {'client_certificate_hosts': hosts}});
+Preset _held(List<Map<String, Object?>> hosts) => Preset(items: {'network': {'client_certificate_hosts': hosts}});
 
 Future<List<(String, Preset)>> _pump(
   WidgetTester tester,
@@ -46,7 +46,7 @@ Future<List<(String, Preset)>> _pump(
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  final catalog = ProfileItemCatalog()..adopt(_proxyAnswer());
+  final catalog = ProfileItemCatalog()..adopt(_networkAnswer());
   final listed = ClientCertificateChoices()..adopt(certificates ?? _certificatesAnswer(), now: DateTime.utc(2026, 11, 19));
   final saved = <(String, Preset)>[];
   await tester.pumpWidget(
@@ -89,12 +89,12 @@ Future<void> _choose(WidgetTester tester, String control, String label) async {
   await tester.pumpAndSettle();
 }
 
-List<Object?> _hosts(Preset preset) => preset.items['proxy']!['client_certificate_hosts']! as List<Object?>;
+List<Object?> _hosts(Preset preset) => preset.items['network']!['client_certificate_hosts']! as List<Object?>;
 
 void main() {
   test('the host\'s own answer asks for rows whose certificate is a pick, and the catalog knows to fetch the list', () {
-    final catalog = ProfileItemCatalog()..adopt(_proxyAnswer());
-    final proxy = catalog.byId('proxy')!;
+    final catalog = ProfileItemCatalog()..adopt(_networkAnswer());
+    final proxy = catalog.byId('network')!;
     expect(proxy.asksForClientCertificate, isTrue);
     expect(catalog.asksForClientCertificate, isTrue);
     expect(ProfileItemCatalog().asksForClientCertificate, isFalse);
@@ -120,7 +120,7 @@ void main() {
   });
 
   test('rows are kept in their order, a row nobody filled is dropped and a row without its required member is a problem', () {
-    final proxy = (ProfileItemCatalog()..adopt(_proxyAnswer())).byId('proxy')!;
+    final proxy = (ProfileItemCatalog()..adopt(_networkAnswer())).byId('network')!;
     final values = {
       'client_certificate_hosts': [
         {'pattern': 'a[.]example', 'identity': _good},
@@ -141,7 +141,7 @@ void main() {
     expect(schemaProblem(proxy.schema, proxy.form, values), 'Hosts that get a client certificate: Hosts is needed');
   });
 
-  testWidgets('the proxy item draws a row for each entry, and a pattern edited and a certificate picked read back as pattern and identity', (tester) async {
+  testWidgets('the network item draws a row for each entry, and a pattern edited and a certificate picked read back as pattern and identity', (tester) async {
     final saved = await _pump(
       tester,
       _held([
@@ -228,7 +228,7 @@ void main() {
     expect(find.text('System (default)'), findsWidgets, reason: 'the only choice there is');
   });
 
-  testWidgets('the proxy item\'s rows, drawn from the host\'s own answer', (tester) async {
+  testWidgets('the network item\'s rows, drawn from the host\'s own answer', (tester) async {
     await _pump(
       tester,
       _held([

@@ -384,25 +384,31 @@ def test_a_setting_item_sets_one_of_the_sessions_own_settings_when_its_member_is
     assert _apply(Model(), {})["settings"] == []
 
 
-def test_a_network_item_names_the_network_its_mode_asks_for_and_what_that_mode_needs() -> None:
-    class Proxy(sdk.NetworkProfileItem):
-        item = "proxy"
-        title = "Proxy"
+def test_a_network_item_names_the_routes_the_session_leaves_by() -> None:
+    class Network(sdk.NetworkProfileItem):
+        item = "network"
+        title = "Network"
 
-    assert _apply(Proxy(), {})["network"]["mode"] == "system"
+    assert _apply(Network(), {})["network"] == {"routes": [], "bypass": [], "intercept": []}
     own = _apply(
-        Proxy(),
-        {"mode": "proxy", "url": "http://p.example:3128", "bypass": ["a.example"], "user": "me", "password_variable": "PW"},
-    )["network"]
-    assert (own["url"], own["bypass"], own["password_variable"]) == ("http://p.example:3128", ["a.example"], "PW")
-    command = _apply(Proxy(), {"mode": "command", "command": ["myproxy", "{listen}"]})
-    assert command["network"]["command"] == ["myproxy", "{listen}"]
-    ended = _apply(Proxy(), {"client_certificate_hosts": [{"pattern": "a.example"}]})
+        Network(),
+        {
+            "routes": [{"route": "gateway", "hosts": ["*.internal.example"]}, {"route": " corp "}],
+            "bypass": ["a.example"],
+        },
+    )
+    assert own["network"]["routes"] == [
+        {"route": "gateway", "hosts": ["*.internal.example"]},
+        {"route": "corp", "hosts": []},
+    ]
+    assert own["network"]["bypass"] == ["a.example"]
+    assert "gateway, corp" in own["notes"][0]
+    ended = _apply(Network(), {"client_certificate_hosts": [{"pattern": "a.example"}]})
     assert ended["network"]["intercept"] == [{"pattern": "a.example", "identity": "system"}]
     assert "a.example" in ended["notes"][1]
-    for values in ({"mode": "proxy"}, {"mode": "pac"}, {"mode": "command"}, {"mode": "tor"}):
+    for values in ({"routes": "corp"}, {"routes": [{"hosts": []}]}, {"routes": [{"route": "a"}, {"route": "b"}]}):
         with pytest.raises(BadValue):
-            _apply(Proxy(), values)
+            _apply(Network(), values)
 
 
 class _Process:

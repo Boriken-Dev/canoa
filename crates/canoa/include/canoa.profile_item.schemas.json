@@ -121,37 +121,30 @@
           "null"
         ],
         "properties": {
-          "mode": {
-            "type": "string",
-            "enum": [
-              "system",
-              "none",
-              "proxy",
-              "pac",
-              "command"
-            ],
-            "x-enum-labels": {
-              "system": "The host runs a proxy on its loopback address for this session alone, which sends each connection as the host's own network would (the system's proxy with its PAC, WPAD and login), and the session's programs are given it.",
-              "none": "The session's programs are given no proxy, and what they inherit is theirs.",
-              "proxy": "The proxy at `url`, given to the programs as it is and used by the host's own requests for the session.",
-              "pac": "As `system`, choosing by the PAC script at `url`.",
-              "command": "A program the host starts for the session, which listens where it is told and is given to the programs as their proxy."
-            },
-            "description": "How the session reaches the network."
-          },
-          "url": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The proxy's address for `proxy`, or the PAC script's location for `pac`."
-          },
-          "command": {
+          "routes": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "object",
+              "properties": {
+                "route": {
+                  "type": "string",
+                  "description": "The name of a route the host has: `system`, `direct` or one of `[network.routes]`. A route the host lacks, or one that does not open, refuses the session's start."
+                },
+                "hosts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The destinations it is for, each a host name, `*.name`, an address or a regular expression ([`HostPattern`]); none means every destination no other rule names.",
+                  "default": []
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "route"
+              ]
             },
-            "description": "For `command`: the program and its arguments, in which `{listen}` stands for the loopback address `host:port` the host tells it to listen on.",
+            "description": "The routes, in order. Empty leaves the session on the host's route.",
             "default": []
           },
           "bypass": {
@@ -159,22 +152,8 @@
             "items": {
               "type": "string"
             },
-            "description": "Hosts that go direct, in the `NO_PROXY` form; empty keeps what the network chooses.",
+            "description": "Hosts that go direct, in the `NO_PROXY` form; empty keeps what the routes choose.",
             "default": []
-          },
-          "user": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "A user name for the proxy, for `proxy` and `pac`."
-          },
-          "password_variable": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The name of the host's environment variable that holds that user's password; the password itself is never in a profile."
           },
           "intercept": {
             "type": "array",
@@ -198,15 +177,12 @@
                 "pattern"
               ]
             },
-            "description": "The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order: the first entry whose pattern matches a destination says which certificate it gets. Only `system` and `pac`, which run that proxy, take it; every destination no entry matches stays a tunnel the program's own TLS runs through.",
+            "description": "The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order: the first entry whose pattern matches a destination says which certificate it gets; every destination no entry matches stays a tunnel the program's own TLS runs through.",
             "default": []
           }
         },
         "additionalProperties": false,
-        "required": [
-          "mode"
-        ],
-        "description": "The network its programs use."
+        "description": "The routes its programs' network leaves by."
       },
       "notes": {
         "type": "array",
@@ -257,41 +233,34 @@
       "value"
     ]
   },
-  "NetworkEffect": {
+  "RouteEffect": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-      "mode": {
-        "type": "string",
-        "enum": [
-          "system",
-          "none",
-          "proxy",
-          "pac",
-          "command"
-        ],
-        "x-enum-labels": {
-          "system": "The host runs a proxy on its loopback address for this session alone, which sends each connection as the host's own network would (the system's proxy with its PAC, WPAD and login), and the session's programs are given it.",
-          "none": "The session's programs are given no proxy, and what they inherit is theirs.",
-          "proxy": "The proxy at `url`, given to the programs as it is and used by the host's own requests for the session.",
-          "pac": "As `system`, choosing by the PAC script at `url`.",
-          "command": "A program the host starts for the session, which listens where it is told and is given to the programs as their proxy."
-        },
-        "description": "How the session reaches the network."
-      },
-      "url": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "description": "The proxy's address for `proxy`, or the PAC script's location for `pac`."
-      },
-      "command": {
+      "routes": {
         "type": "array",
         "items": {
-          "type": "string"
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "description": "The name of a route the host has: `system`, `direct` or one of `[network.routes]`. A route the host lacks, or one that does not open, refuses the session's start."
+            },
+            "hosts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The destinations it is for, each a host name, `*.name`, an address or a regular expression ([`HostPattern`]); none means every destination no other rule names.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "route"
+          ]
         },
-        "description": "For `command`: the program and its arguments, in which `{listen}` stands for the loopback address `host:port` the host tells it to listen on.",
+        "description": "The routes, in order. Empty leaves the session on the host's route.",
         "default": []
       },
       "bypass": {
@@ -299,22 +268,8 @@
         "items": {
           "type": "string"
         },
-        "description": "Hosts that go direct, in the `NO_PROXY` form; empty keeps what the network chooses.",
+        "description": "Hosts that go direct, in the `NO_PROXY` form; empty keeps what the routes choose.",
         "default": []
-      },
-      "user": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "description": "A user name for the proxy, for `proxy` and `pac`."
-      },
-      "password_variable": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "description": "The name of the host's environment variable that holds that user's password; the password itself is never in a profile."
       },
       "intercept": {
         "type": "array",
@@ -338,13 +293,32 @@
             "pattern"
           ]
         },
-        "description": "The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order: the first entry whose pattern matches a destination says which certificate it gets. Only `system` and `pac`, which run that proxy, take it; every destination no entry matches stays a tunnel the program's own TLS runs through.",
+        "description": "The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order: the first entry whose pattern matches a destination says which certificate it gets; every destination no entry matches stays a tunnel the program's own TLS runs through.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "RouteRule": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "route": {
+        "type": "string",
+        "description": "The name of a route the host has: `system`, `direct` or one of `[network.routes]`. A route the host lacks, or one that does not open, refuses the session's start."
+      },
+      "hosts": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The destinations it is for, each a host name, `*.name`, an address or a regular expression ([`HostPattern`]); none means every destination no other rule names.",
         "default": []
       }
     },
     "additionalProperties": false,
     "required": [
-      "mode"
+      "route"
     ]
   },
   "ClientCertificateHost": {

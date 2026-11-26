@@ -44,8 +44,8 @@ class ProfileItem:        # canoa_sdk.profile: one thing a profile sets; abstrac
     values = None         # a dataclass: its schema (Guatiao) and form (canoa_sdk.forms); values_schema / values_form give plain data instead
 class SettingProfileItem(ProfileItem)   # one text becomes a session setting: setting, member = None, note
 class EnvProfileItem(ProfileItem)       # values become variables: variables = {member: [NAMES]}, lines = None, line_label, note
-class NetworkProfileItem(ProfileItem)   # values become a network effect, the proxy item's members (the proxy itself is the host's)
-values_of(request); text_of(values, name); words_of(values, name); effect(env=, args=, settings=, network=, notes=); NETWORK_MODES
+class NetworkProfileItem(ProfileItem)   # values become a route effect, the network item's members: `routes` ({route, hosts}), `bypass`, `client_certificate_hosts` (the routes are the host's)
+values_of(request); text_of(values, name); words_of(values, name); effect(env=, args=, settings=, network=, notes=); RouteEffect
 class CatalogSource:      # canoa_sdk.source: where a Store type's catalog comes from; abstract slot read(request, spawner, fetch) -> the catalog's text
     source: str; title: str; help = None; types = ()          # source = the id canoa.cfg records, and the provider's id
     values = None         # a dataclass, as above

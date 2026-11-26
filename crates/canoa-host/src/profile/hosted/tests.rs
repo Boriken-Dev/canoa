@@ -3492,47 +3492,25 @@ fn the_bundled_identity_item_gives_the_sessions_programs_the_name_git_commits_un
 }
 
 #[test]
-fn the_bundled_proxy_item_gives_the_sessions_programs_the_network_its_mode_names() {
+fn the_bundled_network_item_gives_the_sessions_programs_the_hosts_route_unless_it_names_others() {
     let temp = temp_with_skill();
     let offer_for = |items: &str| {
         offer_with_items(
             &temp,
-            &format!("[profiles.default.items.proxy]\n{items}"),
+            &format!("[profiles.default.items.network]\n{items}"),
             crate::profile::items::ItemCatalog::from_registries(Vec::new()),
         )
     };
-    // Its own proxy: the programs are given it as it is.
-    let own = offer_for("mode = \"proxy\"\nurl = \"http://gateway.example:3128\"\n");
-    let (connection, report) = item_report(&own, None);
-    assert_eq!(
-        var(&connection, "HTTPS_PROXY"),
-        Some("http://gateway.example:3128")
-    );
-    assert_eq!(
-        item(&report, "items.proxy.network")["state"],
-        "applied",
-        "{report}"
-    );
-    // None: no proxy, which the host's own starter takes for no system proxy to add.
-    let none = offer_for("mode = \"none\"\n");
-    let (connection, report) = item_report(&none, None);
-    assert_eq!(var(&connection, "HTTPS_PROXY"), None);
-    assert_eq!(var(&connection, "NO_PROXY"), Some("*"));
-    assert_eq!(
-        item(&report, "items.proxy.network")["state"],
-        "applied",
-        "{report}"
-    );
     // The system's, the default: a proxy the host runs for the session, which stops with it.
     let system = offer_for("");
     let (connection, report) = item_report(&system, None);
     let url = var(&connection, "HTTPS_PROXY").expect("a proxy").to_owned();
     assert!(url.starts_with("http://canoa:"), "{url}");
-    let how = item(&report, "items.proxy.network")["how"]
+    let how = item(&report, "items.network.network")["how"]
         .as_str()
         .expect("text");
     assert!(
-        how.contains("following the system") && !how.contains("canoa:"),
+        how.contains("following the host's route") && !how.contains("canoa:"),
         "{how}"
     );
     let address: core::net::SocketAddr = url
@@ -3551,7 +3529,7 @@ fn the_bundled_proxy_item_gives_the_sessions_programs_the_network_its_mode_names
     // A proxy the profile's own environment names is kept.
     let named = offer_with_items(
         &temp,
-        "[profile.env.HTTPS_PROXY]\nvalue = \"http://mine.example:1\"\n[profiles.default.items.proxy]\nmode = \"proxy\"\nurl = \"http://gateway.example:3128\"\n",
+        "[profile.env.HTTPS_PROXY]\nvalue = \"http://mine.example:1\"\n[profiles.default.items.network]\n",
         crate::profile::items::ItemCatalog::from_registries(Vec::new()),
     );
     let (connection, _) = item_report(&named, None);
@@ -3562,12 +3540,12 @@ fn the_bundled_proxy_item_gives_the_sessions_programs_the_network_its_mode_names
 }
 
 #[test]
-fn the_proxy_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_in_the_session() {
+fn the_network_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_in_the_session() {
     let temp = temp_with_skill();
     let offer_for = |items: &str| {
         offer_with_items(
             &temp,
-            &format!("[profiles.default.items.proxy]\n{items}"),
+            &format!("[profiles.default.items.network]\n{items}"),
             crate::profile::items::ItemCatalog::from_registries(Vec::new()),
         )
     };
@@ -3586,7 +3564,7 @@ fn the_proxy_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_
     let text = std::fs::read_to_string(&bundle).expect("written");
     assert!(text.contains("BEGIN CERTIFICATE") && !text.contains("PRIVATE KEY"));
     assert!(var(&connection, "NODE_EXTRA_CA_CERTS").is_some());
-    let how = item(&report, "items.proxy.network")["how"]
+    let how = item(&report, "items.network.network")["how"]
         .as_str()
         .expect("text");
     assert!(
@@ -3597,40 +3575,33 @@ fn the_proxy_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_
         !report.to_string().contains("PRIVATE KEY"),
         "no key in the report"
     );
-    // With no proxy of the host's own to end TLS in, the profile is told so and nothing is ended.
-    let wrong = offer_for(
-        "mode = \"none\"\nclient_certificate_hosts = [{ pattern = \"api.example.test\" }]\n",
-    );
-    let (connection, report) = item_report(&wrong, None);
-    assert_eq!(var(&connection, "SSL_CERT_FILE"), None);
-    assert_eq!(
-        item(&report, "items.proxy")["state"],
-        "not supported",
-        "{report}"
-    );
-    assert!(
-        item(&report, "items.proxy")["how"]
-            .as_str()
-            .is_some_and(|how| how.contains("system or pac")),
-        "{report}"
-    );
 }
 
 #[test]
-fn a_network_that_cannot_be_made_is_refused_in_the_report_and_the_session_still_starts() {
+fn a_route_the_host_lacks_refuses_the_session_instead_of_leaving_it_on_another_path() {
     let temp = temp_with_skill();
     let offer = offer_with_items(
         &temp,
-        "[profiles.default.items.proxy]\nmode = \"command\"\ncommand = [\"/no/such/program\"]\n",
+        "[profiles.default.items.network]\nroutes = [{ route = \"ghost\" }]\n",
         crate::profile::items::ItemCatalog::from_registries(Vec::new()),
     );
-    let (connection, report) = item_report(&offer, None);
-    assert_eq!(var(&connection, "HTTPS_PROXY"), None);
-    assert_eq!(
-        item(&report, "items.proxy.network")["state"],
-        "refused",
-        "{report}"
-    );
+    let why = Connection::prepare_with(
+        &offer,
+        0,
+        "a",
+        &lookup,
+        Choices::default(),
+        Starting {
+            who: crate::profile::session::Who {
+                harness: Some("claude-code"),
+                ..Default::default()
+            },
+            ..Starting::default()
+        },
+    )
+    .err()
+    .expect("refused");
+    assert!(why.contains("ghost") && why.contains("network"), "{why}");
 }
 
 #[test]

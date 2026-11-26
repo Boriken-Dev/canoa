@@ -1,11 +1,13 @@
 //! How one session's programs reach the network, as a profile's network item says: the proxy variables they are given and the
 //! network the host's own requests for the session use.
 //!
-//! `system` and `pac` run a proxy on the loopback address. A program that understands only a plain proxy then behaves as the system
-//! does: each connection it asks for is sent through [`canoa::network::Network`], which chooses the route by the system's settings or
-//! the PAC script per destination, logs in to the proxy (Basic, Negotiate, NTLM) and carries it through a CONNECT tunnel. Hosts on
+//! A route that follows the system or a PAC script, several rules, or a client certificate run a proxy on the loopback address (a
+//! single proxy route is given to the programs as it is, and a direct one is `NO_PROXY=*`). A program that understands only a plain
+//! proxy then behaves as the system does: each connection it asks for is sent through the [`canoa::network::Network`] of the route that
+//! carries its destination, which chooses the proxy by the system's settings or the PAC script per destination, logs in to it (Basic,
+//! Negotiate, NTLM) and carries it through a CONNECT tunnel. Hosts on
 //! the bypass list go direct. Only a program that has the proxy's secret may use it: the address handed to the session's programs
-//! carries a token as the proxy's password, since the proxy answers with the person's own logon session. Sessions whose proxy items
+//! carries a token as the proxy's password, since the proxy answers with the person's own logon session. Sessions whose network items
 //! make the same settings share one proxy and its secret; it starts with the first and ends with the last (or after the idle time
 //! the host is set to keep it).
 //!
@@ -13,7 +15,7 @@
 //! each with the certificate to present. For a destination one of them matches, the proxy ends the program's TLS with a certificate
 //! it signs for the destination, as the process's authority does ([`super::proxy_ca`]: in memory, made on demand and kept), and
 //! makes its own TLS to the destination through the network, which verifies it as the operating system does and presents the
-//! certificate the pattern names (by default the one the person's keystores or `[host.network]` choose). A program is told to trust
+//! certificate the pattern names (by default the one the person's keystores or the route's `client_certificate` choose). A program is told to trust
 //! that authority by the variables its session gets, and by nothing else; every other destination stays a tunnel the program's own
 //! TLS runs through.
 #![allow(
@@ -28,13 +30,12 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use canoa::network::{
-    BypassRules, Connection, Dialect, Network, NetworkSettings, ProxyChoice, Secret,
-    SecureConnection,
+    BypassRules, Connection, Dialect, Network, NetworkSettings, ProxyChoice, SecureConnection,
 };
-use canoa::profile_item::{ClientCertificateHost, HostPattern, NetworkEffect};
+use canoa::profile_item::{ClientCertificateHost, HostPattern, RouteEffect};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
 use super::proxy_ca::ProxyCa;
@@ -46,8 +47,6 @@ const HEAD_SECONDS: u64 = 10;
 const MAX_HEAD: usize = 64 * 1024;
 /// How long a direct connection to a destination may take.
 const CONNECT_SECONDS: u64 = 20;
-/// How long a program the session names as its proxy has to listen.
-const LISTEN_SECONDS: u64 = 10;
 /// The user name the proxy's address carries; the password is the token.
 const PROXY_USER: &str = "canoa";
 /// How long each end of a connection whose TLS is ended here waits for something to read before the other is looked at: such a
@@ -88,137 +87,195 @@ impl core::fmt::Debug for SessionNetwork {
 enum Keep {
     Nothing,
     Proxy(Lease),
-    Program(Child),
 }
 
-/// Makes the network `effect` asks for. `lookup` reads the host's environment, for a proxy user's password.
+/// A route made ready: the network it makes and the settings that made it.
+pub(crate) struct Resolved {
+    pub(crate) network: Arc<Network>,
+    pub(crate) settings: NetworkSettings,
+}
+
+/// What opens the route a name says; `None` is the host's own. A route the host lacks, or one that does not open, is an error in
+/// words for the report.
+pub(crate) type Resolver<'a> = &'a dyn Fn(Option<&str>) -> Result<Resolved, String>;
+
+/// A rule the session has besides the profile's: the route of the account it runs on, for the addresses of that account's own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Extra {
+    /// The addresses, as host patterns.
+    pub(crate) hosts: Vec<String>,
+    /// The route.
+    pub(crate) route: String,
+}
+
+/// The rule the account a session runs on adds, when its route is named: that route carries the addresses the account sets for the
+/// agent (the endpoints among `variables`), which are its own and which its profile's patterns do not name. No rule when the account
+/// names no route or sets no address.
+pub(crate) fn account_rule(account: Option<&str>, variables: &[(String, String)]) -> Vec<Extra> {
+    let Some(route) = account.and_then(super::routes::account_route) else {
+        return Vec::new();
+    };
+    let mut hosts: Vec<String> = Vec::new();
+    for (_, value) in variables {
+        let Some(rest) = value
+            .strip_prefix("https://")
+            .or_else(|| value.strip_prefix("http://"))
+        else {
+            continue;
+        };
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let authority = authority.rsplit('@').next().unwrap_or("");
+        let host = if let Some(inner) = authority.strip_prefix('[') {
+            inner.split(']').next().unwrap_or("")
+        } else {
+            authority.split(':').next().unwrap_or("")
+        };
+        if !host.is_empty() && !hosts.iter().any(|each| each == host) {
+            hosts.push(host.to_owned());
+        }
+    }
+    if hosts.is_empty() {
+        Vec::new()
+    } else {
+        vec![Extra { hosts, route }]
+    }
+}
+
+/// One rule of the table a session's destinations are chosen by: who it is for and the network that carries them.
+struct Chosen {
+    hosts: Vec<HostPattern>,
+    network: Arc<Network>,
+}
+
+/// Makes the network `effect` asks for, over the host's routes: the profile's routes with hosts first, in order, then the account's own
+/// route for its own addresses (`extra`), then the profile's route with no hosts, then the host's. `lookup` is unused by the routes
+/// themselves, which read the host's variables as they open.
 ///
 /// # Errors
 ///
-/// What cannot be made, in words for the report: a proxy that cannot be read, a password variable that is not set, a program that
-/// does not start or does not listen in time.
+/// What cannot be made, in words for the report: a route the host lacks or that does not open, a pattern that cannot be read, a
+/// program that does not start or does not listen in time.
 pub(crate) fn start(
-    effect: &NetworkEffect,
-    lookup: &dyn Fn(&str) -> Option<String>,
+    effect: &RouteEffect,
+    extra: &[Extra],
     services: &Services<'_>,
 ) -> Result<SessionNetwork, String> {
-    use canoa::profile_item::NetworkMode;
-    match effect.mode {
-        NetworkMode::None => {
-            let network = Network::new(&settings(ProxyChoice::None, effect, lookup)?)
-                .map_err(|error| error.to_string())?;
-            Ok(SessionNetwork {
-                variables: direct_variables(),
-                network: Arc::new(network),
-                description: "with no proxy".to_owned(),
-                _keep: Keep::Nothing,
-            })
+    start_with(effect, extra, services, &super::routes::resolve)
+}
+
+/// [`start`] over `resolve`, which a test makes its own.
+pub(crate) fn start_with(
+    effect: &RouteEffect,
+    extra: &[Extra],
+    services: &Services<'_>,
+    resolve: Resolver<'_>,
+) -> Result<SessionNetwork, String> {
+    let mut table: Vec<Chosen> = Vec::new();
+    let patterned = effect
+        .routes
+        .iter()
+        .filter(|rule| !rule.hosts.is_empty())
+        .map(|rule| (rule.route.as_str(), &rule.hosts))
+        .chain(extra.iter().map(|each| (each.route.as_str(), &each.hosts)));
+    for (route, hosts) in patterned {
+        if hosts.is_empty() {
+            continue;
         }
-        NetworkMode::Proxy => {
-            let url = effect.url.clone().unwrap_or_default();
-            let network = Arc::new(
-                Network::new(&settings(ProxyChoice::Proxy(url), effect, lookup)?)
-                    .map_err(|error| error.to_string())?,
-            );
-            Ok(SessionNetwork {
-                variables: super::program_variables(&network),
-                network,
-                description: "the proxy the profile names".to_owned(),
-                _keep: Keep::Nothing,
-            })
-        }
-        NetworkMode::Pac => {
-            let url = effect.url.clone().unwrap_or_default();
-            middleman(
-                registry(),
-                effect,
-                lookup,
-                "chosen by the PAC script",
-                services,
-                || {
-                    Network::new(&settings(ProxyChoice::Pac(url), effect, lookup)?)
-                        .map(Arc::new)
-                        .map_err(|error| error.to_string())
-                },
-            )
-        }
-        NetworkMode::Command => program(effect),
-        NetworkMode::System | _ => middleman(
-            registry(),
-            effect,
-            lookup,
-            "following the system",
-            services,
-            || Ok(Network::current()),
-        ),
+        let hosts = hosts
+            .iter()
+            .map(|host| HostPattern::parse(host).map_err(|error| format!("route {route}: {error}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        table.push(Chosen {
+            hosts,
+            network: resolve(Some(route))?.network,
+        });
     }
-}
-
-fn settings(
-    proxy: ProxyChoice,
-    effect: &NetworkEffect,
-    lookup: &dyn Fn(&str) -> Option<String>,
-) -> Result<NetworkSettings, String> {
-    settings_over(super::installed_settings(), proxy, effect, lookup)
-}
-
-/// `base` with the proxy, login and bypass list the profile names. What `[host.network]` says of the roots to trust and the client
-/// certificate to present is kept; the proxy and its login are the profile's alone, and the host's own proxy login is never given to
-/// another proxy.
-fn settings_over(
-    base: NetworkSettings,
-    proxy: ProxyChoice,
-    effect: &NetworkEffect,
-    lookup: &dyn Fn(&str) -> Option<String>,
-) -> Result<NetworkSettings, String> {
-    let mut settings = base;
-    settings.proxy = proxy;
-    settings.proxy_user = None;
-    settings.proxy_password = None;
-    settings.no_proxy = (!effect.bypass.is_empty()).then(|| effect.bypass.clone());
-    if let Some(user) = &effect.user {
-        settings.proxy_user = Some(user.clone());
-        if let Some(name) = &effect.password_variable {
-            let password = lookup(name).ok_or_else(|| {
-                format!("{name}, the variable the proxy's password is read from, is not set")
-            })?;
-            settings.proxy_password = Some(Secret::new(password));
+    let general = effect
+        .routes
+        .iter()
+        .find(|rule| rule.hosts.is_empty())
+        .map(|rule| rule.route.as_str());
+    let resolved = resolve(general)?;
+    let network = if effect.bypass.is_empty() {
+        Arc::clone(&resolved.network)
+    } else {
+        let mut settings = resolved.settings.clone();
+        settings.no_proxy = Some(effect.bypass.clone());
+        Arc::new(Network::new(&settings).map_err(|error| error.to_string())?)
+    };
+    let named = general.map_or_else(
+        || "the host's route".to_owned(),
+        |route| format!("route {route}"),
+    );
+    if table.is_empty() && effect.intercept.is_empty() {
+        match &resolved.settings.proxy {
+            ProxyChoice::None => {
+                return Ok(SessionNetwork {
+                    variables: direct_variables(),
+                    network,
+                    description: format!("with no proxy ({named})"),
+                    _keep: Keep::Nothing,
+                });
+            }
+            ProxyChoice::Proxy(_) | ProxyChoice::Each { .. } => {
+                return Ok(SessionNetwork {
+                    variables: super::program_variables(&network),
+                    network,
+                    description: format!("through the proxy of {named}"),
+                    _keep: Keep::Nothing,
+                });
+            }
+            _ => {}
         }
     }
-    Ok(settings)
+    let how = if table.is_empty() {
+        match &resolved.settings.proxy {
+            ProxyChoice::Pac(_) => format!("chosen by the PAC script of {named}"),
+            _ => format!("following {named}"),
+        }
+    } else {
+        format!("choosing the route of each destination, {named} for the rest")
+    };
+    middleman(
+        registry(),
+        (effect, extra, general),
+        &how,
+        services,
+        (network, table),
+    )
 }
 
-/// What identifies a proxy that can be shared: every setting that decides what it does. Two sessions whose proxy items make equal keys
+/// What identifies a proxy that can be shared: every setting that decides what it does. Two sessions whose network items make equal keys
 /// are given the same proxy.
 #[derive(Clone, PartialEq, Eq)]
 struct ProxyKey {
-    mode: canoa::profile_item::NetworkMode,
-    url: Option<String>,
+    /// The route with no hosts, by name; the host's when none.
+    general: Option<String>,
+    /// Each rule with hosts, in order, as the routes name them.
+    routes: Vec<(Vec<String>, String)>,
     bypass: Vec<String>,
-    user: Option<String>,
-    /// The proxy login's password as the host's environment holds it, which a session's own proxy would be started with.
-    password: Option<String>,
     /// Each destination pattern and the certificate it presents, as the item says them.
     rules: Vec<(String, String)>,
-    /// Which installation of `[host.network]` the proxy's network keeps the roots and certificate of.
+    /// Which installation of the host's routes the proxy's networks come from.
     installed: u64,
 }
 
 impl ProxyKey {
-    fn of(effect: &NetworkEffect, lookup: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
-        let login = effect.mode == canoa::profile_item::NetworkMode::Pac;
-        let password = match (&effect.user, &effect.password_variable) {
-            (Some(_), Some(name)) if login => Some(lookup(name).ok_or_else(|| {
-                format!("{name}, the variable the proxy's password is read from, is not set")
-            })?),
-            _ => None,
-        };
-        Ok(Self {
-            mode: effect.mode,
-            url: effect.url.clone(),
+    fn of(effect: &RouteEffect, extra: &[Extra], general: Option<&str>) -> Self {
+        Self {
+            general: general.map(str::to_owned),
+            routes: effect
+                .routes
+                .iter()
+                .filter(|rule| !rule.hosts.is_empty())
+                .map(|rule| (rule.hosts.clone(), rule.route.clone()))
+                .chain(
+                    extra
+                        .iter()
+                        .map(|each| (each.hosts.clone(), each.route.clone())),
+                )
+                .collect(),
             bypass: effect.bypass.clone(),
-            user: effect.user.clone().filter(|_| login),
-            password,
             rules: effect
                 .intercept
                 .iter()
@@ -234,7 +291,7 @@ impl ProxyKey {
                 })
                 .collect(),
             installed: super::installed_generation(),
-        })
+        }
     }
 }
 
@@ -393,13 +450,12 @@ pub(crate) fn registry() -> &'static Arc<Registry> {
 /// A session's network through a proxy the host runs: the one already running for the same settings, or a new one.
 fn middleman(
     registry: &Arc<Registry>,
-    effect: &NetworkEffect,
-    lookup: &dyn Fn(&str) -> Option<String>,
+    (effect, extra, general): (&RouteEffect, &[Extra], Option<&str>),
     how: &str,
     services: &Services<'_>,
-    network: impl FnOnce() -> Result<Arc<Network>, String>,
+    (network, table): (Arc<Network>, Vec<Chosen>),
 ) -> Result<SessionNetwork, String> {
-    let key = ProxyKey::of(effect, lookup)?;
+    let key = ProxyKey::of(effect, extra, general);
     // What its programs are given to trust is written first, so a session that cannot have it is refused before a proxy is made.
     let intercept = if effect.intercept.is_empty() {
         None
@@ -414,14 +470,14 @@ fn middleman(
         None
     };
     let lease = registry.acquire(key, || {
-        let network = network()?;
         let token = new_token()
             .map_err(|error| format!("a token for the proxy could not be made: {error}"))?;
         let bypass =
             BypassRules::from_entries(effect.bypass.iter().map(String::as_str), Dialect::NoProxy);
         let kept = intercept.clone();
-        let proxy = Middleman::start(Arc::clone(&network), bypass, &token, intercept)
-            .map_err(|error| format!("the proxy could not listen: {error}"))?;
+        let proxy =
+            Middleman::start_routed((Arc::clone(&network), table), bypass, &token, intercept)
+                .map_err(|error| format!("the proxy could not listen: {error}"))?;
         Ok(Running {
             intercept: kept,
             proxy,
@@ -612,18 +668,42 @@ pub(crate) struct Middleman {
 }
 
 struct Shared {
+    /// What carries a destination no rule of `routed` names.
     network: Arc<Network>,
+    /// The rules, in order: the first whose patterns match a destination decides which network carries it.
+    routed: Vec<Chosen>,
     bypass: BypassRules,
     intercept: Option<Arc<Intercept>>,
     /// `Basic` and the base64 of `canoa:token`, which a request must carry.
     wanted: String,
 }
 
+impl Shared {
+    /// The network that carries a connection to `host`.
+    fn network_for(&self, host: &str) -> &Arc<Network> {
+        self.routed
+            .iter()
+            .find(|each| each.hosts.iter().any(|pattern| pattern.matches(host)))
+            .map_or(&self.network, |each| &each.network)
+    }
+}
+
 impl Middleman {
     /// A proxy on the loopback address that sends connections through `network` and the ones `bypass` names straight to their
     /// destination, for the program that has `token`.
+    #[cfg(test)]
     pub(crate) fn start(
         network: Arc<Network>,
+        bypass: BypassRules,
+        token: &str,
+        intercept: Option<Arc<Intercept>>,
+    ) -> io::Result<Self> {
+        Self::start_routed((network, Vec::new()), bypass, token, intercept)
+    }
+
+    /// As [`Middleman::start`], choosing the network of each destination by `table`'s rules and `network` for the rest.
+    fn start_routed(
+        (network, routed): (Arc<Network>, Vec<Chosen>),
         bypass: BypassRules,
         token: &str,
         intercept: Option<Arc<Intercept>>,
@@ -635,6 +715,7 @@ impl Middleman {
         let held = listener.try_clone()?;
         let shared = Arc::new(Shared {
             network,
+            routed,
             bypass,
             intercept,
             wanted: format!(
@@ -869,7 +950,7 @@ fn ended_here(
             return;
         }
     };
-    let upstream = match shared.network.secure_tunnel_as(
+    let upstream = match shared.network_for(host).secure_tunnel_as(
         &format!("https://{shown}:{port}"),
         rule.thumbprint.as_deref(),
     ) {
@@ -1034,7 +1115,7 @@ fn open(shared: &Shared, host: &str, port: u16, scheme: &str) -> Result<Upstream
     if !shared.bypass.is_empty() && shared.bypass.matches(&url) {
         return direct(host, port).map(|stream| Upstream::Plain(Connection::Tcp(stream)));
     }
-    match shared.network.tunnel(&url) {
+    match shared.network_for(host).tunnel(&url) {
         Ok(Some(connection)) => Ok(Upstream::Plain(connection)),
         Ok(None) => direct(host, port).map(|stream| Upstream::Plain(Connection::Tcp(stream))),
         Err(error) => Err(format!("{host}:{port} could not be reached: {error}")),
@@ -1053,77 +1134,6 @@ fn direct(host: &str, port: u16) -> Result<TcpStream, String> {
         }
     }
     Err(last)
-}
-
-/// A program the host started as a session's proxy, which stops with the session.
-struct Child(crate::spawn::Child);
-
-impl Drop for Child {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-/// Starts the program `effect` names, telling it where to listen, and waits until it does.
-fn program(effect: &NetworkEffect) -> Result<SessionNetwork, String> {
-    let port = {
-        let probe = TcpListener::bind("127.0.0.1:0")
-            .map_err(|error| format!("no port to listen on: {error}"))?;
-        probe
-            .local_addr()
-            .map_err(|error| error.to_string())?
-            .port()
-    };
-    let listen = format!("127.0.0.1:{port}");
-    let words: Vec<String> = effect
-        .command
-        .iter()
-        .map(|word| word.replace("{listen}", &listen))
-        .collect();
-    let Some((program, args)) = words.split_first() else {
-        return Err("the program is named first".to_owned());
-    };
-    let mut command = crate::spawn::Command::new(program);
-    command
-        .args(args)
-        .stdin(crate::spawn::Stdio::Null)
-        .stdout(crate::spawn::Stdio::Null)
-        .stderr(crate::spawn::Stdio::Null)
-        .own_group();
-    let child = command
-        .spawn()
-        .map_err(|error| format!("{program} could not start: {error}"))?;
-    let child = Child(child);
-    let target: SocketAddr = listen
-        .parse()
-        .map_err(|_| "no address to listen on".to_owned())?;
-    let started = Instant::now();
-    loop {
-        if TcpStream::connect_timeout(&target, Duration::from_millis(200)).is_ok() {
-            break;
-        }
-        if started.elapsed() > Duration::from_secs(LISTEN_SECONDS) {
-            return Err(format!(
-                "{program} did not listen on {listen} within {LISTEN_SECONDS} seconds"
-            ));
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    let url = format!("http://{listen}");
-    // The host's own requests for the session go through the program too, as its programs' do.
-    let mut settings = NetworkSettings::default();
-    settings.proxy = ProxyChoice::Proxy(url.clone());
-    if !effect.bypass.is_empty() {
-        settings.no_proxy = Some(effect.bypass.clone());
-    }
-    let network = Network::new(&settings).map_err(|error| error.to_string())?;
-    Ok(SessionNetwork {
-        variables: loopback_variables(&url, &effect.bypass),
-        network: Arc::new(network),
-        description: format!("through {program}, listening on {listen}"),
-        _keep: Keep::Program(child),
-    })
 }
 
 #[cfg(test)]

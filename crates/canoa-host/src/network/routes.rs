@@ -94,6 +94,8 @@ struct State {
     max_leases: Option<usize>,
     /// The route of each account that names one, by the account's id.
     accounts: BTreeMap<String, String>,
+    /// The same, by the account's name.
+    account_names: BTreeMap<String, String>,
 }
 
 /// An open lease and what is made from it.
@@ -277,6 +279,11 @@ impl State {
                 .values()
                 .filter_map(|account| Some((account.id.clone(), account.route.clone()?)))
                 .collect(),
+            account_names: config
+                .accounts
+                .iter()
+                .filter_map(|(name, account)| Some((name.clone(), account.route.clone()?)))
+                .collect(),
         }
     }
 }
@@ -294,6 +301,32 @@ pub(crate) fn network(route: Option<&str>) -> Result<Arc<Network>, RouteFailure>
         None => Ok(Network::current()),
         Some(name) => Ok(Arc::clone(&held(&state, name, "host")?.network)),
     }
+}
+
+/// The route `route` opened for a session, or the host's when `None`, as a session's network is made from it.
+///
+/// # Errors
+///
+/// The host has no such route, or it does not open, in words for the session's report.
+pub(crate) fn resolve(route: Option<&str>) -> Result<super::session::Resolved, String> {
+    let host = || super::session::Resolved {
+        network: Network::current(),
+        settings: super::installed_settings(),
+    };
+    let Some(name) = route else {
+        return Ok(host());
+    };
+    let state = state().ok_or_else(|| format!("route {name}: the host has no routes"))?;
+    let held = held(&state, name, "session").map_err(|error| error.to_string())?;
+    Ok(super::session::Resolved {
+        network: Arc::clone(&held.network),
+        settings: held.settings.clone(),
+    })
+}
+
+/// The route the account called `name` names, when it names one.
+pub(crate) fn account_route(name: &str) -> Option<String> {
+    state()?.account_names.get(name).cloned()
 }
 
 /// The network of the route the account whose id is `id` names, when it names one.

@@ -1,4 +1,4 @@
-use canoa::profile_item::{ItemEffect, NetworkEffect, NetworkMode, Setting, Variable};
+use canoa::profile_item::{ItemEffect, RouteEffect, RouteRule, Setting, Variable};
 use coqui_acp_harness::{Approvals, Sandbox};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
@@ -57,7 +57,7 @@ fn the_items_are_the_providers_the_registries_offer_the_built_in_ones_first() {
             ("mode", "built-in"),
             ("model", "built-in"),
             ("identity", "bundled"),
-            ("proxy", "bundled"),
+            ("network", "bundled"),
             ("region", "regions"),
         ]
     );
@@ -224,10 +224,12 @@ fn a_setting_a_session_does_not_have_is_refused_by_key_and_the_rest_still_applie
 fn the_first_item_to_set_a_variable_keeps_it_and_the_last_to_ask_decides_the_network() {
     let mut first = ItemEffect::none();
     first.env = vec![Variable::new("A", "1"), Variable::new("B", "1")];
-    first.network = Some(NetworkEffect::new(NetworkMode::None));
+    let mut direct = RouteEffect::new();
+    direct.routes = vec![RouteRule::new("direct")];
+    first.network = Some(direct);
     let mut second = ItemEffect::none();
     second.env = vec![Variable::new("A", "2"), Variable::new("C", "2")];
-    second.network = Some(NetworkEffect::new(NetworkMode::System));
+    second.network = Some(RouteEffect::new());
     let applied = vec![
         Applied {
             id: "one".to_owned(),
@@ -250,9 +252,9 @@ fn the_first_item_to_set_a_variable_keeps_it_and_the_last_to_ask_decides_the_net
         seen,
         [("one", "A", "1"), ("one", "B", "1"), ("two", "C", "2")]
     );
-    assert_eq!(
-        network_of(&applied).map(|each| each.mode.as_str()),
-        Some("system")
+    assert!(
+        network_of(&applied).is_some_and(|each| each.routes.is_empty()),
+        "the last to ask decides: the host's own route"
     );
 }
 
@@ -291,33 +293,32 @@ fn the_bundled_identity_gives_git_its_name_and_address_and_the_account_label() {
 }
 
 #[test]
-fn the_bundled_proxy_asks_for_the_network_its_mode_names() {
+fn the_bundled_network_item_names_the_routes_its_sessions_leave_by() {
     let catalog = ItemCatalog::built_in();
-    let mode = |held: Value| {
-        let applied = catalog.apply_all(&one("proxy", &held), None);
-        done(&applied, "proxy").network.expect("a network")
+    let routes = |held: Value| {
+        let applied = catalog.apply_all(&one("network", &held), None);
+        done(&applied, "network").network.expect("a network")
     };
-    assert_eq!(
-        mode(json!({})).mode,
-        NetworkMode::System,
-        "system is the default"
+    assert!(
+        routes(json!({})).routes.is_empty(),
+        "the host's route is the default"
     );
-    assert_eq!(mode(json!({"mode": "none"})).mode, NetworkMode::None);
-    let own = mode(
-        json!({"mode": "proxy", "url": "http://p.example:3128", "bypass": ["a.example"], "user": "me", "password_variable": "PW"}),
-    );
-    assert_eq!(own.url.as_deref(), Some("http://p.example:3128"));
+    let own = routes(json!({
+        "routes": [{"route": "gateway", "hosts": ["*.internal.example"]}, {"route": "corp"}],
+        "bypass": ["a.example"],
+    }));
+    assert_eq!(own.routes.len(), 2);
+    assert_eq!(own.routes[0].route, "gateway");
+    assert_eq!(own.routes[0].hosts, ["*.internal.example"]);
+    assert!(own.routes[1].hosts.is_empty());
     assert_eq!(own.bypass, ["a.example"]);
-    assert_eq!(own.password_variable.as_deref(), Some("PW"));
-    let command = mode(json!({"mode": "command", "command": ["myproxy", "--listen", "{listen}"]}));
-    assert_eq!(command.command, ["myproxy", "--listen", "{listen}"]);
-    // An address is needed for a proxy and a program for a command.
+    // A route with no name, a pattern that cannot be read and two routes for every destination are said.
     for held in [
-        json!({"mode": "proxy"}),
-        json!({"mode": "pac"}),
-        json!({"mode": "command"}),
+        json!({"routes": [{"hosts": []}]}),
+        json!({"routes": [{"route": " "}]}),
+        json!({"routes": [{"route": "a"}, {"route": "b"}]}),
     ] {
-        let applied = catalog.apply_all(&one("proxy", &held), None);
-        assert!(not(&applied, "proxy").contains("needs"), "{held}");
+        let applied = catalog.apply_all(&one("network", &held), None);
+        assert!(!not(&applied, "network").is_empty(), "{held}");
     }
 }

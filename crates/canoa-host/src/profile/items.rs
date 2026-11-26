@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use canoa::profile_item::{
-    ApplyRequest, ItemEffect, ItemInfo, NetworkEffect, ProfileItem, Setting, Variable,
+    ApplyRequest, ItemEffect, ItemInfo, ProfileItem, RouteEffect, Setting, Variable,
 };
 use canoa::status::bad_value;
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
@@ -517,10 +517,19 @@ impl Applied {
             ));
         }
         if let Some(network) = &effect.network {
-            parts.push(format!(
-                "sets how its programs reach the network: {}",
-                network.mode.as_str()
-            ));
+            let routes: Vec<&str> = network
+                .routes
+                .iter()
+                .map(|rule| rule.route.as_str())
+                .collect();
+            parts.push(if routes.is_empty() {
+                "sets how its programs reach the network: the host's route".to_owned()
+            } else {
+                format!(
+                    "sets how its programs reach the network: by {}",
+                    routes.join(", ")
+                )
+            });
         }
         if parts.is_empty() {
             "sets nothing for this session".to_owned()
@@ -593,7 +602,7 @@ fn take(layer: &mut Profile, setting: &Setting) -> Result<(), String> {
 }
 
 /// What the effects of `applied` ask the session's network to be: the last item that asks.
-pub(crate) fn network_of(applied: &[Applied]) -> Option<&NetworkEffect> {
+pub(crate) fn network_of(applied: &[Applied]) -> Option<&RouteEffect> {
     applied.iter().rev().find_map(|item| match &item.outcome {
         Outcome::Done(effect) => effect.network.as_ref(),
         Outcome::Not(_) => None,

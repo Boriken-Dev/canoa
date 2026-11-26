@@ -12,12 +12,12 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use canoa::network::{BypassRules, Dialect, Network};
-use canoa::profile_item::NetworkEffect;
+use canoa::network::{BypassRules, Dialect, Network, NetworkSettings, ProxyChoice, Secret};
+use canoa::profile_item::{RouteEffect, RouteRule};
 
-use super::{Middleman, Services, start};
+use super::{Extra, Middleman, Resolved, Services, start, start_with};
 use crate::network::standins::StandInSocks;
 use crate::network::tests::{
     Dir, PASSWORD, USER, environment_of, printing_environment, proxied, through, world,
@@ -263,27 +263,43 @@ fn a_proxy_stops_listening_while_another_holder_still_has_its_socket() {
     drop(copy);
 }
 
-fn effect(mode: &str) -> NetworkEffect {
-    let mode = match mode {
-        "system" => canoa::profile_item::NetworkMode::System,
-        "none" => canoa::profile_item::NetworkMode::None,
-        "proxy" => canoa::profile_item::NetworkMode::Proxy,
-        "pac" => canoa::profile_item::NetworkMode::Pac,
-        "command" => canoa::profile_item::NetworkMode::Command,
-        other => panic!("unexpected mode {other}"),
-    };
-    NetworkEffect::new(mode)
+/// A resolver of routes by name over `settings`; the host's own (no name) is the process's network, as it is with no routes installed.
+fn routes(
+    settings: Vec<(&'static str, NetworkSettings)>,
+) -> impl Fn(Option<&str>) -> Result<Resolved, String> {
+    move |name| match name {
+        None => Ok(Resolved {
+            network: Network::current(),
+            settings: NetworkSettings::default(),
+        }),
+        Some(name) => {
+            let (_, settings) = settings
+                .iter()
+                .find(|(held, _)| *held == name)
+                .ok_or_else(|| format!("route {name}: the host has no such route"))?;
+            Ok(Resolved {
+                network: Arc::new(Network::new(settings).map_err(|error| error.to_string())?),
+                settings: settings.clone(),
+            })
+        }
+    }
 }
 
-fn no_environment(_: &str) -> Option<String> {
-    None
+fn through_proxy(address: &str) -> NetworkSettings {
+    let mut settings = NetworkSettings::default();
+    settings.proxy = ProxyChoice::Proxy(address.to_owned());
+    settings
+}
+
+fn rule(route: &str) -> RouteRule {
+    RouteRule::new(route)
 }
 
 #[test]
-fn the_system_mode_gives_the_programs_a_loopback_proxy_with_the_secret_and_keeps_loopback_off_it() {
-    let mut asked = effect("system");
+fn the_host_route_gives_the_programs_a_loopback_proxy_with_the_secret_and_keeps_loopback_off_it() {
+    let mut asked = RouteEffect::new();
     asked.bypass = vec!["internal.example".to_owned()];
-    let session = start(&asked, &no_environment, &Services::default()).expect("starts");
+    let session = start(&asked, &[], &Services::default()).expect("starts");
     let value = |name: &str| {
         session
             .variables
@@ -307,7 +323,7 @@ fn the_system_mode_gives_the_programs_a_loopback_proxy_with_the_secret_and_keeps
         value("NO_PROXY").as_deref(),
         Some("localhost,127.0.0.1,::1,internal.example")
     );
-    assert!(session.description.contains("following the system"));
+    assert!(session.description.contains("following the host's route"));
     assert!(
         !session.description.contains("canoa:"),
         "the secret is not in what the report says"
@@ -323,8 +339,18 @@ fn the_system_mode_gives_the_programs_a_loopback_proxy_with_the_secret_and_keeps
 }
 
 #[test]
-fn the_none_mode_says_no_proxy_for_anything_and_the_hosts_own_starter_adds_none() {
-    let session = start(&effect("none"), &no_environment, &Services::default()).expect("starts");
+fn a_direct_route_says_no_proxy_for_anything_and_the_hosts_own_starter_adds_none() {
+    let mut off = NetworkSettings::default();
+    off.proxy = ProxyChoice::None;
+    let mut asked = RouteEffect::new();
+    asked.routes = vec![rule("off")];
+    let session = start_with(
+        &asked,
+        &[],
+        &Services::default(),
+        &routes(vec![("off", off)]),
+    )
+    .expect("starts");
     let names: Vec<&str> = session
         .variables
         .iter()
@@ -351,11 +377,15 @@ fn the_none_mode_says_no_proxy_for_anything_and_the_hosts_own_starter_adds_none(
 }
 
 #[test]
-fn the_proxy_mode_gives_the_programs_the_proxy_it_names() {
-    let mut asked = effect("proxy");
-    asked.url = Some("http://gateway.example:3128".to_owned());
+fn a_proxy_route_gives_the_programs_the_proxy_it_names_and_a_route_the_host_lacks_refuses() {
+    let mut asked = RouteEffect::new();
+    asked.routes = vec![rule("gateway")];
     asked.bypass = vec!["direct.example".to_owned()];
-    let session = start(&asked, &no_environment, &Services::default()).expect("starts");
+    let known = routes(vec![(
+        "gateway",
+        through_proxy("http://gateway.example:3128"),
+    )]);
+    let session = start_with(&asked, &[], &Services::default(), &known).expect("starts");
     let value = |name: &str| {
         session
             .variables
@@ -365,15 +395,24 @@ fn the_proxy_mode_gives_the_programs_the_proxy_it_names() {
     };
     assert_eq!(value("HTTPS_PROXY"), Some("http://gateway.example:3128"));
     assert!(value("NO_PROXY").is_some_and(|list| list.contains("direct.example")));
-    // A user whose password variable is not set is said, not guessed.
-    asked.user = Some("alice".to_owned());
-    asked.password_variable = Some("NO_SUCH_PASSWORD".to_owned());
-    let why = start(&asked, &no_environment, &Services::default()).expect_err("refused");
-    assert!(why.contains("NO_SUCH_PASSWORD"), "{why}");
+    // The host's own requests for the session leave by it too.
+    let chosen = session
+        .network
+        .resolver()
+        .lookup("https://api.example.test/")
+        .expect("a route");
+    assert!(
+        format!("{chosen:?}").contains("gateway.example"),
+        "{chosen:?}"
+    );
+    // A route the host lacks refuses the start, naming it.
+    asked.routes = vec![rule("ghost")];
+    let why = start_with(&asked, &[], &Services::default(), &known).expect_err("refused");
+    assert!(why.contains("ghost"), "{why}");
 }
 
 #[test]
-fn the_pac_mode_chooses_the_route_for_each_destination_and_logs_in() {
+fn a_pac_route_chooses_the_proxy_for_each_destination_and_logs_in() {
     let world = world("session-pac", &["downloads.example.test"], b"x");
     let (origin, thread) = echo();
     let dir = Dir::new("session-pac-script");
@@ -386,14 +425,17 @@ fn the_pac_mode_chooses_the_route_for_each_destination_and_logs_in() {
         ),
     )
     .expect("writes");
-    let mut asked = effect("pac");
-    asked.url = Some(script.to_string_lossy().into_owned());
-    asked.user = Some(USER.to_owned());
-    asked.password_variable = Some("PROXY_PASSWORD".to_owned());
-    let session = start(
+    let mut asked = RouteEffect::new();
+    asked.routes = vec![rule("script")];
+    let mut pac = NetworkSettings::default();
+    pac.proxy = ProxyChoice::Pac(script.to_string_lossy().into_owned());
+    pac.proxy_user = Some(USER.to_owned());
+    pac.proxy_password = Some(Secret::new(PASSWORD));
+    let session = start_with(
         &asked,
-        &|name| (name == "PROXY_PASSWORD").then(|| PASSWORD.to_owned()),
+        &[],
         &Services::default(),
+        &routes(vec![("script", pac)]),
     )
     .expect("starts");
     let url = session
@@ -455,72 +497,6 @@ fn stand_in_proxy_program() {
 }
 
 #[test]
-fn the_command_mode_starts_the_program_where_it_is_told_to_listen_and_stops_it_with_the_session() {
-    let exe = std::env::current_exe().expect("this program");
-    let mut asked = effect("command");
-    asked.command = vec![
-        exe.to_string_lossy().into_owned(),
-        "--exact".to_owned(),
-        "network::session::tests::stand_in_proxy_program".to_owned(),
-        "{listen}".to_owned(),
-    ];
-    let session = start(&asked, &no_environment, &Services::default()).expect("starts and listens");
-    let url = session
-        .variables
-        .iter()
-        .find(|(name, _)| name == "HTTP_PROXY")
-        .map(|(_, value)| value.clone())
-        .expect("a proxy");
-    let target: SocketAddr = url
-        .trim_start_matches("http://")
-        .parse()
-        .expect("the address it was told");
-    assert!(session.description.contains("listening on"));
-    drop(session);
-    let started = Instant::now();
-    while TcpStream::connect_timeout(&target, Duration::from_millis(200)).is_ok() {
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the program still listens after the session"
-        );
-        thread::sleep(Duration::from_millis(100));
-    }
-    // A program that does not exist is said.
-    asked.command = vec!["/no/such/program".to_owned()];
-    let why = start(&asked, &no_environment, &Services::default()).expect_err("refused");
-    assert!(why.contains("could not start"), "{why}");
-}
-
-#[test]
-fn the_command_mode_sends_the_hosts_own_requests_for_the_session_through_the_program_too() {
-    let exe = std::env::current_exe().expect("this program");
-    let mut asked = effect("command");
-    asked.command = vec![
-        exe.to_string_lossy().into_owned(),
-        "--exact".to_owned(),
-        "network::session::tests::stand_in_proxy_program".to_owned(),
-        "{listen}".to_owned(),
-    ];
-    let session = start(&asked, &no_environment, &Services::default()).expect("starts and listens");
-    let routes = session
-        .network
-        .resolver()
-        .lookup("https://api.example.test/")
-        .expect("a route");
-    let shown = format!("{routes:?}");
-    let listen = session
-        .variables
-        .iter()
-        .find(|(name, _)| name == "HTTP_PROXY")
-        .map(|(_, value)| value.trim_start_matches("http://").to_owned())
-        .expect("a proxy");
-    assert!(
-        shown.contains("Proxy") && shown.contains(&listen),
-        "{shown}"
-    );
-}
-
-#[test]
 fn a_socks_upstream_carries_what_a_program_asks_the_session_proxy_for() {
     let world = world("session-socks", &["downloads.example.test"], b"x");
     let (origin, thread) = echo();
@@ -535,9 +511,17 @@ fn a_socks_upstream_carries_what_a_program_asks_the_session_proxy_for() {
         ),
     )
     .expect("writes");
-    let mut asked = effect("pac");
-    asked.url = Some(script.to_string_lossy().into_owned());
-    let session = start(&asked, &no_environment, &Services::default()).expect("starts");
+    let mut asked = RouteEffect::new();
+    asked.routes = vec![rule("script")];
+    let mut pac = NetworkSettings::default();
+    pac.proxy = ProxyChoice::Pac(script.to_string_lossy().into_owned());
+    let session = start_with(
+        &asked,
+        &[],
+        &Services::default(),
+        &routes(vec![("script", pac)]),
+    )
+    .expect("starts");
     let url = session
         .variables
         .iter()
@@ -572,38 +556,76 @@ fn a_socks_upstream_carries_what_a_program_asks_the_session_proxy_for() {
 }
 
 #[test]
-fn a_session_network_keeps_the_roots_and_certificate_of_host_network_and_not_its_proxy_login() {
-    use canoa::network::{ClientCertificate, ProxyChoice, Secret};
-    let mut installed = canoa::network::NetworkSettings::default();
-    installed.proxy = ProxyChoice::Proxy("http://corporate.example:3128".to_owned());
-    installed.proxy_user = Some("me".to_owned());
-    installed.proxy_password = Some(Secret::new("hers"));
-    installed.no_proxy = Some(vec!["internal.example".to_owned()]);
-    installed.ca_file = Some("roots.pem".into());
-    installed.client_certificate = ClientCertificate::File("me.pem".into());
-    let mut asked = effect("pac");
-    asked.url = Some("proxy.pac".to_owned());
-    let made = super::settings_over(
-        installed.clone(),
-        ProxyChoice::Pac("proxy.pac".to_owned()),
-        &asked,
-        &no_environment,
-    )
-    .expect("settings");
-    assert_eq!(made.proxy, ProxyChoice::Pac("proxy.pac".to_owned()));
-    assert_eq!(made.ca_file, installed.ca_file);
-    assert_eq!(made.client_certificate, installed.client_certificate);
-    assert!(made.proxy_user.is_none() && made.proxy_password.is_none());
-    assert!(
-        made.no_proxy.is_none(),
-        "the profile's own list, which is empty"
-    );
+fn the_host_route_is_the_network_the_host_installed_for_its_own_requests() {
+    // The session's requests are the process's network's: nothing here installs one, so it is the system's.
+    let network: Arc<Network> = Network::current();
+    let session = start(&RouteEffect::new(), &[], &Services::default()).expect("starts");
+    assert!(Arc::ptr_eq(&session.network, &network));
 }
 
 #[test]
-fn the_system_mode_uses_the_network_the_host_installed_for_its_own_requests() {
-    // The session's requests are the process's network's: nothing here installs one, so it is the system's.
-    let network: Arc<Network> = Network::current();
-    let session = start(&effect("system"), &no_environment, &Services::default()).expect("starts");
-    assert!(Arc::ptr_eq(&session.network, &network));
+fn each_destination_is_carried_by_the_first_rule_that_names_it_then_the_accounts_route_then_the_general_one()
+ {
+    let (one, two) = (
+        world("session-routes-one", &["one.example.test"], b"x"),
+        world("session-routes-two", &["two.example.test"], b"x"),
+    );
+    let known = routes(vec![
+        ("one", crate::network::tests::settings(&one, PASSWORD)),
+        ("two", crate::network::tests::settings(&two, PASSWORD)),
+    ]);
+    let mut asked = RouteEffect::new();
+    asked.routes = vec![
+        RouteRule::for_hosts("one", vec!["*.internal.example".to_owned()]),
+        rule("two"),
+    ];
+    let extra = [Extra {
+        hosts: vec!["api.account.example".to_owned()],
+        route: "one".to_owned(),
+    }];
+    let session = start_with(&asked, &extra, &Services::default(), &known).expect("starts");
+    assert!(
+        session
+            .description
+            .contains("choosing the route of each destination")
+    );
+    let url = session
+        .variables
+        .iter()
+        .find(|(name, _)| name == "HTTPS_PROXY")
+        .map(|(_, value)| value.clone())
+        .expect("a proxy");
+    let address = url
+        .rsplit_once('@')
+        .and_then(|(_, address)| address.parse::<SocketAddr>().ok())
+        .expect("an address");
+    let token = url
+        .trim_start_matches("http://canoa:")
+        .split('@')
+        .next()
+        .expect("a token")
+        .to_owned();
+    for destination in [
+        "db.internal.example:443",
+        "api.account.example:443",
+        "elsewhere.example.test:443",
+    ] {
+        let (mut stream, head) = ask(address, &connect(destination, Some(&basic(&token))));
+        assert!(head.starts_with("HTTP/1.1 200"), "{destination}: {head}");
+        closes(&mut stream);
+    }
+    assert_eq!(
+        one.proxy.allowed(USER, PASSWORD),
+        ["db.internal.example:443", "api.account.example:443"],
+        "the profile's pattern, then the account's addresses"
+    );
+    assert_eq!(
+        two.proxy.allowed(USER, PASSWORD),
+        ["elsewhere.example.test:443"],
+        "every other destination"
+    );
+    // A route that does not open refuses the start, whichever rule names it.
+    asked.routes = vec![RouteRule::for_hosts("ghost", vec!["x.example".to_owned()])];
+    let why = start_with(&asked, &[], &Services::default(), &known).expect_err("refused");
+    assert!(why.contains("ghost"), "{why}");
 }
