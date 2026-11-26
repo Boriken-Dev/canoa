@@ -931,6 +931,39 @@ pub struct AccountSpeechModel { pub id: String, pub label: String }   // new(id,
 - A service's `id` is 1 to 32 lower-case letters and digits; the offer made of an account is `ID:ACCOUNT`. `standard` is the credential standard an account's kind provides (such as `openai-api`) and `address` the address that kind's model API is called at when nothing moves it: an account is offered when its provider has a kind that provides the standard from that address, and is listed as not offered, with the reason, when its own kind is not one or its settings move the address elsewhere. `url` is where a recording is posted (an http or https address, the key sent as `Authorization: Bearer`), `credential` the field of the account's stored credentials that holds the key, `summary` and `location` the words of the offer (what it is, and where the audio goes) and `models` the ones that transcribe, the recommended first.
 - Every model is `#[non_exhaustive]` with `new` and public fields.
 
+## `history_store` (`canoa::history_store`, feature `history-store`)
+
+Where recorded conversations, the list of them each client shows and the properties of every turn are kept. A relational interface, not a storage format: named tables of typed columns, structured queries and atomic batches. SQLite, the in-memory store and an extension's store are providers alike, so the host names none. Models are plain data; a filter is an OR of ANDs (`Vec<Vec<Cond>>`), so nothing nests in itself.
+
+```rust
+pub const KIND: &str = "history_store";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+#[guatiao::kind(name = "history_store")]
+pub trait HistoryStore: Send + Sync {
+    fn describe(&self) -> Result<StoreInfo, ProviderError>;
+    fn open(&self, request: OpenRequest) -> Result<Object<dyn HistoryDb>, ProviderError>;
+}
+#[guatiao::kind(object, name = "history_db")]
+pub trait HistoryDb: Send + Sync {
+    fn schema(&self) -> Result<SchemaState, ProviderError>;      fn migrate(&self, m: Migration) -> Result<(), ProviderError>;
+    fn select(&self, s: Select) -> Result<Rows, ProviderError>;  fn count(&self, s: Select) -> Result<u64, ProviderError>;
+    fn aggregate(&self, a: Aggregate) -> Result<Rows, ProviderError>;
+    fn write(&self, w: Write) -> Result<Written, ProviderError>;   // every change or none
+    fn sql(&self, q: Sql) -> Result<Rows, ProviderError>;           // capability `sql`: one read-only statement
+    fn revision(&self) -> Result<String, ProviderError>;  fn stats(&self) -> Result<Stats, ProviderError>;
+    fn compact(&self) -> Result<Compacted, ProviderError>;          // capability `compact`
+    fn close(&self) -> Result<(), ProviderError>;
+}
+```
+
+- `Cell` is `null | bool | int | real | text | bytes | json` (json as text); times are `int` milliseconds since the Unix epoch. `ColumnType`: `text int real bool blob json`. Nulls sort lowest.
+- `Select { table, columns, filter, order, limit (required), after }`: the table's key is appended to `order`, so `Rows.next` (a keyset cursor, valid for the same select) never moves when rows are added. `Cond { column, op, values }` with `Op` `eq ne lt le gt ge in is_null not_null prefix contains suffix` (text tests are literal and case-sensitive). A table's `requires` columns must be tested for equality by every alternative.
+- `Write { ops: [Change::Insert | Upsert | Update{set, add} | Delete] }`; `add` increments in place so a counter moves with the rows that made it. `Aggregate { table, filter, group_by, figures[count|sum|min|max] }`.
+- `StoreError` (`Bad`, `Conflict`, `Unsupported`, `ReadOnly`, `Busy{retry_ms}`, `Gone`, `Corrupt`, `Full`, `Internal`) maps to `ProviderError` by status and text prefix; no message holds row content.
+- `StoreInfo` (`id`, `title`, `summary`, `location`, `access`, `foreign`, `default`, `capabilities` `sql|search|blobs|compact`, `dialect`, `limits`, settings schema and form, `tables` for a foreign store) and `OpenRequest { settings (JSON text), home, secret, create, reply_bytes }`.
+- `history_store::schema::v1()` is the `Migration` that creates version 1: `meta`, `sessions`, `turns`, `events`, `attachments`, `event_attachments`, `listings`, `source_memory`, `favourites`. A turn carries `harness agent account model effort role pool member profile why moved_from usage_known tokens_input tokens_output tokens_cached cost_micros cost_currency duration_ms limited moved_on` (null when not reported, never zero) and `tags`, a JSON map keyed `namespace:name`.
+- `history_store::memory::{MemoryDb, MemoryStore}` is the in-memory store. `history_store::contract::run(&dyn HistoryDb)` is the test every provider passes (given a store with no schema); `plan_select`, `check_filter`, `normalize_row`, `row_matches` and `cmp_cells` are what a provider that is not a database reuses.
+- Not yet: the `Document` to rows conversion and the kind's description files for the script SDKs.
+
 ## `session_service` (`canoa::session_service`, feature `session-service`)
 
 The Guatiao extension kind for what a library runs for the sessions of a host and hands to them, so a knowledge index, the secrets an agent may use or a person's mail are libraries outside `canoa-host`: the host owns the way a service is offered, never a service.
