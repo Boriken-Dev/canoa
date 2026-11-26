@@ -7737,6 +7737,7 @@ dependencies = [
 [[package]]
 name = "whisper-rs-sys"
 version = "0.15.0"
+source = "git+https://github.com/Boriken-Dev/whisper-rs-sys?branch=main#3cd0b0d54371c2fdf8768169d1a8ec46995b48d1"
 dependencies = [
  "bindgen 0.72.1",
  "cfg-if",
