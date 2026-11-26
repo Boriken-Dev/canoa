@@ -52,6 +52,11 @@ class CatalogSource:      # canoa_sdk.source: where a Store type's catalog comes
 class CommandCatalogSource(CatalogSource)   # a program the person named; its output (or `file`) is the catalog
 class ReadCatalogSource(CatalogSource)      # a place the type reads itself; read answers a file on this computer
 fields_of(request); MAX_BYTES; DEFAULT_SECONDS; TAIL_BYTES
+class ContentSource:      # canoa_sdk.content: a file or folder by URI; source: str (the id), title, help = None, schemes = [scheme(name, title, grammar, lists=, resolves=)], endpoints = ()
+                          # stat(target), list(request), open(request), resolve(target): each answers a dict (stat_found, list_found, opened_inline, resolved) or refused(kind, why); a slot left alone answers UNSUPPORTED
+class CatalogGenerator:   # canoa_sdk.content: generator: str (the id canoa.cfg records), title, types = (), reads = "required" | "optional" | "absent" (the entry's source), grammar = None, endpoints, keys, values = None
+                          # abstract slot generate(request, spawner, host) -> the catalog's text; host reads (stat, list, open_text, open_json, open_bytes, resolve, child) only under the entry's source; destroy both objects
+request_of(request); fields_json(request); stat_file(size=, etag=, content_type=, revision=, immutable=); stat_dir(); stat_found(stat); list_found(entries, next=); opened_inline(stat, data); resolved(uri, revision, immutable=); refused(kind, why, retry_after_seconds=); scheme(...)
 class SettingsSection:    # canoa_sdk.settings: section, title, help, icon, group, under, keywords, stored = "config" | "provider", values; read(), write(values)
 class PanelTab:           # canoa_sdk.panel: tab, title, help, icon, shows = "log" | "terminal" | "page", shell, url; tail(request)
 class TerminalPanelTab(PanelTab); class PagePanelTab(PanelTab)   # a page at `url`, on this computer's loopback

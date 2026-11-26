@@ -13,6 +13,9 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use canoa::content::{
+    CatalogGeneratorProviderVtable, ContentHostVtable, ContentSourceProviderVtable,
+};
 use canoa::gateway::{GatewayLeaseVtable, ModelGatewayVtable};
 use canoa::notifier::NotifierVtable;
 use canoa::panel_tab::PanelTabVtable;
@@ -47,6 +50,9 @@ pub(crate) fn document() -> String {
         ProfileItemVtable::description(),
         CatalogSourceProviderVtable::description(),
         SourceFetchVtable::description(),
+        ContentSourceProviderVtable::description(),
+        ContentHostVtable::description(),
+        CatalogGeneratorProviderVtable::description(),
         UsageReaderVtable::description(),
         UsageReadingVtable::description(),
         ProcessMembersVtable::description(),
@@ -136,6 +142,9 @@ mod tests {
             "secret_provider",
             "profile_item",
             "catalog_source",
+            "content_source",
+            "content_host",
+            "catalog_generator",
             "usage_reader",
             "settings_section",
             "panel_tab",

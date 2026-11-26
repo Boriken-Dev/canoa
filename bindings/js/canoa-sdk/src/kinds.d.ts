@@ -707,6 +707,43 @@ export interface AccountSpeechOutputRemote extends k.RemoteBase<typeof AccountSp
 export declare const AccountSpeechOutput: k.DescribedKind<AccountSpeechOutput, AccountSpeechOutputRemote, false>;
 
 /**
+ * Where a catalog's text is made from what a content source holds.
+ *
+ * `generate` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last
+ * good catalog it keeps. It reads through the `host` it is handed, which keeps to the entry's `source` and the generator's
+ * `endpoints`. A generator that runs a program or reads a file does it through the `spawner`, which is the host's and has the
+ * person's own reach (`spawn`, and `read_file` by absolute path; writing and removing are refused). The generator destroys both
+ * objects, even when it refuses.
+ *
+ * The `catalog_generator` kind: what a provider of it implements.
+ */
+export interface CatalogGenerator {
+  /** What this generator is. The same answer on every call, with nothing run. */
+  describe(): unknown;
+  /** The catalog's text. */
+  generate(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>, host: k.ObjectHandle<typeof ContentHost>): string;
+}
+
+/** A caller's handle on a `catalog_generator` table: a method per slot. */
+export interface CatalogGeneratorRemote extends k.RemoteBase<typeof CatalogGenerator> {
+  /** What this generator is. The same answer on every call, with nothing run. */
+  describe(): g.Value;
+  /** The catalog's text. */
+  generate(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>, host: ContentHost | k.ObjectHandle<typeof ContentHost>): string;
+}
+
+/**
+ * Where a catalog's text is made from what a content source holds.
+ *
+ * `generate` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last
+ * good catalog it keeps. It reads through the `host` it is handed, which keeps to the entry's `source` and the generator's
+ * `endpoints`. A generator that runs a program or reads a file does it through the `spawner`, which is the host's and has the
+ * person's own reach (`spawn`, and `read_file` by absolute path; writing and removing are refused). The generator destroys both
+ * objects, even when it refuses.
+ */
+export declare const CatalogGenerator: k.DescribedKind<CatalogGenerator, CatalogGeneratorRemote, false>;
+
+/**
  * Where a catalog comes from.
  *
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
@@ -844,6 +881,96 @@ export interface ConfigStoreRemote extends k.RemoteBase<typeof ConfigStore> {
  * what it cannot do answers `UNSUPPORTED` ([`crate::status::unsupported`]).
  */
 export declare const ConfigStore: k.DescribedKind<ConfigStore, ConfigStoreRemote, false>;
+
+/**
+ * Where the data of a content source comes from, as a Store type's catalogs name it.
+ *
+ * Reads and answers, never writes: nothing in Canoa publishes content.
+ *
+ * The `content_source` kind: what a provider of it implements.
+ */
+export interface ContentSource {
+  /** What this provider is. The same answer on every call, with nothing run. */
+  describe(): unknown;
+  /** What is at the URI. `GUATIAO_ERR_UNSUPPORTED` for a scheme that cannot say without reading. */
+  stat(target: g.Ref): unknown;
+  /** What is under the URI, one page. `GUATIAO_ERR_UNSUPPORTED` for a scheme that lists nothing. */
+  list(request: g.Ref): unknown;
+  /** The content of the file at the URI. */
+  open(request: g.Ref): unknown;
+  /** The same place with its revision fixed. `GUATIAO_ERR_UNSUPPORTED` for a scheme with no revisions. */
+  resolve(target: g.Ref): unknown;
+}
+
+/** A caller's handle on a `content_source` table: a method per slot. */
+export interface ContentSourceRemote extends k.RemoteBase<typeof ContentSource> {
+  /** What this provider is. The same answer on every call, with nothing run. */
+  describe(): g.Value;
+  /** What is at the URI. `GUATIAO_ERR_UNSUPPORTED` for a scheme that cannot say without reading. */
+  stat(target: unknown): g.Value;
+  /** What is under the URI, one page. `GUATIAO_ERR_UNSUPPORTED` for a scheme that lists nothing. */
+  list(request: unknown): g.Value;
+  /** The content of the file at the URI. */
+  open(request: unknown): g.Value;
+  /** The same place with its revision fixed. `GUATIAO_ERR_UNSUPPORTED` for a scheme with no revisions. */
+  resolve(target: unknown): g.Value;
+}
+
+/**
+ * Where the data of a content source comes from, as a Store type's catalogs name it.
+ *
+ * Reads and answers, never writes: nothing in Canoa publishes content.
+ */
+export declare const ContentSource: k.DescribedKind<ContentSource, ContentSourceRemote, false>;
+
+/**
+ * What the host lends a [`CatalogGeneratorProvider`] to read with: any registered scheme, through the same registry, route and
+ * trust rules as the host's own readers, and only the places the generator may read (the entry's `source` and below, and the
+ * `endpoints` the generator declares). A generator never opens a connection by itself. It destroys the object when it is done.
+ *
+ * The `content_host` kind: what an object of it implements.
+ */
+export interface ContentHost {
+  /** What is at `uri`. */
+  stat(uri: string): unknown;
+  /** The first page of the entries under `uri`, at most `max_entries`. */
+  list(uri: string, maxEntries: number): unknown;
+  /** The text of the file at `uri`: `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text. */
+  openText(uri: string, maxBytes: bigint): string;
+  /** The file at `uri` as JSON text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON. */
+  openJson(uri: string, maxBytes: bigint): string;
+  /** The bytes of the file at `uri`. */
+  openBytes(uri: string, maxBytes: bigint): unknown;
+  /** `uri` with its revision fixed. */
+  resolve(uri: string): unknown;
+  /** `base` with one path segment appended and its query kept. */
+  child(base: string, name: string): string;
+}
+
+/** A caller's handle on a `content_host` table or object: a method per slot. */
+export interface ContentHostRemote extends k.RemoteBase<typeof ContentHost> {
+  /** What is at `uri`. */
+  stat(uri: string): g.Value;
+  /** The first page of the entries under `uri`, at most `max_entries`. */
+  list(uri: string, maxEntries: number): g.Value;
+  /** The text of the file at `uri`: `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text. */
+  openText(uri: string, maxBytes: number | bigint): string;
+  /** The file at `uri` as JSON text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON. */
+  openJson(uri: string, maxBytes: number | bigint): string;
+  /** The bytes of the file at `uri`. */
+  openBytes(uri: string, maxBytes: number | bigint): g.Value;
+  /** `uri` with its revision fixed. */
+  resolve(uri: string): g.Value;
+  /** `base` with one path segment appended and its query kept. */
+  child(base: string, name: string): string;
+}
+
+/**
+ * What the host lends a [`CatalogGeneratorProvider`] to read with: any registered scheme, through the same registry, route and
+ * trust rules as the host's own readers, and only the places the generator may read (the entry's `source` and below, and the
+ * `endpoints` the generator declares). A generator never opens a connection by itself. It destroys the object when it is done.
+ */
+export declare const ContentHost: k.DescribedKind<ContentHost, ContentHostRemote, true>;
 
 /**
  * A place an agent works. One instance is one configuration of one provider (an address, a key to expect, the folders it grants).

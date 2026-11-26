@@ -164,7 +164,8 @@ mod with_source {
              [host.extensions.examples.source_settings]\n{settings}\n\
              [store.skills.catalogs.mine]\nprovider = \"team\"\nteam = \"core\"\n\n\
              [store.skills.catalogs.echoed]\nprovider = \"echo_command\"\ncommand = {echo}\n\n\
-             [store.skills.catalogs.filed]\nprovider = \"echo_read\"\nsource = {shown}\n",
+             [store.skills.catalogs.filed]\nprovider = \"echo_read\"\nsource = {shown}\n\n\
+             [store.skills.catalogs.generated]\ngenerator = \"team_listing\"\nsource = \"team://core\"\n",
             quoted(&agent.to_string_lossy()),
             quoted(&source.to_string_lossy()),
             quoted(provider),
@@ -353,6 +354,40 @@ mod with_source {
         let filed = skills(9, "filed");
         assert_eq!(filed["provider"], "echo_read", "{filed}");
         assert_eq!(filed["skills"][0]["name"], "from-file", "{filed}");
+        // The scheme and the generator the library adds: the generator reads `team://core/skills.json` through the host, which asks the
+        // scheme's provider for it.
+        let generated = skills(10, "generated");
+        assert_eq!(generated["skills"][0]["name"], "from-core", "{generated}");
+        let (schemes, _) = ask(&link, 11, "content/schemes", json!({})).expect("the schemes");
+        let team = schemes["schemes"]
+            .as_array()
+            .expect("schemes")
+            .iter()
+            .find(|row| row["scheme"] == "team")
+            .unwrap_or_else(|| panic!("the scheme is listed: {schemes}"));
+        assert_eq!(team["provider"], "team_files");
+        assert_eq!(team["extension"], "examples");
+        assert!(
+            schemes["generators"]
+                .as_array()
+                .expect("generators")
+                .iter()
+                .any(|row| row["id"] == "team_listing" && row["source"] == "required"),
+            "{schemes}"
+        );
+        let (read, _) = ask(
+            &link,
+            12,
+            "content/read",
+            json!({"uri": "team://other/skills.json"}),
+        )
+        .expect("read through the scheme");
+        assert!(
+            read["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("from-other")),
+            "{read}"
+        );
         drop(link);
         hosted.stop();
     }

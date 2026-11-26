@@ -50,6 +50,10 @@
       "types": "./types/source.d.ts",
       "import": "./src/source.js"
     },
+    "./content": {
+      "types": "./types/content.d.ts",
+      "import": "./src/content.js"
+    },
     "./section": {
       "types": "./types/section.d.ts",
       "import": "./src/section.js"

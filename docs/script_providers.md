@@ -13,6 +13,8 @@ A script is shared between hosts as the files it is.
 | `secret_provider` | somewhere a secret comes from | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` |
 | `profile_item` | one thing a profile may set | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` |
 | `catalog_source` | where a Store type's catalog comes from | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` |
+| `content_source` | a file or a folder by URI, for the schemes it serves (read-only) | `ContentSource` |
+| `catalog_generator` | what makes a catalog from what a source holds | `CatalogGenerator` |
 | `settings_section` | a page, or a group on a page, of Settings | `SettingsSection` |
 | `notifier` | somewhere a notice about what happened on the host is sent | `Notifier` |
 | `panel_tab` | a kind of tab of the bottom panel | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` |

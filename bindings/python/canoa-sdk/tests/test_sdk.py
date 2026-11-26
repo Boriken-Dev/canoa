@@ -867,3 +867,100 @@ def test_a_notifier_describes_itself_and_a_slot_left_in_place_is_refused() -> No
         class Silent(sdk.Notifier):
             notifier = "silent"
             title = "Silent"
+
+
+class _Host:
+    """The host's `content_host`, as a call answers: reads what a test holds, by address."""
+
+    def __init__(self, files: dict) -> None:
+        self.files = files
+        self.destroyed = False
+
+    def child(self, base: str, name: str) -> str:
+        return base.rstrip("/") + "/" + name
+
+    def open_text(self, uri: str, limit: int) -> str:
+        if uri not in self.files:
+            raise NotFound("no such document")
+        return self.files[uri]
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+
+class Scheme(sdk.ContentSource):
+    source = "files_of_team"
+    title = "Team files"
+    schemes = [sdk.scheme("team", "Team files", "team://name/path", lists=True)]
+
+    def open(self, request: Any) -> Any:
+        uri = sdk.request_of(request)["target"]["uri"]
+        if uri.endswith("/missing"):
+            return sdk.refused("not_found", "team: no such file")
+        return sdk.opened_inline(sdk.stat_file(), uri.encode())
+
+    def stat(self, target: Any) -> Any:
+        return sdk.stat_found(sdk.stat_file(size=3))
+
+
+class Listing(sdk.CatalogGenerator):
+    generator = "team_listing"
+    title = "A team's listing"
+    types = ["skills"]
+    grammar = "team://name"
+
+    def generate(self, request: Any, spawner: Any, host: Any) -> str:
+        try:
+            source = sdk.request_of(request)["source"]
+            return host.open_text(host.child(source, "list.json"), 1024)
+        finally:
+            spawner.destroy()
+            host.destroy()
+
+
+def test_a_content_source_is_described_by_its_schemes_and_answers_with_data_or_a_refusal() -> None:
+    described = Scheme().describe()
+    assert described["id"] == "files_of_team"
+    assert described["schemes"] == [
+        {"name": "team", "title": "Team files", "grammar": "team://name/path", "lists": True, "resolves": False, "ranges": False}
+    ]
+    opened = Scheme().open({"target": {"uri": "team://core/a"}})
+    assert opened["opened"]["delivery"] == {"inline": b"team://core/a"}
+    assert opened["opened"]["stat"]["size"] == len(b"team://core/a")
+    assert Scheme().open({"target": {"uri": "team://core/missing"}}) == {
+        "refusal": {"kind": "not_found", "why": "team: no such file"}
+    }
+    assert Scheme().stat({"uri": "team://x"}) == {"stat": {"kind": "file", "size": 3, "immutable": False, "digests": []}}
+    with pytest.raises(Unsupported):
+        Scheme().list({"target": {"uri": "team://x"}})
+    with pytest.raises(Unsupported):
+        Scheme().resolve({"uri": "team://x"})
+    assert Scheme.__guatiao_provider__.id == "files_of_team"
+    assert provide.library("content", "1", providers=[Scheme, Listing]).kinds == ("content_source", "catalog_generator")
+
+
+def test_a_catalog_generator_reads_through_the_host_and_lets_go_of_what_it_was_handed() -> None:
+    host = _Host({"team://core/list.json": '{"skills": []}'})
+    spawner = _Spawner(None)
+    request = {"kind": "skills", "label": "x", "source": "team://core", "fields": "{}"}
+    assert Listing().generate(request, spawner, host) == '{"skills": []}'
+    assert host.destroyed and spawner.destroyed
+    description = Listing().describe()
+    assert description["id"] == "team_listing" and description["types"] == ["skills"]
+    assert description["source"] == "required" and description["grammar"] == "team://name"
+    assert "schema" not in description
+    with pytest.raises(NotFound):
+        Listing().generate({**request, "source": "team://other"}, _Spawner(None), _Host({}))
+    assert Listing.__guatiao_provider__.id == "team_listing"
+
+
+def test_a_generator_that_reads_no_source_says_so() -> None:
+    class Runs(sdk.CatalogGenerator):
+        generator = "runs"
+        title = "Runs"
+        reads = "absent"
+
+        def generate(self, request: Any, spawner: Any, host: Any) -> str:
+            return ""
+
+    assert Runs().describe()["source"] == "absent"

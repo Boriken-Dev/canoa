@@ -1,7 +1,15 @@
 // What a team might add to Canoa's screens, written in JavaScript: a profile item that tells a session which region it runs in, a
-// catalog source that lists a team's skills, a page of Settings, a tab of the bottom panel and a place notices are sent to. One library serves five kinds; each
-// class is a provider the host offers as it offers any extension's.
+// catalog source that lists a team's skills, a URI scheme of the team's own and a generator that reads it, a page of Settings, a tab
+// of the bottom panel and a place notices are sent to. One library serves seven kinds; each class is a provider the host offers as it
+// offers any extension's.
 import { Notifier, delivery, noticeOf } from '../../../../bindings/js/canoa-sdk/src/notifier.js';
+import {
+  CatalogGenerator,
+  ContentSource,
+  openedInline,
+  scheme,
+  statFile,
+} from '../../../../bindings/js/canoa-sdk/src/content.js';
 import { LogPanelTab, PagePanelTab } from '../../../../bindings/js/canoa-sdk/src/panel.js';
 import { EnvProfileItem } from '../../../../bindings/js/canoa-sdk/src/profile.js';
 import { SettingsSection } from '../../../../bindings/js/canoa-sdk/src/section.js';
@@ -71,6 +79,42 @@ export class EchoCommand extends CommandCatalogSource {
 export class EchoRead extends ReadCatalogSource {
   static source = 'echo_read';
   static title = 'Echo a file';
+}
+
+/** A URI scheme of a team's own: `team://NAME/skills.json` is a list of that team's skills, made up here instead of fetched. */
+export class TeamFiles extends ContentSource {
+  static source = 'team_files';
+  static title = 'Team files';
+  static schemes = [scheme('team', "A team's files", 'team://name/path')];
+
+  /** @param {{target: {uri: string}}} request */
+  open(request) {
+    const team = request.target.uri.slice('team://'.length).split('/')[0];
+    const listing = { skills: [{ name: `from-${team}`, description: 'Read through a scheme a script added.', source: 'owner/repo' }] };
+    return openedInline(statFile(), JSON.stringify(listing));
+  }
+}
+
+/** A generator that makes a skills catalog from what its source holds: it reads `<source>/skills.json` through the host. */
+export class TeamListing extends CatalogGenerator {
+  static generator = 'team_listing';
+  static title = "A team's listing";
+  static types = ['skills'];
+  static grammar = 'team://name';
+
+  /**
+   * @param {{source: string}} request
+   * @param {{destroy(): void}} spawner
+   * @param {{child(base: string, name: string): string, openText(uri: string, max: bigint): string, destroy(): void}} host
+   */
+  generate(request, spawner, host) {
+    try {
+      return host.openText(host.child(request.source, 'skills.json'), 1048576n);
+    } finally {
+      release(spawner);
+      release(host);
+    }
+  }
 }
 
 /** A page of Settings whose values the host keeps in canoa.cfg. */

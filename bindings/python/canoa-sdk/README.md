@@ -28,6 +28,7 @@ examples in `examples/providers/python` are loaded by `crates/canoa-host/tests/s
 | `secret_provider` | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` | `canoa_sdk.secret` |
 | `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa_sdk.profile` |
 | `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa_sdk.source` |
+| `content_source`, `catalog_generator` | `ContentSource`, `CatalogGenerator` | `canoa_sdk.content` |
 | `settings_section` | `SettingsSection` | `canoa_sdk.settings` |
 | `notifier` | `Notifier`, `delivery`, `notice_of`, `settings_of` | `canoa_sdk.notifier` |
 | `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab`, `PagePanelTab` | `canoa_sdk.panel` |

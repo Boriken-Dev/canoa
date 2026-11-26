@@ -52,6 +52,10 @@ class CatalogSource extends Provider {        // source.js: where a Store type's
 }
 class CommandCatalogSource extends CatalogSource   // a program the person named; its output (or `file`) is the catalog
 class ReadCatalogSource extends CatalogSource      // a place the type reads itself; read answers a file on this computer
+class ContentSource extends Provider              // content.js: a file or folder by URI; static source (the id), title, help, schemes = [scheme(name, title, grammar, { lists, resolves })], endpoints
+                                                  // stat(target), list(request), open(request), resolve(target): each answers an object (statFound, listFound, openedInline, resolved) or refused(kind, why); a slot left alone is UNSUPPORTED
+class CatalogGenerator extends Provider           // content.js: static generator (the id canoa.cfg records), title, types, reads = 'required' | 'optional' | 'absent', grammar, endpoints, keys, values, form
+                                                  // generate(request, spawner, host) -> the catalog's text; host reads (stat, list, openText, openJson, openBytes, resolve, child) under the entry's source; release both
 fieldsOf(request); releaseSpawner(spawner); MAX_BYTES; DEFAULT_SECONDS; TAIL_BYTES
 class SettingsSection extends Provider {      // section.js: static section, title, help, icon, group, under, keywords, stored = 'config'|'provider', values, form
   read()  // {} for a config section; write(values)

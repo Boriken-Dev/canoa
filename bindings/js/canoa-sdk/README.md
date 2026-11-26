@@ -28,6 +28,7 @@ nothing else, so a library imports the SDK by a relative path to where it is und
 | `secret_provider` | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` | `canoa-sdk/secret` |
 | `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa-sdk/profile` |
 | `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa-sdk/source` |
+| `content_source`, `catalog_generator` | `ContentSource`, `CatalogGenerator` | `canoa-sdk/content` |
 | `settings_section` | `SettingsSection` | `canoa-sdk/section` |
 | `notifier` | `Notifier`, `delivery`, `noticeOf`, `settingsOf` | `canoa-sdk/notifier` |
 | `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab`, `PagePanelTab` | `canoa-sdk/panel` |

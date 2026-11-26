@@ -1,6 +1,7 @@
 """What a team might add to Canoa's screens, written in Python: a profile item that tells a session which region it runs in, a catalog
-source that lists a team's skills, a page of Settings, a tab of the bottom panel and a place notices are sent to. One library serves five kinds; each class is a
-provider the host offers as it offers any extension's.
+source that lists a team's skills, a URI scheme of the team's own and a generator that reads it, a page of Settings, a tab of the
+bottom panel and a place notices are sent to. One library serves seven kinds; each class is a provider the host offers as it offers
+any extension's.
 """
 
 from __future__ import annotations
@@ -10,8 +11,10 @@ from dataclasses import dataclass, field
 from typing import Annotated, List
 
 from canoa_sdk import (
+    CatalogGenerator,
     CatalogSource,
     CommandCatalogSource,
+    ContentSource,
     EnvProfileItem,
     LogPanelTab,
     Notifier,
@@ -21,12 +24,16 @@ from canoa_sdk import (
     delivery,
     fields_of,
     notice_of,
+    opened_inline,
+    request_of,
+    scheme,
     section,
+    stat_file,
     ui,
 )
 
 __version__ = "1.0.0"
-__all__ = ["BuildsTab", "DocsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamChat", "TeamSource"]
+__all__ = ["BuildsTab", "DocsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamChat", "TeamFiles", "TeamListing", "TeamSource"]
 
 
 @dataclass
@@ -82,6 +89,37 @@ class EchoRead(ReadCatalogSource):
 
     source = "echo_read"
     title = "Echo a file"
+
+
+class TeamFiles(ContentSource):
+    """A URI scheme of a team's own: `team://NAME/skills.json` is a list of that team's skills, made up here instead of fetched."""
+
+    source = "team_files"
+    title = "Team files"
+    schemes = [scheme("team", "A team's files", "team://name/path")]
+
+    def open(self, request):  # type: ignore[no-untyped-def]
+        uri = request_of(request)["target"]["uri"]
+        team = uri[len("team://") :].split("/")[0]
+        listing = {"skills": [{"name": f"from-{team}", "description": "Read through a scheme a script added.", "source": "owner/repo"}]}
+        return opened_inline(stat_file(), json.dumps(listing).encode("utf-8"))
+
+
+class TeamListing(CatalogGenerator):
+    """A generator that makes a skills catalog from what its source holds: it reads `<source>/skills.json` through the host."""
+
+    generator = "team_listing"
+    title = "A team's listing"
+    types = ["skills"]
+    grammar = "team://name"
+
+    def generate(self, request, spawner, host):  # type: ignore[no-untyped-def]
+        try:
+            source = request_of(request)["source"]
+            return host.open_text(host.child(source, "skills.json"), 1 << 20)
+        finally:
+            spawner.destroy()
+            host.destroy()
 
 
 class RegionSection(SettingsSection):

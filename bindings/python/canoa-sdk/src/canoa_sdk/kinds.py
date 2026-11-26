@@ -446,6 +446,78 @@ class AccountSpeechOutput(KindProtocol, Protocol, kind="account_speech_output", 
         ...
 
 
+class ContentHost(KindProtocol, Protocol, kind="content_host", floor_hash=1967041331, is_object=True):
+    """What the host lends a [`CatalogGeneratorProvider`] to read with: any registered scheme, through the same registry, route and
+    trust rules as the host's own readers, and only the places the generator may read (the entry's `source` and below, and the
+    `endpoints` the generator declares). A generator never opens a connection by itself. It destroys the object when it is done.
+    """
+
+    @required
+    @fallible
+    def stat(self, uri: str) -> ValueAnswer:
+        """What is at `uri`."""
+        ...
+
+    @required
+    @fallible
+    def list(self, uri: str, max_entries: U32) -> ValueAnswer:
+        """The first page of the entries under `uri`, at most `max_entries`."""
+        ...
+
+    @required
+    @fallible
+    def open_text(self, uri: str, max_bytes: U64) -> str:
+        """The text of the file at `uri`: `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text."""
+        ...
+
+    @required
+    @fallible
+    def open_json(self, uri: str, max_bytes: U64) -> str:
+        """The file at `uri` as JSON text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON."""
+        ...
+
+    @required
+    @fallible
+    def open_bytes(self, uri: str, max_bytes: U64) -> ValueAnswer:
+        """The bytes of the file at `uri`."""
+        ...
+
+    @required
+    @fallible
+    def resolve(self, uri: str) -> ValueAnswer:
+        """`uri` with its revision fixed."""
+        ...
+
+    @required
+    @fallible
+    def child(self, base: str, name: str) -> str:
+        """`base` with one path segment appended and its query kept."""
+        ...
+
+
+class CatalogGenerator(KindProtocol, Protocol, kind="catalog_generator", floor_hash=1677861760):
+    """Where a catalog's text is made from what a content source holds.
+
+    `generate` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last
+    good catalog it keeps. It reads through the `host` it is handed, which keeps to the entry's `source` and the generator's
+    `endpoints`. A generator that runs a program or reads a file does it through the `spawner`, which is the host's and has the
+    person's own reach (`spawn`, and `read_file` by absolute path; writing and removing are refused). The generator destroys both
+    objects, even when it refuses.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this generator is. The same answer on every call, with nothing run."""
+        ...
+
+    @required
+    @fallible
+    def generate(self, request: Ref, spawner: Taken[ProcessSpawner], host: Taken[ContentHost]) -> str:
+        """The catalog's text."""
+        ...
+
+
 class SourceFetch(KindProtocol, Protocol, kind="source_fetch", floor_hash=634123251, is_object=True):
     """What the host does for a source that reads over the network: one `https` document at a time, through the client, proxy and
     certificate checks the host's own downloads use, and only from the places the source's `endpoints` declare (and the address
@@ -535,6 +607,43 @@ class ConfigStore(KindProtocol, Protocol, kind="config_store", floor_hash=724946
         """A token that differs whenever anything in the store did: the change notification. A host that holds a copy reads again when
         it moves.
         """
+        ...
+
+
+class ContentSource(KindProtocol, Protocol, kind="content_source", floor_hash=3712946889):
+    """Where the data of a content source comes from, as a Store type's catalogs name it.
+
+    Reads and answers, never writes: nothing in Canoa publishes content.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this provider is. The same answer on every call, with nothing run."""
+        ...
+
+    @required
+    @fallible
+    def stat(self, target: Ref) -> ValueAnswer:
+        """What is at the URI. `GUATIAO_ERR_UNSUPPORTED` for a scheme that cannot say without reading."""
+        ...
+
+    @required
+    @fallible
+    def list(self, request: Ref) -> ValueAnswer:
+        """What is under the URI, one page. `GUATIAO_ERR_UNSUPPORTED` for a scheme that lists nothing."""
+        ...
+
+    @required
+    @fallible
+    def open(self, request: Ref) -> ValueAnswer:
+        """The content of the file at the URI."""
+        ...
+
+    @required
+    @fallible
+    def resolve(self, target: Ref) -> ValueAnswer:
+        """The same place with its revision fixed. `GUATIAO_ERR_UNSUPPORTED` for a scheme with no revisions."""
         ...
 
 
@@ -1399,4 +1508,8 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
+<<<<<<< HEAD
 __all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+=======
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+>>>>>>> 7f4bf78d9 (feat: ContentSource and CatalogGenerator in the Python and JavaScript SDKs, with a scheme and a generator in the region examples)
