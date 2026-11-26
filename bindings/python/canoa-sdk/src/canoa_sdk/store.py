@@ -25,7 +25,31 @@ from . import kinds
 from ._model import Model
 from ._provider import WithForm, abstract
 
-__all__ = ["ExtensionInfo", "ExtensionType", "ModelStore", "ProgramStore", "StoreExtension"]
+__all__ = ["CatalogWords", "DefaultCatalog", "ExtensionInfo", "ExtensionType", "ModelStore", "ProgramStore", "StoreExtension"]
+
+
+@dataclass
+class DefaultCatalog(Model):
+    """A catalog a type ships: its `label` in canoa.cfg, the `catalog_source` provider that reads it, that provider's `fields` (a JSON
+    object as text), and optionally the `pin` the author verified and the catalog's `snapshot` text as of that pin."""
+
+    label: str
+    provider: str
+    fields: Optional[str] = None
+    pin: Optional[str] = None
+    snapshot: Optional[str] = None
+
+
+@dataclass
+class CatalogWords(Model):
+    """The catalogs of a type: what one is called (`noun`, `plural`), what the type lists (`lists`), the `format` each answers in,
+    and the `defaults` the type ships."""
+
+    noun: str
+    plural: str
+    lists: str
+    format: Optional[str] = None
+    defaults: List[DefaultCatalog] = field(default_factory=list)
 
 
 @dataclass
@@ -40,6 +64,7 @@ class ExtensionType(Model):
     stores: List[str] = field(default_factory=list)
     icon: Optional[str] = None
     models: Optional[str] = None
+    catalogs: Optional[CatalogWords] = None
 
 
 @dataclass

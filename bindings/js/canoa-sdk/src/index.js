@@ -21,6 +21,9 @@ export {
   renewed,
   usageUnsupported,
 } from './account.js';
+export { ConfigStore } from './config.js';
+export { Environment } from './environment.js';
+export { Sdk, SdkProvider } from './sdk.js';
 export { FORM_KEY, formMeta, section, ui, when } from './forms.js';
 export { GatewayLease, ModelGateway } from './gateway.js';
 export * as kinds from './kinds.js';

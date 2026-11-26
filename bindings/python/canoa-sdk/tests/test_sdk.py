@@ -37,9 +37,12 @@ def test_a_vendor_answers_its_description_from_its_class_attributes() -> None:
         "title": "Quill",
         "vendor": "quill-labs",
         "standards": [{"id": "quill-key", "title": "Quill key"}],
+        "context_files": [],
+        "home_context_files": [],
         "names": [],
         "markers": [],
         "modes": [{"id": "ask", "title": "Ask"}],
+        "endpoints": [],
     }
 
 
@@ -62,6 +65,75 @@ def test_an_extension_lists_its_types_and_leaves_an_absent_icon_out() -> None:
         "publisher": "Example",
         "types": [{"id": "notes", "title": "Notes", "stores": []}],
     }
+
+
+def test_an_extension_type_carries_the_catalogs_it_ships() -> None:
+    class Skills(sdk.StoreExtension):
+        title = "Skills"
+        publisher = "Example"
+        types = [
+            sdk.ExtensionType(
+                "skills",
+                "Skills",
+                catalogs=sdk.CatalogWords(
+                    "catalog", "catalogs", "skills", defaults=[sdk.DefaultCatalog("main", "skills_source", pin="abc")]
+                ),
+            )
+        ]
+
+    assert Skills().describe()["types"][0]["catalogs"] == {
+        "noun": "catalog",
+        "plural": "catalogs",
+        "lists": "skills",
+        "defaults": [{"label": "main", "provider": "skills_source", "pin": "abc"}],
+    }
+
+
+def test_a_config_store_an_environment_and_an_sdk_provider_are_providers_of_their_kinds() -> None:
+    class Memory(sdk.ConfigStore):
+        def describe(self) -> Any:
+            return {"title": "Memory", "layers": []}
+
+        def read(self) -> Any:
+            return {}
+
+        def get(self, key: Any) -> Any:
+            return {}
+
+        def change(self, changes: Any) -> Any:
+            return {}
+
+        def revision(self) -> str:
+            return "1"
+
+    class Sandbox(sdk.Environment):
+        def describe(self) -> Any:
+            return {"title": "Sandbox"}
+
+        def spawner(self) -> Any:
+            raise Unsupported("no spawner here")
+
+    class Client(sdk.SdkProvider):
+        def describe(self) -> Any:
+            return {"title": "Client"}
+
+        def open(self, request: Any, http: Any) -> Any:
+            return sdk.Sdk()
+
+    assert provide.library("memory", "1", providers=[Memory]).kinds == ("config_store",)
+    assert provide.library("sandbox", "1", providers=[Sandbox]).kinds == ("environment",)
+    assert provide.library("client", "1", providers=[Client]).kinds == ("sdk_provider",)
+    for call in (lambda: Sandbox().read_file({}), lambda: Sandbox().list_dir({}), lambda: Sandbox().call({})):
+        with pytest.raises(Unsupported):
+            call()
+    for call in (lambda: Client().open({}, None).chat({}), lambda: Client().open({}, None).models()):
+        with pytest.raises(Unsupported):
+            call()
+
+    with pytest.raises(TypeError, match="IncompleteStore does not implement"):
+
+        class IncompleteStore(sdk.ConfigStore):
+            pass
 
 
 def test_an_account_speech_provider_lists_its_services_with_their_models() -> None:
@@ -633,8 +705,8 @@ def test_account_provider_and_model_gateway_describe_and_answer_defaults() -> No
         ]
         logins = [sdk.LoginMethodInfo(id="demo-login", title="Key", produces="demo-key", steps=["ask"])]
 
-        def provides(self, account: Any) -> List[str]:
-            return ["openai-api"]
+    class LocalAccounts(DemoAccounts):
+        local = True
 
     destroyed: List[str] = []
 
@@ -646,6 +718,9 @@ def test_account_provider_and_model_gateway_describe_and_answer_defaults() -> No
             destroyed.append(self.tag)
 
     provider = DemoAccounts()
+    assert provider.provides({"kind": "demo-key", "settings": {}}) == ["openai-api"]
+    with pytest.raises(BadValue):
+        provider.provides({"kind": "other"})
     assert provider.describe() == {"title": "Demo accounts", "description": "An account kind."}
     offered = provider.offers()
     assert offered["kinds"][0]["id"] == "demo-key"
@@ -670,10 +745,28 @@ def test_account_provider_and_model_gateway_describe_and_answer_defaults() -> No
     with pytest.raises(Unsupported):
         provider.signed_in({"environment": {"DEMO_KEY": "CANARY"}})
 
-    class LocalAccounts(DemoAccounts):
-        local = True
-
     assert LocalAccounts().signed_in({})["state"] == "unknown"
+    assert LocalAccounts().provides({"kind": "local"}) == []
+    assert sdk.models_listed([sdk.ModelInfo("m1", capabilities=["chat"], limits=sdk.ModelLimits(context_tokens=8))]) == {
+        "known": True,
+        "models": [
+            {
+                "id": "m1",
+                "efforts": [],
+                "is_default": False,
+                "capabilities": ["chat"],
+                "limits": {
+                    "context_tokens": 8,
+                    "dimensions_adjustable": False,
+                    "audio_in_formats": [],
+                    "audio_out_formats": [],
+                    "voices": [],
+                    "styles": [],
+                },
+            }
+        ],
+    }
+    assert sdk.models_listed([], signed_out=True)["signed_out"] is True
     assert sdk.login_present() == {"state": "signed_in", "variable": None}
     assert sdk.login_present("DEMO_KEY") == {"state": "signed_in", "variable": "DEMO_KEY"}
     assert sdk.login_absent("no file") == {"state": "signed_out", "reason": "no file"}

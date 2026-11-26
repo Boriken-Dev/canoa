@@ -25,7 +25,7 @@ export class StoreExtension extends Provider {
 
   /** @type {string} */ static title;
   /** @type {string} */ static publisher;
-  /** @type {{id: string, title: string, stores?: string[], icon?: string, models?: string}[]} */ static types = [];
+  /** @type {{id: string, title: string, stores?: string[], icon?: string, models?: string, catalogs?: {noun: string, plural: string, lists: string, format?: string, defaults?: {label: string, provider: string, fields?: string, pin?: string, snapshot?: string}[]}}[]} */ static types = [];
 
   info() {
     const c = /** @type {typeof StoreExtension} */ (this.constructor);

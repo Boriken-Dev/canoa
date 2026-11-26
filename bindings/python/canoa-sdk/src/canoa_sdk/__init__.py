@@ -8,6 +8,9 @@ descriptions, which the base classes sit on.
 
 from __future__ import annotations
 
+from .config import ConfigStore
+from .environment import Environment
+from .sdk import Sdk, SdkProvider
 from .account import (
     AccountKindInfo,
     AccountOffer,
@@ -19,6 +22,7 @@ from .account import (
     LoginMethodInfo,
     LoginOutcome,
     ModelInfo,
+    ModelLimits,
     OpenUrl,
     credential_schema,
     login_absent,
@@ -67,7 +71,7 @@ from .speech import (
     SpeechSession,
     SpeechUtterance,
 )
-from .store import ExtensionInfo, ExtensionType, ModelStore, ProgramStore, StoreExtension
+from .store import CatalogWords, DefaultCatalog, ExtensionInfo, ExtensionType, ModelStore, ProgramStore, StoreExtension
 from .usage import ReaderInfo, Retry, UsageReader, UsageReading, bucket, failed, reading
 from .vendor import AgentVendor, ModeTitle, StandardTitle, VendorInfo
 
@@ -79,9 +83,13 @@ __all__ = [
     "AccountWatch",
     "AgentVendor",
     "CatalogSource",
+    "CatalogWords",
     "CommandCatalogSource",
+    "ConfigStore",
+    "DefaultCatalog",
     "EndpointSlot",
     "EnvProfileItem",
+    "Environment",
     "ExtensionInfo",
     "ExtensionType",
     "FormSecretProvider",
@@ -96,6 +104,7 @@ __all__ = [
     "ModeTitle",
     "ModelGateway",
     "ModelInfo",
+    "ModelLimits",
     "NetworkEffect",
     "NetworkProfileItem",
     "OpenUrl",
@@ -108,6 +117,8 @@ __all__ = [
     "ReaderInfo",
     "Retry",
     "SecretProvider",
+    "Sdk",
+    "SdkProvider",
     "Section",
     "SettingProfileItem",
     "SettingsSection",

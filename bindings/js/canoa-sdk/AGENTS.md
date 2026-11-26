@@ -16,7 +16,7 @@ class AgentVendor extends Provider {          // vendor.js
   info()                                      // override to compute the description
 }
 class StoreExtension extends Provider {       // store.js
-  static title; static publisher; static types = [];   // {id, title, stores?, icon?}
+  static title; static publisher; static types = [];   // {id, title, stores?, icon?, models?, catalogs?: {noun, plural, lists, format?, defaults?: [{label, provider, fields?, pin?, snapshot?}]}}
 }
 class ProgramStore extends Provider {         // store.js: info() (the StoreInfo), program, latest, plan, apply
 class ModelStore extends Provider {           // store.js: lists, moves and sets up the models of a type's programs; info() (the ModelStoreInfo), list, act, keep, service (each takes the host's spawner)
@@ -60,10 +60,14 @@ class PanelTab extends Provider {             // panel.js: static tab, title, he
 }
 class TerminalPanelTab extends PanelTab; class PagePanelTab extends PanelTab   // a page at `url`, on this computer's loopback
 class LogPanelTab extends PanelTab   // lines() -> the log's lines, oldest first
-class AccountProvider extends Provider {      // account.js: static title, description, offeredKinds, logins, usageKinds, local; offer(), login/renew/watch throw Unsupported, usage/models answer unsupported/unknown (and release handles); signedIn(query) says whether the program's own login exists (`loginPresent`, `loginAbsent`, `loginUnknown`): Unsupported without `local`, unknown with it, until overridden
+class AccountProvider extends Provider {      // account.js: static title, description, offeredKinds, logins, usageKinds, local; offer(), provides(account) (the `provides` of the kind it names; override when settings pick the standards), login/renew/watch throw Unsupported, usage/models answer unsupported/unknown (and release handles); signedIn(query) says whether the program's own login exists (`loginPresent`, `loginAbsent`, `loginUnknown`): Unsupported without `local`, unknown with it, until overridden
 }
 class AccountWatch   // account.js: stop()
-credentialSchema(title?, description?); accountKind(fields); loginMethod(fields); endpointSlot(fields); loginOutcome(fields); modelsListed(models); modelsUnknown(reason, unknownKind?); loginPresent(variable?); loginAbsent(reason); loginUnknown(reason); usageUnsupported(reason, account?); renewed(credentials, expiresAt?); renewUnchanged(reason); release(...handles)
+credentialSchema(title?, description?); accountKind(fields); loginMethod(fields); endpointSlot(fields); loginOutcome(fields); modelsListed(models, signedOut?) (a model: id, name, ..., capabilities, capabilities_from, limits); modelsUnknown(reason, unknownKind?); loginPresent(variable?); loginAbsent(reason); loginUnknown(reason); usageUnsupported(reason, account?); renewed(credentials, expiresAt?); renewUnchanged(reason); release(...handles)
+class ConfigStore extends Provider {           // config.js: where the host's configuration lives; describe, read, get, change, revision throw Unsupported until implemented
+class Environment extends Provider {          // environment.js: a place an agent works; describe, spawner; readFile, writeFile, listDir, call throw Unsupported until overridden
+class SdkProvider extends Provider {          // sdk.js: a vendor's client for an account type; describe, open(request, http) -> Sdk
+class Sdk                                     // sdk.js: the opened client; models, chat, embed, rerank throw Unsupported until overridden
 class ModelGateway extends Provider {         // gateway.js: static kind, vendor, table?; open(request, spawner) -> GatewayLease
 }
 class GatewayLease   // gateway.js: address(), bearer(), models() (defaults to modelsUnknown)

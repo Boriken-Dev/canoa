@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional, Sequence, Union
 
 from guatiao import Ref, provide
-from guatiao.errors import Unsupported
+from guatiao.errors import BadValue, Unsupported
 from guatiao.kinds import Taken, ValueAnswer
 
 from . import kinds
@@ -43,6 +43,7 @@ __all__ = [
     "LoginMethodInfo",
     "LoginOutcome",
     "ModelInfo",
+    "ModelLimits",
     "OpenUrl",
     "credential_schema",
     "login_absent",
@@ -78,9 +79,12 @@ def credential_schema(title: Optional[str] = None, description: Optional[str] = 
     return schema
 
 
-def models_listed(models: Sequence[Union["ModelInfo", Dict[str, Any]]]) -> Dict[str, Any]:
-    """A known model list."""
-    return {"known": True, "models": [data_of(model) for model in models]}
+def models_listed(models: Sequence[Union["ModelInfo", Dict[str, Any]]], *, signed_out: bool = False) -> Dict[str, Any]:
+    """A known model list; `signed_out` says the program listed them though nobody is signed in to it."""
+    result: Dict[str, Any] = {"known": True, "models": [data_of(model) for model in models]}
+    if signed_out:
+        result["signed_out"] = True
+    return result
 
 
 def models_unknown(reason: str, *, unknown_kind: Optional[str] = None) -> Dict[str, Any]:
@@ -223,8 +227,25 @@ class LoginOutcome(Model):
 
 
 @dataclass
+class ModelLimits(Model):
+    """What a model takes and gives at most, each absent when the service does not say."""
+
+    context_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    max_input_tokens: Optional[int] = None
+    dimensions: Optional[int] = None
+    dimensions_adjustable: bool = False
+    audio_in_formats: List[str] = field(default_factory=list)
+    audio_out_formats: List[str] = field(default_factory=list)
+    max_audio_bytes: Optional[int] = None
+    voices: List[str] = field(default_factory=list)
+    styles: List[str] = field(default_factory=list)
+
+
+@dataclass
 class ModelInfo(Model):
-    """One model an account may use."""
+    """One model an account may use. `capabilities` are ids (`chat`, `embed`, `tool_use`, ...); empty means not reported, and
+    `capabilities_from` says whether the service `listed` them or the library `declared` them."""
 
     id: str
     name: Optional[str] = None
@@ -234,6 +255,9 @@ class ModelInfo(Model):
     efforts: List[str] = field(default_factory=list)
     default_effort: Optional[str] = None
     is_default: bool = False
+    capabilities: List[str] = field(default_factory=list)
+    capabilities_from: Optional[str] = None
+    limits: Optional["ModelLimits"] = None
 
 
 class AccountWatch(kinds.AccountWatch):
@@ -272,6 +296,18 @@ class AccountProvider(WithForm, provide.Provider, kinds.AccountProvider, abstrac
 
     def offers(self) -> ValueAnswer:
         return self.offer().to_data()
+
+    def provides(self, account: Ref) -> ValueAnswer:
+        """The standards the account provides: the `provides` of the kind it names, as `kinds_offered` (or `offer()`) lists it.
+        Override it for a kind whose settings pick the standards; `account["settings"]` is there and no secret is."""
+        body = _plain(account)
+        kind = body.get("kind") if isinstance(body, dict) else None
+        for offered in self.offer().kinds:
+            if offered.id == kind:
+                return list(offered.provides)
+        if kind == "local" and self.local:
+            return []
+        raise BadValue("this provider keeps no account of that kind")
 
     def login(
         self,

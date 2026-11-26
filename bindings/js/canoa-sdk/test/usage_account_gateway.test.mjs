@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { Unsupported } from 'guatiao';
+import { BadValue, Unsupported } from 'guatiao';
 import { library } from 'guatiao/provide';
 
 import {
@@ -118,12 +118,11 @@ test('AccountProvider, ModelGateway, and helpers build valid answers and destroy
       }),
     ];
     static logins = [loginMethod({ id: 'demo-login', title: 'Key', produces: 'demo-key', steps: ['ask'] })];
-    provides() {
-      return ['openai-api'];
-    }
   }
 
   const accounts = new DemoAccounts();
+  assert.deepEqual(accounts.provides({ kind: 'demo-key', settings: {} }), ['openai-api']);
+  assert.throws(() => accounts.provides({ kind: 'other' }), BadValue);
   assert.deepEqual(accounts.describe(), { title: 'Demo accounts', description: 'An account kind.' });
   const offered = accounts.offers();
   assert.equal(offered.kinds[0].id, 'demo-key');
@@ -139,6 +138,7 @@ test('AccountProvider, ModelGateway, and helpers build valid answers and destroy
     static local = true;
   }
   assert.equal(new LocalAccounts().signedIn({}).state, 'unknown');
+  assert.deepEqual(new LocalAccounts().provides({ kind: 'local' }), []);
   assert.deepEqual(loginPresent('DEMO_KEY'), { state: 'signed_in', variable: 'DEMO_KEY' });
   assert.deepEqual(loginAbsent('no file'), { state: 'signed_out', reason: 'no file' });
   assert.deepEqual(loginUnknown('no keyring'), { state: 'unknown', reason: 'no keyring' });
@@ -149,6 +149,7 @@ test('AccountProvider, ModelGateway, and helpers build valid answers and destroy
     checked: false,
   });
   assert.deepEqual(modelsListed([{ id: 'm1' }]), { known: true, models: [{ id: 'm1' }] });
+  assert.equal(modelsListed([], true).signed_out, true);
   assert.deepEqual(renewed({ api_key: 'k2' }), { credentials: { api_key: 'k2' } });
   assert.deepEqual(renewUnchanged('fresh'), { not_renewed_because: 'fresh' });
   new AccountWatch().stop();

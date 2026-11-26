@@ -4,7 +4,7 @@
 //     static title = 'Demo accounts';
 //     static offeredKinds = [accountKind({ id: 'demo-key', title: 'Demo gateway', provides: ['openai-api'] })];
 //   }
-import { Unsupported } from 'guatiao';
+import { BadValue, Unsupported } from 'guatiao';
 import { Provider } from 'guatiao/provide';
 
 import * as kinds from './kinds.js';
@@ -87,10 +87,12 @@ export function loginOutcome(fields) {
 
 /**
  * A known model listing.
- * @param {{id: string, name?: string, description?: string, resolved?: string, version?: string, efforts?: string[], default_effort?: string, is_default?: boolean}[]} models
+ * @param {{id: string, name?: string, description?: string, resolved?: string, version?: string, efforts?: string[], default_effort?: string, is_default?: boolean, capabilities?: string[], capabilities_from?: 'listed' | 'declared', limits?: {context_tokens?: number, max_output_tokens?: number, max_input_tokens?: number, dimensions?: number, dimensions_adjustable?: boolean, audio_in_formats?: string[], audio_out_formats?: string[], max_audio_bytes?: number, voices?: string[], styles?: string[]}}[]} models
+ * @param {boolean} [signedOut] the program listed them though nobody is signed in to it
  */
-export function modelsListed(models) {
-  return { known: true, models: models.map((model) => dataOf(model)) };
+export function modelsListed(models, signedOut = false) {
+  const listed = { known: true, models: models.map((model) => dataOf(model)) };
+  return signedOut ? { ...listed, signed_out: true } : listed;
 }
 
 /**
@@ -199,6 +201,19 @@ export class AccountProvider extends Provider {
 
   offers() {
     return dataOf(this.offer());
+  }
+
+  /**
+   * The standards the account provides: the `provides` of the kind it names, as `offeredKinds` (or `offer()`) lists it. Override it
+   * for a kind whose settings pick the standards; `account.settings` is there and no secret is.
+   * @param {{kind?: string, settings?: unknown}} account
+   */
+  provides(account) {
+    const c = /** @type {typeof AccountProvider} */ (this.constructor);
+    const kind = this.offer().kinds.find((k) => k.id === account?.kind);
+    if (kind) return [...(kind.provides ?? [])];
+    if (account?.kind === 'local' && c.local) return [];
+    throw new BadValue('this provider keeps no account of that kind');
   }
 
   /**
