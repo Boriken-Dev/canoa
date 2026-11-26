@@ -71,7 +71,7 @@ of the base's symbols (`"like"`): the base symbols are `conversations`, `hosts`,
 The build gives the app these as `--dart-define`s, the host's build the file as `BRAND_FILE`, the runner its names
 (`name_runner.sh`) and the Windows program its icon (`canoa_mark.py --brand FILE --out DIR` renders the set; it needs Pillow). The
 tray icon is drawn at run time from the same mark in the accent of the look in force: an `.ico` of several sizes on Windows, a PNG
-elsewhere. `--portable` and the Office add-in's identifiers still name Canoa.
+elsewhere. `--portable` and the Office add-in's identifiers still name Canoa; the launcher's and the add-in's other names and messages, the tool servers an agent sees, the speech providers' variables, the flag a built application takes to run as the host's own command and the app's own words follow the brand.
 
 ## The documentation follows the brand
 
