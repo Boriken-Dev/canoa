@@ -843,6 +843,13 @@ enum Pending {
     Open { digests: Vec<[u8; 32]> },
 }
 
+/// A request of the agent's that asks the person to switch a session's mode.
+struct ModeAsk {
+    session: String,
+    /// The ids of the options that allow it.
+    allowing: Vec<String>,
+}
+
 /// A request of the client's whose answer says something of a session.
 enum Asked {
     /// `session/new`, `load` or `resume`: the session it names, none for a new one.
@@ -868,6 +875,11 @@ struct LinkState {
     opened: usize,
     /// The sessions the agent has been told about its environments.
     briefed: BTreeSet<String>,
+    /// The agent's requests to switch a session's mode that the person has not answered, by the request's id.
+    mode_asks: HashMap<String, ModeAsk>,
+    /// The sessions whose person allowed the agent's request to leave plan mode, until the agent says its new mode or the next
+    /// prompt.
+    leaving: BTreeSet<String>,
 }
 
 /// One client connection's use of environments.
@@ -1044,6 +1056,7 @@ impl Link {
         // JSON may escape any character, so a message with a backslash is read whatever its bytes say.
         if !(contains(&message, b"session/")
             || contains(&message, b"initialize")
+            || contains(&message, b"outcome")
             || message.contains(&b'\\'))
         {
             return Said::On(message);
@@ -1056,6 +1069,7 @@ impl Link {
             .and_then(Value::as_str)
             .map(str::to_owned)
         else {
+            self.permission_answered(&value);
             return Said::On(message);
         };
         let id = value.get("id").map(Value::to_string);
@@ -1118,6 +1132,10 @@ impl Link {
                 false
             }
             ("session/prompt", _) => {
+                if let Some(session) = &session {
+                    // A request to leave plan mode answered before this prompt is the last one that could raise the mode.
+                    lock(&self.state).leaving.remove(session);
+                }
                 let briefed = self.brief(&mut value);
                 if let (Some(interception), Some(session)) = (&self.interception, session)
                     && !interception.started(&session)
@@ -1227,6 +1245,8 @@ impl Link {
         self.modes.forget(session);
         let mut state = lock(&self.state);
         state.mode_options.remove(session);
+        state.leaving.remove(session);
+        state.mode_asks.retain(|_, ask| ask.session != session);
         if let Some(digests) = state.bearers.remove(session) {
             for digest in &digests {
                 lock(&self.hub.tokens.0).remove(digest);
@@ -1385,6 +1405,9 @@ impl Link {
             return false;
         };
         if let Some(method) = value.get("method").and_then(Value::as_str) {
+            if method == "session/request_permission" {
+                self.permission_asked(&id, &value);
+            }
             if self.served.is_none() || !super::served::serves(method) {
                 return false;
             }
@@ -1428,8 +1451,77 @@ impl Link {
             _ => None,
         };
         if let Some(mode) = reported {
-            self.modes
-                .reported(session, Mode::of_id(&mode).unwrap_or(Mode::Manual));
+            let mode = Mode::of_id(&mode).unwrap_or(Mode::Manual);
+            // The person allowed the agent to leave plan mode, and the agent says where it went.
+            if lock(&self.state).leaving.remove(session) {
+                self.modes.left_plan(session, mode);
+            }
+            self.modes.reported(session, mode);
+        }
+    }
+
+    /// The agent asks the person for a permission: one that switches the session's mode (leaving plan mode) is remembered, for the
+    /// person's answer on the client's stream.
+    fn permission_asked(&self, id: &Value, value: &Value) {
+        let params = &value["params"];
+        let call = params
+            .get("toolCall")
+            .or_else(|| params.pointer("/subject/toolCall"));
+        let switches = call
+            .and_then(|call| call.get("kind"))
+            .and_then(Value::as_str)
+            == Some("switch_mode");
+        let Some(session) = params.get("sessionId").and_then(Value::as_str) else {
+            return;
+        };
+        if !switches {
+            return;
+        }
+        let allowing = params
+            .get("options")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|option| {
+                option
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind.starts_with("allow"))
+            })
+            .filter_map(|option| option.get("optionId").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect();
+        let mut state = lock(&self.state);
+        if state.mode_asks.len() < MAX_PENDING {
+            state.mode_asks.insert(
+                id.to_string(),
+                ModeAsk {
+                    session: session.to_owned(),
+                    allowing,
+                },
+            );
+        }
+    }
+
+    /// The client's answer to a request of the agent's: the person allowing the agent to switch a session out of plan mode lets
+    /// the mode the agent then says raise it. This is the person's own answer, on the client's stream, and only the option that
+    /// allows counts.
+    fn permission_answered(&self, value: &Value) {
+        let Some(id) = value.get("id") else {
+            return;
+        };
+        let Some(ask) = lock(&self.state).mode_asks.remove(&id.to_string()) else {
+            return;
+        };
+        let outcome = value.pointer("/result/outcome");
+        let chosen = outcome
+            .filter(|outcome| outcome.get("outcome").and_then(Value::as_str) == Some("selected"))
+            .and_then(|outcome| outcome.get("optionId"))
+            .and_then(Value::as_str);
+        if chosen.is_some_and(|chosen| ask.allowing.iter().any(|allowing| allowing == chosen))
+            && self.modes.of(&ask.session) == Mode::Plan
+        {
+            lock(&self.state).leaving.insert(ask.session);
         }
     }
 

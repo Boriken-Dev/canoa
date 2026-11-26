@@ -1321,3 +1321,88 @@ fn monitor_is_turned_to_the_environment_like_a_shell_but_is_not_offered_for_wait
     };
     assert!(!why.contains("Monitor"), "{why}");
 }
+
+#[test]
+fn a_session_held_at_plan_leaves_it_on_the_persons_own_allowance_of_the_agents_request_and_no_report_alone_raises_it() {
+    let link = hub("canoa")
+        .for_connection(None, &serve("box"), Some("claude"))
+        .expect("made")
+        .expect("a link");
+    let agent = |message: Value| link.agent_said(message.to_string().as_bytes());
+    let mode = |session: &str, id: &str| {
+        agent(
+            json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session,
+            "update": {"sessionUpdate": "current_mode_update", "currentModeId": id}}}),
+        );
+    };
+    let ask = |id: u64, session: &str, kind: &str| {
+        agent(json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {
+            "sessionId": session,
+            "toolCall": {"toolCallId": "t", "kind": kind, "title": "Ready to code?"},
+            "options": [
+                {"optionId": "yes", "name": "Yes", "kind": "allow_once"},
+                {"optionId": "no", "name": "No", "kind": "reject_once"},
+            ]}}));
+    };
+    let answer = |id: u64, option: Option<&str>| {
+        let outcome = option.map_or(
+            json!({"outcome": "cancelled"}),
+            |option| json!({"outcome": "selected", "optionId": option}),
+        );
+        let _ = said(
+            &link,
+            &json!({"jsonrpc": "2.0", "id": id, "result": {"outcome": outcome}}),
+        );
+    };
+    mode("s", "plan");
+    assert_eq!(link.mode_of("s"), Mode::Plan);
+    // A report alone cannot raise it.
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Plan, "the agent's word alone");
+    // The person refuses, or cancels, or allows something that is not a switch of the mode: still plan.
+    ask(1, "s", "switch_mode");
+    answer(1, Some("no"));
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Plan, "refused");
+    ask(2, "s", "switch_mode");
+    answer(2, None);
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Plan, "cancelled");
+    ask(3, "s", "execute");
+    answer(3, Some("yes"));
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Plan, "a question about a command");
+    // The person's answer to a request nobody asked is nothing.
+    answer(99, Some("yes"));
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Plan);
+    // The person allows the agent to leave plan mode: the mode the agent then says counts, once.
+    ask(4, "s", "switch_mode");
+    answer(4, Some("yes"));
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Manual, "allowed by the person");
+    mode("s", "plan");
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Plan, "once");
+    // What the agent says it went to is held below Bypass, which only the client's own choice reaches.
+    ask(5, "s", "switch_mode");
+    answer(5, Some("yes"));
+    mode("s", "bypass");
+    assert_eq!(link.mode_of("s"), Mode::Auto);
+    // An allowance the agent does not follow with its report ends with the person's next prompt.
+    mode("s", "plan");
+    ask(6, "s", "switch_mode");
+    answer(6, Some("yes"));
+    let _ = said(
+        &link,
+        &json!({"jsonrpc": "2.0", "id": 7, "method": "session/prompt", "params": {"sessionId": "s", "prompt": []}}),
+    );
+    mode("s", "manual");
+    assert_eq!(link.mode_of("s"), Mode::Plan, "stale");
+    // Another session is not the one that was allowed.
+    mode("t", "plan");
+    ask(8, "s", "switch_mode");
+    answer(8, Some("yes"));
+    mode("t", "manual");
+    assert_eq!(link.mode_of("t"), Mode::Plan);
+}

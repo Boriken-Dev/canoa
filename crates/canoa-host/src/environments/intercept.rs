@@ -108,8 +108,9 @@ impl Mode {
     }
 }
 
-/// The mode of each session of a connection. Only the client's own choice, answered OK, raises one; what the agent says of itself
-/// can only lower it. A session nothing was said of asks.
+/// The mode of each session of a connection. Only the client's own choice, answered OK, raises one, and so does the person's own
+/// answer to the agent's request to leave plan mode ([`Modes::left_plan`]); what the agent says of itself can only lower it. A
+/// session nothing was said of asks.
 #[derive(Debug, Default)]
 pub(crate) struct Modes(Mutex<BTreeMap<String, Mode>>);
 
@@ -122,6 +123,15 @@ impl Modes {
     /// The client chose `mode` for `session` and the agent took it.
     pub(crate) fn chosen(&self, session: &str, mode: Mode) {
         lock(&self.0).insert(session.to_owned(), mode);
+    }
+
+    /// The person allowed the agent's request to leave plan mode, and the agent says `session` is now in `mode`: a session held at
+    /// plan goes to `mode`, but never to Bypass, which only the client's own choice reaches.
+    pub(crate) fn left_plan(&self, session: &str, mode: Mode) {
+        let mut all = lock(&self.0);
+        if all.get(session).copied() == Some(Mode::Plan) {
+            all.insert(session.to_owned(), mode.min(Mode::Auto));
+        }
     }
 
     /// The agent says `session` is in `mode`: kept only when it is stricter.
