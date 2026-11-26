@@ -118,6 +118,21 @@ class ExtensionBody extends StatefulWidget {
   State<ExtensionBody> createState() => _ExtensionBodyState();
 }
 
+/// A page with more items than this has a row of chips that filter it by the tags its items carry.
+const _chipsFrom = 8;
+
+/// The tags of [items], each with how many carry it, the most common first.
+List<MapEntry<String, int>> _tagCounts(List<ExtensionStoreItem> items) {
+  final counts = <String, int>{};
+  for (final item in items) {
+    for (final tag in item.tags.toSet()) {
+      if (tag.isNotEmpty) counts[tag] = (counts[tag] ?? 0) + 1;
+    }
+  }
+  return counts.entries.toList()
+    ..sort((a, b) => b.value != a.value ? b.value.compareTo(a.value) : a.key.compareTo(b.key));
+}
+
 class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveClientMixin {
   final _installing = <String>{};
 
@@ -192,6 +207,27 @@ class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveCl
               ),
           ]),
         ),
+        if (_tagCounts(inScope) case final counts when counts.length > 1 && inScope.length > _chipsFrom)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Wrap(spacing: 6, runSpacing: 4, children: [
+              for (final MapEntry(key: tag, value: count) in counts)
+                FilterChip(
+                  key: Key('store-tag-${type.id}-$tag'),
+                  label: Text('$tag ($count)'),
+                  visualDensity: VisualDensity.compact,
+                  selected: view.tags.contains(tag),
+                  onSelected: (on) {
+                    if (on) {
+                      view.tags.add(tag);
+                    } else {
+                      view.tags.remove(tag);
+                    }
+                    view.changed();
+                  },
+                ),
+            ]),
+          ),
         for (final notice in type.notices?.call() ?? const <ExtensionStoreNotice>[]) _NoticeRow(notice: notice),
         if (shown.isEmpty) Text(filtered ? 'Nothing listed matches.' : 'No catalog lists any $noun.', key: const Key('store-type-nothing')),
       ],

@@ -126,6 +126,11 @@ fn the_recorded_voices_have_their_reviewed_digests() {
             "no licence is claimed for a voice whose card was not read"
         );
         assert!(item.verified_with().is_some(), "{}", item.id);
+        let language = item.facts[0].1.split(',').next().expect("a language");
+        assert_eq!(
+            item.tags[0], language,
+            "the first tag is the language by name, which the page's chips filter by"
+        );
     }
 }
 

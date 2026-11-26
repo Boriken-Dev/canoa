@@ -260,7 +260,8 @@ fn item_of(
         |country| format!("{english}, {country}"),
     );
     let mut item = ModelItem::new(key, format!("{name} ({spoken}, {quality})"));
-    item.tags = vec![family.to_owned(), quality.to_owned()];
+    // The language by name, so the Models page's tag chips filter the voices by it.
+    item.tags = vec![english.to_owned(), quality.to_owned()];
     item.facts = vec![
         ("Language".to_owned(), spoken),
         ("Quality".to_owned(), quality.to_owned()),

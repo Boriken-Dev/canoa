@@ -245,6 +245,36 @@ void main() {
     shown.dispose();
   });
 
+  testWidgets('a page of many models has a chip for each tag, most common first, which filters the list like the banner does', (tester) async {
+    _tall(tester);
+    final host = FakeStoreHost([])
+      ..modelsAnswer = (given) => {
+        'type': given['type'],
+        'catalog': 'Voices',
+        'publisher': 'Acme',
+        'models': [
+          for (var at = 0; at < 9; at++)
+            {'id': 'voice-$at', 'summary': 'v', 'tags': [at < 6 ? 'English' : 'Spanish', 'medium'], 'actions': <Object?>[]},
+        ],
+      };
+    final shared = host.client();
+    final voices = TypeModels(type: 'voices', title: 'Voices', control: () async => shared, open: () async => host.client());
+    final page = modelsStoreType(models: [voices]);
+    final view = StoreView(modelsTypeId);
+    await tester.runAsync(page.load!);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: view, builder: (context, _) => ExtensionBody(type: page, view: view)))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('store-tag-models-English')), findsOneWidget);
+    expect(find.text('English (6)'), findsOneWidget);
+    expect(find.text('medium (9)'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('store-tag-models-Spanish')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('store-entry-Voices-voice-7')), findsOneWidget);
+    expect(find.byKey(const Key('store-entry-Voices-voice-1')), findsNothing, reason: 'an English voice is filtered out');
+    expect(tester.widget<Chip>(find.byKey(const Key('store-count'))).label, isA<Text>().having((text) => text.data, 'count', '3'));
+    voices.dispose();
+  });
+
   testWidgets('a type that failed shows a notice with Retry next to the models of one that worked, and no row of its own', (tester) async {
     var down = true;
     final host = FakeStoreHost([])
