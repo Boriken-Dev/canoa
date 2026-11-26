@@ -12,6 +12,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `profile-item` | `canoa::profile_item` | the `profile_item` kind: a setting a profile carries and applies (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `regex`) |
 | `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
 | `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
+| `content` | `canoa::content` | the `content_source` and `catalog_generator` kinds: a file or a tree by URI, and what turns it into a catalog (`guatiao`, `coqui-acp-api`, `guatiao-intake`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `notifier` | `canoa::notifier` | the `notifier` kind: somewhere a notice about what happened on the host is sent (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
@@ -717,6 +718,44 @@ pub fn sha256_from_sums(sums: &str, filename: &str) -> Option<String>;
 pub fn latest_report(result: Result<String, ProviderError>, channel: Option<&str>) -> LatestReport;
 ```
 
+## `canoa::content` (feature `content`)
+
+The `content_source` and `catalog_generator` kinds. A **content source** serves URI schemes (`file`, `https`, `data`, `git+https`, and the ones an extension adds) and answers four questions about a URI: `stat`, `list`, `open` and, for a scheme with revisions, `resolve`. It only reads. A catalog is a URI plus an optional **generator** that makes the catalog from what the URI holds; a generator reads through a `content_host` the host lends it, limited to the entry's `source` and the places the generator declares. Models are plain data (`include/canoa.content_source.kinds.json`, `include/canoa.catalog_generator.kinds.json`, `include/canoa.content.schemas.json`, checked current by `tests/content_kinds.rs`).
+
+```rust
+pub const SOURCE_KIND: &str = "content_source";
+pub const GENERATOR_KIND: &str = "catalog_generator";
+pub const HOST_KEYS: [&str; 6];   // source generator pin ttl keys endpoints: no generator's form may use one
+#[guatiao::kind(name = "content_source")] pub trait ContentSourceProvider: Send + Sync {
+    fn describe(&self) -> Result<ContentInfo, ProviderError>;     // id, title, schemes: [SchemeInfo{name, title, grammar, lists, resolves, ranges}], endpoints
+    fn stat(&self, target: Target) -> Result<StatAnswer, ProviderError>;     // Target{uri, person, timeout_ms}
+    fn list(&self, request: ListRequest) -> Result<ListAnswer, ProviderError>;   // one page: cursor, max_entries, recursive
+    fn open(&self, request: OpenRequest) -> Result<OpenAnswer, ProviderError>;   // Opened{stat, delivery: inline | locator | not_modified}
+    fn resolve(&self, target: Target) -> Result<ResolveAnswer, ProviderError>;   // a branch or tag made a commit: Resolved{uri, revision, immutable}
+}
+#[guatiao::kind(object, name = "content_host")] pub trait ContentHost: Send + Sync {
+    fn stat(&self, uri: &str) -> Result<Stat, ProviderError>;
+    fn list(&self, uri: &str, max_entries: u32) -> Result<Listing, ProviderError>;
+    fn open_text(&self, uri: &str, max_bytes: u64) -> Result<String, ProviderError>;
+    fn open_json(&self, uri: &str, max_bytes: u64) -> Result<String, ProviderError>;
+    fn open_bytes(&self, uri: &str, max_bytes: u64) -> Result<Bytes, ProviderError>;
+    fn resolve(&self, uri: &str) -> Result<Resolved, ProviderError>;
+    fn child(&self, base: &str, name: &str) -> Result<String, ProviderError>;   // appends one path segment and keeps the query
+}
+#[guatiao::kind(name = "catalog_generator")] pub trait CatalogGeneratorProvider: Send + Sync {
+    fn describe(&self) -> Result<GeneratorInfo, ProviderError>;   // id, title, types, source: Required | Optional | Absent, grammar, schema, form, endpoints, keys
+    fn generate(&self, request: GenerateRequest, spawner: Object<dyn ProcessSpawner>, host: Object<dyn ContentHost>) -> Result<String, ProviderError>;
+}
+pub fn scheme_of(uri: &str) -> Option<String>;       // 2 to 32 characters: `C:/x` is a path and a string with no scheme is a path
+pub fn holds_password(uri: &str) -> bool;            // user:secret@host: a secret goes in a credential, not in an address
+pub fn child(base: &str, name: &str) -> Result<String, String>;
+```
+
+- **An expected failure of a remote place is data.** Each answer holds the value or a `Refusal { kind: not_found | denied | rate_limited | bad_reply | too_large | unreachable | timeout | refused_place | changed, why, retry_after_seconds? }`; a protocol failure (`UNSUPPORTED` for a question the scheme cannot answer, `BAD_VALUE`, `INTERNAL`) is the `ProviderError`. `why` names the scheme and the place and holds no credential or query token.
+- **`person`** is true for a URI written in canoa.cfg or the app and false for one a catalog document named: `file` refuses the second, and git runs isolated (none of the person's credentials or configuration) for it.
+- **A digest in `Stat` is only what the provider knows without reading the file**, as the publisher states it (`provenance` `published`) or as it derived it from the content (`derived`): never another algorithm, never a hash-shaped value.
+- **Two providers never serve one scheme.** The host loads the first and lists the second as refused; there is no replace.
+
 ## `canoa::config_store` (feature `config-store`)
 
 The `config_store` kind: where the host's configuration lives. canoa.cfg's layers are the host's provider; a service, a database or a policy store is another, and an extension adds one like any other kind. The host and the application never open the file: they read what the store holds and ask it to change a path. Models are plain data (`include/canoa.config_store.kinds.json`, `include/canoa.config_store.schemas.json`).
@@ -901,7 +940,7 @@ pub trait SpeechUtterance: Send + Sync {
 
 Every method is required and synchronous; the provider destroys the spawner and the fetch it is handed, even when it refuses. `describe` is cheap and the same on every call.
 `voices` may run a program or ask a server, so it may take time and fail with the reason. `fetch` is the catalog sources' `source_fetch` (the host's own client and proxy, `https` only, read-only
-documents), held to the places `OutputInfo::endpoints` declares; the host keeps what a provider that declares any answers for `[host.store] source_ttl`, and one that declares none is asked again
+documents), held to the places `OutputInfo::endpoints` declares; the host keeps what a provider that declares any answers for `[host.content] ttl`, and one that declares none is asked again
 after 30 seconds. A provider whose `voices` fails leaves the list empty with the reason (`voices_problem`), and what a person types by name is still sent. The feature `speech` needs `store` for `SourceFetch`. `say` starts nothing for a request it refuses: `UNSUPPORTED`
 (naming what it has) for a voice, model or style it does not list, `BAD_VALUE` for no text, too much text or a setting it cannot use. `read` answers the audio
 before an error that ended the utterance, so a client plays what there is and then hears why it stopped; after `stop`, or the end, it answers `0`. Dropping an

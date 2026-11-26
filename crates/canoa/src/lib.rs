@@ -15,6 +15,9 @@ pub mod brand;
 #[cfg(feature = "config-store")]
 #[cfg_attr(docsrs, doc(cfg(feature = "config-store")))]
 pub mod config_store;
+#[cfg(feature = "content")]
+#[cfg_attr(docsrs, doc(cfg(feature = "content")))]
+pub mod content;
 #[cfg(feature = "environment")]
 #[cfg_attr(docsrs, doc(cfg(feature = "environment")))]
 pub mod environment;
@@ -50,6 +53,7 @@ pub mod search;
 )]
 pub mod session_service;
 #[cfg(any(
+    feature = "content",
     feature = "history-store",
     feature = "notifier",
     feature = "profile-item",
@@ -64,6 +68,7 @@ pub mod settings_section;
 #[cfg(any(
     feature = "api-gateway",
     feature = "config-store",
+    feature = "content",
     feature = "gateway",
     feature = "panel-tab",
     feature = "profile-item",
@@ -79,6 +84,7 @@ pub mod settings_section;
     docsrs,
     doc(cfg(any(
         feature = "api-gateway",
+        feature = "content",
         feature = "gateway",
         feature = "panel-tab",
         feature = "profile-item",

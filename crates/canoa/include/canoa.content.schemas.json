@@ -1,0 +1,1327 @@
+{
+  "ByteRange": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "start": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The first byte."
+      },
+      "length": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How many bytes; to the end when absent."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "start"
+    ]
+  },
+  "ContentInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id `[host.disabled]` names it by: a word of lower-case letters, digits and `_`, 1 to 32."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying what it reads."
+      },
+      "schemes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The scheme: lower-case letters, digits, `+`, `.` and `-`, 2 to 32 characters, the first a letter."
+            },
+            "title": {
+              "type": "string",
+              "description": "What it reaches, for people."
+            },
+            "grammar": {
+              "type": "string",
+              "description": "One line of grammar, such as `hf://[datasets/]owner/name[/path][?ref=REV]`."
+            },
+            "lists": {
+              "type": "boolean",
+              "description": "Whether `list` works.",
+              "default": false
+            },
+            "resolves": {
+              "type": "boolean",
+              "description": "Whether `resolve` works.",
+              "default": false
+            },
+            "ranges": {
+              "type": "boolean",
+              "description": "Whether `open` honours a range.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "title",
+            "grammar"
+          ]
+        },
+        "description": "The schemes it serves. Two providers never serve one scheme: the second to load is refused.",
+        "default": []
+      },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `https` places the deliveries it hands out (`locator`) may point to, redirects included, each an origin or a prefix with a path.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title"
+    ]
+  },
+  "Delivery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "inline": {
+        "type": [
+          "bytes",
+          "null"
+        ],
+        "description": "The bytes themselves, at most the request's `max_inline`."
+      },
+      "locator": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The address."
+          },
+          "ranges": {
+            "type": "boolean",
+            "description": "Whether it answers a `Range` request.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "description": "An address the host fetches the bytes from."
+      },
+      "not_modified": {
+        "type": "boolean",
+        "description": "The request's `if_none_match` matched: nothing changed.",
+        "default": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "Digest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "algorithm": {
+        "type": "string",
+        "description": "The algorithm as the publisher names it: `sha256`, `sha512`, `git_blob`, and weaker ones recorded as given. Never another algorithm than the publisher's, and never a hash-shaped value that is not a digest of the content."
+      },
+      "value": {
+        "type": "string",
+        "description": "The digest, as the publisher writes it."
+      },
+      "provenance": {
+        "type": "string",
+        "enum": [
+          "published",
+          "derived"
+        ],
+        "x-enum-labels": {
+          "published": "The publisher states it.",
+          "derived": "The provider worked it out from the content."
+        },
+        "description": "Whether the publisher states it or the provider derived it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "algorithm",
+      "value",
+      "provenance"
+    ]
+  },
+  "GenerateRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "The id of the Store type the catalog is of."
+      },
+      "label": {
+        "type": "string",
+        "description": "The label the person gave the catalog."
+      },
+      "source": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The entry's `source` URI, when it has one."
+      },
+      "fields": {
+        "type": "string",
+        "description": "What the form's fields hold, as a JSON object keyed by member name; a field left empty is absent."
+      },
+      "pin": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The entry's `pin`: a revision the generator understands, or `sha256:<hex>` of the catalog's text, which the host checks."
+      },
+      "keys": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The fingerprints the entry demands a signature from, in place of the generator's own.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "label",
+      "fields"
+    ]
+  },
+  "GeneratorInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id canoa.cfg records as `generator`: a word of lower-case letters, digits and `_`, 1 to 32."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying what it makes a catalog of."
+      },
+      "types": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The Store types it serves, by id; none means every type.",
+        "default": []
+      },
+      "source": {
+        "type": "string",
+        "enum": [
+          "required",
+          "optional",
+          "absent"
+        ],
+        "x-enum-labels": {
+          "required": "The entry's `source` is needed.",
+          "optional": "The entry's `source` is used when given.",
+          "absent": "The generator reads no source (a program the person named)."
+        },
+        "description": "Whether it reads the entry's `source`.",
+        "default": "required"
+      },
+      "grammar": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What a `source` must look like for it, in a line of grammar."
+      },
+      "schema": {
+        "description": "The values its form asks for, as a guatiao schema of an object. No member is called one of [`HOST_KEYS`]."
+      },
+      "form": {
+        "description": "How the schema is shown, a guatiao-intake form document."
+      },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `https` places it may read besides the entry's `source`: an origin or a prefix with a path.",
+        "default": []
+      },
+      "keys": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The fingerprints of the publisher keys it verifies what it reads with, in the publisher's own notation. An entry's `keys` replace them.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title"
+    ]
+  },
+  "ListEntry": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Its path relative to the listed URI, `/`-separated. An entry whose name is not one path component (`..`, `a/b`, empty, NUL) is left out by the host."
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "file",
+          "dir"
+        ],
+        "x-enum-labels": {
+          "file": "A file: it has bytes.",
+          "dir": "A folder: it has entries."
+        },
+        "description": "A file or a folder."
+      },
+      "stat": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "file",
+              "dir"
+            ],
+            "x-enum-labels": {
+              "file": "A file: it has bytes.",
+              "dir": "A folder: it has entries."
+            },
+            "description": "A file or a folder."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Its size in bytes, when known."
+          },
+          "modified_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": -9223372036854775808,
+            "maximum": 9223372036854775807,
+            "description": "When it last changed, in milliseconds since the epoch, when known."
+          },
+          "etag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An opaque version tag a later `open` may send as `if_none_match`."
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its media type, when known."
+          },
+          "digests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "algorithm": {
+                  "type": "string",
+                  "description": "The algorithm as the publisher names it: `sha256`, `sha512`, `git_blob`, and weaker ones recorded as given. Never another algorithm than the publisher's, and never a hash-shaped value that is not a digest of the content."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The digest, as the publisher writes it."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "published",
+                    "derived"
+                  ],
+                  "x-enum-labels": {
+                    "published": "The publisher states it.",
+                    "derived": "The provider worked it out from the content."
+                  },
+                  "description": "Whether the publisher states it or the provider derived it."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "algorithm",
+                "value",
+                "provenance"
+              ]
+            },
+            "description": "The digests the provider knows without reading the file.",
+            "default": []
+          },
+          "revision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The revision of the place this answers for (a commit, a version), when the scheme has revisions."
+          },
+          "immutable": {
+            "type": "boolean",
+            "description": "Whether the content at this URI can never change: a commit id, a digest-keyed name, a `data:` URI.",
+            "default": false
+          },
+          "ranges": {
+            "type": "boolean",
+            "description": "Whether `open` honours a range.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind"
+        ],
+        "description": "What the listing gave of it, `size` and `modified_ms` absent when it did not; the host asks `stat` for what it needs."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path",
+      "kind"
+    ]
+  },
+  "ListRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "The URI, as the scheme's grammar writes it."
+          },
+          "person": {
+            "type": "boolean",
+            "description": "Whether the person wrote the URI (canoa.cfg, the application), as opposed to a catalog document naming it. A provider that runs something as the person (git with their credentials) does it only for a URI the person wrote.",
+            "default": false
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "How long the provider may take, in milliseconds; 0 leaves it to the provider.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "uri"
+        ],
+        "description": "The folder."
+      },
+      "cursor": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The cursor of the page wanted, from a listing's `next`; the first page when absent."
+      },
+      "max_entries": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The most entries one page holds."
+      },
+      "recursive": {
+        "type": "boolean",
+        "description": "Whether to list everything below, not only the folder's own entries.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "target",
+      "max_entries"
+    ]
+  },
+  "Listing": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "entries": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Its path relative to the listed URI, `/`-separated. An entry whose name is not one path component (`..`, `a/b`, empty, NUL) is left out by the host."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "file",
+                "dir"
+              ],
+              "x-enum-labels": {
+                "file": "A file: it has bytes.",
+                "dir": "A folder: it has entries."
+              },
+              "description": "A file or a folder."
+            },
+            "stat": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "dir"
+                  ],
+                  "x-enum-labels": {
+                    "file": "A file: it has bytes.",
+                    "dir": "A folder: it has entries."
+                  },
+                  "description": "A file or a folder."
+                },
+                "size": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "Its size in bytes, when known."
+                },
+                "modified_ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": -9223372036854775808,
+                  "maximum": 9223372036854775807,
+                  "description": "When it last changed, in milliseconds since the epoch, when known."
+                },
+                "etag": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "An opaque version tag a later `open` may send as `if_none_match`."
+                },
+                "content_type": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Its media type, when known."
+                },
+                "digests": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "algorithm": {
+                        "type": "string",
+                        "description": "The algorithm as the publisher names it: `sha256`, `sha512`, `git_blob`, and weaker ones recorded as given. Never another algorithm than the publisher's, and never a hash-shaped value that is not a digest of the content."
+                      },
+                      "value": {
+                        "type": "string",
+                        "description": "The digest, as the publisher writes it."
+                      },
+                      "provenance": {
+                        "type": "string",
+                        "enum": [
+                          "published",
+                          "derived"
+                        ],
+                        "x-enum-labels": {
+                          "published": "The publisher states it.",
+                          "derived": "The provider worked it out from the content."
+                        },
+                        "description": "Whether the publisher states it or the provider derived it."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "algorithm",
+                      "value",
+                      "provenance"
+                    ]
+                  },
+                  "description": "The digests the provider knows without reading the file.",
+                  "default": []
+                },
+                "revision": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The revision of the place this answers for (a commit, a version), when the scheme has revisions."
+                },
+                "immutable": {
+                  "type": "boolean",
+                  "description": "Whether the content at this URI can never change: a commit id, a digest-keyed name, a `data:` URI.",
+                  "default": false
+                },
+                "ranges": {
+                  "type": "boolean",
+                  "description": "Whether `open` honours a range.",
+                  "default": false
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "description": "What the listing gave of it, `size` and `modified_ms` absent when it did not; the host asks `stat` for what it needs."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "kind"
+          ]
+        },
+        "description": "The entries of this page.",
+        "default": []
+      },
+      "next": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The cursor of the next page; none on the last."
+      }
+    },
+    "additionalProperties": false
+  },
+  "Locator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The address."
+      },
+      "ranges": {
+        "type": "boolean",
+        "description": "Whether it answers a `Range` request.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "url"
+    ]
+  },
+  "OpenRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "The URI, as the scheme's grammar writes it."
+          },
+          "person": {
+            "type": "boolean",
+            "description": "Whether the person wrote the URI (canoa.cfg, the application), as opposed to a catalog document naming it. A provider that runs something as the person (git with their credentials) does it only for a URI the person wrote.",
+            "default": false
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "How long the provider may take, in milliseconds; 0 leaves it to the provider.",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "uri"
+        ],
+        "description": "The file."
+      },
+      "range": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The first byte."
+          },
+          "length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "How many bytes; to the end when absent."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "start"
+        ],
+        "description": "A part of it, when the scheme's `stat` says it takes ranges; a provider that does not answers the whole file and the host cuts it."
+      },
+      "if_none_match": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The etag of a copy the host holds: the answer is `not_modified` when it still is that."
+      },
+      "max_inline": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes an `inline` delivery may hold; a larger file is delivered another way or refused as too large."
+      },
+      "max_bytes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes the caller will take at all."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "target",
+      "max_inline",
+      "max_bytes"
+    ]
+  },
+  "Opened": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "stat": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "file",
+              "dir"
+            ],
+            "x-enum-labels": {
+              "file": "A file: it has bytes.",
+              "dir": "A folder: it has entries."
+            },
+            "description": "A file or a folder."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Its size in bytes, when known."
+          },
+          "modified_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": -9223372036854775808,
+            "maximum": 9223372036854775807,
+            "description": "When it last changed, in milliseconds since the epoch, when known."
+          },
+          "etag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An opaque version tag a later `open` may send as `if_none_match`."
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its media type, when known."
+          },
+          "digests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "algorithm": {
+                  "type": "string",
+                  "description": "The algorithm as the publisher names it: `sha256`, `sha512`, `git_blob`, and weaker ones recorded as given. Never another algorithm than the publisher's, and never a hash-shaped value that is not a digest of the content."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The digest, as the publisher writes it."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "published",
+                    "derived"
+                  ],
+                  "x-enum-labels": {
+                    "published": "The publisher states it.",
+                    "derived": "The provider worked it out from the content."
+                  },
+                  "description": "Whether the publisher states it or the provider derived it."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "algorithm",
+                "value",
+                "provenance"
+              ]
+            },
+            "description": "The digests the provider knows without reading the file.",
+            "default": []
+          },
+          "revision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The revision of the place this answers for (a commit, a version), when the scheme has revisions."
+          },
+          "immutable": {
+            "type": "boolean",
+            "description": "Whether the content at this URI can never change: a commit id, a digest-keyed name, a `data:` URI.",
+            "default": false
+          },
+          "ranges": {
+            "type": "boolean",
+            "description": "Whether `open` honours a range.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind"
+        ],
+        "description": "What is known of the file."
+      },
+      "delivery": {
+        "type": "object",
+        "properties": {
+          "inline": {
+            "type": [
+              "bytes",
+              "null"
+            ],
+            "description": "The bytes themselves, at most the request's `max_inline`."
+          },
+          "locator": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "The address."
+              },
+              "ranges": {
+                "type": "boolean",
+                "description": "Whether it answers a `Range` request.",
+                "default": false
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "url"
+            ],
+            "description": "An address the host fetches the bytes from."
+          },
+          "not_modified": {
+            "type": "boolean",
+            "description": "The request's `if_none_match` matched: nothing changed.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "description": "How its content reaches the host."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "stat",
+      "delivery"
+    ]
+  },
+  "Refusal": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "not_found",
+          "denied",
+          "rate_limited",
+          "bad_reply",
+          "too_large",
+          "unreachable",
+          "timeout",
+          "refused_place",
+          "changed"
+        ],
+        "x-enum-labels": {
+          "not_found": "A repository, a ref or a path that is not there, or private and unknown.",
+          "denied": "A credential refused or missing.",
+          "rate_limited": "Too many requests: `retry_after_seconds` says when.",
+          "bad_reply": "A reply that is not the shape the scheme documents (a captive portal's page, a body that is not JSON).",
+          "too_large": "More than `max_bytes`.",
+          "unreachable": "No connection.",
+          "timeout": "No answer in time.",
+          "refused_place": "An address outside the endpoints, or a redirect off them.",
+          "changed": "The content no longer matches the pin or digest."
+        },
+        "description": "What kind of failure."
+      },
+      "why": {
+        "type": "string",
+        "description": "What happened, naming the scheme and the place and holding no credential, query token or userinfo."
+      },
+      "retry_after_seconds": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "For a rate limit, how long to wait."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "why"
+    ]
+  },
+  "Resolved": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "uri": {
+        "type": "string",
+        "description": "The same place with its revision fixed."
+      },
+      "revision": {
+        "type": "string",
+        "description": "The revision."
+      },
+      "immutable": {
+        "type": "boolean",
+        "description": "Whether the content at `uri` can never change.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "uri",
+      "revision"
+    ]
+  },
+  "SchemeInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "The scheme: lower-case letters, digits, `+`, `.` and `-`, 2 to 32 characters, the first a letter."
+      },
+      "title": {
+        "type": "string",
+        "description": "What it reaches, for people."
+      },
+      "grammar": {
+        "type": "string",
+        "description": "One line of grammar, such as `hf://[datasets/]owner/name[/path][?ref=REV]`."
+      },
+      "lists": {
+        "type": "boolean",
+        "description": "Whether `list` works.",
+        "default": false
+      },
+      "resolves": {
+        "type": "boolean",
+        "description": "Whether `resolve` works.",
+        "default": false
+      },
+      "ranges": {
+        "type": "boolean",
+        "description": "Whether `open` honours a range.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "title",
+      "grammar"
+    ]
+  },
+  "Stat": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "file",
+          "dir"
+        ],
+        "x-enum-labels": {
+          "file": "A file: it has bytes.",
+          "dir": "A folder: it has entries."
+        },
+        "description": "A file or a folder."
+      },
+      "size": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Its size in bytes, when known."
+      },
+      "modified_ms": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it last changed, in milliseconds since the epoch, when known."
+      },
+      "etag": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "An opaque version tag a later `open` may send as `if_none_match`."
+      },
+      "content_type": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Its media type, when known."
+      },
+      "digests": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "description": "The algorithm as the publisher names it: `sha256`, `sha512`, `git_blob`, and weaker ones recorded as given. Never another algorithm than the publisher's, and never a hash-shaped value that is not a digest of the content."
+            },
+            "value": {
+              "type": "string",
+              "description": "The digest, as the publisher writes it."
+            },
+            "provenance": {
+              "type": "string",
+              "enum": [
+                "published",
+                "derived"
+              ],
+              "x-enum-labels": {
+                "published": "The publisher states it.",
+                "derived": "The provider worked it out from the content."
+              },
+              "description": "Whether the publisher states it or the provider derived it."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "algorithm",
+            "value",
+            "provenance"
+          ]
+        },
+        "description": "The digests the provider knows without reading the file.",
+        "default": []
+      },
+      "revision": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The revision of the place this answers for (a commit, a version), when the scheme has revisions."
+      },
+      "immutable": {
+        "type": "boolean",
+        "description": "Whether the content at this URI can never change: a commit id, a digest-keyed name, a `data:` URI.",
+        "default": false
+      },
+      "ranges": {
+        "type": "boolean",
+        "description": "Whether `open` honours a range.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind"
+    ]
+  },
+  "StatAnswer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "stat": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "file",
+              "dir"
+            ],
+            "x-enum-labels": {
+              "file": "A file: it has bytes.",
+              "dir": "A folder: it has entries."
+            },
+            "description": "A file or a folder."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Its size in bytes, when known."
+          },
+          "modified_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": -9223372036854775808,
+            "maximum": 9223372036854775807,
+            "description": "When it last changed, in milliseconds since the epoch, when known."
+          },
+          "etag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An opaque version tag a later `open` may send as `if_none_match`."
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its media type, when known."
+          },
+          "digests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "algorithm": {
+                  "type": "string",
+                  "description": "The algorithm as the publisher names it: `sha256`, `sha512`, `git_blob`, and weaker ones recorded as given. Never another algorithm than the publisher's, and never a hash-shaped value that is not a digest of the content."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The digest, as the publisher writes it."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "published",
+                    "derived"
+                  ],
+                  "x-enum-labels": {
+                    "published": "The publisher states it.",
+                    "derived": "The provider worked it out from the content."
+                  },
+                  "description": "Whether the publisher states it or the provider derived it."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "algorithm",
+                "value",
+                "provenance"
+              ]
+            },
+            "description": "The digests the provider knows without reading the file.",
+            "default": []
+          },
+          "revision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The revision of the place this answers for (a commit, a version), when the scheme has revisions."
+          },
+          "immutable": {
+            "type": "boolean",
+            "description": "Whether the content at this URI can never change: a commit id, a digest-keyed name, a `data:` URI.",
+            "default": false
+          },
+          "ranges": {
+            "type": "boolean",
+            "description": "Whether `open` honours a range.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind"
+        ],
+        "description": "The answer, when there is one."
+      },
+      "refusal": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "not_found",
+              "denied",
+              "rate_limited",
+              "bad_reply",
+              "too_large",
+              "unreachable",
+              "timeout",
+              "refused_place",
+              "changed"
+            ],
+            "x-enum-labels": {
+              "not_found": "A repository, a ref or a path that is not there, or private and unknown.",
+              "denied": "A credential refused or missing.",
+              "rate_limited": "Too many requests: `retry_after_seconds` says when.",
+              "bad_reply": "A reply that is not the shape the scheme documents (a captive portal's page, a body that is not JSON).",
+              "too_large": "More than `max_bytes`.",
+              "unreachable": "No connection.",
+              "timeout": "No answer in time.",
+              "refused_place": "An address outside the endpoints, or a redirect off them.",
+              "changed": "The content no longer matches the pin or digest."
+            },
+            "description": "What kind of failure."
+          },
+          "why": {
+            "type": "string",
+            "description": "What happened, naming the scheme and the place and holding no credential, query token or userinfo."
+          },
+          "retry_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "For a rate limit, how long to wait."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "why"
+        ],
+        "description": "Why there is none, when the place refused."
+      }
+    },
+    "additionalProperties": false
+  },
+  "Target": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "uri": {
+        "type": "string",
+        "description": "The URI, as the scheme's grammar writes it."
+      },
+      "person": {
+        "type": "boolean",
+        "description": "Whether the person wrote the URI (canoa.cfg, the application), as opposed to a catalog document naming it. A provider that runs something as the person (git with their credentials) does it only for a URI the person wrote.",
+        "default": false
+      },
+      "timeout_ms": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How long the provider may take, in milliseconds; 0 leaves it to the provider.",
+        "default": 0
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "uri"
+    ]
+  }
+}

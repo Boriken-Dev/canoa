@@ -28,6 +28,8 @@ usage = ["dep:coqui-acp-api"]
 profile-item = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:regex"]
 # The `secret_provider` kind: somewhere a secret comes from and goes to (the person's form, the system's store, a password manager).
 secret = ["dep:guatiao", "dep:coqui-acp-api"]
+# The `content_source` and `catalog_generator` kinds: a file or a tree obtained by URI, with the schemes providers register, and what turns it into a catalog.
+content = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:serde_json"]
 # The `config_store` kind: where the host's configuration lives (canoa.cfg's layers, or another store).
 config-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-serde", "dep:serde_json"]
 # The settings_section kind: a page, or a group on a page, of the application Settings.

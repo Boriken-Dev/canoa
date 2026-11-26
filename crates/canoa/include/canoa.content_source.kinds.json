@@ -1,0 +1,219 @@
+{
+  "kinds": [
+    {
+      "name": "content_source",
+      "floor_hash": 3712946889,
+      "object": false,
+      "doc": "Where the data of a content source comes from, as a Store type's catalogs name it.\n\nReads and answers, never writes: nothing in Canoa publishes content.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this provider is. The same answer on every call, with nothing run."
+        },
+        {
+          "name": "stat",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "target",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What is at the URI. `GUATIAO_ERR_UNSUPPORTED` for a scheme that cannot say without reading."
+        },
+        {
+          "name": "list",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What is under the URI, one page. `GUATIAO_ERR_UNSUPPORTED` for a scheme that lists nothing."
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The content of the file at the URI."
+        },
+        {
+          "name": "resolve",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "target",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The same place with its revision fixed. `GUATIAO_ERR_UNSUPPORTED` for a scheme with no revisions."
+        }
+      ]
+    },
+    {
+      "name": "content_host",
+      "floor_hash": 1967041331,
+      "object": true,
+      "doc": "What the host lends a [`CatalogGeneratorProvider`] to read with: any registered scheme, through the same registry, route and\ntrust rules as the host's own readers, and only the places the generator may read (the entry's `source` and below, and the\n`endpoints` the generator declares). A generator never opens a connection by itself. It destroys the object when it is done.",
+      "slots": [
+        {
+          "name": "stat",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What is at `uri`."
+        },
+        {
+          "name": "list",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_entries",
+              "type": "u32"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The first page of the entries under `uri`, at most `max_entries`."
+        },
+        {
+          "name": "open_text",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "The text of the file at `uri`: `GUATIAO_ERR_BAD_VALUE` for one over `max_bytes` or not text."
+        },
+        {
+          "name": "open_json",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "The file at `uri` as JSON text: `GUATIAO_ERR_BAD_VALUE` when it is not JSON."
+        },
+        {
+          "name": "open_bytes",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            },
+            {
+              "name": "max_bytes",
+              "type": "u64"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The bytes of the file at `uri`."
+        },
+        {
+          "name": "resolve",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "uri",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "`uri` with its revision fixed."
+        },
+        {
+          "name": "child",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "base",
+              "type": "str"
+            },
+            {
+              "name": "name",
+              "type": "str"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "`base` with one path segment appended and its query kept."
+        }
+      ]
+    }
+  ]
+}

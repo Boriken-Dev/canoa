@@ -28,6 +28,7 @@ Not published (`publish = false`). A default build has no dependencies. Cargo fe
 | `profile-item` | `canoa::profile_item` | the `profile_item` kind: a setting a profile carries and applies (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `regex`) |
 | `secret` | `canoa::secret_provider` | the `secret_provider` kind: secret vaults and prompts (`guatiao`, `coqui-acp-api`) |
 | `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
+| `content` | `canoa::content` | the `content_source` and `catalog_generator` kinds: a file or a tree by URI, and what turns it into a catalog (`guatiao`, `coqui-acp-api`, `guatiao-intake`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `notifier` | `canoa::notifier` | the `notifier` kind: somewhere a notice about what happened on the host is sent (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
