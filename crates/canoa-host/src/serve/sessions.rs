@@ -32,6 +32,7 @@ use serde_json::{Value, json};
 use super::kept::{Keeper, Kept};
 use super::watch::{self, Check, Watch};
 use super::{FIRST_MESSAGE, Served, Shared};
+use crate::approve::shared::{Answers, Decided};
 use crate::control::{self, Grant, SharedSessions};
 use crate::local::{self, Link};
 use crate::usage_splice::TreeUse;
@@ -45,6 +46,8 @@ const MAX_BACKLOG: usize = 256 * 1024 * 1024;
 const ATTACH_ID: &str = "canoa-attach";
 /// What the ids of a watch's own requests start with.
 const WATCH_ID: &str = "canoa-watch-";
+/// How long an approver's answer waits for the hub to hold the request it answers.
+const HELD_ANSWER: Duration = Duration::from_secs(5);
 
 /// What an entry with `shared = true` keeps.
 #[derive(Debug)]
@@ -323,6 +326,8 @@ struct State {
     watch: Option<Watching>,
     /// The requests a watch sent as an attached client, whose answers that client is not sent.
     watch_asks: BTreeSet<(ClientId, String)>,
+    /// The hub's number for each permission request the agent made, by the id the agent made it under, while it is open.
+    asked: BTreeMap<String, u64>,
     /// How many prompts watches have sent, for their ids.
     watch_count: u64,
 }
@@ -345,6 +350,8 @@ pub(super) struct Session {
     started_unix_ms: u64,
     /// The driver's end of the link the agent flow serves.
     agent: Link,
+    /// What the agent flow's approvers answered for requests the hub holds, and whether a client is attached for them.
+    approvers: Arc<Answers>,
     /// Where the log is kept, for a session whose entry keeps it.
     kept: Option<Arc<Kept>>,
     /// The bounds of the hub's log, from the entry.
@@ -638,10 +645,66 @@ impl Session {
             Phase::Boot(_) => self.boot_from_agent(&mut state, bytes, &message, now),
             Phase::Live(hub) => {
                 hub.poll(now);
+                let before: BTreeSet<u64> = hub.pending_permissions().map(|ask| ask.id).collect();
                 let outputs = hub.from_agent(&message);
+                let ask = (message.get("method").and_then(Value::as_str)
+                    == Some("session/request_permission"))
+                .then(|| message.get("id"))
+                .flatten()
+                .map(ToString::to_string);
+                let open: BTreeSet<u64> = hub.pending_permissions().map(|ask| ask.id).collect();
+                let State { asked, .. } = &mut *state;
+                asked.retain(|_, number| open.contains(number));
+                if let Some(ask) = ask
+                    && let Some(number) = open.difference(&before).next()
+                {
+                    asked.insert(ask, *number);
+                }
                 self.dispatch(&mut state, outputs);
             }
             Phase::Over => {}
+        }
+    }
+
+    /// What the approvers answered for requests the hub holds: the hub answers the agent with it, and every client's card closes.
+    /// An answer for a request the hub does not hold yet (the agent's message is still on its way here) is kept in `late` for a
+    /// few seconds; one for a request a client answered first settles nothing.
+    fn settle_approvals(&self, late: &mut Vec<(Decided, Instant)>) {
+        let now = Instant::now();
+        late.extend(self.approvers.take().into_iter().map(|each| (each, now)));
+        if late.is_empty() {
+            return;
+        }
+        let mut state = self.lock();
+        for (decided, since) in core::mem::take(late) {
+            let outputs = {
+                let State { phase, asked, .. } = &mut *state;
+                let Phase::Live(hub) = phase else {
+                    continue;
+                };
+                let Some(number) = asked.remove(&decided.request.to_string()) else {
+                    if now.duration_since(since) < HELD_ANSWER {
+                        late.push((decided, since));
+                    }
+                    continue;
+                };
+                hub.poll(self.now_ms());
+                match hub.decide(number, json!({"outcome": decided.outcome})) {
+                    Ok(outputs) => outputs,
+                    Err(error) => {
+                        tracing::debug!(
+                            entry = self.entry,
+                            "an approver's answer settled nothing: {error}"
+                        );
+                        continue;
+                    }
+                }
+            };
+            tracing::info!(
+                entry = self.entry,
+                "a permission request was answered by an approver"
+            );
+            self.dispatch(&mut state, outputs);
         }
     }
 
@@ -862,6 +925,9 @@ impl Session {
                 Output::Note(note) => self.say(&note),
                 _ => {}
             }
+        }
+        if let Phase::Live(hub) = &state.phase {
+            self.approvers.attach(hub.attached_count());
         }
         if let (Phase::Live(hub), Some(keeper)) = (&state.phase, &mut state.keeper) {
             keeper.sync(hub);
@@ -1102,10 +1168,12 @@ impl Session {
 
     /// Reads the agent until it ends.
     fn drive(&self, stopped: &AtomicBool) {
+        let mut late = Vec::new();
         loop {
             if stopped.load(Ordering::SeqCst) {
                 break;
             }
+            self.settle_approvals(&mut late);
             match Channel::receive(&self.agent, Some(POLL)) {
                 Ok(Some(bytes)) => self.agent_said(&bytes),
                 Err(Failure::Timeout) => self.tick(),
@@ -1369,6 +1437,7 @@ fn open<C: Channel>(
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0)),
         agent: driver,
+        approvers: Arc::default(),
         kept: keep.keep_log.then(|| shared.hosted.kept.clone()).flatten(),
         log_bounds: (keep.log_entries, keep.log_bytes),
         max_line: shared.max_line,
@@ -1397,6 +1466,7 @@ fn open<C: Channel>(
             keeper: None,
             watch: None,
             watch_asks: BTreeSet::new(),
+            asked: BTreeMap::new(),
             watch_count: 0,
         }),
     });
@@ -1414,6 +1484,7 @@ fn open<C: Channel>(
         let (shared, served) = (Arc::clone(shared), Arc::clone(served));
         let (first, peer) = (first.to_vec(), *peer);
         let pid = Arc::clone(&session.agent_pid);
+        let approvers = Arc::clone(&session.approvers);
         thread::Builder::new()
             .name("canoa-session-agent".to_owned())
             .spawn(move || {
@@ -1423,7 +1494,7 @@ fn open<C: Channel>(
                     &served,
                     &prefilled,
                     (&first, &peer),
-                    (None, reach, Some(&pid)),
+                    (None, reach, Some(&pid), Some(&approvers)),
                 );
                 pid.store(0, Ordering::Relaxed);
                 host.close();
@@ -1576,15 +1647,21 @@ mod tests {
     }
 
     fn unopened_session(read_processes: fn(u32) -> TreeUse) -> Arc<Session> {
-        let (driver, _host) = local::pair(1024, Arc::new(AtomicBool::new(false)));
+        session_with_agent(read_processes).0
+    }
+
+    /// A session whose agent has not opened it, and the agent's end of the link.
+    fn session_with_agent(read_processes: fn(u32) -> TreeUse) -> (Arc<Session>, Link) {
+        let (driver, host) = local::pair(1024, Arc::new(AtomicBool::new(false)));
         let who = Client::new("key".to_owned());
-        Arc::new(Session {
+        let session = Arc::new(Session {
             entry: "shared".to_owned(),
             epoch: Instant::now(),
             idle: None,
             permission_window_ms: None,
             started_unix_ms: 1_000_000,
             agent: driver,
+            approvers: Arc::default(),
             kept: None,
             log_bounds: (None, None),
             max_line: 1024,
@@ -1613,9 +1690,152 @@ mod tests {
                 keeper: None,
                 watch: None,
                 watch_asks: BTreeSet::new(),
+                asked: BTreeMap::new(),
                 watch_count: 0,
             }),
-        })
+        });
+        (session, host)
+    }
+
+    /// What `inbox` holds now.
+    fn read(inbox: &Inbox) -> Vec<Value> {
+        inbox
+            .queue
+            .try_iter()
+            .filter_map(|bytes| serde_json::from_slice(&bytes).ok())
+            .collect()
+    }
+
+    fn ask(id: u64) -> Vec<u8> {
+        json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {
+            "sessionId": "s",
+            "toolCall": {"toolCallId": "t", "title": "Write", "kind": "edit"},
+            "options": [{"optionId": "yes", "name": "Allow", "kind": "allow_once"}],
+        }})
+        .to_string()
+        .into_bytes()
+    }
+
+    /// An open session with the clients `a` and `b` attached.
+    fn open_with_two_clients() -> (Arc<Session>, Link, [Inbox; 2]) {
+        let (session, host) = session_with_agent(probing_reader);
+        session.lock().phase =
+            Phase::Live(Box::new(Hub::builder("s").policy(Arc::new(Anyone)).build()));
+        let mut inboxes = Vec::new();
+        for name in ["a", "b"] {
+            let (outbox, inbox) = mailbox();
+            session
+                .join(Client::new(name.to_owned()), outbox)
+                .expect("attached");
+            let resume = json!({"jsonrpc": "2.0", "id": 1, "method": "session/resume",
+                "params": {"sessionId": "s"}});
+            session.client_said(&ClientId::from(name), resume.to_string().as_bytes());
+            read(&inbox);
+            inboxes.push(inbox);
+        }
+        let [a, b]: [Inbox; 2] = inboxes.try_into().ok().expect("two");
+        (session, host, [a, b])
+    }
+
+    fn agent_got(host: &Link) -> Vec<Value> {
+        let mut got = Vec::new();
+        while let Ok(Some(bytes)) = Channel::receive(host, Some(Duration::from_millis(100))) {
+            got.extend(serde_json::from_slice::<Value>(&bytes).ok());
+        }
+        got
+    }
+
+    #[test]
+    fn an_approvers_answer_closes_every_clients_card_and_answers_the_agent_once() {
+        let (session, host, [a, b]) = open_with_two_clients();
+        session.agent_said(&ask(41));
+        for inbox in [&a, &b] {
+            let asked = read(inbox)
+                .into_iter()
+                .find(|message| message["method"] == "session/request_permission")
+                .expect("every client is asked");
+            assert!(
+                asked["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("hub-perm-"))
+            );
+        }
+        let chosen = json!({"outcome": "selected", "optionId": "yes"});
+        session.approvers.decide(json!(41), chosen.clone());
+        let mut late = Vec::new();
+        session.settle_approvals(&mut late);
+        assert!(late.is_empty());
+        for inbox in [&a, &b] {
+            let closed = read(inbox)
+                .into_iter()
+                .find(|message| message["method"] == "_dev.boriken.coqui.acp/hub_permission_closed")
+                .expect("every card closes");
+            assert_eq!(closed["params"]["outcome"], chosen);
+        }
+        let answers: Vec<Value> = agent_got(&host)
+            .into_iter()
+            .filter(|message| message["id"] == 41)
+            .collect();
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert_eq!(answers[0]["result"]["outcome"], chosen);
+        // A client's answer after it is the hub's to drop: the agent is answered once.
+        session.client_said(
+            &ClientId::from("a"),
+            json!({"jsonrpc": "2.0", "id": "hub-perm-1",
+                "result": {"outcome": {"outcome": "selected", "optionId": "yes"}}})
+            .to_string()
+            .as_bytes(),
+        );
+        assert!(agent_got(&host).iter().all(|message| message["id"] != 41));
+    }
+
+    #[test]
+    fn an_answer_that_comes_before_the_hub_holds_the_request_waits_for_it() {
+        let (session, host, [a, _b]) = open_with_two_clients();
+        session
+            .approvers
+            .decide(json!(42), json!({"outcome": "cancelled"}));
+        let mut late = Vec::new();
+        session.settle_approvals(&mut late);
+        assert_eq!(late.len(), 1, "kept for the request that is on its way");
+        session.agent_said(&ask(42));
+        session.settle_approvals(&mut late);
+        assert!(late.is_empty());
+        assert!(
+            read(&a)
+                .iter()
+                .any(|message| message["method"] == "_dev.boriken.coqui.acp/hub_permission_closed")
+        );
+        assert!(agent_got(&host).iter().any(|message| message["id"] == 42));
+    }
+
+    #[test]
+    fn an_answer_for_a_request_a_client_answered_first_settles_nothing() {
+        let (session, host, [a, _b]) = open_with_two_clients();
+        session.agent_said(&ask(43));
+        let hub_id = read(&a)
+            .into_iter()
+            .find(|message| message["method"] == "session/request_permission")
+            .expect("asked")["id"]
+            .clone();
+        session.client_said(
+            &ClientId::from("a"),
+            json!({"jsonrpc": "2.0", "id": hub_id,
+                "result": {"outcome": {"outcome": "selected", "optionId": "yes"}}})
+            .to_string()
+            .as_bytes(),
+        );
+        session
+            .approvers
+            .decide(json!(43), json!({"outcome": "cancelled"}));
+        let mut late = Vec::new();
+        session.settle_approvals(&mut late);
+        let answers: Vec<Value> = agent_got(&host)
+            .into_iter()
+            .filter(|message| message["id"] == 43)
+            .collect();
+        assert_eq!(answers.len(), 1, "the client's answer alone: {answers:?}");
+        assert_eq!(answers[0]["result"]["outcome"]["outcome"], "selected");
     }
 
     #[test]

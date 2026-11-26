@@ -14,5 +14,6 @@ pub mod config;
 pub(crate) mod notice;
 pub(crate) mod options;
 pub(crate) mod policy;
+pub(crate) mod shared;
 
 pub use config::{Approvers, Detail, Entry};

@@ -206,6 +206,9 @@ pub(crate) struct Connection {
     skills: private::Private,
     /// Whether the client is this process's own link, the only one the host asks to approve servers.
     in_process: bool,
+    /// The hub of the shared session this connection serves the agent of: the answers of approvers go to it, and it says whether a
+    /// client is attached. `None` for a connection that is its client's own.
+    shared: Option<alloc::sync::Arc<crate::approve::shared::Answers>>,
     /// Whether this connection's sessions are given the knowledge tools, so an overlay that is served through them is not
     /// put in the context.
     kb_tools: bool,
@@ -814,6 +817,7 @@ impl Connection {
             env_items,
             skills,
             in_process: false,
+            shared: None,
             kb_tools: false,
             role,
             session_env: session.variables(),
@@ -896,6 +900,15 @@ impl Connection {
     /// This connection's client is (or is not) this process's own link.
     pub(crate) fn asking(mut self, in_process: bool) -> Self {
         self.in_process = in_process;
+        self
+    }
+
+    /// This connection serves the agent of a shared session whose hub is `shared`, when it is given one.
+    pub(crate) fn sharing(
+        mut self,
+        shared: Option<alloc::sync::Arc<crate::approve::shared::Answers>>,
+    ) -> Self {
+        self.shared = shared;
         self
     }
 

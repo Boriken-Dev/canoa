@@ -390,7 +390,7 @@ fn give_agent<C: Channel>(
         served,
         channel,
         (first, peer),
-        (context, reach, None),
+        (context, reach, None, None),
     );
 }
 
@@ -644,7 +644,12 @@ pub(super) fn give_agent_flow<C: Channel>(
     served: &Served,
     channel: &C,
     (first, peer): (&[u8], &PeerId),
-    (context, reach, pid): (Option<&delegate::ChildContext>, Reach, Option<&AtomicU32>),
+    (context, reach, pid, hub): (
+        Option<&delegate::ChildContext>,
+        Reach,
+        Option<&AtomicU32>,
+        Option<&Arc<crate::approve::shared::Answers>>,
+    ),
 ) {
     if dispatch_non_agent(shared, served, channel, peer, reach.in_process()) {
         return;
@@ -793,7 +798,7 @@ pub(super) fn give_agent_flow<C: Channel>(
                 },
             },
         ) {
-            Some(connection) => Some(connection),
+            Some(connection) => Some(connection.sharing(hub.cloned())),
             None => return,
         },
         None => None,

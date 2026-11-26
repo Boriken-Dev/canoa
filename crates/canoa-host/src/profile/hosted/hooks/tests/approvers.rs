@@ -374,3 +374,84 @@ fn a_cancelled_turn_and_a_closed_session_withdraw_what_approvers_wait_for() {
     }
     assert!(WITHDRAWN.load(Ordering::SeqCst) > before);
 }
+
+#[test]
+fn for_a_shared_session_an_approvers_answer_goes_to_the_hub_and_not_past_it_to_the_agent() {
+    use crate::approve::shared::Answers;
+
+    let temp = Temp::new();
+    let answers = Arc::new(Answers::default());
+    answers.attach(2);
+    let connection = connection(
+        &temp,
+        "[permissions.approvers.phone]\nprovider = \"soon\"\n",
+    )
+    .sharing(Some(Arc::clone(&answers)));
+    let client = Client::default();
+    let scope = Scope::new(Vec::new());
+    let hosted = Hosted::in_process(&client, &scope, &connection);
+    assert!(matches!(
+        hosted.on_agent(&ask(7, edit_of("src/lib.rs"))),
+        Seen::Passed(None)
+    ));
+    let mut decided = Vec::new();
+    assert!(settle_until(&hosted, || {
+        decided.extend(answers.take());
+        !decided.is_empty()
+    }));
+    assert_eq!(decided[0].request, json!(7));
+    assert_eq!(decided[0].outcome["optionId"], "yes");
+    // The hub answers the agent, so the host does not, and does not close the card by its own word: the hub does.
+    assert_eq!(hosted.hold().book.next_injected(), None);
+    let methods: Vec<String> = client
+        .to
+        .lock()
+        .expect("lock")
+        .iter()
+        .filter_map(|message| serde_json::from_slice::<Value>(message).ok())
+        .filter_map(|message| message["method"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(methods, ["_dev.boriken.canoa/approved"]);
+    // What the hub then sends the agent, the answer it made for the clients, is not taken for a late client's.
+    let answer = json!({"jsonrpc": "2.0", "id": 7, "result": {"outcome": {"outcome": "selected", "optionId": "yes"}}});
+    let answer = serde_json::to_vec(&answer).expect("JSON");
+    assert_eq!(
+        hosted.on_client(answer.clone(), &BTreeSet::new()),
+        Ok(answer)
+    );
+}
+
+#[test]
+fn for_a_shared_session_the_window_is_a_client_attached_to_the_hub() {
+    use crate::approve::shared::Answers;
+
+    let _alone = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let temp = Temp::new();
+    let slow = "[permissions.approvers.slow]\nprovider = \"never\"\ntimeout_seconds = 1\n";
+    // With a client attached, a request the approver does not answer stays with that client.
+    let attached = Arc::new(Answers::default());
+    attached.attach(1);
+    let held = connection(&temp, slow).sharing(Some(Arc::clone(&attached)));
+    let client = Client::default();
+    let scope = Scope::new(Vec::new());
+    let hosted = Hosted::in_process(&client, &scope, &held);
+    hosted.on_agent(&ask(1, edit_of("src/lib.rs")));
+    assert!(
+        !settle_until(&hosted, || !attached.take().is_empty()),
+        "the request stays with the client"
+    );
+    // With none attached nobody is left to ask, so the hub is told to refuse it.
+    let alone = Arc::new(Answers::default());
+    let held = connection(&temp, slow).sharing(Some(Arc::clone(&alone)));
+    let hosted = Hosted::in_process(&client, &scope, &held);
+    hosted.on_agent(&ask(2, edit_of("src/lib.rs")));
+    let mut decided = Vec::new();
+    assert!(settle_until(&hosted, || {
+        decided.extend(alone.take());
+        !decided.is_empty()
+    }));
+    assert_eq!(decided[0].request, json!(2));
+    assert_eq!(decided[0].outcome["optionId"], "no");
+}

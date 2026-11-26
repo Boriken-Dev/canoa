@@ -940,10 +940,14 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     .push_back((key.clone(), settled));
             })
         };
-        // The window is attached while the client's connection is; whether it reports attending the session comes with the
-        // notifications' `notify/attended`.
+        // The window is attached while the client's connection is, or, for a shared session, while a client is attached to its hub;
+        // whether it reports attending the session comes with the notifications' `notify/attended`.
         let presence = Presence {
-            window: true,
+            window: self
+                .connection
+                .shared
+                .as_ref()
+                .is_none_or(|shared| shared.window()),
             attended: false,
         };
         if let Some(waiting) = chain.asking(&request, can_allow, presence, settle) {
@@ -990,22 +994,29 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                         .unwrap_or_else(|| approve::options::reject(options)),
                     Outcome::Rejected | Outcome::Refused => approve::options::reject(options),
                 };
-                if let Some(answer) = approve::options::answer(&pending.id, &outcome) {
-                    hold.book.inject.push_back(answer);
-                }
-                for notice in [
-                    approve::notice::approved(&pending.agent, pending.call.as_ref(), &settled),
-                    approve::notice::closed(&pending.agent, &pending.id, &settled, &outcome),
-                ]
-                .into_iter()
-                .flatten()
+                if let Some(approved) =
+                    approve::notice::approved(&pending.agent, pending.call.as_ref(), &settled)
                 {
-                    hold.book.to_client.push_back(notice);
+                    hold.book.to_client.push_back(approved);
                 }
-                if hold.book.settled.len() >= MAX_TRACKED {
-                    hold.book.settled.clear();
+                if let Some(shared) = &self.connection.shared {
+                    // The hub holds the request: it answers the agent, closes every client's card, and drops what a client answers
+                    // after.
+                    shared.decide(pending.id.clone(), outcome);
+                } else {
+                    if let Some(answer) = approve::options::answer(&pending.id, &outcome) {
+                        hold.book.inject.push_back(answer);
+                    }
+                    if let Some(closed) =
+                        approve::notice::closed(&pending.agent, &pending.id, &settled, &outcome)
+                    {
+                        hold.book.to_client.push_back(closed);
+                    }
+                    if hold.book.settled.len() >= MAX_TRACKED {
+                        hold.book.settled.clear();
+                    }
+                    hold.book.settled.insert(key);
                 }
-                hold.book.settled.insert(key);
                 tracing::info!(
                     entry = self.connection.entry,
                     by = settled.by,
