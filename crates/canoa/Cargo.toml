@@ -36,6 +36,8 @@ config-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-serde", "dep:se
 settings-section = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 # The `approver` kind: somewhere an agent's permission request can be answered from (a rule, a phone).
 approver = ["dep:coqui-acp-api", "dep:guatiao"]
+# The `telemetry_exporter` kind: somewhere the host's traces, metrics and events go when the person turned that on, and OTLP's JSON for them.
+telemetry = ["dep:coqui-acp-api", "dep:guatiao", "dep:serde_json"]
 # The `panel_tab` kind: a kind of tab the application bottom panel can open (a terminal, a log).
 panel-tab = ["dep:coqui-acp-api", "dep:guatiao"]
 # The `file_viewer` kind: a way to show a file of some type in the application Files surface (an A2UI surface or a sealed page).
@@ -119,7 +121,7 @@ required-features = ["store"]
 
 [[test]]
 name = "script_kinds"
-required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment", "config-store", "notifier", "file-viewer", "network-route", "approver"]
+required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment", "config-store", "notifier", "file-viewer", "network-route", "approver", "telemetry"]
 
 [[test]]
 name = "speech_kinds"

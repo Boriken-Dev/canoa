@@ -1,7 +1,7 @@
 //! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`, `model_store`,
 //! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab`, `file_viewer`, `usage_reader`, `model_gateway` and
 //! `account_provider`), and their models' schemas: what such a library is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment,config-store,notifier,network-route,approver --test script_kinds`.
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment,config-store,notifier,network-route,approver,telemetry --test script_kinds`.
 #![cfg(all(
     feature = "store",
     feature = "vendor",
@@ -16,7 +16,8 @@
     feature = "config-store",
     feature = "notifier",
     feature = "network-route",
-    feature = "approver"
+    feature = "approver",
+    feature = "telemetry"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -65,6 +66,10 @@ use canoa::store::models::{
 };
 use canoa::store::source::{
     CatalogSourceProviderVtable, ReadRequest, SourceFetchVtable, SourceInfo,
+};
+use canoa::telemetry::{
+    Attr, Batch, ExporterInfo, LogRecord, Metric, MetricKind, Point, Signals, Span,
+    TelemetryExporterVtable,
 };
 use canoa::usage_reader::{
     Failure, ProcessMembersVtable, ReaderInfo, Reading, Retry, UsageReaderVtable,
@@ -602,6 +607,14 @@ fn the_committed_approver_description_is_what_this_build_describes() {
 }
 
 #[test]
+fn the_committed_telemetry_exporter_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.telemetry.kinds.json",
+        &document(&TelemetryExporterVtable::description()),
+    );
+}
+
+#[test]
 fn the_committed_approver_schemas_are_what_this_build_describes() {
     committed(
         "include/canoa.approver.schemas.json",
@@ -616,6 +629,24 @@ fn the_committed_approver_schemas_are_what_this_build_describes() {
             ("Authority", schema_of::<Authority>()),
             ("Choice", schema_of::<Choice>()),
             ("Step", schema_of::<Step>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_telemetry_exporter_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.telemetry.schemas.json",
+        &schemas(vec![
+            ("ExporterInfo", schema_of::<ExporterInfo>()),
+            ("Signals", schema_of::<Signals>()),
+            ("Attr", schema_of::<Attr>()),
+            ("Span", schema_of::<Span>()),
+            ("MetricKind", schema_of::<MetricKind>()),
+            ("Point", schema_of::<Point>()),
+            ("Metric", schema_of::<Metric>()),
+            ("LogRecord", schema_of::<LogRecord>()),
+            ("Batch", schema_of::<Batch>()),
         ]),
     );
 }

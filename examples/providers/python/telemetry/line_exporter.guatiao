@@ -1,0 +1,4 @@
+type = "python"
+module = "line_exporter"
+kinds = ["telemetry_exporter"]
+paths = ["."]

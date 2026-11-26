@@ -1,7 +1,7 @@
 """Write a Canoa provider in Python: subclass a kind's base class, set a few attributes or override a few methods, and list the class
 in the module's `__all__`; a guatiao source loads the module like any other, and the host offers the provider.
 
-Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.content`, `.settings`, `.panel`, `.viewer`, `.notifier`, `.usage`, `.account`, `.gateway`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
+Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.content`, `.settings`, `.panel`, `.viewer`, `.notifier`, `.telemetry`, `.usage`, `.account`, `.gateway`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
 is written on a dataclass with `canoa_sdk.forms`. `canoa_sdk.kinds` holds the typed `Protocol` classes written from the kinds'
 descriptions, which the base classes sit on.
 """
@@ -54,6 +54,7 @@ from .gateway import GatewayInfo, GatewayLease, ModelGateway, request_of
 from .notifier import Notifier, delivery, notice_of, settings_of
 from .panel import LogPanelTab, PagePanelTab, PanelTab, TerminalPanelTab
 from .viewer import FileViewer, PageViewer, SurfaceViewer, ViewedFile, viewed_file
+from .telemetry import TelemetryExporter
 from .profile import (
     EnvProfileItem,
     ItemEffect,
@@ -152,6 +153,7 @@ __all__ = [
     "StoreExtension",
     "SurfaceViewer",
     "SystemStoreSecretProvider",
+    "TelemetryExporter",
     "TerminalPanelTab",
     "UsageReader",
     "UsageReading",

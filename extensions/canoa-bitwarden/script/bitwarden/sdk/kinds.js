@@ -2345,6 +2345,40 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "telemetry_exporter",
+      "floor_hash": 3167970647,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "export",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "batch",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        },
+        {
+          "name": "flush",
+          "required": true,
+          "fallible": true,
+          "args": []
+        }
+      ]
+    },
+    {
       "name": "usage_reader",
       "floor_hash": 1793635073,
       "object": false,
@@ -2997,6 +3031,15 @@ export const InstallTools = described["install_tools"];
 
 /** Adds types to the Store. The same answer on every call, with nothing run and no connection opened. */
 export const StoreExtension = described["store_extension"];
+
+/**
+ * Somewhere signals are delivered. One instance is one configuration of one provider (a folder, an address and its headers).
+ *
+ * `describe` answers the same on every call with nothing run. `export` returns when the batch is delivered or fails with an
+ * [`ExporterError`]; the host calls it from one thread at a time and keeps a batch the exporter could not take until it can.
+ * `flush` is called once when the host stops, with the host's wait for it: an exporter that holds nothing answers at once.
+ */
+export const TelemetryExporter = described["telemetry_exporter"];
 
 /** Reads an agent's own quota. A provider is the same on every call; what it keeps for one agent is in the reading it opens. */
 export const UsageReader = described["usage_reader"];

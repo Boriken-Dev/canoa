@@ -2083,6 +2083,43 @@ export interface StoreExtensionRemote extends k.RemoteBase<typeof StoreExtension
 export declare const StoreExtension: k.DescribedKind<StoreExtension, StoreExtensionRemote, false>;
 
 /**
+ * Somewhere signals are delivered. One instance is one configuration of one provider (a folder, an address and its headers).
+ *
+ * `describe` answers the same on every call with nothing run. `export` returns when the batch is delivered or fails with an
+ * [`ExporterError`]; the host calls it from one thread at a time and keeps a batch the exporter could not take until it can.
+ * `flush` is called once when the host stops, with the host's wait for it: an exporter that holds nothing answers at once.
+ *
+ * The `telemetry_exporter` kind: what a provider of it implements.
+ */
+export interface TelemetryExporter {
+  /** What this exporter is. */
+  describe(): unknown;
+  /** Delivers a batch. */
+  export(batch: g.Ref): void;
+  /** Finishes what the exporter holds, when the host stops. */
+  flush(): void;
+}
+
+/** A caller's handle on a `telemetry_exporter` table: a method per slot. */
+export interface TelemetryExporterRemote extends k.RemoteBase<typeof TelemetryExporter> {
+  /** What this exporter is. */
+  describe(): g.Value;
+  /** Delivers a batch. */
+  export(batch: unknown): void;
+  /** Finishes what the exporter holds, when the host stops. */
+  flush(): void;
+}
+
+/**
+ * Somewhere signals are delivered. One instance is one configuration of one provider (a folder, an address and its headers).
+ *
+ * `describe` answers the same on every call with nothing run. `export` returns when the batch is delivered or fails with an
+ * [`ExporterError`]; the host calls it from one thread at a time and keeps a batch the exporter could not take until it can.
+ * `flush` is called once when the host stops, with the host's wait for it: an exporter that holds nothing answers at once.
+ */
+export declare const TelemetryExporter: k.DescribedKind<TelemetryExporter, TelemetryExporterRemote, false>;
+
+/**
  * Reads an agent's own quota. A provider is the same on every call; what it keeps for one agent is in the reading it opens.
  *
  * The `usage_reader` kind: what a provider of it implements.

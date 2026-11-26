@@ -1,0 +1,42 @@
+{
+  "kinds": [
+    {
+      "name": "telemetry_exporter",
+      "floor_hash": 3167970647,
+      "object": false,
+      "doc": "Somewhere signals are delivered. One instance is one configuration of one provider (a folder, an address and its headers).\n\n`describe` answers the same on every call with nothing run. `export` returns when the batch is delivered or fails with an\n[`ExporterError`]; the host calls it from one thread at a time and keeps a batch the exporter could not take until it can.\n`flush` is called once when the host stops, with the host's wait for it: an exporter that holds nothing answers at once.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this exporter is."
+        },
+        {
+          "name": "export",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "batch",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Delivers a batch."
+        },
+        {
+          "name": "flush",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "doc": "Finishes what the exporter holds, when the host stops."
+        }
+      ]
+    }
+  ]
+}

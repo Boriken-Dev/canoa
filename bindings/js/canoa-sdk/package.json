@@ -70,6 +70,10 @@
       "types": "./types/viewer.d.ts",
       "import": "./src/viewer.js"
     },
+    "./telemetry": {
+      "types": "./types/telemetry.d.ts",
+      "import": "./src/telemetry.js"
+    },
     "./usage": {
       "types": "./types/usage.d.ts",
       "import": "./src/usage.js"

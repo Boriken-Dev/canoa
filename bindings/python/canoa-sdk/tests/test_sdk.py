@@ -597,6 +597,33 @@ def test_a_panel_tab_can_show_a_page_at_an_address() -> None:
     assert provide.library("tabs", "1", providers=[Docs, Plain]).kinds == ("panel_tab",)
 
 
+def test_a_telemetry_exporter_takes_all_three_groups_unless_it_names_the_ones_it_takes() -> None:
+    class Everything(sdk.TelemetryExporter):
+        title = "Everything"
+
+        def export(self, batch: Any) -> None:
+            return None
+
+    assert Everything().describe() == {"title": "Everything", "signals": ["spans", "metrics", "logs"]}
+    assert Everything().flush() is None
+
+    class Lines(sdk.TelemetryExporter):
+        title = "A line a batch"
+        help = "Writes one line for each batch."
+        signals = ["logs"]
+
+        def export(self, batch: Any) -> None:
+            return None
+
+    assert Lines().describe() == {"title": "A line a batch", "help": "Writes one line for each batch.", "signals": ["logs"]}
+    assert provide.library("exporters", "1", providers=[Everything, Lines]).kinds == ("telemetry_exporter",)
+
+    with pytest.raises(TypeError, match="export"):
+
+        class Bare(sdk.TelemetryExporter):
+            title = "Bare"
+
+
 def test_a_catalog_source_is_the_provider_of_the_id_it_is_described_under() -> None:
     class Team(sdk.CatalogSource):
         source = "team"

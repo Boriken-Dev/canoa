@@ -68,6 +68,8 @@ class FileViewer extends Provider    // viewer.js: static viewer, title, help, m
 class SurfaceViewer extends FileViewer   // surface(file: ViewedFile) -> the A2UI messages, an array of objects
 class PageViewer extends FileViewer      // page(file: ViewedFile) -> one self-contained HTML document
 class ViewedFile                         // name, size, data (Uint8Array the host read), mime, truncated, section; text(); never a path
+class TelemetryExporter extends Provider {    // telemetry.js: somewhere the host's traces, metrics and events go; static title, help, signals = ['spans','metrics','logs']; export(batch) (throw Gone to be tried again, BadValue to have the batch dropped); flush() does nothing unless overridden
+}
 class AccountProvider extends Provider {      // account.js: static title, description, offeredKinds, logins, usageKinds, local; offer(), provides(account) (the `provides` of the kind it names; override when settings pick the standards), login/renew/watch throw Unsupported, usage/models answer unsupported/unknown (and release handles); signedIn(query) says whether the program's own login exists (`loginPresent`, `loginAbsent`, `loginUnknown`): Unsupported without `local`, unknown with it, until overridden
 }
 class AccountWatch   // account.js: stop()

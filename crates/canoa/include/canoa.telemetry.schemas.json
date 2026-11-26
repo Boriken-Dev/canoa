@@ -1,0 +1,789 @@
+{
+  "ExporterInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying where it sends what it takes."
+      },
+      "signals": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "spans",
+            "metrics",
+            "logs"
+          ],
+          "x-enum-labels": {
+            "spans": "Traces: one span per session, turn, tool call and permission.",
+            "metrics": "Counters, gauges and histograms.",
+            "logs": "Events with a fixed name and fixed attributes."
+          }
+        },
+        "description": "The groups of signals it takes; it is never handed the others.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title"
+    ]
+  },
+  "Signals": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "spans",
+      "metrics",
+      "logs"
+    ],
+    "x-enum-labels": {
+      "spans": "Traces: one span per session, turn, tool call and permission.",
+      "metrics": "Counters, gauges and histograms.",
+      "logs": "Events with a fixed name and fixed attributes."
+    },
+    "properties": {}
+  },
+  "Attr": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "key": {
+        "type": "string",
+        "description": "The attribute's name, such as `canoa.harness`."
+      },
+      "text": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Its value, when it is text."
+      },
+      "int": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "Its value, when it is a whole number."
+      },
+      "number": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "Its value, when it is any other number."
+      },
+      "flag": {
+        "type": [
+          "boolean",
+          "null"
+        ],
+        "description": "Its value, when it is a flag."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "key"
+    ]
+  },
+  "Span": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "trace_id": {
+        "type": "string",
+        "description": "The trace it belongs to: 32 lower-case hexadecimal digits, random per session and per run."
+      },
+      "span_id": {
+        "type": "string",
+        "description": "Its own id: 16 lower-case hexadecimal digits."
+      },
+      "parent_id": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The span it is part of, when it is part of one."
+      },
+      "name": {
+        "type": "string",
+        "description": "Its name, such as `canoa.turn`."
+      },
+      "start_ns": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it began, in Unix nanoseconds."
+      },
+      "end_ns": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it ended, in Unix nanoseconds."
+      },
+      "attrs": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "The attribute's name, such as `canoa.harness`."
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Its value, when it is text."
+            },
+            "int": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "Its value, when it is a whole number."
+            },
+            "number": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Its value, when it is any other number."
+            },
+            "flag": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Its value, when it is a flag."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "key"
+          ]
+        },
+        "description": "What it says.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "trace_id",
+      "span_id",
+      "name",
+      "start_ns",
+      "end_ns"
+    ]
+  },
+  "MetricKind": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "counter",
+      "gauge",
+      "histogram"
+    ],
+    "x-enum-labels": {
+      "counter": "A count: each point is what was added since the last, never negative.",
+      "gauge": "A level: each point is the value at its time.",
+      "histogram": "A distribution: each point is one measurement."
+    },
+    "properties": {}
+  },
+  "Point": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "time_ns": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it was taken, in Unix nanoseconds."
+      },
+      "value": {
+        "type": "number",
+        "description": "Its value."
+      },
+      "attrs": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "The attribute's name, such as `canoa.harness`."
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Its value, when it is text."
+            },
+            "int": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "Its value, when it is a whole number."
+            },
+            "number": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Its value, when it is any other number."
+            },
+            "flag": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Its value, when it is a flag."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "key"
+          ]
+        },
+        "description": "What it says.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "time_ns",
+      "value"
+    ]
+  },
+  "Metric": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name, such as `canoa.turns`."
+      },
+      "unit": {
+        "type": "string",
+        "description": "Its unit, as OpenTelemetry writes one: `s`, `{token}`."
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "counter",
+          "gauge",
+          "histogram"
+        ],
+        "x-enum-labels": {
+          "counter": "A count: each point is what was added since the last, never negative.",
+          "gauge": "A level: each point is the value at its time.",
+          "histogram": "A distribution: each point is one measurement."
+        },
+        "description": "What it counts or measures."
+      },
+      "points": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "time_ns": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "When it was taken, in Unix nanoseconds."
+            },
+            "value": {
+              "type": "number",
+              "description": "Its value."
+            },
+            "attrs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "The attribute's name, such as `canoa.harness`."
+                  },
+                  "text": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Its value, when it is text."
+                  },
+                  "int": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": -9223372036854775808,
+                    "maximum": 9223372036854775807,
+                    "description": "Its value, when it is a whole number."
+                  },
+                  "number": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Its value, when it is any other number."
+                  },
+                  "flag": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Its value, when it is a flag."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "key"
+                ]
+              },
+              "description": "What it says.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "time_ns",
+            "value"
+          ]
+        },
+        "description": "Its readings, oldest first.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "unit",
+      "kind"
+    ]
+  },
+  "LogRecord": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "time_ns": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "When it happened, in Unix nanoseconds."
+      },
+      "name": {
+        "type": "string",
+        "description": "Its fixed name, such as `host.started`."
+      },
+      "attrs": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "The attribute's name, such as `canoa.harness`."
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Its value, when it is text."
+            },
+            "int": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "Its value, when it is a whole number."
+            },
+            "number": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Its value, when it is any other number."
+            },
+            "flag": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Its value, when it is a flag."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "key"
+          ]
+        },
+        "description": "What it says.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "time_ns",
+      "name"
+    ]
+  },
+  "Batch": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "resource": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "The attribute's name, such as `canoa.harness`."
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Its value, when it is text."
+            },
+            "int": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "Its value, when it is a whole number."
+            },
+            "number": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Its value, when it is any other number."
+            },
+            "flag": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Its value, when it is a flag."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "key"
+          ]
+        },
+        "description": "What every signal in it came from: `service.name`, `service.version`, `service.instance.id`, `os.type`, `host.arch`.",
+        "default": []
+      },
+      "spans": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "trace_id": {
+              "type": "string",
+              "description": "The trace it belongs to: 32 lower-case hexadecimal digits, random per session and per run."
+            },
+            "span_id": {
+              "type": "string",
+              "description": "Its own id: 16 lower-case hexadecimal digits."
+            },
+            "parent_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The span it is part of, when it is part of one."
+            },
+            "name": {
+              "type": "string",
+              "description": "Its name, such as `canoa.turn`."
+            },
+            "start_ns": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "When it began, in Unix nanoseconds."
+            },
+            "end_ns": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "When it ended, in Unix nanoseconds."
+            },
+            "attrs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "The attribute's name, such as `canoa.harness`."
+                  },
+                  "text": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Its value, when it is text."
+                  },
+                  "int": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": -9223372036854775808,
+                    "maximum": 9223372036854775807,
+                    "description": "Its value, when it is a whole number."
+                  },
+                  "number": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Its value, when it is any other number."
+                  },
+                  "flag": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Its value, when it is a flag."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "key"
+                ]
+              },
+              "description": "What it says.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "trace_id",
+            "span_id",
+            "name",
+            "start_ns",
+            "end_ns"
+          ]
+        },
+        "description": "The spans, when the exporter takes them.",
+        "default": []
+      },
+      "metrics": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name, such as `canoa.turns`."
+            },
+            "unit": {
+              "type": "string",
+              "description": "Its unit, as OpenTelemetry writes one: `s`, `{token}`."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "counter",
+                "gauge",
+                "histogram"
+              ],
+              "x-enum-labels": {
+                "counter": "A count: each point is what was added since the last, never negative.",
+                "gauge": "A level: each point is the value at its time.",
+                "histogram": "A distribution: each point is one measurement."
+              },
+              "description": "What it counts or measures."
+            },
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time_ns": {
+                    "type": "integer",
+                    "minimum": -9223372036854775808,
+                    "maximum": 9223372036854775807,
+                    "description": "When it was taken, in Unix nanoseconds."
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "Its value."
+                  },
+                  "attrs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "The attribute's name, such as `canoa.harness`."
+                        },
+                        "text": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Its value, when it is text."
+                        },
+                        "int": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": -9223372036854775808,
+                          "maximum": 9223372036854775807,
+                          "description": "Its value, when it is a whole number."
+                        },
+                        "number": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "description": "Its value, when it is any other number."
+                        },
+                        "flag": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ],
+                          "description": "Its value, when it is a flag."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "key"
+                      ]
+                    },
+                    "description": "What it says.",
+                    "default": []
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "time_ns",
+                  "value"
+                ]
+              },
+              "description": "Its readings, oldest first.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "unit",
+            "kind"
+          ]
+        },
+        "description": "The metrics, when it takes them.",
+        "default": []
+      },
+      "logs": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "time_ns": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "When it happened, in Unix nanoseconds."
+            },
+            "name": {
+              "type": "string",
+              "description": "Its fixed name, such as `host.started`."
+            },
+            "attrs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "The attribute's name, such as `canoa.harness`."
+                  },
+                  "text": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Its value, when it is text."
+                  },
+                  "int": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": -9223372036854775808,
+                    "maximum": 9223372036854775807,
+                    "description": "Its value, when it is a whole number."
+                  },
+                  "number": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Its value, when it is any other number."
+                  },
+                  "flag": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Its value, when it is a flag."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "key"
+                ]
+              },
+              "description": "What it says.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "time_ns",
+            "name"
+          ]
+        },
+        "description": "The events, when it takes them.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  }
+}

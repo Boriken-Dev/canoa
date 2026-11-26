@@ -18,6 +18,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `approver` | `canoa::approver` | the `approver` kind: somewhere a permission request can be answered from, besides the window (`coqui-acp-api`, `guatiao`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `file-viewer` | `canoa::file_viewer` | the `file_viewer` kind: a way to show a file of some type in the Files surface, as an A2UI surface or a sealed page (`coqui-acp-api`, `guatiao`) |
+| `telemetry` | `canoa::telemetry` | the `telemetry_exporter` kind: somewhere the host's traces, metrics and events go, and OTLP's JSON for a batch (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `history-store` | `canoa::history_store` | the `history_store` kind: where recorded conversations and every turn's properties are kept, as typed tables with structured queries (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `data-encoding`, `coqui-acp-history`, `time`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
@@ -310,6 +311,33 @@ pub fn is_word(word: &str) -> bool;   // 1 to 32 lower-case letters, digits and 
 
 - `NotifierInfo::problem` says why a description cannot be used (a bad id, no title, an event that is no word, a schema its form does not fit). `events` limits the events a notifier takes; none takes any. A sensitive member of the schema is kept by the host as the secret `notifiers/NAME/MEMBER` and filled into `settings` when a notice is sent. The host also puts `_services` into the settings of a provider it does not carry: the handle of its session services, which `canoa::session_service::host` turns into the host a provider reaches the services' configuration and secrets through (a notifier that sends through an account a service keeps reads it; the others ignore it). No timeout is fixed by the kind: each provider declares its own as settings.
 - `NotifierError` is what a failure is called: `Unavailable` (no window is open, the service cannot be reached; `GUATIAO_ERR_GONE`), `Auth` and `Rejected` (`GUATIAO_ERR_INTERNAL` with a prefix), `Bad` (the settings do not fit; `GUATIAO_ERR_BAD_VALUE`). Each message is one line with no secret. The slot that takes a delivery away is `withdraw`: `close` is a name Guatiao's JavaScript binding keeps for a remote's own.
+## `canoa::telemetry` (feature `telemetry`)
+
+The `telemetry_exporter` kind: somewhere the host's traces, metrics and events go, when the person turned that on. What is recorded is the host's closed list (`canoa-host`'s `telemetry/catalog`), never a provider's to widen: an exporter only delivers the batches it is handed. The models are plain data in the shape of OpenTelemetry's.
+
+pub const KIND: &str = "telemetry_exporter";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+pub enum Signals { Spans, Metrics, Logs }   impl Signals { pub const fn word(self) -> &'static str }   // "spans", "metrics", "logs"
+#[non_exhaustive] pub struct ExporterInfo { pub title: String, pub help: Option<String>, pub signals: Vec<Signals> }   // `ExporterInfo::new(title)` takes all three groups
+#[non_exhaustive] pub struct Attr { pub key: String, pub text: Option<String>, pub int: Option<i64>, pub number: Option<f64>, pub flag: Option<bool> }   // exactly one value; `Attr::text|int|number|flag`
+#[non_exhaustive] pub struct Span { pub trace_id: String, pub span_id: String, pub parent_id: Option<String>, pub name: String, pub start_ns: i64, pub end_ns: i64, pub attrs: Vec<Attr> }
+pub enum MetricKind { Counter, Gauge, Histogram }
+#[non_exhaustive] pub struct Point { pub time_ns: i64, pub value: f64, pub attrs: Vec<Attr> }
+#[non_exhaustive] pub struct Metric { pub name: String, pub unit: String, pub kind: MetricKind, pub points: Vec<Point> }
+#[non_exhaustive] pub struct LogRecord { pub time_ns: i64, pub name: String, pub attrs: Vec<Attr> }
+#[non_exhaustive] pub struct Batch { pub resource: Vec<Attr>, pub spans: Vec<Span>, pub metrics: Vec<Metric>, pub logs: Vec<LogRecord> }   // `Batch::new(resource)`, `is_empty()`
+#[guatiao::kind(name = "telemetry_exporter")] pub trait TelemetryExporter: Send + Sync {
+    fn describe(&self) -> Result<ExporterInfo, ProviderError>;   // the same on every call, with nothing run
+    fn export(&self, batch: Batch) -> Result<(), ProviderError>; // delivered, or fails
+    fn flush(&self) -> Result<(), ProviderError>;                // once, when the host stops; answer at once when nothing is held
+}
+pub enum ExporterError { Unavailable(String), Auth(String), Bad(String), Rejected(String) }   impl ExporterError { pub fn into_provider(self) -> ProviderError }
+pub fn is_retried(error: &ProviderError) -> bool;   // false only for `Bad` and `Rejected`
+pub mod otlp { pub const DURATION_BOUNDS: [f64; 10]; pub struct Documents { pub traces: Option<Value>, pub metrics: Option<Value>, pub logs: Option<Value> }; pub fn render(batch: &Batch) -> Documents }
+```
+
+- One instance is one configuration of one provider (a folder, an address and its headers): its settings are the provider's `config`, as for the other kinds that take settings. The host calls `export` from one thread at a time, keeps a batch that failed with `Unavailable` or `Auth` (a `GONE` status) and tries it again after a pause that doubles from a second to a minute, and drops one that failed with `Bad` or `Rejected` (a `BAD_VALUE` status) and counts it. `why` is one line with no secret and never the destination's own words.
+- A time is Unix nanoseconds, a trace id 32 and a span id 16 lower-case hexadecimal digits. A counter's point is what was added since the last (delta), a gauge's the value at its time, a histogram's one measurement.
+- `otlp::render` writes a batch as the bodies of OTLP's JSON encoding (`/v1/traces`, `/v1/metrics`, `/v1/logs`): nanosecond times and 64-bit integers as strings, counters as delta sums, a histogram of seconds with `DURATION_BOUNDS` buckets. The `file` exporter of `canoa-host` and an HTTP exporter share it.
 
 ## `canoa::file_viewer` (feature `file-viewer`)
 

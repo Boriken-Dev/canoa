@@ -1,0 +1,7 @@
+type = "js"
+name = "line_exporter"
+version = "1.0.0"
+main = "line_exporter.js"
+kinds = ["telemetry_exporter"]
+# This folder, and the SDK the module imports by a relative path.
+paths = [".", "../../../../bindings/js/canoa-sdk/src"]
