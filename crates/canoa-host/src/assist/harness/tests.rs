@@ -329,7 +329,7 @@ fn a_request_for_a_tool_is_refused_and_the_agent_is_not_given_one() {
         account: None,
         profile: None,
     };
-    let Ok(mut conn) = Conn::start(rig.host.as_ref(), &start) else {
+    let Ok(mut conn) = Conn::start(rig.host.as_ref(), &start, "test-conn") else {
         panic!("the agent started")
     };
     let ask = Ask {

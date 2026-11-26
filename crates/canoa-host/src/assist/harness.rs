@@ -175,8 +175,6 @@ struct Conn {
     refused: usize,
 }
 
-static FOLDERS: AtomicU64 = AtomicU64::new(0);
-
 impl Drop for Conn {
     fn drop(&mut self) {
         self.link.close();
@@ -185,12 +183,8 @@ impl Drop for Conn {
 }
 
 impl Conn {
-    fn start(host: &dyn Host, start: &Start) -> Result<Self, Fail> {
-        let folder = std::env::temp_dir().join(format!(
-            "canoa-assist-{}-{}",
-            std::process::id(),
-            FOLDERS.fetch_add(1, Ordering::SeqCst)
-        ));
+    fn start(host: &dyn Host, start: &Start, name: &str) -> Result<Self, Fail> {
+        let folder = std::env::temp_dir().join(format!("canoa-assist-{name}"));
         std::fs::create_dir_all(&folder)
             .map_err(|error| Fail::broken(format!("no working folder could be made: {error}")))?;
         let context = ChildContext {
@@ -445,6 +439,8 @@ pub(crate) struct Pool {
     cap: usize,
     state: Mutex<State>,
     changed: Condvar,
+    /// Numbers the private folders the sessions work in.
+    folders: AtomicU64,
 }
 
 enum Taken {
@@ -463,6 +459,7 @@ impl Pool {
             cap: settings.max_sessions.unwrap_or(DEFAULT_SESSIONS).max(1),
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
+            folders: AtomicU64::new(0),
         })
     }
 
@@ -474,7 +471,18 @@ impl Pool {
             cap,
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
+            folders: AtomicU64::new(0),
         })
+    }
+
+    /// A name for the private folder of the next session: the process, this pool and a count, so no two sessions share one.
+    fn folder_name(&self) -> String {
+        let number = self.folders.fetch_add(1, Ordering::SeqCst);
+        format!(
+            "{}-{:x}-{number}",
+            std::process::id(),
+            core::ptr::from_ref(self) as usize
+        )
     }
 
     /// How long a session may be idle.
@@ -648,7 +656,7 @@ impl HarnessBackend {
         loop {
             let (mut conn, reused) = match self.pool.take(&key, waiting).map_err(Failure::new)? {
                 Taken::Warm(conn) => (conn, true),
-                Taken::Room => match Conn::start(host, &start) {
+                Taken::Room => match Conn::start(host, &start, &self.pool.folder_name()) {
                     Ok(conn) => (conn, false),
                     Err(fail) => {
                         self.pool.lost();
