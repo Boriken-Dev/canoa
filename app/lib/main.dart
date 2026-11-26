@@ -1719,12 +1719,13 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Goes back as [_rewindTo] does, and sends [edited] in the session that opens.
   Future<bool> _resendFrom(ChatSession session, int turn, String text, String edited) async {
+    final words = AppText.of(context);
     final back = await _goBack(session, turn, text);
     if (back == null) return false;
     try {
       await store.sendTextTo(back, edited, attached: false);
     } on Object catch (error) {
-      _messenger.currentState?.showSnackBar(SnackBar(content: Text(AppText.of(context)('turn.resend_failed', {'why': reasonOf(error)}))));
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text(words('turn.resend_failed', {'why': reasonOf(error)}))));
     }
     return true;
   }

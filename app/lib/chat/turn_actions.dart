@@ -33,8 +33,9 @@ int? turnOf(ChatSession session, chat.ChatEntryData entry) {
   for (final message in session.messages) {
     if (message.role != MessageRole.user) continue;
     if (message.at.microsecondsSinceEpoch == entry.at.microsecondsSinceEpoch &&
-        message.text == entry.text)
+        message.text == entry.text) {
       return turn;
+    }
     turn++;
   }
   return null;

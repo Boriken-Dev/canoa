@@ -67,8 +67,9 @@ void main() {
         while (!first.messages.any(
           (message) => message.text.contains('Done: $text'),
         )) {
-          if (DateTime.now().isAfter(deadline))
+          if (DateTime.now().isAfter(deadline)) {
             fail('Claude did not answer $text');
+          }
           await Future<void>.delayed(const Duration(milliseconds: 50));
         }
         // The host keeps the turn once the answer has gone by.
@@ -82,8 +83,9 @@ void main() {
           } on Object {
             // Not kept yet.
           }
-          if (DateTime.now().isAfter(deadline))
+          if (DateTime.now().isAfter(deadline)) {
             fail('the host kept no history of $text');
+          }
           await Future<void>.delayed(const Duration(milliseconds: 50));
         }
       }
