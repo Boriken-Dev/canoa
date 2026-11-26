@@ -4362,30 +4362,6 @@
         "host": "fonts.gstatic.com",
         "path": "/s/notoseriftibetan/v24/gokGH7nwAEdtF9N45n0Vaz7O-pk0wsvxHeDXMfqguoCmIrYcPSvrdSy_32c.woff2",
         "sha256": "df41efb6d25f03aee975fc537798f9d77b16953cf191a3beeef7362be897101b"
-      },
-      {
-        "bytes": 14063,
-        "host": "huggingface.co",
-        "path": "/api/models/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1",
-        "sha256": "60abbffad17f7968e4163743e40b2922bcbcaad95a919fa59a6227b1c1b575cb"
-      },
-      {
-        "bytes": 720,
-        "host": "huggingface.co",
-        "path": "/api/models/rhasspy/piper-voices/tree/4a409e3cbfd0a189930b38f127a38e107677e8ac/en/en_US/ljspeech/medium",
-        "sha256": "b7c4f53102fcd6edc64479955c741dbb3b1cd20a0077650bd9dad5eb2189eafc"
-      },
-      {
-        "bytes": 696,
-        "host": "huggingface.co",
-        "path": "/api/models/rhasspy/piper-voices/tree/4a409e3cbfd0a189930b38f127a38e107677e8ac/es/es_MX/claude/high",
-        "sha256": "42b308a1761a138ca56f3df2629aca362875acce396ef37c6f8067c9691cbefd"
-      },
-      {
-        "bytes": 252070,
-        "host": "huggingface.co",
-        "path": "/rhasspy/piper-voices/raw/4a409e3cbfd0a189930b38f127a38e107677e8ac/voices.json",
-        "sha256": "794b0a88086c2fc9b537fe83fadf58cff1e758649f3c6bdf622241e502fa37cf"
       }
     ]
   },
@@ -4567,7 +4543,7 @@
       "libxi-dev"
     ]
   },
-  "sourceCommit": "ea83d184ec086954a2e8b77e4f81a1f80918861f",
+  "sourceCommit": "5c8c948de5915bf417245e38be4a636897b75173",
   "trees": {
     "office-js": {
       "commit": "498e88261bc578243d40dd79083953d86f84e7f6",
@@ -8439,10 +8415,10 @@
   },
   "vendors": {
     "crates": {
-      "crates": 691,
+      "crates": 692,
       "gitSources": 22,
       "lock": "Cargo.lock",
-      "lockSha256": "946378283e9ee43424631af30d30cda1bd9f36919f6188851466163896df298e"
+      "lockSha256": "8cbeaf2ad26ef09e6c47a0f808088a59742bf150959da3e95e92b64c93b11386"
     },
     "crates-wasm-bindgen-cli": {
       "crates": 254,
