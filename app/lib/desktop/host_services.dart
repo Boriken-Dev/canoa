@@ -18,6 +18,7 @@ import '../store/catalog_sources.dart';
 import '../store/content_settings.dart';
 import '../settings/host_sections.dart';
 import '../settings/shell_settings.dart';
+import '../files/viewers/extension_viewers.dart' show ExtensionViewers;
 import '../shell/panel_tabs.dart';
 import '../store/programs.dart';
 import '../store/store_extensions.dart';
@@ -85,6 +86,7 @@ final class HostServices {
     hostVoices = hostSpeech == null ? null : HostVoiceCatalog(hostSpeech!.call);
     terminals = c == null ? null : ControlTerminals(c);
     panelTabs = c == null ? null : PanelTabKinds((method, params) async => (await c.ready(wait: false)).call(method, params));
+    fileViewers = c == null ? null : ExtensionViewers((method, params) async => (await c.ready(wait: false)).call(method, params));
     hostSections = c == null
         ? HostSections.withoutHost()
         : HostSections(
@@ -140,6 +142,9 @@ final class HostServices {
   final HostFolders? hostFolders;
   late final ControlTerminals? terminals;
   late final PanelTabKinds? panelTabs;
+
+  /// The viewers the host's extensions offer the Files surface.
+  late final ExtensionViewers? fileViewers;
   late final HostSections hostSections;
   late final UsageController? usageHeld = control == null
       ? null
@@ -190,6 +195,7 @@ final class HostServices {
       final client = await c.ready(wait: wait);
       unawaited(hostSections.load());
       unawaited(panelTabs?.load());
+      unawaited(fileViewers?.load());
       profileItems.adopt(await client.call('profile_items/list', const {}));
       if (profileItems.asksForClientCertificate) {
         try {

@@ -25,6 +25,9 @@ export '../files/viewers/file_sample.dart' show sizeText;
 export '../files/viewers/image_viewer.dart' show ImagePreview, declaredImageSize, imagePixels, imageSide;
 export '../files/viewers/text_viewer.dart' show lineLength, markRun, previewLines, visibleText;
 
+/// The most viewers a file's switch shows side by side; with more, the choice is an Open with menu.
+const int maxViewerSegments = 4;
+
 /// The files of the session's workspace, on the host the session runs on, to browse, preview, and edit text files or open loaded
 /// session instruction files; the host decides what it shows and grants. It opens before any agent has started.
 class FilesSurface extends WorkSurface {
@@ -594,19 +597,50 @@ class _FilesPanelState extends State<FilesPanel> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Align(
               alignment: Alignment.centerRight,
-              child: SegmentedButton<String>(
-                key: const ValueKey('viewer switch'),
-                segments: [
-                  for (final each in options)
-                    ButtonSegment<String>(value: each.id, label: Text(context.t(each.labelKey), key: ValueKey('viewer switch ${each.id}'), style: const TextStyle(fontSize: 11))),
-                ],
-                selected: {viewer.id},
-                showSelectedIcon: false,
-                onSelectionChanged: (choice) {
-                  setState(() => _focusSection = null);
-                  unawaited(registry.choices.choose(type, choice.first));
-                },
-              ),
+              child: options.length <= maxViewerSegments
+                  ? SegmentedButton<String>(
+                      key: const ValueKey('viewer switch'),
+                      segments: [
+                        for (final each in options)
+                          ButtonSegment<String>(value: each.id, label: Text(each.labelFor(context), key: ValueKey('viewer switch ${each.id}'), style: const TextStyle(fontSize: 11))),
+                      ],
+                      selected: {viewer.id},
+                      showSelectedIcon: false,
+                      onSelectionChanged: (choice) {
+                        setState(() => _focusSection = null);
+                        unawaited(registry.choices.choose(type, choice.first));
+                      },
+                    )
+                  : PopupMenuButton<String>(
+                      key: const ValueKey('viewer menu'),
+                      tooltip: context.t('files.viewer.open_with_tip'),
+                      initialValue: viewer.id,
+                      onSelected: (choice) {
+                        setState(() => _focusSection = null);
+                        unawaited(registry.choices.choose(type, choice));
+                      },
+                      itemBuilder: (context) => [
+                        for (final each in options)
+                          CheckedPopupMenuItem<String>(
+                            key: ValueKey('viewer menu ${each.id}'),
+                            value: each.id,
+                            checked: each.id == viewer.id,
+                            child: Text(each.labelFor(context)),
+                          ),
+                      ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(context.t('files.viewer.open_with'), style: const TextStyle(fontSize: 11)),
+                            const SizedBox(width: 4),
+                            Text(viewer.labelFor(context), key: const ValueKey('viewer menu current'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                            const Icon(Icons.arrow_drop_down, size: 18),
+                          ],
+                        ),
+                      ),
+                    ),
             ),
           ),
         if (_saveProblem != null)

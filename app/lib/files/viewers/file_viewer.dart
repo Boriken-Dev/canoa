@@ -1,6 +1,7 @@
 
 import 'package:flutter/widgets.dart';
 
+import '../../l10n/app_text.dart';
 import 'file_sample.dart';
 
 /// What a viewer is asked to draw: the file, its MIME type and, for a document with sections, the one to open at.
@@ -26,6 +27,10 @@ abstract class FileViewer {
 
   /// The text key of the name the viewer's switch shows.
   String get labelKey;
+
+  /// The name the viewer's switch shows: the text of [labelKey] in the person's language, or, for a viewer whose name is its
+  /// provider's own words, that name.
+  String labelFor(BuildContext context) => context.t(labelKey);
 
   /// The MIME types it shows: exact (`application/json`) or by family (`image/*`).
   Set<String> get mimeTypes => const {};

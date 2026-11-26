@@ -632,17 +632,22 @@ class _CanoaAppState extends State<CanoaApp> {
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
 
   /// The viewers the Files surface shows a file with; the person's choice per file type is `[appearance.viewers]` of canoa.cfg.
-  late final ViewerRegistry _fileViewers = standardViewerRegistry(
-    choices: ViewerChoices(
-      read: () => config.viewers,
-      write: (all) async {
-        final changed = config.copyWith(viewers: all);
-        setState(() => config = changed);
-        _settingsKey.currentState?.controller.adopt(changed);
-        await _write(changed);
-      },
-    ),
-  );
+  late final ViewerRegistry _fileViewers = () {
+    final registry = standardViewerRegistry(
+      choices: ViewerChoices(
+        read: () => config.viewers,
+        write: (all) async {
+          final changed = config.copyWith(viewers: all);
+          setState(() => config = changed);
+          _settingsKey.currentState?.controller.adopt(changed);
+          await _write(changed);
+        },
+      ),
+    );
+    // The viewers the host's extensions offer join the app's own, and leave with the extension.
+    _services.fileViewers?.attach(registry);
+    return registry;
+  }();
   StreamSubscription<Object?>? _a2uiOpened;
 
   late final WorkSurfaces _surfaces = widget.surfaces == null
