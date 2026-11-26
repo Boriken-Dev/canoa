@@ -78,7 +78,7 @@ fn to_guatiao(value: &Value) -> Result<coqui_acp_api::guatiao::Value, String> {
 }
 
 fn registry_of(name: &str, library: Library) -> Result<Registry, String> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     let loading = registry
         .register_local(name, library)
         .map_err(|error| format!("{name}: {error}"))?;

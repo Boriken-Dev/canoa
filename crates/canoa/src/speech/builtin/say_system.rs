@@ -50,8 +50,8 @@ foreach ($v in $s.GetInstalledVoices()) { if ($v.Enabled) { $i = $v.VoiceInfo; \
 const WINDOWS_SAY: &str = "Add-Type -AssemblyName System.Speech; \
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8; \
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
-if ($env:CANOA_SAY_VOICE) { $s.SelectVoice($env:CANOA_SAY_VOICE) }; \
-if ($env:CANOA_SAY_RATE) { $s.Rate = [int]$env:CANOA_SAY_RATE }; \
+if ($env:@VOICE@) { $s.SelectVoice($env:@VOICE@) }; \
+if ($env:@RATE@) { $s.Rate = [int]$env:@RATE@ }; \
 $f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono); \
 $o = [Console]::OpenStandardOutput(); \
 while (($l = [Console]::In.ReadLine()) -ne $null) { if ($l.Trim().Length -eq 0) { continue }; \
@@ -60,7 +60,7 @@ $b = $m.ToArray(); $o.Write($b, 0, $b.Length); $o.Flush() }";
 
 /// `say` cannot write to a pipe, so it writes a file that is printed and removed.
 const MACOS_SAY: &str = "f=$(mktemp -t canoa) || exit 1; \
-say ${CANOA_SAY_VOICE:+-v \"$CANOA_SAY_VOICE\"} ${CANOA_SAY_RATE:+-r \"$CANOA_SAY_RATE\"} -o \"$f\" --file-format=WAVE --data-format=LEI16@22050 -f -; \
+say ${@VOICE@:+-v \"$@VOICE@\"} ${@RATE@:+-r \"$@RATE@\"} -o \"$f\" --file-format=WAVE --data-format=LEI16@22050 -f -; \
 code=$?; cat \"$f\"; rm -f \"$f\"; exit $code";
 
 /// What the system provider is configured with.
@@ -145,6 +145,13 @@ impl SystemSpeech {
 }
 
 /// The spec that runs the Windows script `script`.
+/// The script with the names of the variables the build reads put in.
+fn with_names(script: &str) -> String {
+    script
+        .replace("@VOICE@", crate::brand::SAY_VOICE)
+        .replace("@RATE@", crate::brand::SAY_RATE)
+}
+
 fn powershell(program: &str, script: &str) -> SpawnSpec {
     SpawnSpec::new(program)
         .arg("-NoProfile")
@@ -207,7 +214,7 @@ impl SpeechOutput for SystemSpeech {
         let program = self.program(family);
         let mut environment = Environment::new();
         if let Some(voice) = request.voice.as_deref().filter(|voice| !voice.is_empty()) {
-            environment.insert("CANOA_SAY_VOICE", voice);
+            environment.insert(crate::brand::SAY_VOICE, voice);
         }
         let (spec, lines, head, format) = match family {
             Family::Windows => {
@@ -215,10 +222,10 @@ impl SpeechOutput for SystemSpeech {
                     // The synthesizer's rate is a step from -10 to 10; a step is about a tenth of normal speed.
                     #[allow(clippy::cast_possible_truncation, reason = "held to -10 and 10 first")]
                     let step = ((speed - 1.0) * 10.0).round().clamp(-10.0, 10.0) as i32;
-                    environment.insert("CANOA_SAY_RATE", step.to_string());
+                    environment.insert(crate::brand::SAY_RATE, step.to_string());
                 }
                 (
-                    powershell(&program, WINDOWS_SAY),
+                    powershell(&program, &with_names(WINDOWS_SAY)),
                     Some(sentences(text)),
                     Head::Raw,
                     AudioFormat::pcm(WINDOWS_RATE),
@@ -226,10 +233,12 @@ impl SpeechOutput for SystemSpeech {
             }
             Family::Macos => {
                 if let Some(speed) = speed {
-                    environment.insert("CANOA_SAY_RATE", per_minute(speed));
+                    environment.insert(crate::brand::SAY_RATE, per_minute(speed));
                 }
                 (
-                    SpawnSpec::new(&program).arg("-c").arg(MACOS_SAY),
+                    SpawnSpec::new(&program)
+                        .arg("-c")
+                        .arg(with_names(MACOS_SAY)),
                     Some(vec![text.to_owned()]),
                     Head::Wav,
                     AudioFormat::pcm(22_050),

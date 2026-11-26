@@ -131,7 +131,7 @@ coqui_acp_api::guatiao::local_providers!(
 
 /// The built-in sources and the stand-in, as a host with that extension loaded holds them.
 pub(crate) fn with_standin() -> Sources {
-    let mut registry = Registry::new("canoa", "0");
+    let mut registry = Registry::new(canoa::brand::PROGRAM, "0");
     let loading = registry
         .register_local("standin", library)
         .expect("registers");
@@ -269,10 +269,10 @@ fn a_provider_is_asked_only_for_a_type_it_serves_and_an_id_taken_twice_is_refuse
     );
 
     let mut taken = Sources::default();
-    let mut first = Registry::new("canoa", "0");
+    let mut first = Registry::new(canoa::brand::PROGRAM, "0");
     first.register_local("again", library).expect("registers");
     taken.add(Some("one"), Arc::new(first)).expect("first");
-    let mut second = Registry::new("canoa", "0");
+    let mut second = Registry::new(canoa::brand::PROGRAM, "0");
     second.register_local("again", library).expect("registers");
     let refused = taken.add(Some("two"), Arc::new(second)).expect_err("taken");
     assert!(refused.contains("already offered"), "{refused}");

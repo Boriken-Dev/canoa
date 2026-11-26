@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn an_included_library_registers_beside_the_agents_and_its_helper_is_found_by_name() {
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         register(&mut registry, ALL).expect("the agents");
         register_included(&mut registry).expect("the libraries that are no agent");
         assert!(

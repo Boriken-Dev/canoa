@@ -408,8 +408,10 @@ impl Stores {
         if crate::disabled::off::<dyn StoreExtension>(&extension.provider) {
             return Ok(());
         }
-        let mut registry =
-            coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut registry = coqui_acp_api::guatiao::library::Registry::new(
+            canoa::brand::PROGRAM,
+            env!("CARGO_PKG_VERSION"),
+        );
         crate::provider::open(&mut registry, &extension.origin).map_err(|e| e.to_string())?;
         let Some(found) = registry.offer::<dyn StoreExtension>(&extension.provider) else {
             return Err(format!("no provider {}", extension.provider));

@@ -227,7 +227,8 @@ impl Environments {
                     let Some(origin) = &environment.origin else {
                         continue;
                     };
-                    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+                    let mut registry =
+                        Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
                     match crate::provider::open(&mut registry, origin) {
                         Ok(()) => registries.push((name.clone(), Arc::new(registry))),
                         Err(why) => {
@@ -244,7 +245,7 @@ impl Environments {
                 .collect(),
         };
         let mut found: Vec<(String, Arc<Registry>)> = Vec::new();
-        let mut built_in = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut built_in = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         let accepted = built_in
             .register_local("canoa-environments", library)
             .is_ok_and(|loading| loading.loaded().is_some());

@@ -164,7 +164,7 @@ coqui_acp_api::guatiao::local_providers!(
 );
 
 fn catalog() -> Catalog {
-    let mut registry = Registry::new("canoa", "0.0.0");
+    let mut registry = Registry::new(canoa::brand::PROGRAM, "0.0.0");
     registry
         .register_local("canoa-secret-standins", library)
         .expect("registered");

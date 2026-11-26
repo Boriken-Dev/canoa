@@ -641,7 +641,7 @@ struct ToolServer {
 
 impl Service for ToolServer {
     type Caller = Access;
-    const NAME: &'static str = "canoa-environments";
+    const NAME: &'static str = canoa::brand::ENVIRONMENTS_SERVER;
     const MAX_PER_CALLER: usize = 8;
 
     fn caller(&self, token: &str) -> Option<Arc<Access>> {

@@ -70,8 +70,9 @@ const fn default_timeout() -> u32 {
 /// What the command provider is configured with.
 ///
 /// Each of `args` may name `{voice}`, `{model}`, `{style}`, `{speed}`, `{language}` and `{text}`, which are replaced with what
-/// the request chose (a choice left out is the empty text); the same choices are set as the variables `CANOA_SAY_VOICE`,
-/// `CANOA_SAY_MODEL`, `CANOA_SAY_STYLE`, `CANOA_SAY_SPEED` and `CANOA_SAY_LANGUAGE`.
+/// the request chose (a choice left out is the empty text); the same choices are set as the variables `SAY_VOICE`,
+/// `SAY_MODEL`, `SAY_STYLE`, `SAY_SPEED` and `SAY_LANGUAGE`, each with the build's variable prefix (`CANOA_` in the default
+/// brand).
 #[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq)]
 #[form(section(id = "command", label = "Command"))]
 #[non_exhaustive]
@@ -109,7 +110,7 @@ pub struct CommandSaySettings {
     #[map(default)]
     #[schema(section = "command", title = "Styles")]
     pub styles: Vec<String>,
-    /// Whether it takes a speed, as `{speed}` or `CANOA_SAY_SPEED`.
+    /// Whether it takes a speed, as `{speed}` or the variable `SAY_SPEED` (with the build's variable prefix).
     #[map(default)]
     #[schema(section = "command", title = "Takes a speed")]
     pub speed: bool,
@@ -264,7 +265,10 @@ impl SpeechOutput for CommandSay {
             ("LANGUAGE", language),
         ] {
             if !value.is_empty() {
-                environment.insert(alloc::format!("CANOA_SAY_{name}"), value);
+                environment.insert(
+                    alloc::format!("{}_SAY_{name}", crate::brand::ENV_PREFIX),
+                    value,
+                );
             }
         }
         spec = spec.environment(environment);

@@ -150,7 +150,7 @@ fn opening_the_store_reaches_a_publisher_once_and_costs_no_body_when_it_has_not_
     let dir = std::env::temp_dir().join(format!("canoa-store-open-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("home")).expect("a home");
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     registry
         .register_local("reads-library", library)
         .expect("registered");

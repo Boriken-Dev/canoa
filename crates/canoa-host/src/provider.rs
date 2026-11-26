@@ -253,7 +253,7 @@ fn serve_on(
         .map_err(ProviderError::Transport)?;
     AcpFacade::new(provider)
         .with_settings(settings)
-        .with_agent_info("canoa", env!("CARGO_PKG_VERSION"))
+        .with_agent_info(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"))
         .run(transport)
         .map_err(|error| ProviderError::Facade(error.to_string()))
 }
@@ -397,7 +397,7 @@ fn with_kinds(settings: &Settings) -> Settings {
 }
 
 fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>), ProviderError> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     open(&mut registry, &options.origin)?;
     let offer = registry
         .offer::<dyn AgentProvider>(&options.provider)

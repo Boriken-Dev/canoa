@@ -154,8 +154,8 @@ impl Bridge {
                 continue;
             };
             match name {
-                "CANOA_DELEGATE_URL" => value.clone_into(&mut url),
-                "CANOA_DELEGATE_TOKEN" => value.clone_into(&mut token),
+                canoa::brand::DELEGATE_URL => value.clone_into(&mut url),
+                canoa::brand::DELEGATE_TOKEN => value.clone_into(&mut token),
                 _ => {}
             }
             process.env(name, value);
@@ -1319,20 +1319,21 @@ impl Shared {
                                 .insert(name.to_owned(), (url.to_owned(), token.to_owned()));
                         }
                         let kept = match server["name"].as_str() {
-                            Some("canoa-delegate") => Some(&self.tools),
-                            Some("canoa-secrets") => Some(&self.secret_tools),
-                            Some("canoa-store") => Some(&self.store_tools),
-                            Some("canoa-kb") => Some(&self.kb_tools),
+                            Some(canoa::brand::DELEGATE_SERVER) => Some(&self.tools),
+                            Some(canoa::brand::SECRETS_SERVER) => Some(&self.secret_tools),
+                            Some(canoa::brand::STORE_SERVER) => Some(&self.store_tools),
+                            Some(canoa::brand::KB_SERVER) => Some(&self.kb_tools),
                             _ => None,
                         };
                         if let Some(kept) = kept {
                             lock(kept).insert(created.clone(), (url.to_owned(), token.to_owned()));
                         }
                     } else if let Some(name) = server["name"].as_str()
-                        && (name == "canoa-delegate" || name == "canoa-secrets")
+                        && (name == canoa::brand::DELEGATE_SERVER
+                            || name == canoa::brand::SECRETS_SERVER)
                         && let Some((bridge, url, token)) = Bridge::start(server)
                     {
-                        let (tools, bridges) = if name == "canoa-delegate" {
+                        let (tools, bridges) = if name == canoa::brand::DELEGATE_SERVER {
                             (&self.tools, &self.bridges)
                         } else {
                             (&self.secret_tools, &self.secret_bridges)

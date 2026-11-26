@@ -24,7 +24,7 @@ struct Served {
 
 impl Service for Served {
     type Caller = Access;
-    const NAME: &'static str = "canoa-kb";
+    const NAME: &'static str = canoa::brand::KB_SERVER;
     const MAX_PER_CALLER: usize = 4;
 
     fn caller(&self, token: &str) -> Option<Arc<Access>> {

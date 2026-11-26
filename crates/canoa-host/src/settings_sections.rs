@@ -116,7 +116,7 @@ impl Section<'_> {
 }
 
 fn built_in() -> Result<Registry, String> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     let loading = registry
         .register_local("canoa-settings-sections", built_in::library)
         .map_err(|error| format!("canoa-settings-sections: {error}"))?;

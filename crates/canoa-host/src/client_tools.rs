@@ -40,7 +40,7 @@ use crate::site::SITE_META;
 /// What `@tools` is opened as.
 pub(crate) const NAME: &str = "@tools";
 /// The names of the MCP servers the host adds to a session start with this; the rest is the provider's name.
-const SERVER_PREFIX: &str = "canoa-";
+const SERVER_PREFIX: &str = canoa::brand::SERVER_PREFIX;
 /// How long a connection has to say who it is.
 const REGISTER_WAIT: Duration = Duration::from_secs(10);
 /// How often the connection looks up to send what the host queued for it.

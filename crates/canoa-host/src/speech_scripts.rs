@@ -165,7 +165,7 @@ pub(crate) fn registry_of(table: &Value, base: &Path) -> Result<Option<Arc<Regis
     let Some(origin) = origin_of(table, base)? else {
         return Ok(None);
     };
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     crate::provider::open(&mut registry, &origin).map_err(|error| error.to_string())?;
     Ok(Some(Arc::new(registry)))
 }

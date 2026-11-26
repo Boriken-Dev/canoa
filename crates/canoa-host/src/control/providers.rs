@@ -227,7 +227,7 @@ pub(crate) fn registries_of(config: Option<&Config>) -> Vec<Arc<Registry>> {
             .map(|(_, registry)| Arc::clone(registry))
             .collect();
     }
-    let mut carried = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut carried = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     if let Err(why) = crate::bundled::register_included(&mut carried) {
         tracing::warn!("the carried libraries could not be loaded: {why}");
     }
@@ -280,7 +280,7 @@ pub(crate) fn libraries(config: &Config) -> LoadedRegistries {
                 continue;
             }
             seen.push(origin.clone());
-            let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+            let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
             match crate::provider::open(&mut registry, origin) {
                 Ok(()) => {
                     crate::vendors::note(&registry);
@@ -330,7 +330,7 @@ pub(crate) fn looks_of(registries: &[(&str, &Registry)]) -> Vec<Value> {
 
 /// A registry holding the libraries of `bundles`, and the ones this build carries that are no agent.
 pub(crate) fn bundled_registry(bundles: &[Bundle]) -> Result<Registry, String> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     bundled::register(&mut registry, bundles)?;
     bundled::register_included(&mut registry)?;
     Ok(registry)

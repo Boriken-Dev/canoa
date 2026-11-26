@@ -71,7 +71,7 @@ const DELEGATE_CONTEXT: &str = "_canoa/delegate/context";
 /// Notifications of a task's updates the outbox holds before the host drops the next ones (the history keeps them).
 const MAX_QUEUED_UPDATES: usize = 1024;
 /// The name of the MCP server the host adds to a session.
-pub(crate) const SERVER_NAME: &str = "canoa-delegate";
+pub(crate) const SERVER_NAME: &str = canoa::brand::DELEGATE_SERVER;
 /// Sessions of one connection that hold a bearer at once.
 const MAX_SESSIONS: usize = 256;
 /// Requests of one connection the host remembers an answer for.

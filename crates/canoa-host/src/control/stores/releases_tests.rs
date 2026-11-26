@@ -125,7 +125,7 @@ fn fixture(name: &str) -> Fixture {
     let _ = std::fs::remove_dir_all(&root);
     let home = root.join("home");
     std::fs::create_dir_all(&home).expect("a home");
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     registry
         .register_local("feed-library", library)
         .expect("registered");

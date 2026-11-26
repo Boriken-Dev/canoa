@@ -124,7 +124,7 @@ mod library {
 
 /// The registry of the stand-in extension.
 pub(crate) fn registry() -> Registry {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     let loading = registry
         .register_local("regions", library::library)
         .expect("registers");

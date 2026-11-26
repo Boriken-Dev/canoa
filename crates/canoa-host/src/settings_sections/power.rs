@@ -51,7 +51,7 @@ mod library {
 
 /// The registry of the sections the host offers beyond the application's own pages.
 pub(super) fn registry() -> Result<Registry, String> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     let loading = registry
         .register_local("canoa-host-settings", library::library)
         .map_err(|error| format!("canoa-host-settings: {error}"))?;

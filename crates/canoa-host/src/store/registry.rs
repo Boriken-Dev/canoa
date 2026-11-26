@@ -21,7 +21,7 @@ use crate::bundled::{self, Bundle};
 ///
 /// The reason the registry did not accept them.
 pub fn built_in() -> Result<Arc<Registry>, String> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     bundled::register(&mut registry, bundled::ALL)?;
     bundled::register_included(&mut registry)?;
     Ok(Arc::new(registry))
@@ -32,7 +32,7 @@ pub fn built_in() -> Result<Arc<Registry>, String> {
 pub(crate) fn agent_stores(bundles: &[Bundle]) -> Vec<String> {
     let mut ids = Vec::new();
     for bundle in bundles {
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         if bundled::register(&mut registry, core::slice::from_ref(bundle)).is_err() {
             continue;
         }

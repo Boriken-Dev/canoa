@@ -233,7 +233,7 @@ fn converse<T>(
         json!({
             "protocolVersion": 1,
             "clientCapabilities": {},
-            "clientInfo": {"name": "canoa-choices", "version": env!("CARGO_PKG_VERSION")},
+            "clientInfo": {"name": format!("{}-choices", canoa::brand::PROGRAM), "version": env!("CARGO_PKG_VERSION")},
         }),
         deadline,
     )?;

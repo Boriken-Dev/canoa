@@ -523,7 +523,7 @@
       "speed": {
         "type": "boolean",
         "title": "Takes a speed",
-        "description": "Whether it takes a speed, as `{speed}` or `CANOA_SAY_SPEED`.",
+        "description": "Whether it takes a speed, as `{speed}` or the variable `SAY_SPEED` (with the build's variable prefix).",
         "x-section": "command",
         "default": false
       },

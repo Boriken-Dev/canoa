@@ -142,7 +142,7 @@ static CARRIED: Mutex<Option<Arc<Registry>>> = Mutex::new(None);
 pub(super) fn carried() -> Option<Arc<Registry>> {
     let mut held = CARRIED.lock().unwrap_or_else(PoisonError::into_inner);
     if held.is_none() {
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         match crate::bundled::register_included(&mut registry) {
             Ok(()) => *held = Some(Arc::new(registry)),
             Err(why) => {

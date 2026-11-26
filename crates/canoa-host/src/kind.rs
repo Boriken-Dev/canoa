@@ -54,7 +54,7 @@ const CLIENT_PLUGINS: &str = "allow_client_plugins";
 ///
 /// [`ProviderError::Load`] or [`ProviderError::Source`] for the built-in providers or an origin that does not load.
 pub(crate) fn registry(origin: Option<&Origin>) -> Result<Registry, ProviderError> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     match origin {
         Some(origin) => {
             open(&mut registry, origin)?;

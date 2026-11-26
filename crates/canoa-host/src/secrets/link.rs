@@ -27,7 +27,7 @@ use super::{Grant, Hub, lock};
 use crate::delegate::privilege::{Modes, modes_of};
 
 /// The name of the MCP server the host adds to a session.
-pub(crate) const SERVER_NAME: &str = "canoa-secrets";
+pub(crate) const SERVER_NAME: &str = canoa::brand::SECRETS_SERVER;
 /// The prefix of the id of every request the host makes of the app, which tells an answer to one from any other message.
 const ID_PREFIX: &str = "canoa-secret-";
 /// What the host tells the app when it gives up on a question, so the card of a question nobody can answer any more goes away.

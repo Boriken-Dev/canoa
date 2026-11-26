@@ -221,7 +221,7 @@ fn fixture(name: &str) -> Fixture {
         home: Some(home.clone()),
         ..Options::default()
     };
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     registry
         .register_local("stand-library", library)
         .expect("registered");

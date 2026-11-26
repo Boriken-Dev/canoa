@@ -125,7 +125,7 @@ impl Bundle {
             "kinds",
             List::from_iter([text(crate::descriptions::file()?)]),
         );
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         add_bundled_js(&mut registry, &config).map_err(|error| error.to_string())?;
         Ok(registry)
     }

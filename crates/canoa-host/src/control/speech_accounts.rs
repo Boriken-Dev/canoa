@@ -326,7 +326,7 @@ fn registries(config: Option<&Config>) -> Vec<Arc<Registry>> {
             .map(|(_, registry)| Arc::clone(registry))
             .collect();
     }
-    let mut carried = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut carried = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     if let Err(why) = crate::bundled::register_included(&mut carried) {
         tracing::warn!("the libraries this build carries are not read for speech: {why}");
     }
@@ -354,7 +354,7 @@ mod tests {
     }
 
     fn services() -> Services {
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         crate::bundled::register_included(&mut registry).expect("the carried libraries");
         Services::from_registries(&[registry])
     }
@@ -381,9 +381,9 @@ mod tests {
 
     #[test]
     fn a_service_a_library_describes_once_is_not_taken_by_a_second_of_the_same_id() {
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         crate::bundled::register_included(&mut registry).expect("the carried libraries");
-        let mut again = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        let mut again = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
         crate::bundled::register_included(&mut again).expect("the carried libraries");
         let twice = Services::from_registries(&[registry, again]);
         assert_eq!(twice.services.len(), services().services.len());

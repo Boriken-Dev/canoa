@@ -687,8 +687,10 @@ mod stub {
 fn a_library_of_no_vendor_adds_a_type_and_its_models_and_a_type_naming_no_provider_it_offers_is_not_listed()
  {
     let root = std::env::temp_dir().join(format!("canoa-models-stub-{}", std::process::id()));
-    let mut registry =
-        coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = coqui_acp_api::guatiao::library::Registry::new(
+        canoa::brand::PROGRAM,
+        env!("CARGO_PKG_VERSION"),
+    );
     registry
         .register_local("test-stub-models", stub::library)
         .expect("registered");

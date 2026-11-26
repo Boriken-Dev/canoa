@@ -18,7 +18,7 @@ impl Caller for Session {
 
 impl Service for Engine {
     type Caller = Session;
-    const NAME: &'static str = "canoa-delegate";
+    const NAME: &'static str = canoa::brand::DELEGATE_SERVER;
     const MAX_PER_CALLER: usize = 8;
 
     fn caller(&self, token: &str) -> Option<Arc<Session>> {

@@ -2,7 +2,7 @@
 //! each line: the line itself between brackets, so a test reads what was spoken, in what order.
 //!
 //! The first argument picks a mode. `lines` (the default) writes `[line]`; `piper` (chosen when `--output-raw` is among the
-//! arguments, as Piper is run) writes `[line|model=STEM|scale=N|speaker=N]`; `env` writes the `CANOA_SAY_*` variables once;
+//! arguments, as Piper is run) writes `[line|model=STEM|scale=N|speaker=N]`; `env` writes the `SAY_*` variables, with the build's prefix, once;
 //! `fail` writes one line and exits with an error; `slow` writes a line a second.
 #![allow(
     clippy::std_instead_of_core,
@@ -30,7 +30,8 @@ fn main() {
         let said: Vec<String> = ["VOICE", "MODEL", "STYLE", "SPEED", "LANGUAGE"]
             .iter()
             .map(|name| {
-                let value = std::env::var(format!("CANOA_SAY_{name}")).unwrap_or_default();
+                let value = std::env::var(format!("{}_SAY_{name}", canoa::brand::ENV_PREFIX))
+                    .unwrap_or_default();
                 format!("{name}={value}")
             })
             .collect();

@@ -19,7 +19,7 @@ struct Served {
 
 impl Service for Served {
     type Caller = Access;
-    const NAME: &'static str = "canoa-tools";
+    const NAME: &'static str = canoa::brand::TOOLS_SERVER;
     /// One of them may be the stream of messages, and a call waits on the person for minutes while the agent's pings go on.
     const MAX_PER_CALLER: usize = 8;
 

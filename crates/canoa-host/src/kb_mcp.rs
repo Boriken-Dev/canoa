@@ -42,9 +42,9 @@ use crate::delegate::BridgeCommand;
 /// The `_meta` key of `initialize` that asks for the knowledge tools.
 pub(crate) const META: &str = "dev.boriken.canoa/kb";
 /// The name of the MCP server the host adds to a session.
-pub(crate) const SERVER_NAME: &str = "canoa-kb";
+pub(crate) const SERVER_NAME: &str = canoa::brand::KB_SERVER;
 /// The built-in skill that says when to use the tools, delivered with a session that has them.
-pub(crate) const SKILL_NAME: &str = "canoa-kb";
+pub(crate) const SKILL_NAME: &str = canoa::brand::KB_SERVER;
 const SKILL: &str = include_str!("kb_mcp/canoa-kb.md");
 /// The most passages the model of the `llm` mode is shown, when `[host.kb]` does not say.
 const DEFAULT_CANDIDATES: usize = 10;
@@ -63,9 +63,16 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The built-in skill with the build's names put in.
+fn skill() -> String {
+    SKILL
+        .replace("@SERVER@", canoa::brand::KB_SERVER)
+        .replace("@NAME@", canoa::brand::NAME)
+}
+
 /// The files of the built-in skill, by path, for a session's skills.
 pub(crate) fn skill_files() -> std::collections::BTreeMap<String, Vec<u8>> {
-    [("SKILL.md".to_owned(), SKILL.as_bytes().to_vec())].into()
+    [("SKILL.md".to_owned(), skill().into_bytes())].into()
 }
 
 /// Whether an `initialize` asks for the knowledge tools.

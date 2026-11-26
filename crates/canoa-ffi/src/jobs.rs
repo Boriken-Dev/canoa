@@ -23,7 +23,7 @@ use crate::exports::{STATUS_BAD_ARGUMENT, STATUS_FAILED};
 use crate::{log, platform};
 
 /// The first argument that makes an application run as the host's own command when it starts itself.
-pub const CHILD_FLAG: &str = "--canoa-child";
+pub const CHILD_FLAG: &str = canoa::brand::CHILD_FLAG;
 /// How a browser starts a native messaging host: the extension's origin is the first argument. The application's entry file
 /// treats it as it does [`CHILD_FLAG`], so the browser's own start of the application opens no window.
 pub const BROWSER_ORIGIN_PREFIX: &str = "chrome-extension://";

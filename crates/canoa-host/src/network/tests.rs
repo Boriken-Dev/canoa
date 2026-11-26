@@ -483,7 +483,7 @@ fn the_addresses_programs_reach_are_what_the_libraries_loaded_say() {
     }
     // An agent a library adds says its own, and only once it is loaded.
     assert!(!before.iter().any(|url| url == standin_vendor::ADDRESS));
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     let loading = registry
         .register_local("zed-endpoints", standin_vendor::library)
         .expect("the library registers");

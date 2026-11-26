@@ -50,7 +50,7 @@ int32_t  canoa_ffi_child_main(void);
 | `args` | the command line without the program's name, as the command line takes it (the brand's `program`, `canoa` by default) (see `crates/canoa-host/AGENTS.md`) | required |
 | `home` | the directory of the identity, trust store and lock | this user's home |
 | `holder` | what `serve` calls itself to another host that finds its home held | `an application` |
-| `program` | what runs the host's own `provider`, `tool`, `launch`, `mcp-bridge` and `hook-forward` | this application, with `--canoa-child` first |
+| `program` | what runs the host's own `provider`, `tool`, `launch`, `mcp-bridge` and `hook-forward` | this application, with the brand's child flag first (`--<program>-child`, `canoa::brand::CHILD_FLAG`; `--canoa-child` in the default brand) |
 | `program_args` | what goes before the subcommand on `program`'s command line; only with `program` | none |
 
 - `canoa_ffi_job_read`: what the job has said since the last read, `{"out": [line...], "err": [line...], "dropped": n, "exit": status or null}`, which `canoa_ffi_text_free` frees with the same length. `out` is what `canoa` prints on standard output, `err` what it says on standard error. `dropped` counts lines lost past 4096 unread of a kind, the oldest first. `exit` is set once the command has ended and has given up all it held, a home's lock and its addresses included; a command line `clap` refuses is status 2, a panicked command 101.

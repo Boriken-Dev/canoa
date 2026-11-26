@@ -62,7 +62,7 @@ mod library {
 
 fn environments(table: &str) -> Arc<Environments> {
     let config = Config::from_str_in(table, std::path::Path::new("")).expect("the table parses");
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     registry
         .register_local("runs-only", library::library)
         .expect("registers");

@@ -156,7 +156,7 @@ impl crate::store::mcp::Backend for ToolsBackend {
         refresh: bool,
     ) -> Result<Value, String> {
         let caller = Caller::Peer {
-            id: "canoa-store".to_owned(),
+            id: crate::store::mcp::SERVER_NAME.to_owned(),
             grants: grants.clone(),
         };
         // An agent that asks again and again must not make the host fetch again and again.

@@ -333,7 +333,7 @@ mod declared_link {
     );
 
     fn registry_of_ember() -> Registry {
-        let mut registry = Registry::new("canoa", "0.0.0");
+        let mut registry = Registry::new(canoa::brand::PROGRAM, "0.0.0");
         registry
             .register_local("ember", library)
             .expect("registered");

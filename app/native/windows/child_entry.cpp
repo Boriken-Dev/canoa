@@ -6,6 +6,11 @@
 #include <shellapi.h>
 #include <wchar.h>
 
+// The brand's flag, which the build gives as a definition; the default brand's own when it gives none.
+#ifndef CANOA_CHILD_FLAG
+#define CANOA_CHILD_FLAG "--canoa-child"
+#endif
+
 namespace {
 
 int RunAsChildIfAsked() {
@@ -14,7 +19,7 @@ int RunAsChildIfAsked() {
   // The flag, or the extension's origin a browser passes to a native messaging host it starts: then this process is the relay.
   const bool asked =
       args != nullptr && count >= 2 &&
-      (::wcscmp(args[1], L"--canoa-child") == 0 ||
+      (::wcscmp(args[1], L"" CANOA_CHILD_FLAG) == 0 ||
        ::wcsncmp(args[1], L"chrome-extension://", 19) == 0);
   if (args != nullptr) {
     ::LocalFree(args);

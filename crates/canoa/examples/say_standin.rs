@@ -1,7 +1,7 @@
 //! A stand-in text-to-speech program the tests run. It reads its standard input a line at a time and writes the "audio" of
 //! each line: the line itself between brackets, so a test reads what was spoken, in what order, in what voice.
 //!
-//! The first argument picks a mode. `lines` (the default) writes `[line]`; `env` writes the `CANOA_SAY_*` variables and the other arguments once; `wav` writes a WAV header and then `lines`;
+//! The first argument picks a mode. `lines` (the default) writes `[line]`; `env` writes the `SAY_*` variables, with the build's prefix, and the other arguments once; `wav` writes a WAV header and then `lines`;
 //! `fail` writes one line and exits with an error; `hang` writes nothing; `flood` writes more than anyone buffers; `args` writes
 //! its other arguments (the text, when it is one of them) once and reads nothing.
 #![allow(
@@ -21,7 +21,8 @@ fn main() {
             let said: Vec<String> = ["VOICE", "MODEL", "STYLE", "SPEED", "LANGUAGE"]
                 .iter()
                 .map(|name| {
-                    let value = std::env::var(format!("CANOA_SAY_{name}")).unwrap_or_default();
+                    let value = std::env::var(format!("{}_SAY_{name}", canoa::brand::ENV_PREFIX))
+                        .unwrap_or_default();
                     format!("{name}={value}")
                 })
                 .collect();

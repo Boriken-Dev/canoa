@@ -456,7 +456,7 @@ fn initialize_params(choice: &Choice) -> Value {
     let mut initialize = json!({
         "protocolVersion": 1,
         "clientCapabilities": {},
-        "clientInfo": {"name": "canoa-delegate", "version": env!("CARGO_PKG_VERSION")},
+        "clientInfo": {"name": format!("{}-delegate", canoa::brand::PROGRAM), "version": env!("CARGO_PKG_VERSION")},
     });
     if !meta.is_empty() {
         initialize["_meta"] = Value::Object(meta);

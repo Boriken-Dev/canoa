@@ -785,8 +785,10 @@ fn talk_stores(name: &str) -> (Stores, Arc<Programs>, PathBuf) {
     let root = dir(name);
     let home = root.join("home");
     fs::create_dir_all(&home).expect("a home");
-    let mut registry =
-        coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = coqui_acp_api::guatiao::library::Registry::new(
+        canoa::brand::PROGRAM,
+        env!("CARGO_PKG_VERSION"),
+    );
     registry
         .register_local("test-talk", talk::library)
         .expect("registered");

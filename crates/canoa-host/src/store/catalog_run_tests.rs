@@ -140,7 +140,7 @@ impl Transport for World {
 }
 
 fn sources(world: &Arc<World>) -> Sources {
-    let mut registry = Registry::new("canoa", "0");
+    let mut registry = Registry::new(canoa::brand::PROGRAM, "0");
     let loading = registry
         .register_local("standins", library)
         .expect("registers");

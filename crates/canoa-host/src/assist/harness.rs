@@ -160,7 +160,7 @@ impl Start {
         json!({
             "protocolVersion": 1,
             "clientCapabilities": {},
-            "clientInfo": {"name": "canoa-assist", "version": env!("CARGO_PKG_VERSION")},
+            "clientInfo": {"name": format!("{}-assist", canoa::brand::PROGRAM), "version": env!("CARGO_PKG_VERSION")},
             "_meta": Value::Object(meta),
         })
     }

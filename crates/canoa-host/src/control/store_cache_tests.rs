@@ -121,7 +121,7 @@ coqui_acp_api::guatiao::local_providers!(
 );
 
 fn control_over(dir: &Path, caches: StoreCaches) -> Arc<Control> {
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     registry
         .register_local("counts-library", library)
         .expect("registered");

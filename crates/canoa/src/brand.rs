@@ -26,6 +26,10 @@ pub const USER_CONFIG: &str = concat!(
     "/",
     env!("CANOA_BRAND_CONFIG_FILE")
 );
+/// The first argument that makes an application run as the host's own command when it starts itself.
+pub const CHILD_FLAG: &str = concat!("--", env!("CANOA_BRAND_PROGRAM"), "-child");
+/// The start of the name of every branch the host makes for a session: the program's name and a slash.
+pub const BRANCH_PREFIX: &str = concat!(env!("CANOA_BRAND_PROGRAM"), "/");
 /// The brand file this build was made from.
 pub const JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/brand.json"));
 /// The brand's icon, an SVG.
@@ -37,6 +41,40 @@ macro_rules! variable {
         pub const $name: &str = concat!(env!("CANOA_RESOLVED_ENV_PREFIX"), "_", $suffix);
     };
 }
+
+macro_rules! server {
+    ($(#[$doc:meta])* $name:ident, $suffix:literal) => {
+        $(#[$doc])*
+        pub const $name: &str = concat!(env!("CANOA_BRAND_PROGRAM"), "-", $suffix);
+    };
+}
+
+server!(
+    /// The tool server of the knowledge base, and the skill that says when to use it.
+    KB_SERVER, "kb"
+);
+server!(
+    /// The tool server of the Store, and the skill that says when to use it.
+    STORE_SERVER, "store"
+);
+server!(
+    /// The tool server of delegation to other agents.
+    DELEGATE_SERVER, "delegate"
+);
+server!(
+    /// The tool server of secrets.
+    SECRETS_SERVER, "secrets"
+);
+server!(
+    /// The tool server of the environments an agent can run commands in.
+    ENVIRONMENTS_SERVER, "environments"
+);
+server!(
+    /// The tool server of the client's own tools.
+    TOOLS_SERVER, "tools"
+);
+/// The start of the name of a tool server a program on this computer offers: the program's name and a hyphen.
+pub const SERVER_PREFIX: &str = concat!(env!("CANOA_BRAND_PROGRAM"), "-");
 
 /// The prefix, without the underscore.
 pub const ENV_PREFIX: &str = env!("CANOA_RESOLVED_ENV_PREFIX");
@@ -62,6 +100,30 @@ variable!(
     CREDENTIAL_STORE, "CREDENTIAL_STORE"
 );
 variable!(
+    /// The voice the command or system speech provider is asked for.
+    SAY_VOICE, "SAY_VOICE"
+);
+variable!(
+    /// The model the command speech provider is asked for.
+    SAY_MODEL, "SAY_MODEL"
+);
+variable!(
+    /// The style the command speech provider is asked for.
+    SAY_STYLE, "SAY_STYLE"
+);
+variable!(
+    /// The speed the command speech provider is asked for.
+    SAY_SPEED, "SAY_SPEED"
+);
+variable!(
+    /// The language the command speech provider is asked for.
+    SAY_LANGUAGE, "SAY_LANGUAGE"
+);
+variable!(
+    /// The rate the system speech provider gives the operating system's synthesizer.
+    SAY_RATE, "SAY_RATE"
+);
+variable!(
     /// The tool server's address for an agent the host starts.
     DELEGATE_URL, "DELEGATE_URL"
 );
@@ -84,6 +146,12 @@ mod tests {
             (CREDENTIAL_STORE, "CREDENTIAL_STORE"),
             (DELEGATE_URL, "DELEGATE_URL"),
             (DELEGATE_TOKEN, "DELEGATE_TOKEN"),
+            (SAY_VOICE, "SAY_VOICE"),
+            (SAY_MODEL, "SAY_MODEL"),
+            (SAY_STYLE, "SAY_STYLE"),
+            (SAY_SPEED, "SAY_SPEED"),
+            (SAY_LANGUAGE, "SAY_LANGUAGE"),
+            (SAY_RATE, "SAY_RATE"),
         ] {
             assert_eq!(name, format!("{ENV_PREFIX}_{suffix}"));
         }
@@ -92,6 +160,23 @@ mod tests {
                 .chars()
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
         );
+    }
+
+    #[test]
+    fn the_names_that_start_with_the_program_follow_it() {
+        assert_eq!(CHILD_FLAG, format!("--{PROGRAM}-child"));
+        assert_eq!(BRANCH_PREFIX, format!("{PROGRAM}/"));
+        assert_eq!(SERVER_PREFIX, format!("{PROGRAM}-"));
+        for (name, suffix) in [
+            (KB_SERVER, "kb"),
+            (STORE_SERVER, "store"),
+            (DELEGATE_SERVER, "delegate"),
+            (SECRETS_SERVER, "secrets"),
+            (ENVIRONMENTS_SERVER, "environments"),
+            (TOOLS_SERVER, "tools"),
+        ] {
+            assert_eq!(name, format!("{PROGRAM}-{suffix}"));
+        }
     }
 
     #[test]

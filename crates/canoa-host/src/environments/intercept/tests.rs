@@ -208,7 +208,7 @@ fn environments_with(message_bytes: usize, extra: &str) -> Arc<Environments> {
         std::path::Path::new(""),
     )
     .expect("the tables parse");
-    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let mut registry = Registry::new(canoa::brand::PROGRAM, env!("CARGO_PKG_VERSION"));
     registry
         .register_local("intercept-standins", library::library)
         .expect("registers");

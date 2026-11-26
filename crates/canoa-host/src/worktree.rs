@@ -43,7 +43,7 @@ pub(crate) const PUSH: &str = "_canoa/worktree/push";
 pub(crate) const PULL_REQUEST: &str = "_canoa/worktree/pull_request";
 
 /// Every branch the host makes or removes starts with this.
-pub(crate) const BRANCH_PREFIX: &str = "canoa/";
+pub(crate) const BRANCH_PREFIX: &str = canoa::brand::BRANCH_PREFIX;
 /// The longest branch name taken, prefix included.
 pub(crate) const MAX_BRANCH: usize = 70;
 /// The most of git's own words an error carries.
@@ -55,7 +55,7 @@ const UNSAFE_SETTINGS: &str = r"^(filter|include|includeif)\.|^core\.attributesf
 const INVALID_PARAMS: i64 = -32602;
 const INTERNAL_ERROR: i64 = -32603;
 
-/// `canoa/` and then lower-case letters and digits in runs joined by single hyphens: nothing git or a shell reads as an
+/// [`BRANCH_PREFIX`] and then lower-case letters and digits in runs joined by single hyphens: nothing git or a shell reads as an
 /// option, a range or a path step, and no control character.
 pub(crate) fn safe_branch(branch: &str) -> bool {
     let Some(slug) = branch.strip_prefix(BRANCH_PREFIX) else {
@@ -374,9 +374,9 @@ impl Worktrees {
 
     fn make(&self, cwd: &str, branch: &str) -> Result<Value, Refusal> {
         if !safe_branch(branch) {
-            return Err(refused(
-                "a branch is canoa/ then lower-case letters and digits joined by single hyphens, 70 characters at most",
-            ));
+            return Err(refused(&format!(
+                "a branch is {BRANCH_PREFIX} then lower-case letters and digits joined by single hyphens, {MAX_BRANCH} characters at most"
+            )));
         }
         let cwd = self
             .checked(cwd)?
