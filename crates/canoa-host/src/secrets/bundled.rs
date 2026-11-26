@@ -1,4 +1,4 @@
-//! The secret providers written as scripts that ship inside the host: Bitwarden, with the SDK modules it imports.
+//! The secret providers written as scripts that extension crates carry, such as Bitwarden, kept where the host reads libraries from.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -13,37 +13,12 @@ use coqui_acp_api::guatiao::library::Registry;
 
 use crate::scripts::Bundle;
 
-/// The secret providers that ship in the host.
+/// The secret providers written as scripts that the extension crates carry: what a crate offers is its own, and the host only keeps
+/// the files where its JavaScript source reads libraries.
 static BUNDLE: Bundle = Bundle {
     name: "secrets",
-    libraries: &["bitwarden"],
-    files: &[
-        (
-            "bitwarden/bitwarden.js",
-            include_str!("../../extensions/bitwarden/bitwarden.js"),
-        ),
-        (
-            "bitwarden/package.json",
-            include_str!("../../extensions/bitwarden/package.json"),
-        ),
-        (
-            "bitwarden/canoa_bitwarden.guatiao",
-            include_str!("../../extensions/bitwarden/canoa_bitwarden.guatiao"),
-        ),
-        // The SDK's modules the script imports, kept beside it.
-        (
-            "bitwarden/sdk/secret.js",
-            include_str!("../../extensions/sdk/secret.js"),
-        ),
-        (
-            "bitwarden/sdk/kinds.js",
-            include_str!("../../extensions/sdk/kinds.js"),
-        ),
-        (
-            "bitwarden/sdk/model.js",
-            include_str!("../../extensions/sdk/model.js"),
-        ),
-    ],
+    libraries: canoa_bitwarden::SCRIPT_LIBRARIES,
+    files: canoa_bitwarden::SCRIPT_FILES,
 };
 
 /// Writes the bundled files into the host's home where they are missing or differ, and answers the folder.

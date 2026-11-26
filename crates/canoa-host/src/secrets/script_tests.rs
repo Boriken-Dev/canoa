@@ -660,7 +660,7 @@ fn an_entry_gives_a_setting_once_and_names_only_entries_that_exist() {
 fn end_to_end_the_provider_runs_a_real_program_through_the_real_spawner() {
     let home = Home::new("e2e");
     let standin = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("extensions/bitwarden/tests/bw_standin.py");
+        .join("../../extensions/canoa-bitwarden/tests/bw_standin.py");
     let section = json!({
         "names": {"github": "bw", "ghost": "bw"},
         "providers": {"bw": {

@@ -46,6 +46,39 @@ mod source;
 
 pub use source::{BitwardenReleases, SOURCE, catalog_of};
 
+/// The folders of the JavaScript libraries this crate carries, relative to the root of [`SCRIPT_FILES`]: each holds a manifest.
+pub const SCRIPT_LIBRARIES: &[&str] = &["bitwarden"];
+
+/// The Bitwarden secret provider, a `secret_provider` written in JavaScript, as the files it is made of: each is its path under the
+/// root of the library folders and its text. The SDK modules the script imports are kept beside it. A host that serves JavaScript
+/// libraries writes them to a folder and reads that folder as it reads a library the person names.
+pub const SCRIPT_FILES: &[(&str, &str)] = &[
+    (
+        "bitwarden/bitwarden.js",
+        include_str!("../script/bitwarden/bitwarden.js"),
+    ),
+    (
+        "bitwarden/package.json",
+        include_str!("../script/bitwarden/package.json"),
+    ),
+    (
+        "bitwarden/canoa_bitwarden.guatiao",
+        include_str!("../script/bitwarden/canoa_bitwarden.guatiao"),
+    ),
+    (
+        "bitwarden/sdk/secret.js",
+        include_str!("../script/bitwarden/sdk/secret.js"),
+    ),
+    (
+        "bitwarden/sdk/kinds.js",
+        include_str!("../script/bitwarden/sdk/kinds.js"),
+    ),
+    (
+        "bitwarden/sdk/model.js",
+        include_str!("../script/bitwarden/sdk/model.js"),
+    ),
+];
+
 store_provider!(
     /// The Bitwarden command line's store.
     BitwardenStore, BitwardenRecipe, "bitwarden_store"

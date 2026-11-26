@@ -197,5 +197,15 @@ fn host_headers_have_no_overlong_lines_and_include_str_stays_inside_crate() {
                 "crates/canoa-host/extensions/sdk/{name} differs from bindings/js/canoa-sdk/src/{name}"
             );
         }
+        // The copies of the extension crates that carry a script library.
+        let bitwarden_sdk = workspace.join("extensions/canoa-bitwarden/script/bitwarden/sdk");
+        for name in ["kinds.js", "model.js", "secret.js"] {
+            let want = fs::read(src_sdk.join(name)).expect("read sdk file");
+            let have = fs::read(bitwarden_sdk.join(name)).expect("read the crate's sdk copy");
+            assert_eq!(
+                have, want,
+                "extensions/canoa-bitwarden/script/bitwarden/sdk/{name} differs from bindings/js/canoa-sdk/src/{name}"
+            );
+        }
     }
 }
