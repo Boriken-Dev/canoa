@@ -342,6 +342,7 @@ class _HostingPanelState extends State<HostingPanel> {
     final asked = _found.containsKey(agent.id);
     final path = _found[agent.id];
     final installed = !asked ? context.t('hosting.checking') : (path == null ? context.t('hosting.not_installed') : context.t('hosting.installed', {'path': path}));
+    final hosting = '${context.t(entries.isEmpty ? 'hosting.not_hosted' : 'hosting.hosted')}\n$installed';
     return Column(
       key: Key('hosting-agent-${agent.id}'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -350,10 +351,7 @@ class _HostingPanelState extends State<HostingPanel> {
           contentPadding: EdgeInsets.zero,
           leading: SourceMark.provider(agent.id),
           title: Text(agent.title),
-          subtitle: Text(
-            '${entries.isEmpty ? context.t('hosting.not_hosted') : context.t('hosting.hosted')}\n$installed',
-            key: Key('hosting-agent-state-${agent.id}'),
-          ),
+          subtitle: Text(hosting, key: Key('hosting-agent-state-${agent.id}')),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
