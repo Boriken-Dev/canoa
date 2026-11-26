@@ -186,7 +186,7 @@ fn file_note(why: &str, dir: &Path) -> String {
     )
 }
 
-/// Who keeps what this host keeps for other kinds (the accounts' credentials, the mail accounts' passwords and the secret values of
+/// Who keeps what this host keeps for other kinds (the accounts' credentials, the session services' passwords and the secret values of
 /// Settings' sections): the entry `[secrets] accounts` names, or for `auto` the operating system's store when it answers (`probe` asks)
 /// and sealed files when there is none. Gives the vault that asks it, the entry's name and, for sealed files, why they are in use.
 ///

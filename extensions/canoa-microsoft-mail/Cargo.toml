@@ -18,7 +18,8 @@ publish = false
 standin = ["dep:httparse"]
 
 [dependencies]
-canoa = { workspace = true, features = ["mail-backend", "network"] }
+canoa = { workspace = true, features = ["settings-section", "network"] }
+canoa-mail.workspace = true
 coqui-acp-api.workspace = true
 data-encoding.workspace = true
 guatiao.workspace = true

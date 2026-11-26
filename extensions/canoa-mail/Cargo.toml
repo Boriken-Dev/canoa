@@ -14,7 +14,7 @@ exclude = [".*", "*.local.*"]
 publish = false
 
 [dependencies]
-canoa = { workspace = true, features = ["mail-backend", "session-service", "settings-section", "store", "network"] }
+canoa = { workspace = true, features = ["session-service", "settings-section", "store", "network"] }
 coqui-acp-api.workspace = true
 data-encoding.workspace = true
 guatiao.workspace = true
@@ -29,7 +29,6 @@ zeroize.workspace = true
 
 [dev-dependencies]
 canoa-microsoft-mail = { workspace = true, features = ["standin"] }
-coqui-syshttp.workspace = true
 
 [lints.rust]
 missing_docs = "warn"

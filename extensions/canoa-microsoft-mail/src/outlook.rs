@@ -22,7 +22,7 @@ use std::time::Instant;
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 
-use canoa::mail_backend::{
+use canoa_mail::mail_backend::{
     Attachment, Change, ChangeKind, Draft, DraftKind, Folder, MailError, Mailbox, Message, Page,
     Person, Query, Summary,
 };

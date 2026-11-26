@@ -528,7 +528,7 @@ impl Control {
         self
     }
 
-    /// Answers the control methods of each service's namespace (`mail/accounts`) for a key that holds `services.setup`.
+    /// Answers the control methods of each service's namespace (`ID/METHOD`) for a key that holds `services.setup`.
     #[must_use]
     pub(crate) fn with_services(mut self, services: Arc<crate::services::Services>) -> Self {
         self.services = Some(services);

@@ -370,9 +370,7 @@ fn a_session_with_the_outlook_pane_open_is_told_how_to_find_the_open_message_and
     let id = session(&link, &work);
     let told = prompt(&link, 3, &id, "InstructionsOn canoa-outlook");
     assert!(
-        told.contains("outlook_open_item")
-            && told.contains("mail_related")
-            && told.contains("message_id"),
+        told.contains("outlook_open_item"),
         "the agent is told which tool names the open message and what to do with it: {told}"
     );
     assert!(

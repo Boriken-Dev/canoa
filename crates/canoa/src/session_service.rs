@@ -1,6 +1,6 @@
 //! The `session_service` kind: something a library runs for the sessions of a host and hands to them.
 //!
-//! What a host gives its sessions beyond the agent itself (the person's mail, a knowledge index, the secrets an agent may use) is not
+//! What a host gives its sessions beyond the agent itself (a knowledge index, the secrets an agent may use, a person's mail) is not
 //! Canoa's to list: each is a provider of this kind. A provider describes itself (its id, what it gives a session) and the host asks
 //! it three things: whether to give it to a connection's sessions now ([`SessionService::offered`]), to answer a call of one of its
 //! tools ([`SessionService::call`], [`SessionService::resume`]), and to answer a control method of its own namespace
@@ -13,7 +13,7 @@
 //! [`SessionService::resume`].
 //!
 //! A service keeps nothing of the host's: its settings are a table of canoa.cfg, its secrets rest where the host keeps secrets, and
-//! the other providers it uses (a mail service's backends) are the host's registries. It reaches them through the [`ServiceHost`]
+//! the other providers it uses (a service's backends) are the host's registries. It reaches them through the [`ServiceHost`]
 //! its [`Context`] names, so one process can run several hosts, each with its own files.
 //!
 //! The models are plain data, the same in every language; [`ServiceHost`] is for a provider in the host's own process.
@@ -368,7 +368,7 @@ impl Outcome {
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
 pub struct ControlCall {
-    /// The method without the namespace (`accounts` for `mail/accounts`).
+    /// The method without the namespace (`accounts` for `ID/accounts`).
     pub method: String,
     /// Its parameters, as JSON text.
     pub params: String,
@@ -441,7 +441,7 @@ pub trait SessionService: Send + Sync {
     /// What this service is and what it gives a session.
     fn describe(&self) -> Result<ServiceInfo, ProviderError>;
 
-    /// Whether the sessions of a connection that may have it are given the service now: a mail service with no account to read has
+    /// Whether the sessions of a connection that may have it are given the service now: a service with nothing to read has
     /// nothing to give.
     fn offered(&self, context: Context) -> Result<bool, ProviderError>;
 
@@ -504,7 +504,7 @@ pub trait ServiceHost: Send + Sync {
     /// The registries of providers this host loaded: the libraries it carries and the ones canoa.cfg adds.
     fn registries(&self) -> Vec<Arc<Registry>>;
 
-    /// Whether canoa.cfg's `[host.disabled]` turns off the provider `id` of the kind `kind` (`mail_backend`, say): a service that
+    /// Whether canoa.cfg's `[host.disabled]` turns off the provider `id` of the kind `kind` (`speech_provider`, say): a service that
     /// loads providers of a kind itself leaves it out, and the library's other providers stay. None is off unless the host says so.
     fn is_off(&self, _kind: &str, _id: &str) -> bool {
         false

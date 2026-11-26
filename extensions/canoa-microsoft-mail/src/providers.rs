@@ -8,10 +8,10 @@
 use core::time::Duration;
 use std::sync::Arc;
 
-use canoa::mail_backend::{
+use canoa::network::{Network, Secret as NetworkSecret};
+use canoa_mail::mail_backend::{
     BackendInfo, MailBackend, MailError, Mailbox, OpenMailbox, PreparedAccount, ValidateRequest,
 };
-use canoa::network::{Network, Secret as NetworkSecret};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, ToValue};
 use guatiao_intake::Form;

@@ -30,7 +30,6 @@ Not published (`publish = false`). A default build has no dependencies. Cargo fe
 | `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
-| `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
 | `sdk` | `canoa::sdk` | the `sdk_provider` kind: a vendor's client for an account type over HTTP the host lends (implies `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |

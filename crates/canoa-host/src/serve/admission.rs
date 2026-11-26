@@ -22,8 +22,8 @@ use crate::delegate::{self, Principal};
 use crate::local::{self, Link};
 
 /// What a page this host's own web server admitted holds besides what its key was given: what `[host.native] control` gives a
-/// browser key, and the `services` grant when a session service has something to give its sessions (the mail service, once an
-/// account is named and its tools are on).
+/// browser key, and the `services` grant when a session service has something to give its sessions (once it has what it serves and
+/// its tools are on).
 pub(super) fn page_grants(
     config: &Config,
     services: &crate::services::Services,

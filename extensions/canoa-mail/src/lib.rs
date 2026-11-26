@@ -3,11 +3,14 @@
 //! the `mail` section of Settings. The mailboxes are opened through the `mail_backend` providers the host loaded.
 #![forbid(unsafe_code)]
 
+extern crate alloc;
+
 mod accounts;
 #[cfg(test)]
 mod accounts_tests;
 mod config;
 mod forms;
+pub mod mail_backend;
 mod mailboxes;
 mod service;
 #[cfg(test)]

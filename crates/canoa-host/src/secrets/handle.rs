@@ -1,5 +1,5 @@
 //! What another kind keeps its secrets with: a handle on one entry of `[secrets.providers]`, by name, through whichever provider the
-//! person chose to hold them. The accounts' credentials and the mail accounts' passwords are kept this way, so a credential is a named
+//! person chose to hold them. The accounts' credentials and the session services' passwords are kept this way, so a credential is a named
 //! secret of the same providers an agent's secret comes from and the Secrets section lists it, instead of resting in a store of its own.
 //!
 //! A handle always asks the provider and never the cache: a credential that rotates is read as it is. Its words on failure name what

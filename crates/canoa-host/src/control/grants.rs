@@ -111,15 +111,13 @@ pub enum Grant {
     /// such a provider answers goes to an agent as its tools' own results, so it is as much as access to the agent's context.
     ToolsProvide,
     /// The sessions of a connection whose key holds it are given the MCP servers of the session services (`canoa::session_service`)
-    /// the host's libraries offer, each when it has something to give: the person's mail (`canoa-mail`: search, read, draft and
-    /// organize the mail of the accounts the service's table names), for one. What a service gives is the person's own and what an
-    /// agent reads of it enters its context, so a key gets it only when canoa.cfg says so; the application in this process holds
-    /// it. Not a control method.
+    /// the host's libraries offer, each when it has something to give. What a service gives is the person's own and what an agent
+    /// reads of it enters its context, so a key gets it only when canoa.cfg says so; the application in this process holds it. Not
+    /// a control method.
     Services,
-    /// The control methods of the session services, each under the namespace of its service (`mail/accounts`, `mail/add`,
-    /// `mail/test`, `mail/remove` for the mail service): what a service lets the person set up, such as the mail accounts of
-    /// canoa.cfg, whose passwords the host keeps and whose servers the host connects to with them. What it sets up is what a key
-    /// holding `services` then reads, so it is as much as access to the person's mail.
+    /// The control methods of the session services, each under the namespace of its service (`ID/METHOD`): what a service lets the
+    /// person set up, whose secrets the host keeps and whose servers the host connects to with them. What it sets up is what a key
+    /// holding `services` then reads, so it is as much as access to what the service gives.
     ServicesSetup,
     /// `secrets/providers`, `secrets/list`, `secrets/reveal`, `secrets/forget` and `secrets/set`: the list of the secrets this host holds
     /// (where each is kept, its name, how long it has left), showing the value of one on request, forgetting one and setting one by a

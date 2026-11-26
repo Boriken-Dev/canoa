@@ -219,7 +219,7 @@ pub(crate) fn loaded(config: &Config) -> LoadedRegistries {
     }))
 }
 
-/// The registries available for mail and speech providers: `loaded(config)` when `Some`, else the carried libraries alone.
+/// The registries available for the session services' backends and the speech providers: `loaded(config)` when `Some`, else the carried libraries alone.
 pub(crate) fn registries_of(config: Option<&Config>) -> Vec<Arc<Registry>> {
     if let Some(config) = config {
         return loaded(config)

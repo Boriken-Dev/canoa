@@ -24,9 +24,6 @@ pub mod gateway;
 #[cfg(feature = "loopback")]
 #[cfg_attr(docsrs, doc(cfg(feature = "loopback")))]
 pub mod loopback;
-#[cfg(feature = "mail-backend")]
-#[cfg_attr(docsrs, doc(cfg(feature = "mail-backend")))]
-pub mod mail_backend;
 #[cfg(feature = "panel-tab")]
 #[cfg_attr(docsrs, doc(cfg(feature = "panel-tab")))]
 pub mod panel_tab;
@@ -47,13 +44,12 @@ pub mod search;
 )]
 pub mod session_service;
 #[cfg(any(
-    feature = "mail-backend",
     feature = "profile-item",
     feature = "sdk",
     feature = "store",
     feature = "settings-section"
 ))]
-mod settings;
+pub mod settings;
 #[cfg(feature = "settings-section")]
 #[cfg_attr(docsrs, doc(cfg(feature = "settings-section")))]
 pub mod settings_section;

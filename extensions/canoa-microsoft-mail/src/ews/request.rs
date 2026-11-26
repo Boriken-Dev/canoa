@@ -4,7 +4,7 @@
 use core::fmt::Write as _;
 
 use crate::xml::escape;
-use canoa::mail_backend::{Change, ChangeKind, Draft, DraftKind, FlagState, Query};
+use canoa_mail::mail_backend::{Change, ChangeKind, Draft, DraftKind, FlagState, Query};
 
 /// A folder as a request names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +25,7 @@ impl FolderRef {
     }
 }
 
-pub(super) use canoa::mail_backend::well_known;
+pub(super) use canoa_mail::mail_backend::well_known;
 
 /// The whole envelope around one operation.
 pub(super) fn envelope(operation: &str) -> String {

@@ -1,6 +1,6 @@
 //! The mailboxes of `[host.services.mail]`, opened through the `mail_backend` providers the host loaded.
 //!
-//! Canoa carries no mail protocol of its own here: every backend is a provider of the `mail_backend` kind (`canoa::mail_backend`),
+//! Canoa carries no mail protocol of its own here: every backend is a provider of the `mail_backend` kind (`crate::mail_backend`),
 //! loaded from the bundled `canoa-microsoft-mail` library (`ews`, `graph`, `outlook`) and any extension libraries configured in
 //! `canoa.cfg`.
 #![allow(
@@ -11,7 +11,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use canoa::mail_backend::{
+use crate::mail_backend::{
     BackendInfo, Change, Draft, Folder, MailBackend, MailError, Mailbox, Message, OpenMailbox,
     Page, PreparedAccount, Query, Summary, ValidateRequest,
 };

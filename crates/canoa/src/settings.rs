@@ -10,7 +10,11 @@ use guatiao::{Alloc, Schema, Status, Value};
 use guatiao_intake::{FormRef, Screen};
 
 /// The schema and the form of the values `S` holds.
-pub(crate) fn describe<S: Schema + Screen>() -> Result<(Value, Value), ProviderError> {
+///
+/// # Errors
+///
+/// When `S`'s schema or form cannot be written.
+pub fn describe<S: Schema + Screen>() -> Result<(Value, Value), ProviderError> {
     let wrong = |why: &dyn core::fmt::Display| {
         ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &alloc::format!("{why}"))
     };
@@ -21,7 +25,8 @@ pub(crate) fn describe<S: Schema + Screen>() -> Result<(Value, Value), ProviderE
 
 /// Why `schema` and `form` cannot be offered, or `None` when they can: a schema is a schema, a form needs one, and the form names
 /// only fields the schema has.
-pub(crate) fn problem(schema: Option<&Value>, form: Option<&Value>) -> Option<String> {
+#[must_use]
+pub fn problem(schema: Option<&Value>, form: Option<&Value>) -> Option<String> {
     let Some(schema) = schema else {
         return form.map(|_| "it has a form but no schema for the form to show".into());
     };

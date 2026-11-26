@@ -18,10 +18,10 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
-use crate::mailboxes::Mailboxes;
-use canoa::mail_backend::{
+use crate::mail_backend::{
     Change, Draft, FlagState, MailError, Mailbox, Message, Person, Query, Summary, related,
 };
+use crate::mailboxes::Mailboxes;
 use canoa::session_service::{Answer, Outcome, Question, ToolInfo};
 
 /// The name of the MCP server the host adds to a session.

@@ -1220,7 +1220,6 @@ dependencies = [
  "canoa",
  "canoa-microsoft-mail",
  "coqui-acp-api",
- "coqui-syshttp",
  "data-encoding",
  "guatiao",
  "guatiao-intake",
@@ -1238,6 +1237,7 @@ name = "canoa-microsoft-mail"
 version = "0.0.0-alpha.0"
 dependencies = [
  "canoa",
+ "canoa-mail",
  "coqui-acp-api",
  "coqui-syshttp",
  "data-encoding",

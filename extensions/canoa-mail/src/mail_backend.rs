@@ -165,7 +165,7 @@ impl BackendInfo {
     ///
     /// When `S`'s schema or form cannot be written.
     pub fn taking<S: Schema + Screen>(mut self) -> Result<Self, ProviderError> {
-        let (schema, form) = crate::settings::describe::<S>()?;
+        let (schema, form) = canoa::settings::describe::<S>()?;
         self.schema = Some(schema);
         self.form = Some(form);
         Ok(self)
@@ -183,7 +183,7 @@ impl BackendInfo {
         if self.title.trim().is_empty() {
             return Some(format!("the mail backend {:?} has no title", self.id));
         }
-        crate::settings::problem(self.schema.as_ref(), self.form.as_ref())
+        canoa::settings::problem(self.schema.as_ref(), self.form.as_ref())
     }
 }
 

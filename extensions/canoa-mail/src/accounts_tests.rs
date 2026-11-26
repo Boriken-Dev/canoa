@@ -7,34 +7,20 @@
 
 use std::sync::Arc;
 
-use canoa::mail_backend::{
+use crate::mail_backend::{
     BackendInfo, Folder, MailBackend, MailError, Mailbox as MailTrait, OpenMailbox,
     PreparedAccount, ValidateRequest,
 };
 use canoa::session_service::ServiceHost;
-use canoa_microsoft_mail::ews::{Auth, Ews, EwsSettings};
 use canoa_microsoft_mail::standin::{Mailbox, Standin};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
-use coqui_syshttp::tls::TlsBuilder;
-use coqui_syshttp::{Environment, Resolver};
 use serde_json::{Map, json};
 
 use crate::accounts::{NewAccount, add, remove, rows};
 use crate::config::{MailAccount, MailConfig};
 use crate::mailboxes::{BackendCatalog, Mailboxes, Opened, PASSWORD_KEY, secret_of};
 use crate::testkit::FakeHost;
-
-fn direct() -> Arc<canoa::network::Network> {
-    let resolver = Resolver::builder()
-        .environment(Environment::from_pairs([("PATH", "x")]))
-        .system(false)
-        .build();
-    Arc::new(canoa::network::Network::with(
-        resolver,
-        TlsBuilder::default(),
-    ))
-}
 
 fn exchange_new(server: &str, password: Option<&str>) -> NewAccount {
     let mut settings = Map::new();
@@ -140,23 +126,6 @@ fn an_opened_mailbox_uses_the_stored_password_and_says_when_there_is_none() {
         .backend("work")
         .expect("opens with the stored secret");
     assert_eq!(handle.folders().expect("folders").len(), 7);
-
-    // A direct connector with the wrong password reports `MailError::Auth` cleanly.
-    let wrong = Ews::new(
-        EwsSettings {
-            email: Some("me@example.test".to_owned()),
-            server: Some(standin.server()),
-            autodiscover: None,
-            auth: Auth::Basic {
-                user: "EXAMPLE\\me".to_owned(),
-                password: canoa::network::Secret::new("wrong"),
-            },
-            timeout: core::time::Duration::from_secs(5),
-        },
-        direct(),
-    );
-    let err = MailError::from(canoa::mail_backend::Mailbox::folders(&wrong).expect_err("401"));
-    assert!(matches!(err, MailError::Auth(_)), "{err:?}");
 
     // Forgetting the secret makes `backend()` fail with Auth.
     host.forget_secrets(&id).expect("forgets");
@@ -383,12 +352,12 @@ impl MailTrait for MockImapBox {
 
     fn search(
         &self,
-        _query: canoa::mail_backend::Query,
-    ) -> Result<canoa::mail_backend::Page, ProviderError> {
-        Ok(canoa::mail_backend::Page::default())
+        _query: crate::mail_backend::Query,
+    ) -> Result<crate::mail_backend::Page, ProviderError> {
+        Ok(crate::mail_backend::Page::default())
     }
 
-    fn read(&self, id: String) -> Result<canoa::mail_backend::Message, ProviderError> {
+    fn read(&self, id: String) -> Result<crate::mail_backend::Message, ProviderError> {
         Err(MailError::Bad(format!("no message {id}")).into())
     }
 
@@ -399,28 +368,28 @@ impl MailTrait for MockImapBox {
     fn summaries(
         &self,
         _ids: Vec<String>,
-    ) -> Result<Vec<canoa::mail_backend::Summary>, ProviderError> {
+    ) -> Result<Vec<crate::mail_backend::Summary>, ProviderError> {
         Ok(Vec::new())
     }
 
     fn thread(
         &self,
-        _summary: canoa::mail_backend::Summary,
-    ) -> Result<Vec<canoa::mail_backend::Summary>, ProviderError> {
+        _summary: crate::mail_backend::Summary,
+    ) -> Result<Vec<crate::mail_backend::Summary>, ProviderError> {
         Ok(Vec::new())
     }
 
     fn draft(
         &self,
-        _draft: canoa::mail_backend::Draft,
-    ) -> Result<canoa::mail_backend::Summary, ProviderError> {
+        _draft: crate::mail_backend::Draft,
+    ) -> Result<crate::mail_backend::Summary, ProviderError> {
         Err(MailError::Bad("unsupported".to_owned()).into())
     }
 
     fn change(
         &self,
         _ids: Vec<String>,
-        _change: canoa::mail_backend::Change,
+        _change: crate::mail_backend::Change,
     ) -> Result<(), ProviderError> {
         Ok(())
     }
@@ -441,7 +410,7 @@ impl MailBackend for MockImapBackend {
     }
 
     fn open(&self, _request: OpenMailbox) -> Result<Object<dyn MailTrait>, ProviderError> {
-        use canoa::mail_backend::Mailbox as _;
+        use crate::mail_backend::Mailbox as _;
         Ok(MockImapBox.into_object())
     }
 }

@@ -332,7 +332,7 @@ impl Services {
             .collect()
     }
 
-    /// Whether a service has the namespace of `method` (`mail/accounts` is `mail`'s).
+    /// Whether a service has the namespace of `method` (`a/b` is `a`'s).
     pub(crate) fn has_namespace(&self, method: &str) -> bool {
         method
             .split_once('/')
@@ -467,7 +467,7 @@ impl Extra for ServiceExtra {
     }
 }
 
-/// A host for tests: the mail service over accounts a test names, with secrets kept in memory.
+/// A host for tests: a session service over the stand-in mailboxes a test names, with secrets kept in memory.
 #[cfg(test)]
 pub(crate) mod standin {
     use super::*;
@@ -558,7 +558,7 @@ pub(crate) mod standin {
     }
 
     impl TestHost {
-        /// A host that loaded no library, as one built without the mail extension would be.
+        /// A host that loaded no library, as one built without the service's library would be.
         pub(crate) fn without_libraries() -> Arc<dyn ServiceHost> {
             let config = Config::from_str_in("", &std::env::temp_dir()).expect("parses");
             Arc::new(Self {

@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use self::token::Tokens;
 pub(crate) use self::token::{TokenSource, Wam};
 use self::wire::{FOLDER_FIELDS, LIST_FIELDS, Plan, encode, folder, message, plan, quote, summary};
-use canoa::mail_backend::{
+use canoa_mail::mail_backend::{
     Change, ChangeKind, Draft, DraftKind, FlagState, Folder, MailError, Mailbox, Message, Page,
     Query, Summary, find_folder, well_known,
 };

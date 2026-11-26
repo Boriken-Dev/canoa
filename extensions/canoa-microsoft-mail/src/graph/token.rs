@@ -21,7 +21,7 @@ use data_encoding::BASE64URL_NOPAD;
 use serde_json::{Value, json};
 
 use crate::outlook::{PowerShell, Runner};
-use canoa::mail_backend::MailError;
+use canoa_mail::mail_backend::MailError;
 
 /// The helper script: it asks WAM for a token and writes it to standard output.
 pub(crate) const SCRIPT: &str = include_str!("wam.ps1");

@@ -3,7 +3,7 @@
 //! ```toml
 //! [secrets]
 //! default = "form"           # the entry that answers a name no `names` line gives (default `form`)
-//! accounts = "auto"          # who keeps the accounts' credentials and mail passwords: auto, or an entry that keeps (default auto)
+//! accounts = "auto"          # who keeps the accounts' credentials and the session services' passwords: auto, or an entry that keeps (default auto)
 //! store = "system"           # the entry "remember" keeps a typed secret in (default `system`)
 //! keep = "session"           # what the form offers first: once, session, close, 15m, 1h, 8h, 1d
 //! max_wait = 240             # the most seconds a request waits for the person, whatever the agent asks (default 240, and never
@@ -142,7 +142,7 @@ pub(crate) struct Settings {
     pub(crate) names: BTreeMap<String, String>,
     /// The entries, `form`, `system` and `file` included.
     pub(crate) entries: BTreeMap<String, Entry>,
-    /// Who keeps the accounts' credentials and the mail accounts' passwords: `auto`, or an entry that keeps what it is given.
+    /// Who keeps the accounts' credentials and the session services' passwords: `auto`, or an entry that keeps what it is given.
     pub(crate) accounts: String,
 }
 
@@ -203,7 +203,7 @@ struct RawSection {
     store: Option<String>,
     /// Default lifetime option offered by the prompt form (`once`, `session`, `close`, `15m`, `1h`, `8h`, `1d`, `ttl:SECONDS`).
     keep: Option<String>,
-    /// Entry keeping account credentials and mail passwords (`auto` or an entry name).
+    /// Entry keeping account credentials and the session services' passwords (`auto` or an entry name).
     accounts: Option<String>,
     /// Most seconds a prompt waits for the person (at least 1).
     max_wait: Option<u64>,

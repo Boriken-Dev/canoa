@@ -35,7 +35,7 @@ Offered to the sessions of a connection whose key holds the host's `services` gr
 - **Never sends.** There is no tool or `Mailbox` call that sends. A draft is saved in Drafts, and the answer says `"sent": false`.
 - **Asked first.** `mail_move`, `mail_archive` and `mail_update` read the named messages from the mailbox and answer an `Outcome` whose `ask` is the change and those messages in plain words and a digest of both; the host puts it to the person and calls `resume`, and nothing changes until the answer is `Allowed` (or `Silent`, when the session is in a mode that asks for nothing, which the host then says in the session).
 - **Mail is data.** Every string of a message is stripped of control, direction and zero-width characters and cut (subject and names 300 characters, body `max_chars`, default 20000, at most 200000, newlines kept); every answer carries the note and the skill says the same.
-- Related mail (`canoa::mail_backend::related`) and thread summaries run over a backend's `Mailbox` methods (`search`, `summaries`, `thread`).
+- Related mail (`canoa_mail::mail_backend::related`) and thread summaries run over a backend's `Mailbox` methods (`search`, `summaries`, `thread`).
 
 ## The control methods
 
@@ -51,3 +51,30 @@ Answered to a key holding the host's `services.setup` grant; an answer never car
 `cargo test -p canoa-mail` runs the service against a host kept in memory (`testkit.rs`) and the loopback Exchange stand-in of `canoa-microsoft-mail` (feature `standin`). The host's own tests (`cargo test -p canoa-host --lib -- store::mcp::extra_tests control::services_tests serve::tests`) drive the same library through the MCP link, the grants and the approval the person gives.
 
 - `[host.disabled] mail_backend = ["ews"]` turns a backend off inside this service: the catalog of backends (`BackendCatalog::of`) leaves out each id `ServiceHost::is_off("mail_backend", id)` answers for, so the library's other backends stay, an account of the one that is off cannot be added, and the accounts already in canoa.cfg are kept and listed.
+
+## `mail_backend` (`canoa_mail::mail_backend`)
+
+The Guatiao extension kind for mailboxes (`mail_backend`, paired with the stateful Guatiao object `mailbox`), so mailbox connectors live in libraries outside `canoa-host` and `canoa` (the kind belongs to this crate; `canoa-microsoft-mail` implements it) and describe their add-account form via `guatiao-intake` schemas.
+
+```rust
+pub const KIND: &str = "mail_backend";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+#[guatiao::kind(name = "mail_backend")]
+pub trait MailBackend: Send + Sync {
+    fn describe(&self) -> Result<BackendInfo, ProviderError>;
+    fn validate(&self, request: ValidateRequest) -> Result<PreparedAccount, ProviderError>;
+    fn open(&self, request: OpenMailbox) -> Result<Object<dyn Mailbox>, ProviderError>;
+}
+#[guatiao::kind(object, name = "mailbox")]
+pub trait Mailbox: Send + Sync {
+    fn folders(&self) -> Result<Vec<Folder>, ProviderError>;
+    fn search(&self, query: Query) -> Result<Page, ProviderError>;
+    fn read(&self, id: String) -> Result<Message, ProviderError>;
+    fn find_by_message_id(&self, message_id: String) -> Result<Option<String>, ProviderError>;
+    fn summaries(&self, ids: Vec<String>) -> Result<Vec<Summary>, ProviderError>;
+    fn thread(&self, id: String) -> Result<Vec<Summary>, ProviderError>;
+    fn draft(&self, draft: Draft) -> Result<String, ProviderError>;
+    fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError>;
+}
+```
+
+- `BackendInfo` (`new(id, title)`, `.taking::<S: SettingsSchema>()`, `.problem()`, `description`, `no_secret_state`, `schema`, `form`), `ValidateRequest` (`new(settings, has_secret)`), `PreparedAccount` (`needs_secret`, `state`, `details`, `check_urls`, `no_secret_state`), `OpenMailbox` (`new(settings, timeout_secs)`, `secret`, `no_store`), `MailError` (`Bad`, `Auth`, `Unreachable`, `Backend`, converting to and from `ProviderError` without losing variant meaning), `Person`, `Summary`, `Attachment`, `Message`, `Folder`, `Query`, `Page`, `Draft` (`new_message`, `reply`, `kind()`), `Change` (`move_to`, `archive`, `read`, `flag`, `categories`, `kind()`), `FlagState`, `Related`, and shared helpers `WELL_KNOWN_FOLDERS`, `is_valid_id`, `well_known`, `find_folder`, `plain_subject`, `related`, `default_summaries`, `default_thread`.

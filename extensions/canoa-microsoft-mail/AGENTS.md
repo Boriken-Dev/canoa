@@ -1,6 +1,6 @@
 # `canoa-microsoft-mail`
 
-`canoa-microsoft-mail` implements Canoa's `mail_backend` kind (`canoa::mail_backend`) for Microsoft mailboxes:
+`canoa-microsoft-mail` implements Canoa's `mail_backend` kind (`canoa_mail::mail_backend`) for Microsoft mailboxes:
 
 - `ews`: Exchange Server via Exchange Web Services SOAP over `canoa::network::Network::current()`, supporting Basic sign-in, Windows logon (Negotiate/NTLM), and Autodiscover restricted to the mailbox domain or configured autodiscover host.
 - `graph`: Microsoft 365 / Exchange Online via Microsoft Graph REST v1.0, using Windows Web Account Manager (`wam.ps1`) for bearer tokens.

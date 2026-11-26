@@ -503,12 +503,7 @@ fn a_server_says_how_to_use_it_only_where_the_host_has_words_for_it_and_never_in
     let outlook_says = said["outlook"]
         .as_deref()
         .expect("instructions for Outlook");
-    for word in [
-        "outlook_open_item",
-        "mail_related",
-        "message_id",
-        "never its text",
-    ] {
+    for word in ["outlook_open_item", "never its text"] {
         assert!(outlook_says.contains(word), "{word}: {outlook_says}");
     }
     assert_eq!(

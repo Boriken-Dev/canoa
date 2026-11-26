@@ -240,9 +240,9 @@ pub(super) enum Command {
         #[command(subcommand)]
         command: AccountsCommand,
     },
-    /// Call a control method of a session service of this host's libraries, as the application does: `canoa service mail accounts`
-    /// lists the mail accounts, `canoa service mail add --params -` adds one from the JSON on standard input (a password goes
-    /// there, never on the command line). The answer is the method's JSON.
+    /// Call a control method of a session service of this host's libraries, as the application does: `canoa service ID METHOD`
+    /// (the service says which methods it has). `--params -` reads the method's parameters as JSON from standard input, which is
+    /// where a secret goes, never on the command line. The answer is the method's JSON.
     Service(Box<ServiceArgs>),
     /// Run an agent with the environment the first line of standard input gives: what `serve` runs for an agent entry
     /// with profiles. The rest of standard input goes to the agent.
@@ -450,9 +450,9 @@ pub(super) enum AccountsCommand {
 /// What `canoa service` takes.
 #[derive(Debug, Args)]
 pub(super) struct ServiceArgs {
-    /// The service's id (`mail`).
+    /// The service's id.
     pub(super) id: String,
-    /// The method, without the service's namespace (`accounts`, `add`, `test`, `remove` for the mail service).
+    /// The method, without the service's namespace.
     pub(super) method: String,
     /// The method's parameters as a JSON object, or `-` to read it from standard input.
     #[arg(long, default_value = "{}")]

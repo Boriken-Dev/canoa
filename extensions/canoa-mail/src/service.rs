@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use canoa::mail_backend::MailError;
+use crate::mail_backend::MailError;
 use canoa::session_service::{
     Context, ControlCall, ControlReply, Outcome, Refusal, Resume, ServiceHost, ServiceInfo,
     SessionService, SkillFile, ToolCall,

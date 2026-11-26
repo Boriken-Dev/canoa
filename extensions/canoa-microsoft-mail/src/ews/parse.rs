@@ -1,7 +1,7 @@
 //! Exchange's answers read into the connector's own types.
 
 use crate::xml::{self, Element};
-use canoa::mail_backend::{Attachment, Folder, MailError, Message, Person, Summary};
+use canoa_mail::mail_backend::{Attachment, Folder, MailError, Message, Person, Summary};
 
 /// The `Body` of a SOAP answer, after its fault and every response message that says it failed have been looked at.
 pub(super) fn body_of(text: &str) -> Result<Element, MailError> {

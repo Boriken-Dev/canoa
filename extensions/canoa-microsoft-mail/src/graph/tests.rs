@@ -22,8 +22,8 @@ use super::{Graph, GraphSettings};
 use crate::outlook::{PowerShell, Runner};
 use crate::standin::Mailbox;
 use crate::tests::direct;
-use canoa::mail_backend::{BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
-use canoa::mail_backend::{Change, Draft, FlagState, MailError, Mailbox as _, Query, Summary};
+use canoa_mail::mail_backend::{BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
+use canoa_mail::mail_backend::{Change, Draft, FlagState, MailError, Mailbox as _, Query, Summary};
 
 /// Gives the tokens it was given in turn, the last one for ever, and counts how often it was asked.
 #[derive(Debug)]
@@ -470,7 +470,7 @@ fn a_message_is_found_by_its_internet_message_id_across_the_mailbox() {
 fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
     let (_standin, graph) = connected();
     let message = graph.read("AAMk/1+x=".to_owned()).expect("reads");
-    let found = canoa::mail_backend::related(&graph, &message.summary, 20).expect("related");
+    let found = canoa_mail::mail_backend::related(&graph, &message.summary, 20).expect("related");
     let by = |id: &str| {
         found
             .iter()

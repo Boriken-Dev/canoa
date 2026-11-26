@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::*;
-use canoa::mail_backend::FlagState;
-use canoa::mail_backend::{Change, Draft, MailError};
+use canoa_mail::mail_backend::FlagState;
+use canoa_mail::mail_backend::{Change, Draft, MailError};
 
 const STANDIN: &str = include_str!("standin.ps1");
 
@@ -359,7 +359,7 @@ fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
     assert_eq!(apollo.path, "standin@example.test/Projects/Apollo");
     assert!(folders.iter().all(|f| f.name != "Calendar"));
 
-    let found = canoa::mail_backend::related(&outlook, &message.summary, 20).expect("related");
+    let found = canoa_mail::mail_backend::related(&outlook, &message.summary, 20).expect("related");
     let ids: Vec<&str> = found.iter().map(|r| r.summary.id.as_str()).collect();
     assert_eq!(
         ids[..2],

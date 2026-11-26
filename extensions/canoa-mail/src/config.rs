@@ -84,7 +84,7 @@ impl MailConfig {
                 .backend
                 .as_deref()
                 .map(str::trim)
-                .filter(|s| canoa::mail_backend::is_valid_id(s))
+                .filter(|s| crate::mail_backend::is_valid_id(s))
                 .ok_or_else(|| invalid("backend must be 1 to 32 lower-case letters, digits or _"))?
                 .to_owned();
             if raw.rest.contains_key("password") {

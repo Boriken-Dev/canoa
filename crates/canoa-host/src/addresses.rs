@@ -18,12 +18,12 @@ pub(crate) fn warnings(config: &Config) -> Vec<String> {
             ));
         }
     }
-    notes.extend(mail_and_kb_warnings(config));
+    notes.extend(service_and_sdk_warnings(config));
     notes
 }
 
-/// The notes for the addresses of the session services' tables and the knowledge index, which need no account catalog.
-pub(crate) fn mail_and_kb_warnings(config: &Config) -> Vec<String> {
+/// The notes for the addresses of the session services' tables and the `[sdk]` providers, which need no account catalog.
+pub(crate) fn service_and_sdk_warnings(config: &Config) -> Vec<String> {
     let mut notes = Vec::new();
     for (service, text) in &config.services {
         if let Ok(table) = serde_json::from_str::<serde_json::Value>(text) {
@@ -81,7 +81,8 @@ mod tests {
     }
 
     #[test]
-    fn plain_http_beyond_this_computer_is_noted_in_mail_and_the_index_and_nowhere_else() {
+    fn plain_http_beyond_this_computer_is_noted_in_a_services_table_and_an_sdk_address_and_nowhere_else()
+     {
         let quiet = config_of(
             "[host.services.mail.accounts.a]\nbackend = \"ews\"\nserver = \"https://mail.example/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
              [host.services.mail.accounts.b]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://127.0.0.1:9/v1.0\"\n\

@@ -18,7 +18,7 @@ use data_encoding::BASE64;
 use ureq::http::Request;
 use url::Url;
 
-use canoa::mail_backend::MailError;
+use canoa_mail::mail_backend::MailError;
 
 /// The most bytes read from one answer: a page of a message list or one message with its body.
 const MAX_ANSWER: u64 = 64 * 1024 * 1024;

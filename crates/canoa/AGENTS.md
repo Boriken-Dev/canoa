@@ -14,7 +14,6 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
-| `mail-backend` | `canoa::mail_backend` | the `mail_backend` kind: a mail protocol backend (Exchange Server, Graph, Outlook, or an extension's) and an opened mailbox (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
 | `sdk` | `canoa::sdk` | the `sdk_provider` kind: a vendor's client for an account type over HTTP the host lends (implies `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
@@ -25,7 +24,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `api-gateway` | `canoa::api_gateway` | generic multi-standard API gateway accounts and helpers (implies `network`, `coqui-acp-api`, `guatiao`, `guatiao-serde`, `serde_json`, `percent-encoding`) |
 | `network` | `canoa::network`, `canoa::address` | system proxy, proxy auth, certificates, and URL/address checks (`coqui-syshttp`, `ureq`, `rustls`, `tracing`, `url`) |
 
-The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`), the `account_speech` kind from `canoa::speech::account`, the `mail_backend` kind from `canoa::mail_backend` (feature `mail-backend`), and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`). `canoa::search` (always on) holds `SETTING` (`"search_path"`, an optional string setting a provider or usage reader declares to be given the host's search path: the person's `PATH`, then the folders of the programs the Store installed, then the install folders the built-in sources look their program up in, such as `%LOCALAPPDATA%/agy/bin`, where they exist) and `find_in(search_path: &OsStr, pathext: &str, name: &str) -> Option<PathBuf>`, the first runnable file of that name in an absolute folder of the path.
+The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`), the `account_speech` kind from `canoa::speech::account`, and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`). `canoa::search` (always on) holds `SETTING` (`"search_path"`, an optional string setting a provider or usage reader declares to be given the host's search path: the person's `PATH`, then the folders of the programs the Store installed, then the install folders the built-in sources look their program up in, such as `%LOCALAPPDATA%/agy/bin`, where they exist) and `find_in(search_path: &OsStr, pathext: &str, name: &str) -> Option<PathBuf>`, the first runnable file of that name in an absolute folder of the path.
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
 
@@ -928,36 +927,9 @@ pub struct AccountSpeechModel { pub id: String, pub label: String }   // new(id,
 - A service's `id` is 1 to 32 lower-case letters and digits; the offer made of an account is `ID:ACCOUNT`. `standard` is the credential standard an account's kind provides (such as `openai-api`) and `address` the address that kind's model API is called at when nothing moves it: an account is offered when its provider has a kind that provides the standard from that address, and is listed as not offered, with the reason, when its own kind is not one or its settings move the address elsewhere. `url` is where a recording is posted (an http or https address, the key sent as `Authorization: Bearer`), `credential` the field of the account's stored credentials that holds the key, `summary` and `location` the words of the offer (what it is, and where the audio goes) and `models` the ones that transcribe, the recommended first.
 - Every model is `#[non_exhaustive]` with `new` and public fields.
 
-## `mail_backend` (`canoa::mail_backend`, feature `mail-backend`)
-
-The Guatiao extension kind for mailboxes (`mail_backend`, paired with the stateful Guatiao object `mailbox`), so mailbox connectors live in libraries outside `canoa-host` and describe their add-account form via `guatiao-intake` schemas.
-
-```rust
-pub const KIND: &str = "mail_backend";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
-#[guatiao::kind(name = "mail_backend")]
-pub trait MailBackend: Send + Sync {
-    fn describe(&self) -> Result<BackendInfo, ProviderError>;
-    fn validate(&self, request: ValidateRequest) -> Result<PreparedAccount, ProviderError>;
-    fn open(&self, request: OpenMailbox) -> Result<Object<dyn Mailbox>, ProviderError>;
-}
-#[guatiao::kind(object, name = "mailbox")]
-pub trait Mailbox: Send + Sync {
-    fn folders(&self) -> Result<Vec<Folder>, ProviderError>;
-    fn search(&self, query: Query) -> Result<Page, ProviderError>;
-    fn read(&self, id: String) -> Result<Message, ProviderError>;
-    fn find_by_message_id(&self, message_id: String) -> Result<Option<String>, ProviderError>;
-    fn summaries(&self, ids: Vec<String>) -> Result<Vec<Summary>, ProviderError>;
-    fn thread(&self, id: String) -> Result<Vec<Summary>, ProviderError>;
-    fn draft(&self, draft: Draft) -> Result<String, ProviderError>;
-    fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError>;
-}
-```
-
-- `BackendInfo` (`new(id, title)`, `.taking::<S: SettingsSchema>()`, `.problem()`, `description`, `no_secret_state`, `schema`, `form`), `ValidateRequest` (`new(settings, has_secret)`), `PreparedAccount` (`needs_secret`, `state`, `details`, `check_urls`, `no_secret_state`), `OpenMailbox` (`new(settings, timeout_secs)`, `secret`, `no_store`), `MailError` (`Bad`, `Auth`, `Unreachable`, `Backend`, converting to and from `ProviderError` without losing variant meaning), `Person`, `Summary`, `Attachment`, `Message`, `Folder`, `Query`, `Page`, `Draft` (`new_message`, `reply`, `kind()`), `Change` (`move_to`, `archive`, `read`, `flag`, `categories`, `kind()`), `FlagState`, `Related`, and shared helpers `WELL_KNOWN_FOLDERS`, `is_valid_id`, `well_known`, `find_folder`, `plain_subject`, `related`, `default_summaries`, `default_thread`.
-
 ## `session_service` (`canoa::session_service`, feature `session-service`)
 
-The Guatiao extension kind for what a library runs for the sessions of a host and hands to them, so the person's mail, a knowledge index or the secrets an agent may use are libraries outside `canoa-host`: the host owns the way a service is offered, never a service.
+The Guatiao extension kind for what a library runs for the sessions of a host and hands to them, so a knowledge index, the secrets an agent may use or a person's mail are libraries outside `canoa-host`: the host owns the way a service is offered, never a service.
 
 ```rust
 pub const KIND: &str = "session_service";
@@ -983,7 +955,7 @@ pub fn is_id(text: &str) -> bool;   // 1 to 32 lower-case letters, digits and `_
 
 A tool that must not go on without the person answers `Outcome::asking(Question)` (the title and text the person reads, a digest, and the provider's own `state`); the host puts it to the person on the client the session belongs to, one question per session at a time, and calls `resume` with the same `state` and the person's answer (`Silent` when the session is in a mode that asks for nothing; the outcome's `note` is then said in the session). Everything on the wire is plain data and JSON text.
 
-`ServiceHost` is what a provider in the host's own process reaches of its host through the `Context` it was handed: `config(service)` and `set_config(service, path, table)` (the service's table of canoa.cfg as JSON text in the file's order, and a sub-table replaced or removed in place, the file checked to be read again), `secret`, `put_secret`, `forget_secrets` and `secrets_note` (the secrets the host keeps by id), `registries()` (the providers the host loaded, which a mail service opens its `mail_backend`s through) and `new_id()`. The host `register`s its `ServiceHost` and puts the handle in each `Context`, so one process can run several hosts; `host(&context)` finds it, and it is gone with the `Registration` it returned.
+`ServiceHost` is what a provider in the host's own process reaches of its host through the `Context` it was handed: `config(service)` and `set_config(service, path, table)` (the service's table of canoa.cfg as JSON text in the file's order, and a sub-table replaced or removed in place, the file checked to be read again), `secret`, `put_secret`, `forget_secrets` and `secrets_note` (the secrets the host keeps by id), `registries()` (the providers the host loaded, which a service opens the providers of the kinds it defines through) and `new_id()`. The host `register`s its `ServiceHost` and puts the handle in each `Context`, so one process can run several hosts; `host(&context)` finds it, and it is gone with the `Registration` it returned.
 
 ## `account_speech_output` (`canoa::speech::output::account`, feature `speech`)
 

@@ -51,7 +51,7 @@ pub struct Config {
     /// session may run on whichever account of them has usage left. The host adds an `any-<standard>` pool of its own for each
     /// standard an account provides; those are in no file.
     pub pools: IndexMap<String, PoolConfig>,
-    /// `[secrets]` as the file has it, which the secret providers read: who keeps the accounts' credentials and the mail accounts'
+    /// `[secrets]` as the file has it, which the secret providers read: who keeps the accounts' credentials and the session services'
     /// passwords is among it (`accounts`).
     pub secrets: Option<serde_json::Value>,
     /// `[host] shell`: the program a terminal starts, with no arguments; `None` leaves it to the person's own (`$SHELL`, else

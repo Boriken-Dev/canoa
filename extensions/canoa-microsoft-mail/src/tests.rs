@@ -15,8 +15,8 @@ use coqui_syshttp::{Environment, Resolver};
 
 use super::ews::{Auth, Ews, EwsSettings};
 use super::standin::{Mailbox, Standin};
-use canoa::mail_backend::{BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
-use canoa::mail_backend::{Change, Draft, FlagState, MailError, Mailbox as _, Query};
+use canoa_mail::mail_backend::{BY_CONVERSATION, BY_PERSON, BY_SUBJECT};
+use canoa_mail::mail_backend::{Change, Draft, FlagState, MailError, Mailbox as _, Query};
 
 pub(super) fn direct() -> Arc<Network> {
     let resolver = Resolver::builder()
@@ -50,7 +50,7 @@ pub(super) fn connected() -> (Standin, Ews) {
     (standin, ews)
 }
 
-fn subjects(items: &[canoa::mail_backend::Summary]) -> Vec<&str> {
+fn subjects(items: &[canoa_mail::mail_backend::Summary]) -> Vec<&str> {
     items.iter().map(|item| item.subject.as_str()).collect()
 }
 
@@ -315,7 +315,7 @@ fn a_message_is_found_by_its_internet_message_id_in_any_folder() {
 fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
     let (_standin, ews) = connected();
     let message = ews.read("AAMk/1+x=".to_owned()).expect("reads");
-    let found = canoa::mail_backend::related(&ews, &message.summary, 20).expect("related");
+    let found = canoa_mail::mail_backend::related(&ews, &message.summary, 20).expect("related");
     let by = |subject: &str, id: &str| {
         found
             .iter()

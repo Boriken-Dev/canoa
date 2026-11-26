@@ -19,7 +19,7 @@ use self::request::{FolderRef, well_known};
 pub use self::transport::Auth;
 use self::transport::Transport;
 use super::xml::Element;
-use canoa::mail_backend::{
+use canoa_mail::mail_backend::{
     Change, ChangeKind, Draft, DraftKind, Folder, MailError, Mailbox, Message, Page, Query,
     Summary, default_thread, find_folder,
 };

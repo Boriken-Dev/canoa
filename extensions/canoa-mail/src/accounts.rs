@@ -6,7 +6,7 @@
     reason = "environment variables are std's"
 )]
 
-use canoa::mail_backend::{BackendInfo, ValidateRequest};
+use crate::mail_backend::{BackendInfo, ValidateRequest};
 use canoa::session_service::ServiceHost;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
