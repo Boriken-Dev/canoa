@@ -12,9 +12,10 @@ use serde_json::{Value, json};
 use crate::worktree::Worktrees;
 
 use super::{
-    BAD_PARAMS, Caller, Control, DENIED, Grant, REFUSED, Stores, allow, choices, discover,
-    error_line, file_viewers, files, hosting, kb_offers, looks, notify, panel_tabs, profile_items,
-    providers, registry, secrets, settings_sections, speech_offers, usage_read,
+    BAD_PARAMS, Caller, Control, DENIED, Grant, NOT_FOUND, REFUSED, Stores, allow, bad, choices,
+    discover, error_line, file_viewers, files, hosting, kb_offers, looks, notify, panel_tabs,
+    profile_items, providers, registry, secrets, settings_sections, speech_offers, text_param,
+    usage_read,
 };
 
 impl Control {
@@ -708,6 +709,34 @@ impl Control {
                 params,
             ),
             _ => self.usage_call(method, params),
+        }
+    }
+
+    pub(super) fn r_limits(
+        &self,
+        _: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        let rules = self
+            .usage
+            .as_ref()
+            .and_then(|log| log.rules())
+            .ok_or((REFUSED, "this host keeps no usage records".to_owned()))?;
+        // A page that just wrote a limit asks what stands, so what the file holds is read now and not after the table's few seconds.
+        rules.reload();
+        match method {
+            "limits/allow" => {
+                let name = text_param(params, "name")?
+                    .ok_or_else(|| bad("name is missing or not text"))?;
+                rules
+                    .allow(name, text_param(params, "session")?)
+                    .map_err(|why| (NOT_FOUND, why))?;
+                Ok(json!({"ok": true}))
+            }
+            _ => Ok(json!({
+                "limits": rules.state().iter().map(crate::limits::Reading::json).collect::<Vec<_>>(),
+            })),
         }
     }
 

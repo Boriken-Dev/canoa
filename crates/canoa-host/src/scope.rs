@@ -132,11 +132,14 @@ impl Scope {
     /// One connection's share in the entry's inferred usage.
     pub(crate) fn splice(&self) -> Splice {
         let splice = Splice::new(Arc::clone(&self.usage), self.account.clone());
+        // A session with no profile of its own runs on the host's own sources.
+        let own = Some(crate::profile::hosted::LOCAL_PROFILE.to_owned());
         match &self.log {
             Some((log, harness)) => splice
                 .recording(Arc::clone(log), harness.clone())
-                .child_of(self.parent.clone()),
-            None => splice,
+                .child_of(self.parent.clone())
+                .profile(own),
+            None => splice.profile(own),
         }
     }
 
@@ -749,6 +752,16 @@ impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
                     Err(Failure::Timeout)
                 }
                 Client::Held => Err(Failure::Timeout),
+                Client::Stop(answers) => {
+                    for answer in &answers {
+                        self.reply(answer)?;
+                    }
+                    Err(Failure::Timeout)
+                }
+                Client::Warn(notice) => {
+                    self.reply(&notice)?;
+                    Ok(Some(bytes))
+                }
                 Client::Forward => Ok(Some(bytes)),
             },
             Verdict::Refuse(answer) => {

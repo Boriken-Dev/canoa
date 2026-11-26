@@ -1168,6 +1168,19 @@ impl Serving {
                 crate::usage_splice::unix_now(),
             ))
         });
+        if let (Some(log), Some(home)) = (&usage_log, &options.state_dir) {
+            // The limits follow canoa.cfg as it changes, so a limit made in Settings reaches the next turn.
+            let layers = options.account_layers.clone();
+            crate::limits::Limits::open(
+                log,
+                Some(crate::usage_log::dir_of(home)),
+                crate::limits::Table::of(config),
+                Box::new(move || {
+                    let config = crate::config::Config::load_layers(layers.as_ref()?).ok()?;
+                    Some(crate::limits::Table::of(&config))
+                }),
+            );
+        }
         let agents = Arc::new(Mutex::new(Agents::default()));
         let missing_of: BTreeMap<&str, &Vec<String>> = sources
             .iter()

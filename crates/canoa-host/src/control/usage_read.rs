@@ -176,6 +176,7 @@ mod tests {
                 session: "s1",
                 parent: None,
                 model: Some("opus"),
+                profile: None,
             },
             &spend,
             now,

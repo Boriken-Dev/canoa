@@ -21,12 +21,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use coqui_acp_api::{Spend, UsageReport};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use time::{Date, Month, OffsetDateTime};
+
+use crate::limits::Limits;
 
 /// How many days of lines the host keeps unless `[host.usage] keep_days` says otherwise.
 pub const DEFAULT_KEEP_DAYS: u32 = 400;
@@ -51,6 +53,8 @@ pub(crate) struct Turn<'a> {
     pub(crate) parent: Option<&'a str>,
     /// The model the session runs, for a report that does not name its models.
     pub(crate) model: Option<&'a str>,
+    /// The `[host.profiles]` profile the session runs under, `default` for the host's own sources.
+    pub(crate) profile: Option<&'a str>,
 }
 
 /// One line of `YYYY-MM.jsonl`: what a model spent in a turn.
@@ -65,6 +69,9 @@ struct Row {
     session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parent_session_id: Option<String>,
+    /// The profile the session ran under; absent for a line written before lines named one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     input: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -125,6 +132,8 @@ struct State {
 pub(crate) struct UsageLog {
     dir: PathBuf,
     state: Mutex<State>,
+    /// The limits that read this log, once the host has any to keep.
+    rules: OnceLock<Arc<Limits>>,
 }
 
 /// The difference between two running totals. A total that fell is a counter that started over.
@@ -179,6 +188,7 @@ impl UsageLog {
         let log = Self {
             dir,
             state: Mutex::new(State::default()),
+            rules: OnceLock::new(),
         };
         log.retire(keep_days, now);
         log.load(keep_days, now);
@@ -218,6 +228,24 @@ impl UsageLog {
             for snapshot in limits {
                 state.limits.insert(snapshot.account.clone(), snapshot);
             }
+        }
+    }
+
+    /// The limits that read this log: they are looked at again each time a line is appended or an account's allowances change. A
+    /// log keeps the first it is given.
+    pub(crate) fn keep_rules(&self, rules: Arc<Limits>) {
+        let _ = self.rules.set(rules);
+    }
+
+    /// The limits that read this log.
+    pub(crate) fn rules(&self) -> Option<&Arc<Limits>> {
+        self.rules.get()
+    }
+
+    /// Lets the limits look again, on the thread that changed the log and with none of its locks held.
+    fn changed(&self) {
+        if let Some(rules) = self.rules.get() {
+            rules.recheck();
         }
     }
 
@@ -312,6 +340,7 @@ impl UsageLog {
                     model,
                     session_id: turn.session.to_owned(),
                     parent_session_id: turn.parent.map(str::to_owned),
+                    profile: turn.profile.map(str::to_owned),
                     input: counter(delta.input, after.input),
                     output: counter(delta.output, after.output),
                     cache_read: counter(delta.cache_read, after.cache_read),
@@ -347,7 +376,9 @@ impl UsageLog {
         }
         if let Err(error) = self.append(&name, text.as_bytes()) {
             tracing::warn!("the usage file {name} could not be appended to: {error}");
+            return;
         }
+        self.changed();
     }
 
     fn append(&self, name: &str, bytes: &[u8]) -> std::io::Result<()> {
@@ -410,6 +441,23 @@ impl UsageLog {
             serde_json::to_vec(&state.limits.values().collect::<Vec<_>>()).unwrap_or_default()
         };
         self.replace(LIMITS_FILE, &bytes);
+        self.changed();
+    }
+
+    /// The allowances last reported for the account `account` and when they were read, Unix seconds; `None` when it reported none.
+    pub(crate) fn reported_buckets(
+        &self,
+        account: &str,
+    ) -> Option<(i64, Vec<coqui_acp_api::usage::Bucket>)> {
+        let state = lock(&self.state);
+        let kept = state.limits.get(account)?;
+        let buckets = serde_json::from_value(kept.buckets.clone()).ok()?;
+        Some((kept.updated_at, buckets))
+    }
+
+    /// The accounts that have reported allowances.
+    pub(crate) fn reporting_accounts(&self) -> Vec<String> {
+        lock(&self.state).limits.keys().cloned().collect()
     }
 
     /// What one session of `account` has spent so far, over every model it ran, as the running totals the log keeps. A counter
@@ -430,6 +478,7 @@ impl UsageLog {
                 model: None,
                 session_id: id.clone(),
                 parent_session_id: None,
+                profile: None,
                 input: counter(totals.input),
                 output: counter(totals.output),
                 cache_read: counter(totals.cache_read),
@@ -530,7 +579,7 @@ impl UsageLog {
         out
     }
 
-    /// `usage/summary`: the lines with `from <= time < to`, for the account, provider, model and session asked, summed by `group_by`
+    /// `usage/summary`: the lines with `from <= time < to`, for the account, provider, model, session and profile asked, summed by `group_by`
     /// (`day` in UTC, `account`, `provider`, `model` or `session`). A group's counters are absent when no line in it has them.
     /// The host the figures came from is the client's to name, so `host` is read and let go.
     pub(crate) fn summary(&self, params: &Value) -> Result<Value, String> {
@@ -553,6 +602,7 @@ impl UsageLog {
         }
         let (account, provider) = (text("account")?, text("provider")?);
         let (model, session) = (text("model")?, text("session")?);
+        let profile = text("profile")?;
         text("host")?;
         let mut groups: BTreeMap<Option<String>, Sum> = BTreeMap::new();
         let mut total = Sum::default();
@@ -574,6 +624,7 @@ impl UsageLog {
                     || provider.is_some_and(|provider| provider != row.harness)
                     || model.is_some_and(|model| row.model.as_deref() != Some(model))
                     || session.is_some_and(|session| session != row.session_id)
+                    || profile.is_some_and(|profile| row.profile.as_deref() != Some(profile))
                 {
                     continue;
                 }

@@ -32,6 +32,7 @@ mod inproc;
 mod kb_mcp;
 mod kind;
 mod launcher;
+mod limits;
 mod local;
 mod loopback;
 mod makers;

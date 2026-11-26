@@ -99,6 +99,7 @@ const OWNER_NETWORK_MSG: &str =
 const OWNER_PUBLISH_MSG: &str = "only the person running this host commits, pushes or opens a pull request with their own git and gh";
 const OWNER_HISTORY_MSG: &str =
     "only the person running this host reads or moves a recorded session";
+const OWNER_LIMITS_MSG: &str = "only the person running this host lets a turn through a limit";
 
 /// Dispatch table mapping control RPC method names to required grants and handlers.
 pub(super) static ROUTES: &[Route] = &[
@@ -830,6 +831,16 @@ pub(super) static ROUTES: &[Route] = &[
         "usage/read",
         Access::Require(Grant::Usage),
         Control::r_usage,
+    ),
+    rpc(
+        "limits/state",
+        Access::Require(Grant::Usage),
+        Control::r_limits,
+    ),
+    rpc(
+        "limits/allow",
+        Access::Owner(OWNER_LIMITS_MSG),
+        Control::r_limits,
     ),
     rpc("options/choices", Access::Open, Control::r_options_choices),
     rpc("kb/offers", Access::Require(Grant::Accounts), Control::r_kb),

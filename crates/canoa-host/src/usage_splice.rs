@@ -33,6 +33,7 @@ use coqui_acp_api::{
 use coqui_transport::Failure;
 use serde_json::{Value, json};
 
+use crate::limits::{Asking, Context, Gate, META_KEY};
 use crate::usage_log::UsageLog;
 
 mod members;
@@ -48,6 +49,8 @@ use tap::Tap;
 const INTERNAL_ERROR: i64 = -32603;
 /// How many open turns and sessions' words one connection keeps; a client past it is not read.
 const MAX_OPEN: usize = 64;
+/// How many warnings one connection remembers having given.
+const MAX_TOLD: usize = 4096;
 /// How much of a refused turn's words are kept for the phrases; `infer_limit` reads no more than this, and less here.
 const MAX_SAID: usize = 16 * 1024;
 
@@ -350,6 +353,10 @@ pub(crate) struct Splice {
     notifying: Mutex<()>,
     /// What this connection tells the host's usage log, when the host keeps one.
     tap: Option<Tap>,
+    /// The `[host.profiles]` profile this connection's sessions run under.
+    profile: Option<String>,
+    /// The warnings of limits this connection has put in a session already: `(session, limit, window)`.
+    told: Mutex<BTreeSet<(String, String, i64)>>,
 }
 
 impl Drop for Splice {
@@ -367,6 +374,17 @@ pub(crate) enum Client {
     Answer(Vec<u8>),
     /// It stops here, and the answer comes later through [`Splice::tick`].
     Held,
+    /// It stops here, and these are sent to the client in order: a limit refused the turn.
+    Stop(Vec<Vec<u8>>),
+    /// This is sent to the client first, and then the message goes to the agent: a limit is near.
+    Warn(Vec<u8>),
+}
+
+/// What the host's limits make of a prompt.
+enum Gated {
+    Pass,
+    Notice(Vec<u8>),
+    Refuse(Vec<Vec<u8>>),
 }
 
 /// A notice for the client and the revision it carries.
@@ -387,7 +405,20 @@ impl Splice {
             quota,
             notifying: Mutex::new(()),
             tap: None,
+            profile: None,
+            told: Mutex::new(BTreeSet::new()),
         }
+    }
+
+    /// This connection's sessions run under `profile`: what they spend is recorded under it, and the limits on it apply to them.
+    #[must_use]
+    pub(crate) fn profile(mut self, profile: Option<String>) -> Self {
+        self.tap = self
+            .tap
+            .take()
+            .map(|tap| tap.under_profile(profile.clone()));
+        self.profile = profile;
+        self
     }
 
     /// This connection recording the spend its agent reports in `log`, as `harness`, under its account. A splice with no
@@ -439,6 +470,11 @@ impl Splice {
     /// As [`Splice::read_client`] for a `message` the scope rebuilt: `original` is what the client sent, which is where its
     /// wish for notices is read, since the scope always asks the agent for them.
     pub(crate) fn read_client_as(&self, message: &[u8], original: &[u8]) -> Client {
+        // A refused prompt is not heard by the log: no turn of it opens.
+        let gated = self.gate(message);
+        if let Gated::Refuse(answers) = gated {
+            return Client::Stop(answers);
+        }
         if let Some(tap) = &self.tap {
             tap.heard_client(message);
         }
@@ -449,7 +485,86 @@ impl Splice {
             lock(&self.conn).notify =
                 serde_json::from_slice::<Value>(original).is_ok_and(|sent| asks_notices(&sent));
         }
-        self.client(message).unwrap_or(Client::Forward)
+        match (gated, self.client(message).unwrap_or(Client::Forward)) {
+            (Gated::Notice(notice), Client::Forward) => Client::Warn(notice),
+            (_, next) => next,
+        }
+    }
+
+    /// What the host's limits make of `message`, a `session/prompt`: the turn is refused with the reason, or goes on with the
+    /// warnings of the limits it is near, which this connection has not put in the session in this window.
+    fn gate(&self, message: &[u8]) -> Gated {
+        if !contains(message, b"session/prompt") {
+            return Gated::Pass;
+        }
+        let Some(tap) = &self.tap else {
+            return Gated::Pass;
+        };
+        let Some(rules) = tap.rules() else {
+            return Gated::Pass;
+        };
+        let Ok(value) = serde_json::from_slice::<Value>(message) else {
+            return Gated::Pass;
+        };
+        if value.get("method").and_then(Value::as_str) != Some("session/prompt") {
+            return Gated::Pass;
+        }
+        let (Some(id), Some(session)) = (
+            value.get("id"),
+            value.pointer("/params/sessionId").and_then(Value::as_str),
+        ) else {
+            return Gated::Pass;
+        };
+        let model = tap.model_of(session);
+        let gate: Gate = rules.gate(&Asking {
+            session,
+            context: Context {
+                account: self.account.as_deref(),
+                profile: self.profile.as_deref(),
+                model: model.as_deref(),
+            },
+        });
+        let say = |text: &str| {
+            serde_json::to_vec(
+                &json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+                    "sessionId": session,
+                    "update": {"sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": text}},
+                }}),
+            )
+            .ok()
+        };
+        if let Some(refused) = gate.refused {
+            tracing::info!(limit = %refused.limit, "a turn was refused by a limit");
+            let answer = json!({"jsonrpc": "2.0", "id": id, "result": {
+                "stopReason": "refusal",
+                "_meta": {META_KEY: refused.meta},
+            }});
+            let (Some(notice), Ok(answer)) = (say(&refused.text), serde_json::to_vec(&answer))
+            else {
+                return Gated::Pass;
+            };
+            return Gated::Refuse(vec![notice, answer]);
+        }
+        let mut told = lock(&self.told);
+        let lines: Vec<String> = gate
+            .warnings
+            .into_iter()
+            .filter(|warning| {
+                told.len() < MAX_TOLD
+                    && told.insert((
+                        session.to_owned(),
+                        warning.limit.clone(),
+                        warning.window_key,
+                    ))
+            })
+            .map(|warning| warning.text)
+            .collect();
+        drop(told);
+        if lines.is_empty() {
+            return Gated::Pass;
+        }
+        say(&lines.join("\n")).map_or(Gated::Pass, Gated::Notice)
     }
 
     fn client(&self, message: &[u8]) -> Option<Client> {

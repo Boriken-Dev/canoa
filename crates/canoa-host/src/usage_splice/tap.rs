@@ -44,6 +44,8 @@ pub(crate) struct Tap {
     harness: String,
     /// The session this connection's sessions were started from, when the connection is a delegated task's.
     parent: Option<String>,
+    /// The profile this connection's sessions run under.
+    profile: Option<String>,
     open: Mutex<Open>,
 }
 
@@ -54,8 +56,30 @@ impl Tap {
             account,
             harness,
             parent: None,
+            profile: None,
             open: Mutex::new(Open::default()),
         }
+    }
+
+    /// This connection's spend recorded under `profile`.
+    pub(crate) fn under_profile(mut self, profile: Option<String>) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// The limits that read the log this connection tells.
+    pub(crate) fn rules(&self) -> Option<&Arc<crate::limits::Limits>> {
+        self.log.rules()
+    }
+
+    /// The model `session` runs, as far as this connection has seen.
+    pub(crate) fn model_of(&self, session: &str) -> Option<String> {
+        self.open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .models
+            .get(session)
+            .cloned()
     }
 
     /// This connection's spend recorded as that of sessions started from `parent`.
@@ -314,6 +338,7 @@ impl Tap {
                 session,
                 parent: self.parent.as_deref(),
                 model: model.as_deref(),
+                profile: self.profile.as_deref(),
             },
             spend,
             unix_now(),

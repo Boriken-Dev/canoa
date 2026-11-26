@@ -1364,3 +1364,89 @@ fn an_entry_naming_a_usage_reader_nobody_offers_stops_the_host_and_says_which() 
         "{said}"
     );
 }
+
+/// The notices of `update` kind agent_message_chunk the host said during the last turns, as text.
+fn said(rpc: &Rpc<'_>) -> Vec<String> {
+    rpc.updates
+        .borrow()
+        .iter()
+        .filter(|update| update["method"] == "session/update")
+        .filter(|update| update["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+        .filter_map(|update| update["params"]["update"]["content"]["text"].as_str())
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_limit_refuses_the_next_turn_of_an_agent_past_its_stop_and_not_the_loading_of_a_session() {
+    // The scripted agent reports the tokens a prompt `spend INPUT OUTPUT` says it used, which the host records.
+    let config = format!(
+        "{}\n[host.usage.limits.tokens]\ntokens = 1000\nwindow = \"day\"\nwarn_permille = 500\nstop_permille = 1000\n",
+        usage_entry("busy", None),
+    );
+    let host = Host::start(&config, 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("busy"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(true)).expect("answered");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id").to_owned();
+        // Near the limit the next turn is warned of, and goes on.
+        rpc.prompt(&session, "spend 600 0").expect("the turn ends");
+        let warned = rpc
+            .prompt(&session, "Say still here")
+            .expect("a turn below the stop goes on");
+        assert!(
+            said(rpc).iter().any(|text| text
+                .starts_with("Limit tokens: 60 percent used (600 of 1000 tokens), resets in")),
+            "{:?} {warned}",
+            said(rpc)
+        );
+        // The turn that takes the host past the stop is not cut: it ends as the agent ended it.
+        rpc.prompt(&session, "spend 600 0").expect("the turn ends");
+        // The next one is refused, with the reason in the turn and the limit in the answer.
+        rpc.updates.borrow_mut().clear();
+        let refused = say(rpc, &session, "Say hello").expect("an answer");
+        assert_eq!(refused["stopReason"], "refusal", "{refused}");
+        let meta = &refused["_meta"]["dev.boriken.canoa/limit"];
+        assert_eq!(meta["limit"], "tokens", "{refused}");
+        assert_eq!(meta["used_permille"], 1200, "{refused}");
+        assert!(
+            said(rpc)
+                .iter()
+                .any(|text| text.starts_with("Limit tokens stopped this turn")),
+            "{:?}",
+            said(rpc)
+        );
+        // Opening another session is never refused, and a refused prompt is judged again.
+        let other = new_session(rpc, &dir).expect("a session opens");
+        assert!(other["sessionId"].is_string(), "{other}");
+        let again = say(rpc, &session, "Say hello again").expect("an answer");
+        assert_eq!(again["stopReason"], "refusal", "{again}");
+    })
+    .expect("a paired key is served");
+}
+
+#[test]
+fn a_host_with_no_limit_refuses_nothing_however_much_an_agent_spent() {
+    let host = Host::start(&usage_entry("busy", None), 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("busy"), &client, host.peer, |rpc| {
+        rpc.request("initialize", asking(true)).expect("answered");
+        let session = new_session(rpc, &dir).expect("a session opens");
+        let session = session["sessionId"].as_str().expect("an id").to_owned();
+        rpc.prompt(&session, "spend 5000000 0")
+            .expect("the turn ends");
+        rpc.prompt(&session, "Say hello")
+            .expect("nothing refuses it");
+        assert!(
+            said(rpc).iter().all(|text| !text.starts_with("Limit ")),
+            "{:?}",
+            said(rpc)
+        );
+    })
+    .expect("a paired key is served");
+}

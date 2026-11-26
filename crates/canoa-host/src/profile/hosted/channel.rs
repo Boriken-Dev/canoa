@@ -187,7 +187,7 @@ impl<'a, C: Channel + ?Sized> Hosted<'a, C> {
                 approves: false,
                 book: Book::default(),
             }),
-            splice: scope.splice(),
+            splice: scope.splice().profile(Some(connection.name.clone())),
             sites: scope.sites(),
             given: None,
             noted: core::sync::atomic::AtomicBool::new(false),
@@ -599,6 +599,16 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
                 Client::Held => {
                     self.abandon_opening(&bytes);
                     Err(Failure::Timeout)
+                }
+                Client::Stop(answers) => {
+                    for answer in &answers {
+                        self.reply(answer)?;
+                    }
+                    Err(Failure::Timeout)
+                }
+                Client::Warn(notice) => {
+                    self.reply(&notice)?;
+                    Ok(Some(bytes))
                 }
                 Client::Forward => Ok(Some(bytes)),
             },

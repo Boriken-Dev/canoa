@@ -33,6 +33,7 @@ fn turn<'a>(account: &'a str, session: &'a str) -> Turn<'a> {
         session,
         parent: None,
         model: Some("opus"),
+        profile: None,
     }
 }
 

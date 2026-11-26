@@ -891,6 +891,7 @@ fn usage_answers_a_key_holding_the_grant_and_the_owner_and_no_other() {
             session: "s1",
             parent: None,
             model: None,
+            profile: None,
         },
         &spend,
         crate::usage_splice::unix_now(),
@@ -1097,5 +1098,81 @@ fn usage_limits_fills_canonical_provider_for_local_and_legacy_accounts() {
     assert_eq!(provider_of("codex:local").as_deref(), Some("codex"));
     assert_eq!(provider_of("claude").as_deref(), Some("claude"));
     assert_eq!(provider_of("id-other"), None);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn limits_are_read_with_the_usage_grant_and_one_turn_is_let_through_by_the_owner_alone() {
+    use crate::limits::{Limits, Table};
+    let dir = std::env::temp_dir().join(format!("canoa-control-limits-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let now = crate::usage_splice::unix_now();
+    let log = Arc::new(crate::usage_log::UsageLog::open(dir.clone(), 400, now));
+    let config = crate::config::Config::from_str_in(
+        "[host.accounts.work]\nkind = \"anthropic-api-key\"\nid = \"id-work\"\n\n[host.usage.limits.cap]\naccount = \"work\"\ntokens = 100\nwindow = \"day\"\nwarn_permille = 500\nstop_permille = 1000\n",
+        std::path::Path::new("."),
+    )
+    .expect("parses");
+    Limits::open(
+        &log,
+        Some(dir.clone()),
+        Table::of(&config),
+        Box::new(|| None),
+    );
+    let mut spend = coqui_acp_api::Spend::new("s1");
+    spend.input = 150;
+    log.record(
+        &crate::usage_log::Turn {
+            account: "id-work",
+            harness: "claude",
+            session: "s1",
+            parent: None,
+            model: None,
+            profile: Some("default"),
+        },
+        &spend,
+        now,
+    );
+    let control = memory().with_usage(log);
+    let granted = peer("sha256:aa", &[Grant::Usage]);
+    let answer = ask(&control, &granted, "limits/state", json!({}));
+    let row = &answer["result"]["limits"][0];
+    assert_eq!(row["name"], "cap", "{answer}");
+    assert_eq!(row["state"], "stop", "{answer}");
+    assert_eq!(row["scope"], "account");
+    assert_eq!(row["name_of_scope"], "work");
+    assert_eq!(row["figure"]["kind"], "tokens");
+    assert_eq!(row["figure"]["used"], 150);
+    assert_eq!(row["figure"]["permille"], 1500);
+    assert!(row["window"]["resets_at"].is_i64(), "{answer}");
+    // A key without the grant reads nothing, and no key lets a turn through: the person running the host does.
+    let none = peer("sha256:bb", &[]);
+    assert_eq!(
+        ask(&control, &none, "limits/state", json!({}))["error"]["code"],
+        DENIED
+    );
+    assert_eq!(
+        ask(&control, &granted, "limits/allow", json!({"name": "cap"}))["error"]["code"],
+        DENIED
+    );
+    let owner = ask(
+        &control,
+        &Caller::Owner,
+        "limits/allow",
+        json!({"name": "cap", "session": "s1"}),
+    );
+    assert_eq!(owner["result"]["ok"], true, "{owner}");
+    let missing = ask(
+        &control,
+        &Caller::Owner,
+        "limits/allow",
+        json!({"name": "nothing"}),
+    );
+    assert_eq!(missing["error"]["code"], NOT_FOUND, "{missing}");
+    let bad = ask(&control, &Caller::Owner, "limits/allow", json!({}));
+    assert_eq!(bad["error"]["code"], BAD_PARAMS, "{bad}");
+    // A host with no home keeps no limits.
+    let answer = ask(&memory(), &Caller::Owner, "limits/state", json!({}));
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
     let _ = fs::remove_dir_all(&dir);
 }

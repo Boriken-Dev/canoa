@@ -50,6 +50,7 @@ fn read_client(splice: &Splice, message: &Value) -> Option<Value> {
         Client::Answer(answer) => Some(serde_json::from_slice(&answer).expect("JSON")),
         Client::Forward => None,
         Client::Held => panic!("an answer that waits for a reading"),
+        Client::Stop(_) | Client::Warn(_) => panic!("a limit spoke"),
     }
 }
 
@@ -95,6 +96,7 @@ fn report_of(splice: &Splice) -> Value {
             serde_json::from_slice::<Value>(&answer).expect("JSON")["result"].clone()
         }
         Client::Forward => panic!("the host answers"),
+        Client::Stop(_) | Client::Warn(_) => panic!("a limit spoke"),
         Client::Held => {
             let answer = RefCell::new(None);
             let until = std::time::Instant::now() + PATIENCE;
@@ -1595,6 +1597,194 @@ mod recording {
         assert_eq!(rows[1]["input"], 80);
         assert_eq!(rows[1]["output"], 20);
         assert_eq!(rows[1]["cache_read"], 10);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// The host's limits at a connection's prompts.
+mod limited {
+    use coqui_acp_api::Spend;
+
+    use super::*;
+    use crate::config::Config;
+    use crate::limits::{Limits, Table};
+    use crate::usage_log::{Turn, UsageLog};
+
+    const ACCOUNTS: &str = "[host.accounts.work]\nkind = \"anthropic-api-key\"\nid = \"work\"\n";
+
+    const CONFIG: &str = r#"
+[host.usage.limits.cap]
+account = "work"
+tokens = 1000
+window = "day"
+warn_permille = 500
+stop_permille = 1000
+"#;
+
+    fn folder(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("canoa-gate-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// A connection of the account `work` that records into a log with the limits of `config`.
+    fn connection(name: &str, config: &str) -> (Splice, Arc<UsageLog>, std::path::PathBuf) {
+        let dir = folder(name);
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let table = Table::of(
+            &Config::from_str_in(&format!("{ACCOUNTS}{config}"), std::path::Path::new("."))
+                .expect("the configuration"),
+        );
+        Limits::open(&log, Some(dir.clone()), table, Box::new(|| None));
+        (under(&log, "default"), log, dir)
+    }
+
+    /// A connection of `work` under `profile`.
+    fn under(log: &Arc<UsageLog>, profile: &str) -> Splice {
+        Splice::new(
+            Arc::new(Inference::new(Some(Vec::new()))),
+            Some("work".to_owned()),
+        )
+        .recording(Arc::clone(log), "claude".to_owned())
+        .profile(Some(profile.to_owned()))
+    }
+
+    fn spend_tokens(log: &UsageLog, session: &str, tokens: u64, profile: &str) {
+        let mut spend = Spend::new(session);
+        spend.input = tokens;
+        log.record(
+            &Turn {
+                account: "work",
+                harness: "claude",
+                session,
+                parent: None,
+                model: None,
+                profile: Some(profile),
+            },
+            &spend,
+            unix_now(),
+        );
+    }
+
+    fn ask(splice: &Splice, id: u64, method: &str, session: &str) -> Client {
+        splice.read_client(&bytes(
+            &json!({"jsonrpc": "2.0", "id": id, "method": method,
+            "params": {"sessionId": session, "prompt": [{"type": "text", "text": "go"}]}}),
+        ))
+    }
+
+    #[test]
+    fn a_stop_refuses_a_new_prompt_with_the_reason_and_not_the_loading_of_a_session() {
+        let (splice, log, dir) = connection("stop", CONFIG);
+        assert_eq!(ask(&splice, 1, "session/prompt", "s1"), Client::Forward);
+        // That turn ended, and the agent's spend is over the limit.
+        from_agent(
+            &splice,
+            &json!({"id": 1, "result": {"stopReason": "end_turn"}}),
+        );
+        spend_tokens(&log, "s1", 1500, "default");
+        let Client::Stop(answers) = ask(&splice, 2, "session/prompt", "s1") else {
+            panic!("the turn is refused");
+        };
+        assert_eq!(answers.len(), 2);
+        let notice: Value = serde_json::from_slice(&answers[0]).expect("JSON");
+        assert_eq!(notice["method"], "session/update");
+        assert_eq!(notice["params"]["sessionId"], "s1");
+        assert_eq!(
+            notice["params"]["update"]["sessionUpdate"],
+            "agent_message_chunk"
+        );
+        let text = notice["params"]["update"]["content"]["text"]
+            .as_str()
+            .expect("words");
+        assert!(text.contains("Limit cap stopped this turn"), "{text}");
+        let answer: Value = serde_json::from_slice(&answers[1]).expect("JSON");
+        assert_eq!(answer["id"], 2);
+        assert_eq!(answer["result"]["stopReason"], "refusal");
+        let meta = &answer["result"]["_meta"]["dev.boriken.canoa/limit"];
+        assert_eq!(meta["limit"], "cap");
+        assert_eq!(meta["used_permille"], 1500);
+        // Opening and loading are never refused; the next prompt is judged again.
+        assert_eq!(ask(&splice, 3, "session/load", "s1"), Client::Forward);
+        assert_eq!(ask(&splice, 4, "session/new", "s1"), Client::Forward);
+        assert!(matches!(
+            ask(&splice, 5, "session/prompt", "s1"),
+            Client::Stop(_)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_turn_already_running_is_not_cut_when_the_limit_is_reached_during_it() {
+        let (splice, log, dir) = connection("running", CONFIG);
+        assert_eq!(ask(&splice, 1, "session/prompt", "s1"), Client::Forward);
+        // The agent spends past the stop in the middle of the turn: what it says passes, and its answer ends the turn.
+        spend_tokens(&log, "s1", 1500, "default");
+        let said = from_agent(
+            &splice,
+            &json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "still going"}}}}),
+        );
+        assert_eq!(said.len(), 1);
+        let ended = from_agent(
+            &splice,
+            &json!({"id": 1, "result": {"stopReason": "end_turn"}}),
+        );
+        assert_eq!(ended[0]["result"]["stopReason"], "end_turn");
+        assert!(matches!(
+            ask(&splice, 2, "session/prompt", "s1"),
+            Client::Stop(_)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_warning_goes_before_the_turn_once_in_a_window_and_a_host_with_no_limit_adds_nothing() {
+        let (splice, log, dir) = connection("warn", CONFIG);
+        spend_tokens(&log, "s1", 600, "default");
+        let Client::Warn(notice) = ask(&splice, 1, "session/prompt", "s1") else {
+            panic!("the person is warned");
+        };
+        let notice: Value = serde_json::from_slice(&notice).expect("JSON");
+        let text = notice["params"]["update"]["content"]["text"]
+            .as_str()
+            .expect("words");
+        assert!(
+            text.starts_with("Limit cap: 60 percent used (600 of 1000 tokens), resets in"),
+            "{text}"
+        );
+        // The turn goes on; the same warning is not said again in the same session and window.
+        from_agent(
+            &splice,
+            &json!({"id": 1, "result": {"stopReason": "end_turn"}}),
+        );
+        assert_eq!(ask(&splice, 2, "session/prompt", "s1"), Client::Forward);
+        // Another session is told.
+        assert!(matches!(
+            ask(&splice, 3, "session/prompt", "s2"),
+            Client::Warn(_)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // The control: no limit configured, nothing added however much was spent.
+        let (plain, log, dir) = connection("none", "");
+        spend_tokens(&log, "s1", 5_000_000, "default");
+        assert_eq!(ask(&plain, 1, "session/prompt", "s1"), Client::Forward);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_profile_limit_stops_the_profile_and_no_other() {
+        let config = "[host.usage.limits.p]\nprofile = \"review\"\ntokens = 10\nwindow = \"day\"\nwarn_permille = 0\nstop_permille = 1000\n";
+        let (splice, log, dir) = connection("profile", config);
+        spend_tokens(&log, "s1", 50, "review");
+        // This connection runs under `default`, so the limit on `review` is not its own.
+        assert_eq!(ask(&splice, 1, "session/prompt", "s1"), Client::Forward);
+        let reviewing = under(&log, "review");
+        assert!(matches!(
+            ask(&reviewing, 1, "session/prompt", "s1"),
+            Client::Stop(_)
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
