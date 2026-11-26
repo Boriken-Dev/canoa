@@ -74,6 +74,7 @@ final class FakeOutput implements SpeechOutput {
     this.speed,
     this.uses = const {'voice'},
     this.voiceList = const [],
+    this.voicesProblem,
     this.hold = false,
     this.failWith,
     this.pcm = const PcmFormat(rate: 22050),
@@ -92,6 +93,8 @@ final class FakeOutput implements SpeechOutput {
   @override
   final Set<String> uses;
   final List<OutputVoice> voiceList;
+  @override
+  final String? voicesProblem;
 
   /// Whether each text is held until the test finishes it.
   bool hold;

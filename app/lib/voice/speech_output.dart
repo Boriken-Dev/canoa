@@ -133,6 +133,10 @@ abstract interface class SpeechOutput {
   /// The voices it has now, for [language] (a BCP 47 tag or its first part) when given.
   Future<List<OutputVoice>> voices({String? language});
 
+  /// Why [voices] is empty when the provider could not list them (the document it reads is out of reach), in the host's words; null
+  /// when it listed them or has none to list. A voice typed by name is still sent.
+  String? get voicesProblem;
+
   /// Starts speaking [text]. The choices a provider does not list are refused with a [SpeechFailure] on [SpeechUtterance.done].
   SpeechUtterance speak(String text, {SpeakChoices choices = const SpeakChoices()});
 }

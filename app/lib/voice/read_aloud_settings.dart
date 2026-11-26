@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../config/canoa_config.dart';
+import '../l10n/app_text.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_row.dart';
 import 'outputs.dart';
@@ -135,7 +136,7 @@ class _ReadAloudGroupState extends State<ReadAloudGroup> {
               description: snapshot.connectionState != ConnectionState.done
                   ? 'Reading the voices'
                   : voices.isEmpty
-                  ? 'This provider lists no voices'
+                  ? (output.voicesProblem == null ? 'This provider lists no voices' : context.t('speak.voices_problem', {'why': output.voicesProblem}))
                   : null,
               fieldKey: const Key('speak-voice'),
               value: speak.voice ?? _own,
@@ -147,6 +148,20 @@ class _ReadAloudGroupState extends State<ReadAloudGroup> {
               onChanged: (id) => _set((s) => id == _own ? s.copyWith(clearVoice: true) : s.copyWith(voice: id)),
             );
           },
+        ),
+      if (output.uses.contains('voice'))
+        SettingsRow(
+          key: const Key('speak-voice-name-row'),
+          title: context.t('speak.voice_name'),
+          description: context.t('speak.voice_name_help'),
+          control: SizedBox(
+            width: 200,
+            child: _VoiceName(
+              key: ValueKey('speak-voice-name-${output.id}'),
+              value: speak.voice ?? '',
+              onChanged: (name) => _set((s) => name.isEmpty ? s.copyWith(clearVoice: true) : s.copyWith(voice: name)),
+            ),
+          ),
         ),
       if (output.uses.contains('model') && models.isNotEmpty)
         ChoiceRow<String>(
@@ -197,6 +212,44 @@ class _ReadAloudGroupState extends State<ReadAloudGroup> {
   }
 
   static String _label(List<OutputChoice> choices, String id) => choices.where((c) => c.id == id).firstOrNull?.label ?? id;
+}
+
+/// A voice written by name, for one a provider does not list (a custom voice, or one that is newer than the list): sent as typed.
+class _VoiceName extends StatefulWidget {
+  const _VoiceName({super.key, required this.value, required this.onChanged});
+
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_VoiceName> createState() => _VoiceNameState();
+}
+
+class _VoiceNameState extends State<_VoiceName> {
+  late final TextEditingController _text = TextEditingController(text: widget.value);
+
+  @override
+  void didUpdateWidget(_VoiceName old) {
+    super.didUpdateWidget(old);
+    if (widget.value != old.value && widget.value != _text.text.trim()) _text.text = widget.value;
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _commit() {
+    final name = _text.text.trim();
+    if (name != widget.value) widget.onChanged(name);
+  }
+
+  @override
+  Widget build(BuildContext context) => Focus(
+    onFocusChange: (focused) => focused ? null : _commit(),
+    child: TextField(key: const Key('speak-voice-name'), controller: _text, onSubmitted: (_) => _commit()),
+  );
 }
 
 /// Reads the sample, so a voice can be heard before a reply is.

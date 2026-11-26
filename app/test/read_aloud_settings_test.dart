@@ -115,6 +115,32 @@ void main() {
       expect((h.last.voice.speak.output, h.last.voice.speak.voice, h.last.voice.speak.model, h.last.voice.speak.style, h.last.voice.speak.speed), ('browser', null, null, null, 1.5));
     });
 
+    testWidgets('a voice typed by name is written as typed, and an empty field takes it out', (tester) async {
+      final h = await openSettings(tester, section: 'voice', voiceOutputs: VoiceOutputs(browser: [_cloud()]));
+      await tester.enterText(find.byKey(const Key('speak-voice-name')), ' voice_1234 ');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(h.last.voice.speak.voice, 'voice_1234');
+      expect(h.last.encode(), contains('output_voice = "voice_1234"'));
+      // A voice the list does not have stays a choice of the dropdown, so what is written can be seen.
+      expect(find.text('voice_1234'), findsWidgets);
+      await tester.enterText(find.byKey(const Key('speak-voice-name')), '');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(h.last.voice.speak.voice, isNull);
+    });
+
+    testWidgets('with no voices listed the reason is said, and a voice can still be typed', (tester) async {
+      final output = FakeOutput('host:openai', 'openai', uses: const {'voice'}, voicesProblem: 'raw.githubusercontent.com could not be reached');
+      final h = await openSettings(tester, section: 'voice', voiceOutputs: VoiceOutputs(browser: [output]));
+      await choose(tester, 'speak-output', 'openai');
+      expect(find.textContaining('The voices could not be listed: raw.githubusercontent.com could not be reached'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('speak-voice-name')), 'marin');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(h.last.voice.speak.voice, 'marin');
+    });
+
     testWidgets('a provider named in canoa.cfg that is not here is said, and not replaced', (tester) async {
       final config = CanoaConfig.parse('[voice]\noutput = "host:gone"\n');
       final h = await openSettings(tester, section: 'voice', config: config, voiceOutputs: VoiceOutputs(browser: [_local()]));

@@ -408,6 +408,9 @@ const Map<String, Map<String, String>> baseStrings = {
     'cfg.advanced_edit': 'Edit',
     'cfg.advanced_add': 'Add',
     'cfg.advanced_nothing_set': 'Nothing set here',
+    'speak.voices_problem': 'The voices could not be listed: {why}. A voice typed by name is still used.',
+    'speak.voice_name': 'Voice by name',
+    'speak.voice_name_help': 'A voice the list does not have, such as a custom voice. It is sent as typed, and the service says if it does not know it',
   },
   'es': {
     'language.name': 'Español',
@@ -735,6 +738,9 @@ const Map<String, Map<String, String>> baseStrings = {
     'cfg.advanced_edit': 'Editar',
     'cfg.advanced_add': 'Añadir',
     'cfg.advanced_nothing_set': 'Aquí no hay nada definido',
+    'speak.voices_problem': 'No se pudieron listar las voces: {why}. Una voz escrita por nombre se usa igualmente.',
+    'speak.voice_name': 'Voz por nombre',
+    'speak.voice_name_help': 'Una voz que la lista no tiene, como una voz personalizada. Se envía tal como se escribe, y el servicio avisa si no la conoce',
   },
 };
 

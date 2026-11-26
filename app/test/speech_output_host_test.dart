@@ -108,6 +108,7 @@ void main() {
       await catalog.refresh();
       await catalog.save('cloud', 'speech_say_openai', {
         'model': 'tts-1',
+        'models': ['gpt-4o-mini-tts', 'tts-1'],
         'api_key': 'sk-test-0123456789',
       });
       var text = await File('${dir.path}/canoa.cfg').readAsString();
@@ -117,10 +118,11 @@ void main() {
       expect(cloud.settings['model'], 'tts-1');
       expect(cloud.settings.containsKey('api_key'), isFalse);
       expect(cloud.secretsSet, {'api_key'});
-      // OpenAI's library lists its documented models, voices and styles, and the text is said to go to its host with the key.
-      expect(cloud.models.map((m) => m.id), ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd']);
-      expect(cloud.voices, hasLength(13));
-      expect(cloud.voices.firstWhere((v) => v.id == 'marin').models, ['gpt-4o-mini-tts']);
+      // OpenAI's library lists the models the settings name (the host writes the ones an account's key lists), and its voices are read
+      // from OpenAI's API description: with that out of reach the list is empty and says why. No voice is tied to a model.
+      expect(cloud.models.map((m) => m.id), ['gpt-4o-mini-tts', 'tts-1']);
+      expect(cloud.voices.isNotEmpty || cloud.voicesProblem != null, isTrue);
+      expect(cloud.voices.every((v) => v.models.isEmpty), isTrue);
       expect(cloud.where.leaves, TextLeaves.yes);
       expect(cloud.where.words, contains('api.openai.com'));
       expect(cloud.where.words, contains('your key'));

@@ -52,6 +52,9 @@ final class BrowserSpeech implements SpeechOutput {
   String get id => online ? 'browser:online' : 'browser';
 
   @override
+  String? get voicesProblem => null;
+
+  @override
   String get name => online ? "The browser's online voices" : "The browser's own voices";
 
   @override

@@ -192,6 +192,9 @@ final class HostSpeechOutput implements SpeechOutput {
   OutputWhere get where => provider.where;
 
   @override
+  String? get voicesProblem => provider.voicesProblem;
+
+  @override
   List<OutputChoice> get models => provider.models;
 
   @override
