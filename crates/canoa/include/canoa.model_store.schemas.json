@@ -420,6 +420,64 @@
               ],
               "description": "Present when it may be used as the person's speech-to-text."
             },
+            "engines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "The name the install dialog's choices are keyed by."
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "What the pill says."
+                  },
+                  "state": {
+                    "type": "string",
+                    "description": "`installed` once every file it reads is in the folder, else `available`."
+                  },
+                  "variants": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "What [`ModelAct::options`] names."
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "What the dialog says."
+                        },
+                        "detail": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What it says beside it."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "label"
+                      ]
+                    },
+                    "description": "The forms the install writes its file in, when the person picks one; the first is the default.",
+                    "default": []
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label",
+                  "state"
+                ]
+              },
+              "description": "The ways it can be run, each a pill on its tile: installed once what it reads is in the folder, available until then.",
+              "default": []
+            },
             "files": {
               "type": "array",
               "items": {
@@ -653,6 +711,64 @@
         ],
         "description": "Present when it may be used as the person's speech-to-text."
       },
+      "engines": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The name the install dialog's choices are keyed by."
+            },
+            "label": {
+              "type": "string",
+              "description": "What the pill says."
+            },
+            "state": {
+              "type": "string",
+              "description": "`installed` once every file it reads is in the folder, else `available`."
+            },
+            "variants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "What [`ModelAct::options`] names."
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "What the dialog says."
+                  },
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "What it says beside it."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label"
+                ]
+              },
+              "description": "The forms the install writes its file in, when the person picks one; the first is the default.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label",
+            "state"
+          ]
+        },
+        "description": "The ways it can be run, each a pill on its tile: installed once what it reads is in the folder, available until then.",
+        "default": []
+      },
       "files": {
         "type": "array",
         "items": {
@@ -727,6 +843,86 @@
       "confirm",
       "label",
       "steps"
+    ]
+  },
+  "RowEngine": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The name the install dialog's choices are keyed by."
+      },
+      "label": {
+        "type": "string",
+        "description": "What the pill says."
+      },
+      "state": {
+        "type": "string",
+        "description": "`installed` once every file it reads is in the folder, else `available`."
+      },
+      "variants": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "What [`ModelAct::options`] names."
+            },
+            "label": {
+              "type": "string",
+              "description": "What the dialog says."
+            },
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What it says beside it."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "description": "The forms the install writes its file in, when the person picks one; the first is the default.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "label",
+      "state"
+    ]
+  },
+  "RowVariant": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "What [`ModelAct::options`] names."
+      },
+      "label": {
+        "type": "string",
+        "description": "What the dialog says."
+      },
+      "detail": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What it says beside it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "label"
     ]
   },
   "Section": {
@@ -844,6 +1040,20 @@
       "action": {
         "type": "string",
         "description": "One of the actions a [`RowAction`] named."
+      },
+      "folder": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder the host keeps the type's models in, as [`ModelQuery::folder`]: the files of the row are paths in it."
+      },
+      "options": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What the person picked in the install dialog, a JSON object that gives each engine's id the id of the variant chosen for it; none when the row offered no choice."
       }
     },
     "additionalProperties": false,
@@ -1034,6 +1244,13 @@
       },
       "settings": {
         "description": "The settings of the `speech_provider` [`SpeechService::provider`] names, for the model the person asked for when it is installed and else the first that is: an object that provider's schema accepts."
+      },
+      "provider": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The id of the `speech_provider` `settings` are for, when it is not [`SpeechService::provider`]: a service that several engines run the same model on names the one that runs it here."
       }
     },
     "additionalProperties": false

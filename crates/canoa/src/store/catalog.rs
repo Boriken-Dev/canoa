@@ -96,6 +96,111 @@ pub fn verified_with<'a>(files: impl IntoIterator<Item = &'a CatalogFile>) -> Op
     (!names.is_empty()).then(|| names.join(", "))
 }
 
+/// One way of running a model: a name for the person, the files it reads from the model's folder, and, when some of those are
+/// written after the download rather than downloaded, the action that writes them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ItemEngine {
+    /// Its name in the catalog, unique among the item's engines.
+    pub id: String,
+    /// What the person reads on the item's pill.
+    pub label: String,
+    /// The files it reads, in the folder the item's files are kept in (the item's `file` paths). A file here that no download
+    /// supplies is one `make` writes.
+    pub files: Vec<String>,
+    /// The action the provider of the type is asked for, once the download is done, to write the files `files` names that no
+    /// download supplies; none when everything it reads is downloaded.
+    pub make: Option<String>,
+    /// The forms `make` can write, which the person picks in the install dialog: the first is the default. None when there is one.
+    pub variants: Vec<EngineVariant>,
+}
+
+/// One form an engine's file can be written in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EngineVariant {
+    /// What the action is told, unique among the engine's variants.
+    pub id: String,
+    /// What the person reads.
+    pub label: String,
+    /// What the dialog says beside it (its size, what it costs in accuracy).
+    pub detail: Option<String>,
+}
+
+impl ItemEngine {
+    /// An engine that reads `files` of the item's folder and writes nothing.
+    #[must_use]
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        files: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            files: files.into_iter().map(Into::into).collect(),
+            make: None,
+            variants: Vec::new(),
+        }
+    }
+
+    /// This engine with the action that writes the files no download supplies, in each of `variants`.
+    #[must_use]
+    pub fn making(mut self, action: impl Into<String>, variants: Vec<EngineVariant>) -> Self {
+        self.make = Some(action.into());
+        self.variants = variants;
+        self
+    }
+
+    /// This engine as the object a `canoa.models/1` document holds.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("id".into(), Value::String(self.id.clone()));
+        map.insert("label".into(), Value::String(self.label.clone()));
+        map.insert("files".into(), Value::from(self.files.clone()));
+        if let Some(make) = &self.make {
+            map.insert("make".into(), Value::String(make.clone()));
+        }
+        if !self.variants.is_empty() {
+            let variants = self
+                .variants
+                .iter()
+                .map(|variant| {
+                    let mut each = Map::new();
+                    each.insert("id".into(), Value::String(variant.id.clone()));
+                    each.insert("label".into(), Value::String(variant.label.clone()));
+                    if let Some(detail) = &variant.detail {
+                        each.insert("detail".into(), Value::String(detail.clone()));
+                    }
+                    Value::Object(each)
+                })
+                .collect();
+            map.insert("variants".into(), Value::Array(variants));
+        }
+        Value::Object(map)
+    }
+}
+
+impl EngineVariant {
+    /// A form named `id`, read as `label`.
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            detail: None,
+        }
+    }
+
+    /// This form with what the dialog says beside it.
+    #[must_use]
+    pub fn detailed(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+}
+
 /// One model, voice or other file set a models catalog lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -114,6 +219,8 @@ pub struct ModelItem {
     pub facts: Vec<(String, String)>,
     /// What is downloaded for it.
     pub files: Vec<CatalogFile>,
+    /// The ways it can be run, each shown as a pill on its tile; none for an item with one use.
+    pub engines: Vec<ItemEngine>,
 }
 
 impl ModelItem {
@@ -326,6 +433,72 @@ fn file_of(
     })
 }
 
+fn engines_of(item: &Map<String, Value>, what: &str) -> Result<Vec<ItemEngine>, String> {
+    let Some(listed) = item.get("engines") else {
+        return Ok(Vec::new());
+    };
+    let mut engines: Vec<ItemEngine> = Vec::new();
+    for engine in listed
+        .as_array()
+        .ok_or_else(|| format!("{what}: engines is not a list"))?
+    {
+        let engine = object(engine, &format!("{what}: an engine"))?;
+        let id = text(engine, "id", &format!("{what}: an engine"))?.to_owned();
+        let here = format!("{what}: the engine {id:?}");
+        if engines.iter().any(|each| each.id == id) {
+            return Err(format!("{what}: the engine {id:?} is listed twice"));
+        }
+        let files = words(engine, "files", &here)?;
+        if let Some(bad) = files.iter().find(|file| {
+            file.contains('\\')
+                || file
+                    .split('/')
+                    .any(|part| part.is_empty() || part == ".." || part == ".")
+        }) {
+            return Err(format!(
+                "{here}: {bad:?} is not a relative path of plain names"
+            ));
+        }
+        let mut variants: Vec<EngineVariant> = Vec::new();
+        if let Some(listed) = engine.get("variants") {
+            for variant in listed
+                .as_array()
+                .ok_or_else(|| format!("{here}: variants is not a list"))?
+            {
+                let variant = object(variant, &format!("{here}: a variant"))?;
+                let name = text(variant, "id", &format!("{here}: a variant"))?.to_owned();
+                if variants.iter().any(|each| each.id == name) {
+                    return Err(format!("{here}: the variant {name:?} is listed twice"));
+                }
+                variants.push(EngineVariant {
+                    label: text(variant, "label", &here)
+                        .map_or_else(|_| name.clone(), str::to_owned),
+                    detail: optional(variant, "detail", &here)?,
+                    id: name,
+                });
+            }
+        }
+        let make = optional(engine, "make", &here)?.filter(|action| !action.trim().is_empty());
+        if make
+            .as_deref()
+            .is_some_and(|action| matches!(action, "fetch_files" | "delete_files"))
+        {
+            return Err(format!("{here}: make names a step the host does itself"));
+        }
+        if make.is_none() && !variants.is_empty() {
+            return Err(format!("{here}: variants without an action to write them"));
+        }
+        engines.push(ItemEngine {
+            label: text(engine, "label", &here).map_or_else(|_| id.clone(), str::to_owned),
+            files,
+            make,
+            variants,
+            id,
+        });
+    }
+    Ok(engines)
+}
+
 fn document(source: &str, format: &str) -> Result<Map<String, Value>, String> {
     let value: Value = serde_json::from_str(source)
         .map_err(|error| format!("the catalog is not JSON: {error}"))?;
@@ -389,7 +562,9 @@ pub fn parse_models(source: &str) -> Result<ModelsCatalog, String> {
         if files.is_empty() {
             return Err(format!("{what} has no files"));
         }
+        let engines = engines_of(item, &what)?;
         parsed.push(ModelItem {
+            engines,
             label: text(item, "label", &what).map_or_else(|_| id.clone(), str::to_owned),
             by: optional(item, "by", &what)?,
             tags: words(item, "tags", &what)?,
@@ -607,6 +782,7 @@ impl ModelItem {
             license: None,
             facts: Vec::new(),
             files: Vec::new(),
+            engines: Vec::new(),
         }
     }
 }
@@ -654,6 +830,12 @@ impl ModelsCatalog {
                     "files".into(),
                     Value::Array(item.files.iter().map(|file| file.to_value(true)).collect()),
                 );
+                if !item.engines.is_empty() {
+                    map.insert(
+                        "engines".into(),
+                        Value::Array(item.engines.iter().map(ItemEngine::to_value).collect()),
+                    );
+                }
                 Value::Object(map)
             })
             .collect();
@@ -945,6 +1127,72 @@ mod tests {
             Some(("5A3F".into(), "manifest.json".into()))
         );
         assert_eq!(check_format(RELEASES_FORMAT, &text), Ok(()));
+    }
+
+    const ENGINES: &str = r#"{"format": "canoa.models/1", "items": [{"id": "m", "files": [{"url": "https://h.example/m/a.bin"}],
+        "engines": [
+            {"id": "one", "label": "One", "files": ["m/a.bin"]},
+            {"id": "two", "files": ["m/b.bin", "m/b.json"], "make": "write_b",
+             "variants": [{"id": "big", "label": "Big", "detail": "all of it"}, {"id": "small"}]}
+        ]}]}"#;
+
+    #[test]
+    fn an_item_lists_its_engines_with_the_files_each_reads_the_action_that_writes_them_and_the_forms()
+     {
+        let catalog = parse_models(ENGINES).expect("a catalog");
+        let [one, two] = catalog.items[0].engines.as_slice() else {
+            panic!("two engines");
+        };
+        assert_eq!((one.id.as_str(), one.label.as_str()), ("one", "One"));
+        assert_eq!(one.files, ["m/a.bin"]);
+        assert_eq!(one.make, None);
+        assert!(one.variants.is_empty());
+        assert_eq!(two.label, "two", "the id when no label is given");
+        assert_eq!(two.make.as_deref(), Some("write_b"));
+        assert_eq!(two.variants[0].detail.as_deref(), Some("all of it"));
+        assert_eq!(two.variants[1].label, "small");
+        // Written and read again, the document says the same.
+        let again = parse_models(&catalog.to_json()).expect("read again");
+        assert_eq!(again, catalog);
+        let bare = parse_models(
+            r#"{"format": "canoa.models/1", "items": [{"id": "m", "files": [{"url": "https://h.example/a.bin"}]}]}"#,
+        )
+        .expect("a catalog");
+        assert!(
+            bare.items[0].engines.is_empty(),
+            "an item with one use lists none"
+        );
+        assert!(!bare.to_json().contains("engines"));
+    }
+
+    #[test]
+    fn an_engine_that_is_not_well_formed_is_refused_with_its_name() {
+        let with = |engines: &str| {
+            parse_models(&format!(
+                r#"{{"format": "canoa.models/1", "items": [{{"id": "m", "files": [{{"url": "https://h.example/a.bin"}}], "engines": {engines}}}]}}"#
+            ))
+        };
+        for (engines, says) in [
+            (r#"[{"id": "a"}, {"id": "a"}]"#, "listed twice"),
+            (r#"[{"id": "a", "files": ["../x"]}]"#, "plain names"),
+            (r#"[{"id": "a", "files": ["m\\x"]}]"#, "plain names"),
+            (
+                r#"[{"id": "a", "variants": [{"id": "v"}]}]"#,
+                "without an action",
+            ),
+            (
+                r#"[{"id": "a", "make": "fetch_files"}]"#,
+                "the host does itself",
+            ),
+            (
+                r#"[{"id": "a", "make": "w", "variants": [{"id": "v"}, {"id": "v"}]}]"#,
+                "listed twice",
+            ),
+            (r#"{"id": "a"}"#, "not a list"),
+        ] {
+            let why = with(engines).expect_err(engines);
+            assert!(why.contains(says), "{engines}: {why}");
+        }
     }
 
     #[test]

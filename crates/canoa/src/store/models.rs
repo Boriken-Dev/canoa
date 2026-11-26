@@ -266,9 +266,41 @@ pub struct ModelRow {
     pub sections: Vec<Section>,
     /// Present when it may be used as the person's speech-to-text.
     pub speech: Option<SpeechUse>,
+    /// The ways it can be run, each a pill on its tile: installed once what it reads is in the folder, available until then.
+    #[map(default)]
+    pub engines: Vec<RowEngine>,
     /// The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`].
     #[map(default)]
     pub files: Vec<ModelFile>,
+}
+
+/// One way a row can be run, which the tile shows as a pill.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct RowEngine {
+    /// The name the install dialog's choices are keyed by.
+    pub id: String,
+    /// What the pill says.
+    pub label: String,
+    /// `installed` once every file it reads is in the folder, else `available`.
+    pub state: String,
+    /// The forms the install writes its file in, when the person picks one; the first is the default.
+    #[map(default)]
+    pub variants: Vec<RowVariant>,
+}
+
+/// One form an engine's file can be written in.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct RowVariant {
+    /// What [`ModelAct::options`] names.
+    pub id: String,
+    /// What the dialog says.
+    pub label: String,
+    /// What it says beside it.
+    pub detail: Option<String>,
 }
 
 /// The rows of a page, from [`ModelStore::list`].
@@ -297,6 +329,11 @@ pub struct ModelAct {
     pub model: String,
     /// One of the actions a [`RowAction`] named.
     pub action: String,
+    /// The folder the host keeps the type's models in, as [`ModelQuery::folder`]: the files of the row are paths in it.
+    pub folder: Option<String>,
+    /// What the person picked in the install dialog, a JSON object that gives each engine's id the id of the variant chosen for
+    /// it; none when the row offered no choice.
+    pub options: Option<String>,
 }
 
 /// What an action did.
@@ -383,6 +420,9 @@ pub struct ServiceReport {
     /// The settings of the `speech_provider` [`SpeechService::provider`] names, for the model the person asked for when it is
     /// installed and else the first that is: an object that provider's schema accepts.
     pub settings: Option<Value>,
+    /// The id of the `speech_provider` `settings` are for, when it is not [`SpeechService::provider`]: a service that several
+    /// engines run the same model on names the one that runs it here.
+    pub provider: Option<String>,
 }
 
 /// How a program turns one recording into text, which the host writes as the person's speech provider.
@@ -791,7 +831,33 @@ impl ModelRow {
             actions: Vec::new(),
             sections: Vec::new(),
             speech: None,
+            engines: Vec::new(),
             files: Vec::new(),
+        }
+    }
+}
+
+impl RowEngine {
+    /// An engine called `label`, `installed` or not, with no choice of forms.
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>, installed: bool) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            state: if installed { "installed" } else { "available" }.to_owned(),
+            variants: Vec::new(),
+        }
+    }
+}
+
+impl RowVariant {
+    /// A form named `id`, said as `label`, with what the dialog says beside it.
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>, detail: Option<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            detail,
         }
     }
 }
@@ -913,6 +979,8 @@ impl ModelAct {
             home: None,
             model: model.into(),
             action: action.into(),
+            folder: None,
+            options: None,
         }
     }
 }

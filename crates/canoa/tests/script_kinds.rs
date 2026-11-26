@@ -43,8 +43,8 @@ use canoa::store::extension::{
 };
 use canoa::store::models::{
     Fact, ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
-    ModelSettings, ModelStoreInfo, ModelStoreVtable, RowAction, Section, ServedModel, ServiceQuery,
-    ServiceReport, SpeechRun, SpeechService, SpeechUse,
+    ModelSettings, ModelStoreInfo, ModelStoreVtable, RowAction, RowEngine, RowVariant, Section,
+    ServedModel, ServiceQuery, ServiceReport, SpeechRun, SpeechService, SpeechUse,
 };
 use canoa::store::source::{
     CatalogSourceProviderVtable, ReadRequest, SourceFetchVtable, SourceInfo,
@@ -204,6 +204,8 @@ fn the_committed_model_store_schemas_are_what_this_build_describes() {
             ("ModelList", schema_of::<ModelList>()),
             ("ModelRow", schema_of::<ModelRow>()),
             ("RowAction", schema_of::<RowAction>()),
+            ("RowEngine", schema_of::<RowEngine>()),
+            ("RowVariant", schema_of::<RowVariant>()),
             ("Section", schema_of::<Section>()),
             ("Fact", schema_of::<Fact>()),
             ("SpeechUse", schema_of::<SpeechUse>()),

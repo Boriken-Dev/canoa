@@ -38,12 +38,46 @@
             "type": "array",
             "minItems": 1,
             "items": { "$ref": "#/$defs/file" }
+          },
+          "engines": {
+            "type": "array",
+            "description": "The ways the item can be run, each shown as a pill on its tile, installed once every file it reads is in the item's folder.",
+            "items": { "$ref": "#/$defs/engine" }
           }
         }
       }
     }
   },
   "$defs": {
+    "engine": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "Unique among the item's engines." },
+        "label": { "type": "string", "description": "What the pill says." },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The files it reads, as relative paths in the folder the item's files are kept in; one that no download of the item supplies is written by `make`."
+        },
+        "make": { "type": "string", "description": "The action the type's provider is asked for, after the download, to write the files no download supplies." },
+        "variants": {
+          "type": "array",
+          "description": "The forms `make` can write, picked in the install dialog; the first is the default. Needs `make`.",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "label": { "type": "string" },
+              "detail": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
     "file": {
       "type": "object",
       "required": ["url"],
