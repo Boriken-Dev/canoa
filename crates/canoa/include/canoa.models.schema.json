@@ -50,7 +50,7 @@
       "additionalProperties": false,
       "properties": {
         "url": { "type": "string", "pattern": "^https://" },
-        "file": { "type": "string", "description": "A plain file name; the last part of the URL when absent." },
+        "file": { "type": "string", "description": "A relative path of plain names, `/` between them (a model of several files keeps them in a folder of its own); the last part of the URL when absent." },
         "bytes": { "type": "integer", "minimum": 0 },
         "derived": {
           "type": "boolean",

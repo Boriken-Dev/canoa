@@ -299,8 +299,14 @@ fn file_of(
             .filter(|name| !name.is_empty())
             .ok_or_else(|| format!("{what} has no file name"))?,
     };
-    if name.contains(['/', '\\']) || name == ".." || name == "." {
-        return Err(format!("{what}: {name:?} is not a plain file name"));
+    if name.contains('\\')
+        || name
+            .split('/')
+            .any(|part| part.is_empty() || part == ".." || part == ".")
+    {
+        return Err(format!(
+            "{what}: {name:?} is not a relative path of plain names"
+        ));
     }
     let bytes = match map.get("bytes") {
         None | Some(Value::Null) => None,
@@ -852,6 +858,21 @@ mod tests {
         assert_eq!(item.files[0].check, Some(FileCheck::Sha256(SHA256.into())));
         assert_eq!(item.verified_with().as_deref(), Some("SHA-256"));
         assert_eq!(item.facts, [("Language".to_owned(), "every".to_owned())]);
+    }
+
+    #[test]
+    fn a_file_is_kept_at_a_relative_path_that_stays_inside_the_folder() {
+        for (name, fine) in [
+            ("base/model.bin", true),
+            ("a/../b", false),
+            ("/abs", false),
+            ("a//b", false),
+            ("a\\b", false),
+            ("..", false),
+        ] {
+            let doc = models("").replace("\"ggml-base.bin\"", &format!("{name:?}"));
+            assert_eq!(parse_models(&doc).is_ok(), fine, "{name}");
+        }
     }
 
     #[test]

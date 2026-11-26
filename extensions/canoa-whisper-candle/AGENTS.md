@@ -38,25 +38,31 @@ pub struct Error;                                     // Display, std::error::Er
 pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // WhisperCandleExtension, WhisperCandleModels, WhisperCandleSpeech  (host)
 
 pub struct WhisperCandleExtension;  // a `store_extension`, id "whispercandle_extension": the type `whispercandle` ("Whisper (Candle)", icon `chip`, no program store, models `whispercandle_models`)
-pub struct WhisperCandleModels;     // a `model_store`, id "whispercandle_models"; `WhisperCandleModels::over(&'static [Model])` lists another set, which a test serves
+pub struct WhisperCandleModels;     // a `model_store`, id "whispercandle_models": the speech offer's view of the models folder; the page's rows are the catalogs'
+pub struct WhisperCandleHf;         // a `catalog_source`, id "whispercandle_hf" (`SOURCE`), default label `openai` (`default_catalog()`): fields `author` (openai), `search` (whisper), `include`, `exclude` (default `*.en`: the engine needs language tokens), a pin names a branch or tag
 pub struct WhisperCandleSpeech;     // a `speech_provider`, id "speech_whisper_candle", built `From<WhisperCandleSettings>`
 pub struct WhisperCandleSettings { pub model: String, pub models_dir: String, pub language: Option<String>, pub threads: Option<u32> }   // `new(model, models_dir)`
 pub fn unload();                    // frees the model held
 pub fn is_loaded() -> bool;         // whether a model is held
 
 pub mod catalog {
+    pub const MODELS_API: &str;      // Hugging Face's model API: `?author=..&search=..` lists, `/<owner>/<name>/revision/<rev>?blobs=true` describes
     pub const ENDPOINTS: [&str; 6];  // where the files are downloaded from: Hugging Face's `openai/` and the hosts it sends a download on to
+    pub const DEFAULT_AUTHOR: &str; pub const DEFAULT_SEARCH: &str; pub const DEFAULT_EXCLUDE: [&str; 1];
     pub const CONFIG: &str; pub const TOKENIZER: &str; pub const WEIGHTS: &str; pub const FILE_NAMES: [&str; 3];
-    pub struct File { pub name: &'static str, pub bytes: u64, pub sha256: &'static str }
-    pub struct Model { pub id, pub label, pub repository, pub revision: &'static str, pub files: [File; 3] }   // `url(&File)`, `bytes()`, `file(name)`
-    pub const MODELS: [Model; 4];    // `base` (the default), `tiny`, `small`, `large-v3-turbo`
-    pub fn model(id: &str) -> Option<&'static Model>;
+    pub enum Check { Sha256(String), GitBlob(String) }   // what the listing states: a large file's SHA-256, a small one's git blob id
+    pub struct File { pub name: String, pub bytes: u64, pub check: Check }
+    pub struct Model { pub id, pub label, pub repository, pub revision: String, pub license: Option<String>, pub files: Vec<File> }   // `url(&File)` (at the commit), `bytes()`, `file(name)`
+    pub fn repositories(listing: &str, include: &[String], exclude: &[String]) -> Result<Vec<String>, String>;   // `*` patterns on the name after the owner
+    pub fn model_of(description: &str) -> Result<Option<Model>, String>;     // none when the repository lacks the three files
+    pub fn models_of<'a>(descriptions: impl IntoIterator<Item = &'a str>) -> Result<Vec<Model>, String>;
+    pub fn id_of(repository: &str) -> String; pub fn describe_id(id: &str) -> String; pub fn wildcard(pattern: &str, text: &str) -> bool;
 }
 ```
 
 ## The models page and the speech offer
 
-The type has no program: the host keeps its files under its own id in the shelf (`<shelf>/whispercandle/models`). Each model is a folder `<id>/` of three files: `openai/whisper-<id>`'s `config.json`, `tokenizer.json` and `model.safetensors` at one pinned revision, each checked against the SHA-256 listed for it. A model is installed when all three are there; its row offers `fetch_files` until then and `delete_files` once they are. `act` and `keep` refuse `UNSUPPORTED`. `describe().speech` is `SpeechService::in_process(.., "speech_whisper_candle")`; `service` lists the installed models and answers `settings` for the model asked for, else the first installed, or `unavailable` in its own words.
+The type has no program: the host keeps its files under its own id in the shelf (`<shelf>/whispercandle/models`). The page's rows are the catalogs' (`whispercandle_hf` reads the publisher's repositories at the branch they serve; no model is named in this crate). Each model is a folder `<id>/` of three files: the repository's `config.json`, `tokenizer.json` and `model.safetensors` at the commit the listing was read at, each checked against what the listing states for it (the SHA-256 of a large file, the git blob id of a small one). A model is installed when all three are there; its row offers `fetch_files` until then and `delete_files` once they are. `act` and `keep` refuse `UNSUPPORTED`. `describe().speech` is `SpeechService::in_process(.., "speech_whisper_candle")`; `service` lists the installed models and answers `settings` for the model asked for, else the first installed, or `unavailable` in its own words.
 
 ## The provider
 
@@ -68,4 +74,4 @@ The type has no program: the host keeps its files under its own id in the shelf 
 
 - The mel spectrogram is this crate's own (`mel.rs`: Slaney filters computed, a mixed-radix FFT), single-threaded: Candle's own one spawns threads, which WebAssembly lacks.
 - A clip is read at its real length, not padded to 30 seconds.
-- The tests that run a model (`tests/speech.rs`) download `tiny` and a recording with `curl` into a temporary folder, check each file's SHA-256, and are ignored without the network: `cargo test -p canoa-whisper-candle -- --ignored` (use `--release`: Candle is slow unoptimized).
+- The tests that run a model (`tests/speech.rs`) download `tiny` and a recording with `curl` into a temporary folder, check each file against what the recorded listing states, and are ignored without the network: `cargo test -p canoa-whisper-candle -- --ignored` (use `--release`: Candle is slow unoptimized).

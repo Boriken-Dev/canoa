@@ -1,11 +1,13 @@
 //! What this crate offers a Canoa host as a library: the Store type that lists Whisper's models for Candle, the models page and the
 //! provider that transcribes with them. The host holds no word of any of them: it loads this library as it loads any other.
 
-use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
+use canoa::store::catalog::MODELS_FORMAT;
+use canoa::store::extension::{CatalogWords, ExtensionInfo, ExtensionType, StoreExtension};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
 
 use crate::model_store::WhisperCandleModels;
+use crate::source::{WhisperCandleHf, default_catalog};
 use crate::speech::WhisperCandleSpeech;
 use crate::{NAME, STORE_TYPE};
 
@@ -20,6 +22,11 @@ impl StoreExtension for WhisperCandleExtension {
         let mut local = ExtensionType::new(STORE_TYPE, NAME, [] as [&str; 0]);
         local.icon = Some("chip".to_owned());
         local.models = Some("whispercandle_models".to_owned());
+        local.catalogs = Some(
+            CatalogWords::new("catalog", "catalogs", "models")
+                .in_format(MODELS_FORMAT)
+                .registering([default_catalog()]),
+        );
         Ok(ExtensionInfo::new(NAME, "Boriken Dev", vec![local]))
     }
 }
@@ -31,6 +38,7 @@ coqui_acp_api::guatiao::local_providers!(
     providers = [
         WhisperCandleExtension,
         WhisperCandleModels,
+        WhisperCandleHf,
         WhisperCandleSpeech
     ]
 );

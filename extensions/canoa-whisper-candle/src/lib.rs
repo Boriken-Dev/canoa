@@ -18,6 +18,8 @@ mod model_store;
 #[cfg(feature = "host")]
 mod providers;
 #[cfg(feature = "host")]
+mod source;
+#[cfg(feature = "host")]
 mod speech;
 
 pub use engine::{Engine, Error, Transcription};
@@ -25,6 +27,8 @@ pub use engine::{Engine, Error, Transcription};
 pub use model_store::WhisperCandleModels;
 #[cfg(feature = "host")]
 pub use providers::{WhisperCandleExtension, library};
+#[cfg(feature = "host")]
+pub use source::{SOURCE, WhisperCandleHf, WhisperCandleHfSettings, catalog_of, default_catalog};
 #[cfg(feature = "host")]
 pub use speech::{IDLE, PROVIDER, WhisperCandleSettings, WhisperCandleSpeech, is_loaded, unload};
 
