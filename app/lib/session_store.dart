@@ -8,7 +8,6 @@ import 'acp/local_agent.dart' show readLocalFile;
 import 'chat/timing_log.dart';
 import 'config/canoa_config.dart' show Preset;
 import 'acp/secret_wire.dart' show SecretIdentity;
-import 'package:coqui_acp/coqui_acp.dart' show AcpFailed;
 import 'package:coqui_acp/secret.dart';
 import 'usage/limit_rules.dart' show LimitsLink;
 import 'usage/limits_group.dart' show LimitStop;
