@@ -45,7 +45,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "notifications",
