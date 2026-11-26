@@ -299,10 +299,10 @@ impl SettingsSection for MailSection {
         let mut info = SectionInfo::new("mail", "Mail");
         info.group = Some("Agents".to_owned());
         info.icon = Some("mail".to_owned());
-        info.help = Some(
-            "An agent can search, read and draft in these mailboxes, and asks you before it moves or changes a message.              An agent never sends; only the Mail notifier of Notifications does. Passwords stay in this computer's credential store, never in canoa.cfg."
-                .to_owned(),
-        );
+        info.help = Some(format!(
+            "An agent can search, read and draft in these mailboxes, and asks you before it moves or changes a message.              An agent never sends; only the Mail notifier of Notifications does. Passwords stay in this computer's credential store, never in {}.",
+            canoa::brand::CONFIG_FILE
+        ));
         let mut mailboxes = Collection::new(
             "mail/accounts",
             "mail/add",
@@ -317,9 +317,10 @@ impl SettingsSection for MailSection {
         mailboxes.empty_help = Some("Agents have no mail to use until one is added.".to_owned());
         mailboxes.kind_label = Some("Backend".to_owned());
         mailboxes.test_label = Some("Test sign-in".to_owned());
-        mailboxes.remove_note = Some(
-            "Takes the mailbox out of canoa.cfg and forgets any saved password. Nothing in the mailbox itself changes.".to_owned(),
-        );
+        mailboxes.remove_note = Some(format!(
+            "Takes the mailbox out of {} and forgets any saved password. Nothing in the mailbox itself changes.",
+            canoa::brand::CONFIG_FILE
+        ));
         info.collection = Some(mailboxes);
         info.keywords = Some(
             "email exchange outlook ews mailbox inbox messages password account add remove test sign in"

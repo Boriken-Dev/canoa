@@ -35,7 +35,12 @@ const GIT_TIME: Duration = Duration::from_secs(10);
 /// The most characters of an expanded value that is one path segment.
 const SEGMENT: usize = 100;
 /// `[sessions] workspace` when canoa.cfg sets none.
-const DEFAULT_TEMPLATE: &str = "${documents}/Canoa/scratch/${session}";
+fn default_template() -> String {
+    format!(
+        "${{documents}}/{}/scratch/${{session}}",
+        canoa::brand::FOLDER
+    )
+}
 /// A session id to show what a template makes before any session has one.
 const EXAMPLE_SESSION: &str = "3f2a9c1e-7b4d-4e58-9a16-0d5c2b8e6f40";
 /// What a template may name.
@@ -272,7 +277,7 @@ impl Files {
         self.config_get(&json!({"section": "sessions"}))
             .ok()
             .and_then(|answer| answer["value"]["workspace"].as_str().map(str::to_owned))
-            .unwrap_or_else(|| DEFAULT_TEMPLATE.to_owned())
+            .unwrap_or_else(default_template)
     }
 }
 

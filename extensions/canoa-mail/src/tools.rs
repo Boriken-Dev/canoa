@@ -25,9 +25,9 @@ use crate::mailboxes::Mailboxes;
 use canoa::session_service::{Answer, Outcome, Question, ToolInfo};
 
 /// The name of the MCP server the host adds to a session.
-pub(crate) const SERVER_NAME: &str = "canoa-mail";
+pub(crate) const SERVER_NAME: &str = canoa::brand::MAIL_SERVER;
 /// The built-in skill that says when to use the tools, delivered with a session that has them.
-pub(crate) const SKILL_NAME: &str = "canoa-mail";
+pub(crate) const SKILL_NAME: &str = canoa::brand::MAIL_SERVER;
 const SKILL: &str = include_str!("canoa-mail.md");
 
 /// Results one `mail_search` returns when the call does not say.
@@ -131,7 +131,13 @@ fn done(answer: Result<Value, String>) -> Outcome {
 
 /// The files of the built-in skill, by path.
 pub(crate) fn skill_files() -> BTreeMap<String, String> {
-    [("SKILL.md".to_owned(), SKILL.to_owned())].into()
+    [(
+        "SKILL.md".to_owned(),
+        SKILL
+            .replace("@SERVER@", SERVER_NAME)
+            .replace("@PREFIX@", canoa::brand::SERVER_PREFIX),
+    )]
+    .into()
 }
 
 /// `text` as it may reach an agent: no control character (newlines and tabs kept when `lines`), no direction or zero-width
@@ -877,7 +883,8 @@ impl MailTools {
         }
         let note = (answer == Answer::Silent).then(|| {
             format!(
-                "Canoa changed these messages without asking, because this session is in a mode that asks for nothing: {}",
+                "{} changed these messages without asking, because this session is in a mode that asks for nothing: {}",
+                canoa::brand::NAME,
                 plan.what.join("; ")
             )
         });

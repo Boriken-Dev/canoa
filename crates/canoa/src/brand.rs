@@ -62,6 +62,10 @@ server!(
     DELEGATE_SERVER, "delegate"
 );
 server!(
+    /// The tool server of the person's mail, and the skill that says when to use it.
+    MAIL_SERVER, "mail"
+);
+server!(
     /// The tool server of secrets.
     SECRETS_SERVER, "secrets"
 );
@@ -174,6 +178,7 @@ mod tests {
             (SECRETS_SERVER, "secrets"),
             (ENVIRONMENTS_SERVER, "environments"),
             (TOOLS_SERVER, "tools"),
+            (MAIL_SERVER, "mail"),
         ] {
             assert_eq!(name, format!("{PROGRAM}-{suffix}"));
         }
