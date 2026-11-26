@@ -22,7 +22,7 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status, ToValue};
 
 use crate::NAME;
-use crate::catalog::{DEFAULT_FILES, ENDPOINTS};
+use crate::catalog::ENDPOINTS;
 use crate::source::describe_name;
 use crate::speech::{PROVIDER, WhisperSettings};
 
@@ -41,9 +41,9 @@ fn unsupported(why: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, why)
 }
 
-/// The models installed in `folder`: every `ggml-<id>.bin` file, the default catalog's models first, as `(id, label)`.
+/// The models installed in `folder`: every `ggml-<id>.bin` file, by id, as `(id, label)`.
 fn installed(folder: &Path) -> Vec<(String, String)> {
-    let mut found: Vec<(usize, String, String)> = std::fs::read_dir(folder)
+    let mut found: Vec<(String, String)> = std::fs::read_dir(folder)
         .into_iter()
         .flatten()
         .flatten()
@@ -51,18 +51,11 @@ fn installed(folder: &Path) -> Vec<(String, String)> {
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             let (id, label) = describe_name(&name)?;
-            let rank = DEFAULT_FILES
-                .iter()
-                .position(|file| *file == name)
-                .unwrap_or(DEFAULT_FILES.len());
-            Some((rank, id, label))
+            Some((id, label))
         })
         .collect();
     found.sort();
     found
-        .into_iter()
-        .map(|(_, id, label)| (id, label))
-        .collect()
 }
 
 impl ModelStore for WhisperModels {
@@ -211,8 +204,8 @@ mod tests {
         let ids: Vec<&str> = all.models.iter().map(|model| model.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["base.en", "tiny", "medium"],
-            "the default models in their order, then any other"
+            ["base.en", "medium", "tiny"],
+            "in the order of their ids"
         );
         assert!(all.unavailable.is_none());
         let settings = WhisperSettings::from_value(&all.settings.expect("settings")).expect("read");
@@ -247,7 +240,7 @@ mod tests {
         let origin = format!(
             "https://huggingface.co/{}/resolve/{}/ggml-base.bin",
             crate::catalog::DEFAULT_REPO,
-            crate::catalog::REVISION
+            "5359861c739e955e79d9a303bcbc70fb988958b1"
         );
         assert!(
             info.endpoints

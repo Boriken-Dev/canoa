@@ -4,7 +4,10 @@ use canoa::store::catalog::{MODELS_FORMAT, Trust, parse_models};
 use coqui_acp_harness::LocalSpawner;
 
 use super::*;
-use crate::catalog::{DEFAULT_VOICES, REVISION, SNAPSHOT, default_catalog};
+use crate::catalog::default_catalog;
+
+/// The commit the recordings were taken at.
+const REVISION: &str = "4a409e3cbfd0a189930b38f127a38e107677e8ac";
 
 /// A trimmed copy of what Hugging Face answered for `voices.json` at [`REVISION`]: three of its voices, as it gave them.
 const VOICES: &str = include_str!("../tests/fixtures/voices_4a409e3c.json");
@@ -20,50 +23,91 @@ fn listing(folder: &str) -> Result<String, ProviderError> {
         .ok_or_else(|| ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no such folder"))
 }
 
+/// The two voices whose listings the recordings hold, as the reviewed values below were read for them.
+const VOICES_LOOKED_AT: [&str; 2] = ["en_US-ljspeech-medium", "es_MX-claude-high"];
+
 fn default_voices() -> ModelsCatalog {
-    let include: Vec<String> = DEFAULT_VOICES.map(str::to_owned).to_vec();
+    let include: Vec<String> = VOICES_LOOKED_AT.map(str::to_owned).to_vec();
     catalog_of(DEFAULT_REPO, REVISION, VOICES, &include, &[], listing).expect("a catalog")
 }
 
-#[test]
-fn the_shipped_snapshot_is_what_the_source_makes_of_the_recorded_answers() {
-    let made = default_voices().to_json();
-    if std::env::var_os("CANOA_WRITE_SNAPSHOTS").is_some() {
-        std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/catalogs/rhasspy.json"),
-            format!("{made}\n"),
-        )
-        .expect("written");
+fn snapshot() -> String {
+    default_voices().to_json()
+}
+
+/// What Hugging Face answered for `voices.json` at [`REVISION`], whole: every voice the publisher lists.
+const ALL_VOICES: &str = include_str!("../tests/fixtures/voices_all_4a409e3c.json");
+
+/// A folder's listing made from `voices.json`'s own file names, for the voices whose recordings are not kept: a size and a digest
+/// that depend only on the name.
+fn made_listing(folder: &str) -> Result<String, ProviderError> {
+    let all: Value = serde_json::from_str(ALL_VOICES).expect("JSON");
+    let mut files = Vec::new();
+    for voice in all.as_object().expect("an object").values() {
+        for path in voice["files"].as_object().expect("files").keys() {
+            if path.rsplit_once('/').is_some_and(|(of, _)| of == folder)
+                && (path.ends_with(".onnx") || path.ends_with(".onnx.json"))
+            {
+                let digest = format!("{:0>64x}", path.len());
+                files.push(if path.ends_with(".onnx") {
+                    serde_json::json!({"type": "file", "path": path, "size": 100, "oid": "a", "lfs": {"oid": digest}})
+                } else {
+                    serde_json::json!({"type": "file", "path": path, "size": 10, "oid": "b"})
+                });
+            }
+        }
     }
-    assert_eq!(
-        SNAPSHOT.trim_end(),
-        made,
-        "CANOA_WRITE_SNAPSHOTS=1 rewrites it"
-    );
+    Ok(Value::Array(files).to_string())
 }
 
 #[test]
-fn the_default_catalog_lists_the_two_voices_with_their_reviewed_digests() {
-    let catalog = parse_models(SNAPSHOT).expect("a catalog");
+fn the_catalog_lists_every_voice_voices_json_holds() {
+    let all: Value = serde_json::from_str(ALL_VOICES).expect("JSON");
+    let keys: alloc::collections::BTreeSet<&str> = all
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert!(
+        keys.len() > 100,
+        "the recording is the whole file: {}",
+        keys.len()
+    );
+    let fields = default_catalog().fields.expect("fields");
+    let fields: Value = serde_json::from_str(&fields).expect("JSON");
+    assert!(
+        fields.get("include").is_none(),
+        "the default names no voice"
+    );
+    let made =
+        catalog_of(DEFAULT_REPO, REVISION, ALL_VOICES, &[], &[], made_listing).expect("a catalog");
+    let ids: alloc::collections::BTreeSet<&str> =
+        made.items.iter().map(|item| item.id.as_str()).collect();
+    assert_eq!(made.items.len(), ids.len(), "no voice is listed twice");
+    assert_eq!(ids, keys, "the voices the catalog lists are the file's");
+}
+
+#[test]
+fn the_recorded_voices_have_their_reviewed_digests() {
+    let catalog = parse_models(&snapshot()).expect("a catalog");
     assert_eq!(catalog.revision.as_deref(), Some(REVISION));
     let ids: Vec<&str> = catalog.items.iter().map(|item| item.id.as_str()).collect();
-    assert_eq!(ids, DEFAULT_VOICES);
+    assert_eq!(ids, VOICES_LOOKED_AT);
     // The model's SHA-256 and size as reviewed, and the size of its description.
     let golden = [
         (
             "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
             63_531_379_u64,
             4972_u64,
-            "public domain (the LJ Speech recordings)",
         ),
         (
             "3ef40a71ea63852cd8ab7e6fa7d2ecdcfa67a0b47c9c48e3f10e02ee02083ea0",
             63_122_309,
             4963,
-            "Apache License 2.0",
         ),
     ];
-    for (item, (sha256, bytes, json_bytes, licence)) in catalog.items.iter().zip(golden) {
+    for (item, (sha256, bytes, json_bytes)) in catalog.items.iter().zip(golden) {
         let [model, description] = item.files.as_slice() else {
             panic!("two files: {item:?}");
         };
@@ -77,7 +121,10 @@ fn the_default_catalog_lists_the_two_voices_with_their_reviewed_digests() {
             description.url.contains(REVISION) && model.url.contains(REVISION),
             "both are read at the commit"
         );
-        assert_eq!(item.license.as_deref(), Some(licence));
+        assert_eq!(
+            item.license, None,
+            "no licence is claimed for a voice whose card was not read"
+        );
         assert_eq!(item.trust(false), Ok(Trust::Verified), "{}", item.id);
     }
 }
@@ -86,7 +133,11 @@ fn the_default_catalog_lists_the_two_voices_with_their_reviewed_digests() {
 fn the_default_catalog_registers_a_pinned_source_the_host_can_read() {
     let default = default_catalog();
     assert_eq!(default.problem(Some(MODELS_FORMAT)), None);
-    assert_eq!(default.pin.as_deref(), Some(REVISION));
+    assert_eq!(
+        default.pin, None,
+        "it follows the repository's default branch"
+    );
+    assert_eq!(default.snapshot, None, "no list is shipped");
     assert_eq!(default.provider, SOURCE);
     let info = PiperVoices.describe().expect("described");
     assert_eq!(info.problem(), None);
@@ -216,12 +267,13 @@ impl SourceFetch for Forward {
 fn the_source_reads_the_commit_it_is_pinned_at_and_answers_the_catalog() {
     let fields = default_catalog().fields.expect("fields");
     let (answer, asked) = read(ReadRequest::new("piper", "rhasspy", fields).pinned(REVISION));
-    assert_eq!(answer.expect("a catalog").trim_end(), SNAPSHOT.trim_end());
+    let made = parse_models(&answer.expect("a catalog")).expect("a document");
+    assert_eq!(made.items.len(), 3, "every voice the recording holds");
     assert!(
         asked.iter().all(|url| !url.contains("/revision/")),
         "a commit needs no lookup: {asked:?}"
     );
-    assert_eq!(asked.len(), 3, "voices.json and one folder for each voice");
+    assert_eq!(asked.len(), 4, "voices.json and one folder for each voice");
 }
 
 #[test]
@@ -274,8 +326,9 @@ fn blob_id(bytes: &[u8]) -> String {
 
 #[test]
 #[ignore = "reaches huggingface.co"]
-fn the_real_listings_at_the_pinned_commit_give_the_snapshot_and_the_blob_ids_match_the_files() {
-    let fields = default_catalog().fields.expect("fields");
+fn the_real_listings_at_the_pinned_commit_give_the_recorded_voices_and_the_blob_ids_match_the_files()
+ {
+    let fields = serde_json::json!({"include": VOICES_LOOKED_AT}).to_string();
     let request = ReadRequest::new("piper", "rhasspy", fields).pinned(REVISION);
     let answer = PiperVoices
         .read(
@@ -284,7 +337,7 @@ fn the_real_listings_at_the_pinned_commit_give_the_snapshot_and_the_blob_ids_mat
             Live.into_object(),
         )
         .expect("a catalog");
-    assert_eq!(answer.trim_end(), SNAPSHOT.trim_end());
+    assert_eq!(answer.trim_end(), snapshot());
     // The control: the blob id the listing gave is the id of the file the URL serves, and that file's SHA-256 is the one reviewed, so
     // the two ways of checking it vouch for the same bytes.
     let catalog = parse_models(&answer).expect("a document");
@@ -306,41 +359,4 @@ fn the_real_listings_at_the_pinned_commit_give_the_snapshot_and_the_blob_ids_mat
         let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         assert_eq!(hex, sha256, "{}", file.file);
     }
-}
-
-#[test]
-#[ignore = "needs CANOA_DEPS to hold cdn/huggingface.co/ (python tools/build.py deps sync)"]
-fn the_snapshot_is_what_the_source_makes_of_the_documents_the_deps_branch_keeps() {
-    let deps = std::env::var("CANOA_DEPS").expect("CANOA_DEPS names a deps checkout");
-    let read = |path: String| {
-        std::fs::read_to_string(format!("{deps}/cdn/huggingface.co/{path}"))
-            .expect("the document, synced")
-    };
-    let voices = read(format!("{DEFAULT_REPO}/raw/{REVISION}/voices.json"));
-    let tree = |folder: &str| {
-        read(format!(
-            "api/models/{DEFAULT_REPO}/tree/{REVISION}/{folder}"
-        ))
-    };
-    let ljspeech = tree("en/en_US/ljspeech/medium");
-    let claude = tree("es/es_MX/claude/high");
-    let include: Vec<String> = DEFAULT_VOICES.map(str::to_owned).to_vec();
-    let made = catalog_of(
-        DEFAULT_REPO,
-        REVISION,
-        &voices,
-        &include,
-        &[],
-        |folder| match folder {
-            "en/en_US/ljspeech/medium" => Ok(ljspeech.clone()),
-            "es/es_MX/claude/high" => Ok(claude.clone()),
-            other => Err(ProviderError::new(
-                Status::GUATIAO_ERR_UNSUPPORTED,
-                format!("no document for {other}").as_str(),
-            )),
-        },
-    )
-    .expect("a catalog")
-    .to_json();
-    assert_eq!(made, SNAPSHOT.trim_end());
 }

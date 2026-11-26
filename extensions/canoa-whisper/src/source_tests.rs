@@ -4,34 +4,41 @@ use canoa::store::catalog::{MODELS_FORMAT, Trust, parse_models};
 use coqui_acp_harness::LocalSpawner;
 
 use super::*;
-use crate::catalog::{DEFAULT_FILES, REVISION, SNAPSHOT, default_catalog};
+use crate::catalog::default_catalog;
+
+/// The revision the recorded listing was taken at.
+const REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
 
 /// What Hugging Face answered for `GET /api/models/ggerganov/whisper.cpp/tree/<REVISION>`.
 const LISTING: &str = include_str!("../tests/fixtures/hf_tree_5359861c.json");
 
+/// The files the tests read out of the recorded listing: the models the expected values below were reviewed for.
+const FILES: [&str; 8] = [
+    "ggml-base.bin",
+    "ggml-base.en.bin",
+    "ggml-tiny.bin",
+    "ggml-tiny.en.bin",
+    "ggml-small-q5_1.bin",
+    "ggml-small.bin",
+    "ggml-small.en.bin",
+    "ggml-large-v3-turbo-q5_0.bin",
+];
+
 fn default_include() -> Vec<String> {
-    DEFAULT_FILES.map(str::to_owned).to_vec()
+    FILES.map(str::to_owned).to_vec()
+}
+
+/// The fields of the default catalog, with the files the tests look at.
+fn default_fields() -> String {
+    serde_json::json!({"repo": DEFAULT_REPO, "include": FILES}).to_string()
+}
+
+fn snapshot() -> String {
+    default_models().to_json()
 }
 
 fn default_models() -> ModelsCatalog {
     catalog_of(DEFAULT_REPO, REVISION, LISTING, &default_include(), &[]).expect("a catalog")
-}
-
-#[test]
-fn the_shipped_snapshot_is_what_the_source_makes_of_the_recorded_listing() {
-    let made = default_models().to_json();
-    if std::env::var_os("CANOA_WRITE_SNAPSHOTS").is_some() {
-        std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/catalogs/ggerganov.json"),
-            format!("{made}\n"),
-        )
-        .expect("written");
-    }
-    assert_eq!(
-        SNAPSHOT.trim_end(),
-        made,
-        "CANOA_WRITE_SNAPSHOTS=1 rewrites it"
-    );
 }
 
 /// The eight models of the default catalog as reviewed (size, label and SHA-256), the control for what the source reads.
@@ -88,7 +95,7 @@ const GOLDEN: [(&str, &str, u64, &str); 8] = [
 
 #[test]
 fn the_default_catalog_lists_the_eight_models_with_their_reviewed_digests() {
-    let catalog = parse_models(SNAPSHOT).expect("a catalog");
+    let catalog = parse_models(&snapshot()).expect("a catalog");
     assert_eq!(catalog.revision.as_deref(), Some(REVISION));
     assert_eq!(catalog.items.len(), GOLDEN.len());
     for (item, (id, label, bytes, sha256)) in catalog.items.iter().zip(GOLDEN) {
@@ -118,7 +125,16 @@ fn the_default_catalog_lists_the_eight_models_with_their_reviewed_digests() {
 fn the_default_catalog_registers_a_pinned_source_the_host_can_read() {
     let default = default_catalog();
     assert_eq!(default.problem(Some(MODELS_FORMAT)), None);
-    assert_eq!(default.pin.as_deref(), Some(REVISION));
+    assert_eq!(default.pin, None, "it follows the repository's branch");
+    assert_eq!(default.snapshot, None, "no list is shipped");
+    assert!(
+        !default
+            .fields
+            .as_deref()
+            .unwrap_or_default()
+            .contains("ggml"),
+        "no model is named"
+    );
     assert_eq!(default.provider, SOURCE);
     let info = WhisperHf.describe().expect("described");
     assert_eq!(info.problem(), None);
@@ -207,9 +223,8 @@ fn read(request: ReadRequest) -> Result<String, ProviderError> {
 
 #[test]
 fn the_source_reads_the_listing_at_its_pin_and_answers_the_catalog() {
-    let fields = default_catalog().fields.expect("fields");
-    let answer = read(ReadRequest::new("whisper", "ggerganov", fields).pinned(REVISION));
-    assert_eq!(answer.expect("a catalog").trim_end(), SNAPSHOT.trim_end());
+    let answer = read(ReadRequest::new("whisper", "ggerganov", default_fields()).pinned(REVISION));
+    assert_eq!(answer.expect("a catalog").trim_end(), snapshot());
 }
 
 #[test]
@@ -243,9 +258,8 @@ impl SourceFetch for Live {
 
 #[test]
 #[ignore = "reaches huggingface.co"]
-fn the_real_listing_at_the_pinned_revision_gives_the_shipped_snapshot() {
-    let fields = default_catalog().fields.expect("fields");
-    let request = ReadRequest::new("whisper", "ggerganov", fields).pinned(REVISION);
+fn the_real_listing_at_the_pinned_revision_gives_the_recorded_catalog() {
+    let request = ReadRequest::new("whisper", "ggerganov", default_fields()).pinned(REVISION);
     let answer = WhisperHf
         .read(
             request,
@@ -253,19 +267,5 @@ fn the_real_listing_at_the_pinned_revision_gives_the_shipped_snapshot() {
             Live.into_object(),
         )
         .expect("a catalog");
-    assert_eq!(answer.trim_end(), SNAPSHOT.trim_end());
-}
-
-#[test]
-#[ignore = "needs CANOA_DEPS to hold cdn/huggingface.co/ (python tools/build.py deps sync)"]
-fn the_snapshot_is_what_the_source_makes_of_the_document_the_deps_branch_keeps() {
-    let deps = std::env::var("CANOA_DEPS").expect("CANOA_DEPS names a deps checkout");
-    let listing = std::fs::read_to_string(format!(
-        "{deps}/cdn/huggingface.co/api/models/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1"
-    ))
-    .expect("the document, synced");
-    let made = catalog_of(DEFAULT_REPO, REVISION, &listing, &default_include(), &[])
-        .expect("a catalog")
-        .to_json();
-    assert_eq!(made, SNAPSHOT.trim_end());
+    assert_eq!(answer.trim_end(), snapshot());
 }

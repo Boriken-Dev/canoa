@@ -143,15 +143,6 @@ fn megabytes(bytes: u64) -> u64 {
     (bytes + 500_000) / 1_000_000
 }
 
-/// What a voice's data is licensed as, for the voices whose licence was read from their model cards; none for any other.
-fn licence_of(key: &str) -> Option<&'static str> {
-    match key {
-        "en_US-ljspeech-medium" => Some("public domain (the LJ Speech recordings)"),
-        "es_MX-claude-high" => Some("Apache License 2.0"),
-        _ => None,
-    }
-}
-
 /// The catalog of the voices in `voices` (a repository's `voices.json`) at `revision`, with each voice's digests read from the file
 /// listing `listing` answers for the voice's folder.
 ///
@@ -270,7 +261,6 @@ fn item_of(
     );
     let mut item = ModelItem::new(key, format!("{name} ({spoken}, {quality})"));
     item.tags = vec![family.to_owned(), quality.to_owned()];
-    item.license = licence_of(key).map(str::to_owned);
     item.facts = vec![
         ("Language".to_owned(), spoken),
         ("Quality".to_owned(), quality.to_owned()),

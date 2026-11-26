@@ -41,9 +41,6 @@ pub fn catalog_of(repo: &str, revision: &str, listing: &str, include: &[String],
 pub mod catalog {
     pub const LABEL: &str = "ggerganov";    // the default catalog's label: `[store.whisper.catalogs.ggerganov]`
     pub const DEFAULT_REPO: &str;           // ggerganov/whisper.cpp
-    pub const REVISION: &str;               // the commit the default catalog is pinned to, and the digests reviewed at
-    pub const DEFAULT_FILES: [&str; 8];     // the files it offers, `base` first
-    pub const SNAPSHOT: &str;               // what the source answers at REVISION (`catalogs/ggerganov.json`), shipped so the page is full with no network
     pub const ENDPOINTS: [&str; 6];         // where the files are downloaded from: the repository's files and the hosts Hugging Face sends a download on to
     pub fn default_catalog() -> DefaultCatalog;
 }
@@ -51,7 +48,7 @@ pub mod catalog {
 
 ## The models page and the speech offer
 
-The type has no program: `WhisperExtension` names no store, and the host keeps the type's files under its own id in the shelf (`<shelf>/whisper/models`). It holds no model, size or digest: the type registers one catalog, `ggerganov` (`CatalogWords` in `canoa.models/1`), whose source `whisper_hf` reads Hugging Face's file listing of the repository at the pinned `REVISION` (`GET /api/models/<repo>/tree/<revision>`), takes each large file's SHA-256 from `lfs.oid`, and names a model from its file name (`ggml-small-q5_1.bin` is `small-q5_1`, "Small, every language, compressed"). The default offers the eight files of `DEFAULT_FILES`; a person's entry replaces the catalog by its label, adds another repository, or widens `include` (every `ggml-*.bin` file is 33 models) or narrows it. A listing that is not pinned follows the branch `main`. The host lists the catalog's models on the page with their badge and downloads a row's file checked by that digest. `WhisperModels::list` answers no row of its own.
+The type has no program: `WhisperExtension` names no store, and the host keeps the type's files under its own id in the shelf (`<shelf>/whisper/models`). It holds no model, size or digest: the type registers one catalog, `ggerganov` (`CatalogWords` in `canoa.models/1`), whose source `whisper_hf` reads Hugging Face's file listing of the repository at the entry's `pin`, or `main` when it has none (`GET /api/models/<repo>/tree/<revision>`), takes each large file's SHA-256 from `lfs.oid`, and names a model from its file name (`ggml-small-q5_1.bin` is `small-q5_1`, "Small, every language, compressed"). The default lists every `ggml-*.bin` file of the listing and ships no list: with no network and nothing read before, the page is empty, with the reason. A person's entry replaces the catalog by its label, adds another repository, or narrows `include`. The host lists the catalog's models on the page with their badge and downloads a row's file checked by that digest. `WhisperModels::list` answers no row of its own.
 
 `describe().speech` is `SpeechService::in_process(.., "speech_whisper")`. `service` lists, with `query.models`, the models installed in the folder (every `ggml-<id>.bin`, the default catalog's first) and answers `settings`: the `speech_whisper` settings for `query.model` when that is installed, else for the first that is (`model`, `models_dir`); with no folder or no model it answers `unavailable` in its own words. The host writes the person's provider from those settings.
 
@@ -65,5 +62,5 @@ The type has no program: `WhisperExtension` names no store, and the host keeps t
 
 - Logs from whisper.cpp and ggml are discarded (`whisper_rs::install_logging_hooks`), so nothing is written to the host's standard streams.
 - A model is the file `ggml-<id>.bin` in the folder, whatever catalog it came from, so a file the person drops there runs.
-- The provider's tests that run a model (`tests/speech.rs`) download `tiny` (from the shipped catalog's address) and a recording with `curl` into a temporary folder, check the model's SHA-256, and are ignored without the network: `cargo test -p canoa-whisper -- --ignored`.
+- The provider's tests that run a model (`tests/speech.rs`) download `tiny` (from the address a recorded listing gives) and a recording with `curl` into a temporary folder, check the model's SHA-256, and are ignored without the network: `cargo test -p canoa-whisper -- --ignored`.
 - When a `whisper-rs-sys` that bundles whisper.cpp 1.9 or later is published, drop the `[patch.crates-io]` entry and `third_party/whisper-rs-sys`.

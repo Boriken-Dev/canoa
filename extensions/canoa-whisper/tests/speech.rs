@@ -17,12 +17,16 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use canoa::speech::{AudioFormat, Hints, OpenRequest, PCM_S16LE, SpeechProvider};
-use canoa::store::catalog::{FileCheck, parse_models};
-use canoa_whisper::catalog::SNAPSHOT;
+use canoa::store::catalog::FileCheck;
+use canoa_whisper::catalog::DEFAULT_REPO;
+use canoa_whisper::catalog_of;
 use canoa_whisper::{WhisperSettings, WhisperSpeech, is_loaded, unload};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_harness::LocalSpawner;
 use sha2::{Digest, Sha256};
+
+/// The revision the recorded listing was taken at.
+const REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
 
 const CLIP: &str = "https://raw.githubusercontent.com/ggml-org/whisper.cpp/master/samples/jfk.wav";
 
@@ -44,7 +48,9 @@ fn fixture(name: &str) -> (PathBuf, Vec<u8>) {
     let dir = std::env::temp_dir().join(format!("canoa-whisper-it-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a folder");
-    let catalog = parse_models(SNAPSHOT).expect("the shipped catalog");
+    let listing = include_str!("fixtures/hf_tree_5359861c.json");
+    let include = ["ggml-tiny.bin".to_owned()];
+    let catalog = catalog_of(DEFAULT_REPO, REVISION, listing, &include, &[]).expect("the catalog");
     let tiny = catalog
         .items
         .iter()

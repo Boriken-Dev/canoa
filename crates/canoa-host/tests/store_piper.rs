@@ -321,8 +321,24 @@ fn the_real_release_installs_and_speaks() {
         .to_path_buf();
     println!("installed at {}", copy.display());
     // The voices are the shipped catalog's, fetched as the Models page does, each checked by the digest the catalog gives.
-    let catalog = canoa::store::catalog::parse_models(canoa_piper::catalog::SNAPSHOT)
-        .expect("the shipped catalog");
+    let include = [
+        "en_US-ljspeech-medium".to_owned(),
+        "es_MX-claude-high".to_owned(),
+    ];
+    let catalog = canoa_piper::catalog_of(
+        canoa_piper::catalog::DEFAULT_REPO,
+        "4a409e3cbfd0a189930b38f127a38e107677e8ac",
+        include_str!("../../../extensions/canoa-piper/tests/fixtures/voices_all_4a409e3c.json"),
+        &include,
+        &[],
+        |folder| {
+            let tree =
+                include_str!("../../../extensions/canoa-piper/tests/fixtures/trees_4a409e3c.json");
+            let trees: serde_json::Value = serde_json::from_str(tree).expect("JSON");
+            Ok(trees[folder].to_string())
+        },
+    )
+    .expect("the catalog");
     let inside = copy
         .strip_prefix(&staging)
         .expect("inside the staging folder");
