@@ -145,10 +145,19 @@ impl ModelStore for Models {
 
     fn act(
         &self,
-        _request: ModelAct,
+        request: ModelAct,
         _spawner: Object<dyn ProcessSpawner>,
     ) -> Result<ModelActed, ProviderError> {
-        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "none"))
+        if request.action != "make" {
+            return Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "none"));
+        }
+        // The action an engine names writes what it reads, in the model's folder, and keeps what it was told to write.
+        let folder = request.folder.expect("the models folder");
+        let target = std::path::Path::new(&folder)
+            .join(&request.model)
+            .join("made.bin");
+        std::fs::write(target, request.options.unwrap_or_default()).expect("written");
+        Ok(ModelActed::default())
     }
 
     fn keep(
@@ -268,6 +277,13 @@ impl Fixture {
     fn act(&self, model: &str, action: &str) -> Result<Value, Failed> {
         self.stores.model_act(
             &json!({"type": "stand", "model": model, "action": action}),
+            &self.files,
+        )
+    }
+
+    fn act_with(&self, model: &str, action: &str, options: &Value) -> Result<Value, Failed> {
+        self.stores.model_act(
+            &json!({"type": "stand", "model": model, "action": action, "options": options}),
             &self.files,
         )
     }
@@ -422,4 +438,89 @@ fn a_file_outside_the_places_the_type_downloads_from_is_refused_until_an_entry_n
         std::fs::read(host.root.join("shelf/stand/models/m.bin")).expect("the file"),
         WEIGHTS
     );
+}
+
+/// A catalog of one item with two engines: the first reads what is downloaded, the second a file the action `make` writes after it.
+fn engines_catalog() -> String {
+    json!({"format": "canoa.models/1", "items": [
+        {"id": "m", "label": "M", "files": [{"url": format!("{ORIGIN}base.bin"), "file": "m/a.bin", "check": {"sha256": digest(WEIGHTS)}}],
+         "engines": [
+            {"id": "first", "label": "First", "files": ["m/a.bin"]},
+            {"id": "second", "label": "Second", "files": ["m/made.bin"], "make": "make",
+             "variants": [{"id": "big", "label": "Big", "detail": "all of it"}, {"id": "small", "label": "Small"}]},
+         ]},
+    ]})
+    .to_string()
+}
+
+fn pills(row: &Value) -> Vec<(String, String, String)> {
+    row["engines"]
+        .as_array()
+        .expect("engines")
+        .iter()
+        .map(|engine| {
+            (
+                engine["id"].as_str().expect("id").to_owned(),
+                engine["label"].as_str().expect("label").to_owned(),
+                engine["state"].as_str().expect("state").to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_row_shows_the_engines_its_catalog_names_and_installing_writes_what_the_second_reads() {
+    let host = fixture("engines");
+    let own = host.file("engines.json", &engines_catalog());
+    host.catalogs(&json!({"engines": own}));
+    let row = host.row("m").expect("a row");
+    assert_eq!(
+        pills(&row),
+        [
+            ("first".into(), "First".into(), "available".into()),
+            ("second".into(), "Second".into(), "available".into())
+        ],
+        "an engine is available until what it reads is there"
+    );
+    assert_eq!(
+        row["actions"][0]["steps"],
+        json!(["fetch_files", "make"]),
+        "the download, then each engine's action"
+    );
+    assert_eq!(
+        row["engines"][1]["variants"],
+        json!([{"id": "big", "label": "Big", "detail": "all of it"}, {"id": "small", "label": "Small"}]),
+        "the install dialog's choices, the first the default"
+    );
+    assert!(
+        row["actions"][0]["confirm"]
+            .as_str()
+            .is_some_and(|text| text.contains("Second reads is written")),
+        "{}",
+        row["actions"][0]["confirm"]
+    );
+
+    host.act("m", "fetch_files").expect("downloaded");
+    let row = host.row("m").expect("a row");
+    assert_eq!(pills(&row)[0].2, "installed");
+    assert_eq!(
+        pills(&row)[1].2,
+        "available",
+        "the second is not written yet"
+    );
+
+    host.act_with("m", "make", &json!({"second": "small"}))
+        .expect("written");
+    let made = host.root.join("shelf/stand/models/m/made.bin");
+    assert_eq!(
+        std::fs::read_to_string(&made).expect("the file"),
+        "{\"second\":\"small\"}",
+        "the provider was handed the choice and the models folder"
+    );
+    assert_eq!(pills(&host.row("m").expect("a row"))[1].2, "installed");
+
+    host.act("m", "delete_files").expect("removed");
+    assert!(!made.exists(), "what an engine wrote goes with the row");
+    assert!(!host.root.join("shelf/stand/models/m/a.bin").exists());
+    assert_eq!(pills(&host.row("m").expect("a row"))[0].2, "available");
 }

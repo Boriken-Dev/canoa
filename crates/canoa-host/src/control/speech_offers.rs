@@ -684,6 +684,8 @@ fn enable_in_process(
         ));
     };
     let model = settings.get("model").cloned().unwrap_or(Value::Null);
+    // A service several engines run a model on names the engine that runs this one.
+    let provider = report.provider.as_deref().unwrap_or(provider);
     let mut table = settings;
     table.insert("provider".to_owned(), json!(provider));
     table.insert(OFFER_KEY.to_owned(), json!(offer));

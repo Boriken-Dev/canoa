@@ -370,6 +370,11 @@ impl Stores {
         let mut request = ModelAct::new(model, action);
         request.program = self.type_program(&held.type_id);
         request.home = self.home_text();
+        request.folder = self.models_folder(&held.type_id);
+        request.options = params
+            .get("options")
+            .filter(|options| options.is_object())
+            .map(Value::to_string);
         let acted = held
             .ask(|store, spawner| store.act(request, spawner))
             .map_err(|error| failure(&error))?;
@@ -404,6 +409,15 @@ impl Stores {
             return Err((REFUSED, format!("{model} cannot be installed: {why}")));
         }
         let extra = from.endpoints.get(model).cloned().unwrap_or_default();
+        // What the row's engines had written after the download goes with the row.
+        let mut removable = row.files.clone();
+        removable.extend(
+            from.made
+                .get(model)
+                .into_iter()
+                .flatten()
+                .map(|name| ModelFile::new(String::new(), name, None, String::new())),
+        );
         if action == STEP_FETCH_FILES && from.meta.contains_key(model) {
             let own = match self
                 .type_store(&held.type_id)
@@ -433,7 +447,7 @@ impl Stores {
             // A type with no program: its files are fetched from the origins its model store names, and nothing has to be installed.
             if action == STEP_DELETE_FILES {
                 self.programs
-                    .delete_models_in(&held.type_id, &row.files)
+                    .delete_models_in(&held.type_id, &removable)
                     .map_err(|error| super::refusal(&error))?;
             } else {
                 self.programs
@@ -456,7 +470,7 @@ impl Stores {
         })?;
         if action == STEP_DELETE_FILES {
             self.programs
-                .delete_models(&*store, &row.files)
+                .delete_models(&*store, &removable)
                 .map_err(|error| super::refusal(&error))?;
             return Ok(json!({"ok": true, "model": model, "action": action, "note": null}));
         }

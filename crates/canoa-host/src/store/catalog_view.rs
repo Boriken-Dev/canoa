@@ -5,8 +5,8 @@
 //! with a file that has none says null, and is offered all the same.
 
 use canoa::store::catalog::{
-    CatalogFile, FileCheck, MODELS_FORMAT, ModelItem, RELEASES_FORMAT, Release, parse_models,
-    parse_releases, verified_with,
+    CatalogFile, FileCheck, ItemEngine, MODELS_FORMAT, ModelItem, RELEASES_FORMAT, Release,
+    parse_models, parse_releases, verified_with,
 };
 use serde_json::{Value, json};
 
@@ -62,6 +62,7 @@ fn item_json(item: &ModelItem, catalog: &Value) -> Value {
         "license": item.license,
         "facts": item.facts.iter().map(|(label, value)| json!({"label": label, "value": value})).collect::<Vec<_>>(),
         "files": item.files.iter().map(file_json).collect::<Vec<_>>(),
+        "engines": item.engines.iter().map(ItemEngine::to_value).collect::<Vec<_>>(),
         "verified": item.verified_with(),
         "catalog": catalog,
     })

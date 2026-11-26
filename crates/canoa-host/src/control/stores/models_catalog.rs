@@ -13,7 +13,8 @@ use std::path::Path;
 use canoa::store::Check;
 use canoa::store::catalog::{FileCheck, MODELS_FORMAT, ModelItem, parse_models};
 use canoa::store::models::{
-    Fact, ModelFile, ModelRow, RowAction, STEP_DELETE_FILES, STEP_FETCH_FILES,
+    Fact, ModelFile, ModelRow, RowAction, RowEngine, RowVariant, STEP_DELETE_FILES,
+    STEP_FETCH_FILES,
 };
 use serde_json::{Value, json};
 
@@ -36,6 +37,9 @@ pub(super) struct FromCatalogs {
     pub(super) refused: BTreeMap<String, String>,
     /// For each row, the further origins its catalog's entry says its files are downloaded from.
     pub(super) endpoints: BTreeMap<String, Vec<String>>,
+    /// For each row, the files its engines read that no download supplies: the install's steps write them, and removing the row
+    /// takes them away.
+    pub(super) made: BTreeMap<String, Vec<String>>,
     /// Each catalog of the type, whether it could be read or why not.
     pub(super) sources: Vec<Value>,
 }
@@ -73,17 +77,71 @@ fn installed(item: &ModelItem, folder: Option<&str>) -> bool {
     })
 }
 
+/// The files the engines of `item` read that none of its downloads supplies.
+fn made_files(item: &ModelItem) -> Vec<String> {
+    let mut made: Vec<String> = Vec::new();
+    for file in item.engines.iter().flat_map(|engine| &engine.files) {
+        if !item.files.iter().any(|each| &each.file == file) && !made.contains(file) {
+            made.push(file.clone());
+        }
+    }
+    made
+}
+
+/// What the install of `item` asks for: the download, then each engine's `make` once.
+fn install_steps(item: &ModelItem) -> Vec<String> {
+    let mut steps = vec![STEP_FETCH_FILES.to_owned()];
+    for make in item
+        .engines
+        .iter()
+        .filter_map(|engine| engine.make.as_ref())
+    {
+        if !steps.contains(make) {
+            steps.push(make.clone());
+        }
+    }
+    steps
+}
+
+/// The pills of `item`: each engine, installed when every file it reads is in `folder`.
+fn engines_of(item: &ModelItem, folder: Option<&str>, done: bool) -> Vec<RowEngine> {
+    item.engines
+        .iter()
+        .map(|engine| {
+            let installed = if engine.files.is_empty() {
+                done
+            } else {
+                folder.is_some_and(|folder| {
+                    engine
+                        .files
+                        .iter()
+                        .all(|file| Path::new(folder).join(file).is_file())
+                })
+            };
+            let mut shown = RowEngine::new(&engine.id, &engine.label, installed);
+            shown.variants = engine
+                .variants
+                .iter()
+                .map(|variant| RowVariant::new(&variant.id, &variant.label, variant.detail.clone()))
+                .collect();
+            shown
+        })
+        .collect()
+}
+
 fn row_of(
     id: &str,
     item: &ModelItem,
     entry: &Entry,
     verified: Option<&str>,
     checks: Option<&[Check]>,
+    folder: Option<&str>,
     done: bool,
 ) -> ModelRow {
     let mut row = ModelRow::new(id, item.label.clone());
     row.by.clone_from(&item.by);
     row.tags.clone_from(&item.tags);
+    row.engines = engines_of(item, folder, done);
     row.facts.push(Fact::new(
         "Catalog",
         format!("{} ({})", entry.label, entry.provider),
@@ -118,20 +176,27 @@ fn row_of(
                 [STEP_DELETE_FILES],
             )
         } else {
+            let mut confirm = match verified {
+                Some(algorithm) => format!(
+                    "The files are downloaded and checked against the {algorithm} digest {} gives.",
+                    entry.label
+                ),
+                None => format!(
+                    "{} gives no checksum for these files, so nothing says they are the ones meant.",
+                    entry.label
+                ),
+            };
+            for engine in item.engines.iter().filter(|engine| engine.make.is_some()) {
+                confirm.push_str(&format!(
+                    " Then the file {} reads is written from them.",
+                    engine.label
+                ));
+            }
             RowAction::new(
                 format!("Install {}", item.label),
-                match verified {
-                    Some(algorithm) => format!(
-                        "The files are downloaded and checked against the {algorithm} digest {} gives.",
-                        entry.label
-                    ),
-                    None => format!(
-                        "{} gives no checksum for these files, so nothing says they are the ones meant.",
-                        entry.label
-                    ),
-                },
+                confirm,
                 "Install",
-                [STEP_FETCH_FILES],
+                install_steps(item),
             )
         }];
     } else {
@@ -169,6 +234,7 @@ impl Stores {
         let run = self.catalog_run();
         let folder = self.models_folder(type_id);
         let mut used: BTreeSet<String> = taken.clone();
+        let mut made_by: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for merged in merge(&scope, table_of(&store, type_id)) {
             let entry = match merged.parsed {
                 Ok(entry) => entry,
@@ -230,8 +296,13 @@ impl Stores {
                     &entry,
                     verified.as_deref(),
                     checks.as_deref(),
+                    folder.as_deref(),
                     done,
                 );
+                let written = made_files(item);
+                if !written.is_empty() {
+                    made_by.insert(id.clone(), written);
+                }
                 if let Some(checks) = checks {
                     made.checks.insert(id.clone(), checks);
                 } else {
@@ -248,6 +319,7 @@ impl Stores {
                 made.rows.push(row);
             }
         }
+        made.made = made_by;
         made
     }
 }
