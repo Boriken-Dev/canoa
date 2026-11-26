@@ -21,6 +21,9 @@ pub mod environment;
 #[cfg(feature = "gateway")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gateway")))]
 pub mod gateway;
+#[cfg(feature = "history-store")]
+#[cfg_attr(docsrs, doc(cfg(feature = "history-store")))]
+pub mod history_store;
 #[cfg(feature = "loopback")]
 #[cfg_attr(docsrs, doc(cfg(feature = "loopback")))]
 pub mod loopback;
@@ -44,6 +47,7 @@ pub mod search;
 )]
 pub mod session_service;
 #[cfg(any(
+    feature = "history-store",
     feature = "profile-item",
     feature = "sdk",
     feature = "store",
