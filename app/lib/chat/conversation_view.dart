@@ -46,6 +46,7 @@ import 'reply_voice.dart';
 import 'run_in_terminal.dart';
 import 'session_views.dart';
 import 'session_watch.dart' show SessionWatches;
+import 'turn_actions.dart';
 
 /// The conversation view: header, transcript, permission/question/secret prompts, composer, and optional work panels.
 class ConversationView extends StatefulWidget {
@@ -147,6 +148,10 @@ class _ConversationViewState extends State<ConversationView> {
         .merge(delegationRenderers)
         .merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command)));
     if (reader != null) renderers = renderers.merge(replyRenderers(reader));
+    final handle = widget.handle;
+    if (handle.rewind != null && handle.resend != null && (handle.canRewind?.call(session) ?? false)) {
+      renderers = renderers.merge(turnRenderers(session, TurnActions(rewind: handle.rewind!, resend: handle.resend!)));
+    }
     return _find.decorate(renderers.merge(widget.renderers), session);
   }
 

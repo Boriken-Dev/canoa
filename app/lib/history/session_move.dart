@@ -164,19 +164,25 @@ Future<String> sessionHistory(ControlClient control, {required String entry, req
   return text.toString();
 }
 
-/// Asks the host to move [session] of [entry] to the source [to].
+/// Asks the host to move [session] of [entry] to the source [to]. With [before] the move carries only the turns that came before
+/// that one (counting the person's messages from 0), and [expect] is what the message at that turn says, so a count that does not
+/// agree with the host's history carries nothing.
 Future<MoveReport> requestMove(
   ControlClient control, {
   required String entry,
   required String session,
   required String to,
   String? cwd,
+  int? before,
+  String? expect,
 }) async {
   final report = MoveReport.parse(await control.call('history/move', {
     'entry': entry,
     'session': session,
     'to': to,
     'cwd': ?cwd,
+    'before': ?before,
+    'expect': ?expect,
   }));
   if (report == null) throw StateError('the host answered a move with something that is no report');
   return report;
@@ -201,6 +207,10 @@ Future<String?> pickTarget(BuildContext context, {required Map<String, String> t
 
 /// Moves [session] to [to]: the host carries its history over, [connect] reaches the target's agent, and the new session opens
 /// beside the old one with its history and what did not carry. The old session stays as it was.
+///
+/// With [before] the new session holds only the turns that came before that one of [session], as [requestMove] says, and [to] may
+/// be the source [session] ran on: this is how a conversation goes back to before one of its messages. [notes] says what the new
+/// session opens with, in place of [moveSummary].
 Future<ChatSession> moveSession({
   required SessionStore store,
   required ControlClient control,
@@ -208,11 +218,14 @@ Future<ChatSession> moveSession({
   required String to,
   required Future<VerifiedAgent> Function(String entry) connect,
   required void Function(VerifiedAgent client) keep,
+  int? before,
+  String? expect,
+  List<String> Function(MoveReport report)? notes,
 }) async {
   final from = session.agent;
   final remote = session.remoteSessionId;
   if (remote == null || session.isDraft) throw StateError('That session has not started, so there is nothing to move');
-  final report = await requestMove(control, entry: from, session: remote, to: to, cwd: session.cwd);
+  final report = await requestMove(control, entry: from, session: remote, to: to, cwd: session.cwd, before: before, expect: expect);
   final VerifiedAgent client = await connect(report.entry);
   try {
     // What the agent does not send back when the session opens is shown from the host's copy of the history.
@@ -228,7 +241,7 @@ Future<ChatSession> moveSession({
       sessionId: report.session,
       agent: report.entry,
       cwd: report.cwd,
-      notes: [moveSummary(report, from: from)],
+      notes: notes?.call(report) ?? [moveSummary(report, from: from)],
       carried: carried,
     );
     keep(client);

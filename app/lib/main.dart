@@ -1679,6 +1679,56 @@ class _CanoaAppState extends State<CanoaApp> {
         }
       : const {};
 
+  /// Whether [session] can go back to before one of the person's messages: it has started on a source of this computer, the host
+  /// this app runs holds its history, and no turn is running.
+  bool _canRewind(ChatSession session) =>
+      store.canMove(session) &&
+      _control != null &&
+      widget.served == null &&
+      session.status != SessionStatus.working &&
+      !store.isStarting(session);
+
+  /// Opens a session that goes on from before the person's message number [turn] of [session], and returns it; null, the person
+  /// told why, when it could not be opened. [session] stays as it was, and so do the files. The first message has nothing before
+  /// it, so it opens a new session like [session].
+  Future<ChatSession?> _goBack(ChatSession session, int turn, String text) async {
+    final control = _control;
+    if (control == null) return null;
+    final words = AppText.of(context);
+    try {
+      if (turn == 0) return store.fork(session);
+      final said = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      return await moveSession(
+        store: store,
+        control: await control.ready(),
+        session: session,
+        to: session.agent,
+        before: turn,
+        expect: text,
+        connect: (entry) => _linkAgent(entry, _cacheMeta((lifetime: CacheLifetime.chat, chosen: false))),
+        keep: _ownedClients.add,
+        notes: (_) => [words('turn.rewound', {'text': said.length > 80 ? '${said.substring(0, 79)}…' : said})],
+      );
+    } on Object catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text(words('turn.rewind_failed', {'why': reasonOf(error)}))));
+      return null;
+    }
+  }
+
+  Future<bool> _rewindTo(ChatSession session, int turn, String text) async => await _goBack(session, turn, text) != null;
+
+  /// Goes back as [_rewindTo] does, and sends [edited] in the session that opens.
+  Future<bool> _resendFrom(ChatSession session, int turn, String text, String edited) async {
+    final back = await _goBack(session, turn, text);
+    if (back == null) return false;
+    try {
+      await store.sendTextTo(back, edited, attached: false);
+    } on Object catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text(AppText.of(context)('turn.resend_failed', {'why': reasonOf(error)}))));
+    }
+    return true;
+  }
+
   /// Asks which source to move [session] to, has the host carry its history over, and opens the result beside it.
   Future<void> _moveTo(BuildContext context, ChatSession session) async {
     final control = _control;
@@ -3168,6 +3218,9 @@ class _CanoaAppState extends State<CanoaApp> {
     _conversation
       ..moveTargets = _moveTargets
       ..move = _moveTo
+      ..canRewind = _canRewind
+      ..rewind = _rewindTo
+      ..resend = _resendFrom
       ..canListImported = _canListImported
       ..imported = _importedFor
       ..showImported = _showImported;

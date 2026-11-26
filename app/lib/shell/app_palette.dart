@@ -35,6 +35,12 @@ final class ConversationHandle {
   Map<String, String> Function(ChatSession)? moveTargets;
   Future<void> Function(BuildContext, ChatSession)? move;
 
+  /// Whether a conversation can go back to before one of its messages, and the going back, with an edited message sent after it or
+  /// not; set by the app.
+  bool Function(ChatSession)? canRewind;
+  Future<bool> Function(ChatSession, int turn, String text)? rewind;
+  Future<bool> Function(ChatSession, int turn, String text, String edited)? resend;
+
   /// The sessions the host brought in for a session's source, for Earlier conversations, whether it has any to list, and the
   /// showing of one; set by the app.
   bool Function(ChatSession)? canListImported;
