@@ -1,7 +1,6 @@
 # canoa-whispercpp
 
-Canoa's package for whisper.cpp: the Store type that lists its models (each installed on its own, checked against its publisher's
-SHA-256) and the speech provider that runs a model inside the host's own process, so dictation runs on the host's processor and
+Canoa's package for whisper.cpp: the speech provider that runs a model (one the Whisper type of `canoa-whisper` installed) inside the host's own process, so dictation runs on the host's processor and
 the audio goes nowhere else. There is no program to install.
 
 A build that does not carry it has no whisper.cpp models or offer. Compiling it compiles whisper.cpp: cmake, a C++ compiler and

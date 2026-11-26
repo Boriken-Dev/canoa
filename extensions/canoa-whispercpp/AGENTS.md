@@ -1,10 +1,10 @@
 # `canoa-whispercpp` — API header
 
-Header-file-style reference for `canoa-whispercpp`: whisper.cpp for a Canoa host (the Store type that lists its models, the models page of that type, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
+Header-file-style reference for `canoa-whispercpp`: whisper.cpp for a Canoa host (the `speech_provider` that transcribes with a model inside the host's own process, and the converter that writes the file it reads from a Hugging Face Whisper folder), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![deny(unsafe_code)]`, with one module that allows it: `src/native.rs` holds the two foreign calls the converter makes (a read-only memory map of `model.safetensors`, and `ggml_quantize_chunk` with `ggml_row_size`), each behind a safe function. Depends on `canoa` (features `store`, `speech`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `safetensors`, `half`, `memmap2`, `whisper-rs-sys` and `whisper-rs` 0.16.0, whose `whisper-rs-sys` is replaced (`[patch.crates-io]`) by the fork `Boriken-Dev/whisper-rs-sys` at its `main` (the crate's 0.15.0 as the first commit, then whisper.cpp v1.9.6 in place of the 1.8.3 it carries, the Windows on ARM build and the CPU target option as commits on top; the deps branch vendors it like the other git crates). whisper-rs 0.16's safe API compiles against 1.9.6 unchanged. cmake compiles the sources with the crate.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![deny(unsafe_code)]`, with one module that allows it: `src/native.rs` holds the two foreign calls the converter makes (a read-only memory map of `model.safetensors`, and `ggml_quantize_chunk` with `ggml_row_size`), each behind a safe function. Depends on `canoa` (feature `speech`), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `safetensors`, `half`, `memmap2`, `whisper-rs-sys` and `whisper-rs` 0.16.0, whose `whisper-rs-sys` is replaced (`[patch.crates-io]`) by the fork `Boriken-Dev/whisper-rs-sys` at its `main` (the crate's 0.15.0 as the first commit, then whisper.cpp v1.9.6 in place of the 1.8.3 it carries, the Windows on ARM build and the CPU target option as commits on top; the deps branch vendors it like the other git crates). whisper-rs 0.16's safe API compiles against 1.9.6 unchanged. cmake compiles the sources with the crate.
 
-What a host loads is `library` (below). The host names none of it: it carries the library as it carries any other, lists the type and its models through the generic Store calls and makes the speech offer from what `WhisperModels::service` answers.
+What a host loads is `library` (below). The host names none of it: it carries the library as it carries any other. The models are the Whisper type's (`canoa-whisper`), whose install calls `convert`; this crate has no Store type, catalog or model list of its own.
 
 ## Building
 
@@ -19,46 +19,28 @@ Compiling the crate compiles whisper.cpp (C and C++), so a build needs a C++ too
 
 ```rust
 pub const LIBRARY: &str = "canoa-whispercpp";   // the name `library` is registered under
-pub const NAME: &str = "whisper.cpp";        // what it is called to the person: its rows, facts and speech offer
-pub const STORE_TYPE: &str = "whispercpp";   // the id of the Store type, and of its speech offer
 pub const GGML_FILE: &str = "ggml.bin";      // the file `canoa-whisper`'s install writes in a model's folder: <models>/<id>/ggml.bin
 pub const GGML_RECORD: &str = "ggml.json";   // what it recorded of it: `precision`, `bytes`, `sha256`
 pub const PROVIDER: &str = "speech_whisper"; // the id of the speech provider
 pub const IDLE: Duration;                    // 5 minutes: how long a loaded model is kept without a recording
 
 /// What a host links: handed to `Registry::register_local`.
-pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // WhisperExtension, WhisperModels, WhisperHf, WhisperSpeech
+pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // WhisperSpeech
 
-pub struct WhisperExtension;   // a `store_extension`, id "whispercpp_extension": the type `whispercpp` ("whisper.cpp", icon `chip`, no program store, models `whisper_models`)
-pub struct WhisperModels;      // a `model_store`, id "whispercpp_models": the speech offer's side of the type (its endpoints, `service`); the page's rows are the catalogs'
 pub struct WhisperSpeech;      // a `speech_provider`, id "speech_whisper", built `From<WhisperSettings>`
 pub struct WhisperSettings { pub model: String, pub models_dir: String, pub threads: Option<u32>, pub beam_size: u32, pub flash_attention: bool }   // `WhisperSettings::new(model, models_dir)`; beam_size defaults to 5, flash_attention to true
 pub fn unload();               // frees the model held
 pub fn is_loaded() -> bool;    // whether a model is held
 
-pub struct WhisperHf;          // a `catalog_source`, id "whispercpp_hf", serving the type `whispercpp`: the `ggml-*.bin` files of a Hugging Face repository, from its file listing at a revision
-pub struct WhisperHfSettings { pub repo: String, pub include: Vec<String>, pub exclude: Vec<String> }   // repo `ggerganov/whisper.cpp`; patterns with `*` on file names, none meaning every `ggml-*.bin`
-pub const SOURCE: &str = "whispercpp_hf";
-pub fn catalog_of(repo: &str, revision: &str, listing: &str, include: &[String], exclude: &[String]) -> Result<ModelsCatalog, String>;   // what the source makes of a listing
-
 /// A Hugging Face Whisper folder as whisper.cpp's GGML file.
 pub enum Precision { F16, Q5_0, Q5_1, Q8_0 }   // `Precision::ALL`; `suffix()` is "", "-q5_0", "-q5_1", "-q8_0" (as in `ggml-small-q5_1.bin`); `parse("q5_1")`
 pub enum ConvertError { Io(std::io::Error), Unsupported(String) }   // Display says what is missing or unread
 pub fn convert(folder: &Path, output: &Path, precision: Precision) -> Result<(), ConvertError>;
-
-pub mod catalog {
-    pub const LABEL: &str = "ggerganov";    // the default catalog's label: `[store.whispercpp.catalogs.ggerganov]`
-    pub const DEFAULT_REPO: &str;           // ggerganov/whisper.cpp
-    pub const ENDPOINTS: [&str; 6];         // where the files are downloaded from: the repository's files and the hosts Hugging Face sends a download on to
-    pub fn default_catalog() -> DefaultCatalog;
-}
 ```
 
-## The models page and the speech offer
+## The models
 
-The type has no program: `WhisperExtension` names no store, and the host keeps the type's files under its own id in the shelf (`<shelf>/whispercpp/models`). It holds no model, size or digest: the type registers no catalog (its page is empty: the Whisper type of `canoa-whisper` lists the models, and this one stays for its speech offer and for a catalog canoa.cfg adds); the catalog `catalog::default_catalog()` describes, `ggerganov` (`CatalogWords` in `canoa.models/1`), has a source that `whisper_hf` reads Hugging Face's file listing of the repository at the entry's `pin`, or `main` when it has none (`GET /api/models/<repo>/tree/<revision>`), takes each large file's SHA-256 from `lfs.oid`, and names a model from its file name (`ggml-small-q5_1.bin` is `small-q5_1`, "Small, every language, compressed"). The default lists every `ggml-*.bin` file of the listing and ships no list: with no network and nothing read before, the page is empty, with the reason. A person's entry replaces the catalog by its label, adds another repository, or narrows `include`. The host lists the catalog's models on the page with their badge and downloads a row's file checked by that digest. `WhisperModels::list` answers no row of its own.
-
-`describe().speech` is `SpeechService::in_process(.., "speech_whisper")`. `service` lists, with `query.models`, the models installed in the folder (every `ggml-<id>.bin`, the default catalog's first) and answers `settings`: the `speech_whisper` settings for `query.model` when that is installed, else for the first that is (`model`, `models_dir`); with no folder or no model it answers `unavailable` in its own words. The host writes the person's provider from those settings.
+The crate lists and downloads nothing: a model is a folder `<models_dir>/<id>/` of the Whisper type, whose install writes `ggml.bin` (and `ggml.json`) in it with `convert`, and whose speech offer (`canoa-whisper`) names `speech_whisper` and the settings (`model`, `models_dir`) for a model that has the file. No file named `ggml-<id>.bin` is read.
 
 ## The provider
 
@@ -69,8 +51,8 @@ The type has no program: `WhisperExtension` names no store, and the host keeps t
 ## Gotchas
 
 - Logs from whisper.cpp and ggml are discarded (`whisper_rs::install_logging_hooks`), so nothing is written to the host's standard streams.
-- A model is the file `<models_dir>/<id>/ggml.bin` when that exists (what `canoa-whisper`'s install wrote), else `ggml-<id>.bin` in the folder, whatever catalog it came from, so a file the person drops there runs.
-- The provider's tests that run a model (`tests/speech.rs`) download `tiny` (from the address a recorded listing gives) and a recording with `curl` into a temporary folder, check the model's SHA-256, and are ignored without the network: `cargo test -p canoa-whispercpp -- --ignored`.
+- A model is the file `<models_dir>/<id>/ggml.bin`, which `canoa-whisper`'s install (or its action that adds whisper.cpp to a model already installed) writes; `open` refuses a model without it.
+- The provider's tests that run a model (`tests/speech.rs`) download `openai/whisper-tiny`'s folder and a recording with `curl` into a temporary folder, convert it to f16 and are ignored without the network: `cargo test -p canoa-whispercpp -- --ignored`.
 - When a `whisper-rs-sys` that bundles whisper.cpp 1.9 or later and the CPU option is published, drop the `[patch.crates-io]` entry.
 
 ## The converter

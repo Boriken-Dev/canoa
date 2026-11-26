@@ -1,23 +1,25 @@
 # `canoa-candle` — API header
 
-Header-file-style reference for `canoa-candle`: OpenAI's Whisper written in Rust over Hugging Face's Candle, for a Canoa host (the Store type that lists its models, the models page of that type, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
+Header-file-style reference for `canoa-candle`: OpenAI's Whisper written in Rust over Hugging Face's Candle, for a Canoa host (the engine, and the `speech_provider` that transcribes with a model inside the host's own process), so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
 MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `candle-core`, `candle-nn`, `candle-transformers` 0.11 (the `whisper` module), `tokenizers` 0.23 (its regular expressions in Rust: feature `unstable_wasm`) and `serde_json`; with the default feature `host` also `canoa` (features `store`, `speech`), `coqui-acp-api`, `guatiao`, `guatiao-intake` and `rayon`. There is no C or C++ to build and nothing is fetched at build time.
 
-It is offered beside `canoa-whispercpp` (whisper.cpp): the person picks. What a host loads is `library` (below); the host names none of it.
+It is offered beside `canoa-whispercpp` (whisper.cpp): the person picks. What a host loads is `library` (below); the host names none of it. The models are the Whisper type's (`canoa-whisper`, whose `catalog` reads Hugging Face's listing of them, also in the web app); this crate has no Store type, catalog or model list of its own.
 
 ## Features
 
-- `host` (default): the Store type, the models page, the provider and `catalog`.
-- Without it: [`Engine`] and `catalog` alone. It reads bytes and samples, and starts no thread, reads no file and keeps no clock, so the crate compiles to `wasm32-unknown-unknown` (the web app's module is `app/web_whisper`, which links it that way; its build needs `RUSTFLAGS` `-C target-feature=+simd128` and, for the random generator Candle's dependencies use, `--cfg getrandom_backend="wasm_js"`).
+- `host` (default): the speech provider.
+- Without it: [`Engine`] and the names of a model's files alone. It reads bytes and samples, and starts no thread, reads no file and keeps no clock, so the crate compiles to `wasm32-unknown-unknown` (the web app's module is `app/web_whisper`, which links it that way; its build needs `RUSTFLAGS` `-C target-feature=+simd128` and, for the random generator Candle's dependencies use, `--cfg getrandom_backend="wasm_js"`).
 - A debug build on Windows on ARM needs the workspace's `[profile.dev.package.gemm-common]` and `gemm-f16` at `opt-level = 1`: Candle's matrix multiply writes half-precision instructions as inline assembly that assembles only once it is inlined.
 
 ## Exports
 
 ```rust
 pub const LIBRARY: &str = "canoa-candle";    // the name `library` is registered under
-pub const NAME: &str = "Whisper (Candle)";           // what it is called to the person
-pub const STORE_TYPE: &str = "whispercandle";        // the id of the Store type, and of its speech offer
+pub const CONFIG: &str = "config.json";      // the names of the files of a model's folder that `Engine::load` reads
+pub const TOKENIZER: &str = "tokenizer.json";
+pub const WEIGHTS: &str = "model.safetensors";
+pub const FILE_NAMES: [&str; 3] = [CONFIG, TOKENIZER, WEIGHTS];
 pub const PROVIDER: &str = "speech_whisper_candle";  // the id of the speech provider (host)
 pub const IDLE: Duration;                            // 5 minutes: how long a loaded model is kept without a recording (host)
 
@@ -35,35 +37,18 @@ pub struct Transcription { pub text: String, pub language: Option<String> }
 pub struct Error;                                     // Display, std::error::Error
 
 /// What a host links: handed to `Registry::register_local`.
-pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // WhisperCandleExtension, WhisperCandleModels, WhisperCandleSpeech  (host)
+pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // WhisperCandleSpeech  (host)
 
-pub struct WhisperCandleExtension;  // a `store_extension`, id "whispercandle_extension": the type `whispercandle` ("Whisper (Candle)", icon `chip`, no program store, models `whispercandle_models`)
-pub struct WhisperCandleModels;     // a `model_store`, id "whispercandle_models": the speech offer's view of the models folder; the page's rows are the catalogs'
-pub struct WhisperCandleHf;         // a `catalog_source`, id "whispercandle_hf" (`SOURCE`), default label `openai` (`default_catalog()`): fields `author` (openai), `search` (whisper), `include`, `exclude` (default `*.en`: the engine needs language tokens), a pin names a branch or tag
 pub struct WhisperCandleSpeech;     // a `speech_provider`, id "speech_whisper_candle", built `From<WhisperCandleSettings>`
 pub struct WhisperCandleSettings { pub model: String, pub models_dir: String, pub language: Option<String>, pub threads: Option<u32> }   // `new(model, models_dir)`
 pub fn unload();                    // frees the model held
 pub fn is_loaded() -> bool;         // whether a model is held
 
-pub mod catalog {
-    pub const MODELS_API: &str;      // Hugging Face's model API: `?author=..&search=..` lists, `/<owner>/<name>/revision/<rev>?blobs=true` describes
-    pub const ENDPOINTS: [&str; 6];  // where the files are downloaded from: Hugging Face's `openai/` and the hosts it sends a download on to
-    pub const DEFAULT_AUTHOR: &str; pub const DEFAULT_SEARCH: &str; pub const DEFAULT_EXCLUDE: [&str; 1];
-    pub const CONFIG: &str; pub const TOKENIZER: &str; pub const WEIGHTS: &str; pub const FILE_NAMES: [&str; 3];
-    pub enum Check { Sha256(String), GitBlob(String) }   // what the listing states: a large file's SHA-256, a small one's git blob id
-    pub struct File { pub name: String, pub bytes: u64, pub check: Check }
-    pub struct Model { pub id, pub label, pub repository, pub revision: String, pub license: Option<String>, pub files: Vec<File> }   // `url(&File)` (at the commit), `bytes()`, `file(name)`
-    pub fn repositories(listing: &str, include: &[String], exclude: &[String]) -> Result<Vec<String>, String>;   // `*` patterns on the name after the owner
-    pub fn model_of(description: &str) -> Result<Option<Model>, String>;     // none when the repository lacks the three files
-    pub fn models_of<'a>(descriptions: impl IntoIterator<Item = &'a str>) -> Result<Vec<Model>, String>;
-    pub fn runs_model(id: &str) -> bool;   // false for an English-only model (`.en`): the engine detects the language from tokens it lacks
-    pub fn id_of(repository: &str) -> String; pub fn describe_id(id: &str) -> String; pub fn wildcard(pattern: &str, text: &str) -> bool;
-}
 ```
 
-## The models page and the speech offer
+## The models
 
-The type has no program: the host keeps its files under its own id in the shelf (`<shelf>/whispercandle/models`). The type registers no catalog (its page is empty: the Whisper type of `canoa-whisper` lists the models, and this one stays for its speech offer and for a catalog canoa.cfg adds; `default_catalog()` describes the one it had). The rows a catalog gives are (`whispercandle_hf` reads the publisher's repositories at the branch they serve; no model is named in this crate). Each model is a folder `<id>/` of three files: the repository's `config.json`, `tokenizer.json` and `model.safetensors` at the commit the listing was read at, each checked against what the listing states for it (the SHA-256 of a large file, the git blob id of a small one). A model is installed when all three are there; its row offers `fetch_files` until then and `delete_files` once they are. `act` and `keep` refuse `UNSUPPORTED`. `describe().speech` is `SpeechService::in_process(.., "speech_whisper_candle")`; `service` lists the installed models and answers `settings` for the model asked for, else the first installed, or `unavailable` in its own words.
+The crate lists and downloads nothing: a model is a folder `<models_dir>/<id>/` of the three files, which the Whisper type (`canoa-whisper`) installs, and whose speech offer names `speech_whisper_candle` and the settings (`model`, `models_dir`) for a model whose three files are there.
 
 ## The provider
 
@@ -75,4 +60,4 @@ The type has no program: the host keeps its files under its own id in the shelf 
 
 - The mel spectrogram is this crate's own (`mel.rs`: Slaney filters computed, a mixed-radix FFT), single-threaded: Candle's own one spawns threads, which WebAssembly lacks.
 - A clip is read at its real length, not padded to 30 seconds.
-- The tests that run a model (`tests/speech.rs`) download `tiny` and a recording with `curl` into a temporary folder, check each file against what the recorded listing states, and are ignored without the network: `cargo test -p canoa-candle -- --ignored` (use `--release`: Candle is slow unoptimized).
+- The tests that run a model (`tests/speech.rs`) download `openai/whisper-tiny`'s three files and a recording with `curl` into a temporary folder and are ignored without the network: `cargo test -p canoa-candle -- --ignored` (use `--release`: Candle is slow unoptimized).

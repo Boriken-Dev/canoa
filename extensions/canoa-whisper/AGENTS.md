@@ -2,13 +2,15 @@
 
 Header-file-style reference for `canoa-whisper`: OpenAI's Whisper as one Canoa Store type, whose models are read from Hugging Face and whose one download runs on two engines, Candle and whisper.cpp, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa` (features `store`, `speech`), `canoa-candle` (its Hugging Face reader and its settings), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `sha2` and, with the default feature `whispercpp`, `canoa-whispercpp`. Without that feature there is no C or C++ to build, and the models run on Candle alone.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa-candle` (the names of a model's files), `serde_json` and, with the default feature `host`, `canoa` (features `store`, `speech`), `canoa-candle` (its speech provider's settings), `coqui-acp-api`, `guatiao`, `guatiao-intake`, `sha2` and, with the default feature `whispercpp`, `canoa-whispercpp`. Without `whispercpp` there is no C or C++ to build, and the models run on Candle alone. Without `host` only `catalog` is built: it has no thread, file or clock, so it compiles to `wasm32-unknown-unknown`, which the web app (`app/web_whisper`) does to read the same Hugging Face listing.
 
 What a host loads is `library` (below). The host names none of it: it carries the library as it carries any other, and lists the type, its models and its speech offer through the generic Store calls.
 
 ## Exports
 
 ```rust
+pub mod catalog;   // what a Hugging Face listing says of the Whisper repositories (below); always built
+
 pub const LIBRARY: &str = "canoa-whisper";   // the name `library` is registered under
 pub const NAME: &str = "Whisper";            // what the type is called to the person
 pub const STORE_TYPE: &str = "whisper";      // the id of the Store type, and of its speech offer
@@ -28,6 +30,10 @@ pub fn default_catalog() -> DefaultCatalog;   // label `openai`: `[store.whisper
 pub fn catalog_of(revision: &str, models: &[canoa_candle::catalog::Model]) -> Result<ModelsCatalog, String>;   // what the source makes of the repositories it read
 ```
 
+## The catalog
+
+`catalog` reads Hugging Face's API and names no model, size or digest: `MODELS_API`, `ENDPOINTS` (where a download may come from), `DEFAULT_AUTHOR` (`openai`), `DEFAULT_SEARCH` (`whisper`), `DEFAULT_EXCLUDE` (`*.en`, for a list of the models Candle detects a language with), `CONFIG`, `TOKENIZER`, `WEIGHTS` and `FILE_NAMES` (`canoa-candle`'s), `Check` (`Sha256` of a large file, `GitBlob` of a small one), `File`, `Model` (`url(&File)`, `bytes()`, `file(name)`), `repositories(listing, include, exclude)`, `model_of(description)` (none when the repository lacks the three files), `models_of`, `runs_model(id)` (false for a `.en` model: Candle detects the language from tokens it lacks), `id_of`, `describe_id` and `wildcard`.
+
 ## The page
 
 The type has no program and ships no model list. `whisper_hf` lists the publisher's repositories (`GET /api/models?author=openai&search=whisper`), describes each at the branch it serves (`main`, or an entry's `pin`: a branch or tag; `/api/models/<repo>/revision/<rev>?blobs=true`) and answers `canoa.models/1`. A model is one item, a folder `<id>/` of the repository's `config.json`, `tokenizer.json` and `model.safetensors`, each file checked by what the listing states for it (a large file's SHA-256, a small one's git blob id, at the commit the listing was read at), so the badge names those hashes. The id is the repository's name without `whisper-` (`tiny`, `large-v3-turbo`, `tiny.en`).
@@ -35,7 +41,7 @@ The type has no program and ships no model list. `whisper_hf` lists the publishe
 Each item names its engines in its own data, which the application draws as pills (filled once installed, outlined while available):
 
 - **Candle** (`candle`): reads the three downloaded files. Left off a model whose id ends in `.en`: Candle detects the language from tokens an English-only model lacks.
-- **Whisper.cpp** (`whispercpp`, with the feature): reads `<id>/ggml.bin`, which no download supplies. Its action is `write_ggml`, and its variants (`f16`, `q8_0`, `q5_1`, `q5_0`, the full-precision one first and the default) are what the install dialog asks the person to pick.
+- **Whisper.cpp** (`whispercpp`, with the feature): reads `<id>/ggml.bin`, which no download supplies. Its action is `write_ggml`, and its variants (`f16`, `q8_0`, `q5_1`, `q5_0`, the full-precision one first and the default) are what the install dialog asks the person to pick. A model installed while the engine was not there has that pill outlined, and the host's row for it offers the same action again ("Add Whisper.cpp to <model>"), which writes the file from the downloaded folder with no download.
 
 The install is the host's `fetch_files` step (the three files, checked) and then `write_ggml`, which `WhisperModels::act` runs with the models folder and the pick (`ModelAct::folder`, `ModelAct::options` = `{"whispercpp": "<variant>"}`): `canoa_whispercpp::convert` writes `<id>/ggml.bin` from the downloaded folder, and `<id>/ggml.json` records `precision`, `bytes` and the file's `sha256`. A model whose rows do not divide into blocks of 32 is refused a quantized form with the tensor's name; the folder stays installed and `f16` works. Removing the row removes `ggml.bin` and `ggml.json` with the three files.
 
