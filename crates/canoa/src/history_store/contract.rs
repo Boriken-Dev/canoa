@@ -686,7 +686,7 @@ fn requirements_and_refusals(db: &dyn HistoryDb) {
         "a select with no limit",
     );
     assert!(matches!(error, StoreError::Bad(_)));
-    db.close().expect("close");
+    db.release().expect("release");
 }
 
 /// Runs the document half of the contract on `db`, which holds schema version 1 (a store made with [`schema::v1`], or one that is the

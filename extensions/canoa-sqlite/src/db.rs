@@ -1118,7 +1118,7 @@ impl HistoryDb for SqliteDb {
         })
     }
 
-    fn close(&self) -> Result<(), ProviderError> {
+    fn release(&self) -> Result<(), ProviderError> {
         let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         *guard = None;
         Ok(())

@@ -357,7 +357,7 @@ impl HistoryDb for FilesDb {
         )
     }
 
-    fn close(&self) -> Result<(), ProviderError> {
+    fn release(&self) -> Result<(), ProviderError> {
         Ok(())
     }
 }

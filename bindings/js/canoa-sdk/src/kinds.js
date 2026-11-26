@@ -4,6 +4,7 @@
 import { kindsOf } from 'guatiao/kinds';
 
 const described = kindsOf({
+  "format": 1,
   "kinds": [
     {
       "name": "account_provider",
@@ -867,7 +868,7 @@ const described = kindsOf({
     },
     {
       "name": "history_db",
-      "floor_hash": 419223122,
+      "floor_hash": 2218354315,
       "object": true,
       "slots": [
         {
@@ -994,7 +995,7 @@ const described = kindsOf({
           }
         },
         {
-          "name": "close",
+          "name": "release",
           "required": true,
           "fallible": true,
           "args": []

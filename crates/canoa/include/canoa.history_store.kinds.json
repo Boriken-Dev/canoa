@@ -37,7 +37,7 @@
     },
     {
       "name": "history_db",
-      "floor_hash": 419223122,
+      "floor_hash": 2218354315,
       "object": true,
       "doc": "An opened store.",
       "slots": [
@@ -175,7 +175,7 @@
           "doc": "Makes the store smaller; only with the capability `compact`."
         },
         {
-          "name": "close",
+          "name": "release",
           "required": true,
           "fallible": true,
           "args": [],

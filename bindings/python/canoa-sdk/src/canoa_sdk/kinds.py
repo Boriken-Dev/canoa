@@ -634,7 +634,7 @@ class ModelGateway(KindProtocol, Protocol, kind="model_gateway", floor_hash=1955
         ...
 
 
-class HistoryDb(KindProtocol, Protocol, kind="history_db", floor_hash=419223122, is_object=True):
+class HistoryDb(KindProtocol, Protocol, kind="history_db", floor_hash=2218354315, is_object=True):
     """An opened store."""
 
     @required
@@ -699,7 +699,7 @@ class HistoryDb(KindProtocol, Protocol, kind="history_db", floor_hash=419223122,
 
     @required
     @fallible
-    def close(self) -> None:
+    def release(self) -> None:
         """Lets go of the connection or the files."""
         ...
 

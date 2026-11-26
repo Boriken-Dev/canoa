@@ -551,7 +551,7 @@ impl HistoryDb for MemoryDb {
         Err(StoreError::Unsupported("the memory store has nothing to compact".to_owned()).into())
     }
 
-    fn close(&self) -> Result<(), ProviderError> {
+    fn release(&self) -> Result<(), ProviderError> {
         Ok(())
     }
 }

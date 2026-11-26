@@ -75,8 +75,8 @@ impl HistoryDb for Opened {
     fn compact(&self) -> Result<Compacted, ProviderError> {
         self.0.compact()
     }
-    fn close(&self) -> Result<(), ProviderError> {
-        self.0.close()
+    fn release(&self) -> Result<(), ProviderError> {
+        self.0.release()
     }
 }
 
@@ -192,7 +192,7 @@ pub(crate) fn open(
             notice: None,
         }),
         Fit::Newer(stored) => {
-            let _ = db.close();
+            let _ = db.release();
             let mut map: Map<String, Value> = serde_json::from_str(settings).unwrap_or_default();
             map.insert("read_only".to_owned(), Value::Bool(true));
             let db = open_one(&registry, &key, &Value::Object(map).to_string(), home, false)

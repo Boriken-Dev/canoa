@@ -95,8 +95,8 @@ impl HistoryDb for NotAtomic {
     fn compact(&self) -> Result<Compacted, ProviderError> {
         self.0.compact()
     }
-    fn close(&self) -> Result<(), ProviderError> {
-        self.0.close()
+    fn release(&self) -> Result<(), ProviderError> {
+        self.0.release()
     }
 }
 

@@ -1006,7 +1006,7 @@ pub trait HistoryDb: Send + Sync {
     fn compact(&self) -> Result<Compacted, ProviderError>;
 
     /// Lets go of the connection or the files.
-    fn close(&self) -> Result<(), ProviderError>;
+    fn release(&self) -> Result<(), ProviderError>;
 }
 
 /// A history store provider: describes itself and its settings, and opens the store.

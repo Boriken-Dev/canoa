@@ -952,7 +952,7 @@ pub trait HistoryDb: Send + Sync {
     fn sql(&self, q: Sql) -> Result<Rows, ProviderError>;           // capability `sql`: one read-only statement
     fn revision(&self) -> Result<String, ProviderError>;  fn stats(&self) -> Result<Stats, ProviderError>;
     fn compact(&self) -> Result<Compacted, ProviderError>;          // capability `compact`
-    fn close(&self) -> Result<(), ProviderError>;
+    fn release(&self) -> Result<(), ProviderError>;
 }
 ```
 

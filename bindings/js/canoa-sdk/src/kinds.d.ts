@@ -1026,7 +1026,7 @@ export interface HistoryDb {
   /** Makes the store smaller; only with the capability `compact`. */
   compact(): unknown;
   /** Lets go of the connection or the files. */
-  close(): void;
+  release(): void;
 }
 
 /** A caller's handle on a `history_db` table or object: a method per slot. */
@@ -1052,7 +1052,7 @@ export interface HistoryDbRemote extends k.RemoteBase<typeof HistoryDb> {
   /** Makes the store smaller; only with the capability `compact`. */
   compact(): g.Value;
   /** Lets go of the connection or the files. */
-  close(): void;
+  release(): void;
 }
 
 /** An opened store. */
