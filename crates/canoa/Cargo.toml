@@ -131,3 +131,7 @@ required-features = ["config-store"]
 [[test]]
 name = "history_store"
 required-features = ["history-store"]
+
+[[test]]
+name = "history_store_kinds"
+required-features = ["history-store"]

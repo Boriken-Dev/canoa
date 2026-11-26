@@ -4,7 +4,6 @@
 import { kindsOf } from 'guatiao/kinds';
 
 const described = kindsOf({
-  "format": 1,
   "kinds": [
     {
       "name": "account_provider",
@@ -831,6 +830,174 @@ const described = kindsOf({
           "answer": {
             "type": "value"
           }
+        }
+      ]
+    },
+    {
+      "name": "history_store",
+      "floor_hash": 3516192341,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "history_db"
+          }
+        }
+      ]
+    },
+    {
+      "name": "history_db",
+      "floor_hash": 419223122,
+      "object": true,
+      "slots": [
+        {
+          "name": "schema",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "migrate",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "migration",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        },
+        {
+          "name": "select",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "select",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "count",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "select",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "u64"
+          }
+        },
+        {
+          "name": "aggregate",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "aggregate",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "write",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "write",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "sql",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "sql",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "text"
+          }
+        },
+        {
+          "name": "stats",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "compact",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "close",
+          "required": true,
+          "fallible": true,
+          "args": []
         }
       ]
     },
@@ -2147,6 +2314,12 @@ export const ModelGateway = described["model_gateway"];
  * account's gateway.
  */
 export const GatewayLease = described["gateway_lease"];
+
+/** A history store provider: describes itself and its settings, and opens the store. */
+export const HistoryStore = described["history_store"];
+
+/** An opened store. */
+export const HistoryDb = described["history_db"];
 
 /**
  * The models of a Store type, and what the person does with each.

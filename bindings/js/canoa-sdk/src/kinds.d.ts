@@ -977,6 +977,88 @@ export interface GatewayLeaseRemote extends k.RemoteBase<typeof GatewayLease> {
 export declare const GatewayLease: k.DescribedKind<GatewayLease, GatewayLeaseRemote, true>;
 
 /**
+ * A history store provider: describes itself and its settings, and opens the store.
+ *
+ * The `history_store` kind: what a provider of it implements.
+ */
+export interface HistoryStore {
+  /** What this store is, what settings it takes, and how Settings draws its form. */
+  describe(): unknown;
+  /** Opens the store. */
+  open(request: g.Ref): HistoryDb | k.ObjectHandle<typeof HistoryDb>;
+}
+
+/** A caller's handle on a `history_store` table: a method per slot. */
+export interface HistoryStoreRemote extends k.RemoteBase<typeof HistoryStore> {
+  /** What this store is, what settings it takes, and how Settings draws its form. */
+  describe(): g.Value;
+  /** Opens the store. */
+  open(request: unknown): k.ObjectHandle<typeof HistoryDb>;
+}
+
+/** A history store provider: describes itself and its settings, and opens the store. */
+export declare const HistoryStore: k.DescribedKind<HistoryStore, HistoryStoreRemote, false>;
+
+/**
+ * An opened store.
+ *
+ * The `history_db` kind: what an object of it implements.
+ */
+export interface HistoryDb {
+  /** The schema the store holds. */
+  schema(): unknown;
+  /** Applies typed steps, all or none; only a read-write store. */
+  migrate(migration: g.Ref): void;
+  /** Rows of a table, a page at a time. */
+  select(select: g.Ref): unknown;
+  /** How many rows a select keeps, ignoring its order, limit and cursor. */
+  count(select: g.Ref): number | bigint;
+  /** Figures over rows, by group. */
+  aggregate(aggregate: g.Ref): unknown;
+  /** Applies changes, every one or none. */
+  write(write: g.Ref): unknown;
+  /** One read-only statement; only with the capability `sql`. */
+  sql(sql: g.Ref): unknown;
+  /** A text that moves when anything changed, by any writer. */
+  revision(): string;
+  /** How big the store is. */
+  stats(): unknown;
+  /** Makes the store smaller; only with the capability `compact`. */
+  compact(): unknown;
+  /** Lets go of the connection or the files. */
+  close(): void;
+}
+
+/** A caller's handle on a `history_db` table or object: a method per slot. */
+export interface HistoryDbRemote extends k.RemoteBase<typeof HistoryDb> {
+  /** The schema the store holds. */
+  schema(): g.Value;
+  /** Applies typed steps, all or none; only a read-write store. */
+  migrate(migration: unknown): void;
+  /** Rows of a table, a page at a time. */
+  select(select: unknown): g.Value;
+  /** How many rows a select keeps, ignoring its order, limit and cursor. */
+  count(select: unknown): bigint;
+  /** Figures over rows, by group. */
+  aggregate(aggregate: unknown): g.Value;
+  /** Applies changes, every one or none. */
+  write(write: unknown): g.Value;
+  /** One read-only statement; only with the capability `sql`. */
+  sql(sql: unknown): g.Value;
+  /** A text that moves when anything changed, by any writer. */
+  revision(): string;
+  /** How big the store is. */
+  stats(): g.Value;
+  /** Makes the store smaller; only with the capability `compact`. */
+  compact(): g.Value;
+  /** Lets go of the connection or the files. */
+  close(): void;
+}
+
+/** An opened store. */
+export declare const HistoryDb: k.DescribedKind<HistoryDb, HistoryDbRemote, true>;
+
+/**
  * The models of a Store type, and what the person does with each.
  *
  * Every method is required and synchronous, and every object a method is handed is the provider's to destroy. A provider with no

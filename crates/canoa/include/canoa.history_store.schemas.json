@@ -1,0 +1,4419 @@
+{
+  "Cell": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "x-variant-tag": "type",
+    "oneOf": [
+      {
+        "description": "No value.",
+        "properties": {
+          "type": {
+            "const": "null"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ]
+      },
+      {
+        "description": "A boolean.",
+        "properties": {
+          "type": {
+            "const": "bool"
+          },
+          "value": {
+            "type": "boolean",
+            "description": "The value."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value"
+        ]
+      },
+      {
+        "description": "A 64-bit integer.",
+        "properties": {
+          "type": {
+            "const": "int"
+          },
+          "value": {
+            "type": "integer",
+            "minimum": -9223372036854775808,
+            "maximum": 9223372036854775807,
+            "description": "The value."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value"
+        ]
+      },
+      {
+        "description": "A floating-point number.",
+        "properties": {
+          "type": {
+            "const": "real"
+          },
+          "value": {
+            "type": "number",
+            "description": "The value."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value"
+        ]
+      },
+      {
+        "description": "Text.",
+        "properties": {
+          "type": {
+            "const": "text"
+          },
+          "value": {
+            "type": "string",
+            "description": "The value."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value"
+        ]
+      },
+      {
+        "description": "Bytes.",
+        "properties": {
+          "type": {
+            "const": "bytes"
+          },
+          "value": {
+            "type": "bytes",
+            "description": "The value."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value"
+        ]
+      },
+      {
+        "description": "A JSON document, as text.",
+        "properties": {
+          "type": {
+            "const": "json"
+          },
+          "value": {
+            "type": "string",
+            "description": "The document's text."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value"
+        ]
+      }
+    ],
+    "properties": {}
+  },
+  "ColumnType": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "text",
+      "int",
+      "real",
+      "bool",
+      "blob",
+      "json"
+    ],
+    "x-enum-labels": {
+      "text": "Text.",
+      "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+      "real": "A floating-point number.",
+      "bool": "A boolean.",
+      "blob": "Bytes.",
+      "json": "A JSON document."
+    },
+    "properties": {}
+  },
+  "ColumnInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "The column's name."
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "text",
+          "int",
+          "real",
+          "bool",
+          "blob",
+          "json"
+        ],
+        "x-enum-labels": {
+          "text": "Text.",
+          "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+          "real": "A floating-point number.",
+          "bool": "A boolean.",
+          "blob": "Bytes.",
+          "json": "A JSON document."
+        },
+        "description": "What it holds."
+      },
+      "nullable": {
+        "type": "boolean",
+        "description": "Whether it may be null.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "kind"
+    ]
+  },
+  "IndexInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "The index's name, unique in the store."
+      },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The columns, in order."
+      },
+      "unique": {
+        "type": "boolean",
+        "description": "Whether two rows may not share the columns' values.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "columns"
+    ]
+  },
+  "TableInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "The table's name."
+      },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The column's name."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "text",
+                "int",
+                "real",
+                "bool",
+                "blob",
+                "json"
+              ],
+              "x-enum-labels": {
+                "text": "Text.",
+                "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+                "real": "A floating-point number.",
+                "bool": "A boolean.",
+                "blob": "Bytes.",
+                "json": "A JSON document."
+              },
+              "description": "What it holds."
+            },
+            "nullable": {
+              "type": "boolean",
+              "description": "Whether it may be null.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "kind"
+          ]
+        },
+        "description": "Its columns."
+      },
+      "key": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The columns whose values identify a row."
+      },
+      "indexes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The index's name, unique in the store."
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The columns, in order."
+            },
+            "unique": {
+              "type": "boolean",
+              "description": "Whether two rows may not share the columns' values.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "columns"
+          ]
+        },
+        "description": "Its indexes.",
+        "default": []
+      },
+      "requires": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Columns a `select` must test for equality, as a table of one session's lines is only read for that session.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "columns",
+      "key"
+    ]
+  },
+  "SchemaState": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The version of the schema, `0` when the store holds none."
+      },
+      "tables": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The table's name."
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The column's name."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "int",
+                      "real",
+                      "bool",
+                      "blob",
+                      "json"
+                    ],
+                    "x-enum-labels": {
+                      "text": "Text.",
+                      "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+                      "real": "A floating-point number.",
+                      "bool": "A boolean.",
+                      "blob": "Bytes.",
+                      "json": "A JSON document."
+                    },
+                    "description": "What it holds."
+                  },
+                  "nullable": {
+                    "type": "boolean",
+                    "description": "Whether it may be null.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "kind"
+                ]
+              },
+              "description": "Its columns."
+            },
+            "key": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The columns whose values identify a row."
+            },
+            "indexes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The index's name, unique in the store."
+                  },
+                  "columns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The columns, in order."
+                  },
+                  "unique": {
+                    "type": "boolean",
+                    "description": "Whether two rows may not share the columns' values.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "columns"
+                ]
+              },
+              "description": "Its indexes.",
+              "default": []
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Columns a `select` must test for equality, as a table of one session's lines is only read for that session.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "columns",
+            "key"
+          ]
+        },
+        "description": "Its tables."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "version",
+      "tables"
+    ]
+  },
+  "Step": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "x-variant-tag": "step",
+    "oneOf": [
+      {
+        "description": "Creates a table.",
+        "properties": {
+          "step": {
+            "const": "create_table"
+          },
+          "table": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The table's name."
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The column's name."
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "int",
+                        "real",
+                        "bool",
+                        "blob",
+                        "json"
+                      ],
+                      "x-enum-labels": {
+                        "text": "Text.",
+                        "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+                        "real": "A floating-point number.",
+                        "bool": "A boolean.",
+                        "blob": "Bytes.",
+                        "json": "A JSON document."
+                      },
+                      "description": "What it holds."
+                    },
+                    "nullable": {
+                      "type": "boolean",
+                      "description": "Whether it may be null.",
+                      "default": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "kind"
+                  ]
+                },
+                "description": "Its columns."
+              },
+              "key": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The columns whose values identify a row."
+              },
+              "indexes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The index's name, unique in the store."
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The columns, in order."
+                    },
+                    "unique": {
+                      "type": "boolean",
+                      "description": "Whether two rows may not share the columns' values.",
+                      "default": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "columns"
+                  ]
+                },
+                "description": "Its indexes.",
+                "default": []
+              },
+              "requires": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Columns a `select` must test for equality, as a table of one session's lines is only read for that session.",
+                "default": []
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "columns",
+              "key"
+            ],
+            "description": "The table, with its indexes."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "table"
+        ]
+      },
+      {
+        "description": "Adds a column, which must be nullable.",
+        "properties": {
+          "step": {
+            "const": "add_column"
+          },
+          "table": {
+            "type": "string",
+            "description": "The table's name."
+          },
+          "column": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The column's name."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "int",
+                  "real",
+                  "bool",
+                  "blob",
+                  "json"
+                ],
+                "x-enum-labels": {
+                  "text": "Text.",
+                  "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+                  "real": "A floating-point number.",
+                  "bool": "A boolean.",
+                  "blob": "Bytes.",
+                  "json": "A JSON document."
+                },
+                "description": "What it holds."
+              },
+              "nullable": {
+                "type": "boolean",
+                "description": "Whether it may be null.",
+                "default": false
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "kind"
+            ],
+            "description": "The column."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "table",
+          "column"
+        ]
+      },
+      {
+        "description": "Creates an index.",
+        "properties": {
+          "step": {
+            "const": "create_index"
+          },
+          "table": {
+            "type": "string",
+            "description": "The table's name."
+          },
+          "index": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The index's name, unique in the store."
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The columns, in order."
+              },
+              "unique": {
+                "type": "boolean",
+                "description": "Whether two rows may not share the columns' values.",
+                "default": false
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "columns"
+            ],
+            "description": "The index."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "table",
+          "index"
+        ]
+      },
+      {
+        "description": "Drops an index.",
+        "properties": {
+          "step": {
+            "const": "drop_index"
+          },
+          "table": {
+            "type": "string",
+            "description": "The table's name."
+          },
+          "name": {
+            "type": "string",
+            "description": "The index's name."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "table",
+          "name"
+        ]
+      }
+    ],
+    "properties": {}
+  },
+  "Migration": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "to_version": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The version the store has after the steps."
+      },
+      "steps": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-variant-tag": "step",
+          "oneOf": [
+            {
+              "description": "Creates a table.",
+              "properties": {
+                "step": {
+                  "const": "create_table"
+                },
+                "table": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The table's name."
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "The column's name."
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "text",
+                              "int",
+                              "real",
+                              "bool",
+                              "blob",
+                              "json"
+                            ],
+                            "x-enum-labels": {
+                              "text": "Text.",
+                              "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+                              "real": "A floating-point number.",
+                              "bool": "A boolean.",
+                              "blob": "Bytes.",
+                              "json": "A JSON document."
+                            },
+                            "description": "What it holds."
+                          },
+                          "nullable": {
+                            "type": "boolean",
+                            "description": "Whether it may be null.",
+                            "default": false
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "name",
+                          "kind"
+                        ]
+                      },
+                      "description": "Its columns."
+                    },
+                    "key": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The columns whose values identify a row."
+                    },
+                    "indexes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "The index's name, unique in the store."
+                          },
+                          "columns": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "The columns, in order."
+                          },
+                          "unique": {
+                            "type": "boolean",
+                            "description": "Whether two rows may not share the columns' values.",
+                            "default": false
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "name",
+                          "columns"
+                        ]
+                      },
+                      "description": "Its indexes.",
+                      "default": []
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Columns a `select` must test for equality, as a table of one session's lines is only read for that session.",
+                      "default": []
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "columns",
+                    "key"
+                  ],
+                  "description": "The table, with its indexes."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "step",
+                "table"
+              ]
+            },
+            {
+              "description": "Adds a column, which must be nullable.",
+              "properties": {
+                "step": {
+                  "const": "add_column"
+                },
+                "table": {
+                  "type": "string",
+                  "description": "The table's name."
+                },
+                "column": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The column's name."
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "int",
+                        "real",
+                        "bool",
+                        "blob",
+                        "json"
+                      ],
+                      "x-enum-labels": {
+                        "text": "Text.",
+                        "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+                        "real": "A floating-point number.",
+                        "bool": "A boolean.",
+                        "blob": "Bytes.",
+                        "json": "A JSON document."
+                      },
+                      "description": "What it holds."
+                    },
+                    "nullable": {
+                      "type": "boolean",
+                      "description": "Whether it may be null.",
+                      "default": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "kind"
+                  ],
+                  "description": "The column."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "step",
+                "table",
+                "column"
+              ]
+            },
+            {
+              "description": "Creates an index.",
+              "properties": {
+                "step": {
+                  "const": "create_index"
+                },
+                "table": {
+                  "type": "string",
+                  "description": "The table's name."
+                },
+                "index": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The index's name, unique in the store."
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The columns, in order."
+                    },
+                    "unique": {
+                      "type": "boolean",
+                      "description": "Whether two rows may not share the columns' values.",
+                      "default": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "columns"
+                  ],
+                  "description": "The index."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "step",
+                "table",
+                "index"
+              ]
+            },
+            {
+              "description": "Drops an index.",
+              "properties": {
+                "step": {
+                  "const": "drop_index"
+                },
+                "table": {
+                  "type": "string",
+                  "description": "The table's name."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "The index's name."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "step",
+                "table",
+                "name"
+              ]
+            }
+          ]
+        },
+        "description": "The steps, in order."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "to_version",
+      "steps"
+    ]
+  },
+  "Op": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "eq",
+      "ne",
+      "lt",
+      "le",
+      "gt",
+      "ge",
+      "in",
+      "is_null",
+      "not_null",
+      "prefix",
+      "contains",
+      "suffix",
+      "matches"
+    ],
+    "x-enum-labels": {
+      "eq": "Equal to the one value.",
+      "ne": "Not equal to the one value; a null column is not.",
+      "lt": "Less than the one value.",
+      "le": "Less than or equal to the one value.",
+      "gt": "Greater than the one value.",
+      "ge": "Greater than or equal to the one value.",
+      "in": "Equal to any of the values.",
+      "is_null": "The column is null; no value.",
+      "not_null": "The column is not null; no value.",
+      "prefix": "Text that starts with the one value, which is literal.",
+      "contains": "Text that holds the one value, which is literal.",
+      "suffix": "Text that ends with the one value, which is literal.",
+      "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+    },
+    "properties": {}
+  },
+  "Cond": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "column": {
+        "type": "string",
+        "description": "The column."
+      },
+      "op": {
+        "type": "string",
+        "enum": [
+          "eq",
+          "ne",
+          "lt",
+          "le",
+          "gt",
+          "ge",
+          "in",
+          "is_null",
+          "not_null",
+          "prefix",
+          "contains",
+          "suffix",
+          "matches"
+        ],
+        "x-enum-labels": {
+          "eq": "Equal to the one value.",
+          "ne": "Not equal to the one value; a null column is not.",
+          "lt": "Less than the one value.",
+          "le": "Less than or equal to the one value.",
+          "gt": "Greater than the one value.",
+          "ge": "Greater than or equal to the one value.",
+          "in": "Equal to any of the values.",
+          "is_null": "The column is null; no value.",
+          "not_null": "The column is not null; no value.",
+          "prefix": "Text that starts with the one value, which is literal.",
+          "contains": "Text that holds the one value, which is literal.",
+          "suffix": "Text that ends with the one value, which is literal.",
+          "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+        },
+        "description": "The comparison."
+      },
+      "values": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-variant-tag": "type",
+          "oneOf": [
+            {
+              "description": "No value.",
+              "properties": {
+                "type": {
+                  "const": "null"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "description": "A boolean.",
+              "properties": {
+                "type": {
+                  "const": "bool"
+                },
+                "value": {
+                  "type": "boolean",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A 64-bit integer.",
+              "properties": {
+                "type": {
+                  "const": "int"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": -9223372036854775808,
+                  "maximum": 9223372036854775807,
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A floating-point number.",
+              "properties": {
+                "type": {
+                  "const": "real"
+                },
+                "value": {
+                  "type": "number",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "Text.",
+              "properties": {
+                "type": {
+                  "const": "text"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "Bytes.",
+              "properties": {
+                "type": {
+                  "const": "bytes"
+                },
+                "value": {
+                  "type": "bytes",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A JSON document, as text.",
+              "properties": {
+                "type": {
+                  "const": "json"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The document's text."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            }
+          ]
+        },
+        "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "column",
+      "op"
+    ]
+  },
+  "Order": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "column": {
+        "type": "string",
+        "description": "The column; nulls sort lowest."
+      },
+      "desc": {
+        "type": "boolean",
+        "description": "Largest first.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "column"
+    ]
+  },
+  "Select": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "The table."
+      },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The columns to answer, in order; none is all of them.",
+        "default": []
+      },
+      "filter": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string",
+                "description": "The column."
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "ne",
+                  "lt",
+                  "le",
+                  "gt",
+                  "ge",
+                  "in",
+                  "is_null",
+                  "not_null",
+                  "prefix",
+                  "contains",
+                  "suffix",
+                  "matches"
+                ],
+                "x-enum-labels": {
+                  "eq": "Equal to the one value.",
+                  "ne": "Not equal to the one value; a null column is not.",
+                  "lt": "Less than the one value.",
+                  "le": "Less than or equal to the one value.",
+                  "gt": "Greater than the one value.",
+                  "ge": "Greater than or equal to the one value.",
+                  "in": "Equal to any of the values.",
+                  "is_null": "The column is null; no value.",
+                  "not_null": "The column is not null; no value.",
+                  "prefix": "Text that starts with the one value, which is literal.",
+                  "contains": "Text that holds the one value, which is literal.",
+                  "suffix": "Text that ends with the one value, which is literal.",
+                  "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+                },
+                "description": "The comparison."
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "x-variant-tag": "type",
+                  "oneOf": [
+                    {
+                      "description": "No value.",
+                      "properties": {
+                        "type": {
+                          "const": "null"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    {
+                      "description": "A boolean.",
+                      "properties": {
+                        "type": {
+                          "const": "bool"
+                        },
+                        "value": {
+                          "type": "boolean",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A 64-bit integer.",
+                      "properties": {
+                        "type": {
+                          "const": "int"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": -9223372036854775808,
+                          "maximum": 9223372036854775807,
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A floating-point number.",
+                      "properties": {
+                        "type": {
+                          "const": "real"
+                        },
+                        "value": {
+                          "type": "number",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Text.",
+                      "properties": {
+                        "type": {
+                          "const": "text"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Bytes.",
+                      "properties": {
+                        "type": {
+                          "const": "bytes"
+                        },
+                        "value": {
+                          "type": "bytes",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A JSON document, as text.",
+                      "properties": {
+                        "type": {
+                          "const": "json"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The document's text."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    }
+                  ]
+                },
+                "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+                "default": []
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "column",
+              "op"
+            ]
+          }
+        },
+        "description": "Which rows.",
+        "default": []
+      },
+      "order": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "column": {
+              "type": "string",
+              "description": "The column; nulls sort lowest."
+            },
+            "desc": {
+              "type": "boolean",
+              "description": "Largest first.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "column"
+          ]
+        },
+        "description": "The order.",
+        "default": []
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The most rows to answer."
+      },
+      "after": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The `next` of the last reply to this same select."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "table",
+      "limit"
+    ]
+  },
+  "Rows": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The columns of each row."
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "x-variant-tag": "type",
+            "oneOf": [
+              {
+                "description": "No value.",
+                "properties": {
+                  "type": {
+                    "const": "null"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ]
+              },
+              {
+                "description": "A boolean.",
+                "properties": {
+                  "type": {
+                    "const": "bool"
+                  },
+                  "value": {
+                    "type": "boolean",
+                    "description": "The value."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "value"
+                ]
+              },
+              {
+                "description": "A 64-bit integer.",
+                "properties": {
+                  "type": {
+                    "const": "int"
+                  },
+                  "value": {
+                    "type": "integer",
+                    "minimum": -9223372036854775808,
+                    "maximum": 9223372036854775807,
+                    "description": "The value."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "value"
+                ]
+              },
+              {
+                "description": "A floating-point number.",
+                "properties": {
+                  "type": {
+                    "const": "real"
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "The value."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "value"
+                ]
+              },
+              {
+                "description": "Text.",
+                "properties": {
+                  "type": {
+                    "const": "text"
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The value."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "value"
+                ]
+              },
+              {
+                "description": "Bytes.",
+                "properties": {
+                  "type": {
+                    "const": "bytes"
+                  },
+                  "value": {
+                    "type": "bytes",
+                    "description": "The value."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "value"
+                ]
+              },
+              {
+                "description": "A JSON document, as text.",
+                "properties": {
+                  "type": {
+                    "const": "json"
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The document's text."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "value"
+                ]
+              }
+            ]
+          }
+        },
+        "description": "The rows."
+      },
+      "next": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Where the next page starts, when there is one."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "columns",
+      "rows"
+    ]
+  },
+  "AggFn": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "count",
+      "sum",
+      "min",
+      "max"
+    ],
+    "x-enum-labels": {
+      "count": "The rows, or the rows where `column` is not null.",
+      "sum": "The sum of an integer or real column.",
+      "min": "The least value.",
+      "max": "The greatest value."
+    },
+    "properties": {}
+  },
+  "Figure": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "func": {
+        "type": "string",
+        "enum": [
+          "count",
+          "sum",
+          "min",
+          "max"
+        ],
+        "x-enum-labels": {
+          "count": "The rows, or the rows where `column` is not null.",
+          "sum": "The sum of an integer or real column.",
+          "min": "The least value.",
+          "max": "The greatest value."
+        },
+        "description": "The function."
+      },
+      "column": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The column, none for `count` of every row."
+      },
+      "name": {
+        "type": "string",
+        "description": "The column of the answer holding it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "func",
+      "name"
+    ]
+  },
+  "Aggregate": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "The table."
+      },
+      "filter": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string",
+                "description": "The column."
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "ne",
+                  "lt",
+                  "le",
+                  "gt",
+                  "ge",
+                  "in",
+                  "is_null",
+                  "not_null",
+                  "prefix",
+                  "contains",
+                  "suffix",
+                  "matches"
+                ],
+                "x-enum-labels": {
+                  "eq": "Equal to the one value.",
+                  "ne": "Not equal to the one value; a null column is not.",
+                  "lt": "Less than the one value.",
+                  "le": "Less than or equal to the one value.",
+                  "gt": "Greater than the one value.",
+                  "ge": "Greater than or equal to the one value.",
+                  "in": "Equal to any of the values.",
+                  "is_null": "The column is null; no value.",
+                  "not_null": "The column is not null; no value.",
+                  "prefix": "Text that starts with the one value, which is literal.",
+                  "contains": "Text that holds the one value, which is literal.",
+                  "suffix": "Text that ends with the one value, which is literal.",
+                  "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+                },
+                "description": "The comparison."
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "x-variant-tag": "type",
+                  "oneOf": [
+                    {
+                      "description": "No value.",
+                      "properties": {
+                        "type": {
+                          "const": "null"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    {
+                      "description": "A boolean.",
+                      "properties": {
+                        "type": {
+                          "const": "bool"
+                        },
+                        "value": {
+                          "type": "boolean",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A 64-bit integer.",
+                      "properties": {
+                        "type": {
+                          "const": "int"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": -9223372036854775808,
+                          "maximum": 9223372036854775807,
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A floating-point number.",
+                      "properties": {
+                        "type": {
+                          "const": "real"
+                        },
+                        "value": {
+                          "type": "number",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Text.",
+                      "properties": {
+                        "type": {
+                          "const": "text"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Bytes.",
+                      "properties": {
+                        "type": {
+                          "const": "bytes"
+                        },
+                        "value": {
+                          "type": "bytes",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A JSON document, as text.",
+                      "properties": {
+                        "type": {
+                          "const": "json"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The document's text."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    }
+                  ]
+                },
+                "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+                "default": []
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "column",
+              "op"
+            ]
+          }
+        },
+        "description": "Which rows.",
+        "default": []
+      },
+      "group_by": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The columns the rows are grouped by; they come first in the answer, which is ordered by them.",
+        "default": []
+      },
+      "figures": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "func": {
+              "type": "string",
+              "enum": [
+                "count",
+                "sum",
+                "min",
+                "max"
+              ],
+              "x-enum-labels": {
+                "count": "The rows, or the rows where `column` is not null.",
+                "sum": "The sum of an integer or real column.",
+                "min": "The least value.",
+                "max": "The greatest value."
+              },
+              "description": "The function."
+            },
+            "column": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The column, none for `count` of every row."
+            },
+            "name": {
+              "type": "string",
+              "description": "The column of the answer holding it."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "func",
+            "name"
+          ]
+        },
+        "description": "The figures."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "table",
+      "figures"
+    ]
+  },
+  "Update": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "The table."
+      },
+      "filter": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string",
+                "description": "The column."
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "ne",
+                  "lt",
+                  "le",
+                  "gt",
+                  "ge",
+                  "in",
+                  "is_null",
+                  "not_null",
+                  "prefix",
+                  "contains",
+                  "suffix",
+                  "matches"
+                ],
+                "x-enum-labels": {
+                  "eq": "Equal to the one value.",
+                  "ne": "Not equal to the one value; a null column is not.",
+                  "lt": "Less than the one value.",
+                  "le": "Less than or equal to the one value.",
+                  "gt": "Greater than the one value.",
+                  "ge": "Greater than or equal to the one value.",
+                  "in": "Equal to any of the values.",
+                  "is_null": "The column is null; no value.",
+                  "not_null": "The column is not null; no value.",
+                  "prefix": "Text that starts with the one value, which is literal.",
+                  "contains": "Text that holds the one value, which is literal.",
+                  "suffix": "Text that ends with the one value, which is literal.",
+                  "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+                },
+                "description": "The comparison."
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "x-variant-tag": "type",
+                  "oneOf": [
+                    {
+                      "description": "No value.",
+                      "properties": {
+                        "type": {
+                          "const": "null"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    {
+                      "description": "A boolean.",
+                      "properties": {
+                        "type": {
+                          "const": "bool"
+                        },
+                        "value": {
+                          "type": "boolean",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A 64-bit integer.",
+                      "properties": {
+                        "type": {
+                          "const": "int"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": -9223372036854775808,
+                          "maximum": 9223372036854775807,
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A floating-point number.",
+                      "properties": {
+                        "type": {
+                          "const": "real"
+                        },
+                        "value": {
+                          "type": "number",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Text.",
+                      "properties": {
+                        "type": {
+                          "const": "text"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Bytes.",
+                      "properties": {
+                        "type": {
+                          "const": "bytes"
+                        },
+                        "value": {
+                          "type": "bytes",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A JSON document, as text.",
+                      "properties": {
+                        "type": {
+                          "const": "json"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The document's text."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    }
+                  ]
+                },
+                "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+                "default": []
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "column",
+              "op"
+            ]
+          }
+        },
+        "description": "Which rows.",
+        "default": []
+      },
+      "set": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "x-variant-tag": "type",
+          "oneOf": [
+            {
+              "description": "No value.",
+              "properties": {
+                "type": {
+                  "const": "null"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "description": "A boolean.",
+              "properties": {
+                "type": {
+                  "const": "bool"
+                },
+                "value": {
+                  "type": "boolean",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A 64-bit integer.",
+              "properties": {
+                "type": {
+                  "const": "int"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": -9223372036854775808,
+                  "maximum": 9223372036854775807,
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A floating-point number.",
+              "properties": {
+                "type": {
+                  "const": "real"
+                },
+                "value": {
+                  "type": "number",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "Text.",
+              "properties": {
+                "type": {
+                  "const": "text"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "Bytes.",
+              "properties": {
+                "type": {
+                  "const": "bytes"
+                },
+                "value": {
+                  "type": "bytes",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A JSON document, as text.",
+              "properties": {
+                "type": {
+                  "const": "json"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The document's text."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            }
+          ]
+        },
+        "description": "Columns set to a value.",
+        "default": {}
+      },
+      "add": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807
+        },
+        "description": "Integer columns increased in place by an amount (negative decreases), so a counter moves with the rows that made it.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "table"
+    ]
+  },
+  "Change": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "x-variant-tag": "op",
+    "oneOf": [
+      {
+        "description": "Adds a row; a key that exists is a [`StoreError::Conflict`].",
+        "properties": {
+          "op": {
+            "const": "insert"
+          },
+          "table": {
+            "type": "string",
+            "description": "The table."
+          },
+          "row": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "x-variant-tag": "type",
+              "oneOf": [
+                {
+                  "description": "No value.",
+                  "properties": {
+                    "type": {
+                      "const": "null"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "description": "A boolean.",
+                  "properties": {
+                    "type": {
+                      "const": "bool"
+                    },
+                    "value": {
+                      "type": "boolean",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "A 64-bit integer.",
+                  "properties": {
+                    "type": {
+                      "const": "int"
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": -9223372036854775808,
+                      "maximum": 9223372036854775807,
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "A floating-point number.",
+                  "properties": {
+                    "type": {
+                      "const": "real"
+                    },
+                    "value": {
+                      "type": "number",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "Text.",
+                  "properties": {
+                    "type": {
+                      "const": "text"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "Bytes.",
+                  "properties": {
+                    "type": {
+                      "const": "bytes"
+                    },
+                    "value": {
+                      "type": "bytes",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "A JSON document, as text.",
+                  "properties": {
+                    "type": {
+                      "const": "json"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "The document's text."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                }
+              ]
+            },
+            "description": "The row, by column; a column left out is null."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "table",
+          "row"
+        ]
+      },
+      {
+        "description": "Adds a row, or replaces the one with the same key.",
+        "properties": {
+          "op": {
+            "const": "upsert"
+          },
+          "table": {
+            "type": "string",
+            "description": "The table."
+          },
+          "row": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "x-variant-tag": "type",
+              "oneOf": [
+                {
+                  "description": "No value.",
+                  "properties": {
+                    "type": {
+                      "const": "null"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "description": "A boolean.",
+                  "properties": {
+                    "type": {
+                      "const": "bool"
+                    },
+                    "value": {
+                      "type": "boolean",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "A 64-bit integer.",
+                  "properties": {
+                    "type": {
+                      "const": "int"
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": -9223372036854775808,
+                      "maximum": 9223372036854775807,
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "A floating-point number.",
+                  "properties": {
+                    "type": {
+                      "const": "real"
+                    },
+                    "value": {
+                      "type": "number",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "Text.",
+                  "properties": {
+                    "type": {
+                      "const": "text"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "Bytes.",
+                  "properties": {
+                    "type": {
+                      "const": "bytes"
+                    },
+                    "value": {
+                      "type": "bytes",
+                      "description": "The value."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                },
+                {
+                  "description": "A JSON document, as text.",
+                  "properties": {
+                    "type": {
+                      "const": "json"
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "The document's text."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ]
+                }
+              ]
+            },
+            "description": "The row, by column; a column left out is null."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "table",
+          "row"
+        ]
+      },
+      {
+        "description": "Changes rows.",
+        "properties": {
+          "op": {
+            "const": "update"
+          },
+          "update": {
+            "type": "object",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "The table."
+              },
+              "filter": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "column": {
+                        "type": "string",
+                        "description": "The column."
+                      },
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "eq",
+                          "ne",
+                          "lt",
+                          "le",
+                          "gt",
+                          "ge",
+                          "in",
+                          "is_null",
+                          "not_null",
+                          "prefix",
+                          "contains",
+                          "suffix",
+                          "matches"
+                        ],
+                        "x-enum-labels": {
+                          "eq": "Equal to the one value.",
+                          "ne": "Not equal to the one value; a null column is not.",
+                          "lt": "Less than the one value.",
+                          "le": "Less than or equal to the one value.",
+                          "gt": "Greater than the one value.",
+                          "ge": "Greater than or equal to the one value.",
+                          "in": "Equal to any of the values.",
+                          "is_null": "The column is null; no value.",
+                          "not_null": "The column is not null; no value.",
+                          "prefix": "Text that starts with the one value, which is literal.",
+                          "contains": "Text that holds the one value, which is literal.",
+                          "suffix": "Text that ends with the one value, which is literal.",
+                          "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+                        },
+                        "description": "The comparison."
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "x-variant-tag": "type",
+                          "oneOf": [
+                            {
+                              "description": "No value.",
+                              "properties": {
+                                "type": {
+                                  "const": "null"
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "type"
+                              ]
+                            },
+                            {
+                              "description": "A boolean.",
+                              "properties": {
+                                "type": {
+                                  "const": "bool"
+                                },
+                                "value": {
+                                  "type": "boolean",
+                                  "description": "The value."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            },
+                            {
+                              "description": "A 64-bit integer.",
+                              "properties": {
+                                "type": {
+                                  "const": "int"
+                                },
+                                "value": {
+                                  "type": "integer",
+                                  "minimum": -9223372036854775808,
+                                  "maximum": 9223372036854775807,
+                                  "description": "The value."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            },
+                            {
+                              "description": "A floating-point number.",
+                              "properties": {
+                                "type": {
+                                  "const": "real"
+                                },
+                                "value": {
+                                  "type": "number",
+                                  "description": "The value."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            },
+                            {
+                              "description": "Text.",
+                              "properties": {
+                                "type": {
+                                  "const": "text"
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "description": "The value."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            },
+                            {
+                              "description": "Bytes.",
+                              "properties": {
+                                "type": {
+                                  "const": "bytes"
+                                },
+                                "value": {
+                                  "type": "bytes",
+                                  "description": "The value."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            },
+                            {
+                              "description": "A JSON document, as text.",
+                              "properties": {
+                                "type": {
+                                  "const": "json"
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "description": "The document's text."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "type",
+                                "value"
+                              ]
+                            }
+                          ]
+                        },
+                        "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+                        "default": []
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "column",
+                      "op"
+                    ]
+                  }
+                },
+                "description": "Which rows.",
+                "default": []
+              },
+              "set": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "x-variant-tag": "type",
+                  "oneOf": [
+                    {
+                      "description": "No value.",
+                      "properties": {
+                        "type": {
+                          "const": "null"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    {
+                      "description": "A boolean.",
+                      "properties": {
+                        "type": {
+                          "const": "bool"
+                        },
+                        "value": {
+                          "type": "boolean",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A 64-bit integer.",
+                      "properties": {
+                        "type": {
+                          "const": "int"
+                        },
+                        "value": {
+                          "type": "integer",
+                          "minimum": -9223372036854775808,
+                          "maximum": 9223372036854775807,
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A floating-point number.",
+                      "properties": {
+                        "type": {
+                          "const": "real"
+                        },
+                        "value": {
+                          "type": "number",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Text.",
+                      "properties": {
+                        "type": {
+                          "const": "text"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "Bytes.",
+                      "properties": {
+                        "type": {
+                          "const": "bytes"
+                        },
+                        "value": {
+                          "type": "bytes",
+                          "description": "The value."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    },
+                    {
+                      "description": "A JSON document, as text.",
+                      "properties": {
+                        "type": {
+                          "const": "json"
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "The document's text."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "value"
+                      ]
+                    }
+                  ]
+                },
+                "description": "Columns set to a value.",
+                "default": {}
+              },
+              "add": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": -9223372036854775808,
+                  "maximum": 9223372036854775807
+                },
+                "description": "Integer columns increased in place by an amount (negative decreases), so a counter moves with the rows that made it.",
+                "default": {}
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "table"
+            ],
+            "description": "The change."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "update"
+        ]
+      },
+      {
+        "description": "Removes rows.",
+        "properties": {
+          "op": {
+            "const": "delete"
+          },
+          "table": {
+            "type": "string",
+            "description": "The table."
+          },
+          "filter": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "column": {
+                    "type": "string",
+                    "description": "The column."
+                  },
+                  "op": {
+                    "type": "string",
+                    "enum": [
+                      "eq",
+                      "ne",
+                      "lt",
+                      "le",
+                      "gt",
+                      "ge",
+                      "in",
+                      "is_null",
+                      "not_null",
+                      "prefix",
+                      "contains",
+                      "suffix",
+                      "matches"
+                    ],
+                    "x-enum-labels": {
+                      "eq": "Equal to the one value.",
+                      "ne": "Not equal to the one value; a null column is not.",
+                      "lt": "Less than the one value.",
+                      "le": "Less than or equal to the one value.",
+                      "gt": "Greater than the one value.",
+                      "ge": "Greater than or equal to the one value.",
+                      "in": "Equal to any of the values.",
+                      "is_null": "The column is null; no value.",
+                      "not_null": "The column is not null; no value.",
+                      "prefix": "Text that starts with the one value, which is literal.",
+                      "contains": "Text that holds the one value, which is literal.",
+                      "suffix": "Text that ends with the one value, which is literal.",
+                      "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+                    },
+                    "description": "The comparison."
+                  },
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "x-variant-tag": "type",
+                      "oneOf": [
+                        {
+                          "description": "No value.",
+                          "properties": {
+                            "type": {
+                              "const": "null"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "description": "A boolean.",
+                          "properties": {
+                            "type": {
+                              "const": "bool"
+                            },
+                            "value": {
+                              "type": "boolean",
+                              "description": "The value."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "value"
+                          ]
+                        },
+                        {
+                          "description": "A 64-bit integer.",
+                          "properties": {
+                            "type": {
+                              "const": "int"
+                            },
+                            "value": {
+                              "type": "integer",
+                              "minimum": -9223372036854775808,
+                              "maximum": 9223372036854775807,
+                              "description": "The value."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "value"
+                          ]
+                        },
+                        {
+                          "description": "A floating-point number.",
+                          "properties": {
+                            "type": {
+                              "const": "real"
+                            },
+                            "value": {
+                              "type": "number",
+                              "description": "The value."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "value"
+                          ]
+                        },
+                        {
+                          "description": "Text.",
+                          "properties": {
+                            "type": {
+                              "const": "text"
+                            },
+                            "value": {
+                              "type": "string",
+                              "description": "The value."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "value"
+                          ]
+                        },
+                        {
+                          "description": "Bytes.",
+                          "properties": {
+                            "type": {
+                              "const": "bytes"
+                            },
+                            "value": {
+                              "type": "bytes",
+                              "description": "The value."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "value"
+                          ]
+                        },
+                        {
+                          "description": "A JSON document, as text.",
+                          "properties": {
+                            "type": {
+                              "const": "json"
+                            },
+                            "value": {
+                              "type": "string",
+                              "description": "The document's text."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "value"
+                          ]
+                        }
+                      ]
+                    },
+                    "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+                    "default": []
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "column",
+                  "op"
+                ]
+              }
+            },
+            "description": "Which rows."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "table",
+          "filter"
+        ]
+      }
+    ],
+    "properties": {}
+  },
+  "Write": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "ops": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-variant-tag": "op",
+          "oneOf": [
+            {
+              "description": "Adds a row; a key that exists is a [`StoreError::Conflict`].",
+              "properties": {
+                "op": {
+                  "const": "insert"
+                },
+                "table": {
+                  "type": "string",
+                  "description": "The table."
+                },
+                "row": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "x-variant-tag": "type",
+                    "oneOf": [
+                      {
+                        "description": "No value.",
+                        "properties": {
+                          "type": {
+                            "const": "null"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "description": "A boolean.",
+                        "properties": {
+                          "type": {
+                            "const": "bool"
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "A 64-bit integer.",
+                        "properties": {
+                          "type": {
+                            "const": "int"
+                          },
+                          "value": {
+                            "type": "integer",
+                            "minimum": -9223372036854775808,
+                            "maximum": 9223372036854775807,
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "A floating-point number.",
+                        "properties": {
+                          "type": {
+                            "const": "real"
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "Text.",
+                        "properties": {
+                          "type": {
+                            "const": "text"
+                          },
+                          "value": {
+                            "type": "string",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "Bytes.",
+                        "properties": {
+                          "type": {
+                            "const": "bytes"
+                          },
+                          "value": {
+                            "type": "bytes",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "A JSON document, as text.",
+                        "properties": {
+                          "type": {
+                            "const": "json"
+                          },
+                          "value": {
+                            "type": "string",
+                            "description": "The document's text."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "The row, by column; a column left out is null."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "op",
+                "table",
+                "row"
+              ]
+            },
+            {
+              "description": "Adds a row, or replaces the one with the same key.",
+              "properties": {
+                "op": {
+                  "const": "upsert"
+                },
+                "table": {
+                  "type": "string",
+                  "description": "The table."
+                },
+                "row": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "x-variant-tag": "type",
+                    "oneOf": [
+                      {
+                        "description": "No value.",
+                        "properties": {
+                          "type": {
+                            "const": "null"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "description": "A boolean.",
+                        "properties": {
+                          "type": {
+                            "const": "bool"
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "A 64-bit integer.",
+                        "properties": {
+                          "type": {
+                            "const": "int"
+                          },
+                          "value": {
+                            "type": "integer",
+                            "minimum": -9223372036854775808,
+                            "maximum": 9223372036854775807,
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "A floating-point number.",
+                        "properties": {
+                          "type": {
+                            "const": "real"
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "Text.",
+                        "properties": {
+                          "type": {
+                            "const": "text"
+                          },
+                          "value": {
+                            "type": "string",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "Bytes.",
+                        "properties": {
+                          "type": {
+                            "const": "bytes"
+                          },
+                          "value": {
+                            "type": "bytes",
+                            "description": "The value."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      },
+                      {
+                        "description": "A JSON document, as text.",
+                        "properties": {
+                          "type": {
+                            "const": "json"
+                          },
+                          "value": {
+                            "type": "string",
+                            "description": "The document's text."
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "value"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "The row, by column; a column left out is null."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "op",
+                "table",
+                "row"
+              ]
+            },
+            {
+              "description": "Changes rows.",
+              "properties": {
+                "op": {
+                  "const": "update"
+                },
+                "update": {
+                  "type": "object",
+                  "properties": {
+                    "table": {
+                      "type": "string",
+                      "description": "The table."
+                    },
+                    "filter": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "column": {
+                              "type": "string",
+                              "description": "The column."
+                            },
+                            "op": {
+                              "type": "string",
+                              "enum": [
+                                "eq",
+                                "ne",
+                                "lt",
+                                "le",
+                                "gt",
+                                "ge",
+                                "in",
+                                "is_null",
+                                "not_null",
+                                "prefix",
+                                "contains",
+                                "suffix",
+                                "matches"
+                              ],
+                              "x-enum-labels": {
+                                "eq": "Equal to the one value.",
+                                "ne": "Not equal to the one value; a null column is not.",
+                                "lt": "Less than the one value.",
+                                "le": "Less than or equal to the one value.",
+                                "gt": "Greater than the one value.",
+                                "ge": "Greater than or equal to the one value.",
+                                "in": "Equal to any of the values.",
+                                "is_null": "The column is null; no value.",
+                                "not_null": "The column is not null; no value.",
+                                "prefix": "Text that starts with the one value, which is literal.",
+                                "contains": "Text that holds the one value, which is literal.",
+                                "suffix": "Text that ends with the one value, which is literal.",
+                                "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+                              },
+                              "description": "The comparison."
+                            },
+                            "values": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "x-variant-tag": "type",
+                                "oneOf": [
+                                  {
+                                    "description": "No value.",
+                                    "properties": {
+                                      "type": {
+                                        "const": "null"
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type"
+                                    ]
+                                  },
+                                  {
+                                    "description": "A boolean.",
+                                    "properties": {
+                                      "type": {
+                                        "const": "bool"
+                                      },
+                                      "value": {
+                                        "type": "boolean",
+                                        "description": "The value."
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "description": "A 64-bit integer.",
+                                    "properties": {
+                                      "type": {
+                                        "const": "int"
+                                      },
+                                      "value": {
+                                        "type": "integer",
+                                        "minimum": -9223372036854775808,
+                                        "maximum": 9223372036854775807,
+                                        "description": "The value."
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "description": "A floating-point number.",
+                                    "properties": {
+                                      "type": {
+                                        "const": "real"
+                                      },
+                                      "value": {
+                                        "type": "number",
+                                        "description": "The value."
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "description": "Text.",
+                                    "properties": {
+                                      "type": {
+                                        "const": "text"
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "description": "The value."
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "description": "Bytes.",
+                                    "properties": {
+                                      "type": {
+                                        "const": "bytes"
+                                      },
+                                      "value": {
+                                        "type": "bytes",
+                                        "description": "The value."
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "description": "A JSON document, as text.",
+                                    "properties": {
+                                      "type": {
+                                        "const": "json"
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "description": "The document's text."
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "value"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+                              "default": []
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "column",
+                            "op"
+                          ]
+                        }
+                      },
+                      "description": "Which rows.",
+                      "default": []
+                    },
+                    "set": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "x-variant-tag": "type",
+                        "oneOf": [
+                          {
+                            "description": "No value.",
+                            "properties": {
+                              "type": {
+                                "const": "null"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "description": "A boolean.",
+                            "properties": {
+                              "type": {
+                                "const": "bool"
+                              },
+                              "value": {
+                                "type": "boolean",
+                                "description": "The value."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "value"
+                            ]
+                          },
+                          {
+                            "description": "A 64-bit integer.",
+                            "properties": {
+                              "type": {
+                                "const": "int"
+                              },
+                              "value": {
+                                "type": "integer",
+                                "minimum": -9223372036854775808,
+                                "maximum": 9223372036854775807,
+                                "description": "The value."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "value"
+                            ]
+                          },
+                          {
+                            "description": "A floating-point number.",
+                            "properties": {
+                              "type": {
+                                "const": "real"
+                              },
+                              "value": {
+                                "type": "number",
+                                "description": "The value."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "value"
+                            ]
+                          },
+                          {
+                            "description": "Text.",
+                            "properties": {
+                              "type": {
+                                "const": "text"
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "The value."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "value"
+                            ]
+                          },
+                          {
+                            "description": "Bytes.",
+                            "properties": {
+                              "type": {
+                                "const": "bytes"
+                              },
+                              "value": {
+                                "type": "bytes",
+                                "description": "The value."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "value"
+                            ]
+                          },
+                          {
+                            "description": "A JSON document, as text.",
+                            "properties": {
+                              "type": {
+                                "const": "json"
+                              },
+                              "value": {
+                                "type": "string",
+                                "description": "The document's text."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "value"
+                            ]
+                          }
+                        ]
+                      },
+                      "description": "Columns set to a value.",
+                      "default": {}
+                    },
+                    "add": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": -9223372036854775808,
+                        "maximum": 9223372036854775807
+                      },
+                      "description": "Integer columns increased in place by an amount (negative decreases), so a counter moves with the rows that made it.",
+                      "default": {}
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "table"
+                  ],
+                  "description": "The change."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "op",
+                "update"
+              ]
+            },
+            {
+              "description": "Removes rows.",
+              "properties": {
+                "op": {
+                  "const": "delete"
+                },
+                "table": {
+                  "type": "string",
+                  "description": "The table."
+                },
+                "filter": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "column": {
+                          "type": "string",
+                          "description": "The column."
+                        },
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "eq",
+                            "ne",
+                            "lt",
+                            "le",
+                            "gt",
+                            "ge",
+                            "in",
+                            "is_null",
+                            "not_null",
+                            "prefix",
+                            "contains",
+                            "suffix",
+                            "matches"
+                          ],
+                          "x-enum-labels": {
+                            "eq": "Equal to the one value.",
+                            "ne": "Not equal to the one value; a null column is not.",
+                            "lt": "Less than the one value.",
+                            "le": "Less than or equal to the one value.",
+                            "gt": "Greater than the one value.",
+                            "ge": "Greater than or equal to the one value.",
+                            "in": "Equal to any of the values.",
+                            "is_null": "The column is null; no value.",
+                            "not_null": "The column is not null; no value.",
+                            "prefix": "Text that starts with the one value, which is literal.",
+                            "contains": "Text that holds the one value, which is literal.",
+                            "suffix": "Text that ends with the one value, which is literal.",
+                            "matches": "Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with the capability `search` answers it, and for the columns it indexes (`events.text`)."
+                          },
+                          "description": "The comparison."
+                        },
+                        "values": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "x-variant-tag": "type",
+                            "oneOf": [
+                              {
+                                "description": "No value.",
+                                "properties": {
+                                  "type": {
+                                    "const": "null"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "type"
+                                ]
+                              },
+                              {
+                                "description": "A boolean.",
+                                "properties": {
+                                  "type": {
+                                    "const": "bool"
+                                  },
+                                  "value": {
+                                    "type": "boolean",
+                                    "description": "The value."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "value"
+                                ]
+                              },
+                              {
+                                "description": "A 64-bit integer.",
+                                "properties": {
+                                  "type": {
+                                    "const": "int"
+                                  },
+                                  "value": {
+                                    "type": "integer",
+                                    "minimum": -9223372036854775808,
+                                    "maximum": 9223372036854775807,
+                                    "description": "The value."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "value"
+                                ]
+                              },
+                              {
+                                "description": "A floating-point number.",
+                                "properties": {
+                                  "type": {
+                                    "const": "real"
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "description": "The value."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "value"
+                                ]
+                              },
+                              {
+                                "description": "Text.",
+                                "properties": {
+                                  "type": {
+                                    "const": "text"
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "description": "The value."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "value"
+                                ]
+                              },
+                              {
+                                "description": "Bytes.",
+                                "properties": {
+                                  "type": {
+                                    "const": "bytes"
+                                  },
+                                  "value": {
+                                    "type": "bytes",
+                                    "description": "The value."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "value"
+                                ]
+                              },
+                              {
+                                "description": "A JSON document, as text.",
+                                "properties": {
+                                  "type": {
+                                    "const": "json"
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "description": "The document's text."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "type",
+                                  "value"
+                                ]
+                              }
+                            ]
+                          },
+                          "description": "What it compares with: none for `is_null` and `not_null`, one for the comparisons and the text tests, any for `in`.",
+                          "default": []
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "column",
+                        "op"
+                      ]
+                    }
+                  },
+                  "description": "Which rows."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "op",
+                "table",
+                "filter"
+              ]
+            }
+          ]
+        },
+        "description": "The changes, in order."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "ops"
+    ]
+  },
+  "Written": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "affected": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Rows added, replaced, changed and removed."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "affected"
+    ]
+  },
+  "Sql": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The statement, `SELECT` or `WITH`, with `?` for each parameter."
+      },
+      "params": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-variant-tag": "type",
+          "oneOf": [
+            {
+              "description": "No value.",
+              "properties": {
+                "type": {
+                  "const": "null"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "description": "A boolean.",
+              "properties": {
+                "type": {
+                  "const": "bool"
+                },
+                "value": {
+                  "type": "boolean",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A 64-bit integer.",
+              "properties": {
+                "type": {
+                  "const": "int"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": -9223372036854775808,
+                  "maximum": 9223372036854775807,
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A floating-point number.",
+              "properties": {
+                "type": {
+                  "const": "real"
+                },
+                "value": {
+                  "type": "number",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "Text.",
+              "properties": {
+                "type": {
+                  "const": "text"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "Bytes.",
+              "properties": {
+                "type": {
+                  "const": "bytes"
+                },
+                "value": {
+                  "type": "bytes",
+                  "description": "The value."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            },
+            {
+              "description": "A JSON document, as text.",
+              "properties": {
+                "type": {
+                  "const": "json"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "The document's text."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "value"
+              ]
+            }
+          ]
+        },
+        "description": "The parameters, bound and never spliced in.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ]
+  },
+  "Stats": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "bytes": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Bytes it takes, when it knows."
+      },
+      "rows": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "description": "Rows by table.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false
+  },
+  "Compacted": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "before": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Bytes before."
+      },
+      "after": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Bytes after."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "before",
+      "after"
+    ]
+  },
+  "Access": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "read_write",
+      "read_only"
+    ],
+    "x-enum-labels": {
+      "read_write": "Read and written.",
+      "read_only": "Only read."
+    },
+    "properties": {}
+  },
+  "Limits": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "max_value_bytes": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The longest value it holds, in bytes."
+      },
+      "max_rows": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most rows it holds."
+      }
+    },
+    "additionalProperties": false
+  },
+  "StoreInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id the store is named by in `canoa.cfg`: 1 to 32 lower-case ASCII letters, digits and `_`."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "summary": {
+        "type": "string",
+        "description": "One line saying what it is."
+      },
+      "location": {
+        "type": "string",
+        "description": "Where the data lives, in a sentence or two, shown before the person chooses it."
+      },
+      "access": {
+        "type": "string",
+        "enum": [
+          "read_write",
+          "read_only"
+        ],
+        "x-enum-labels": {
+          "read_write": "Read and written.",
+          "read_only": "Only read."
+        },
+        "description": "Whether rows can be changed."
+      },
+      "foreign": {
+        "type": "boolean",
+        "description": "The rows are another program's files presented in the schema; the host never writes the schema into it.",
+        "default": false
+      },
+      "default": {
+        "type": "boolean",
+        "description": "What a host uses when `canoa.cfg` names no store; at most one provider of a host sets it.",
+        "default": false
+      },
+      "capabilities": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What it can do beyond the structured calls: the `CAP_*` names.",
+        "default": []
+      },
+      "dialect": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The SQL dialect (`sqlite`, `postgres`) when it has `sql`."
+      },
+      "limits": {
+        "type": "object",
+        "properties": {
+          "max_value_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The longest value it holds, in bytes."
+          },
+          "max_rows": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The most rows it holds."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Facts of the store.",
+        "default": {}
+      },
+      "schema": {
+        "description": "The settings it takes, as a guatiao schema of an object."
+      },
+      "form": {
+        "description": "How the schema is shown, as a guatiao-intake form document."
+      },
+      "tables": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The table's name."
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The column's name."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "int",
+                      "real",
+                      "bool",
+                      "blob",
+                      "json"
+                    ],
+                    "x-enum-labels": {
+                      "text": "Text.",
+                      "int": "A 64-bit integer; times are milliseconds since the Unix epoch.",
+                      "real": "A floating-point number.",
+                      "bool": "A boolean.",
+                      "blob": "Bytes.",
+                      "json": "A JSON document."
+                    },
+                    "description": "What it holds."
+                  },
+                  "nullable": {
+                    "type": "boolean",
+                    "description": "Whether it may be null.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "kind"
+                ]
+              },
+              "description": "Its columns."
+            },
+            "key": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The columns whose values identify a row."
+            },
+            "indexes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The index's name, unique in the store."
+                  },
+                  "columns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The columns, in order."
+                  },
+                  "unique": {
+                    "type": "boolean",
+                    "description": "Whether two rows may not share the columns' values.",
+                    "default": false
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "columns"
+                ]
+              },
+              "description": "Its indexes.",
+              "default": []
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Columns a `select` must test for equality, as a table of one session's lines is only read for that session.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "columns",
+            "key"
+          ]
+        },
+        "description": "The tables a foreign store presents; none: it holds the canonical ones."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "summary",
+      "location",
+      "access"
+    ]
+  },
+  "OpenRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "settings": {
+        "type": "string",
+        "description": "The store's settings as a JSON object keyed by the schema's members."
+      },
+      "home": {
+        "type": "string",
+        "description": "The host's state directory, for a default path; the provider reads no other place."
+      },
+      "secret": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "A connection password the host resolved from its secret store; never in `settings` and never answered."
+      },
+      "create": {
+        "type": "boolean",
+        "description": "Whether to create what is missing; `false` makes a store with no schema [`StoreError::Corrupt`] or [`StoreError::Gone`].",
+        "default": false
+      },
+      "reply_bytes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes of rows one reply holds (at least one row is always answered)."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "settings",
+      "home",
+      "reply_bytes"
+    ]
+  }
+}

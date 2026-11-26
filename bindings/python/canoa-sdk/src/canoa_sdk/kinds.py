@@ -634,6 +634,92 @@ class ModelGateway(KindProtocol, Protocol, kind="model_gateway", floor_hash=1955
         ...
 
 
+class HistoryDb(KindProtocol, Protocol, kind="history_db", floor_hash=419223122, is_object=True):
+    """An opened store."""
+
+    @required
+    @fallible
+    def schema(self) -> ValueAnswer:
+        """The schema the store holds."""
+        ...
+
+    @required
+    @fallible
+    def migrate(self, migration: Ref) -> None:
+        """Applies typed steps, all or none; only a read-write store."""
+        ...
+
+    @required
+    @fallible
+    def select(self, select: Ref) -> ValueAnswer:
+        """Rows of a table, a page at a time."""
+        ...
+
+    @required
+    @fallible
+    def count(self, select: Ref) -> U64:
+        """How many rows a select keeps, ignoring its order, limit and cursor."""
+        ...
+
+    @required
+    @fallible
+    def aggregate(self, aggregate: Ref) -> ValueAnswer:
+        """Figures over rows, by group."""
+        ...
+
+    @required
+    @fallible
+    def write(self, write: Ref) -> ValueAnswer:
+        """Applies changes, every one or none."""
+        ...
+
+    @required
+    @fallible
+    def sql(self, sql: Ref) -> ValueAnswer:
+        """One read-only statement; only with the capability `sql`."""
+        ...
+
+    @required
+    @fallible
+    def revision(self) -> str:
+        """A text that moves when anything changed, by any writer."""
+        ...
+
+    @required
+    @fallible
+    def stats(self) -> ValueAnswer:
+        """How big the store is."""
+        ...
+
+    @required
+    @fallible
+    def compact(self) -> ValueAnswer:
+        """Makes the store smaller; only with the capability `compact`."""
+        ...
+
+    @required
+    @fallible
+    def close(self) -> None:
+        """Lets go of the connection or the files."""
+        ...
+
+
+class HistoryStore(KindProtocol, Protocol, kind="history_store", floor_hash=3516192341):
+    """A history store provider: describes itself and its settings, and opens the store."""
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this store is, what settings it takes, and how Settings draws its form."""
+        ...
+
+    @required
+    @fallible
+    def open(self, request: Ref) -> HistoryDb:
+        """Opens the store."""
+        ...
+
+
 class ModelStore(KindProtocol, Protocol, kind="model_store", floor_hash=2161844408):
     """The models of a Store type, and what the person does with each.
 
@@ -1283,4 +1369,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "ModelStore", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "SourceFetch", "CatalogSource", "ConfigStore", "Environment", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
