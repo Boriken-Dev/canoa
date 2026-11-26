@@ -84,6 +84,7 @@ class Brand:
             f"--dart-define=BRAND_SHORT_NAME={self.short_name}",
             f"--dart-define=BRAND_ID={self.id}",
             f"--dart-define=BRAND_ENV_PREFIX={self.env_prefix}",
+            f"--dart-define=BRAND_EXECUTABLE={self.executable}",
             f"--dart-define=BRAND_PROGRAM={self.program}",
             f"--dart-define=BRAND_CONFIG_FILE={self.config_file}",
             f"--dart-define=BRAND_FOLDER={self.folder}",

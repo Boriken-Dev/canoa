@@ -6,6 +6,7 @@ import '../../acp/browser_connect.dart';
 import '../../acp/connect.dart' show chatEndpoints;
 import '../../acp/served_host.dart';
 import '../../auth/peer_proof.dart' show MethodUnavailable, PeerMethod;
+import '../../brand.dart';
 import '../../config/connection.dart';
 import '../../net/system_http.dart';
 
@@ -98,7 +99,7 @@ Future<HostStatus> _readHostList(Connection connection, http.Client ask, Uri lis
   final reply = await ask.get(list).timeout(timeout);
   if (reply.statusCode != 200) return HostStatus(HostState.offline, detail: 'It answered ${reply.statusCode} for its list.');
   final host = ServedHost.parse(reply.body);
-  if (host == null) return const HostStatus(HostState.offline, detail: 'That address does not serve a Canoa host\'s list.');
+  if (host == null) return const HostStatus(HostState.offline, detail: 'That address does not serve a ${Brand.name} host\'s list.');
   if (host.peer != connection.peer) {
     return HostStatus(
       HostState.changed,

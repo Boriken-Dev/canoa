@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import '../acp/link_secret.dart' show LinkSecretIdentity;
 
+import '../brand.dart';
 import 'host_tool_stub.dart' if (dart.library.io) 'host_tool_io.dart' as platform;
 
 /// The status of `canoa serve` when another host holds its home.
@@ -174,7 +175,7 @@ Future<int> freeLoopbackPort() => platform.freeLoopbackPort();
 /// What a line of a host's standard error says after its `canoa: ` prefix (a host built before the rename wrote
 /// `canoa-host: `), or null for any other line.
 String? hostSaid(String line) {
-  for (final prefix in const ['canoa: ', 'canoa-host: ']) {
+  for (final prefix in const ['${Brand.program}: ', '${Brand.program}-host: ']) {
     if (line.startsWith(prefix)) return line.substring(prefix.length);
   }
   return null;

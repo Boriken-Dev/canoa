@@ -6,6 +6,7 @@ library;
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../chat/cache_lifetime.dart';
 import '../config/canoa_config.dart';
 import '../forms/schema_fields.dart';
@@ -309,7 +310,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
                 for (final name in loadouts)
                   DropdownMenuItem<String?>(
                     value: name,
-                    child: Text(widget.loadouts.contains(name) ? name : '$name (not in canoa.cfg)', overflow: TextOverflow.ellipsis),
+                    child: Text(widget.loadouts.contains(name) ? name : '$name (not in ${Brand.configFile})', overflow: TextOverflow.ellipsis),
                   ),
               ],
               onChanged: (value) => setState(() => _loadout = value),

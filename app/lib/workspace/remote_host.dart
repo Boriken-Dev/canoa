@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 
 import '../acp/served_host.dart';
+import '../brand.dart';
 import '../config/connection.dart';
 import '../desktop/control_client.dart' show ControlFailed;
 import '../desktop/host_control.dart';
@@ -111,7 +112,7 @@ Future<ServedHost> fetchServedHost(Connection connection, {http.Client? client, 
     final reply = await ask.get(Uri.parse(connection.address).resolve('canoa.json')).timeout(timeout);
     if (reply.statusCode != 200) throw StateError('${connection.name} answered ${reply.statusCode} for its list.');
     final host = ServedHost.parse(reply.body);
-    if (host == null) throw StateError('${connection.address} does not serve a Canoa host\'s list.');
+    if (host == null) throw StateError('${connection.address} does not serve a ${Brand.name} host\'s list.');
     if (host.peer != connection.peer) {
       throw StateError('${connection.name} says its id is ${host.peer}, not the one saved.');
     }

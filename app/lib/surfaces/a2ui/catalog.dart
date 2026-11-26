@@ -3,6 +3,7 @@
 /// catalog brings code, so the widgets are always Canoa's own, in the colours of the look.
 library;
 
+import '../../brand.dart';
 import 'messages.dart';
 
 /// The basic catalog of A2UI 1.0.
@@ -81,11 +82,11 @@ final class A2uiCatalog {
         final name = '${entry.key}';
         final value = entry.value;
         if (canoa.components.containsKey(name)) {
-          problems.add('$name is a component Canoa\'s catalog has already');
+          problems.add('$name is a component ${Brand.name}\'s catalog has already');
           continue;
         }
         if (value is! Map || value['extends'] is! String || canoa.components[value['extends']] == null) {
-          problems.add('$name extends a component Canoa draws (${canoa.components.keys.join(', ')})');
+          problems.add('$name extends a component ${Brand.name} draws (${canoa.components.keys.join(', ')})');
           continue;
         }
         final base = canoa.components[value['extends']]!;

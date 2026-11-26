@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageReport;
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../providers/provider_catalog.dart';
 import 'account_models.dart';
@@ -276,7 +277,7 @@ class AccountsController extends ChangeNotifier {
       final harness = known?.fits.firstOrNull ?? known?.agent;
       if (harness != null) await change((config) => config.withAccountOffered(account: name, harness: harness));
     } on Object catch (error) {
-      _problem = 'Canoa could not offer $name to a source: $error';
+      _problem = '${Brand.name} could not offer $name to a source: $error';
     }
     await refresh();
   }

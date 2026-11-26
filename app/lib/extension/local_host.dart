@@ -3,6 +3,7 @@
 // (clients/browser/chromium/acp-local.js); this is the panel's view of it and the person's requests to change it.
 import 'dart:convert';
 
+import '../brand.dart';
 import 'local_host_stub.dart' if (dart.library.js_interop) 'local_host_web.dart' as platform;
 
 /// What the worker found when it asked the native messaging host.
@@ -26,7 +27,7 @@ final class LocalHostView {
     required this.state,
     this.why,
     this.forbidden = false,
-    this.name = 'Canoa',
+    this.name = Brand.name,
     this.paired = false,
     this.changed = false,
     this.canPin = true,
@@ -72,7 +73,7 @@ final class LocalHostView {
       },
       why: map['why'] is String ? map['why'] as String : null,
       forbidden: map['forbidden'] == true,
-      name: host?['name'] is String ? host!['name'] as String : 'Canoa',
+      name: host?['name'] is String ? host!['name'] as String : Brand.name,
       paired: map['paired'] == true,
       changed: map['changed'] == true,
       canPin: map['canPin'] != false,

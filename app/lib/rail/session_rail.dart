@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatf
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import '../brand.dart';
 import '../desktop/control_client.dart' show hostWords;
 import '../l10n/app_text.dart';
 import '../ledger/ledger_list.dart';
@@ -127,7 +128,7 @@ class _SessionRailState extends State<SessionRail> {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               CanoaMark(color: context.chatLook.accent),
               const SizedBox(width: 10),
-              const Text('Canoa', softWrap: false, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+              const Text(Brand.name, softWrap: false, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             ]),
           ),
         ),

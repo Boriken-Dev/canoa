@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import 'local_host.dart';
 
 class LocalHostBanner extends StatefulWidget {
@@ -56,30 +57,30 @@ class _LocalHostBannerState extends State<LocalHostBanner> {
     final (said, actions) = switch (current.state) {
       LocalHostState.notInstalled => (
         current.forbidden
-            ? 'Canoa on this computer does not know this extension. Your own agents work as before.'
-            : 'Canoa is not installed on this computer, so this extension uses its own agents. Install Canoa to use the agents and sessions on this computer.',
+            ? '${Brand.name} on this computer does not know this extension. Your own agents work as before.'
+            : '${Brand.name} is not installed on this computer, so this extension uses its own agents. Install ${Brand.name} to use the agents and sessions on this computer.',
         const <Widget>[],
       ),
       LocalHostState.stopped => (
-        'Canoa on this computer is not running.',
+        '${Brand.name} on this computer is not running.',
         [
           FilledButton(
             onPressed: busy ? null : () => _run(widget.bridge.start),
-            child: Text(busy ? 'Starting…' : 'Start Canoa'),
+            child: Text(busy ? 'Starting…' : 'Start ${Brand.name}'),
           ),
         ],
       ),
-      LocalHostState.unavailable => ('Canoa on this computer did not answer${current.why == null ? '' : ': ${current.why}'}.', const <Widget>[]),
+      LocalHostState.unavailable => ('${Brand.name} on this computer did not answer${current.why == null ? '' : ': ${current.why}'}.', const <Widget>[]),
       LocalHostState.running when current.paired => (
         'Using ${current.name} on this computer${current.entries.isEmpty ? '' : ': ${current.entries.join(', ')}'}.',
         [TextButton(onPressed: busy ? null : () => _run(widget.bridge.unpair), child: const Text('Unpair'))],
       ),
       LocalHostState.running => (
         current.changed
-            ? 'This is not the Canoa this browser was paired with. Pair it again to use it.'
+            ? 'This is not the ${Brand.name} this browser was paired with. Pair it again to use it.'
             : current.canPin
-                ? 'Canoa is running on this computer. Ask it for a PIN (Hosting, then Pair the browser extension) and type it here.'
-                : 'Canoa is running on this computer, with a proof a PIN does not pair. Pair this browser with canoa accept.',
+                ? '${Brand.name} is running on this computer. Ask it for a PIN (Hosting, then Pair the browser extension) and type it here.'
+                : '${Brand.name} is running on this computer, with a proof a PIN does not pair. Pair this browser with ${Brand.program} accept.',
         [
           if (current.canPin) ...[
             SizedBox(

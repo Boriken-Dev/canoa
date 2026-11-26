@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 import '../config/canoa_config.dart' show Preset, isPresetName, presetDefault, presetNameRule;
 import '../session_store.dart';
@@ -535,7 +536,7 @@ class PresetChooser extends StatelessWidget {
     final missing = held == null;
     final label = session.preset == null && !modified ? 'Profile' : '$name${modified ? ' · Modified' : ''}';
     final why = [
-      if (missing) '$name is no longer in canoa.cfg',
+      if (missing) '$name is no longer in ${Brand.configFile}',
       if (modified) 'Changed from the profile: ${changes.join(', ').replaceAll('_', ' ')}',
       for (final line in session.presetUnsupported.entries) 'Not taken: ${line.key}, ${line.value}',
     ];

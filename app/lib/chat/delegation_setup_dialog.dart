@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../acp/delegate_targets.dart';
+import '../brand.dart';
 import '../selectable.dart';
 import '../session_store.dart';
 
@@ -110,7 +111,7 @@ class _DelegationSetupDialogState extends State<DelegationSetupDialog> {
         width: 440,
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Let this agent delegate to these Canoa agents:'),
+            const Text('Let this agent delegate to these ${Brand.name} agents:'),
             if (widget.current.suggestedBy('sources') case final layer?) _Suggested(layer, key: const Key('delegation setup sources from')),
             SwitchListTile(
               key: const Key('delegation setup every'),

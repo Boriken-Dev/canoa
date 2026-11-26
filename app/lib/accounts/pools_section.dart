@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../desktop/control_client.dart' show hostWords;
 import '../settings/settings_row.dart';
 import '../shell/confirm_remove.dart';
@@ -65,7 +66,7 @@ class _PoolsGroupState extends State<PoolsGroup> {
         const SettingsRow(
           title: 'Accounts that work together',
           description: 'A pool holds accounts that provide one standard. A session picks a pool as it would an account, and runs on one of '
-              'them. Canoa makes a pool of every standard some account provides: it follows the accounts as they come and go.',
+              'them. ${Brand.name} makes a pool of every standard some account provides: it follows the accounts as they come and go.',
         ),
         for (final pool in pools) _row(pool),
       ],
@@ -81,7 +82,7 @@ class _PoolsGroupState extends State<PoolsGroup> {
       leading: const Icon(Icons.layers_outlined, size: 24),
       description: [
         standardTitle(pool.standard),
-        if (pool.automatic) 'Made by Canoa',
+        if (pool.automatic) 'Made by ${Brand.name}',
         members.isEmpty ? 'no account yet' : members,
       ].join(' · '),
       below: pool.automatic

@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../session_store.dart';
 import '../settings/host_sections.dart' show SectionCall;
 import '../store/links.dart' as links;
@@ -215,7 +216,7 @@ class _PageTabViewState extends State<PageTabView> {
             ),
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text('The page opens in your browser: Canoa has no web view of its own.', style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+              child: Text('The page opens in your browser: ${Brand.name} has no web view of its own.', style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
             ),
             if (_problem case final problem?) Padding(padding: const EdgeInsets.only(top: 8), child: Text(problem, key: const ValueKey('page problem'), style: TextStyle(color: scheme.error))),
           ]),

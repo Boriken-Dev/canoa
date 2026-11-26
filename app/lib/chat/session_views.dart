@@ -5,6 +5,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../highlight/highlighted.dart';
 import '../selectable.dart';
 import '../session_store.dart';
@@ -12,7 +13,7 @@ import '../theme/look.dart';
 import 'remember_dialog.dart';
 
 /// What Canoa calls itself in the sentences of the package's cards.
-const String appName = 'Canoa';
+const String appName = Brand.name;
 
 /// A session's entries as the transcript reads them.
 extension SessionEntries on ChatSession {
@@ -86,7 +87,7 @@ class SessionPermissionCard extends StatelessWidget {
           ),
         if (canRemember)
           Text(
-            'Always allow here: Canoa itself answers allow once to what you confirm, for $agent in $folder, until you revoke '
+            'Always allow here: ${Brand.name} itself answers allow once to what you confirm, for $agent in $folder, until you revoke '
             'it in Settings, Permissions.',
             style: small,
           ),

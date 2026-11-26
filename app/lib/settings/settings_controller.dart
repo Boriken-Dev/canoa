@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import 'setting_layers.dart';
 
@@ -47,7 +48,7 @@ class SettingsController extends ChangeNotifier {
           notifyListeners();
         }
       } on Object catch (error) {
-        _problem = 'Could not save canoa.cfg: $error';
+        _problem = 'Could not save ${Brand.configFile}: $error';
         if (!_closed) notifyListeners();
       }
     });

@@ -213,7 +213,7 @@ Future<CanoaConfig?> _localHostConfig(LocalHostBridge bridge) async {
   try {
     return await HostConfigStore(HostFiles(control)).load().timeout(const Duration(seconds: 8));
   } on Object catch (error) {
-    debugPrint('Canoa: canoa.cfg on this computer cannot be read: $error');
+    debugPrint('${Brand.name}: ${Brand.configFile} on this computer cannot be read: $error');
     return null;
   } finally {
     await control.close();
@@ -540,7 +540,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _writeToHost(HostConfigStore store, CanoaConfig changed) async {
     if (!store.loaded) {
       _messenger.currentState?.showSnackBar(const SnackBar(
-          content: Text('The host canoa.cfg was not read whole, so that change is kept in this page and not written to the host.')));
+          content: Text('The host ${Brand.configFile} was not read whole, so that change is kept in this page and not written to the host.')));
       return;
     }
     try {
@@ -692,7 +692,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (widget.served case final served?) return _saveHostingOnHost(served, fromDialog);
     final host = widget.host;
     final path = _configPath;
-    if (host == null || path == null) return 'canoa.cfg has no place on this computer';
+    if (host == null || path == null) return '${Brand.configFile} has no place on this computer';
     // The person's file holds [host] as the dialog left it, so a value it took out falls back to a lower layer's.
     final changed = config.withHost(fromDialog.host, source: config.source.withOwn('host', fromDialog.source.own['host']));
     if (changed.hostEntries.isNotEmpty) {
@@ -922,7 +922,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!registered && wanted != null && wanted != config.startAtLogin && widget.shell != null) {
       if (await widget.shell!.setStartAtLogin(wanted) case final problem?) {
         _messenger.currentState?.showSnackBar(SnackBar(
-            content: Text('Canoa could not ${wanted ? 'be set to start' : 'be stopped from starting'} when you sign in: $problem')));
+            content: Text('${Brand.name} could not ${wanted ? 'be set to start' : 'be stopped from starting'} when you sign in: $problem')));
         changed = changed.copyWith(startAtLogin: config.startAtLogin ?? !wanted);
       }
     }
@@ -979,7 +979,7 @@ class _CanoaAppState extends State<CanoaApp> {
         key: const Key('restart-host'),
         title: const Text('Restart the host?'),
         content: Text(widget.served == null
-            ? 'A source added or removed takes effect when Canoa\'s host restarts, and that ends the '
+            ? 'A source added or removed takes effect when ${Brand.name}\'s host restarts, and that ends the '
                 '${count == 1 ? 'session' : '$count sessions'} open on this computer now. Their conversations stay in the list '
                 'to open again.'
             : 'Restarting the host ends the ${count == 1 ? 'session' : '$count sessions'} open on it now. Their conversations '
@@ -1038,7 +1038,7 @@ class _CanoaAppState extends State<CanoaApp> {
       try {
         await overlays.refresh();
       } on Object catch (error) {
-        debugPrint("Canoa: the host's overlays cannot be read: $error");
+        debugPrint("${Brand.name}: the host's overlays cannot be read: $error");
       }
     }
   }
@@ -1287,7 +1287,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Each agent the person grants becomes a session. The provider decides the working directory it was granted.
   Future<void> _useBrowserAgents(AcpPage acp, {required String cwd, required String title}) async {
-    final agents = await acp.request(purpose: 'Chat with it in Canoa');
+    final agents = await acp.request(purpose: 'Chat with it in ${Brand.name}');
     for (final agent in agents) {
       await _openProviderSession(acp, agent, cwd: cwd, title: title);
     }
@@ -1305,7 +1305,7 @@ class _CanoaAppState extends State<CanoaApp> {
       // frame) never is, since a page is told no path, and its session still runs in the folder the host made for the site.
       final pageIsWebOrigin = Uri.base.scheme == 'http' || Uri.base.scheme == 'https';
       if (site != null && made == null && !pageIsWebOrigin) throw StateError('The host did not say which workspace it made for this session');
-      if (!mounted) throw StateError('Canoa UI closed');
+      if (!mounted) throw StateError('${Brand.name} UI closed');
       final local = store.addProviderSession(
         title: title.isEmpty ? agent.label : title,
         agent: agent.label,
@@ -1329,7 +1329,7 @@ class _CanoaAppState extends State<CanoaApp> {
       // The browser's link hides the host's own report from the page, so the loadout is said here, from what canoa.cfg names.
       if (local.profile == null && local.loadout != null) local.chat.note('Loadout ${local.loadout}');
       if (config.lostClientLoadout(meta[clientMeta] as String?) case final lost? when meta[loadoutMeta] == null && meta[presetMeta] == null) {
-        local.chat.note('canoa.cfg gives ${meta[clientMeta]} clients the loadout $lost, which it no longer holds: the default applies');
+        local.chat.note('${Brand.configFile} gives ${meta[clientMeta]} clients the loadout $lost, which it no longer holds: the default applies');
       }
     } catch (_) {
       await client.close();
@@ -1345,7 +1345,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (acp == null) throw StateError('This browser has no provider of agents');
     final site = relation.kind == Relation.originKind ? siteFqdn(relation.key) : servedSite;
     if (site == null) throw StateError('${relation.display} is not a site a session can be kept for');
-    final agents = await acp.request(purpose: 'Chat with it in Canoa about ${relation.display}');
+    final agents = await acp.request(purpose: 'Chat with it in ${Brand.name} about ${relation.display}');
     for (final agent in agents) {
       await _openProviderSession(acp, agent, cwd: siteStandInFolder, title: '', site: site, relation: relation);
     }
@@ -1423,7 +1423,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final catalog = _hostSpeech, grants = _grants;
     if (catalog == null) return null;
     if (grants != null && grants.known && !grants.may(HostGrants.voice)) {
-      return 'This host has not given this key the voice grant, so it cannot run a speech provider for it. Its canoa.cfg names the keys that may.';
+      return 'This host has not given this key the voice grant, so it cannot run a speech provider for it. Its ${Brand.configFile} names the keys that may.';
     }
     if (catalog.problem != null) return "This host's speech providers are not available: ${catalog.problem}";
     if (catalog.loaded && catalog.providers.every((each) => each.problem != null)) {
@@ -1457,7 +1457,7 @@ class _CanoaAppState extends State<CanoaApp> {
       return 'The voice $named is not available here. Choose another in Settings, under Voice.';
     }
     if (grants != null && grants.known && !grants.may(HostGrants.voice) && _voiceOutputs.browser.isEmpty) {
-      return 'This host has not given this key the voice grant, so it cannot read replies aloud for it. Its canoa.cfg names the keys that may.';
+      return 'This host has not given this key the voice grant, so it cannot read replies aloud for it. Its ${Brand.configFile} names the keys that may.';
     }
     if (_voiceOutputs.problem case final problem?) return "This host's voice providers are not available: $problem";
     return null;
@@ -1527,7 +1527,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (grants.may(HostGrants.terminal)) return TerminalOnHost(terminals);
     return TerminalRefused(widget.served == null
         ? "This computer's host has not given this app a terminal."
-        : "This host has not given this page's key a terminal. Its canoa.cfg names the keys that may have one.");
+        : "This host has not given this page's key a terminal. Its ${Brand.configFile} names the keys that may have one.");
   }
 
   /// The hosts the Terminal section can open a shell on: the app's own, then each saved Canoa host.
@@ -1634,7 +1634,7 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       await worktrees.remove(worktree);
     } on Object catch (error) {
-      debugPrint('Canoa: the worktree made for a session that did not start stays at ${worktree.path}: $error');
+      debugPrint('${Brand.name}: the worktree made for a session that did not start stays at ${worktree.path}: $error');
     }
   }
 
@@ -1827,7 +1827,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<SourceCheck> _check(AgentSource source) async {
     final listening = widget.host?.listening.where((listening) => listening.name == source.hostEntry).firstOrNull;
     if (listening == null) {
-      return SourceCheck(problem: 'canoa is not serving ${source.label} now: open Hosting to see why.');
+      return SourceCheck(problem: '${Brand.program} is not serving ${source.label} now: open Hosting to see why.');
     }
     // The Store's extension for the source's program says whether it is here, which version and whether a newer one exists;
     // only a source no extension serves keeps the host's own list of what it is missing.
@@ -2239,7 +2239,7 @@ class _CanoaAppState extends State<CanoaApp> {
         final opened = await (widget.openRemote ?? _openRemote)(connection);
         if (!mounted) {
           opened.dispose();
-          throw StateError('Canoa UI closed');
+          throw StateError('${Brand.name} UI closed');
         }
         _remoteReady[name] = opened;
         return opened;
@@ -2282,7 +2282,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final held = _remoteAccounts[name] ??= AccountsController(
       host: ControlAccountsHost(remote.control),
       config: () => const CanoaConfig(),
-      change: (_) async => throw StateError('$name keeps which accounts its agents offer in its own canoa.cfg'),
+      change: (_) async => throw StateError('$name keeps which accounts its agents offer in its own ${Brand.configFile}'),
       hostIsHere: false,
     );
     unawaited(held.refresh());
@@ -2491,12 +2491,12 @@ class _CanoaAppState extends State<CanoaApp> {
     VerifiedAgent? client;
     try {
       worktrees = worktree ? _worktrees(place, endpoint: url, peerId: pinned, method: method.id) : null;
-      if (worktree && worktrees == null) throw StateError('Canoa cannot ask $name for a worktree');
+      if (worktree && worktrees == null) throw StateError('${Brand.name} cannot ask $name for a worktree');
       made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(source.label));
       starting
         ..worktrees = worktrees
         ..made = made;
-      if (_quitting) throw StateError('Canoa is quitting');
+      if (_quitting) throw StateError('${Brand.name} is quitting');
       final where = made?.path ?? folder;
       final overTransport = direct && connection.transport == ConnectionTransport.webtransport;
       client = await (widget.connectEndpoint ?? connectBrowserAcp)(
@@ -2515,9 +2515,9 @@ class _CanoaAppState extends State<CanoaApp> {
         initializeMeta: _startMeta(draft),
       );
       starting.client = client;
-      if (_quitting) throw StateError('Canoa is quitting');
+      if (_quitting) throw StateError('${Brand.name} is quitting');
       final opened = await client.openSession(cwd: where, setup: ephemeralSetup(AcpSessionSetup.none, ephemeral: draft.sideOf != null));
-      if (!mounted || _quitting) throw StateError('Canoa UI closed');
+      if (!mounted || _quitting) throw StateError('${Brand.name} UI closed');
       store.bindDraft(draft, client, opened, cwd: where, worktree: made, place: place, endpoint: endpoint, method: method.id);
       _ownedClients.add(client);
     } catch (_) {
@@ -2708,7 +2708,7 @@ class _CanoaAppState extends State<CanoaApp> {
       {bool hostMakes = false}) async {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
-    if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
+    if (host == null || listening == null) throw StateError('${Brand.program} is not serving $name now: open Hosting to see why');
     // Only a desktop holds its host in this process; a served page reaches every entry, account or not, over its host's endpoint.
     if (widget.served == null && (listening.local || draft.account != null || (_accounts?.offeredBy(name).isNotEmpty ?? false))) {
       draft.account ??= _accounts?.defaultOf(name);
@@ -2716,17 +2716,17 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     draft.account ??= _accounts?.defaultOf(name);
     final method = PeerMethod.values.where((method) => method.id == (listening.method ?? host.peerMethod)).firstOrNull;
-    if (method == null) throw StateError('canoa did not say which method it proves by');
+    if (method == null) throw StateError('${Brand.program} did not say which method it proves by');
     final endpoint = Uri.parse(listening.url);
     final worktrees = worktree
         ? _worktrees(SessionPlace.host, endpoint: listening.url, peerId: listening.peer, method: method.id)
         : null;
-    if (worktree && worktrees == null) throw StateError('Canoa cannot ask canoa for a worktree');
+    if (worktree && worktrees == null) throw StateError('${Brand.name} cannot ask ${Brand.program} for a worktree');
     final made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(name));
     starting
       ..worktrees = worktrees
       ..made = made;
-    if (_quitting) throw StateError('Canoa is quitting');
+    if (_quitting) throw StateError('${Brand.name} is quitting');
     final where = made?.path ?? folder;
     VerifiedAgent? client;
     try {
@@ -2745,14 +2745,14 @@ class _CanoaAppState extends State<CanoaApp> {
               initializeMeta: _startMeta(draft),
             );
       starting.client = client;
-      if (_quitting) throw StateError('Canoa is quitting');
+      if (_quitting) throw StateError('${Brand.name} is quitting');
       final opened = await client.openSession(
         cwd: where,
         setup: ephemeralSetup(hostMakes ? siteSetup(servedSite) : AcpSessionSetup.none, ephemeral: draft.sideOf != null),
       );
       final placed = hostMakes ? madeFolder(opened.raw) : null;
       if (hostMakes && placed == null) throw StateError('The host did not say which workspace it made for this chat');
-      if (!mounted || _quitting) throw StateError('Canoa UI closed');
+      if (!mounted || _quitting) throw StateError('${Brand.name} UI closed');
       if (placed != null) {
         draft
           ..site = servedSite
@@ -2795,7 +2795,7 @@ class _CanoaAppState extends State<CanoaApp> {
         await _write(changed);
         if (mounted) setState(() => config = changed);
       } on Object catch (error) {
-        debugPrint('Canoa could not keep the choices for $agent: $error');
+        debugPrint('${Brand.name} could not keep the choices for $agent: $error');
       }
     }
     return (servers: choice.allow, hooks: choice.hooks);
@@ -2847,7 +2847,7 @@ class _CanoaAppState extends State<CanoaApp> {
     starting
       ..worktrees = worktrees
       ..made = made;
-    if (_quitting) throw StateError('Canoa is quitting');
+    if (_quitting) throw StateError('${Brand.name} is quitting');
     final where = made?.path ?? folder;
     VerifiedAgent? client;
     try {
@@ -2865,9 +2865,9 @@ class _CanoaAppState extends State<CanoaApp> {
         if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),
       }));
       starting.client = client;
-      if (_quitting) throw StateError('Canoa is quitting');
+      if (_quitting) throw StateError('${Brand.name} is quitting');
       final opened = await client.openSession(cwd: where, setup: ephemeralSetup(AcpSessionSetup.none, ephemeral: draft.sideOf != null));
-      if (!mounted || _quitting) throw StateError('Canoa UI closed');
+      if (!mounted || _quitting) throw StateError('${Brand.name} UI closed');
       store.bindDraft(draft, client, opened, cwd: where, worktree: made);
       _ownedClients.add(client);
     } catch (_) {
@@ -2895,7 +2895,7 @@ class _CanoaAppState extends State<CanoaApp> {
     String? endpoint, method;
     if (widget.served != null) {
       final listening = widget.host?.listening.where((each) => each.name == running.entry).firstOrNull;
-      if (listening == null) throw StateError('canoa is not serving ${running.entry} now: open Hosting to see why');
+      if (listening == null) throw StateError('${Brand.program} is not serving ${running.entry} now: open Hosting to see why');
       place = SessionPlace.host;
       peerId = listening.peer;
       endpoint = listening.url;
@@ -2969,7 +2969,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (widget.served != null && place == SessionPlace.local) {
       // A page holds no host in its process: a session begun on the host's own computer is reached through its endpoint.
       final listening = widget.host?.listening.where((each) => each.name == entryName).firstOrNull;
-      if (listening == null) throw StateError('canoa is not serving $entryName now: open Hosting to see why');
+      if (listening == null) throw StateError('${Brand.program} is not serving $entryName now: open Hosting to see why');
       return _agentFor(
         place: SessionPlace.host,
         entryName: entryName,
@@ -2998,7 +2998,7 @@ class _CanoaAppState extends State<CanoaApp> {
       case SessionPlace.host || SessionPlace.peer:
         final endpoint = Uri.tryParse(address ?? '');
         final method = PeerMethod.values.where((each) => each.id == methodId).firstOrNull;
-        if (endpoint == null || method == null) throw StateError('Canoa did not note how to reach that peer');
+        if (endpoint == null || method == null) throw StateError('${Brand.name} did not note how to reach that peer');
         final overWebTransport = endpoint.scheme == 'https';
         final cacheMeta = {
           ..._cacheMeta((
@@ -3147,7 +3147,7 @@ class _CanoaAppState extends State<CanoaApp> {
         ? _worktrees(place, endpoint: primary.toString(), fallback: wt == null ? null : ws?.toString(),
             peerId: pinnedPeerId, method: target.method.id)
         : null;
-    if (target.worktree && worktrees == null) throw StateError('Canoa cannot ask this agent\'s host for a worktree');
+    if (target.worktree && worktrees == null) throw StateError('${Brand.name} cannot ask this agent\'s host for a worktree');
     final made = worktrees == null
         ? null
         : await worktrees.create(target.cwd, worktreeBranch(target.title.isEmpty ? 'remote agent' : target.title));
@@ -3166,7 +3166,7 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       final opened = await client.openSession(cwd: cwd);
       final remoteId = opened.id;
-      if (!mounted) throw StateError('Canoa UI closed');
+      if (!mounted) throw StateError('${Brand.name} UI closed');
       final local = store.addRemoteSession(
         title: target.title.isEmpty ? 'Remote agent' : target.title,
         agent: pinnedPeerId.substring(0, 22),

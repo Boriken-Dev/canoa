@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 import '../voice/host_speech.dart';
 import 'settings_row.dart';
@@ -35,7 +36,7 @@ class _AboutSectionState extends State<AboutSection> {
       listenable: host ?? Listenable.merge(const <Listenable>[]),
       builder: (context, _) => SettingsGroup(children: [
         SettingsRow(
-          title: 'Canoa',
+          title: Brand.name,
           description: 'A client for agents and the tools they use',
           control: Text(widget.version.isEmpty ? 'development build' : widget.version, key: const Key('about-version')),
         ),

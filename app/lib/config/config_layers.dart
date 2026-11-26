@@ -33,7 +33,7 @@ ConfigText decodeConfig(String text, {String? name}) {
   var body = text;
   if (extension != null && extension != 'cfg') {
     format = ConfigFormat.named(extension);
-    if (format == null) throw FormatException('canoa.cfg: the extension .$extension is not one this app reads; it reads $_readsFormats');
+    if (format == null) throw FormatException('${Brand.configFile}: the extension .$extension is not one this app reads; it reads $_readsFormats');
   } else {
     final lineEnd = text.indexOf('\n');
     final first = lineEnd < 0 ? text : text.substring(0, lineEnd);
@@ -42,7 +42,7 @@ ConfigText decodeConfig(String text, {String? name}) {
       final last = words.isEmpty ? '' : words.last.split(RegExp(r'[/\\]')).last;
       format = ConfigFormat.named(last);
       if (format == null) {
-        throw const FormatException('canoa.cfg: the first line names a format this app does not read; it reads $_readsFormats');
+        throw const FormatException('${Brand.configFile}: the first line names a format this app does not read; it reads $_readsFormats');
       }
       marked = true;
       body = lineEnd < 0 ? '' : text.substring(lineEnd + 1);
@@ -59,14 +59,14 @@ ConfigText decodeConfig(String text, {String? name}) {
     };
   } on YamlException catch (error) {
     // The exception's own text quotes the line; only its position is told.
-    throw FormatException('canoa.cfg: not valid YAML${error.span == null ? '' : ' at line ${error.span!.start.line + 1}'}');
+    throw FormatException('${Brand.configFile}: not valid YAML${error.span == null ? '' : ' at line ${error.span!.start.line + 1}'}');
   } on FormatException {
     rethrow;
   } on Object {
-    throw FormatException('canoa.cfg: not valid ${format.name.toUpperCase()}');
+    throw FormatException('${Brand.configFile}: not valid ${format.name.toUpperCase()}');
   }
   final data = _plain(raw, true);
-  if (data is! Map<String, dynamic>) throw const FormatException('canoa.cfg: the top level is not a table of settings');
+  if (data is! Map<String, dynamic>) throw const FormatException('${Brand.configFile}: the top level is not a table of settings');
   return (format: format, marked: marked, data: data);
 }
 
@@ -75,7 +75,7 @@ Object? _json(String body) {
   try {
     return jsonDecode(body);
   } on FormatException {
-    throw const FormatException('canoa.cfg: not valid JSON');
+    throw const FormatException('${Brand.configFile}: not valid JSON');
   }
 }
 
@@ -101,7 +101,7 @@ Object? _plain(Object? value, bool root) {
     case final List<dynamic> list:
       return [
         for (final item in list)
-          _plain(item, false) ?? (throw const FormatException('canoa.cfg: a list holds a null, which has no place in canoa.cfg')),
+          _plain(item, false) ?? (throw const FormatException('${Brand.configFile}: a list holds a null, which has no place in ${Brand.configFile}')),
       ];
     case null:
       return root ? <String, dynamic>{} : null;
@@ -254,7 +254,7 @@ enum ConfigOrigin {
   installed('the installed file'),
   system('the system file'),
   user('your user file'),
-  listed('a file CANOA_CONFIG lists'),
+  listed('a file ${Brand.envPrefix}_CONFIG lists'),
   own('your file');
 
   const ConfigOrigin(this.words);
@@ -315,7 +315,7 @@ Map<String, dynamic> withoutKey(Map<String, dynamic> data, List<String> path) {
   final separator = windows ? ';' : ':';
   final entries = (plus ? value.substring(1) : value).split(separator);
   for (var i = 0; i < entries.length; i++) {
-    if (entries[i].isEmpty) throw FormatException('canoa.cfg entry ${i + 1} is empty');
+    if (entries[i].isEmpty) throw FormatException('${Brand.configFile} entry ${i + 1} is empty');
   }
   return (merge: plus, entries: entries);
 }
@@ -356,25 +356,25 @@ final class ConfigFiles {
     String? user;
     if (windows) {
       final base = var_('APPDATA') ?? (home == null ? null : join(join(home, 'AppData'), 'Roaming'));
-      user = base == null ? null : join(join(base, 'Canoa'), 'canoa.cfg');
+      user = base == null ? null : join(join(base, Brand.folder), Brand.configFile);
     } else {
       final xdg = var_('XDG_CONFIG_HOME');
       final base = xdg != null && xdg.startsWith('/') ? xdg : (home == null ? null : join(home, '.config'));
-      user = base == null ? null : join(join(base, 'Canoa'), 'canoa.cfg');
+      user = base == null ? null : join(join(base, Brand.folder), Brand.configFile);
     }
     final system = windows
-        ? join(join(var_('PROGRAMDATA') ?? r'C:\ProgramData', 'Canoa'), 'canoa.cfg')
-        : '/etc/Canoa/canoa.cfg';
+        ? join(join(var_('PROGRAMDATA') ?? r'C:\ProgramData', Brand.folder), Brand.configFile)
+        : '/etc/${Brand.folder}/${Brand.configFile}';
     final installedDir = var_(Brand.env('INSTALLED_DIR')) ?? programDir;
     final spec = (explicit ?? var_(Brand.env('CONFIG')));
     final lower = <ConfigFile>[
-      (origin: ConfigOrigin.installed, path: join(installedDir, 'canoa.cfg')),
+      (origin: ConfigOrigin.installed, path: join(installedDir, Brand.configFile)),
       (origin: ConfigOrigin.system, path: system),
     ];
     final files = <ConfigFile>[];
     String own;
     if (spec == null || spec.isEmpty) {
-      if (user == null) throw FormatException('no canoa.cfg: give ${Brand.env('CONFIG')}');
+      if (user == null) throw FormatException('no ${Brand.configFile}: give ${Brand.env('CONFIG')}');
       files
         ..addAll(lower)
         ..add((origin: ConfigOrigin.own, path: user));
@@ -383,7 +383,7 @@ final class ConfigFiles {
       final list = parseConfigList(spec, windows: windows);
       for (var i = 0; i < list.entries.length; i++) {
         if (!exists(list.entries[i])) {
-          throw FormatException('canoa.cfg entry ${i + 1} (${list.entries[i]}) is not a file');
+          throw FormatException('${Brand.configFile} entry ${i + 1} (${list.entries[i]}) is not a file');
         }
       }
       if (list.merge) {

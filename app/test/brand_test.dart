@@ -15,6 +15,11 @@ void main() {
     expect(Brand.shortName, file['short_name']);
     expect(Brand.id, file['id']);
     expect(Brand.envPrefix, file['env_prefix']);
+    expect(Brand.executable, file['executable']);
+    expect(Brand.program, file['program']);
+    expect(Brand.configFile, file['config_file']);
+    expect(Brand.folder, file['folder']);
+    expect(Brand.homeDir, file['home_dir']);
     expect(Brand.accentHex.toUpperCase(), (file['accent'] as String).toUpperCase());
     expect(Brand.markJson, isEmpty);
   });

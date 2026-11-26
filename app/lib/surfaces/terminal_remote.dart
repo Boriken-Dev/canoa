@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 
 import '../acp/served_host.dart';
+import '../brand.dart';
 import '../config/connection.dart';
 import '../desktop/host_control.dart';
 import '../desktop/host_grants.dart';
@@ -42,7 +43,7 @@ Future<TerminalAccess> terminalOnConnection(
   }
   if (!grants.may(HostGrants.terminal)) {
     await channel.close();
-    return TerminalRefused('$name has not given this app a terminal. Its canoa.cfg names the keys that may have one.');
+    return TerminalRefused('$name has not given this app a terminal. Its ${Brand.configFile} names the keys that may have one.');
   }
   return TerminalOnHost(ControlTerminals(channel));
 }

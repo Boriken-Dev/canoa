@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../acp/usage_wire.dart';
+import '../brand.dart';
 import 'profiles_panel.dart' show visible;
 
 /// The host's two minutes to answer, less a margin for the answer to arrive.
@@ -90,7 +91,7 @@ class _ProfileApprovalDialogState extends State<ProfileApprovalDialog> {
           CheckboxListTile(
             key: const Key('approve-remember'),
             title: Text('Keep these choices for ${widget.agent}'),
-            subtitle: const Text('Written to canoa.cfg, and used by the next session; a server whose definition changes asks again.'),
+            subtitle: const Text('Written to ${Brand.configFile}, and used by the next session; a server whose definition changes asks again.'),
             value: _remember,
             onChanged: (value) => setState(() => _remember = value ?? false),
           ),
@@ -125,7 +126,7 @@ class _ProfileApprovalDialogState extends State<ProfileApprovalDialog> {
             '${each.timeout == null ? '' : ', ${each.timeout} s at most'}'
             '${each.onFailure == 'refuse' ? ', refuses on failure' : ''}'
             '${each.sets.isEmpty ? '' : ', may set ${each.sets.join(', ')} (not applied over ACP)'}'
-            '${each.fires ? '' : ' (${each.note ?? 'Canoa does not see this event, so it never runs'})'}',
+            '${each.fires ? '' : ' (${each.note ?? '${Brand.name} does not see this event, so it never runs'})'}',
     ];
     return lines.join('\n');
   }

@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../surfaces/a2ui/overlay_views.dart' show OpenOverlayView;
 
 import '../config/canoa_config.dart';
@@ -386,7 +387,7 @@ class LoadoutController extends ChangeNotifier {
           ? config.withCatalog(name, source!)
           : config.withCatalogOf(type, name, generator ? CatalogSpec.generated(provider, fields) : CatalogSpec(provider, fields));
     } on FormatException catch (error) {
-      return error.message.replaceFirst('canoa.cfg: ', '');
+      return error.message.replaceFirst('${Brand.configFile}: ', '');
     }
     await apply(changed);
     await load();
@@ -808,7 +809,7 @@ class LoadoutController extends ChangeNotifier {
     address = address.trim();
     if (registryProblemOf(address) case final why?) return why;
     if (registries.contains(address)) return 'That registry is already here';
-    if (registries.length >= 17) return 'Canoa keeps at most 16 registries beside the official one';
+    if (registries.length >= 17) return '${Brand.name} keeps at most 16 registries beside the official one';
     await apply(config.withStoreRegistries([...config.storeRegistries, address]));
     await selectRegistry(address);
     return null;
@@ -851,7 +852,7 @@ class LoadoutController extends ChangeNotifier {
     final read = readCatalog;
     if (read == null) throw const RegistryRefusal('Registries are read through the host, and this app has none');
     final label = registryLabelOf(address);
-    if (label == null) throw RegistryRefusal('canoa.cfg holds no registry $address');
+    if (label == null) throw RegistryRefusal('${Brand.configFile} holds no registry $address');
     try {
       final answer = await read('mcps', label, search: search, cursor: cursor);
       return parseRegistryPage(jsonEncode({'servers': answer['servers'], 'metadata': answer['metadata']}));

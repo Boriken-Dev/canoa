@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/text_pack.dart';
 import '../highlight/highlighted.dart' show codeSpansFor;
 import 'vendor_looks.dart';
@@ -14,7 +15,7 @@ final class LookId {
   /// The family [name], which a person reads as [label] (the id when none is given).
   const LookId(this.name, [String? label]) : label = label ?? name;
 
-  static const canoa = LookId('canoa', 'Canoa');
+  static const canoa = LookId('canoa', Brand.name);
   static const terminal = LookId('terminal', 'Terminal');
 
   /// The families the app carries itself, in the order a person is offered them.

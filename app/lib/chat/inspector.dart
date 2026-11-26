@@ -5,6 +5,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../acp/pipe_channel.dart' show isPipeUrl;
+import '../brand.dart';
 import '../l10n/app_text.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
@@ -43,7 +44,7 @@ import 'session_watch.dart';
       final name = endpoint == null
           ? null
           : isPipeUrl(endpoint.toString())
-              ? 'this computer, through its canoa'
+              ? 'this computer, through its ${Brand.program}'
               : (endpoint.host.isEmpty ? null : endpoint.host);
       // The host a draft was aimed at keeps the name it was saved under; one reached any other way is named by its address.
       return (label: 'Host', value: session.host ?? name ?? session.place.label);

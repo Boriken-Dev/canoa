@@ -3,6 +3,7 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ComposerPill;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../chat/composer_controls.dart' show loadoutChoices, profileChoices;
 import '../config/canoa_config.dart';
 
@@ -79,7 +80,7 @@ class StartPicker extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
                 onTap: () => controller.isOpen ? controller.close() : controller.open(),
                 child: Tooltip(
-                  message: byKind ? 'The loadout canoa.cfg gives $client clients; choose another for the next session' : 'The loadout the next session starts with',
+                  message: byKind ? 'The loadout ${Brand.configFile} gives $client clients; choose another for the next session' : 'The loadout the next session starts with',
                   child: ComposerPill(label: started ?? 'Loadout', icon: Icons.layers_outlined),
                 ),
               ),

@@ -96,7 +96,7 @@ Future<ProfileLayers> profileLayers({
           continue;
         }
         if (installed.source != source.spec) {
-          notes.add(LayerNote(id, 'Installed from ${installed.source}, not the source canoa.cfg names: sync it'));
+          notes.add(LayerNote(id, 'Installed from ${installed.source}, not the source ${Brand.configFile} names: sync it'));
           continue;
         }
         final digest = installed.digest;
@@ -105,7 +105,7 @@ Future<ProfileLayers> profileLayers({
           continue;
         }
         if (source.pin case final pin? when !sameDigest(pin, digest)) {
-          notes.add(LayerNote(id, 'canoa.cfg pins it to $pin, and $digest is installed: sync it'));
+          notes.add(LayerNote(id, '${Brand.configFile} pins it to $pin, and $digest is installed: sync it'));
           continue;
         }
         directory = home.overlays.directoryOf(name);

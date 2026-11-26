@@ -10,6 +10,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart' show McpOrigin;
 import '../profile/aos_support.dart' show holdsPassword;
 import '../profile/profile.dart' show GitOverlay, OverlaySource, ProfileException, isEntryName, isEnvName;
@@ -135,7 +136,7 @@ final class McpRegistryPage {
 /// Reads a list answer: `{"servers": [{"server": {...}, "_meta": {...}}], "metadata": {"nextCursor": ...}}`. Entries the
 /// registry marks as other than its latest version, and entries with no name, are left out; a body that is not a list is refused.
 McpRegistryPage parseRegistryPage(String body) {
-  if (body.length > maxRegistryBytes) throw const RegistryRefusal('The registry\'s answer is larger than Canoa reads');
+  if (body.length > maxRegistryBytes) throw const RegistryRefusal('The registry\'s answer is larger than ${Brand.name} reads');
   final Object? decoded;
   try {
     decoded = jsonDecode(body);
@@ -175,7 +176,7 @@ final class McpNeed {
 
   String describe() => reads != null
       ? '$where $name: read from your environment variable $reads when a session starts'
-          '${secret ? '; it holds a secret, which Canoa never writes to canoa.cfg' : ''}'
+          '${secret ? '; it holds a secret, which ${Brand.name} never writes to ${Brand.configFile}' : ''}'
       : '$where $name${required ? ' (required)' : ''}';
 }
 
@@ -234,7 +235,7 @@ String _envName(String name) {
     if (isNamed && name == null) return (words: words, refusal: 'an argument with a type named and no name');
     if (raw == null) {
       if (item['isRequired'] == true) {
-        return (words: words, refusal: 'it needs ${isNamed ? name : (hint ?? 'a positional argument')}, a value Canoa cannot choose for you');
+        return (words: words, refusal: 'it needs ${isNamed ? name : (hint ?? 'a positional argument')}, a value ${Brand.name} cannot choose for you');
       }
       if (isNamed && item['format'] == 'boolean') words.add(name!);
       continue;
@@ -261,7 +262,7 @@ McpOption _remote(Map<String, Object?> remote) {
   final url = _text(remote['url']) ?? '';
   final label = 'remote $url';
   McpOption refuse(String why) => McpOption(label: label, kind: 'remote', refusal: why);
-  if (type != 'streamable-http' && type != 'sse') return refuse('Canoa connects to a remote server over streamable HTTP or SSE, and this one is $type');
+  if (type != 'streamable-http' && type != 'sse') return refuse('${Brand.name} connects to a remote server over streamable HTTP or SSE, and this one is $type');
   final filled = _fill(url, _map(remote['variables']));
   if (filled.missing != null) return refuse('its address has {${filled.missing}}, which the registry gives no default for');
   final uri = Uri.tryParse(filled.text);
@@ -270,13 +271,13 @@ McpOption _remote(Map<String, Object?> remote) {
   }
   if (uri.scheme == 'http') {
     final loopback = uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host == '::1';
-    if (!loopback) return refuse('its address is plain http to another computer, which Canoa does not connect to');
+    if (!loopback) return refuse('its address is plain http to another computer, which ${Brand.name} does not connect to');
   }
   final needs = <McpNeed>[];
   final headers = <String, dynamic>{};
   for (final header in _maps(remote['headers'])) {
     final name = _text(header['name']);
-    if (name == null || !isEntryName(name)) return refuse('a header of the registry\'s is not a name Canoa writes');
+    if (name == null || !isEntryName(name)) return refuse('a header of the registry\'s is not a name ${Brand.name} writes');
     final literal = _text(header['value']) ?? _text(header['default']);
     if (literal != null && header['isSecret'] != true) {
       final filledHeader = _fill(literal, _map(header['variables']));
@@ -305,7 +306,7 @@ McpOption _package(Map<String, Object?> package) {
   final label = '$registryType package $identifier${version == null ? '' : ' $version'}';
   McpOption refuse(String why) => McpOption(label: label, kind: 'package', refusal: why);
   final transport = _text(_map(package['transport'])['type']) ?? 'stdio';
-  if (transport != 'stdio') return refuse('Canoa starts a package that speaks MCP on its standard streams, and this one is $transport');
+  if (transport != 'stdio') return refuse('${Brand.name} starts a package that speaks MCP on its standard streams, and this one is $transport');
   final hint = _text(package['runtimeHint']);
   late final String runtime;
   late final List<String> lead, trail;
@@ -323,19 +324,19 @@ McpOption _package(Map<String, Object?> package) {
       lead = const ['run', '-i', '--rm'];
       trail = const [];
     case 'mcpb':
-      return refuse('it is an MCP bundle (mcpb), which Canoa does not unpack or run');
+      return refuse('it is an MCP bundle (mcpb), which ${Brand.name} does not unpack or run');
     default:
-      return refuse('Canoa builds no command for a $registryType package');
+      return refuse('${Brand.name} builds no command for a $registryType package');
   }
   if (!RegExp(r'^@?[A-Za-z0-9][A-Za-z0-9._/@:+=~-]*$').hasMatch(identifier) || identifier.contains('..')) {
-    return refuse('its identifier has characters Canoa does not put on a command line');
+    return refuse('its identifier has characters ${Brand.name} does not put on a command line');
   }
   final needs = <McpNeed>[];
   final env = <String, dynamic>{};
   final dockerEnv = <String>[];
   for (final variable in _maps(package['environmentVariables'])) {
     final name = _text(variable['name']);
-    if (name == null || !isEnvName(name)) return refuse('an environment variable of the registry\'s is not a name Canoa sets');
+    if (name == null || !isEnvName(name)) return refuse('an environment variable of the registry\'s is not a name ${Brand.name} sets');
     final secret = variable['isSecret'] == true, required = variable['isRequired'] == true;
     final literal = _text(variable['value']) ?? _text(variable['default']);
     if (literal != null && !secret) {

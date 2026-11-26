@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 
+import '../brand.dart';
 import '../profile/aos_support.dart';
 import '../profile/overlays.dart';
 import '../profile/skill_copies.dart';
@@ -207,7 +208,7 @@ Future<SkillReview> reviewSkills(OverlayManager overlays, {
     }
     if (both.conflict) {
       items.add(item(SkillStatus.refused,
-          why: 'canoa.cfg [skill_pins] and the entry give different pins, and no tree has both'));
+          why: '${Brand.configFile} [skill_pins] and the entry give different pins, and no tree has both'));
       continue;
     }
     final planned = fetches[key];
@@ -313,7 +314,7 @@ Future<SkillOutcome> _fetchAndSave(OverlayManager overlays, SkillItem item, Set<
     return SkillOutcome(item.name, SkillResult.refused, _refusedBecause(error));
   }
   if (item.configuredPin case final configured? when !sameDigest(configured, '${read.digest}')) {
-    return SkillOutcome(item.name, SkillResult.refused, 'the files fetched do not have the pin in canoa.cfg [skill_pins]: refused');
+    return SkillOutcome(item.name, SkillResult.refused, 'the files fetched do not have the pin in ${Brand.configFile} [skill_pins]: refused');
   }
   final bytes = {for (final (path, data) in files) path: data};
   final failure = await _save(overlays, SkillCopy(
@@ -348,7 +349,7 @@ Future<SkillInstallReport> installSkills(OverlayManager overlays, SkillReview re
         report.outcomes.add(SkillOutcome(item.name, SkillResult.notDelivered, 'named skill; no catalog resolves it'));
       case SkillStatus.ambiguous:
         report.outcomes.add(SkillOutcome(item.name, SkillResult.notDelivered,
-            'offered by ${item.catalogs?.join(' and ')}, and Canoa never picks one'));
+            'offered by ${item.catalogs?.join(' and ')}, and ${Brand.name} never picks one'));
       case SkillStatus.shadowed || SkillStatus.refused:
         report.outcomes.add(SkillOutcome(item.name, SkillResult.notDelivered, item.why ?? 'not delivered'));
       case SkillStatus.unchanged:
@@ -424,7 +425,7 @@ SkillItem reviewChosenSkill(OverlayManager overlays, Map<String, SkillCopy> copi
   SkillItem refused(String why) => SkillItem(name: name, overlay: '', status: SkillStatus.refused, source: from.shown(),
       pin: both.pin, configuredPin: configured, catalog: label, previous: copy, why: why, own: own);
   if (!validSkillName(name)) return refused('it is not a skill name');
-  if (both.conflict) return refused('canoa.cfg [skill_pins] and the catalog give different pins, and no tree has both');
+  if (both.conflict) return refused('${Brand.configFile} [skill_pins] and the catalog give different pins, and no tree has both');
   final same = copy != null && copy.source == from.keyWith(null) && _samePin(copy.pin, both.pin);
   if (copy != null && !same && copy.overlays.isNotEmpty) {
     return refused('an overlay already has a skill of this name from another source or pin');

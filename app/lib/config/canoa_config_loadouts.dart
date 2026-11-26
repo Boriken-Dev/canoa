@@ -25,7 +25,7 @@ final class Loadout {
       final raw = table[key];
       if (raw == null) return const [];
       if (raw is! List || raw.any((item) => item is! String || !valid(item))) {
-        throw FormatException('canoa.cfg: loadouts.$name.$key is a list of names');
+        throw FormatException('${Brand.configFile}: loadouts.$name.$key is a list of names');
       }
       final out = <String>[];
       for (final item in raw.cast<String>()) {
@@ -36,11 +36,11 @@ final class Loadout {
 
     for (final key in table.keys) {
       if (!_keys.contains(key)) {
-        throw FormatException('canoa.cfg: loadouts.$name.$key is not a loadout setting: description, overlays, skills and mcp are');
+        throw FormatException('${Brand.configFile}: loadouts.$name.$key is not a loadout setting: description, overlays, skills and mcp are');
       }
     }
     final description = table['description'];
-    if (description != null && description is! String) throw FormatException('canoa.cfg: loadouts.$name.description is text');
+    if (description != null && description is! String) throw FormatException('${Brand.configFile}: loadouts.$name.description is text');
     return Loadout(
       description: (description as String?) ?? '',
       overlays: names('overlays', validOverlayName),
@@ -124,20 +124,20 @@ final class Preset {
   factory Preset.read(String name, Map<dynamic, dynamic> table) {
     for (final MapEntry(:key, :value) in table.entries) {
       if (!_keys.contains(key)) {
-        throw FormatException('canoa.cfg: profiles.$name.$key is not a profile setting: source, model, effort, mode, access, context, '
+        throw FormatException('${Brand.configFile}: profiles.$name.$key is not a profile setting: source, model, effort, mode, access, context, '
             'cache_lifetime, loadout and items are');
       }
       if (key == 'access' || key == 'items') continue;
-      if (value is! String) throw FormatException('canoa.cfg: profiles.$name.$key is not text');
-      if (value.isEmpty || value.contains('\u0000')) throw FormatException('canoa.cfg: profiles.$name.$key is empty or holds a NUL');
+      if (value is! String) throw FormatException('${Brand.configFile}: profiles.$name.$key is not text');
+      if (value.isEmpty || value.contains('\u0000')) throw FormatException('${Brand.configFile}: profiles.$name.$key is empty or holds a NUL');
     }
     final lifetime = table['cache_lifetime'];
     if (lifetime != null && !_lifetimes.contains(lifetime)) {
-      throw FormatException('canoa.cfg: profiles.$name.cache_lifetime is not default, off, short or long');
+      throw FormatException('${Brand.configFile}: profiles.$name.cache_lifetime is not default, off, short or long');
     }
     final loadout = table['loadout'];
     if (loadout != null && !isEntryName(loadout as String)) {
-      throw FormatException('canoa.cfg: profiles.$name.loadout is not a loadout\'s name');
+      throw FormatException('${Brand.configFile}: profiles.$name.loadout is not a loadout\'s name');
     }
     // The model, effort and mode are held to what a profile document holds them to.
     final Profile own;
@@ -148,17 +148,17 @@ final class Preset {
         if (table['access'] != null) 'access': table['access'],
       }, LayerKind.session);
     } on ProfileException catch (error) {
-      throw FormatException('canoa.cfg: profiles.$name: $error');
+      throw FormatException('${Brand.configFile}: profiles.$name: $error');
     }
     final items = <String, Map<String, Object?>>{};
     final rawItems = table['items'];
     if (rawItems != null) {
-      if (rawItems is! Map) throw FormatException('canoa.cfg: profiles.$name.items is a table');
+      if (rawItems is! Map) throw FormatException('${Brand.configFile}: profiles.$name.items is a table');
       for (final MapEntry(:key, :value) in rawItems.entries) {
         if (!RegExp(r'^[a-z0-9_]{1,32}$').hasMatch('$key')) {
-          throw FormatException('canoa.cfg: profiles.$name.items.$key is not an item\'s id');
+          throw FormatException('${Brand.configFile}: profiles.$name.items.$key is not an item\'s id');
         }
-        if (value is! Map) throw FormatException('canoa.cfg: profiles.$name.items.$key is a table');
+        if (value is! Map) throw FormatException('${Brand.configFile}: profiles.$name.items.$key is a table');
         items['$key'] = {for (final MapEntry(:key, :value) in value.entries) '$key': value};
       }
     }

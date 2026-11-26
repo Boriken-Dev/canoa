@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 
+import '../brand.dart';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
 import '../profile/aos_support.dart' show holdsPassword;
@@ -197,7 +198,7 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source, {bool own = false}) async {
-    if (source.kind != 'git') throw const OverlayException('Canoa fetches skills from git only, and this source is not git');
+    if (source.kind != 'git') throw const OverlayException('${Brand.name} fetches skills from git only, and this source is not git');
     if (holdsPassword(source.location)) throw const OverlayException('A skill source holds a password, which none may');
     final answer = await _call('skill/fetch', {
       'repo': source.location,

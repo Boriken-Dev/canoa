@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../profile/aos_support.dart' show holdsPassword;
 import 'contents_reader.dart';
 import 'contents_storage.dart';
@@ -129,7 +130,7 @@ class ContentsStore extends ChangeNotifier {
         for (final MapEntry(key: name, value: entry) in catalog.skills.entries) {
           want('skill', name, entry.pin, (id) {
             final source = entry.source;
-            if (source.kind != 'git') throw const StoreRefusal('Canoa fetches skills from git only, and this source is not git');
+            if (source.kind != 'git') throw const StoreRefusal('${Brand.name} fetches skills from git only, and this source is not git');
             if (holdsPassword(source.location)) throw const StoreRefusal('A skill source holds a password, which none may');
             return ContentsRequest(id: id, kind: 'skill', name: name, repo: source.location, ref: source.reference, path: source.path);
           });

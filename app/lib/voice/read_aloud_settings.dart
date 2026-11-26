@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../l10n/app_text.dart';
 import '../settings/settings_controller.dart';
@@ -68,8 +69,8 @@ class _ReadAloudGroupState extends State<ReadAloudGroup> {
             title: 'No voice to read replies aloud with',
             description: widget.outputs.problem != null
                 ? "This host's voice providers are not available: ${widget.outputs.problem}"
-                : 'This browser or system has no voices of its own, and Canoa never sends text to another service on its own. '
-                    'Add a voice provider on the host (canoa.cfg, under say), and replies are read through it',
+                : 'This browser or system has no voices of its own, and ${Brand.name} never sends text to another service on its own. '
+                    'Add a voice provider on the host (${Brand.configFile}, under say), and replies are read through it',
             child: true,
           ),
         ]);
@@ -93,7 +94,7 @@ class _ReadAloudGroupState extends State<ReadAloudGroup> {
           SettingsRow(
             key: const Key('speak-missing'),
             title: 'Not available here',
-            description: 'The provider named in canoa.cfg is not here. Choose another; nothing is spoken meanwhile',
+            description: 'The provider named in ${Brand.configFile} is not here. Choose another; nothing is spoken meanwhile',
             child: true,
           )
         else ..._choices(context, speak, output),

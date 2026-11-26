@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as pkg;
 
+import '../brand.dart';
 import 'delegate_targets.dart';
 
 /// The `_meta` key of `initialize` with which a client tells the host it can show a delegated task, answer what the task's agent
@@ -504,7 +505,7 @@ final class DelegateWire {
   Future<Object?> _askRaw(String method, Map<String, Object?> params, Duration timeout) async {
     // Unguessable, so no message of the agent's can pass for the host's answer.
     final nonce = [for (var i = 0; i < 8; i++) _random.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
-    final id = 'canoa-delegate-${_next++}-$nonce';
+    final id = '${Brand.program}-delegate-${_next++}-$nonce';
     final waiting = Completer<Object?>();
     _waiting[id] = waiting;
     try {

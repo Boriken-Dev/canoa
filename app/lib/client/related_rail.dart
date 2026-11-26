@@ -1,6 +1,7 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../ledger/ledger_list.dart';
 import '../ledger/running_sessions.dart';
 import '../ledger/session_ledger.dart';
@@ -67,7 +68,7 @@ class RelatedRail extends StatelessWidget {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               CanoaMark(color: look.accent),
               const SizedBox(width: 10),
-              const Text('Canoa', softWrap: false, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+              const Text(Brand.name, softWrap: false, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             ]),
           ),
         ),

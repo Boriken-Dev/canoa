@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:js_interop';
 
+import '../brand.dart';
 import 'session_ledger.dart';
 
 /// This origin's IndexedDB: a web page, a PWA and the extension each keep their own. The session list is `canoa-sessions`;
 /// another [name] is `canoa-<name>`.
 LedgerBackend platformLedgerBackend({String? configPath, String name = 'sessions'}) =>
-    IndexedDbLedgerBackend(database: 'canoa-$name');
+    IndexedDbLedgerBackend(database: '${Brand.program}-$name');
 
 @JS('indexedDB')
 external _Factory? get _indexedDB;
@@ -49,7 +50,7 @@ extension type _Store._(JSObject _) implements JSObject {
 
 /// The ledger as one string under one key of an object store.
 final class IndexedDbLedgerBackend implements LedgerBackend {
-  IndexedDbLedgerBackend({this.database = 'canoa-sessions'});
+  IndexedDbLedgerBackend({this.database = '${Brand.program}-sessions'});
 
   final String database;
   static const _store = 'ledger';

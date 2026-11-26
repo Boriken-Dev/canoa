@@ -6,6 +6,7 @@ import 'package:toml/toml.dart';
 
 import '../accounts/account_models.dart' show AccountEntry;
 import '../acp/agent_commands.dart';
+import '../brand.dart';
 import '../providers/provider_catalog.dart';
 import '../voice/speech_backend.dart' show VoiceProfile;
 import 'catalog_specs.dart';
@@ -678,13 +679,13 @@ final class CanoaConfig {
   /// names, or a value that is no catalog.
   static Map<String, CatalogSpec> parseCatalogSpecs(String type, Object? raw) {
     if (raw == null) return const {};
-    if (raw is! Map) throw FormatException('canoa.cfg: store.$type.catalogs must be a table');
+    if (raw is! Map) throw FormatException('${Brand.configFile}: store.$type.catalogs must be a table');
     final out = <String, CatalogSpec>{};
     final normalized = <String>{};
     for (final MapEntry(:key, :value) in raw.entries) {
       final label = '$key';
       if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
-        throw FormatException('canoa.cfg: store.$type.catalogs.$label: a label is a letter, then letters, digits, - or _, at most '
+        throw FormatException('${Brand.configFile}: store.$type.catalogs.$label: a label is a letter, then letters, digits, - or _, at most '
             '64, unique when compared as AOS compares names');
       }
       if (value == false) continue;
@@ -728,17 +729,17 @@ final class CanoaConfig {
 
   static Map<String, String> _skillPins(Object? raw) {
     if (raw == null) return const {};
-    if (raw is! Map) throw const FormatException('canoa.cfg: skill_pins must be a table');
+    if (raw is! Map) throw const FormatException('${Brand.configFile}: skill_pins must be a table');
     final out = <String, String>{};
     for (final MapEntry(:key, :value) in raw.entries) {
       final name = '$key'.toLowerCase();
       if (!validSkillName('$key')) {
-        throw FormatException('canoa.cfg: skill_pins.$key is not a skill name');
+        throw FormatException('${Brand.configFile}: skill_pins.$key is not a skill name');
       }
       if (value is! String || !RegExp(r'^sha256:[0-9a-fA-F]{64}$').hasMatch(value)) {
-        throw FormatException('canoa.cfg: skill_pins.$key is a sha256: tree digest');
+        throw FormatException('${Brand.configFile}: skill_pins.$key is a sha256: tree digest');
       }
-      if (out.containsKey(name)) throw FormatException('canoa.cfg: skill_pins.$key repeats a name');
+      if (out.containsKey(name)) throw FormatException('${Brand.configFile}: skill_pins.$key repeats a name');
       out[name] = value.toLowerCase();
     }
     return out;
@@ -809,13 +810,13 @@ final class CanoaConfig {
 
   static Map<String, Loadout> _loadouts(Object? raw) {
     if (raw == null) return const {};
-    if (raw is! Map) throw const FormatException('canoa.cfg: loadouts must be a table');
+    if (raw is! Map) throw const FormatException('${Brand.configFile}: loadouts must be a table');
     final out = <String, Loadout>{};
     for (final MapEntry(:key, :value) in raw.entries) {
       if (!isEntryName('$key')) {
-        throw FormatException('canoa.cfg: loadouts.$key: a loadout is named with 1 to 64 letters, digits, - or _');
+        throw FormatException('${Brand.configFile}: loadouts.$key: a loadout is named with 1 to 64 letters, digits, - or _');
       }
-      if (value is! Map) throw FormatException('canoa.cfg: loadouts.$key must be a table');
+      if (value is! Map) throw FormatException('${Brand.configFile}: loadouts.$key must be a table');
       out['$key'] = Loadout.read('$key', value);
     }
     return out;
@@ -824,13 +825,13 @@ final class CanoaConfig {
   static String? _defaultLoadout(Object? raw, Map<String, Loadout> loadouts) {
     if (raw == null) return null;
     if (raw is! Map || raw.keys.any((key) => key != 'loadout' && key != 'clients')) {
-      throw const FormatException('canoa.cfg: defaults is a table with the keys loadout and clients');
+      throw const FormatException('${Brand.configFile}: defaults is a table with the keys loadout and clients');
     }
     _clientLoadouts(raw);
     final name = raw['loadout'];
     if (name == null) return null;
     if (name is! String || !loadouts.containsKey(name)) {
-      throw const FormatException('canoa.cfg: defaults.loadout is the name of a loadout in loadouts');
+      throw const FormatException('${Brand.configFile}: defaults.loadout is the name of a loadout in loadouts');
     }
     return name;
   }
@@ -838,10 +839,10 @@ final class CanoaConfig {
   static Map<String, String> _clientLoadouts(Object? raw) {
     final clients = raw is Map ? raw['clients'] : null;
     if (clients == null) return const {};
-    if (clients is! Map) throw const FormatException('canoa.cfg: defaults.clients must be a table');
+    if (clients is! Map) throw const FormatException('${Brand.configFile}: defaults.clients must be a table');
     final out = <String, String>{};
     for (final MapEntry(:key, :value) in clients.entries) {
-      if (value is! String) throw FormatException('canoa.cfg: defaults.clients.$key is the name of a loadout');
+      if (value is! String) throw FormatException('${Brand.configFile}: defaults.clients.$key is the name of a loadout');
       out['$key'] = value;
     }
     return out;
@@ -872,13 +873,13 @@ final class CanoaConfig {
   Map<String, Preset> get presets => _presets(tables['profiles']);
 
   static Map<String, Preset> _presets(Object? raw) {
-    if (raw != null && raw is! Map) throw const FormatException('canoa.cfg: profiles must be a table');
+    if (raw != null && raw is! Map) throw const FormatException('${Brand.configFile}: profiles must be a table');
     final read = <String, Preset>{};
     for (final MapEntry(:key, :value) in (raw as Map? ?? const {}).entries) {
       if (!isPresetName('$key')) {
-        throw FormatException('canoa.cfg: profiles.$key: $presetNameRule');
+        throw FormatException('${Brand.configFile}: profiles.$key: $presetNameRule');
       }
-      if (value is! Map) throw FormatException('canoa.cfg: profiles.$key must be a table');
+      if (value is! Map) throw FormatException('${Brand.configFile}: profiles.$key must be a table');
       read['$key'] = Preset.read('$key', value);
     }
     return {presetDefault: read.remove(presetDefault) ?? const Preset(), ...read};
@@ -931,26 +932,26 @@ final class CanoaConfig {
       final address = value.source;
       if (address == null) continue;
       if (address.runes.any((rune) => rune <= 0x20 || rune == 0x7f)) {
-        throw FormatException('canoa.cfg: store.mcps.catalogs.$key is the address of a registry, with no spaces or control characters');
+        throw FormatException('${Brand.configFile}: store.mcps.catalogs.$key is the address of a registry, with no spaces or control characters');
       }
       out[key] = address;
     }
-    if (out.length > 16) throw const FormatException('canoa.cfg: store.mcps.catalogs lists at most 16 registries beside the official one');
-    if (out.values.toSet().length != out.length) throw const FormatException('canoa.cfg: store.mcps.catalogs lists a registry twice');
+    if (out.length > 16) throw const FormatException('${Brand.configFile}: store.mcps.catalogs lists at most 16 registries beside the official one');
+    if (out.values.toSet().length != out.length) throw const FormatException('${Brand.configFile}: store.mcps.catalogs lists a registry twice');
     return out;
   }
 
   static ({Map<String, McpOrigin> mcp, List<String> registries}) _storeExtras(Object? raw) {
     if (raw == null) return (mcp: const {}, registries: const []);
-    if (raw is! Map) throw const FormatException('canoa.cfg: store must be a table');
+    if (raw is! Map) throw const FormatException('${Brand.configFile}: store must be a table');
     final registries = _registryLabels(_catalogsIn(raw, 'mcps'));
     final mcp = <String, McpOrigin>{};
     final rawMcp = raw['mcp'];
-    if (rawMcp != null && rawMcp is! Map) throw const FormatException('canoa.cfg: store.mcp must be a table');
+    if (rawMcp != null && rawMcp is! Map) throw const FormatException('${Brand.configFile}: store.mcp must be a table');
     for (final MapEntry(:key, :value) in ((rawMcp as Map?) ?? const {}).entries) {
       final origin = value is Map ? McpOrigin.fromMap(value) : null;
       if (!isEntryName('$key') || origin == null) {
-        throw FormatException('canoa.cfg: store.mcp.$key is a table of registry, server, version and digest');
+        throw FormatException('${Brand.configFile}: store.mcp.$key is a table of registry, server, version and digest');
       }
       mcp['$key'] = origin;
     }
@@ -1038,11 +1039,11 @@ final class CanoaConfig {
       try {
         given[key] = SkillSource.parse(spec);
       } on FormatException catch (error) {
-        throw FormatException('canoa.cfg: store.skills.catalogs.$key: ${error.message}');
+        throw FormatException('${Brand.configFile}: store.skills.catalogs.$key: ${error.message}');
       }
     }
     if (given.length > maxSkillSources) {
-      throw const FormatException('canoa.cfg: store.skills.catalogs holds at most $maxSkillSources sources');
+      throw const FormatException('${Brand.configFile}: store.skills.catalogs holds at most $maxSkillSources sources');
     }
     final own = given.keys.where((label) => normalizeName(label) == normalizeName(defaultSkillSourceLabel));
     return {
@@ -1093,11 +1094,11 @@ final class CanoaConfig {
             uri.userInfo.isNotEmpty ||
             uri.hasQuery ||
             uri.hasFragment) {
-          throw const FormatException('canoa.cfg: store.skills_search is true, false, or the address of a skills directory: https, or http to this computer, with no user information, query or fragment');
+          throw const FormatException('${Brand.configFile}: store.skills_search is true, false, or the address of a skills directory: https, or http to this computer, with no user information, query or fragment');
         }
         return address.replaceAll(RegExp(r'/+$'), '');
       default:
-        throw const FormatException('canoa.cfg: store.skills_search is true, false, or the address of a skills directory');
+        throw const FormatException('${Brand.configFile}: store.skills_search is true, false, or the address of a skills directory');
     }
   }
 
@@ -1186,12 +1187,12 @@ final class CanoaConfig {
     for (final MapEntry(key: agent, :value) in agents.entries) {
       final table = value is Map ? value['mcp'] : null;
       if (table == null) continue;
-      if (table is! Map) throw FormatException('canoa.cfg: agents.$agent.mcp must be a table');
+      if (table is! Map) throw FormatException('${Brand.configFile}: agents.$agent.mcp must be a table');
       final choices = <String, Object>{};
       for (final MapEntry(:key, value: choice) in table.entries) {
         if (!isEntryName('$key') ||
             !(choice is bool || (choice is String && RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(choice)))) {
-          throw FormatException('canoa.cfg: agents.$agent.mcp.$key is true, false, or the sha256: digest of what was '
+          throw FormatException('${Brand.configFile}: agents.$agent.mcp.$key is true, false, or the sha256: digest of what was '
               'allowed');
         }
         choices['$key'] = choice as Object;
@@ -1211,11 +1212,11 @@ final class CanoaConfig {
     for (final MapEntry(key: agent, :value) in agents.entries) {
       final table = value is Map ? value['hooks'] : null;
       if (table == null) continue;
-      if (table is! Map) throw FormatException('canoa.cfg: agents.$agent.hooks must be a table');
+      if (table is! Map) throw FormatException('${Brand.configFile}: agents.$agent.hooks must be a table');
       final allowed = <String, String>{};
       for (final MapEntry(:key, value: digest) in table.entries) {
         if (!isEntryName('$key') || digest is! String || !RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(digest)) {
-          throw FormatException('canoa.cfg: agents.$agent.hooks.$key is the sha256: digest of the overlay\'s files that were '
+          throw FormatException('${Brand.configFile}: agents.$agent.hooks.$key is the sha256: digest of the overlay\'s files that were '
               'allowed');
         }
         allowed['$key'] = digest;
@@ -1288,12 +1289,12 @@ final class CanoaConfig {
     try {
       source = OverlaySource.parseGit(spec);
     } on ProfileException {
-      throw FormatException('canoa.cfg: store.overlays.catalogs.$label is not <repository>@<ref>#<catalog file> of a source git may '
+      throw FormatException('${Brand.configFile}: store.overlays.catalogs.$label is not <repository>@<ref>#<catalog file> of a source git may '
           'fetch');
     }
-    if (source.path.isEmpty) throw FormatException('canoa.cfg: store.overlays.catalogs.$label names no catalog file after #');
+    if (source.path.isEmpty) throw FormatException('${Brand.configFile}: store.overlays.catalogs.$label names no catalog file after #');
     if (holdsPassword(source.repo)) {
-      throw FormatException('canoa.cfg: store.overlays.catalogs.$label holds a password, which canoa.cfg may not; use a credential '
+      throw FormatException('${Brand.configFile}: store.overlays.catalogs.$label holds a password, which ${Brand.configFile} may not; use a credential '
           'helper');
     }
     return source;
@@ -1311,7 +1312,7 @@ final class CanoaConfig {
 
   static List<Connection> _connections(Object? raw) {
     if (raw == null) return const [];
-    if (raw is! Map) throw const FormatException('canoa.cfg: connections must be a table');
+    if (raw is! Map) throw const FormatException('${Brand.configFile}: connections must be a table');
     return [for (final MapEntry(:key, :value) in raw.entries) Connection.read('$key', value)]..sort((a, b) => a.name.compareTo(b.name));
   }
 
@@ -1486,7 +1487,7 @@ final class CanoaConfig {
     Map<String, dynamic> table(String name) {
       final raw = data[name];
       if (raw == null) return {};
-      if (raw is! Map) throw FormatException('canoa.cfg: expected a table');
+      if (raw is! Map) throw FormatException('${Brand.configFile}: expected a table');
       return Map<String, dynamic>.from(raw);
     }
     final desktop = table('desktop');
@@ -1500,85 +1501,85 @@ final class CanoaConfig {
     final voiceTable = table('voice');
     final outputSpeed = voiceTable['output_speed'];
     if (outputSpeed != null && (outputSpeed is! num || !outputSpeed.isFinite || !(outputSpeed > 0))) {
-      throw const FormatException('canoa.cfg: voice.output_speed must be a number above 0');
+      throw const FormatException('${Brand.configFile}: voice.output_speed must be a number above 0');
     }
     String? voiceText(String key) {
       final raw = voiceTable[key];
       if (raw == null) return null;
-      if (raw is! String || raw.trim().isEmpty) throw FormatException('canoa.cfg: voice.$key must be text');
+      if (raw is! String || raw.trim().isEmpty) throw FormatException('${Brand.configFile}: voice.$key must be text');
       return raw;
     }
     final vocabulary = voiceTable['vocabulary'] ?? const [];
     if (vocabulary is! List || vocabulary.any((word) => word is! String || word.trim().isEmpty)) {
-      throw const FormatException('canoa.cfg: voice.vocabulary must be a list of text');
+      throw const FormatException('${Brand.configFile}: voice.vocabulary must be a list of text');
     }
     final acknowledged = voiceTable['acknowledged'] ?? const [];
     if (acknowledged is! List || acknowledged.any((id) => id is! String || id.trim().isEmpty)) {
-      throw const FormatException('canoa.cfg: voice.acknowledged must be a list of text');
+      throw const FormatException('${Brand.configFile}: voice.acknowledged must be a list of text');
     }
     final voiceMode = voiceTable['mode'] ?? 'toggle';
     if (voiceMode is! String || !{'toggle', 'hold'}.contains(voiceMode)) {
-      throw const FormatException('canoa.cfg: voice.mode must be toggle or hold');
+      throw const FormatException('${Brand.configFile}: voice.mode must be toggle or hold');
     }
     int limit(String key, int fallback) {
       final raw = attachments[key] ?? fallback;
-      if (raw is! int || raw < 0) throw FormatException('canoa.cfg: attachments.$key must be a whole number, 0 or more');
+      if (raw is! int || raw < 0) throw FormatException('${Brand.configFile}: attachments.$key must be a whole number, 0 or more');
       return raw;
     }
     final warn = usage['warn_permille'] ?? defaultWarnPermille;
     if (warn is! int || warn < 0 || warn > 1000) {
-      throw const FormatException('canoa.cfg: usage.warn_permille must be a whole number from 0 to 1000');
+      throw const FormatException('${Brand.configFile}: usage.warn_permille must be a whole number from 0 to 1000');
     }
     final phrases = usage['limit_phrases'];
     if (phrases != null && (phrases is! List || phrases.any((phrase) => phrase is! String))) {
-      throw const FormatException('canoa.cfg: usage.limit_phrases must be a list of text');
+      throw const FormatException('${Brand.configFile}: usage.limit_phrases must be a list of text');
     }
     final hidden = sources['hidden'] ?? const <Object>[];
     if (hidden is! List || hidden.any((name) => name is! String || name.trim().isEmpty)) {
-      throw const FormatException('canoa.cfg: sources.hidden must be a list of preset names');
+      throw const FormatException('${Brand.configFile}: sources.hidden must be a list of preset names');
     }
     final defaultMode = permissions['default_mode'];
     if (defaultMode != null && (defaultMode is! String || !modeOrder.contains(defaultMode))) {
-      throw FormatException('canoa.cfg: permissions.default_mode must be one of ${modeOrder.join(', ')}');
+      throw FormatException('${Brand.configFile}: permissions.default_mode must be one of ${modeOrder.join(', ')}');
     }
     final dropped = permissions['full_access'] ?? const <Object>[];
     if (dropped is! List || dropped.any((name) => name is! String || name.trim().isEmpty)) {
-      throw const FormatException('canoa.cfg: permissions.full_access must be a list of agent names');
+      throw const FormatException('${Brand.configFile}: permissions.full_access must be a list of agent names');
     }
     bool flag(Map<String, dynamic> map, String key, bool fallback) {
       final raw = map[key];
       if (raw == null) return fallback;
-      if (raw is! bool) throw FormatException('canoa.cfg: invalid boolean $key');
+      if (raw is! bool) throw FormatException('${Brand.configFile}: invalid boolean $key');
       return raw;
     }
     final timeout = network['connect_timeout'] ?? 10;
     if (timeout is! num || !timeout.isFinite || timeout <= 0) {
-      throw const FormatException('canoa.cfg: network.connect_timeout must be a number of seconds above 0');
+      throw const FormatException('${Brand.configFile}: network.connect_timeout must be a number of seconds above 0');
     }
     final lookName = appearance['look'] ?? LookId.canoa.name;
     final look = lookName is String ? LookId.named(lookName) : null;
     if (look == null) {
-      throw const FormatException('canoa.cfg: appearance.look must be the id of a look family: lower-case letters, digits, hyphens and underscores');
+      throw const FormatException('${Brand.configFile}: appearance.look must be the id of a look family: lower-case letters, digits, hyphens and underscores');
     }
     final brightness = appearance['brightness'] ?? 'dark';
     if (brightness is! String || !{'light', 'dark', 'system'}.contains(brightness)) {
-      throw const FormatException('canoa.cfg: appearance.brightness must be light, dark or system');
+      throw const FormatException('${Brand.configFile}: appearance.brightness must be light, dark or system');
     }
     final densityName = appearance['density'] ?? ChatDensity.normal.name;
     final density = densityName is String ? ChatDensity.named(densityName) : null;
     if (density == null) {
-      throw FormatException('canoa.cfg: appearance.density must be one of ${ChatDensity.values.map((each) => each.name).join(', ')}');
+      throw FormatException('${Brand.configFile}: appearance.density must be one of ${ChatDensity.values.map((each) => each.name).join(', ')}');
     }
     final openInName = appearance['open_in'] ?? OpenIn.thisWindow.key;
     final openIn = openInName is String ? OpenIn.named(openInName) : null;
     if (openIn == null) {
-      throw FormatException('canoa.cfg: appearance.open_in must be one of ${OpenIn.values.map((each) => each.key).join(', ')}');
+      throw FormatException('${Brand.configFile}: appearance.open_in must be one of ${OpenIn.values.map((each) => each.key).join(', ')}');
     }
     final languageName = appearance['language'] ?? '';
-    if (languageName is! String) throw const FormatException('canoa.cfg: appearance.language must be text');
+    if (languageName is! String) throw FormatException('${Brand.configFile}: appearance.language must be text');
     final rawViewers = appearance['viewers'] ?? const <String, dynamic>{};
     if (rawViewers is! Map || rawViewers.values.any((each) => each is! String)) {
-      throw const FormatException('canoa.cfg: appearance.viewers must be a table of viewer ids by MIME type');
+      throw FormatException('${Brand.configFile}: appearance.viewers must be a table of viewer ids by MIME type');
     }
     final viewers = {for (final MapEntry(:key, :value) in rawViewers.entries) '$key': value as String};
     final zoom = appearance['zoom'] ?? 1;
@@ -1590,82 +1591,82 @@ final class CanoaConfig {
     final agentTables = <String, Object?>{};
     final rawAgents = data['agents'];
     if (rawAgents != null) {
-      if (rawAgents is! Map) throw const FormatException('canoa.cfg: agents must be a table of agents');
+      if (rawAgents is! Map) throw const FormatException('${Brand.configFile}: agents must be a table of agents');
       for (final entry in rawAgents.entries) {
         final agent = entry.value;
         if (agent is Map && (agent['profile'] != null || agent['mcp'] != null || agent['hooks'] != null)) {
           final table = agent['profile'];
-          if (table != null && table is! Map) throw FormatException('canoa.cfg: agents.${entry.key}.profile must be a table');
+          if (table != null && table is! Map) throw FormatException('${Brand.configFile}: agents.${entry.key}.profile must be a table');
           if (table is Map) agentProfiles['${entry.key}'] = _profile('agents.${entry.key}.profile', table, LayerKind.agent);
           agentTables['${entry.key}'] = {'profile': ?table, 'mcp': ?agent['mcp'], 'hooks': ?agent['hooks']};
           if (!agent.containsKey('program') && agent.keys.every(const {'profile', 'mcp', 'hooks'}.contains)) continue;
         }
         if (agent is! Map || agent['program'] is! String || (agent['program'] as String).isEmpty) {
-          throw FormatException('canoa.cfg: agents.${entry.key} needs a program');
+          throw FormatException('${Brand.configFile}: agents.${entry.key} needs a program');
         }
         for (final key in agent.keys) {
           if (key != 'program' && key != 'args' && key != 'profile' && key != 'mcp' && key != 'hooks') {
-            throw FormatException('canoa.cfg: agents.${entry.key}: invalid key $key');
+            throw FormatException('${Brand.configFile}: agents.${entry.key}: invalid key $key');
           }
         }
         final args = agent['args'] ?? const <Object>[];
         if (args is! List || args.any((arg) => arg is! String)) {
-          throw FormatException('canoa.cfg: agents.${entry.key}.args must be a list of strings');
+          throw FormatException('${Brand.configFile}: agents.${entry.key}.args must be a list of strings');
         }
         agents.add(AgentCommand(label: '${entry.key}', program: agent['program'] as String, args: args.cast<String>()));
       }
     }
     final host = data['host'];
-    if (host != null && host is! Map) throw const FormatException('canoa.cfg: host must be a table');
+    if (host != null && host is! Map) throw const FormatException('${Brand.configFile}: host must be a table');
     int count(String key, int fallback) {
       final raw = sessions[key] ?? fallback;
-      if (raw is! int || raw < 0) throw FormatException('canoa.cfg: sessions.$key must be a whole number, 0 or more');
+      if (raw is! int || raw < 0) throw FormatException('${Brand.configFile}: sessions.$key must be a whole number, 0 or more');
       return raw;
     }
     final workspace = sessions['workspace'] ?? defaultWorkspace;
-    if (workspace is! String) throw const FormatException('canoa.cfg: sessions.workspace must be a string');
-    if (workspaceProblem(workspace) case final problem?) throw FormatException('canoa.cfg: sessions.workspace: $problem');
+    if (workspace is! String) throw const FormatException('${Brand.configFile}: sessions.workspace must be a string');
+    if (workspaceProblem(workspace) case final problem?) throw FormatException('${Brand.configFile}: sessions.workspace: $problem');
     final whileWorking = switch (sessions['while_working']) {
       null || 'queue' => WhileWorking.queue,
       'steer' => WhileWorking.steer,
-      _ => throw const FormatException('canoa.cfg: sessions.while_working must be queue or steer'),
+      _ => throw const FormatException('${Brand.configFile}: sessions.while_working must be queue or steer'),
     };
     final queueDelivery = switch (sessions['queue_delivery']) {
       null || 'merge' => QueueDelivery.merge,
       'each' => QueueDelivery.each,
-      _ => throw const FormatException('canoa.cfg: sessions.queue_delivery must be merge or each'),
+      _ => throw const FormatException('${Brand.configFile}: sessions.queue_delivery must be merge or each'),
     };
     final harnesses = data['harnesses'] ?? const <String, Object?>{};
     if (harnesses is! Map || harnesses.values.any((label) => label is! String || label.trim().isEmpty)) {
-      throw const FormatException('canoa.cfg: harnesses must map each reported agent name to a label');
+      throw const FormatException('${Brand.configFile}: harnesses must map each reported agent name to a label');
     }
     final overlays = <String, OverlaySource>{};
     final rawOverlays = data['overlays'] ?? const <String, Object?>{};
-    if (rawOverlays is! Map) throw const FormatException('canoa.cfg: overlays must be a table');
+    if (rawOverlays is! Map) throw const FormatException('${Brand.configFile}: overlays must be a table');
     for (final MapEntry(:key, :value) in rawOverlays.entries) {
       if (!isEntryName('$key')) {
-        throw const FormatException('canoa.cfg: an overlay name has 1 to 64 letters, digits, - or _');
+        throw const FormatException('${Brand.configFile}: an overlay name has 1 to 64 letters, digits, - or _');
       }
       GitOverlay git(String spec) {
         try {
           return OverlaySource.parseGit(spec);
         } on ProfileException {
-          throw FormatException('canoa.cfg: overlays.$key is not <repository>@<ref>[#<path>] of a source git may fetch');
+          throw FormatException('${Brand.configFile}: overlays.$key is not <repository>@<ref>[#<path>] of a source git may fetch');
         }
       }
       String? pin(Map<dynamic, dynamic> entry) => switch (entry['pin']) {
         null => null,
         final String digest when RegExp(r'^sha256:[0-9a-fA-F]{64}$').hasMatch(digest) => digest,
-        _ => throw FormatException('canoa.cfg: overlays.$key.pin is sha256: and 64 hexadecimal digits'),
+        _ => throw FormatException('${Brand.configFile}: overlays.$key.pin is sha256: and 64 hexadecimal digits'),
       };
       // The values of the overlay's declared options, which the host reads, and how its knowledge reaches the agent (`kb`); only
       // their shape is checked here.
       Map<dynamic, dynamic> options(Map<dynamic, dynamic> entry) {
         if (entry['options'] != null && entry['options'] is! Map) {
-          throw FormatException('canoa.cfg: overlays.$key.options is a table of values');
+          throw FormatException('${Brand.configFile}: overlays.$key.options is a table of values');
         }
         if (entry['kb'] != null && entry['kb'] != 'index' && entry['kb'] != 'files') {
-          throw FormatException('canoa.cfg: overlays.$key.kb is "index" or "files"');
+          throw FormatException('${Brand.configFile}: overlays.$key.kb is "index" or "files"');
         }
         return entry;
       }
@@ -1675,11 +1676,11 @@ final class CanoaConfig {
           git(spec).pinnedTo(pin(options(value))),
         {'dir': final String dir} when dir.isNotEmpty && value.keys.every(const {'dir', 'pin', 'options', 'kb'}.contains) =>
           DirOverlay(dir, pin: pin(options(value))),
-        _ => throw FormatException('canoa.cfg: overlays.$key is a git source, { source, pin } or { dir, pin }'),
+        _ => throw FormatException('${Brand.configFile}: overlays.$key is a git source, { source, pin } or { dir, pin }'),
       };
     }
     final rawProfile = data['profile'];
-    if (rawProfile != null && rawProfile is! Map) throw const FormatException('canoa.cfg: profile must be a table');
+    if (rawProfile != null && rawProfile is! Map) throw const FormatException('${Brand.configFile}: profile must be a table');
     _catalogs(_catalogsIn(data['store'], 'overlays'));
     _connections(data['connections']);
     _skillPins(data['skill_pins']);
@@ -1698,19 +1699,19 @@ final class CanoaConfig {
     _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);
     if (permissions['protected'] != null && protectedPaths == null) {
-      throw const FormatException('canoa.cfg: permissions.protected must be text, or a list of text, with a path pattern a line');
+      throw const FormatException('${Brand.configFile}: permissions.protected must be text, or a list of text, with a path pattern a line');
     }
     final rawStore = data['store'];
-    if (rawStore != null && rawStore is! Map) throw const FormatException('canoa.cfg: store must be a table');
+    if (rawStore != null && rawStore is! Map) throw const FormatException('${Brand.configFile}: store must be a table');
     if (rawStore is Map) StoreSettings.parse(rawStore);
     final rawShortcuts = data['shortcuts'];
-    if (rawShortcuts != null && rawShortcuts is! Map) throw const FormatException('canoa.cfg: shortcuts must be a table');
+    if (rawShortcuts != null && rawShortcuts is! Map) throw const FormatException('${Brand.configFile}: shortcuts must be a table');
     final shortcuts = <String, String>{
       if (rawShortcuts is Map)
         for (final MapEntry(:key, :value) in rawShortcuts.entries)
           '$key': value is String && value.trim().isNotEmpty
               ? value.trim()
-              : throw FormatException('canoa.cfg: shortcuts.$key must be a key chord'),
+              : throw FormatException('${Brand.configFile}: shortcuts.$key must be a key chord'),
     };
     return CanoaConfig(
       source: readFrom,
@@ -1807,7 +1808,7 @@ final class CanoaConfig {
   Map<String, Object?> get _tabled => {for (final MapEntry(:key, :value) in tables.entries) if (value is Map) key: value};
 
   String _encodeToml() => '''
-# Canoa deployment settings — Boriken Dev
+# ${Brand.name} deployment settings — Boriken Dev
 ${_loose.isEmpty ? '' : '${TomlDocument.fromMap(_loose)}\n'}[desktop]
 start_hidden = $startHidden
 close_to_tray = $closeToTray
@@ -1909,7 +1910,7 @@ args = ${jsonEncode(agent.args)}
     try {
       return Profile.fromMap(table, kind);
     } on ProfileException catch (error) {
-      throw FormatException('canoa.cfg: $where: $error');
+      throw FormatException('${Brand.configFile}: $where: $error');
     }
   }
 }

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../store/prepare_lines.dart';
 import '../store/skills.dart';
@@ -96,7 +97,7 @@ class ProfilesPanelState extends State<ProfilesPanel> {
 
   Future<String?> _change(CanoaConfig Function(CanoaConfig) edit) async {
     final change = widget.onChange;
-    if (change == null) return 'canoa.cfg is not written from here';
+    if (change == null) return '${Brand.configFile} is not written from here';
     try {
       final next = edit(config);
       await change((held) => edit(held));
@@ -105,7 +106,7 @@ class ProfilesPanelState extends State<ProfilesPanel> {
     } on FormatException catch (error) {
       return error.message;
     } on Object catch (error) {
-      return 'canoa.cfg could not be written: $error';
+      return '${Brand.configFile} could not be written: $error';
     }
   }
 
@@ -476,7 +477,7 @@ class OverlayUpdateDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text('${update.source.spec}\n${update.from == null ? '' : 'From ${update.from}\n'}To ${update.commit}\n'
-              'Tree digest ${update.digest}: applying pins it in canoa.cfg, and Canoa checks it each time the overlay is used.'),
+              'Tree digest ${update.digest}: applying pins it in ${Brand.configFile}, and ${Brand.name} checks it each time the overlay is used.'),
           if (update.changesNothing) const Text('Nothing changes.'),
           files('Added', update.added),
           files('Changed', update.changed),
@@ -502,7 +503,7 @@ class OverlayUpdateDialog extends StatelessWidget {
             for (final line in prepares) Text(visible(line)),
           ],
           const Text('Nothing else from it runs now. What it sets reaches agents started after this; Settings, Profiles shows '
-              'what Canoa does not apply.'),
+              'what ${Brand.name} does not apply.'),
         ],
       ))),
       actions: [
@@ -599,7 +600,7 @@ class OverlayReportView extends StatelessWidget {
   Widget build(BuildContext context) {
     final lines = [
       '${report.layer}: digest ${report.digest}',
-      for (final item in report.notApplied) '  $item: not applied by Canoa yet',
+      for (final item in report.notApplied) '  $item: not applied by ${Brand.name} yet',
       for (final nonDefault in report.nonDefaults)
         '  non-default ${nonDefault.id}${nonDefault.subject.isEmpty ? '' : ': ${nonDefault.subject}'}',
     ];

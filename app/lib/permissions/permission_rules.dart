@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../ledger/session_ledger.dart' show LedgerBackend;
 import 'protected_paths.dart';
 
@@ -228,8 +229,8 @@ String? folderProblem(String folder, {PermissionGuards guards = const Permission
     final rg = _resolved(real, g);
     final isHome = guard == guards.home;
     for (final candidate in [g, ?rg]) {
-      if (_under(d, candidate) || _under(rd, candidate)) return isHome ? 'The workspace holds your home folder.' : 'The workspace holds Canoa\'s own settings.';
-      if (!isHome && (_under(candidate, d) || _under(candidate, rd))) return 'The workspace is inside Canoa\'s own settings.';
+      if (_under(d, candidate) || _under(rd, candidate)) return isHome ? 'The workspace holds your home folder.' : 'The workspace holds ${Brand.name}\'s own settings.';
+      if (!isHome && (_under(candidate, d) || _under(candidate, rd))) return 'The workspace is inside ${Brand.name}\'s own settings.';
     }
   }
   return null;
@@ -739,7 +740,7 @@ class PermissionRules extends ChangeNotifier {
           if (writeProblem?.startsWith('could not write the log') != true) writeProblem = null;
         } on Object catch (error) {
           writeProblem = 'could not write ${backend.location}: $error';
-          debugPrint('Canoa permissions: $writeProblem');
+          debugPrint('${Brand.name} permissions: $writeProblem');
         }
       }
 
@@ -749,7 +750,7 @@ class PermissionRules extends ChangeNotifier {
       } on Object catch (error) {
         if (write) {
           writeProblem = 'could not write ${backend.location}: $error';
-          debugPrint('Canoa permissions: $writeProblem');
+          debugPrint('${Brand.name} permissions: $writeProblem');
         } else {
           _failClosed('could not read ${backend.location}: $error');
         }
@@ -774,7 +775,7 @@ class PermissionRules extends ChangeNotifier {
     });
     _logging = _logging.then((_) => target.append(line)).catchError((Object error) {
       writeProblem = 'could not write the log ${target.location}: $error';
-      debugPrint('Canoa permissions: $writeProblem');
+      debugPrint('${Brand.name} permissions: $writeProblem');
       notifyListeners();
     });
   }

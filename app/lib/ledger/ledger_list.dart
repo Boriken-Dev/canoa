@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../session_store.dart';
 import '../shell/confirm_remove.dart';
 import 'running_sessions.dart';
@@ -90,9 +91,9 @@ class _LedgerListState extends State<LedgerList> {
     final title = entry.title ?? 'This session';
     if (await confirmRemoval(
       context,
-      title: 'Remove from Canoa\'s list?',
+      title: 'Remove from ${Brand.name}\'s list?',
       body: '"$title" leaves this list only. This does not delete the session itself: ${entry.harness} still has it.'
-          '${entry.messages.isEmpty ? '' : ' What Canoa kept of what was said goes with it.'}',
+          '${entry.messages.isEmpty ? '' : ' What ${Brand.name} kept of what was said goes with it.'}',
       cancelLabel: 'Cancel',
       dialogKey: null,
       cancelKey: null,

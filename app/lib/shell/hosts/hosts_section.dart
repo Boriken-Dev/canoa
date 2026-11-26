@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp/page.dart' show AcpPage;
 import 'package:material_ui/material_ui.dart';
 
+import '../../brand.dart';
 import '../../config/connection.dart';
 import '../../connect_dialog.dart' show showAddConnectionDialog;
 import '../../selectable.dart';
@@ -66,7 +67,7 @@ class _HostsIndexState extends State<HostsIndex> {
           onPressed: controller.canSave ? () => unawaited(_openAdd(context, controller)) : null,
         ),
         body: items.isEmpty
-            ? const Padding(padding: EdgeInsets.all(18), child: Text('No host yet. Add a connection to a Canoa host or an agent elsewhere.'))
+            ? const Padding(padding: EdgeInsets.all(18), child: Text('No host yet. Add a connection to a ${Brand.name} host or an agent elsewhere.'))
             : ListView(children: [
                 for (final item in items) _hostRow(context, scheme, item, item.id == selected?.id),
               ]),
@@ -176,7 +177,7 @@ class HostsOverview extends StatelessWidget {
                   children: [
                     ...switch (item.kind) {
                       HostItemKind.saved => _saved(context, item.connection!),
-                      HostItemKind.local => _own(context, item, controller.local!(), 'This computer: the machine Canoa UI runs on, and the host inside it.'),
+                      HostItemKind.local => _own(context, item, controller.local!(), 'This computer: the machine ${Brand.name} UI runs on, and the host inside it.'),
                       HostItemKind.served => _own(
                         context,
                         item,

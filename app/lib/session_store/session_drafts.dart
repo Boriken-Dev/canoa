@@ -4,7 +4,7 @@ extension SessionDrafts on SessionStore {
   /// What a conversation tells the store, and what the store decides of it for the conversation.
   void _wire(ChatSession session) {
     final chat = session.chat;
-    chat.attachClient(ownerClient, name: 'Canoa');
+    chat.attachClient(ownerClient, name: Brand.name);
     chat.onChange = () => _changed(session);
     chat.onAttention = (kind) => _needs(session, kind);
     chat.onModeKept = (mode, bypass) => _keepMode(session, mode, bypass);
@@ -53,7 +53,7 @@ extension SessionDrafts on SessionStore {
 
   ChatSession createPreviewSession({
     String title = 'New conversation',
-    String agent = 'Canoa preview',
+    String agent = '${Brand.name} preview',
   }) {
     final session = _newSession(
       title: title,
@@ -703,7 +703,7 @@ extension SessionDrafts on SessionStore {
               ..titleFromMessage = false;
           }
           debugPrint(
-            'Canoa: ${session.source?.label ?? 'an agent'} was not started: ${reasonOf(error)}',
+            '${Brand.name}: ${session.source?.label ?? 'an agent'} was not started: ${reasonOf(error)}',
           );
           if (_sessions.contains(session)) {
             session.chat.note('Not started: ${reasonOf(error)}');

@@ -4,6 +4,7 @@ import 'package:coqui_acp/page.dart' show AcpPage;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show BuildContext;
 
+import '../../brand.dart';
 import '../../config/canoa_config.dart';
 import '../../config/connection.dart';
 import '../../connect_dialog.dart' show ConnectTarget, UseBrowserAgents;
@@ -95,7 +96,7 @@ final class HostSummary {
       HostPhase.off => 'Off',
       HostPhase.absent => 'Not in this build',
       HostPhase.waiting => 'Ended, starting again',
-      HostPhase.failed => 'canoa.cfg is wrong for it',
+      HostPhase.failed => '${Brand.configFile} is wrong for it',
       HostPhase.held => 'Another host holds this home',
       HostPhase.stopped => 'Stopped',
     },

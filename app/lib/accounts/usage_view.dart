@@ -2,6 +2,7 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageBucket, UsageRepor
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 import '../usage/usage_warn.dart';
 
@@ -53,7 +54,7 @@ List<(String?, List<UsageBucket>)> usageSections(UsageReport report, int now) {
 String? sourceText(UsageBucket bucket) => switch (bucket.source) {
   'response_headers' => "From the provider's rate-limit headers",
   'gateway' => "From the gateway's key information",
-  'recorded' => 'Counted by Canoa from the sessions on this key',
+  'recorded' => 'Counted by ${Brand.name} from the sessions on this key',
   _ => null,
 };
 

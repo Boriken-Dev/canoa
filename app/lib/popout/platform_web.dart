@@ -80,7 +80,7 @@ final class _WebWindow implements PopoutWindow {
   void setTitle(String title) {
     this.title = title;
     try {
-      window.document.title = '$title - Canoa';
+      window.document.title = '$title - ${Brand.name}';
     } on Object {
       // A window that went, or that no longer is of this origin, keeps the title it has.
     }
@@ -225,7 +225,7 @@ PopoutLaunch? popoutLaunch(List<String> args) {
     link: link,
     item: item == null || item.isEmpty ? null : PopoutItem(item, PopoutLaunch.itemArgs(args)),
     session: query['session'],
-    title: query['title'] ?? 'Canoa',
+    title: query['title'] ?? Brand.name,
     look: query['look'] ?? 'canoa',
     density: query['density'] ?? 'normal',
   );
@@ -234,7 +234,7 @@ PopoutLaunch? popoutLaunch(List<String> args) {
 Future<ChatViewLink> connectPopout(PopoutLaunch launch) async => BroadcastViewLink(_channelOf(launch.link));
 
 Future<void> preparePopoutWindow(PopoutLaunch launch) async {
-  web.document.title = '${launch.title} - Canoa';
+  web.document.title = '${launch.title} - ${Brand.name}';
 }
 
 Future<void> closePopoutWindow() async => web.window.close();

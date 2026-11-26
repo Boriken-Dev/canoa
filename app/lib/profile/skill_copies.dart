@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 
+import '../brand.dart';
 import 'aos_support.dart';
 
 /// What one skill may hold, in files and bytes, as the apply path reads it.
@@ -94,10 +95,10 @@ final class SkillCopy {
 String? skillCopyRefusal(aos.SkillEntry entry, String identity, SkillCopy? copy, {String? configuredPin}) {
   if (copy == null) {
     return entry.origin == 'source'
-        ? 'from ${entry.source}, not fetched: install or sync the overlay in Canoa'
-        : 'a named skill; no catalog resolved it here: install or sync the overlay in Canoa';
+        ? 'from ${entry.source}, not fetched: install or sync the overlay in ${Brand.name}'
+        : 'a named skill; no catalog resolved it here: install or sync the overlay in ${Brand.name}';
   }
-  const stale = 'its fetched copy is not what was accepted: install or sync the overlay in Canoa';
+  const stale = 'its fetched copy is not what was accepted: install or sync the overlay in ${Brand.name}';
   if (!copy.overlays.contains(aos.normalizeName(identity)) || skillKey(copy.name) != skillKey(entry.name)) return stale;
   if (entry.origin == 'source') {
     if (copy.source != entry.key) return stale;

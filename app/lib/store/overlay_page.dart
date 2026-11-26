@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../surfaces/a2ui/overlay_views.dart' show OpenOverlayView;
 import '../profile/overlay_layer.dart';
@@ -127,7 +128,7 @@ class OverlayPageState extends State<OverlayPage> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Move the pin?'),
-          content: Text('canoa.cfg pins ${shown.name} to $moved. What was fetched is ${shown.update.digest}, '
+          content: Text('${Brand.configFile} pins ${shown.name} to $moved. What was fetched is ${shown.update.digest}, '
               'shown on this page. Installing it moves the pin there.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -170,7 +171,7 @@ class OverlayPageState extends State<OverlayPage> {
     if (!await confirmRemoval(
       context,
       title: 'Remove ${namedAs(config, name) ?? name}?',
-      body: 'Its files, its fetched history and its entry in canoa.cfg go; agents started after this start without it.',
+      body: 'Its files, its fetched history and its entry in ${Brand.configFile} go; agents started after this start without it.',
       cancelLabel: 'Cancel',
       dialogKey: null,
       cancelKey: null,
@@ -245,11 +246,11 @@ class OverlayPageState extends State<OverlayPage> {
             if (_refusal case final why?)
               Text(visible(why), key: const Key('store-refusal'), style: TextStyle(color: Theme.of(context).colorScheme.error))
             else if (state == EntryState.taken)
-              Text('canoa.cfg names ${namedAs(config, target!.$1)} from another source. The store neither installs over '
+              Text('${Brand.configFile} names ${namedAs(config, target!.$1)} from another source. The store neither installs over '
                   'it nor removes it.', key: const Key('store-taken'))
             else if (state == EntryState.byHand)
-              Text('canoa.cfg names ${namedAs(config, target!.$1)} from this source, by hand. The store neither updates '
-                  'nor removes it; take the entry out of canoa.cfg to let the store manage it.',
+              Text('${Brand.configFile} names ${namedAs(config, target!.$1)} from this source, by hand. The store neither updates '
+                  'nor removes it; take the entry out of ${Brand.configFile} to let the store manage it.',
                   key: const Key('store-by-hand'))
             else if (widget.home == null)
               const Text('The desktop app fetches and installs overlays.')
@@ -399,7 +400,7 @@ class OverlayPageState extends State<OverlayPage> {
         else if (entry.pin != null)
           const Text('The catalog\'s pin matches what was fetched.', key: Key('store-pin-ok')),
         if (moved != null)
-          Text('canoa.cfg pins it to $moved: installing this moves the pin, which it asks first.',
+          Text('${Brand.configFile} pins it to $moved: installing this moves the pin, which it asks first.',
               key: const Key('store-pin-moves'), style: error),
         if (found.iconRefused case final why?) _field('Icon', 'refused ($why): a placeholder shows instead'),
         if (description is String)
@@ -434,7 +435,7 @@ class OverlayPageState extends State<OverlayPage> {
           for (final line in found.prepares) Text(oneLine(line), style: text.bodySmall),
         ],
         if (found.refusal case final why?)
-          Text(visible('Canoa would leave it out: $why'), key: const Key('store-would-refuse'), style: error)
+          Text(visible('${Brand.name} would leave it out: $why'), key: const Key('store-would-refuse'), style: error)
         else if (layer != null) ...[
           EffectiveTable(key: const Key('store-behaviour'), effective: mergeProfiles([layer])),
           if (found.report case final report?)
@@ -452,8 +453,8 @@ class OverlayPageState extends State<OverlayPage> {
                 style: text.bodySmall),
         for (final name in found.requires)
           Text(oneLine(named.contains(aos.normalizeName(name))
-              ? 'requires $name, which canoa.cfg names'
-              : 'requires $name, which canoa.cfg does not name: install it too, or this applies without it'),
+              ? 'requires $name, which ${Brand.configFile} names'
+              : 'requires $name, which ${Brand.configFile} does not name: install it too, or this applies without it'),
               style: text.bodySmall),
       ],
     );
@@ -498,7 +499,7 @@ class SkillRows extends StatelessWidget {
     SkillStatus.update => item.why ?? 'fetched again: the source, pin or catalog changed from the one accepted',
     SkillStatus.unchanged => 'kept as accepted',
     SkillStatus.missing => 'not delivered: named, and no catalog offers it',
-    SkillStatus.ambiguous => 'not delivered: ${item.catalogs?.join(' and ')} both offer it, and Canoa never picks one',
+    SkillStatus.ambiguous => 'not delivered: ${item.catalogs?.join(' and ')} both offer it, and ${Brand.name} never picks one',
     SkillStatus.shadowed => 'not delivered: ${item.why}',
     SkillStatus.refused => 'not delivered: ${item.why}',
   };
@@ -518,7 +519,7 @@ class SkillRows extends StatelessWidget {
               if (item.source != null) item.source!,
               if (item.fetch != null || item.status == SkillStatus.unchanged)
                 item.pin == null ? 'unpinned: nothing says what it should hold' : 'pinned ${item.pin}',
-              if (item.configuredPin != null) 'pin required by canoa.cfg [skill_pins]',
+              if (item.configuredPin != null) 'pin required by ${Brand.configFile} [skill_pins]',
               for (final warning in item.warnings)
                 switch (warning) {
                   'insecure-transport' => 'over a transport that is not encrypted',

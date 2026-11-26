@@ -7,6 +7,7 @@ import 'package:coqui_acp/page.dart';
 import 'acp/browser_connect.dart';
 import 'auth/browser_peer.dart';
 import 'config/connection.dart';
+import 'brand.dart';
 import 'selectable.dart';
 import 'shell/hosts/hosts_controller.dart' show NearbyCandidate, NearbyResult, NearbySearch;
 
@@ -222,7 +223,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
     }
     final method = this.method;
     if (method == null) {
-      setState(() => error = 'Choose the method the host proves by: canoa serve prints it.');
+      setState(() => error = 'Choose the method the host proves by: ${Brand.program} serve prints it.');
       return;
     }
     setState(() {busy = true; error = null;});
@@ -272,7 +273,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
       ]),
       if (widget.nearby == null)
         Text(
-          'Looking nearby needs the Canoa on this computer, which browses for agents; none is reachable from here.',
+          'Looking nearby needs the ${Brand.name} on this computer, which browses for agents; none is reachable from here.',
           key: const ValueKey('nearby-needs-host'),
           style: text,
         )
@@ -313,7 +314,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
             children: [
               Text(
                 'Remote sessions require verified peer authentication. The other end must be explicitly paired with $_here. Only enter a fingerprint verified out of band. '
-                'Canoa never trusts the first key it sees, and keeps no key or password here: only where to connect and the id to expect.',
+                '${Brand.name} never trusts the first key it sees, and keeps no key or password here: only where to connect and the id to expect.',
               ),
               const SizedBox(height: 12),
               TextField(key: const ValueKey('connection-name'), controller: name, decoration: const InputDecoration(labelText: 'Name')),
@@ -330,7 +331,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
               const SizedBox(height: 4),
               Text(
                 kind == ConnectionKind.canoa
-                    ? 'It lists its agents and what it can do; its address is the one canoa serve prints, such as https://host:port/.'
+                    ? 'It lists its agents and what it can do; its address is the one ${Brand.program} serve prints, such as https://host:port/.'
                     : 'It offers a session and nothing else: no folder browsing, files or management.',
                 style: text,
               ),
@@ -424,7 +425,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
                       const SizedBox(height: 12),
                       const Text('Or pair by the PIN the other machine shows, under Noise:'),
                       if (_pageOrigin case final origin?)
-                        SelectableText('There, run: canoa pair --method noise --origin $origin', style: text),
+                        SelectableText('There, run: ${Brand.program} pair --method noise --origin $origin', style: text),
                       TextField(controller: pairUrl,
                         decoration: const InputDecoration(
                           labelText: 'Where it waits to pair',

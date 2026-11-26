@@ -3,12 +3,13 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/widgets.dart';
 
 import '../acp/delegate.dart' show TaskUsage;
+import '../brand.dart';
 import '../session_store.dart';
 import 'delegation_row.dart';
 import 'session_views.dart' show SessionEntries;
 
 /// The name the host gives its delegation tools as an MCP server. A tool call named for another server is not the host's.
-const String delegationServer = 'canoa-delegate';
+const String delegationServer = '${Brand.program}-delegate';
 
 const _delegationTools = {'delegate_task', 'task_status', 'cancel'};
 

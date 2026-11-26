@@ -1,3 +1,4 @@
+import '../brand.dart';
 import '../desktop/host_tool.dart';
 
 /// One way to run an agent, as Settings lists it and the new-session picker offers it: an agent entry of the `canoa` this app
@@ -116,7 +117,7 @@ final class SourceCheck {
     final found = [for (final MapEntry(:key, :value) in this.found.entries) 'found $key at $value'];
     return '$label needs ${_and(needs.isEmpty ? [...this.found.keys, ...missing] : needs)} on PATH: '
         '${[...found, '${_and(missing)} ${missing.length == 1 ? 'was' : 'were'} not found'].join('; ')}. '
-        'Install what is missing, or start Canoa where PATH finds it.';
+        'Install what is missing, or start ${Brand.name} where PATH finds it.';
   }
 
   static String _and(List<String> words) =>

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../l10n/app_text.dart';
 import '../loadout/loadout_controller.dart';
@@ -171,7 +172,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
       DirOverlay(:final dir, :final pin) =>
         'the directory $dir, read in place · ${pin == null ? 'not pinned' : 'pinned ${_short(pin)}'}',
       GitOverlay() => [
-        if (record?.catalog case final catalog?) 'from the catalog $catalog' else 'named in canoa.cfg by hand',
+        if (record?.catalog case final catalog?) 'from the catalog $catalog' else 'named in ${Brand.configFile} by hand',
         source.spec,
         if (record != null) 'commit ${record.commit.substring(0, record.commit.length < 8 ? record.commit.length : 8)}',
         if (source.pin != null) 'pinned ${_short(source.pin!)}' else 'not pinned',
@@ -214,7 +215,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         if (left == null && layer != null && applies.isEmpty) 'Applies nothing of its own',
         if (needs.any((line) => line.met)) 'Found on this computer: ${[for (final line in needs) if (line.met) line.key.replaceFirst('runtime.', '')].join(', ')}',
         for (final line in unmet) 'Needs ${line.key.replaceFirst('runtime.', '')}: ${line.how}',
-        if (notApplied.isNotEmpty) 'Not applied by Canoa yet: ${notApplied.join(', ')}',
+        if (notApplied.isNotEmpty) 'Not applied by ${Brand.name} yet: ${notApplied.join(', ')}',
       ],
       provenance: provenance,
       trailing: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -353,7 +354,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     if (!await confirmRemoval(
       context,
       title: 'Remove $name?',
-      body: 'Its files, its fetched history and its entry in canoa.cfg go; agents started after this start without it.',
+      body: 'Its files, its fetched history and its entry in ${Brand.configFile} go; agents started after this start without it.',
       cancelLabel: 'Cancel',
       dialogKey: null,
       cancelKey: null,

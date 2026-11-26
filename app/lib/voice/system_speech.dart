@@ -6,6 +6,7 @@ import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart' show defaultVoiceBackend;
 import 'record_capture.dart';
 import 'speech_backend.dart';
@@ -144,7 +145,7 @@ final class SystemSpeech implements SpeechBackend {
     };
     if (said != null && said.trim().isNotEmpty) return said.trim().endsWith('.') ? said.trim() : '${said.trim()}.';
     return switch (error) {
-      MissingPluginException() => 'the speech plugin of this system was not loaded when Canoa started.',
+      MissingPluginException() => 'the speech plugin of this system was not loaded when ${Brand.name} started.',
       PlatformException(:final code) => 'the system answered $code.',
       SpeechToTextNotInitializedException() => 'the system speech service was not ready.',
       _ => 'it stopped before it began listening.',

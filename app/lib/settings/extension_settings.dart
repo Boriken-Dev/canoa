@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../desktop/control_client.dart' show ControlFailed;
 import '../served/host_files.dart';
 import '../l10n/app_text.dart';
@@ -277,7 +278,7 @@ class _ExtensionsSectionState extends State<ExtensionsSection> {
           ),
         if (settings.loading && !settings.loaded) const Padding(padding: EdgeInsets.all(12), child: LinearProgressIndicator()),
         if (settings.loaded && settings.entries.isEmpty)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No extension is named in the host\'s canoa.cfg.', key: Key('extensions-none'))),
+          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No extension is named in the host\'s ${Brand.configFile}.', key: Key('extensions-none'))),
         for (final entry in settings.entries)
           SettingsRow(
             key: Key('extension-row-${entry.name}'),
@@ -325,7 +326,7 @@ class _ExtensionsSectionState extends State<ExtensionsSection> {
     if (!await confirmRemoval(
       context,
       title: 'Remove ${entry.name}',
-      body: 'The extension goes out of the host\'s canoa.cfg, and its types leave the Store when the host restarts. Programs it installed '
+      body: 'The extension goes out of the host\'s ${Brand.configFile}, and its types leave the Store when the host restarts. Programs it installed '
           'stay where they are.',
       cancelLabel: 'Cancel',
       dialogKey: const Key('extension-remove-dialog'),

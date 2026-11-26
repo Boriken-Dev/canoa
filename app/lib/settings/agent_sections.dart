@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../accounts/account_models.dart' show standardsText;
 import '../accounts/accounts_controller.dart';
 import '../acp/agent_commands.dart';
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../chat/modes.dart';
 import '../forms/schema_fields.dart';
@@ -237,7 +238,7 @@ class _SourcesSectionState extends State<SourcesSection> {
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const Padding(
           padding: EdgeInsets.only(bottom: 12),
-          child: Text('Where a new session\'s agent comes from. Adding or removing one restarts Canoa\'s host, which ends the sessions open now.'),
+          child: Text('Where a new session\'s agent comes from. Adding or removing one restarts ${Brand.name}\'s host, which ends the sessions open now.'),
         ),
         SettingsGroup(title: 'Sources', children: [
           for (final preset in widget.presets)
@@ -264,7 +265,7 @@ class _SourcesSectionState extends State<SourcesSection> {
               detail: _removal(context, config, agent),
             ),
           for (final name in widget.hosted)
-            SettingsRow(title: name, description: 'Served by canoa: Hosting changes it'),
+            SettingsRow(title: name, description: 'Served by ${Brand.program}: Hosting changes it'),
           if (widget.presets.isEmpty && config.agents.isEmpty && widget.hosted.isEmpty)
             const SettingsRow(title: 'No sources yet', description: 'Add a command below'),
         ]),
@@ -286,7 +287,7 @@ class _SourcesSectionState extends State<SourcesSection> {
               ),
             SettingsRow(title: 'Add it', control: FilledButton(key: const Key('source-add'), onPressed: _add, child: const Text('Add'))),
           ] else
-            const SettingsRow(title: 'Add a command', description: 'Waiting for canoa to say what an agent takes'),
+            const SettingsRow(title: 'Add a command', description: 'Waiting for ${Brand.program} to say what an agent takes'),
         ]),
       ]);
     },
@@ -409,7 +410,7 @@ class _PermissionsSectionState extends State<PermissionsSection> {
         },
         description: 'One pattern a line, as in a gitignore file: a "!" line allows one back, the last line that matches wins, "#" '
             'starts a comment, "~/" is your home folder, and a pattern without a start matches anywhere. Lines in the accent '
-            'colour are Canoa\'s recommendation.',
+            'colour are ${Brand.name}\'s recommendation.',
         below: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           TextField(
             key: const Key('settings-protected-paths'),
@@ -468,7 +469,7 @@ class _PermissionsSectionState extends State<PermissionsSection> {
             const SettingsRow(
               key: Key('rules-unsaved'),
               title: 'Not yet saved',
-              description: 'A change could not be written. It is in effect here, and written when the file allows. If Canoa quits first, a revoke is lost.',
+              description: 'A change could not be written. It is in effect here, and written when the file allows. If ${Brand.name} quits first, a revoke is lost.',
             ),
           if (rules.writeProblem case final problem?)
             SettingsRow(key: const Key('rules-write-problem'), title: problem),

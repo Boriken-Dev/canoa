@@ -3,6 +3,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../acp/browser_connect.dart' show pairBrowserAcp;
+import '../brand.dart';
 import '../connect_dialog.dart' show PairByPin;
 import '../served/navigate.dart' show reloadPage;
 
@@ -85,7 +86,7 @@ class _PanePairingState extends State<PanePairing> {
             Text('Pair this pane with its host', style: text.titleSmall),
             const SizedBox(height: 4),
             Text(
-              'The host has not accepted this pane yet. On the host\'s computer run `canoa pair --method noise --origin ${widget.origin}`, '
+              'The host has not accepted this pane yet. On the host\'s computer run `${Brand.program} pair --method noise --origin ${widget.origin}`, '
               'then enter the address and the PIN it shows.',
               style: text.bodySmall,
             ),

@@ -44,7 +44,7 @@ final class GlyphSymbol extends AppSymbol {
 ///
 /// A key is looked up in the theme's text for the person's language, in the theme's own default language, in the base text for the
 /// person's language and in the base English; a key none of them has reads as itself. A symbol is the theme's when it sets one, and
-/// the base one otherwise. `{brand}` and `{short}` in a text are the build's names; other `{name}`s come from the call's arguments.
+/// the base one otherwise. `{brand}`, `{short}`, `{config_file}` and `{cli}` (the command line's name) in a text are the build's names; other `{name}`s come from the call's arguments.
 @immutable
 final class AppText {
   const AppText({this.language = baseLanguage, this.pack});
@@ -81,7 +81,11 @@ final class AppText {
   }
 
   static String _fill(String raw, Map<String, Object?> args) {
-    var text = raw.replaceAll('{brand}', Brand.name).replaceAll('{short}', Brand.shortName);
+    var text = raw
+        .replaceAll('{brand}', Brand.name)
+        .replaceAll('{short}', Brand.shortName)
+        .replaceAll('{config_file}', Brand.configFile)
+        .replaceAll('{cli}', Brand.program);
     for (final MapEntry(key: name, value: value) in args.entries) {
       text = text.replaceAll('{$name}', '$value');
     }

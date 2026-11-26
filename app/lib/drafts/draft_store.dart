@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../chat/attachments.dart';
 
 /// Where drafts are kept between runs: each one a record and the bytes of its images, by name.
@@ -91,7 +92,7 @@ class DraftKeeper {
     try {
       ids = await backend.ids();
     } on Object catch (error) {
-      debugPrint('Canoa drafts: could not list them: $error');
+      debugPrint('${Brand.name} drafts: could not list them: $error');
       return out;
     }
     for (final id in ids.where(isDraftId)) {
@@ -109,7 +110,7 @@ class DraftKeeper {
         }
         out.add(KeptDraft(id, record, attachments));
       } on Object catch (error) {
-        debugPrint('Canoa drafts: could not read $id: $error');
+        debugPrint('${Brand.name} drafts: could not read $id: $error');
       }
     }
     out.sort((a, b) => '${a.record['created']}'.compareTo('${b.record['created']}'));
@@ -146,7 +147,7 @@ class DraftKeeper {
         if (!blobs.contains(old)) await backend.removeBlob(id, old);
       }
     }).catchError((Object error) {
-      debugPrint('Canoa drafts: could not write $id: $error');
+      debugPrint('${Brand.name} drafts: could not write $id: $error');
     });
   }
 
@@ -157,7 +158,7 @@ class DraftKeeper {
     _timers.remove(id)?.cancel();
     _pending.remove(id);
     return _writing = _writing.then((_) => backend.remove(id)).catchError((Object error) {
-      debugPrint('Canoa drafts: could not remove $id: $error');
+      debugPrint('${Brand.name} drafts: could not remove $id: $error');
     });
   }
 

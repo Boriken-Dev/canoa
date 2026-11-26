@@ -1,7 +1,9 @@
 import 'dart:math';
 
+import '../brand.dart';
+
 /// canoa.cfg's `[sessions] workspace` when it is absent.
-const defaultWorkspace = r'${documents}/Canoa/scratch/${session}';
+const defaultWorkspace = '\${documents}/${Brand.folder}/scratch/\${session}';
 
 /// A session id to show what a template makes, in Settings, before any session has one.
 const exampleSessionId = '3f2a9c1e-7b4d-4e58-9a16-0d5c2b8e6f40';

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../config/config_layers.dart' show decodeConfig;
 import '../desktop/control_client.dart' show ControlFailed;
@@ -104,7 +105,7 @@ final class HostConfigStore {
     if (text.trim().isEmpty) return const {};
     // In the format the configuration was read in: a page's is JSON, a desktop's is its own file's.
     final source = config.source;
-    return decodeConfig(text, name: source.marked ? null : 'canoa.${source.format.name}').data;
+    return decodeConfig(text, name: source.marked ? null : '${Brand.program}.${source.format.name}').data;
   }
 
   /// canoa.cfg as the host holds it. A table this page cannot read (a key it does not know) fails the whole read, and nothing is held:
@@ -140,7 +141,7 @@ final class HostConfigStore {
   /// [config] has none now. A write of `[host]` names the table it was read as: [HostConfigChanged] is thrown when the host holds
   /// another by now. Throws [StateError] when canoa.cfg was not read whole.
   Future<bool> save(CanoaConfig config) async {
-    if (!_loaded) throw StateError('canoa.cfg on the host was not read, so nothing is written to it');
+    if (!_loaded) throw StateError('${Brand.configFile} on the host was not read, so nothing is written to it');
     final data = _tablesOf(config);
     var restart = false;
     for (final section in _sections) {

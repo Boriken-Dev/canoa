@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../brand.dart';
 import 'pcm_player.dart';
 import 'pcm_player_windows.dart';
 import 'speech_backend.dart' show SpeechFailure;
@@ -182,7 +183,7 @@ final class AfplayPlayer implements PcmPlayer {
     try {
       while (_queue.isNotEmpty && format != null && afplay != null && !_stopped) {
         final piece = _queue.removeAt(0);
-        final file = File('${_temp.path}${Platform.pathSeparator}canoa-say-${DateTime.now().microsecondsSinceEpoch}.wav');
+        final file = File('${_temp.path}${Platform.pathSeparator}${Brand.program}-say-${DateTime.now().microsecondsSinceEpoch}.wav');
         try {
           await file.writeAsBytes(wavOf(piece, format));
           final process = _playing = await _start(afplay, [file.path]);

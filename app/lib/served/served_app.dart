@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../auth/peer_proof.dart' show PeerMethod;
 import '../acp/served_host.dart';
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../desktop/control_client.dart' show ControlClient, ControlFailed, ControlListener;
 import '../desktop/host_control.dart';
@@ -298,9 +299,9 @@ final class ServedApp {
       problem = 'You are signed out: going to the sign-in page.';
     } on Object catch (error) {
       detail = '$error';
-      debugPrint('Canoa: the host\'s control channel cannot be used: $error');
+      debugPrint('${Brand.name}: the host\'s control channel cannot be used: $error');
       problem = 'The host\'s control channel cannot be used. Pair this browser with the host, give its key the grants in '
-          'canoa.cfg\'s [host.control], and reload.';
+          '${Brand.configFile}\'s [host.control], and reload.';
     }
   }
 
@@ -310,8 +311,8 @@ final class ServedApp {
     try {
       return await configStore.load();
     } on Object catch (error) {
-      debugPrint('Canoa: the host\'s canoa.cfg cannot be read: $error');
-      configProblem = 'The host\'s canoa.cfg could not be read whole by this page, so changes in Settings stay in this page and '
+      debugPrint('${Brand.name}: the host\'s ${Brand.configFile} cannot be read: $error');
+      configProblem = 'The host\'s ${Brand.configFile} could not be read whole by this page, so changes in Settings stay in this page and '
           'nothing is written to the host\'s file.';
       return null;
     }
@@ -322,7 +323,7 @@ final class ServedApp {
     try {
       await overlays.refresh();
     } on Object catch (error) {
-      debugPrint('Canoa: the host\'s overlays cannot be read: $error');
+      debugPrint('${Brand.name}: the host\'s overlays cannot be read: $error');
       configProblem ??= 'The host\'s installed overlays could not be read.';
     }
   }

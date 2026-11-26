@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import '../brand.dart';
 
 /// The host's ACP session-stream method for listing attached MCP servers' tools and resources.
 const mcpListMethod = '_canoa/mcp/list';
@@ -128,7 +129,7 @@ final class McpListWire {
   Future<Map<String, Object?>?> _ask(Map<String, Object?> params) async {
     if (_closed) return null;
     final nonce = [for (var i = 0; i < 8; i++) _random.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
-    final id = 'canoa-mcp-${_next++}-$nonce';
+    final id = '${Brand.program}-mcp-${_next++}-$nonce';
     final waiting = Completer<Map<String, Object?>?>();
     _waiting[id] = waiting;
     try {

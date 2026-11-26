@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../acp/agent_commands.dart';
 import '../acp/share_path.dart';
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../forms/schema_fields.dart';
 import '../l10n/app_text.dart';
@@ -181,7 +182,7 @@ class _HostingPanelState extends State<HostingPanel> {
       title: 'Pair this key?',
       body: [
         const Text(
-          'Pair it only if it is exactly the id Canoa shows where you connected from, character for character. '
+          'Pair it only if it is exactly the id ${Brand.name} shows where you connected from, character for character. '
           'Anyone on this computer can make a key wait here.',
         ),
         const SizedBox(height: 12),
@@ -321,7 +322,7 @@ class _HostingPanelState extends State<HostingPanel> {
           const Divider(height: 32),
           Text('Pair a program by PIN', style: text.titleSmall),
           const Text(
-            'For a program with a key of its own, or the Canoa browser extension on this computer, which you give the PIN. A web page cannot pair by PIN.',
+            'For a program with a key of its own, or the ${Brand.name} browser extension on this computer, which you give the PIN. A web page cannot pair by PIN.',
           ),
           const SizedBox(height: 8),
           _pinPanel(text),
@@ -448,7 +449,7 @@ class _HostingPanelState extends State<HostingPanel> {
             running.pin,
             style: text.displaySmall?.copyWith(fontFamily: CanoaLook.monospaceFont, letterSpacing: 6),
           ),
-          SelectableText(running.native ? 'Type it in the Canoa extension, in your browser' : 'Dial ${running.url}', style: text.bodySmall),
+          SelectableText(running.native ? 'Type it in the ${Brand.name} extension, in your browser' : 'Dial ${running.url}', style: text.bodySmall),
           const SizedBox(height: 4),
           const Text('The other side shows this host as:'),
           Row(
@@ -514,12 +515,12 @@ class _Status extends StatelessWidget {
   Widget build(BuildContext context) {
     final (icon, said) = switch (supervisor.phase) {
       HostPhase.absent => (Icons.block, 'This build carries no host, so nothing is hosted.'),
-      HostPhase.off => (Icons.power_settings_new, 'Left off, by canoa.cfg\'s local_host or --no-local-host.'),
+      HostPhase.off => (Icons.power_settings_new, 'Left off, by ${Brand.configFile}\'s local_host or --no-local-host.'),
       HostPhase.idle => (Icons.pause_circle_outline, 'Nothing to host: add an agent.'),
       HostPhase.starting => (Icons.hourglass_top, 'Starting…'),
       HostPhase.running => (Icons.check_circle_outline, supervisor.runningSaid),
       HostPhase.waiting => (Icons.restart_alt, 'It stopped: starting again soon. ${supervisor.problem ?? ''}'),
-      HostPhase.failed => (Icons.error_outline, 'canoa.cfg is not right for it: ${supervisor.problem ?? ''}'),
+      HostPhase.failed => (Icons.error_outline, '${Brand.configFile} is not right for it: ${supervisor.problem ?? ''}'),
       HostPhase.held => (Icons.people_outline, supervisor.problem ?? 'Another host runs on this home.'),
       HostPhase.stopped => (Icons.stop_circle_outlined, 'Stopped.'),
     };

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../brand.dart';
 import '../desktop/control_client.dart' show ControlFailed;
 import '../desktop/host_tool.dart' show HostTool, findHostTool;
 import 'canoa_config.dart';
@@ -43,15 +44,15 @@ List<String> hostConfigArgs(String path) {
 /// A failure of the program is a [StateError]; a refusal is a [ControlFailed] in the host's words.
 Future<Object?> _control(String method, Map<String, Object?> params, {HostTool? tool, ConfigFiles? files}) async {
   final host = tool ?? findHostTool();
-  if (host == null) throw StateError('this app carries no canoa to read and write its configuration with');
-  final directory = await Directory.systemTemp.createTemp('canoa-control-');
+  if (host == null) throw StateError('this app carries no ${Brand.program} to read and write its configuration with');
+  final directory = await Directory.systemTemp.createTemp('${Brand.program}-control-');
   try {
     final request = File('${directory.path}${Platform.pathSeparator}request.json');
     await request.writeAsString(jsonEncode({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}));
     final output = await host.run(['control', ...(files ?? configFiles()).hostArgs, '@${request.path}']);
     final line = const LineSplitter().convert(output.stdout).where((each) => each.trim().isNotEmpty).lastOrNull;
     if (output.exitCode != 0 || line == null) {
-      throw StateError('canoa control failed (${output.exitCode}): ${output.stderr.trim()}');
+      throw StateError('${Brand.program} control failed (${output.exitCode}): ${output.stderr.trim()}');
     }
     final answer = jsonDecode(line);
     if (answer is Map && answer['error'] is Map) {

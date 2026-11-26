@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../forms/schema_fields.dart';
 import 'secrets_controller.dart';
 import 'secrets_host.dart';
@@ -91,7 +92,7 @@ class _SecretProviderSetupDialogState extends State<SecretProviderSetupDialog> {
                     key: const Key('secret-provider-name'),
                     controller: _name,
                     enabled: editing == null,
-                    decoration: const InputDecoration(labelText: 'Name of this vault', helperText: 'What canoa.cfg and the Secrets list call it'),
+                    decoration: const InputDecoration(labelText: 'Name of this vault', helperText: 'What ${Brand.configFile} and the Secrets list call it'),
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 8),

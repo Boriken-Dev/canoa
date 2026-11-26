@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../desktop/host_grants.dart';
 import '../settings/settings_row.dart';
 import '../store/programs_view.dart' show runProgramAction;
@@ -210,7 +211,7 @@ class _HostOffersGroupState extends State<HostOffersGroup> {
     builder: (context, _) {
       final offers = _catalog.offers;
       if (offers.isEmpty) return const SizedBox.shrink();
-      return SettingsGroup(title: 'Offered by Canoa', children: [
+      return SettingsGroup(title: 'Offered by ${Brand.name}', children: [
         for (final offer in offers) _row(offer),
         if (_problem case final problem?)
           Padding(

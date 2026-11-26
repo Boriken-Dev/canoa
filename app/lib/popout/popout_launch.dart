@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../brand.dart';
 import 'popout_window.dart' show PopoutItem;
 
 /// What a window opened for a conversation is told when it starts: which link to attach by and how to draw.
@@ -40,7 +41,7 @@ final class PopoutLaunch {
       final item = json['item'];
       return PopoutLaunch(
         link: json['link'] as String,
-        title: json['title'] is String ? json['title'] as String : 'Canoa',
+        title: json['title'] is String ? json['title'] as String : Brand.name,
         look: json['look'] is String ? json['look'] as String : 'canoa',
         density: json['density'] is String ? json['density'] as String : 'normal',
         session: json['session'] is String ? json['session'] as String : null,

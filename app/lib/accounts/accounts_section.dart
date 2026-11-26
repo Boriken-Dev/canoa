@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../settings/settings_row.dart';
 import '../shell/confirm_remove.dart';
 import '../sources/source_icons.dart';
@@ -81,7 +82,7 @@ class _AccountsSectionState extends State<AccountsSection> {
             'who runs this host, and sessions there run on '
             '${_accounts.offeredBy(entry).isEmpty ? account.name : 'any account it offers, ${account.name} included'}'
             '${_accounts.offeredBy(entry).isEmpty ? ', which then replaces the login $entry runs on now' : ''}. '
-            'Add the keys that may use it to its peers in canoa.cfg, or keep ${account.name} to an entry only this computer reaches.',
+            'Add the keys that may use it to its peers in ${Brand.configFile}, or keep ${account.name} to an entry only this computer reaches.',
           ),
           actions: [
             TextButton(
@@ -107,7 +108,7 @@ class _AccountsSectionState extends State<AccountsSection> {
       context,
       title: 'Remove ${account.name}?',
       body:
-          'Canoa forgets the login it stored for ${account.name} on this computer'
+          '${Brand.name} forgets the login it stored for ${account.name} on this computer'
           '${offered.isEmpty ? '' : ' and stops offering it in ${offered.join(', ')}'}. '
           'It does not sign out at ${_accounts.providerNamed(account.provider)?.label ?? account.provider}: a login there stays until you end it.',
       dialogKey: const Key('remove-account'),
@@ -139,7 +140,7 @@ class _AccountsSectionState extends State<AccountsSection> {
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
           child: Text(
             'Several logins of one provider can be signed in at once. A source offers the accounts you choose, and each session '
-            'runs on one of them. Credentials stay in this computer\'s credential store, never in canoa.cfg.',
+            'runs on one of them. Credentials stay in this computer\'s credential store, never in ${Brand.configFile}.',
             style: muted,
           ),
         ),

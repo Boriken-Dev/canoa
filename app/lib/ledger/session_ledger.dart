@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show QueueDelivery;
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../chat/agent_events.dart' show ConfigOption, chatLimits;
 import '../chat/session_options.dart';
 import '../providers/provider_catalog.dart';
@@ -16,7 +17,7 @@ export 'package:coqui_acp_chat/coqui_acp_chat.dart' show QueueDelivery;
 /// Where a session's agent runs, as the app reached it.
 enum SessionPlace {
   local('on this computer'),
-  host('through this app\'s canoa'),
+  host('through this app\'s ${Brand.program}'),
   peer('on a paired peer'),
   browser('through the browser\'s provider');
 
@@ -706,7 +707,7 @@ class SessionLedger extends ChangeNotifier {
     _saveTimer = null;
     final document = encode();
     return _writing = _writing.then((_) => backend.write(document)).catchError((Object error) {
-      debugPrint('Canoa sessions: could not write ${backend.location}: $error');
+      debugPrint('${Brand.name} sessions: could not write ${backend.location}: $error');
     });
   }
 

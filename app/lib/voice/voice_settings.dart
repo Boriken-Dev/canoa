@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_row.dart';
@@ -123,7 +124,7 @@ class _VoiceSectionState extends State<VoiceSection> {
           if (backend == null)
             const SettingsRow(
               title: 'Not available here',
-              description: 'The service named in canoa.cfg is not part of this build. Choose another; nothing is sent anywhere meanwhile',
+              description: 'The service named in ${Brand.configFile} is not part of this build. Choose another; nothing is sent anywhere meanwhile',
               child: true,
             )
           else ...[
@@ -148,7 +149,7 @@ class _VoiceSectionState extends State<VoiceSection> {
                 AudioLeaves.no => 'The audio stays on this device.',
                 AudioLeaves.maybe => 'The audio may leave this device, as the service above decides.',
                 AudioLeaves.yes => 'The audio leaves this device for the service above.',
-              }} Canoa keeps no recording, and the microphone is on only while you dictate.',
+              }} ${Brand.name} keeps no recording, and the microphone is on only while you dictate.',
               child: true,
             ),
           ],
@@ -276,10 +277,10 @@ class _NoSpeechService extends StatelessWidget {
       key: const Key('voice-none'),
       title: 'No speech service here',
       description: host
-          ? 'The operating system has no speech service to use here, and Canoa never sends audio to another service on its own. '
+          ? 'The operating system has no speech service to use here, and ${Brand.name} never sends audio to another service on its own. '
               'Install a speech provider below: it runs on your host, so this page and the desktop app dictate alike'
           : 'Dictation uses the speech service of the operating system, which Windows and macOS have. This browser or '
-              'system has none, and Canoa never sends audio to another service on its own',
+              'system has none, and ${Brand.name} never sends audio to another service on its own',
       control: host
           ? null
           : TextButton(
@@ -289,7 +290,7 @@ class _NoSpeechService extends StatelessWidget {
                 builder: (context) => AlertDialog(
                   title: const Text('Set up dictation'),
                   content: const Text(
-                    'Use the Canoa desktop app on Windows or macOS and allow the microphone and speech recognition in the '
+                    'Use the ${Brand.name} desktop app on Windows or macOS and allow the microphone and speech recognition in the '
                     'system\'s privacy settings. Another speech service can be added later in Settings > Voice.',
                   ),
                   actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],

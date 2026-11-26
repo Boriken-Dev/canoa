@@ -5,6 +5,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretCardEnviron
 import 'package:flutter/foundation.dart';
 
 import '../acp/link_secret.dart';
+import '../brand.dart';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
 import '../providers/provider_catalog.dart';
@@ -358,7 +359,7 @@ Future<SignInAsk?> openSealedAsk(LinkSecretIdentity? secrets, Map<String, Object
     prover: secrets.identity.prover,
     verifier: secrets.identity.verifier,
     expected: secrets.host,
-    host: 'Canoa',
+    host: Brand.name,
     now: seconds,
   );
   try {

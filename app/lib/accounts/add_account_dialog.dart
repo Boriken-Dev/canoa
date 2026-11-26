@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import '../brand.dart';
 import '../providers/provider_catalog.dart';
 import '../sources/source_icons.dart';
 import '../store/links.dart';
@@ -87,7 +88,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
     var inputs = <String, String>{};
     // A secret is asked in the sealed form once the sign-in runs, never in a form that runs before it: refuse rather than drop it.
     if (method.inputFields.values.any(ProgramAsk.sensitive)) {
-      setState(() => _problem = '${method.title} asks for a secret before it signs in, which Canoa cannot take sealed here.');
+      setState(() => _problem = '${method.title} asks for a secret before it signs in, which ${Brand.name} cannot take sealed here.');
       return;
     }
     setState(() => _problem = null);
@@ -263,7 +264,7 @@ class SignInPanel extends StatelessWidget {
               key: ValueKey('sign-in-ask ${asking.request.context.requestId}'),
               request: asking.request,
               environment: asking.environment,
-              agent: 'Canoa',
+              agent: Brand.name,
               onReply: run.answer,
             ),
           if (run.running && asking == null)
@@ -276,7 +277,7 @@ class SignInPanel extends StatelessWidget {
               ]),
             ),
           if (run.phase == SignInPhase.done)
-            SelectableText('Added ${run.name}. Canoa offers it to new sessions of the agents it runs on.', key: const Key('sign-in-done')),
+            SelectableText('Added ${run.name}. ${Brand.name} offers it to new sessions of the agents it runs on.', key: const Key('sign-in-done')),
           if (run.phase == SignInPhase.failed)
             SelectableText('It did not sign in: ${run.problem}', key: const Key('sign-in-failed'), style: TextStyle(color: scheme.error)),
         ]),
@@ -311,7 +312,7 @@ class _PageStep extends StatelessWidget {
           ),
         ]),
         if (webLink(page.url) == null)
-          SelectableText('Canoa will not open this address: it is not a plain http or https link.', key: const Key('sign-in-url-refused'), style: TextStyle(color: scheme.error)),
+          SelectableText('${Brand.name} will not open this address: it is not a plain http or https link.', key: const Key('sign-in-url-refused'), style: TextStyle(color: scheme.error)),
         if (page.userCode case final code?) ...[
           const SizedBox(height: 8),
           const Text('and confirm this code there'),

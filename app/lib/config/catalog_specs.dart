@@ -6,6 +6,8 @@ library;
 
 /// The provider that reads the place a Store type reads itself (a git source, an address, a folder): the one a label that names
 /// none has.
+import '../brand.dart';
+
 const readProvider = 'read';
 
 /// One catalog of a Store type, as canoa.cfg has it.
@@ -25,17 +27,17 @@ final class CatalogSpec {
         return CatalogSpec.read(source);
       case final Map<dynamic, dynamic> table:
         final provider = table['provider'] ?? readProvider;
-        if (provider is! String || provider.isEmpty) throw FormatException('canoa.cfg: $where.provider is the id of a catalog source');
+        if (provider is! String || provider.isEmpty) throw FormatException('${Brand.configFile}: $where.provider is the id of a catalog source');
         final generator = table['generator'];
-        if (generator != null && (generator is! String || generator.isEmpty)) throw FormatException('canoa.cfg: $where.generator is the id of a catalog generator');
-        if (generator != null && provider != readProvider) throw FormatException('canoa.cfg: $where names a generator or a provider, not both');
+        if (generator != null && (generator is! String || generator.isEmpty)) throw FormatException('${Brand.configFile}: $where.generator is the id of a catalog generator');
+        if (generator != null && provider != readProvider) throw FormatException('${Brand.configFile}: $where names a generator or a provider, not both');
         final fields = {
           for (final MapEntry(:key, :value) in table.entries)
             if (key != 'provider' && key != 'generator') '$key': value,
         };
         return generator is String ? CatalogSpec.generated(generator, fields) : CatalogSpec(provider, fields);
       default:
-        throw FormatException('canoa.cfg: $where is a source, a table naming a provider and its fields, or false');
+        throw FormatException('${Brand.configFile}: $where is a source, a table naming a provider and its fields, or false');
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, Chat
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 import '../chat/palette.dart' show ShortcutSpec, appShortcutTable, parseShortcutActivator;
 import '../config/canoa_config.dart';
@@ -88,9 +89,9 @@ class _GeneralSectionState extends State<GeneralSection> {
           SettingsGroup(title: 'Window', children: [
             SwitchRow(
               key: const Key('settings-start-at-login'),
-              title: 'Start Canoa when I sign in',
+              title: 'Start ${Brand.name} when I sign in',
               configKey: const ['desktop', 'start_at_login'],
-              description: 'Canoa starts hidden in the tray when you sign in to this computer, for you only',
+              description: '${Brand.name} starts hidden in the tray when you sign in to this computer, for you only',
               machine: true,
               value: config.startAtLogin ?? false,
               onChanged: (v) => c.change((x) => x.copyWith(startAtLogin: v)),
@@ -98,7 +99,7 @@ class _GeneralSectionState extends State<GeneralSection> {
             SwitchRow(
               title: 'Start hidden in the tray',
               configKey: const ['desktop', 'start_hidden'],
-              description: 'Canoa starts with no window; open it from the tray icon',
+              description: '${Brand.name} starts with no window; open it from the tray icon',
               machine: true,
               value: config.startHidden,
               onChanged: (v) => c.change((x) => x.copyWith(startHidden: v)),
@@ -106,7 +107,7 @@ class _GeneralSectionState extends State<GeneralSection> {
             SwitchRow(
               title: 'Close the window to the tray',
               configKey: const ['desktop', 'close_to_tray'],
-              description: 'Closing keeps Canoa and its sessions running',
+              description: 'Closing keeps ${Brand.name} and its sessions running',
               machine: true,
               value: config.closeToTray,
               onChanged: (v) => c.change((x) => x.copyWith(closeToTray: v)),
@@ -131,7 +132,7 @@ class _GeneralSectionState extends State<GeneralSection> {
           NumberRow(
             title: 'Network timeout',
             configKey: const ['network', 'connect_timeout'],
-            description: 'How long a connection may take before Canoa gives up',
+            description: 'How long a connection may take before ${Brand.name} gives up',
             child: true,
             fieldKey: const ValueKey('settings-timeout'),
             unit: 's',
@@ -262,7 +263,7 @@ class AppearanceSection extends StatelessWidget {
           ChoiceRow<LookId>(
             title: 'Family',
             configKey: const ['appearance', 'look'],
-            description: 'Canoa\'s own, a terminal\'s lines, or a look an agent this host runs brings; brightness is set apart',
+            description: '${Brand.name}\'s own, a terminal\'s lines, or a look an agent this host runs brings; brightness is set apart',
             fieldKey: const Key('settings-look'),
             value: config.look,
             choices: [for (final look in _families(config.look)) (look, look.label)],

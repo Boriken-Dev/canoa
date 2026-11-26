@@ -31,6 +31,7 @@ class BrandFileTests(unittest.TestCase):
         mark = json.loads(next(d for d in defines if d.startswith("--dart-define=BRAND_MARK=")).split("=", 2)[2])
         self.assertEqual(set(mark), {"hull", "smallWeight", "cut", "paddle", "spiral", "spiralWidth"})
         self.assertEqual(other.environment(), {"BRAND_FILE": str(TEST_BRAND.resolve())})
+        self.assertIn("--dart-define=BRAND_EXECUTABLE=PirogueUI", defines)
         self.assertIn("--dart-define=BRAND_PROGRAM=pirogue", defines)
         self.assertIn("--dart-define=BRAND_HOME_DIR=.pirogue", defines)
 

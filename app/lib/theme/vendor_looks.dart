@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/text_pack.dart';
 import 'look.dart';
 
@@ -34,9 +35,9 @@ final class VendorLooks extends ChangeNotifier {
   /// Why a host-supplied family draws in Canoa's look instead, or null when it does not (or [id] is built in).
   String? fallbackReason(LookId id) {
     if (id.isBuiltIn || has(id)) return null;
-    if (_problem != null) return "The ${id.label} family comes from the host, which could not be asked ($_problem). Canoa's look is shown.";
-    if (!_answered) return "The ${id.label} family comes from the host, which has not answered yet. Canoa's look is shown until it does.";
-    return "This host lists no ${id.label} family. Canoa's look is shown.";
+    if (_problem != null) return "The ${id.label} family comes from the host, which could not be asked ($_problem). ${Brand.name}'s look is shown.";
+    if (!_answered) return "The ${id.label} family comes from the host, which has not answered yet. ${Brand.name}'s look is shown until it does.";
+    return "This host lists no ${id.label} family. ${Brand.name}'s look is shown.";
   }
 
   /// The provider whose conversations [id]'s family belongs to, as the host's document names it, or null.

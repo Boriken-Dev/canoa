@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:local_notifier/local_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../brand.dart';
 import 'notifier.dart';
 
 Notifier createNotifier() => DesktopNotifier();
@@ -25,7 +26,7 @@ final class DesktopNotifier implements Notifier {
   Future<bool> _prepare() async {
     if (_ready != null) return _ready!;
     try {
-      await localNotifier.setup(appName: 'Canoa');
+      await localNotifier.setup(appName: Brand.name);
       _ready = true;
     } on Object catch (error) {
       debugPrint('notifications are unavailable: $error');

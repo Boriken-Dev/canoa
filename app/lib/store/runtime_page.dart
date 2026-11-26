@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../desktop/control_client.dart' show hostWords;
 import 'entry_details.dart';
@@ -55,7 +56,7 @@ class RuntimePage extends StatelessWidget {
         },
         source: {
           'Installed version': item.installed
-              ? '${item.version ?? 'not read'}${item.managed ? '' : ' (found on this computer, not installed by Canoa)'}'
+              ? '${item.version ?? 'not read'}${item.managed ? '' : ' (found on this computer, not installed by ${Brand.name})'}'
               : 'none',
           'Newest version': _newest(status),
           if (copy != null) 'Installed at': copy.path,
@@ -76,7 +77,7 @@ class RuntimePage extends StatelessWidget {
               ),
               if (config != null)
                 if (users.isEmpty)
-                  const Text('Nothing in canoa.cfg starts one of them by name.', key: Key('runtime-uses-none'))
+                  const Text('Nothing in ${Brand.configFile} starts one of them by name.', key: Key('runtime-uses-none'))
                 else
                   for (final user in users)
                     Padding(
@@ -93,7 +94,7 @@ class RuntimePage extends StatelessWidget {
             FilledButton(
               key: const Key('runtime-install'),
               onPressed: () => unawaited(runProgramAction(context, programs, status, 'install')),
-              child: Text(item.installed ? 'Install a copy for Canoa' : 'Install'),
+              child: Text(item.installed ? 'Install a copy for ${Brand.name}' : 'Install'),
             ),
           if (item.managed && item.updateAvailable)
             FilledButton(

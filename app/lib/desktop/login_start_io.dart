@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../brand.dart';
 import 'login_start.dart';
 
 /// The command that starts this app with no window: the AppImage when one runs it (its mounted copy goes away), else the
@@ -27,7 +28,7 @@ LoginStart? systemLoginStart() {
 /// A value of the Run key under `HKEY_CURRENT_USER\[key]`. [key] is a parameter so a test works in a scratch key and never in the
 /// person's own.
 final class RunKeyLoginStart implements LoginStart {
-  RunKeyLoginStart({required this.key, required this.command, this.name = 'Canoa'});
+  RunKeyLoginStart({required this.key, required this.command, this.name = Brand.name});
 
   final String key, command, name;
 
@@ -106,14 +107,14 @@ final class DesktopEntryLoginStart extends FileLoginStart {
   DesktopEntryLoginStart({required super.folder, required super.command});
 
   @override
-  String get fileName => 'canoa.desktop';
+  String get fileName => '${Brand.program}.desktop';
 
   /// A value of an Exec line: quoted with its own quotes, backslashes, dollar signs and backticks escaped.
   static String quoteExec(String path) =>
       '"${path.replaceAllMapped(RegExp(r'[\\"$`]'), (m) => '\\${m[0]}').replaceAll('%', '%%')}"';
 
   @override
-  String render() => '[Desktop Entry]\nType=Application\nName=Canoa\nExec=${quoteExec(command)} $backgroundFlag\n'
+  String render() => '[Desktop Entry]\nType=Application\nName=${Brand.name}\nExec=${quoteExec(command)} $backgroundFlag\n'
       'Terminal=false\nX-GNOME-Autostart-enabled=true\n';
 }
 

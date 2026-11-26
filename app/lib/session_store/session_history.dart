@@ -164,7 +164,7 @@ extension SessionHistory on SessionStore {
     final cwd = entry.cwd;
     if (cwd == null) {
       throw StateError(
-        'Canoa did not note where this session was, which the agent needs to open it',
+        '${Brand.name} did not note where this session was, which the agent needs to open it',
       );
     }
     // What the agent lists now names the session, when it still has it under the same name.
@@ -242,7 +242,7 @@ extension SessionHistory on SessionStore {
       await applyHostProfile(session, expected: expected, keptMode: keptMode);
       if (!opened.replayed && entry.messages.isNotEmpty) {
         session.chat.note(
-          'What Canoa kept of it follows, from its own list, not from the agent.',
+          'What ${Brand.name} kept of it follows, from its own list, not from the agent.',
         );
         for (final kept in entry.messages) {
           session.chat.addMessage(SessionStore._keptRole(kept.role), kept.text, at: kept.at);
@@ -300,7 +300,7 @@ extension SessionHistory on SessionStore {
     final cwd = session.cwd ?? entry.cwd;
     if (cwd == null) {
       throw StateError(
-        'Canoa did not note where this session was, which the host needs to attach to it',
+        '${Brand.name} did not note where this session was, which the host needs to attach to it',
       );
     }
     if (client.peerId != entry.peerId) {
@@ -333,7 +333,7 @@ extension SessionHistory on SessionStore {
       agent: entry.harness,
     );
     session.chat.note(
-      'What Canoa kept of this session. ${entry.whyNotReopened ?? ''} Nothing typed here reaches an agent.',
+      'What ${Brand.name} kept of this session. ${entry.whyNotReopened ?? ''} Nothing typed here reaches an agent.',
     );
     for (final kept in entry.messages) {
       session.chat.addMessage(SessionStore._keptRole(kept.role), kept.text, at: kept.at);

@@ -7,6 +7,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../acp/client.dart' show AcpSessionInfo;
+import '../brand.dart';
 import '../desktop/control_client.dart' show hostWords;
 import '../highlight/highlighted.dart' show highlightRenderers;
 import '../history/session_import.dart' show earlierPage;
@@ -406,7 +407,7 @@ class _ConversationViewState extends State<ConversationView> {
                 Builder(builder: (inner) => IconButton(tooltip: 'Sessions', icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(inner).openDrawer())),
               Expanded(
                 child: start ? const SizedBox.shrink() : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(session?.title ?? 'Canoa', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(session?.title ?? Brand.name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
                   Text(_subtitle(session), style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
                 ]),
               ),

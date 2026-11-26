@@ -5,6 +5,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
+import '../brand.dart';
 
 /// The lines for the overlay whose manifest is [manifest] and whose files are [files], on [os]; none when it has nothing to run or
 /// its manifest cannot be applied.
@@ -71,6 +72,6 @@ String _dependency(aos.Dependency dependency) {
 
 String _setup(aos.SetupRun setup) {
   final time = setup.timeout == 0 ? 'no time limit' : 'up to ${setup.timeout} s';
-  final network = setup.network ? 'says it needs the network' : 'declares no network, which Canoa cannot keep it to';
+  final network = setup.network ? 'says it needs the network' : 'declares no network, which ${Brand.name} cannot keep it to';
   return 'setup: ${setup.path} under ${setup.interpreter} ($time; $network), as install, then sync on each update';
 }

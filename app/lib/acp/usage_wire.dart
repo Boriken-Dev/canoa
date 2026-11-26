@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import '../brand.dart';
 import '../chat/agent_events.dart';
 
 /// The `_meta` key of `initialize` with which a client says it answers the host's approval request.
@@ -192,7 +193,7 @@ final class UsageWire {
   /// Asks the agent for its report, with [sessionId]'s spend when one is named. Null when it did not answer in [timeout] or
   /// answered with an error: the report is a convenience, never a reason to fail.
   Future<UsageReport?> fetch({String? sessionId, Duration timeout = const Duration(seconds: 10)}) async {
-    final id = 'canoa-usage-${_next++}';
+    final id = '${Brand.program}-usage-${_next++}';
     final waiting = Completer<UsageReport?>();
     _waiting[id] = waiting;
     try {

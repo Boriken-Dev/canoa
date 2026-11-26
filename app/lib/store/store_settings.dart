@@ -1,4 +1,5 @@
 import 'package:coqui_aos/coqui_aos.dart' as aos;
+import '../brand.dart';
 
 /// canoa.cfg `[store]`: how much of a catalog and of an icon the store reads. Each is a setting with the AOS
 /// specification's recommended default and no floor; a value above the default is configuration the store lists.
@@ -70,11 +71,11 @@ final class StoreSettings {
   static StoreSettings parse(Map<dynamic, dynamic> table) {
     for (final key in table.keys) {
       final typeTable = table[key] is Map && (table[key] as Map).keys.every((each) => each == 'catalogs');
-      if (!keys.contains(key) && key != 'mcp' && key != 'skills_search' && !typeTable) throw FormatException('canoa.cfg: store: invalid key $key');
+      if (!keys.contains(key) && key != 'mcp' && key != 'skills_search' && !typeTable) throw FormatException('${Brand.configFile}: store: invalid key $key');
     }
     int read(String key, int fallback) {
       final value = table[key] ?? fallback;
-      if (value is! int || value < 0) throw FormatException('canoa.cfg: store.$key must be a whole number, 0 or more');
+      if (value is! int || value < 0) throw FormatException('${Brand.configFile}: store.$key must be a whole number, 0 or more');
       return value;
     }
 

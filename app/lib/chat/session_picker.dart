@@ -8,6 +8,7 @@ import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
 import '../accounts/add_account_dialog.dart';
 import '../accounts/usage_view.dart' show windowSummary;
+import '../brand.dart';
 import '../history/agent_switch.dart' show cannotTake;
 import '../session_store.dart';
 import '../sources/source_choices.dart' show ModelChoice;
@@ -554,7 +555,7 @@ class _SessionPickerState extends State<SessionPicker> {
     final ran = !draft && chosen ? session.ranOnAccount : null;
     final state = [
       standardTitle(pool.standard),
-      if (pool.automatic) 'made by Canoa',
+      if (pool.automatic) 'made by ${Brand.name}',
       if (ran != null) 'running on $ran' else if (pool.members.isEmpty) 'no account yet' else members,
     ].join(' · ');
     return Tooltip(
@@ -597,7 +598,7 @@ class _SessionPickerState extends State<SessionPicker> {
           title: Text('Offer ${account.name} to $entry?'),
           content: Text(
             '$entry has no list of keys, so every key paired with this host can start a session on it, running the agent as the user '
-            'who runs this host, and a session there may run on ${account.name}. Add the keys that may use it to its peers in canoa.cfg, '
+            'who runs this host, and a session there may run on ${account.name}. Add the keys that may use it to its peers in ${Brand.configFile}, '
             'or keep ${account.name} to an agent only this computer reaches.',
           ),
           actions: [

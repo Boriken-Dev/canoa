@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 
@@ -25,7 +26,7 @@ export '../shell/confirm_remove.dart' show confirmRemoval;
 Future<bool> confirmCatalogRemoval(BuildContext context, String label) => confirmRemoval(
   context,
   title: 'Stop reading $label?',
-  body: 'It is taken out of canoa.cfg. What was installed from it stays installed, and adding it again reads it once more.',
+  body: 'It is taken out of ${Brand.configFile}. What was installed from it stays installed, and adding it again reads it once more.',
 );
 
 /// Store settings of one type: the catalogs that type reads, added, listed with what each said and removed. What the type calls them

@@ -6,6 +6,7 @@ import 'package:coqui_acp/page.dart';
 import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 import '../accounts/account_meta.dart' show accountMeta, maxMessageMeta;
+import '../brand.dart';
 import '../chat/agent_events.dart';
 import '../chat/timing_log.dart';
 import 'delegate.dart';
@@ -255,7 +256,7 @@ final class VerifiedAgent {
           closeSource: proven.close,
           decider: decider,
           elicitor: elicitor,
-          clientName: 'canoa',
+          clientName: Brand.program,
           clientVersion: '0.0.1',
         ),
         actual.peerId,
@@ -310,7 +311,7 @@ final class VerifiedAgent {
         closeSource: close,
         decider: decider,
         elicitor: elicitor,
-        clientName: 'canoa',
+        clientName: Brand.program,
         clientVersion: '0.0.1',
         // A command that downloads itself the first time (an `npx` adapter, say) answers nothing until it has.
         requestTimeout: const Duration(minutes: 3),
@@ -353,7 +354,7 @@ final class VerifiedAgent {
         closeSource: connection.close,
         decider: decider,
         elicitor: elicitor,
-        clientName: 'canoa',
+        clientName: Brand.program,
         clientVersion: '0.0.1',
       ),
       peer,

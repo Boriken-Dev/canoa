@@ -10,7 +10,7 @@ import 'host_tool.dart';
 import '../brand.dart';
 
 /// What another host is told holds their home.
-const String _holder = 'CanoaUI';
+const String _holder = Brand.executable;
 
 /// How often a running command is asked what it has said. A read takes microseconds and starts no frame.
 const Duration _pollEvery = Duration(milliseconds: 100);
@@ -188,7 +188,7 @@ final class _LibraryChild implements HostChild, HostLinks {
     try {
       said = _native.read(_job);
     } on Object catch (error) {
-      _err.add('canoa: the host library failed: $error');
+      _err.add('${Brand.program}: the host library failed: $error');
       return _ended(1);
     }
     _deliver(_out, _outHeld, said.out);

@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 
+import '../brand.dart';
 import 'aos_support.dart';
 import 'profile.dart';
 import 'skill_copies.dart';
@@ -251,7 +252,7 @@ Layer overlayLayer({
       for (final variable in variables.keys) {
         if (aos.isReservedVariable(variable)) throw OverlayRefusal('reserved', variable);
       }
-      notApplied.add("mcp.$name: it runs in the overlay's root, which Canoa does not set yet");
+      notApplied.add("mcp.$name: it runs in the overlay's root, which ${Brand.name} does not set yet");
       mcp[name] = McpStdio(
         command: command.contains(RegExp(r'[/\\]')) ? _resolvePath(root, command, windows) : command,
         args: [for (final arg in (server['args'] is List ? server['args']! as List : const [])) '$arg'],
@@ -445,7 +446,7 @@ OverlayReport overlayReport(LayerId layer, AosLayer layerAos) {
 String _reason(String code) => switch (code) {
   'undefined-variable' => "an overlay's placeholder names a variable that is not set",
   'secret-placeholder' => "an overlay's placeholder reads a secret",
-  'unresolved-reference' => 'an overlay reads a variable that is not set, or a secret Canoa does not hold',
+  'unresolved-reference' => 'an overlay reads a variable that is not set, or a secret ${Brand.name} does not hold',
   'invalid-pattern' => "an overlay's placeholder has a pattern that is not valid",
   'invalid-reference' => 'an overlay names a secret file that is not a relative path',
   'missing-file' || 'invalid-env-file' => "an overlay's env file cannot be read",

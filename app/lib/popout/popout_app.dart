@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView, ChatView
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../extension/tab_bridge.dart';
 import '../extension/tab_owner_banner.dart';
 import '../extension/tab_shares.dart';
@@ -88,7 +89,7 @@ class PopoutApp extends StatelessWidget {
       );
     }
     return MaterialApp(
-      title: '${launch.title} - Canoa',
+      title: '${launch.title} - ${Brand.name}',
       debugShowCheckedModeBanner: false,
       theme: themeFor(look, Brightness.light, density: density),
       darkTheme: themeFor(look, Brightness.dark, density: density),

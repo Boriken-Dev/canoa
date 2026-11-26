@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
 import '../config/canoa_config_file.dart' show hostConfigArgs;
 import 'host_tool.dart';
 
@@ -112,14 +113,14 @@ final class HostPairing {
       const Duration(seconds: 20),
       onTimeout: () {
         child.kill();
-        throw const HostCommandFailed('canoa did not show a PIN');
+        throw const HostCommandFailed('${Brand.program} did not show a PIN');
       },
     );
     final native = first['native'] == true;
     final [pin, hostId, url] = [first['pin'], first['peer'], native ? '' : first['url']];
     if (pin is! String || hostId is! String || url is! String) {
       child.kill();
-      throw const HostCommandFailed('canoa showed no PIN');
+      throw const HostCommandFailed('${Brand.program} showed no PIN');
     }
     // Nobody may be waiting on it when it is cancelled.
     unawaited(paired.future.then((_) {}, onError: (Object _) {}));
@@ -236,7 +237,7 @@ class HostSupervisor extends ChangeNotifier {
     try {
       return (child as HostLinks).openLink(name);
     } on Object catch (error) {
-      throw HostCommandFailed('canoa is not serving $name here now: $error');
+      throw HostCommandFailed('${Brand.program} is not serving $name here now: $error');
     }
   }
 
@@ -272,7 +273,7 @@ class HostSupervisor extends ChangeNotifier {
     try {
       child = await tool!.start(['serve', ...hostConfigArgs(_configPath!), '--allow-empty', '--local-sources', '--until-stdin-closes', '--supervised']);
     } on Object catch (error) {
-      _problem = 'canoa could not start: $error';
+      _problem = '${Brand.program} could not start: $error';
       return _ended(generation, null);
     }
     if (generation != _generation) {
@@ -344,7 +345,7 @@ class HostSupervisor extends ChangeNotifier {
     _listening.clear();
     if (code != null) {
       final said = const LineSplitter().convert(_log.toString()).map(hostSaid).nonNulls;
-      _problem = said.isEmpty ? 'canoa ended with status $code' : said.last;
+      _problem = said.isEmpty ? '${Brand.program} ended with status $code' : said.last;
     }
     // Status 2 is a wrong canoa.cfg or invocation: the same file fails the same way, so it waits for a person.
     if (code == 2) {
@@ -456,7 +457,7 @@ class HostSupervisor extends ChangeNotifier {
 
   static String _said(HostOutput output) {
     final lines = const LineSplitter().convert(output.stderr).where((line) => line.trim().isNotEmpty);
-    if (lines.isEmpty) return 'canoa ended with status ${output.exitCode}';
+    if (lines.isEmpty) return '${Brand.program} ended with status ${output.exitCode}';
     final last = lines.last;
     return hostSaid(last) ?? last;
   }

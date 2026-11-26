@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../desktop/control_client.dart' show hostWords;
 import '../history/session_import.dart';
 import '../sources/source_icons.dart';
@@ -282,7 +283,7 @@ class _WelcomeViewState extends State<WelcomeView> {
               Expanded(child: Text('No agent is installed yet', key: const Key('welcome-title'), style: theme.textTheme.headlineSmall)),
             ]),
             const SizedBox(height: 8),
-            Text('Canoa runs the agents you install, and a new session starts from this page once one is ready. This is what Canoa found on this computer.',
+            Text('${Brand.name} runs the agents you install, and a new session starts from this page once one is ready. This is what ${Brand.name} found on this computer.',
                 style: TextStyle(color: look.muted)),
             const SizedBox(height: 20),
             Wrap(spacing: 12, runSpacing: 8, children: [

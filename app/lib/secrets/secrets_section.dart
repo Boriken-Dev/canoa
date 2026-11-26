@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../shell/confirm_remove.dart';
 import 'provider_setup.dart';
 import 'secrets_controller.dart';
@@ -15,7 +16,7 @@ String secretKeptText(SecretRow row) {
     'stored' => 'Stored',
     'session' => 'This conversation',
     _ when left != null => '${_span(left)} left',
-    _ => 'Until Canoa closes',
+    _ => 'Until ${Brand.name} closes',
   };
 }
 
@@ -69,10 +70,10 @@ class _SecretsPageState extends State<SecretsPage> {
       context,
       title: 'Forget ${row.name}?',
       body: row.foreign
-          ? '${row.name} is a credential another program keeps in the ${row.provider} vault. Forgetting it deletes it there, and that program will ask for it again. Canoa cannot bring it back.'
+          ? '${row.name} is a credential another program keeps in the ${row.provider} vault. Forgetting it deletes it there, and that program will ask for it again. ${Brand.name} cannot bring it back.'
           : row.kept == 'stored'
           ? '${row.name} is taken out of the ${row.provider} vault. An agent that asks for it again will ask you.'
-          : 'Canoa stops holding ${row.name}. An agent that asks for it again will ask you.',
+          : '${Brand.name} stops holding ${row.name}. An agent that asks for it again will ask you.',
       confirmLabel: 'Forget it',
       dialogKey: const Key('secret-forget-confirm'),
       cancelKey: null,
@@ -91,7 +92,7 @@ class _SecretsPageState extends State<SecretsPage> {
     if (await confirmRemoval(
       context,
       title: 'Remove ${entry.name}?',
-      body: 'Canoa stops using this setup. What it kept for you in its own store stays there.',
+      body: '${Brand.name} stops using this setup. What it kept for you in its own store stays there.',
       confirmLabel: 'Remove it',
       dialogKey: const Key('secret-provider-remove-confirm'),
       cancelKey: null,
@@ -272,7 +273,7 @@ class _SetSecretDialogState extends State<SetSecretDialog> {
       builder: (context) => AlertDialog(
         key: const Key('secret-set-shadow-confirm'),
         title: Text('$name is another program\'s'),
-        content: const Text('Canoa will keep its own secret by this name beside that credential and answer to it, and will not change the other program\'s.'),
+        content: const Text('${Brand.name} will keep its own secret by this name beside that credential and answer to it, and will not change the other program\'s.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(key: const Key('secret-set-shadow-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Set it')),
@@ -347,7 +348,7 @@ class _SetSecretDialogState extends State<SetSecretDialog> {
             key: ValueKey('secret-set-ask ${asking.request.context.requestId}'),
             request: asking.request,
             environment: asking.environment,
-            agent: 'Canoa',
+            agent: Brand.name,
             onReply: run.answer,
           ),
         if (run.running && asking == null) const Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)), SizedBox(width: 12), Text('Waiting for the host')]),

@@ -1,14 +1,16 @@
 import 'dart:math';
 
-/// Every branch Canoa makes for a session starts with this.
-const worktreeBranchPrefix = 'canoa/';
+import '../brand.dart';
+
+/// Every branch the app makes for a session starts with this.
+const worktreeBranchPrefix = '${Brand.program}/';
 
 /// The longest branch name taken, prefix included; `canoa` holds the same bound.
 const maxWorktreeBranch = 70;
 
-final _safeBranch = RegExp(r'^canoa/[a-z0-9]+(?:-[a-z0-9]+)*$');
+final _safeBranch = RegExp('^${RegExp.escape(worktreeBranchPrefix)}[a-z0-9]+(?:-[a-z0-9]+)*\$');
 
-/// `canoa/` and then lower-case letters and digits in runs joined by single hyphens: nothing git or a shell reads as an option,
+/// [worktreeBranchPrefix] and then lower-case letters and digits in runs joined by single hyphens: nothing git or a shell reads as an option,
 /// a range or a path step, and no control character. `canoa` refuses any other.
 bool safeWorktreeBranch(String branch) => branch.length <= maxWorktreeBranch && _safeBranch.hasMatch(branch);
 

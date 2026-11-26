@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../desktop/control_client.dart';
 import '../selectable.dart';
 import '../shell/confirm_remove.dart';
@@ -334,7 +335,7 @@ class ExtensionCatalogs extends ChangeNotifier {
     if (!await confirmRemoval(
       context,
       title: 'Remove $name',
-      body: 'The extension goes out of the host\'s canoa.cfg, and its files out of the folder the host kept them in. Its types leave the '
+      body: 'The extension goes out of the host\'s ${Brand.configFile}, and its files out of the folder the host kept them in. Its types leave the '
           'Store when the host restarts.',
       cancelLabel: 'Cancel',
       dialogKey: const Key('extension-store-remove-dialog'),

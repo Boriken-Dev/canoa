@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../permissions/permission_rules.dart';
 import '../session_store.dart';
 import '../theme/look.dart';
@@ -82,7 +83,7 @@ class _RememberDialogState extends State<RememberDialog> {
           onChanged: (_) => setState(() => problem = null),
           decoration: InputDecoration(
             labelText: 'This file, or this folder and what is under it',
-            helperText: 'An absolute path inside $folder. Never a hidden file or folder, build scripts, agent instructions or Canoa\'s own files.',
+            helperText: 'An absolute path inside $folder. Never a hidden file or folder, build scripts, agent instructions or ${Brand.name}\'s own files.',
           ),
         ),
         McpSubject(:final server, :final tool) => Text('Any use of the tool $tool of $server, with any input.'),
@@ -123,14 +124,14 @@ class _RememberDialogState extends State<RememberDialog> {
             ),
             Text(
               'Limits: a hard link is not detected; the lists of files and of tool names never covered cannot be complete; and what the agent has '
-              'itself been set to allow (its own permissions, or rules it remembered) is outside what Canoa can see, and can make '
+              'itself been set to allow (its own permissions, or rules it remembered) is outside what ${Brand.name} can see, and can make '
               'Manual silent.',
               key: const Key('rule-limits'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'Canoa then answers a matching request with allow once, itself, without asking you, until you revoke the rule in '
+              '${Brand.name} then answers a matching request with allow once, itself, without asking you, until you revoke the rule in '
               'Settings, Permissions. It never answers an "always", a request from another source or workspace, or one the agent '
               'offers no allow once for.',
               style: Theme.of(context).textTheme.bodySmall,

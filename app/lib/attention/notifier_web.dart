@@ -1,6 +1,7 @@
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
+import '../brand.dart';
 import 'notifier.dart';
 
 Notifier createNotifier() => WebNotifier();
@@ -59,7 +60,7 @@ final class WebNotifier implements Notifier {
   @override
   Future<void> show({required String title, required String body, required String sessionId}) async {
     if (!await available) return;
-    final shown = _Notification(title, _Options(body: body, tag: 'canoa-$sessionId'));
+    final shown = _Notification(title, _Options(body: body, tag: '${Brand.program}-$sessionId'));
     shown.onclick = (() {
       _focusWindow();
       shown.close();

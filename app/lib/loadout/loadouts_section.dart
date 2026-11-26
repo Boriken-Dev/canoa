@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../profile/profile_home.dart';
 import '../shell/shell.dart' show ShellScope;
@@ -117,7 +118,7 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
     }
     final saved = await widget.onSave(changed);
     if (!mounted) return;
-    setState(() => _problem = saved == null ? 'canoa.cfg could not be written' : null);
+    setState(() => _problem = saved == null ? '${Brand.configFile} could not be written' : null);
     if (saved != null) {
       _editing.value = null;
       widget.selection.select(name);
@@ -145,12 +146,12 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
     final saved = await widget.onSave(_config.withLoadouts({..._config.loadouts}..remove(name)));
     if (!mounted) return;
     if (saved != null && wasShown && next != null) widget.selection.select(next);
-    setState(() => _problem = saved == null ? 'canoa.cfg could not be written' : null);
+    setState(() => _problem = saved == null ? '${Brand.configFile} could not be written' : null);
   }
 
   Future<void> _makeDefault(String name) async {
     final saved = await widget.onSave(_config.withLoadouts(_config.loadouts, defaultName: name));
-    if (mounted) setState(() => _problem = saved == null ? 'canoa.cfg could not be written' : null);
+    if (mounted) setState(() => _problem = saved == null ? '${Brand.configFile} could not be written' : null);
   }
 
   void _open(LoadoutDraft draft) {

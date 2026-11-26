@@ -1,3 +1,5 @@
+import '../brand.dart';
+
 /// A saved connection to a host or agent elsewhere, as `[connections.NAME]` in canoa.cfg holds it. It names where to connect and
 /// which key to expect there, never a key, a password or a token: the proof at connect is what decides whether the other end holds
 /// the pinned id.
@@ -51,26 +53,26 @@ final class Connection {
 
   /// A connection read from [table], or a [FormatException] naming what is wrong.
   factory Connection.read(String name, Object? table) {
-    if (!isName(name)) throw FormatException('canoa.cfg: connections.$name: a name is 1 to 64 characters, with no control characters');
-    if (table is! Map) throw FormatException('canoa.cfg: connections.$name must be a table');
+    if (!isName(name)) throw FormatException('${Brand.configFile}: connections.$name: a name is 1 to 64 characters, with no control characters');
+    if (table is! Map) throw FormatException('${Brand.configFile}: connections.$name must be a table');
     for (final key in table.keys) {
-      if (!keys.contains(key)) throw FormatException('canoa.cfg: connections.$name: invalid key $key');
+      if (!keys.contains(key)) throw FormatException('${Brand.configFile}: connections.$name: invalid key $key');
     }
     final kind = ConnectionKind.named(table['kind']);
-    if (kind == null) throw FormatException('canoa.cfg: connections.$name: kind is "canoa" or "acp"');
+    if (kind == null) throw FormatException('${Brand.configFile}: connections.$name: kind is "${ConnectionKind.canoa.name}" or "${ConnectionKind.acp.name}"');
     final transport = table['transport'] == null ? ConnectionTransport.websocket : ConnectionTransport.named(table['transport']);
-    if (transport == null) throw FormatException('canoa.cfg: connections.$name: transport is "websocket" or "webtransport"');
+    if (transport == null) throw FormatException('${Brand.configFile}: connections.$name: transport is "websocket" or "webtransport"');
     final address = table['address'];
-    if (address is! String) throw FormatException('canoa.cfg: connections.$name: address is text');
+    if (address is! String) throw FormatException('${Brand.configFile}: connections.$name: address is text');
     final problem = addressProblem(kind, transport, address);
-    if (problem != null) throw FormatException('canoa.cfg: connections.$name: $problem');
+    if (problem != null) throw FormatException('${Brand.configFile}: connections.$name: $problem');
     final peer = table['peer'];
     if (peer is! String || !_peerId.hasMatch(peer)) {
-      throw FormatException('canoa.cfg: connections.$name: peer is sha256: and 64 hex digits');
+      throw FormatException('${Brand.configFile}: connections.$name: peer is sha256: and 64 hex digits');
     }
     final method = table['method'];
     if (method is! String || !methods.contains(method)) {
-      throw FormatException('canoa.cfg: connections.$name: method is "noise" or "webcrypto"');
+      throw FormatException('${Brand.configFile}: connections.$name: method is "noise" or "webcrypto"');
     }
     return Connection(name: name, kind: kind, address: address.trim(), peer: peer, method: method, transport: transport);
   }
@@ -89,7 +91,7 @@ final class Connection {
 /// What the other end is.
 enum ConnectionKind {
   /// A Canoa host, reached over a paired peer: it lists its agents and what it can do.
-  canoa('Canoa host'),
+  canoa('${Brand.name} host'),
 
   /// One agent speaking ACP at an endpoint: it lists nothing and offers nothing beyond the session.
   acp('Direct ACP endpoint');

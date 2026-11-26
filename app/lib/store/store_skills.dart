@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 
 import '../loadout/loadout_controller.dart';
@@ -180,7 +181,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     try {
       return aos.Source.parse(key).shown();
     } on aos.AosError {
-      return 'a source Canoa cannot show';
+      return 'a source ${Brand.name} cannot show';
     }
   }
 
@@ -269,7 +270,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     if (!await confirmRemoval(
       context,
       title: 'Stop reading $label?',
-      body: 'It is taken out of canoa.cfg. The skills installed from it stay installed, and adding it again reads it once more.',
+      body: 'It is taken out of ${Brand.configFile}. The skills installed from it stay installed, and adding it again reads it once more.',
     )) {
       return;
     }
@@ -335,7 +336,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
             ),
           const SizedBox(height: 8),
           if (held.isEmpty)
-            const Text('This source holds no skill: Canoa looks for SKILL.md files the way npx skills does.', key: Key('skills-source-none'))
+            const Text('This source holds no skill: ${Brand.name} looks for SKILL.md files the way npx skills does.', key: Key('skills-source-none'))
           else if (shown.isEmpty)
             const Text('Nothing listed matches.', key: Key('skills-source-nothing-matches')),
         ] else if (problem == null && c.scanningSource != label)
@@ -475,7 +476,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
         _sourceRow(context),
         Text(
           'Only the words you search for are sent to $host, a third party. A result names a repository; nothing is installed until '
-          'you say yes to the skill, after Canoa has read the repository itself.',
+          'you say yes to the skill, after ${Brand.name} has read the repository itself.',
           key: const Key('skills-search-note'),
           style: text.bodySmall,
         ),

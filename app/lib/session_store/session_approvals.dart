@@ -59,7 +59,7 @@ extension SessionApprovals on SessionStore {
       prover: identity.prover,
       verifier: identity.verifier,
       expected: prompt.host,
-      host: 'Canoa',
+      host: Brand.name,
     );
   }
 
@@ -244,10 +244,10 @@ extension SessionApprovals on SessionStore {
       value: value,
     );
     if (rule == null) {
-      return 'Canoa keeps at most ${PermissionRules.maxRules} rules: revoke one in Settings, Permissions first.';
+      return '${Brand.name} keeps at most ${PermissionRules.maxRules} rules: revoke one in Settings, Permissions first.';
     }
     session.chat.note(
-      'Always allow here: ${rule.describe}, for ${shortLine(session.agent) ?? 'this source'} in $folder. Canoa now '
+      'Always allow here: ${rule.describe}, for ${shortLine(session.agent) ?? 'this source'} in $folder. ${Brand.name} now '
       'answers a matching request with allow once, without asking you. Settings, Permissions revokes it.',
     );
     session.chat.settle(question, AcpSelect(once.optionId), by: ownerClient);

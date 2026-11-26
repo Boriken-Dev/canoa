@@ -53,6 +53,7 @@ import 'voice/front_matter.dart';
 import 'workspace/site_meta.dart' show siteSetup;
 import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
+import 'brand.dart';
 
 export 'acp/delegate.dart' show DelegateTask, DelegateTasks, TaskPhase;
 export 'acp/mcp_list.dart' show McpInventory, McpResource, McpServerStatus, McpTool;
@@ -249,7 +250,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         }
       } catch (error) {
         debugPrint(
-          'Canoa: choices of ${source.label} could not be asked: ${reasonOf(error)}',
+          '${Brand.name}: choices of ${source.label} could not be asked: ${reasonOf(error)}',
         );
       } finally {
         if (_asks[key] == mine) _asking.remove(key);
@@ -289,7 +290,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       }
     } catch (error) {
       debugPrint(
-        'Canoa: choices of ${source.label} could not be asked: ${reasonOf(error)}',
+        '${Brand.name}: choices of ${source.label} could not be asked: ${reasonOf(error)}',
       );
     }
     return choicesOf(source);

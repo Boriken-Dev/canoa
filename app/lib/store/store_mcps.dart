@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 
 import '../loadout/loadout_controller.dart';
@@ -47,7 +48,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
     if (!await confirmRemoval(
       context,
       title: 'Remove $name?',
-      body: 'Its entry is taken out of canoa.cfg, with which agents may start it. The program and files it runs are not touched, and adding it again installs it once more.',
+      body: 'Its entry is taken out of ${Brand.configFile}, with which agents may start it. The program and files it runs are not touched, and adding it again installs it once more.',
     )) {
       return;
     }
@@ -59,7 +60,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
     if (!await confirmRemoval(
       context,
       title: 'Stop reading ${registryShown(address)}?',
-      body: 'It is taken out of canoa.cfg. The servers installed from it stay installed, and adding it again reads it once more.',
+      body: 'It is taken out of ${Brand.configFile}. The servers installed from it stay installed, and adding it again reads it once more.',
     )) {
       return;
     }
@@ -156,7 +157,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
       ],
       provenance: origin != null
           ? 'from the registry ${registryShown(origin.registry)} · ${origin.server} ${origin.version} · ${_short(origin.digest)}'
-          : server.fromOverlay ? 'comes with the overlay ${server.layer.substring(8)}' : 'written in canoa.cfg by hand',
+          : server.fromOverlay ? 'comes with the overlay ${server.layer.substring(8)}' : 'written in ${Brand.configFile} by hand',
       trailing: server.fromOverlay || total == 0
           ? null
           : Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -297,7 +298,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
           'Repository': ?entry.repositoryUrl,
         },
         source: {'Registry': host, 'Server': entry.name, 'Version': entry.version},
-        requirements: [for (final runtime in runtimes.toList()..sort()) 'The runtime $runtime, which Canoa does not install'],
+        requirements: [for (final runtime in runtimes.toList()..sort()) 'The runtime $runtime, which ${Brand.name} does not install'],
         technical: {'server.json digest': entry.digest},
         action: FilledButton.tonal(
           key: const Key('entry-details-action'),
@@ -366,9 +367,9 @@ class _McpInstallDialogState extends State<McpInstallDialog> {
   bool _installable(McpOption option) => option.refusal == null && (option.runtime == null || widget.runtimeFound[option.runtime] == true);
 
   String? _whyNot(McpOption option) {
-    if (option.refusal case final why?) return 'Not installed by Canoa: $why';
+    if (option.refusal case final why?) return 'Not installed by ${Brand.name}: $why';
     if (option.runtime case final runtime? when widget.runtimeFound[runtime] != true) {
-      return 'Needs $runtime, which is not on this computer. Canoa installs no runtime.';
+      return 'Needs $runtime, which is not on this computer. ${Brand.name} installs no runtime.';
     }
     return null;
   }
@@ -385,7 +386,7 @@ class _McpInstallDialogState extends State<McpInstallDialog> {
     final entry = widget.entry;
     final nameProblem = !isEntryName(name.text)
         ? 'A name has 1 to 64 letters, digits, - or _'
-        : widget.taken.contains(name.text) ? 'canoa.cfg already has a server named ${name.text}' : null;
+        : widget.taken.contains(name.text) ? '${Brand.configFile} already has a server named ${name.text}' : null;
     final option = widget.options.isEmpty ? null : widget.options[chosen];
     return AlertDialog(
       key: const Key('mcp-install-dialog'),
@@ -429,7 +430,7 @@ class _McpInstallDialogState extends State<McpInstallDialog> {
                 key: const Key('mcp-name'),
                 controller: name,
                 onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(labelText: 'Name in canoa.cfg', errorText: nameProblem),
+                decoration: InputDecoration(labelText: 'Name in ${Brand.configFile}', errorText: nameProblem),
               ),
             ],
             const SizedBox(height: 8),

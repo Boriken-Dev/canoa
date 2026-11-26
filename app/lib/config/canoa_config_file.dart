@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../brand.dart';
 import '../desktop/host_tool.dart' show HostTool;
 import 'canoa_config.dart';
 import 'canoa_config_none.dart'
@@ -20,8 +21,8 @@ final class ConfigUnreadable implements Exception {
   final String reason;
 
   /// What to tell the person.
-  String get message => 'canoa.cfg could not be read ($reason), so Canoa is using its defaults and writes nothing to the file until '
-      'it can be read. Fix the file and reopen Canoa.';
+  String get message => '${Brand.configFile} could not be read ($reason), so ${Brand.name} is using its defaults and writes nothing to the file until '
+      'it can be read. Fix the file and reopen ${Brand.name}.';
 
   @override
   String toString() => message;
@@ -46,14 +47,14 @@ Future<CanoaConfig> loadConfig() async {
     final read = await platform.loadDesktopConfig();
     if (read != null) return read;
     if (kIsWeb) {
-      final response = await http.get(Uri.base.resolve('canoa.cfg'));
+      final response = await http.get(Uri.base.resolve(Brand.configFile));
       if (response.statusCode == 200) return CanoaConfig.parse(response.body);
       if (response.statusCode != 404) {
         throw FormatException('the server answered ${response.statusCode}');
       }
     }
   } on Object catch (error) {
-    debugPrint('canoa.cfg: $error; using defaults');
+    debugPrint('${Brand.configFile}: $error; using defaults');
     return CanoaConfig.unreadable(error is FormatException ? error.message : '$error');
   }
   return const CanoaConfig();

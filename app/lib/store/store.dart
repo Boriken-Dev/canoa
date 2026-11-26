@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 
+import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../profile/aos_support.dart';
 import '../profile/overlay_layer.dart';
@@ -264,26 +265,26 @@ String installName(CatalogEntry entry) {
   if (isEntryName(entry.name)) return entry.name;
   final normalized = aos.normalizeName(entry.name);
   if (isEntryName(normalized)) return normalized;
-  throw StoreRefusal('Canoa names an overlay with 1 to 64 letters, digits, - or _, and ${entry.name} has no such form');
+  throw StoreRefusal('${Brand.name} names an overlay with 1 to 64 letters, digits, - or _, and ${entry.name} has no such form');
 }
 
 /// The git source Canoa installs [entry] from, held to what an overlay named by hand in canoa.cfg is held to.
 GitOverlay installSource(CatalogEntry entry) {
   final source = entry.source;
   if (source.kind != 'git') {
-    throw const StoreRefusal('Canoa installs overlays from git only, and this source is not git');
+    throw const StoreRefusal('${Brand.name} installs overlays from git only, and this source is not git');
   }
   final reference = source.reference;
   if (reference == null) {
-    throw const StoreRefusal('It names no branch, tag or commit, and Canoa fetches only a named one');
+    throw const StoreRefusal('It names no branch, tag or commit, and ${Brand.name} fetches only a named one');
   }
   if (holdsPassword(source.location)) {
-    throw const StoreRefusal('Its source holds a password, which canoa.cfg may not: it is not installed from here');
+    throw const StoreRefusal('Its source holds a password, which ${Brand.configFile} may not: it is not installed from here');
   }
   try {
     return OverlaySource.parseGit('${source.location}@$reference${source.path == null ? '' : '#${source.path}'}');
   } on ProfileException {
-    throw const StoreRefusal('Canoa would refuse this source in canoa.cfg: a transport or ref git must not take');
+    throw const StoreRefusal('${Brand.name} would refuse this source in ${Brand.configFile}: a transport or ref git must not take');
   }
 }
 
@@ -466,7 +467,7 @@ String? pinMoved(CanoaConfig config, OverlayPreview preview) {
 Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, OverlayPreview preview,
     {required String catalog, bool movePin = false, SkillInstallReport? report}) async {
   if (preview.pinRefusal case final why?) throw StoreRefusal(why);
-  if (preview.refusal case final why?) throw StoreRefusal('Canoa would leave it out: $why');
+  if (preview.refusal case final why?) throw StoreRefusal('${Brand.name} would leave it out: $why');
   final name = preview.name;
   final named = namedAs(config, name);
   if (named != null) {
@@ -474,13 +475,13 @@ Future<CanoaConfig> installPreview(OverlayManager overlays, CanoaConfig config, 
       case EntryState.installed || EntryState.absent:
         break;
       case EntryState.byHand:
-        throw StoreRefusal('canoa.cfg names $named by hand: remove it there first to let the store manage it');
+        throw StoreRefusal('${Brand.configFile} names $named by hand: remove it there first to let the store manage it');
       case EntryState.taken:
-        throw StoreRefusal('canoa.cfg names $named from another source: remove it there first');
+        throw StoreRefusal('${Brand.configFile} names $named from another source: remove it there first');
     }
   }
   if (pinMoved(config, preview) case final pin? when !movePin) {
-    throw StoreRefusal('canoa.cfg pins $pin, and what was fetched is ${preview.update.digest}: nothing was installed');
+    throw StoreRefusal('${Brand.configFile} pins $pin, and what was fetched is ${preview.update.digest}: nothing was installed');
   }
   final record = await overlays.apply(preview.update, catalog: catalog);
   if (preview.skills case final review? when !review.isEmpty) {
@@ -501,7 +502,7 @@ Future<CanoaConfig> removeInstalled(OverlayManager overlays, CanoaConfig config,
   final named = namedAs(config, name);
   if (named == null) return config;
   if (entryState(config, name, source, overlays: overlays) != EntryState.installed) {
-    throw StoreRefusal('canoa.cfg names $named from another source or by hand: the store does not remove it');
+    throw StoreRefusal('${Brand.configFile} names $named from another source or by hand: the store does not remove it');
   }
   await overlays.remove(named);
   final orphans = await detachOverlay(overlays, named);

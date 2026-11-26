@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
+import '../brand.dart';
 import 'speech_backend.dart';
 import 'web_whisper.dart';
 
@@ -74,7 +75,7 @@ final class _WorkerWhisper implements WhisperRuntime {
     if (!blocked) return error;
     final where = _endpoints.isEmpty ? "the model's publisher (huggingface.co)" : _endpoints.join(' ');
     return 'The model could not be downloaded. The page may only reach its own host: add $where to `connect` under `[host.web]` in '
-        'canoa.cfg, or check the network.';
+        '${Brand.configFile}, or check the network.';
   }
 
   Future<JSObject> _ask(JSObject message, {JSArray<JSAny?>? transfer, void Function(String words)? progress}) {

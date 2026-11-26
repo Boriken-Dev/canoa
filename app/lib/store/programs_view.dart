@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard;
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../desktop/control_client.dart';
 import '../forms/schema_fields.dart';
 import '../l10n/app_text.dart';
@@ -40,7 +41,7 @@ List<String> statusLines(ProgramStatus status) {
     else if (copy == null)
       'Not installed'
     else
-      'Version ${copy.version ?? 'not read'} · ${copy.managed ? 'installed by Canoa' : 'found at ${copy.path}'}',
+      'Version ${copy.version ?? 'not read'} · ${copy.managed ? 'installed by ${Brand.name}' : 'found at ${copy.path}'}',
     if (copy != null && !copy.managed && copy.manager.isNotEmpty && copy.manager != 'UNKNOWN') 'Put there by ${copy.manager.toLowerCase()}',
     if (latest != null)
       if (!latest.known)
@@ -53,7 +54,7 @@ List<String> statusLines(ProgramStatus status) {
         'Newest version: ${latest.version}',
     if (latest != null && latest.known && latest.note != null) latest.note!,
     if (copy?.update case UpdatedElsewhere(:final how)) 'Updated by the program itself, or by: $how',
-    if (copy?.update case UpdatedNever(:final why)) 'Canoa cannot update it: $why',
+    if (copy?.update case UpdatedNever(:final why)) '${Brand.name} cannot update it: $why',
   ];
 }
 
@@ -90,7 +91,7 @@ class _ProgramsSectionState extends State<ProgramsSection> {
             icon: const Icon(Icons.refresh),
           ),
         ]),
-        const Text('The agent programs Canoa can run, found by the Store. Nothing is installed or updated until you ask.'),
+        const Text('The agent programs ${Brand.name} can run, found by the Store. Nothing is installed or updated until you ask.'),
         if (programs.loading) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
         if (programs.problem case final problem?)
           Padding(
@@ -241,7 +242,7 @@ Future<void> rollBack(BuildContext context, ProgramStores programs, ProgramStatu
     builder: (dialog) => AlertDialog(
       key: const Key('rollback-dialog'),
       title: Text('Roll back $title'),
-      content: Text('Canoa goes back to the version of $title it kept before this one. Nothing is downloaded.'),
+      content: Text('${Brand.name} goes back to the version of $title it kept before this one. Nothing is downloaded.'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
         FilledButton(key: const Key('rollback-confirm'), onPressed: () => Navigator.pop(dialog, true), child: const Text('Roll back')),
@@ -338,7 +339,7 @@ class PlanDialog extends StatelessWidget {
               for (final (at, step) in plan.steps.indexed) Text('• $step', key: Key('plan-step-$at')),
             ],
             const SizedBox(height: 12),
-            Text(remove ? 'It undoes' : 'It changes outside Canoa\'s folder', style: text.titleSmall),
+            Text(remove ? 'It undoes' : 'It changes outside ${Brand.name}\'s folder', style: text.titleSmall),
             if (plan.changes.isEmpty)
               const Text('Nothing: no PATH entry, registry key or profile file.', key: Key('plan-no-changes'))
             else
@@ -436,7 +437,7 @@ class _ProgressDialogState extends State<ProgressDialog> {
             Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 4),
               child: Text(
-                'What you send is sealed so only Canoa\'s host can read it, and the host gives it to the install of ${run.askedBy}.',
+                'What you send is sealed so only ${Brand.name}\'s host can read it, and the host gives it to the install of ${run.askedBy}.',
                 key: const Key('program-ask-note'),
                 style: text.bodySmall,
               ),
@@ -590,7 +591,7 @@ class _AgentsBodyState extends State<AgentsBody> with AutomaticKeepAliveClientMi
           header: [
             Text(
               view.discover
-                  ? 'The agent programs Canoa can run and that are not on this computer yet. Nothing is installed until you ask.'
+                  ? 'The agent programs ${Brand.name} can run and that are not on this computer yet. Nothing is installed until you ask.'
                   : 'The agent programs found on this computer. Nothing is updated until you ask.',
             ),
             if (programs.loading) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),

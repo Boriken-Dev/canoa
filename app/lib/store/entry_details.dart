@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../brand.dart';
 import '../l10n/app_text.dart';
 import '../profile/profiles_panel.dart' show visible;
 import '../surfaces/a2ui/overlay_views.dart';
@@ -126,9 +127,9 @@ class EntryFactsView extends StatelessWidget {
         Padding(padding: const EdgeInsets.only(top: 2), child: SelectableText(oneLine(value), key: key));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('What it provides', style: text.titleSmall),
-      Text('From its own ${provided.generated ? 'files, with an overlay.cfg Canoa generated' : 'overlay.cfg and files'}. '
+      Text('From its own ${provided.generated ? 'files, with an overlay.cfg ${Brand.name} generated' : 'overlay.cfg and files'}. '
           'Nothing of it has run.', key: const Key('details-provided-note')),
-      if (provided.isEmpty) const Text('It provides nothing Canoa lists.', key: Key('details-provided-nothing')),
+      if (provided.isEmpty) const Text('It provides nothing ${Brand.name} lists.', key: Key('details-provided-nothing')),
       section('Skills', [
         for (final skill in provided.skills)
           line(skill.description == null ? skill.name : '${skill.name}: ${skill.description}', key: Key('details-skill-${skill.name}')),
