@@ -379,6 +379,7 @@ impl HistoryStore for FilesStore {
             .clone_into(&mut info.location);
         info.access = Access::ReadWrite;
         info.foreign = true;
+        info.capabilities = vec![super::CAP_SEARCH.to_owned()];
         info.taking::<FilesSettings>()
     }
 

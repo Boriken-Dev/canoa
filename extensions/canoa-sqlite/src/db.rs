@@ -14,6 +14,7 @@ use canoa::history_store::{
     AggFn, Aggregate, Cell, Change, ColumnType, Compacted, Cond, Filter, HistoryDb, IndexInfo,
     Migration, Op, Rows, SchemaState, Select, Sql, Stats, Step, StoreError, TableInfo, Update,
     Write, Written, check_filter, next_cursor, normalize_cell, normalize_row, plan_select,
+    search_words,
 };
 use coqui_acp_api::guatiao::library::ProviderError;
 use rusqlite::types::{Value, ValueRef};
@@ -104,6 +105,11 @@ fn store_error(error: &rusqlite::Error, busy_ms: u64) -> StoreError {
     }
 }
 
+/// The table that holds the words of `events.text`.
+const SEARCH_TABLE: &str = "events_fts";
+/// The column the full-text index covers.
+const SEARCH_COLUMN: &str = "text";
+
 fn is_ident(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -179,6 +185,15 @@ fn condition(cond: &Cond, params: &mut Vec<Value>) -> String {
             params.extend(cond.values.iter().map(value_of));
             let marks = vec!["?"; cond.values.len()].join(",");
             format!("{column} IN ({marks})")
+        }
+        Op::Matches => {
+            let words = search_words(cond.values.first().and_then(Cell::as_text).unwrap_or(""));
+            if words.is_empty() || cond.column != SEARCH_COLUMN {
+                return "0".to_owned();
+            }
+            let query: Vec<String> = words.iter().map(|w| format!("\"{w}\"")).collect();
+            params.push(Value::Text(query.join(" ")));
+            format!("rowid IN (SELECT rowid FROM {SEARCH_TABLE} WHERE {SEARCH_TABLE} MATCH ?)")
         }
         Op::Contains => {
             params.push(Value::Text(needle().0));
@@ -570,6 +585,12 @@ impl SqliteDb {
                 }
             }
         }
+        if tables
+            .iter()
+            .any(|t| t.name == "events" && t.column(SEARCH_COLUMN).is_some())
+        {
+            ensure_search(&tx, busy)?;
+        }
         for table in &tables {
             tx.execute(
                 &format!(
@@ -855,6 +876,37 @@ impl SqliteDb {
             next: None,
         })
     }
+}
+
+/// The full-text index of `events.text` and the triggers that keep it, made once and filled from what the table already holds.
+fn ensure_search(tx: &rusqlite::Transaction<'_>, busy: u64) -> Result<(), StoreError> {
+    let fail = |e: rusqlite::Error| store_error(&e, busy);
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ?)",
+            [SEARCH_TABLE],
+            |row| row.get(0),
+        )
+        .map_err(fail)?;
+    if exists {
+        return Ok(());
+    }
+    tx.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE {t} USING fts5(text, content='events', content_rowid='rowid');
+         CREATE TRIGGER {t}_ai AFTER INSERT ON events BEGIN
+           INSERT INTO {t}(rowid, text) VALUES (new.rowid, new.text);
+         END;
+         CREATE TRIGGER {t}_ad AFTER DELETE ON events BEGIN
+           INSERT INTO {t}({t}, rowid, text) VALUES ('delete', old.rowid, old.text);
+         END;
+         CREATE TRIGGER {t}_au AFTER UPDATE ON events BEGIN
+           INSERT INTO {t}({t}, rowid, text) VALUES ('delete', old.rowid, old.text);
+           INSERT INTO {t}(rowid, text) VALUES (new.rowid, new.text);
+         END;
+         INSERT INTO {t}({t}) VALUES ('rebuild');",
+        t = SEARCH_TABLE
+    ))
+    .map_err(fail)
 }
 
 fn create_index(

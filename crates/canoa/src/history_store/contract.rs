@@ -804,3 +804,78 @@ pub fn run_documents(db: &dyn HistoryDb) {
         0
     );
 }
+
+/// Runs the search half of the contract on `db`, which holds schema version 1 and has the capability `search`: a condition `matches`
+/// finds the lines whose text holds every word of the query, whole words, whatever the case, and follows the text as it changes.
+///
+/// # Panics
+///
+/// When the store breaks a rule of the kind.
+pub fn run_search(db: &dyn HistoryDb) {
+    let id = "6a0f6d6e-3f3c-4f1a-8a52-1c1e6f0b9a78";
+    let mut session = session(id, "claude", 1);
+    session.insert("agent_session".to_string(), Cell::text("search"));
+    must(
+        db,
+        alloc::vec![
+            insert(SESSIONS, session),
+            insert(
+                EVENTS,
+                event(id, 1, "session/prompt", Some("Refactor the Parser module"))
+            ),
+            insert(
+                EVENTS,
+                event(
+                    id,
+                    2,
+                    "session/update",
+                    Some("Done: the parser now streams tokens")
+                )
+            ),
+            insert(EVENTS, event(id, 3, "session/update", None)),
+        ],
+    );
+    let found = |query: &str| {
+        ints(
+            &select(
+                db,
+                events_where(
+                    id,
+                    alloc::vec![Cond::new("text", Op::Matches, Cell::text(query))],
+                ),
+            ),
+            "seq",
+        )
+    };
+    assert_eq!(found("parser"), [1, 2], "whole words, any case");
+    assert_eq!(found("PARSER tokens"), [2], "every word of the query");
+    assert!(found("pars").is_empty(), "a word is not a prefix");
+    assert!(found("   ").is_empty(), "no words match nothing");
+    must(
+        db,
+        alloc::vec![Change::Update {
+            update: Update {
+                table: EVENTS.to_string(),
+                filter: all_of(alloc::vec![
+                    Cond::eq("session_id", Cell::text(id)),
+                    Cond::eq("seq", Cell::int(1)),
+                ]),
+                set: row(alloc::vec![("text", Cell::text("Rename the lexer"))]),
+                add: BTreeMap::new(),
+            },
+        }],
+    );
+    assert_eq!(found("parser"), [2], "the index follows an update");
+    assert_eq!(found("lexer"), [1]);
+    must(
+        db,
+        alloc::vec![Change::Delete {
+            table: EVENTS.to_string(),
+            filter: all_of(alloc::vec![
+                Cond::eq("session_id", Cell::text(id)),
+                Cond::eq("seq", Cell::int(2)),
+            ]),
+        }],
+    );
+    assert!(found("parser").is_empty(), "the index follows a delete");
+}

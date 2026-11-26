@@ -90,7 +90,10 @@ fn check_cond(table: &TableInfo, cond: &Cond) -> Result<(), StoreError> {
         ));
     }
     for value in &cond.values {
-        let text_op = matches!(cond.op, Op::Prefix | Op::Contains | Op::Suffix);
+        let text_op = matches!(
+            cond.op,
+            Op::Prefix | Op::Contains | Op::Suffix | Op::Matches
+        );
         let ok = if text_op {
             matches!(column.kind, ColumnType::Text | ColumnType::Json)
                 && matches!(value, Cell::Text { .. })
@@ -220,6 +223,15 @@ fn holds(text: &str, op: Op, needle: &str) -> bool {
     }
 }
 
+/// The words of `text` as a full-text search sees them: runs of letters and digits, lower-cased.
+#[must_use]
+pub fn search_words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
 /// Whether one condition holds for the value `have` of its column.
 fn cond_holds(cond: &Cond, have: &Cell) -> bool {
     match cond.op {
@@ -230,6 +242,13 @@ fn cond_holds(cond: &Cond, have: &Cell) -> bool {
             .values
             .iter()
             .any(|value| cmp_cells(have, value) == Ordering::Equal),
+        Op::Matches => match (have.as_text(), cond.values.first().and_then(Cell::as_text)) {
+            (Some(text), Some(query)) => {
+                let (have, want) = (search_words(text), search_words(query));
+                !want.is_empty() && want.iter().all(|word| have.contains(word))
+            }
+            _ => false,
+        },
         Op::Prefix | Op::Contains | Op::Suffix => {
             match (have.as_text(), cond.values.first().and_then(Cell::as_text)) {
                 (Some(text), Some(needle)) => holds(text, cond.op, needle),

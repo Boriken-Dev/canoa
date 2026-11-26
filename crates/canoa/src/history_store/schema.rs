@@ -238,3 +238,39 @@ pub fn v1() -> Migration {
 pub fn table(name: &str) -> Option<TableInfo> {
     tables().into_iter().find(|table| table.name == name)
 }
+
+/// How a store's schema version stands against the one this build writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    /// The store holds no schema: [`v1`] is written into it.
+    Empty,
+    /// The store holds [`VERSION`].
+    Current,
+    /// The store is older, and the steps that bring it to [`VERSION`] only add: it is migrated.
+    Older(u32),
+    /// A newer build made it. It is opened read-only, and what it holds is shown but never changed, because this build does not know
+    /// what a newer schema means by its rows.
+    Newer(u32),
+}
+
+/// Where a store whose schema version is `stored` stands against this build.
+#[must_use]
+pub const fn fit(stored: u32) -> Fit {
+    if stored == 0 {
+        Fit::Empty
+    } else if stored == VERSION {
+        Fit::Current
+    } else if stored < VERSION {
+        Fit::Older(stored)
+    } else {
+        Fit::Newer(stored)
+    }
+}
+
+impl Fit {
+    /// Whether this build may change the store.
+    #[must_use]
+    pub const fn writable(self) -> bool {
+        !matches!(self, Self::Newer(_))
+    }
+}

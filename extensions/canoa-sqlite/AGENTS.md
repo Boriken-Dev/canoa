@@ -13,7 +13,7 @@ pub const FILE: &str = "sessions.sqlite3";  // the file in the host's home folde
 
 pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // one provider, SqliteStore
 
-pub struct SqliteStore;   // the `history_store` provider: default, read-write, capabilities `sql` (dialect sqlite), `blobs`, `compact`
+pub struct SqliteStore;   // the `history_store` provider: default, read-write, capabilities `sql` (dialect sqlite), `search`, `blobs`, `compact`
 pub struct SqliteDb;      // an opened store (`HistoryDb`); `SqliteDb::open(&Options)`
 pub fn options(request: &OpenRequest) -> Result<Options, ProviderError>;   // the settings read, defaults applied
 pub struct Options { path, busy_timeout_ms, journal: Journal, synchronous: Synchronous, read_only, create, reply_bytes }
@@ -40,4 +40,4 @@ A JSON object, every key optional, no other key accepted; they live in `canoa.cf
 - `select` is keyset-paged (the key's columns end the order); nulls sort lowest. A reply ends at `limit` rows or `reply_bytes`.
 - `sql` runs one `SELECT` or `WITH` statement on a second, read-only connection (`query_only`); anything that would change the database, or a second statement, is `Bad`.
 - `revision()` moves when any connection changes data or schema. `compact()` checkpoints the log and runs `VACUUM`.
-- Not yet: the `search` capability (full-text over `events.text`).
+- `search`: `migrate` makes an FTS5 index of `events.text` (`events_fts`, kept by triggers, filled from the rows already there) the first time the `events` table exists; `Op::Matches` on `events.text` reads it. Any other column answers no rows.

@@ -29,7 +29,7 @@ use guatiao_intake::Screen;
 
 pub use eval::{
     Plan, check_filter, cmp_cells, next_cursor, normalize_cell, normalize_row, plan_select,
-    row_matches,
+    row_matches, search_words,
 };
 
 /// The name of the `history_store` kind.
@@ -479,6 +479,9 @@ pub enum Op {
     Contains,
     /// Text that ends with the one value, which is literal.
     Suffix,
+    /// Text that holds every word of the one value, as whole words with the case ignored (see [`search_words`]); only a store with
+    /// the capability `search` answers it, and for the columns it indexes (`events.text`).
+    Matches,
 }
 
 /// One condition on one column of a row.

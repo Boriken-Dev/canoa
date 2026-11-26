@@ -116,3 +116,13 @@ fn the_contract_catches_a_provider_whose_batch_is_not_atomic() {
         "{said}"
     );
 }
+
+#[test]
+fn a_store_of_a_newer_schema_is_read_only_and_one_of_none_is_made() {
+    use canoa::history_store::schema::{Fit, VERSION, fit};
+    assert_eq!(fit(0), Fit::Empty);
+    assert_eq!(fit(VERSION), Fit::Current);
+    assert_eq!(fit(VERSION + 1), Fit::Newer(VERSION + 1));
+    assert!(fit(0).writable() && fit(VERSION).writable());
+    assert!(!fit(VERSION + 7).writable());
+}

@@ -299,3 +299,12 @@ fn a_history_is_stored_as_rows_and_read_back_as_it_went_in() {
     db.migrate(schema::v1()).expect("schema");
     contract::run_documents(&db);
 }
+
+#[test]
+fn a_full_text_search_over_the_text_of_events_follows_what_changes() {
+    let folder = Folder::new("search");
+    let db = open(&folder, "{}").expect("opened");
+    db.migrate(schema::v1()).expect("schema");
+    assert!(SqliteStore.describe().expect("described").can("search"));
+    contract::run_search(&db);
+}

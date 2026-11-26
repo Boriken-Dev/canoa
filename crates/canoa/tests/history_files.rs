@@ -126,3 +126,10 @@ fn the_provider_describes_itself_and_opens_the_default_folder() {
         .expect("opened");
     assert_eq!(db.count(Select::new("sessions", 1)).expect("count"), 0);
 }
+
+#[test]
+fn the_memory_store_passes_the_search_contract() {
+    let db = MemoryDb::new();
+    db.migrate(schema::v1()).expect("schema");
+    contract::run_search(&db);
+}

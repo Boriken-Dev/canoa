@@ -565,6 +565,7 @@ impl HistoryStore for MemoryStore {
         let mut info = StoreInfo::new("memory", "Memory");
         "Sessions kept in memory, for tests and short runs.".clone_into(&mut info.summary);
         "Nowhere: it is forgotten when the host stops.".clone_into(&mut info.location);
+        info.capabilities = vec![super::CAP_SEARCH.to_owned()];
         Ok(info)
     }
 

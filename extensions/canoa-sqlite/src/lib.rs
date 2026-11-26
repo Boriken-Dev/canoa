@@ -10,8 +10,8 @@ mod db;
 use std::path::PathBuf;
 
 use canoa::history_store::{
-    Access, CAP_BLOBS, CAP_COMPACT, CAP_SQL, HistoryDb, HistoryStore, Limits, OpenRequest,
-    StoreError, StoreInfo,
+    Access, CAP_BLOBS, CAP_COMPACT, CAP_SEARCH, CAP_SQL, HistoryDb, HistoryStore, Limits,
+    OpenRequest, StoreError, StoreInfo,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
@@ -169,6 +169,7 @@ impl HistoryStore for SqliteStore {
         info.default = true;
         info.capabilities = vec![
             CAP_SQL.to_owned(),
+            CAP_SEARCH.to_owned(),
             CAP_BLOBS.to_owned(),
             CAP_COMPACT.to_owned(),
         ];
