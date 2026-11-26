@@ -83,7 +83,8 @@ impl Member {
     /// The request as this approver is shown it: the command and the files only when its entry asks, or it needs them.
     fn view(&self, request: &Request) -> Request {
         let mut view = request.clone();
-        if self.entry.detail != Detail::Command && !self.info.wants_detail {
+        // Only the person widens what an approver is shown, in the entry: what the provider says it could use changes nothing.
+        if self.entry.detail != Detail::Command {
             view.tool.command = None;
             view.tool.paths.clear();
         }
@@ -147,7 +148,15 @@ impl Chain {
                 .instance(&entry.provider, &entry.settings)
                 .and_then(|instance| Member::new(entry.clone(), instance));
             match made {
-                Ok(member) => members.push(Arc::new(member)),
+                Ok(member) => {
+                    if member.info.wants_detail && entry.detail != Detail::Command {
+                        tracing::warn!(
+                            approver = entry.name,
+                            "this approver could use the command and files of a call; it is shown only the tool until its entry says detail = \"command\""
+                        );
+                    }
+                    members.push(Arc::new(member));
+                }
                 Err(why) => {
                     tracing::warn!(approver = entry.name, "this approver is not used: {why}")
                 }

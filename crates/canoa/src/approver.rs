@@ -53,8 +53,9 @@ pub struct ApproverInfo {
     pub answers_as: Authority,
     /// Whether it answers from `ask` alone: an instant approver is asked first and in order, and never waits.
     pub instant: bool,
-    /// Whether it needs the command and the files of a call to answer (a rule that reads them): the host gives them to it whatever the
-    /// entry's `detail` says. Only an approver that decides on the spot and sends the call nowhere should say so.
+    /// Whether it could use the command and the files of a call (a rule that reads them). Only a statement: the host gives them to an
+    /// approver when its entry says `detail = "command"`, and never because the provider asks, so one that says so is told nothing more
+    /// and the host logs that its entry could widen it.
     #[map(default)]
     pub wants_detail: bool,
 }

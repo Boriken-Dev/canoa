@@ -254,7 +254,7 @@ impl Answer { pub fn allow() / reject() / waiting(ticket) / abstain(why) -> Self
 
 - An `instant` approver answers from `ask`, is asked first and in the file's order, and has no `wait`. One that waits for someone answers `Answer::waiting(ticket)`; the host polls `wait` with `wait_ms` at most `MAX_WAIT_MS` until an answer, the entry's timeout, a `withdraw` or the end of the session. An error from `ask` or `wait` is an abstain and is logged; it never answers.
 - `Authority::Policy` says the allow is a rule's and not the person's: the host never applies it to a place `[permissions] protected` names, a request to widen the sandbox or a call it cannot read, which go on to the window. `Authority::Person` allows those too, since the person answers. A reject always applies. An allow is applied only when the agent offers an unambiguous option that allows once.
-- `Request::tool.command` and `paths` are filled only for an approver whose entry says `detail = "command"`, or whose `ApproverInfo::wants_detail` is set (a rule that reads them); the title and the command are cut at `MAX_TEXT` characters.
+- `Request::tool.command` and `paths` are filled only for an approver whose entry says `detail = "command"`; `ApproverInfo::wants_detail` only says a provider could use them and widens nothing, so a `policy` entry whose rules read the command or files needs `detail = "command"`; the title and the command are cut at `MAX_TEXT` characters.
 - Optional slots are not offered: every provider answers all four methods. SDK base classes for Python and JavaScript are not written yet.
 
 ## `canoa::panel_tab` (feature `panel-tab`)

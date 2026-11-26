@@ -124,6 +124,21 @@ impl Rig {
         self.members.push((entry, Arc::new(stub)));
     }
 
+    /// A rule-like approver that says it could use the command and files.
+    fn add_wanting_detail(&mut self, entry: Entry, plan: Plan) {
+        let mut info = ApproverInfo::new("Stub", Authority::Policy, true);
+        info.wants_detail = true;
+        let stub = Stub {
+            name: entry.name.clone(),
+            info,
+            plan,
+            started: Mutex::new(None),
+            log: Arc::clone(&self.log),
+            seen: Arc::clone(&self.seen),
+        };
+        self.members.push((entry, Arc::new(stub)));
+    }
+
     fn chain(self, window_timeout: Option<Duration>) -> (Chain, Log, Seen) {
         let chain = Chain::of(self.members, window_timeout, Duration::from_millis(10));
         (chain, self.log, self.seen)
@@ -285,9 +300,11 @@ fn an_allow_with_no_unambiguous_allow_once_is_not_applied_and_a_reject_is() {
 }
 
 #[test]
-fn an_approver_sees_the_command_and_files_only_when_its_entry_or_it_asks_for_them() {
+fn an_approver_sees_the_command_and_files_only_when_its_entry_says_so_whatever_the_provider_asks_for()
+ {
     let mut rig = Rig::new();
     rig.add(entry("plain"), Authority::Policy, true, Plan::Abstain);
+    rig.add_wanting_detail(entry("hungry"), Plan::Abstain);
     let mut detailed = entry("detailed");
     detailed.detail = Detail::Command;
     rig.add(detailed, Authority::Policy, true, Plan::Abstain);
@@ -297,8 +314,11 @@ fn an_approver_sees_the_command_and_files_only_when_its_entry_or_it_asks_for_the
     assert_eq!(seen[0].tool.command, None);
     assert!(seen[0].tool.paths.is_empty());
     assert_eq!(seen[0].tool.title, "Edit a file");
-    assert_eq!(seen[1].tool.command.as_deref(), Some("secret command"));
-    assert_eq!(seen[1].tool.paths, ["/work/a.rs"]);
+    // The provider says it could use the detail, and its entry says tool: it is shown the tool alone.
+    assert_eq!(seen[1].tool.command, None);
+    assert!(seen[1].tool.paths.is_empty());
+    assert_eq!(seen[2].tool.command.as_deref(), Some("secret command"));
+    assert_eq!(seen[2].tool.paths, ["/work/a.rs"]);
 }
 
 #[test]

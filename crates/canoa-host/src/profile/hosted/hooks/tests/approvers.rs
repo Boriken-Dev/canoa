@@ -153,7 +153,7 @@ fn chosen(answer: Option<Vec<u8>>) -> Option<String> {
         .map(str::to_owned)
 }
 
-const RULES: &str = "[permissions.approvers.rules]\nprovider = \"policy\"\n\
+const RULES: &str = "[permissions.approvers.rules]\nprovider = \"policy\"\ndetail = \"command\"\n\
     settings = { rules = [\
     { kind = \"execute\", command = \"rm *\", verdict = \"reject\" },\
     { kind = \"edit\", verdict = \"allow\" },\
@@ -184,6 +184,26 @@ fn a_policy_answers_for_the_person_with_the_option_that_decides_once() {
         chosen(hosted.hold().book.next_injected()).as_deref(),
         Some("yes")
     );
+}
+
+#[test]
+fn rules_that_read_the_command_match_nothing_unless_the_entry_says_detail_is_command() {
+    let temp = Temp::new();
+    let connection = connection(
+        &temp,
+        &RULES.replace(
+            "detail = \"command\"
+",
+            "",
+        ),
+    );
+    let client = Client::default();
+    let scope = Scope::new(Vec::new());
+    let hosted = Hosted::in_process(&client, &scope, &connection);
+    // The rule that would reject `rm *` is never given the command, so the request goes on to the window.
+    let seen = hosted.on_agent(&ask(1, run_of("rm -rf build")));
+    assert!(matches!(seen, Seen::Passed(None)), "{seen:?}");
+    assert_eq!(hosted.hold().book.next_injected(), None);
 }
 
 #[test]
@@ -288,6 +308,8 @@ fn an_approver_that_answers_after_the_request_went_out_answers_the_agent_and_clo
     // The window's own answer arrives after: the agent has its answer already, so it is not sent twice.
     let late = json!({"jsonrpc": "2.0", "id": 7, "result": {"outcome": {"outcome": "selected", "optionId": "no"}}});
     let late = serde_json::to_vec(&late).expect("JSON");
+    assert!(hosted.on_client(late.clone(), &BTreeSet::new()).is_err());
+    // A second client that answered the same request, as the clients of a shared session may, is dropped too.
     assert!(hosted.on_client(late, &BTreeSet::new()).is_err());
 }
 

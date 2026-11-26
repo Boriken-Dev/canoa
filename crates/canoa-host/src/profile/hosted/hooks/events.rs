@@ -1030,7 +1030,8 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             pending.asking.end();
             return false;
         }
-        hold.book.settled.remove(&key)
+        // Every late answer is dropped, not only the first: two clients of a shared session may each send one.
+        hold.book.settled.contains(&key)
     }
 
     /// Ends the requests of the agent's session `agent` that approvers are answering (a cancelled turn, a closed session), or of
