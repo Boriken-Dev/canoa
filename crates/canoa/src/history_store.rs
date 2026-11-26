@@ -13,6 +13,7 @@
 pub mod contract;
 mod eval;
 pub mod memory;
+pub mod rows;
 pub mod schema;
 
 use alloc::collections::BTreeMap;

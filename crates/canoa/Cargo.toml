@@ -35,7 +35,7 @@ settings-section = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 # The `panel_tab` kind: a kind of tab the application bottom panel can open (a terminal, a log).
 panel-tab = ["dep:coqui-acp-api", "dep:guatiao"]
 # The `history_store` kind: where recorded conversations and the list of them are kept (SQLite, memory, or an extension's store).
-history-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:serde_json", "dep:data-encoding"]
+history-store = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:serde_json", "dep:data-encoding", "dep:coqui-acp-history", "dep:time"]
 # The `session_service` kind: something a library runs for the sessions of a host and hands to them (an MCP server of its tools, its control methods).
 session-service = ["dep:coqui-acp-api", "dep:guatiao", "dep:serde_json"]
 # The `sdk_provider` kind: a vendor's client for an account type (chat, embeddings, rerank), over HTTP the host lends, and the built-in `server`.
@@ -59,6 +59,8 @@ network = ["dep:coqui-syshttp", "dep:data-encoding", "dep:ureq", "dep:rustls", "
 
 [dependencies]
 coqui-acp-api = { workspace = true, optional = true }
+coqui-acp-history = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
 data-encoding = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 guatiao = { workspace = true, optional = true }
