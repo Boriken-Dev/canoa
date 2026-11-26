@@ -227,6 +227,11 @@ pub(crate) const INCLUDED: &[Included] = &[
         helper: None,
     },
     Included {
+        name: canoa_sqlite::LIBRARY,
+        library: canoa_sqlite::library,
+        helper: None,
+    },
+    Included {
         name: canoa::api_gateway::LIBRARY,
         library: canoa::api_gateway::library,
         helper: None,

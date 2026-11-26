@@ -1158,9 +1158,10 @@ impl Serving {
             &config.delegate,
             delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
         );
-        let recorded = Arc::new(history::Store::open(
-            options.state_dir.as_ref().map(|dir| dir.join("history")),
-            config.history,
+        let recorded = Arc::new(history::Store::open_in(
+            options.state_dir.clone(),
+            config.history.clone(),
+            &crate::control::providers::registries_of(Some(config)),
         ));
         if config.keep_awake {
             tracing::info!("non-default: settings.power.keep_awake is true");

@@ -98,6 +98,21 @@ impl Control {
             .ok_or((REFUSED, StoreError::Off.to_string()))?;
         Ok(json!({"entries": moves.portable()}))
     }
+
+    /// `history/status`: whether sessions are being recorded, whether the store may be changed, and what the person should be told
+    /// of it (a store a newer version made is read and not written; one that could not be opened records nothing).
+    pub(super) fn history_status(&self) -> Result<Value, (i32, String)> {
+        let moves = self
+            .history
+            .as_ref()
+            .ok_or((REFUSED, StoreError::Off.to_string()))?;
+        let store = &moves.store;
+        Ok(json!({
+            "recording": store.recording(),
+            "writable": store.writable(),
+            "notice": store.notice(),
+        }))
+    }
 }
 
 fn export(doc: &coqui_acp_history::Document, params: &Value) -> Result<Value, (i32, String)> {

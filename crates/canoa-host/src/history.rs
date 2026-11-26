@@ -1,32 +1,41 @@
-//! The host's record of the sessions it serves, in the session-history format, kept in its home beside the ledger.
+//! The host's record of the sessions it serves, in the session-history format, kept in a `history_store` (SQLite unless
+//! `[host.history] store` names another).
 //!
 //! A [`Recording`] wraps the client's end of a connection and watches the ACP messages go by, one `SessionRecorder` per
-//! session the connection opens. A session's turns are appended to its file when a turn ends and when the connection does, so a
-//! stop in the middle loses at most the turn in flight. The file's name is a hash of the entry and the session id the
-//! client uses, never text the agent chose; nothing is built into a path from a recorded value.
+//! session the connection opens. A session's turns are appended to its rows when a turn ends and when the connection does, so a
+//! stop in the middle loses at most the turn in flight. Nothing recorded is built into a path or a query: the store binds every value.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "files, locks and clocks are std's"
 )]
 
+mod choose;
+mod old;
+
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io::{BufReader, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
+use canoa::history_store::rows::{Source, read_document, to_rows};
+use canoa::history_store::{
+    AggFn, Aggregate, Cell, Change, Cond, Figure, Order, Select, Update, Write, all_of,
+};
+use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_history::conversation::{derived_uuid, is_uuid};
 use coqui_acp_history::record::{Direction, SessionRecorder};
-use coqui_acp_history::{Body, Document, Header, Line, Origin, Reader, ReaderSettings, Stop};
+use coqui_acp_history::{Body, Document, Header, Line, Origin, Stop};
 use coqui_transport::{Channel, Failure};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
 use crate::config::HistoryConfig;
 
-/// What one session's history may take on disk unless `[host.history] max_session_bytes` says otherwise.
+pub(crate) use choose::Db;
+pub(crate) use old::{mark_moved, moved};
+
+/// What one session's history may take unless `[host.history] max_session_bytes` says otherwise.
 pub const DEFAULT_MAX_SESSION_BYTES: u64 = 16 * 1024 * 1024;
 /// How many sessions have a history unless `[host.history] max_sessions` says otherwise.
 pub const DEFAULT_MAX_SESSIONS: usize = 1000;
@@ -39,21 +48,21 @@ const MAX_LIVE: usize = 16;
 const MAX_OPENING: usize = 16;
 /// The largest `initialize` or open request kept to start a recorder with, in bytes.
 const MAX_KEPT_REQUEST: usize = 64 * 1024;
-/// Room for the header beyond `max_session_bytes` when a file is read.
+/// Room for the header beyond `max_session_bytes` when a history is read.
 const HEADER_ROOM: u64 = 64 * 1024;
 
 /// Why a history could not be kept or read.
 #[derive(Debug)]
 pub(crate) enum StoreError {
-    /// The host keeps no histories (no home, or `record = false`).
+    /// The host keeps no histories (no home, or `record = false`, or no store opened).
     Off,
     /// A limit of `[host.history]` is reached.
     Full(&'static str),
     /// There is no history of that session.
     Missing,
-    /// The file is there and is not a history this host can read.
+    /// The history is there and is not one this host can read.
     Unreadable(String),
-    /// The disk refused.
+    /// The store refused.
     Io(String),
 }
 
@@ -71,10 +80,10 @@ impl core::fmt::Display for StoreError {
 
 #[derive(Default)]
 struct Counts {
-    /// Bytes of every history file.
+    /// Bytes of every history.
     total: u64,
     sessions: usize,
-    /// Files that a limit turned away: nothing more is tried for them while this process runs.
+    /// Sessions that a limit turned away: nothing more is tried for them while this process runs.
     refused: BTreeSet<String>,
 }
 
@@ -86,22 +95,28 @@ pub(crate) struct ImportedSession {
     pub(crate) at: Option<String>,
 }
 
-/// The directory of histories and the limits it is held to.
+/// The histories in a `history_store` and the limits they are held to.
 pub(crate) struct Store {
-    dir: Option<PathBuf>,
+    db: Option<Db>,
     config: HistoryConfig,
     counts: Mutex<Counts>,
+    /// The store was made by a newer version: it is read and never written.
+    read_only: bool,
+    /// What the person is told about the store, when there is something to tell.
+    notice: Option<String>,
 }
 
 impl core::fmt::Debug for Store {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Store")
-            .field("dir", &self.dir)
+            .field("open", &self.db.is_some())
+            .field("read_only", &self.read_only)
             .finish_non_exhaustive()
     }
 }
 
-/// The name of the file of the session `session` of the entry `entry`: a hash, so no recorded text is a path.
+/// The name of the file of the session `session` of the entry `entry` in the layout earlier versions kept: a hash, so no recorded text
+/// is a path. Only the move of those files names it.
 fn file_name(entry: &str, session: &str) -> String {
     let digest = Sha256::digest(format!("{}\0{entry}\0{session}", entry.len()).as_bytes());
     format!("{}.jsonl", data_encoding::HEXLOWER.encode(&digest))
@@ -117,32 +132,104 @@ pub(crate) fn uuid_of(entry: &str, session: &str) -> String {
     }
 }
 
+fn io(error: impl core::fmt::Display) -> StoreError {
+    StoreError::Io(error.to_string())
+}
+
+/// What a session's row says of what is already kept.
+struct Held {
+    id: String,
+    bytes: u64,
+    events: i64,
+    turns: i64,
+}
+
 impl Store {
-    /// The histories in `dir` (made on the first write); none when `dir` is `None`.
-    pub(crate) fn open(dir: Option<PathBuf>, config: HistoryConfig) -> Self {
-        let mut counts = Counts::default();
-        if let Some(entries) = dir.as_deref().and_then(|dir| fs::read_dir(dir).ok()) {
-            for each in entries.flatten() {
-                let is_history = each.file_name().to_string_lossy().ends_with(".jsonl");
-                if let Ok(meta) = each.metadata()
-                    && is_history
-                    && meta.is_file()
-                {
-                    counts.total = counts.total.saturating_add(meta.len());
-                    counts.sessions += 1;
-                }
+    /// The histories of the store under `home` (the host's state folder), made on the first write, from the carried libraries'
+    /// providers; none when `home` is `None` or recording is off.
+    #[cfg(test)]
+    pub(crate) fn open(home: Option<PathBuf>, config: HistoryConfig) -> Self {
+        let registries = crate::control::providers::registries_of(None);
+        Self::open_in(home, config, &registries)
+    }
+
+    /// As [`Store::open`], from the providers of `registries` (the libraries a configuration loads).
+    pub(crate) fn open_in(
+        home: Option<PathBuf>,
+        config: HistoryConfig,
+        registries: &[Arc<Registry>],
+    ) -> Self {
+        let none = |config: HistoryConfig| Self {
+            db: None,
+            config,
+            counts: Mutex::new(Counts::default()),
+            read_only: false,
+            notice: None,
+        };
+        // The store is opened whether or not sessions are recorded: the session list lives in it too.
+        let Some(home) = home else {
+            return none(config);
+        };
+        let chosen = match choose::open(&home, &config, registries) {
+            Ok(chosen) => chosen,
+            Err(why) => {
+                tracing::error!("sessions are not recorded: {why}");
+                let mut store = none(config);
+                store.notice = Some(why);
+                return store;
             }
+        };
+        if !chosen.read_only {
+            old::move_histories(&chosen.db, &home);
+        }
+        let mut counts = Counts::default();
+        if let Ok(rows) = chosen.db.aggregate(Aggregate {
+            table: "sessions".to_owned(),
+            filter: Vec::new(),
+            group_by: Vec::new(),
+            figures: vec![
+                Figure::of(AggFn::Count, None, "n"),
+                Figure::of(AggFn::Sum, Some("bytes"), "bytes"),
+            ],
+        }) {
+            counts.sessions = rows
+                .get(0, "n")
+                .and_then(Cell::as_int)
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(0);
+            counts.total = rows
+                .get(0, "bytes")
+                .and_then(Cell::as_int)
+                .and_then(|n| u64::try_from(n).ok())
+                .unwrap_or(0);
         }
         Self {
-            dir,
+            db: Some(chosen.db),
             config,
             counts: Mutex::new(counts),
+            read_only: chosen.read_only,
+            notice: chosen.notice,
         }
     }
 
     /// Whether sessions are being recorded.
     pub(crate) fn recording(&self) -> bool {
-        self.dir.is_some() && self.config.record
+        self.db.is_some() && self.config.record && !self.read_only
+    }
+
+    /// The store, for what else of the host lives in it (the session list).
+    pub(crate) fn db(&self) -> Option<&Db> {
+        self.db.as_ref()
+    }
+
+    /// Whether this host may change what the store holds.
+    pub(crate) const fn writable(&self) -> bool {
+        !self.read_only
+    }
+
+    /// What the person should know of the store, as a sentence: it is read-only, or it could not be opened.
+    pub(crate) fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
     }
 
     pub(crate) const fn config(&self) -> &HistoryConfig {
@@ -153,48 +240,84 @@ impl Store {
         self.counts.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn path(&self, name: &str) -> Result<PathBuf, StoreError> {
-        self.dir
-            .as_ref()
-            .map(|dir| dir.join(name))
-            .ok_or(StoreError::Off)
+    fn writable_db(&self) -> Result<&Db, StoreError> {
+        match &self.db {
+            Some(db) if !self.read_only => Ok(db),
+            _ => Err(StoreError::Off),
+        }
     }
 
-    /// Adds `doc`, a stretch of the session `session`'s history that begins and ends between turns, to its file: the whole
-    /// document when the file is new, else its lines.
+    fn lookup(&self, db: &Db, entry: &str, session: &str) -> Result<Option<Held>, StoreError> {
+        let mut select = Select::new("sessions", 1).filtered(all_of(vec![
+            Cond::eq("entry", Cell::text(entry)),
+            Cond::eq("agent_session", Cell::text(session)),
+        ]));
+        select.columns = ["id", "bytes", "events", "turns"]
+            .map(str::to_owned)
+            .to_vec();
+        let rows = db.select(select).map_err(io)?;
+        let Some(row) = rows.rows.first() else {
+            return Ok(None);
+        };
+        let int = |at: usize| row.get(at).and_then(Cell::as_int).unwrap_or(0);
+        Ok(Some(Held {
+            id: row
+                .first()
+                .and_then(Cell::as_text)
+                .unwrap_or_default()
+                .to_owned(),
+            bytes: u64::try_from(int(1)).unwrap_or(0),
+            events: int(2),
+            turns: int(3),
+        }))
+    }
+
+    fn source(entry: &str, session: &str, origin: &str, from: Option<&str>) -> Source {
+        Source {
+            entry: entry.to_owned(),
+            agent_session: session.to_owned(),
+            origin: origin.to_owned(),
+            imported_from: from.map(str::to_owned),
+            now_ms: crate::usage_splice::unix_now().saturating_mul(1000),
+        }
+    }
+
+    /// Adds `doc`, a stretch of the session `session`'s history that begins and ends between turns, to its rows: the whole document
+    /// when the session is new, else its lines.
     pub(crate) fn append(
         &self,
         entry: &str,
         session: &str,
         doc: &Document,
     ) -> Result<(), StoreError> {
+        let db = self.writable_db()?;
         let name = file_name(entry, session);
-        let path = self.path(&name)?;
         let mut counts = self.counts();
         if counts.refused.contains(&name) {
             return Err(StoreError::Full("an earlier turn of it did not fit"));
         }
-        let held = match fs::symlink_metadata(&path) {
-            Ok(meta) if meta.is_file() => Some(meta.len()),
-            Ok(_) => return Err(StoreError::Io("that name is not a file".to_owned())),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(StoreError::Io(error.to_string())),
+        let held = self.lookup(db, entry, session)?;
+        let rows = to_rows(doc, &Self::source(entry, session, "recorded", None)).map_err(io)?;
+        let size = if held.is_some() {
+            rows.events
+                .iter()
+                .filter_map(|event| event.get("bytes").and_then(Cell::as_int))
+                .map(|bytes| u64::try_from(bytes).unwrap_or(0) + 1)
+                .sum::<u64>()
+        } else {
+            rows.session
+                .get("bytes")
+                .and_then(Cell::as_int)
+                .map_or(0, |bytes| u64::try_from(bytes).unwrap_or(0))
         };
-        let chunk = match held {
-            Some(_) => {
-                let mut text = String::new();
-                for line in &doc.lines {
-                    text.push_str(&line.to_json().map_err(|e| StoreError::Io(e.to_string()))?);
-                    text.push('\n');
-                }
-                text
-            }
-            None => doc.to_string().map_err(|e| StoreError::Io(e.to_string()))?,
-        };
-        let size = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
         let limit = if held.is_none() && counts.sessions >= self.config.max_sessions {
             Some("max_sessions is reached")
-        } else if held.unwrap_or(0).saturating_add(size) > self.config.max_session_bytes {
+        } else if held
+            .as_ref()
+            .map_or(0, |held| held.bytes)
+            .saturating_add(size)
+            > self.config.max_session_bytes
+        {
             Some("max_session_bytes is reached")
         } else if counts.total.saturating_add(size) > self.config.max_total_bytes {
             Some("max_total_bytes is reached")
@@ -205,77 +328,100 @@ impl Store {
             counts.refused.insert(name);
             return Err(StoreError::Full(limit));
         }
-        let mut file = match held {
-            Some(_) => fs::OpenOptions::new()
-                .append(true)
-                .open(&path)
-                .map_err(|e| StoreError::Io(e.to_string()))?,
-            None => create_new(&path)?,
-        };
-        file.write_all(chunk.as_bytes())
-            .and_then(|()| file.sync_data())
-            .map_err(|e| StoreError::Io(e.to_string()))?;
-        counts.total = counts.total.saturating_add(size);
-        if held.is_none() {
-            counts.sessions += 1;
+        match held {
+            None => {
+                db.write(Write {
+                    ops: rows.inserts(),
+                })
+                .map_err(io)?;
+                counts.sessions += 1;
+            }
+            Some(held) => {
+                let session_row = rows.session.clone();
+                let mut ops = rows.shifted(held.events, held.turns).inserts();
+                // The first of the inserts is the session's own row, which already exists.
+                ops.remove(0);
+                let mut set = BTreeMap::new();
+                for column in ["updated_at", "open_turn", "last_stop"] {
+                    if let Some(cell) = session_row.get(column) {
+                        set.insert(column.to_owned(), cell.clone());
+                    }
+                }
+                let counter =
+                    |column: &str| session_row.get(column).and_then(Cell::as_int).unwrap_or(0);
+                ops.push(Change::Update {
+                    update: Update {
+                        table: "sessions".to_owned(),
+                        filter: all_of(vec![Cond::eq("id", Cell::text(&held.id))]),
+                        set,
+                        add: BTreeMap::from([
+                            ("events".to_owned(), counter("events")),
+                            ("turns".to_owned(), counter("turns")),
+                            ("bytes".to_owned(), i64::try_from(size).unwrap_or(i64::MAX)),
+                        ]),
+                    },
+                });
+                db.write(Write { ops }).map_err(io)?;
+            }
         }
+        counts.total = counts.total.saturating_add(size);
         Ok(())
     }
 
     /// Whether the session already has a history.
     pub(crate) fn has(&self, entry: &str, session: &str) -> bool {
-        self.path(&file_name(entry, session))
-            .is_ok_and(|path| fs::symlink_metadata(path).is_ok())
+        self.db.as_ref().is_some_and(|db| {
+            self.lookup(db, entry, session)
+                .is_ok_and(|held| held.is_some())
+        })
     }
 
     /// The sessions brought in from a harness's own folder under `entry`, newest first; nothing but a header is read.
     pub(crate) fn imported(&self, entry: &str) -> Vec<ImportedSession> {
-        let Some(dir) = &self.dir else {
+        let Some(db) = &self.db else {
             return Vec::new();
         };
+        let mut select = Select::new("sessions", 1000)
+            .filtered(all_of(vec![
+                Cond::eq("entry", Cell::text(entry)),
+                Cond::eq("origin", Cell::text("imported")),
+            ]))
+            .ordered(vec![Order::desc("updated_at")]);
+        select.columns = ["agent_session", "title", "cwd", "header"]
+            .map(str::to_owned)
+            .to_vec();
         let mut found = Vec::new();
-        for each in fs::read_dir(dir).into_iter().flatten().flatten() {
-            if !each.file_name().to_string_lossy().ends_with(".jsonl")
-                || !each.file_type().is_ok_and(|kind| kind.is_file())
-            {
-                continue;
+        loop {
+            let Ok(rows) = db.select(select.clone()) else {
+                break;
+            };
+            for row in &rows.rows {
+                let text = |at: usize| row.get(at).and_then(Cell::as_text).map(str::to_owned);
+                let Some(session) = text(0) else { continue };
+                let at = text(3)
+                    .and_then(|header| serde_json::from_str::<Value>(&header).ok())
+                    .and_then(|header| {
+                        header
+                            .get("createdAt")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    });
+                found.push(ImportedSession {
+                    session,
+                    title: text(1),
+                    cwd: text(2),
+                    at,
+                });
             }
-            let Ok(file) = fs::File::open(each.path()) else {
-                continue;
-            };
-            let mut settings = ReaderSettings::default();
-            settings.bounds.max_total_bytes =
-                self.config.max_session_bytes.saturating_add(HEADER_ROOM);
-            let Ok(reader) = Reader::builder(BufReader::new(file))
-                .settings(settings)
-                .open()
-            else {
-                continue;
-            };
-            let header = reader.header();
-            let Some(mark) = header
-                .meta
-                .as_ref()
-                .and_then(|meta| meta.get(crate::control::IMPORT_KEY))
-            else {
-                continue;
-            };
-            if mark.get("entry").and_then(Value::as_str) != Some(entry) {
-                continue;
+            match rows.next {
+                Some(next) => select.after = Some(next),
+                None => break,
             }
-            let Some(session) = mark.get("session").and_then(Value::as_str) else {
-                continue;
-            };
-            found.push(ImportedSession {
-                session: session.to_owned(),
-                title: mark.get("title").and_then(Value::as_str).map(str::to_owned),
-                cwd: header.cwd.clone(),
-                at: header.created_at.clone(),
-            });
         }
         found.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| a.session.cmp(&b.session)));
         found
     }
+
     /// Keeps nothing more of the session: a turn of it did not fit.
     pub(crate) fn refuse(&self, entry: &str, session: &str) {
         self.counts().refused.insert(file_name(entry, session));
@@ -283,28 +429,18 @@ impl Store {
 
     /// The history of the session, read whole under the host's limits.
     pub(crate) fn load(&self, entry: &str, session: &str) -> Result<Document, StoreError> {
-        let path = self.path(&file_name(entry, session))?;
-        let file = match fs::File::open(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(StoreError::Missing);
-            }
-            Err(error) => return Err(StoreError::Io(error.to_string())),
-        };
-        let meta = file.metadata().map_err(|e| StoreError::Io(e.to_string()))?;
-        let limit = self.config.max_session_bytes.saturating_add(HEADER_ROOM);
-        if !meta.is_file() || meta.len() > limit {
+        let db = self.db.as_ref().ok_or(StoreError::Off)?;
+        let held = self
+            .lookup(db, entry, session)?
+            .ok_or(StoreError::Missing)?;
+        if held.bytes > self.config.max_session_bytes.saturating_add(HEADER_ROOM) {
             return Err(StoreError::Unreadable(
                 "it is larger than max_session_bytes".to_owned(),
             ));
         }
-        let mut settings = ReaderSettings::default();
-        settings.bounds.max_total_bytes = limit;
-        let reader = Reader::builder(BufReader::new(file))
-            .settings(settings)
-            .open()
-            .map_err(|e| StoreError::Unreadable(e.to_string()))?;
-        Document::from_reader(reader).map_err(|e| StoreError::Unreadable(e.to_string()))
+        read_document(&**db, &held.id)
+            .map_err(|error| StoreError::Unreadable(error.to_string()))?
+            .ok_or(StoreError::Missing)
     }
 
     /// Starts the history of the session with `doc`, which is how a moved session keeps what it carried. Refuses a session
@@ -315,10 +451,22 @@ impl Store {
         session: &str,
         doc: &Document,
     ) -> Result<(), StoreError> {
-        let name = file_name(entry, session);
-        let path = self.path(&name)?;
-        let text = doc.to_string().map_err(|e| StoreError::Io(e.to_string()))?;
-        let size = u64::try_from(text.len()).unwrap_or(u64::MAX);
+        let db = self.writable_db()?;
+        let mark = doc
+            .header
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get(crate::control::IMPORT_KEY));
+        let origin = if mark.is_some() { "imported" } else { "moved" };
+        let mut rows = to_rows(doc, &Self::source(entry, session, origin, None)).map_err(io)?;
+        if let Some(title) = mark.and_then(|m| m.get("title")).and_then(Value::as_str) {
+            rows.session.insert("title".to_owned(), Cell::text(title));
+        }
+        let size = rows
+            .session
+            .get("bytes")
+            .and_then(Cell::as_int)
+            .map_or(0, |bytes| u64::try_from(bytes).unwrap_or(0));
         let mut counts = self.counts();
         if counts.sessions >= self.config.max_sessions {
             return Err(StoreError::Full("max_sessions is reached"));
@@ -329,32 +477,19 @@ impl Store {
         if counts.total.saturating_add(size) > self.config.max_total_bytes {
             return Err(StoreError::Full("max_total_bytes is reached"));
         }
-        let mut file = create_new(&path)?;
-        file.write_all(text.as_bytes())
-            .and_then(|()| file.sync_data())
-            .map_err(|e| StoreError::Io(e.to_string()))?;
+        if self.lookup(db, entry, session)?.is_some() {
+            return Err(StoreError::Io(
+                "the session already has a history".to_owned(),
+            ));
+        }
+        db.write(Write {
+            ops: rows.inserts(),
+        })
+        .map_err(io)?;
         counts.total = counts.total.saturating_add(size);
         counts.sessions += 1;
         Ok(())
     }
-}
-
-/// Creates `path` anew, readable and writable by this user alone where the system has such a thing, in a directory that is
-/// this user's alone.
-fn create_new(path: &Path) -> Result<fs::File, StoreError> {
-    if let Some(parent) = path.parent() {
-        crate::control::private_dir(parent).map_err(|e| StoreError::Io(e.to_string()))?;
-    }
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    options
-        .open(path)
-        .map_err(|e| StoreError::Io(e.to_string()))
 }
 
 /// RFC 3339 UTC, to the second.

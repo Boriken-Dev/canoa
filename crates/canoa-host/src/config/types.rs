@@ -663,7 +663,7 @@ impl Default for WorktreeConfig {
 
 /// `[host.history]`: the host records each session it serves in the session-history format, in its home beside the ledger, and
 /// the owner exports it or moves it to another source over the control channel. Every limit is a setting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HistoryConfig {
     /// `record`: whether sessions are recorded at all (on by default).
@@ -674,6 +674,10 @@ pub struct HistoryConfig {
     pub max_sessions: usize,
     /// `max_total_bytes`: what every history together may take; a turn that would pass it is not kept.
     pub max_total_bytes: u64,
+    /// `store`: the id of the `history_store` provider that keeps them; none: the provider that says it is the default.
+    pub store: Option<String>,
+    /// `store_settings`: that provider's settings, as the JSON of an object.
+    pub store_settings: String,
 }
 
 impl Default for HistoryConfig {
@@ -683,6 +687,8 @@ impl Default for HistoryConfig {
             max_session_bytes: crate::history::DEFAULT_MAX_SESSION_BYTES,
             max_sessions: crate::history::DEFAULT_MAX_SESSIONS,
             max_total_bytes: crate::history::DEFAULT_MAX_TOTAL_BYTES,
+            store: None,
+            store_settings: "{}".to_owned(),
         }
     }
 }

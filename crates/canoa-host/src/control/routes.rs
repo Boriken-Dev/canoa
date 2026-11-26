@@ -582,6 +582,7 @@ impl Control {
         match method {
             "history/export" | "history/move" => self.history_call(method, params),
             "history/portable" => self.history_portable(),
+            "history/status" => self.history_status(),
             "history/account" => self.account_move(params),
             _ => self.import_call(method, params),
         }

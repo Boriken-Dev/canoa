@@ -153,16 +153,10 @@ fn a_session_is_recorded_exported_and_moved_from_claude_to_codex() {
     );
     assert!(history.get("next").is_none(), "a small history is one page");
 
-    // The recording is in the host's home, in files named by hashes, and nothing of it is in the working directory.
-    let kept = host.scratch.0.join("home").join("history");
-    assert_eq!(files_under(&kept), 1);
-    for each in std::fs::read_dir(&kept).expect("dir").flatten() {
-        let name = each.file_name().to_string_lossy().into_owned();
-        assert!(
-            name.ends_with(".jsonl") && !name.contains(&session),
-            "{name}"
-        );
-    }
+    // The recording is in the host's own store, in its home, and nothing of it is in the working directory.
+    let kept = host.scratch.0.join("home").join("sessions.sqlite3");
+    assert!(kept.is_file(), "{}", kept.display());
+    assert!(!host.scratch.0.join("home").join("history").exists());
 
     // Moved to Codex: a native import, a new session, the loss report.
     let moved = call(

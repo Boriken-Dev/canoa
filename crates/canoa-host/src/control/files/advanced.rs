@@ -246,6 +246,8 @@ pub(crate) const TABLES: &[Table] = &[
             ("max_session_bytes", Int),
             ("max_sessions", Int),
             ("max_total_bytes", Int),
+            ("store", Text),
+            ("store_settings", Json),
         ],
     },
     Table {

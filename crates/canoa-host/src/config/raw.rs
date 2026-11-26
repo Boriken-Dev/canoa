@@ -680,6 +680,8 @@ pub(super) struct RawHistory {
     pub(super) max_session_bytes: Option<u64>,
     pub(super) max_sessions: Option<usize>,
     pub(super) max_total_bytes: Option<u64>,
+    pub(super) store: Option<String>,
+    pub(super) store_settings: Option<toml::Table>,
 }
 
 /// `[host.control]`.

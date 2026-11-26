@@ -657,6 +657,11 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_history,
     ),
     rpc(
+        "history/status",
+        Access::Owner(OWNER_HISTORY_MSG),
+        Control::r_history,
+    ),
+    rpc(
         "history/account",
         Access::Owner(OWNER_HISTORY_MSG),
         Control::r_history,

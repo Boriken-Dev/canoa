@@ -1,3 +1,4 @@
+use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::time::UNIX_EPOCH;
 
@@ -77,29 +78,31 @@ fn a_second_connection_adds_to_the_same_history() {
 }
 
 #[test]
-fn no_file_name_holds_what_the_agent_chose_and_the_directory_is_private() {
+fn nothing_the_agent_chose_is_a_path_and_the_database_is_private() {
     let dir = dir("names");
     let store = Arc::new(Store::open(Some(dir.clone()), limits()));
     session(&store, "../../Claude", "x");
-    let mut seen = 0;
-    for each in fs::read_dir(&dir).expect("dir").flatten() {
-        let name = each.file_name().to_string_lossy().into_owned();
-        assert_eq!(name.len(), 64 + ".jsonl".len(), "{name}");
-        seen += 1;
-    }
-    assert_eq!(seen, 1);
+    assert!(store.has("../../Claude", ID));
+    let names: Vec<String> = fs::read_dir(&dir)
+        .expect("dir")
+        .flatten()
+        .map(|each| each.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names
+            .iter()
+            .all(|name| name.starts_with("sessions.sqlite3")),
+        "{names:?}"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        let mode = |p: &Path| fs::metadata(p).expect("meta").permissions().mode() & 0o777;
-        assert_eq!(mode(&dir), 0o700);
-        let file = fs::read_dir(&dir)
-            .expect("dir")
-            .flatten()
-            .next()
-            .expect("one")
-            .path();
-        assert_eq!(mode(&file), 0o600);
+        let mode = fs::metadata(dir.join("sessions.sqlite3"))
+            .expect("meta")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
     let _ = fs::remove_dir_all(dir);
 }
@@ -167,11 +170,104 @@ fn recording_off_or_no_home_records_nothing() {
     let mut config = limits();
     config.record = false;
     let store = Arc::new(Store::open(Some(dir.clone()), config));
+    assert!(!store.recording());
     session(&store, "Claude", "x");
-    assert!(!dir.exists());
+    assert!(matches!(store.load("Claude", ID), Err(StoreError::Missing)));
     let homeless = Arc::new(Store::open(None, limits()));
     session(&homeless, "Claude", "x");
     assert!(matches!(homeless.load("Claude", ID), Err(StoreError::Off)));
+    let _ = fs::remove_dir_all(dir);
+}
+
+const OLD_ID: &str = "3a0fad5b-d9cb-469f-a165-70867728950e";
+
+fn an_old_home(name: &str) -> (PathBuf, Document) {
+    let home = dir(name);
+    fs::create_dir_all(home.join("history")).expect("history");
+    fs::create_dir_all(home.join("control")).expect("control");
+    let mut document = Document::new(Header::new(OLD_ID, Origin::new("claude")));
+    document.lines = vec![
+        Line::text_prompt("an old question"),
+        Line::turn_end(Stop::Acp(coqui_acp_history::StopReason::EndTurn)),
+    ];
+    fs::write(
+        home.join("history")
+            .join(file_name("Claude", "old-session")),
+        document.to_string().expect("text"),
+    )
+    .expect("a file");
+    fs::write(
+        home.join("control").join("ledger.json"),
+        r#"{"records":{"s/x":{"owner":"local","updated":1,"record":{"entry":"Claude","sessionId":"old-session"}}}}"#,
+    )
+    .expect("a ledger");
+    (home, document)
+}
+
+#[test]
+fn the_old_history_files_are_moved_into_the_store_under_the_entry_the_ledger_names_and_left_as_they_are()
+ {
+    let (home, document) = an_old_home("old");
+    let file = home
+        .join("history")
+        .join(file_name("Claude", "old-session"));
+    let before = fs::read(&file).expect("there");
+    let store = Store::open(Some(home.clone()), limits());
+    assert!(
+        store.has("Claude", "old-session"),
+        "found by the entry the ledger gave"
+    );
+    assert_eq!(store.load("Claude", "old-session").expect("kept"), document);
+    assert_eq!(
+        fs::read(&file).expect("still there"),
+        before,
+        "the old file is untouched"
+    );
+    // Opened again, and after the person removed what was moved, nothing comes back.
+    drop(store);
+    let again = Store::open(Some(home.clone()), limits());
+    assert_eq!(
+        again.counts().sessions,
+        1,
+        "the second start moves nothing twice"
+    );
+    let _ = fs::remove_dir_all(home);
+}
+
+#[test]
+fn a_store_a_newer_version_made_is_read_and_never_written_and_the_person_is_told() {
+    use canoa::history_store::{HistoryDb as _, Migration, OpenRequest};
+    let (home, _) = an_old_home("newer");
+    drop(Store::open(Some(home.clone()), limits()));
+    {
+        let request = OpenRequest::new("{}", home.to_string_lossy());
+        let db = canoa_sqlite::SqliteDb::open(&canoa_sqlite::options(&request).expect("options"))
+            .expect("opened");
+        db.migrate(Migration {
+            to_version: canoa::history_store::schema::VERSION + 1,
+            steps: Vec::new(),
+        })
+        .expect("a later schema");
+    }
+    let store = Arc::new(Store::open(Some(home.clone()), limits()));
+    assert!(!store.recording() && !store.writable());
+    assert!(
+        store
+            .notice()
+            .is_some_and(|say| say.contains("newer version"))
+    );
+    assert!(
+        store.has("Claude", "old-session"),
+        "what it holds is still read"
+    );
+    session(&store, "Claude", "never kept");
+    assert!(matches!(store.load("Claude", ID), Err(StoreError::Missing)));
+    let doc = Document::new(Header::new(ID, Origin::new("claude")));
+    assert!(matches!(
+        store.seed("Claude", "x", &doc),
+        Err(StoreError::Off)
+    ));
+    let _ = fs::remove_dir_all(home);
 }
 
 #[test]

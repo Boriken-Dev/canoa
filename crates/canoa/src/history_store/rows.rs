@@ -49,6 +49,30 @@ pub struct DocumentRows {
 }
 
 impl DocumentRows {
+    /// These rows for lines that follow `events` lines and `turns` turns the session already has: the line numbers, the turn numbers
+    /// and the turns' line ranges move past them. The `sessions` row is left as it is.
+    #[must_use]
+    pub fn shifted(mut self, events: i64, turns: i64) -> Self {
+        let bump = |row: &mut Row, column: &str, by: i64| {
+            if let Some(n) = row.get(column).and_then(Cell::as_int) {
+                row.insert(column.to_string(), Cell::int(n + by));
+            }
+        };
+        for row in &mut self.events {
+            bump(row, "seq", events);
+            bump(row, "turn_no", turns);
+        }
+        for row in &mut self.turns {
+            bump(row, "no", turns);
+            bump(row, "first_seq", events);
+            bump(row, "last_seq", events);
+        }
+        for row in &mut self.event_attachments {
+            bump(row, "seq", events);
+        }
+        self
+    }
+
     /// The writes that store this history: the session, then its turns, events and attachments, each as an `insert`.
     #[must_use]
     pub fn inserts(&self) -> Vec<Change> {
@@ -195,7 +219,8 @@ pub fn to_rows(document: &Document, source: &Source) -> Result<DocumentRows, Sto
     let mut attachments: BTreeMap<String, Row> = BTreeMap::new();
     let mut event_attachments = Vec::new();
     let mut open: Option<usize> = None;
-    let mut total_bytes = 0_i64;
+    // The header line and each line with its line feed: what the history takes written out.
+    let mut total_bytes = i64::try_from(header_text.len() + 1).unwrap_or(i64::MAX);
     let mut last_at: Option<i64> = None;
 
     for (at, line) in document.lines.iter().enumerate() {

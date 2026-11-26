@@ -28,6 +28,12 @@ pub(super) fn history_of(raw: RawHistory) -> Result<HistoryConfig, ConfigError> 
         max_session_bytes: raw.max_session_bytes.unwrap_or(default.max_session_bytes),
         max_sessions: raw.max_sessions.unwrap_or(default.max_sessions),
         max_total_bytes: raw.max_total_bytes.unwrap_or(default.max_total_bytes),
+        store: raw.store.filter(|id| !id.is_empty()),
+        store_settings: match &raw.store_settings {
+            None => default.store_settings,
+            Some(table) => serde_json::to_string(table)
+                .map_err(|_| refused("store_settings is a table of the store's settings"))?,
+        },
     };
     if config.max_session_bytes == 0 || config.max_sessions == 0 || config.max_total_bytes == 0 {
         return Err(refused(
