@@ -417,7 +417,8 @@ impl Files {
     }
 
     /// `fs/read`: one page of a file, from `offset` (the start unless the request says), for a preview or to read it all. See
-    /// [`DEFAULT_READ_BYTES`] and [`READ_PAGE_BYTES`] for the size of a page; `next` is where the following one starts.
+    /// [`DEFAULT_READ_BYTES`] and [`READ_PAGE_BYTES`] for the size of a page; `next` is where the following one starts. `raw: true`
+    /// answers the bytes of a binary file too, which a preview leaves out, for a viewer that draws a binary type.
     ///
     /// A key holding `files` reads what this computer's account can read, anywhere: the grant is the only gate. What is refused is
     /// what would hurt the person who asked, and the answer says why: a path or a link into a network share (Windows would send
@@ -503,8 +504,10 @@ impl Files {
         } else {
             classify(&head, size > head.len() as u64)
         };
+        let raw = params.get("raw").and_then(Value::as_bool).unwrap_or(false);
         let data = match kind {
             "text" | "image" => Some(bytes.as_slice()),
+            _ if raw => Some(bytes.as_slice()),
             _ => None,
         };
         Ok(json!({

@@ -1,7 +1,7 @@
 // What a team might add to Canoa's screens, written in JavaScript: a profile item that tells a session which region it runs in, a
 // catalog source that lists a team's skills, a URI scheme of the team's own and a generator that reads it, a page of Settings, a tab
-// of the bottom panel and a place notices are sent to. One library serves seven kinds; each class is a provider the host offers as it
-// offers any extension's.
+// of the bottom panel, a place notices are sent to and a viewer of the Files surface. One library serves eight kinds; each class is a
+// provider the host offers as it offers any extension's.
 import { Notifier, delivery, noticeOf } from '../../../../bindings/js/canoa-sdk/src/notifier.js';
 import {
   CatalogGenerator,
@@ -13,6 +13,7 @@ import {
 import { LogPanelTab, PagePanelTab } from '../../../../bindings/js/canoa-sdk/src/panel.js';
 import { EnvProfileItem } from '../../../../bindings/js/canoa-sdk/src/profile.js';
 import { SettingsSection } from '../../../../bindings/js/canoa-sdk/src/section.js';
+import { SurfaceViewer } from '../../../../bindings/js/canoa-sdk/src/viewer.js';
 import {
   CatalogSource,
   CommandCatalogSource,
@@ -153,5 +154,21 @@ export class TeamChat extends Notifier {
   /** @param {unknown} request */
   send(request) {
     return delivery(noticeOf(request).id);
+  }
+}
+
+/**
+ * Shows a `.stamp` file as one line of text in the application's own widgets: the host reads the file and hands over its name and bytes,
+ * so the viewer never sees where the file is.
+ */
+export class StampViewer extends SurfaceViewer {
+  static viewer = 'stamp';
+  static title = 'Stamp';
+  static extensions = ['stamp'];
+  static priority = 20;
+
+  surface(file) {
+    const text = `${file.name}: ${file.text().trim()}`;
+    return [{ version: '1.0', createSurface: { surfaceId: 'stamp', components: [{ id: 'root', component: 'Text', text }] } }];
   }
 }

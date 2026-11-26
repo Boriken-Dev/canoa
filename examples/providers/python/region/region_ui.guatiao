@@ -1,4 +1,4 @@
 type = "python"
 module = "region_ui"
-kinds = ["profile_item", "catalog_source", "content_source", "catalog_generator", "settings_section", "panel_tab", "notifier"]
+kinds = ["profile_item", "catalog_source", "content_source", "catalog_generator", "settings_section", "panel_tab", "notifier", "file_viewer"]
 paths = ["."]

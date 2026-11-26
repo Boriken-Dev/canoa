@@ -20,6 +20,7 @@ mod delegate;
 mod descriptions;
 pub mod disabled;
 mod environments;
+mod file_viewers;
 mod format;
 mod forms;
 mod gateways;

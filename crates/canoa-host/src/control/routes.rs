@@ -13,8 +13,7 @@ use crate::worktree::Worktrees;
 
 use super::{
     BAD_PARAMS, Caller, Control, DENIED, Grant, REFUSED, Stores, allow, choices, discover,
-    error_line, files, hosting, kb_offers, looks, notify, panel_tabs, profile_items, providers,
-    registry, secrets, settings_sections, speech_offers, usage_read,
+    error_line, file_viewers, files, hosting, kb_offers, looks, notify, panel_tabs, profile_items, providers, registry, secrets, settings_sections, speech_offers, usage_read,
 };
 
 impl Control {
@@ -276,6 +275,9 @@ impl Control {
             "looks/list" => looks::list(&config),
             "profile_items/list" => profile_items::list(&config),
             "panel_tabs/list" => panel_tabs::list(&crate::panel_tabs::TabCatalog::of(&config)),
+            "file_viewers/list" => {
+                file_viewers::list(&crate::file_viewers::ViewerCatalog::of(&config))
+            }
             "providers/registered" => providers::registered(&config),
             _ => providers::list(&config),
         })
@@ -342,6 +344,20 @@ impl Control {
     ) -> Result<Value, (i32, String)> {
         let config = self.loaded_config()?;
         panel_tabs::tail(&crate::panel_tabs::TabCatalog::of(&config), params)
+    }
+
+    pub(super) fn r_file_viewers_render(
+        &self,
+        _: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        let config = self.loaded_config()?;
+        file_viewers::render(
+            &crate::file_viewers::ViewerCatalog::of(&config),
+            &self.files,
+            params,
+        )
     }
 
     pub(super) fn r_hosting(

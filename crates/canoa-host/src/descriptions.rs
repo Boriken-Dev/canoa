@@ -16,6 +16,8 @@ use std::sync::OnceLock;
 use canoa::content::{
     CatalogGeneratorProviderVtable, ContentHostVtable, ContentSourceProviderVtable,
 };
+
+use canoa::file_viewer::FileViewerVtable;
 use canoa::gateway::{GatewayLeaseVtable, ModelGatewayVtable};
 use canoa::notifier::NotifierVtable;
 use canoa::panel_tab::PanelTabVtable;
@@ -59,6 +61,8 @@ pub(crate) fn document() -> String {
         SettingsSectionVtable::description(),
         PanelTabVtable::description(),
         NotifierVtable::description(),
+
+        FileViewerVtable::description(),
         ModelGatewayVtable::description(),
         GatewayLeaseVtable::description(),
         ProgramStoreVtable::description(),
@@ -149,6 +153,8 @@ mod tests {
             "settings_section",
             "panel_tab",
             "notifier",
+
+            "file_viewer",
             "model_gateway",
             "gateway_lease",
             "acp_harness",

@@ -1160,6 +1160,7 @@ mod dispatch;
 mod extension_install;
 #[cfg(test)]
 mod extension_install_tests;
+pub(crate) mod file_viewers;
 mod files;
 #[cfg(test)]
 mod files_read_tests;

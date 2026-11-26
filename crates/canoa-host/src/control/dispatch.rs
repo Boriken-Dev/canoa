@@ -338,6 +338,16 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_panel_tabs_tail,
     ),
     rpc(
+        "file_viewers/list",
+        Access::Require(Grant::ConfigRead),
+        Control::r_config_view,
+    ),
+    rpc(
+        "file_viewers/render",
+        Access::Require(Grant::Files),
+        Control::r_file_viewers_render,
+    ),
+    rpc(
         "providers/list",
         Access::Require(Grant::ConfigRead),
         Control::r_config_view,

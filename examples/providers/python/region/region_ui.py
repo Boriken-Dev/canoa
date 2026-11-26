@@ -1,7 +1,7 @@
 """What a team might add to Canoa's screens, written in Python: a profile item that tells a session which region it runs in, a catalog
 source that lists a team's skills, a URI scheme of the team's own and a generator that reads it, a page of Settings, a tab of the
-bottom panel and a place notices are sent to. One library serves seven kinds; each class is a provider the host offers as it offers
-any extension's.
+bottom panel, a place notices are sent to and a viewer of the Files surface. One library serves eight kinds; each class is a provider
+the host offers as it offers any extension's.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ from canoa_sdk import (
     ReadCatalogSource,
     SettingsSection,
     delivery,
+    SurfaceViewer,
+    ViewedFile,
     fields_of,
     notice_of,
     opened_inline,
@@ -33,7 +35,7 @@ from canoa_sdk import (
 )
 
 __version__ = "1.0.0"
-__all__ = ["BuildsTab", "DocsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamChat", "TeamFiles", "TeamListing", "TeamSource"]
+__all__ = ["BuildsTab", "DocsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "StampViewer", "TeamChat", "TeamFiles", "TeamListing", "TeamSource"]
 
 
 @dataclass
@@ -159,3 +161,22 @@ class TeamChat(Notifier):
 
     def send(self, request):  # type: ignore[no-untyped-def]
         return delivery(notice_of(request)["id"])
+
+
+class StampViewer(SurfaceViewer):
+    """Shows a `.stamp` file as one line of text in the application's own widgets: the host reads the file and hands over its name and
+    bytes, so the viewer never sees where the file is."""
+
+    viewer = "stamp"
+    title = "Stamp"
+    extensions = ["stamp"]
+    priority = 20
+
+    def surface(self, file: ViewedFile) -> List[dict]:  # type: ignore[type-arg]
+        text = f"{file.name}: {file.text().strip()}"
+        return [
+            {
+                "version": "1.0",
+                "createSurface": {"surfaceId": "stamp", "components": [{"id": "root", "component": "Text", "text": text}]},
+            }
+        ]

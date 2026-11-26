@@ -299,6 +299,24 @@ fn a_cut_character_is_still_text_and_an_image_is_sent_in_pages_to_put_together()
     let _ = fs::remove_dir_all(&place.tmp);
 }
 
+#[test]
+fn raw_asks_for_the_bytes_of_a_binary_file_too() {
+    let place = place("raw");
+    fs::write(place.work.join("b.bin"), [1u8, 2, 0, 3]).expect("file");
+    let control = control_over(&place.home, &place.work);
+    let raw = ask(
+        &control,
+        &reader(),
+        "fs/read",
+        json!({"path": text(&place.work.join("b.bin")), "raw": true}),
+    );
+    assert_eq!(raw["result"]["kind"], "binary", "{raw}");
+    assert_eq!(bytes_of(&raw), [1u8, 2, 0, 3]);
+    let plain = read(&control, &reader(), &place.work.join("b.bin"));
+    assert!(plain["result"]["data"].is_null(), "{plain}");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
 /// A pipe is not a file, and opening one for reading would wait for a writer.
 #[cfg(unix)]
 #[test]

@@ -333,6 +333,45 @@ mod with_source {
             .unwrap_or_else(|| panic!("the notifier is offered: {notifiers}"));
         assert_eq!(chat["title"], "Team chat");
         assert_eq!(chat["origin"], "examples");
+
+        // The same library offers a viewer for `.stamp` files, which the host lists and which draws a file the host read: its name and
+        // bytes reach the script, and its path does not.
+        let (viewers, _) = ask(&link, 60, "file_viewers/list", json!({})).expect("the viewers");
+        let stamp = viewers["viewers"]
+            .as_array()
+            .expect("viewers")
+            .iter()
+            .find(|row| row["id"] == "stamp")
+            .unwrap_or_else(|| panic!("the viewer is listed: {viewers}"));
+        assert_eq!(stamp["title"], "Stamp");
+        assert_eq!(stamp["shows"], "surface");
+        assert_eq!(stamp["extensions"], json!(["stamp"]));
+        assert_eq!(stamp["priority"], 20);
+        assert_eq!(stamp["origin"], "examples");
+        let folder =
+            std::env::temp_dir().join(format!("canoa-script-viewer-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("folder");
+        let file = folder.join("note.stamp");
+        std::fs::write(&file, "approved\n").expect("file");
+        let (drawn, _) = ask(
+            &link,
+            61,
+            "file_viewers/render",
+            json!({"id": "stamp", "path": file.to_string_lossy()}),
+        )
+        .expect("the drawing");
+        assert_eq!(drawn["shows"], "surface", "{drawn}");
+        let text = &drawn["messages"][0]["createSurface"]["components"][0]["text"];
+        assert_eq!(text, "note.stamp: approved", "{drawn}");
+        let named = folder
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("a name");
+        assert!(
+            !drawn.to_string().contains(named),
+            "the path is not given to a viewer: {drawn}"
+        );
+        let _ = std::fs::remove_dir_all(&folder);
         // The sources the library offers answer a Skills catalog: its own, then the SDK's command and read sources, which run a
         // program and read a file through the spawner the host hands them.
         let skills = |id: u64, label: &str| {
