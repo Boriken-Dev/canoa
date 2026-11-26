@@ -1280,6 +1280,82 @@ export interface ModelStoreRemote extends k.RemoteBase<typeof ModelStore> {
 export declare const ModelStore: k.DescribedKind<ModelStore, ModelStoreRemote, false>;
 
 /**
+ * One way for traffic to leave, as configured. An instance is one configuration of one provider; the provider's settings are its
+ * schema.
+ *
+ * A provider that runs a program or a listener starts it in [`open`](Self::open) and ends it when the lease is destroyed. A
+ * refusal says what the person can act on (a variable that is not set, a file that cannot be read, a program that did not start)
+ * in words that hold no password and no query.
+ *
+ * The `network_route` kind: what a provider of it implements.
+ */
+export interface NetworkRoute {
+  /** What it is. Cheap, and the same on every call. */
+  describe(): unknown;
+  /**
+   * Judges the settings with nothing started: a variable that is not set (`request.variables` lacks it), a file that is missing,
+   * an address that does not parse.
+   */
+  check(request: g.Ref): unknown;
+  /** A lease for `request.scope`, started when the host holds none that serves it. */
+  open(request: g.Ref): RouteLease | k.ObjectHandle<typeof RouteLease>;
+}
+
+/** A caller's handle on a `network_route` table: a method per slot. */
+export interface NetworkRouteRemote extends k.RemoteBase<typeof NetworkRoute> {
+  /** What it is. Cheap, and the same on every call. */
+  describe(): g.Value;
+  /**
+   * Judges the settings with nothing started: a variable that is not set (`request.variables` lacks it), a file that is missing,
+   * an address that does not parse.
+   */
+  check(request: unknown): g.Value;
+  /** A lease for `request.scope`, started when the host holds none that serves it. */
+  open(request: unknown): k.ObjectHandle<typeof RouteLease>;
+}
+
+/**
+ * One way for traffic to leave, as configured. An instance is one configuration of one provider; the provider's settings are its
+ * schema.
+ *
+ * A provider that runs a program or a listener starts it in [`open`](Self::open) and ends it when the lease is destroyed. A
+ * refusal says what the person can act on (a variable that is not set, a file that cannot be read, a program that did not start)
+ * in words that hold no password and no query.
+ */
+export declare const NetworkRoute: k.DescribedKind<NetworkRoute, NetworkRouteRemote, false>;
+
+/**
+ * A route in use. Destroying it ends it.
+ *
+ * The `route_lease` kind: what an object of it implements.
+ */
+export interface RouteLease {
+  /** How a connection of the host's own leaves. */
+  reach(): unknown;
+  /** Environment for a program that reaches `request.urls` on this lease, beyond what [`reach`](Self::reach) implies. */
+  variables(request: g.Ref): unknown;
+  /** The authorities a program on this lease must trust, for a route that ends TLS. */
+  trust(): unknown;
+  /** What the lease is doing, for a page. */
+  status(): unknown;
+}
+
+/** A caller's handle on a `route_lease` table or object: a method per slot. */
+export interface RouteLeaseRemote extends k.RemoteBase<typeof RouteLease> {
+  /** How a connection of the host's own leaves. */
+  reach(): g.Value;
+  /** Environment for a program that reaches `request.urls` on this lease, beyond what [`reach`](Self::reach) implies. */
+  variables(request: unknown): g.Value;
+  /** The authorities a program on this lease must trust, for a route that ends TLS. */
+  trust(): g.Value;
+  /** What the lease is doing, for a page. */
+  status(): g.Value;
+}
+
+/** A route in use. Destroying it ends it. */
+export declare const RouteLease: k.DescribedKind<RouteLease, RouteLeaseRemote, true>;
+
+/**
  * A place notices are sent to.
  *
  * `describe` answers the same on every call with nothing run. `reply` and `withdraw` have defaults that say there is no answer and

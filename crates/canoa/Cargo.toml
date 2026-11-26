@@ -62,6 +62,8 @@ gateway = ["dep:coqui-acp-api"]
 api-gateway = ["network", "dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-serde", "dep:serde_json", "dep:percent-encoding"]
 # How Canoa reaches the network: the system's proxy, proxy login, certificate verifier and client certificates, with the person's overrides.
 network = ["dep:coqui-syshttp", "dep:data-encoding", "dep:ureq", "dep:rustls", "dep:tracing", "dep:url"]
+# The `network_route` kind: how traffic leaves this computer (the system's choice, direct, a typed proxy, a PAC script, a program, or an extension's own), set for the host, an account or a profile's sessions.
+network-route = ["network", "dep:coqui-acp-api", "dep:guatiao"]
 
 [dependencies]
 coqui-acp-api = { workspace = true, optional = true }
@@ -115,7 +117,7 @@ required-features = ["store"]
 
 [[test]]
 name = "script_kinds"
-required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment", "config-store", "notifier", "file-viewer"]
+required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab", "usage", "gateway", "environment", "config-store", "notifier", "file-viewer", "network-route"]
 
 [[test]]
 name = "speech_kinds"

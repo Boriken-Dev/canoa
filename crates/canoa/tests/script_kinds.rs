@@ -1,7 +1,7 @@
 //! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`, `model_store`,
 //! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab`, `file_viewer`, `usage_reader`, `model_gateway` and
 //! `account_provider`), and their models' schemas: what such a library is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment --test script_kinds`.
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment,config-store,notifier,network-route --test script_kinds`.
 #![cfg(all(
     feature = "store",
     feature = "vendor",
@@ -14,7 +14,8 @@
     feature = "gateway",
     feature = "environment",
     feature = "config-store",
-    feature = "notifier"
+    feature = "notifier",
+    feature = "network-route"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -34,6 +35,10 @@ use canoa::environment::{
 };
 use canoa::file_viewer::{FileViewerVtable, Shows as ViewerShows, ViewRequest, ViewerInfo};
 use canoa::gateway::{GatewayInfo, GatewayLeaseVtable, GatewayRequest, ModelGatewayVtable};
+use canoa::network_route::{
+    Checked, HostVariable, LeaseStatus, LeaseVariable, NetworkRouteVtable, OpenRequest, Reach,
+    RouteInfo, RouteLeaseVtable, Trust, Urls,
+};
 use canoa::notifier::{
     Action, Delivery, Notice, NotifierInfo, NotifierVtable, Reply, ReplyRequest, ReplyTo,
     SendRequest, SessionRef, Urgency, WithdrawRequest,
@@ -470,6 +475,36 @@ fn the_committed_gateway_schemas_are_what_this_build_describes() {
         &schemas(vec![
             ("GatewayInfo", schema_of::<GatewayInfo>()),
             ("GatewayRequest", schema_of::<GatewayRequest>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_network_route_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.network_route.kinds.json",
+        &document(&format!(
+            "{},{}",
+            NetworkRouteVtable::description(),
+            RouteLeaseVtable::description()
+        )),
+    );
+}
+
+#[test]
+fn the_committed_network_route_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.network_route.schemas.json",
+        &schemas(vec![
+            ("RouteInfo", schema_of::<RouteInfo>()),
+            ("HostVariable", schema_of::<HostVariable>()),
+            ("OpenRequest", schema_of::<OpenRequest>()),
+            ("Checked", schema_of::<Checked>()),
+            ("Reach", schema_of::<Reach>()),
+            ("Urls", schema_of::<Urls>()),
+            ("LeaseVariable", schema_of::<LeaseVariable>()),
+            ("Trust", schema_of::<Trust>()),
+            ("LeaseStatus", schema_of::<LeaseStatus>()),
         ]),
     );
 }

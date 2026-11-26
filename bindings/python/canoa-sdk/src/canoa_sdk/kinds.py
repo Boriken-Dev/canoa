@@ -894,6 +894,64 @@ class ModelStore(KindProtocol, Protocol, kind="model_store", floor_hash=21618444
         ...
 
 
+class RouteLease(KindProtocol, Protocol, kind="route_lease", floor_hash=586503406, is_object=True):
+    """A route in use. Destroying it ends it."""
+
+    @required
+    @fallible
+    def reach(self) -> ValueAnswer:
+        """How a connection of the host's own leaves."""
+        ...
+
+    @required
+    @fallible
+    def variables(self, request: Ref) -> ValueAnswer:
+        """Environment for a program that reaches `request.urls` on this lease, beyond what [`reach`](Self::reach) implies."""
+        ...
+
+    @required
+    @fallible
+    def trust(self) -> ValueAnswer:
+        """The authorities a program on this lease must trust, for a route that ends TLS."""
+        ...
+
+    @required
+    @fallible
+    def status(self) -> ValueAnswer:
+        """What the lease is doing, for a page."""
+        ...
+
+
+class NetworkRoute(KindProtocol, Protocol, kind="network_route", floor_hash=2708680487):
+    """One way for traffic to leave, as configured. An instance is one configuration of one provider; the provider's settings are its
+    schema.
+
+    A provider that runs a program or a listener starts it in [`open`](Self::open) and ends it when the lease is destroyed. A
+    refusal says what the person can act on (a variable that is not set, a file that cannot be read, a program that did not start)
+    in words that hold no password and no query.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What it is. Cheap, and the same on every call."""
+        ...
+
+    @required
+    @fallible
+    def check(self, request: Ref) -> ValueAnswer:
+        """Judges the settings with nothing started: a variable that is not set (`request.variables` lacks it), a file that is missing,
+        an address that does not parse.
+        """
+        ...
+
+    @required
+    @fallible
+    def open(self, request: Ref) -> RouteLease:
+        """A lease for `request.scope`, started when the host holds none that serves it."""
+        ...
+
+
 class Notifier(KindProtocol, Protocol, kind="notifier", floor_hash=3855728562):
     """A place notices are sent to.
 
@@ -1530,4 +1588,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=177080
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "FileViewer", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "FileViewer", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "RouteLease", "NetworkRoute", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

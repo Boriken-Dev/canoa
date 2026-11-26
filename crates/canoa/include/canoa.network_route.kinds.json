@@ -1,0 +1,109 @@
+{
+  "kinds": [
+    {
+      "name": "network_route",
+      "floor_hash": 2708680487,
+      "object": false,
+      "doc": "One way for traffic to leave, as configured. An instance is one configuration of one provider; the provider's settings are its\nschema.\n\nA provider that runs a program or a listener starts it in [`open`](Self::open) and ends it when the lease is destroyed. A\nrefusal says what the person can act on (a variable that is not set, a file that cannot be read, a program that did not start)\nin words that hold no password and no query.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What it is. Cheap, and the same on every call."
+        },
+        {
+          "name": "check",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Judges the settings with nothing started: a variable that is not set (`request.variables` lacks it), a file that is missing,\nan address that does not parse."
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "route_lease"
+          },
+          "doc": "A lease for `request.scope`, started when the host holds none that serves it."
+        }
+      ]
+    },
+    {
+      "name": "route_lease",
+      "floor_hash": 586503406,
+      "object": true,
+      "doc": "A route in use. Destroying it ends it.",
+      "slots": [
+        {
+          "name": "reach",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "How a connection of the host's own leaves."
+        },
+        {
+          "name": "variables",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Environment for a program that reaches `request.urls` on this lease, beyond what [`reach`](Self::reach) implies."
+        },
+        {
+          "name": "trust",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The authorities a program on this lease must trust, for a route that ends TLS."
+        },
+        {
+          "name": "status",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What the lease is doing, for a page."
+        }
+      ]
+    }
+  ]
+}

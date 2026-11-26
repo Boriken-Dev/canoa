@@ -19,6 +19,7 @@ use canoa::content::{
 
 use canoa::file_viewer::FileViewerVtable;
 use canoa::gateway::{GatewayLeaseVtable, ModelGatewayVtable};
+use canoa::network_route::{NetworkRouteVtable, RouteLeaseVtable};
 use canoa::notifier::NotifierVtable;
 use canoa::panel_tab::PanelTabVtable;
 use canoa::profile_item::ProfileItemVtable;
@@ -64,6 +65,8 @@ pub(crate) fn document() -> String {
         FileViewerVtable::description(),
         ModelGatewayVtable::description(),
         GatewayLeaseVtable::description(),
+        NetworkRouteVtable::description(),
+        RouteLeaseVtable::description(),
         ProgramStoreVtable::description(),
         InstallPrompterVtable::description(),
         InstallToolsVtable::description(),

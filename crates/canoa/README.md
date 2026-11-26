@@ -43,6 +43,7 @@ Not published (`publish = false`). A default build has no dependencies. Cargo fe
 | `gateway` | `canoa::gateway` | the `model_gateway` kind for local model APIs (`coqui-acp-api`) |
 | `api-gateway` | `canoa::api_gateway` | generic multi-standard API gateway accounts and helpers (implies `network`, `coqui-acp-api`, `guatiao`, `guatiao-serde`, `serde_json`, `percent-encoding`) |
 | `network` | `canoa::network`, `canoa::address` | system proxy, proxy auth, certificates, and URL/address checks (`coqui-syshttp`, `ureq`, `rustls`, `tracing`, `url`) |
+| `network-route` | `canoa::network_route` | the `network_route` kind: how traffic leaves this computer (implies `network`, `coqui-acp-api`, `guatiao`) |
 
 ## Quick start
 

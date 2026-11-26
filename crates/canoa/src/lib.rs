@@ -73,6 +73,7 @@ pub mod settings_section;
     feature = "config-store",
     feature = "content",
     feature = "gateway",
+    feature = "network-route",
     feature = "panel-tab",
     feature = "profile-item",
     feature = "sdk",
@@ -105,6 +106,9 @@ pub mod status;
 #[cfg(feature = "network")]
 #[cfg_attr(docsrs, doc(cfg(feature = "network")))]
 pub mod network;
+#[cfg(feature = "network-route")]
+#[cfg_attr(docsrs, doc(cfg(feature = "network-route")))]
+pub mod network_route;
 #[cfg(feature = "secret")]
 #[cfg_attr(docsrs, doc(cfg(feature = "secret")))]
 pub mod secret_provider;

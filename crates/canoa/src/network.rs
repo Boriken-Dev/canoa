@@ -10,6 +10,7 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::fmt;
 use core::time::Duration;
 use std::io::{self, Read, Write};
@@ -20,13 +21,17 @@ use std::time::Instant;
 
 use coqui_syshttp::tls::{CertificateInfo, ClientCertificates, Identity, Tls, TlsBuilder, Trust};
 use coqui_syshttp::ureq::{AgentBuilder, OriginAgent};
-use coqui_syshttp::{Credentials, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver, Route};
+use coqui_syshttp::{
+    Credentials, Environment, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver, Route,
+};
 use rustls::pki_types::pem::PemObject as _;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConnection, StreamOwned};
 
 pub use coqui_syshttp::ureq::OriginAgent as LoginAgent;
-pub use coqui_syshttp::{BypassRules, ChildEnvironment, Connection, Dialect, OriginAuth, Secret};
+pub use coqui_syshttp::{
+    BypassRules, ChildEnvironment, Connection, Dialect, OriginAuth, Route as ProxyRoute, Secret,
+};
 
 /// How long the variables made for a program stay as they are before the system is asked again.
 const CHILD_CACHE: Duration = Duration::from_secs(60);
@@ -43,6 +48,17 @@ pub enum ProxyChoice {
     None,
     /// This proxy for every URL: `[scheme://][user[:password]@]host[:port]`.
     Proxy(String),
+    /// One proxy per scheme, as `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` say them: the `http` one for `http` and `ws`
+    /// addresses, the `https` one for `https` and `wss`, `all` for the rest. An address none of them covers goes direct. The
+    /// system's own settings are not asked.
+    Each {
+        /// For `http` addresses.
+        http: Option<String>,
+        /// For `https` addresses.
+        https: Option<String>,
+        /// For every other address.
+        all: Option<String>,
+    },
     /// A PAC script chooses: a URL, a `file:` URL or a path.
     Pac(String),
 }
@@ -105,7 +121,8 @@ pub struct NetworkSettings {
 pub struct NetworkError(String);
 
 impl NetworkError {
-    fn new(message: impl Into<String>) -> Self {
+    /// An error that says `message`.
+    pub fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
 }
@@ -244,6 +261,11 @@ impl fmt::Debug for Network {
 
 static CURRENT: RwLock<Option<Arc<Network>>> = RwLock::new(None);
 
+thread_local! {
+    /// The network [`Network::within`] makes this thread's own while it runs.
+    static WITHIN: RefCell<Option<Arc<Network>>> = const { RefCell::new(None) };
+}
+
 impl Network {
     /// The settings' network.
     ///
@@ -261,6 +283,25 @@ impl Network {
                         "proxy is none, system, pac:LOCATION or a proxy as [scheme://][user[:password]@]host[:port]",
                     )
                 })?))
+            }
+            ProxyChoice::Each { http, https, all } => {
+                let mut pairs: Vec<(&str, &String)> = Vec::new();
+                for (name, value) in [("http_proxy", http), ("https_proxy", https), ("all_proxy", all)]
+                {
+                    let Some(text) = value else { continue };
+                    Proxy::parse(text).map_err(|_| {
+                        NetworkError::new(alloc::format!(
+                            "{name} is a proxy as [scheme://][user[:password]@]host[:port]"
+                        ))
+                    })?;
+                    pairs.push((name, text));
+                }
+                if pairs.is_empty() {
+                    return Err(NetworkError::new(
+                        "a proxy is needed: http_proxy, https_proxy or all_proxy",
+                    ));
+                }
+                resolver.environment(Environment::from_pairs(pairs))
             }
             ProxyChoice::Pac(location) => resolver.proxy(ProxySetting::Pac(location.clone())),
         };
@@ -337,8 +378,12 @@ impl Network {
         )
     }
 
-    /// This process's network: the one [`Network::install`] set, else the system's.
+    /// This thread's network while [`Network::within`] runs, else the process's: the one [`Network::install`] set, else the
+    /// system's.
     pub fn current() -> Arc<Self> {
+        if let Some(network) = WITHIN.with(|slot| slot.borrow().clone()) {
+            return network;
+        }
         if let Some(network) = CURRENT
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -348,6 +393,20 @@ impl Network {
         }
         let mut slot = CURRENT.write().unwrap_or_else(PoisonError::into_inner);
         Arc::clone(slot.get_or_insert_with(|| Arc::new(Self::system())))
+    }
+
+    /// Runs `run` with `network` as what [`Network::current`] answers on this thread, so a library that reaches the network through
+    /// it (an account kind's requests) leaves by the route of whoever asked, without naming one. A thread `run` starts has the
+    /// process's network.
+    pub fn within<R>(network: Arc<Self>, run: impl FnOnce() -> R) -> R {
+        struct Restore(Option<Arc<Network>>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                WITHIN.with(|slot| *slot.borrow_mut() = self.0.take());
+            }
+        }
+        let _restore = Restore(WITHIN.with(|slot| slot.replace(Some(network))));
+        run()
     }
 
     /// Makes this the process's network; what was started with the old one keeps it.

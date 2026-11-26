@@ -27,6 +27,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `gateway` | `canoa::gateway` | the `model_gateway` kind for local model APIs (`coqui-acp-api`) |
 | `api-gateway` | `canoa::api_gateway` | generic multi-standard API gateway accounts and helpers (implies `network`, `coqui-acp-api`, `guatiao`, `guatiao-serde`, `serde_json`, `percent-encoding`) |
 | `network` | `canoa::network`, `canoa::address` | system proxy, proxy auth, certificates, and URL/address checks (`coqui-syshttp`, `ureq`, `rustls`, `tracing`, `url`) |
+| `network-route` | `canoa::network_route` | the `network_route` kind: how traffic leaves this computer (implies `network`, `coqui-acp-api`, `guatiao`) |
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`), the `account_speech` kind from `canoa::speech::account`, and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`). `canoa::search` (always on) holds `SETTING` (`"search_path"`, an optional string setting a provider or usage reader declares to be given the host's search path: the person's `PATH`, then the folders of the programs the Store installed, then the install folders the built-in sources look their program up in, such as `%LOCALAPPDATA%/agy/bin`, where they exist) and `find_in(search_path: &OsStr, pathext: &str, name: &str) -> Option<PathBuf>`, the first runnable file of that name in an absolute folder of the path.
 
@@ -331,6 +332,38 @@ impl EnvironmentInfo { pub fn new(title, os, arch) -> Self; pub fn offering(self
 - The kind's description and schemas are `include/canoa.environment.kinds.json` and `.schemas.json`, checked by `tests/script_kinds.rs` (`CANOA_WRITE_KINDS=1` regenerates them); the SDKs' kinds are regenerated with `tools/write_kinds.{py,mjs}`.
 
 `SourcePreset::own_tools` says an agent does its own file and shell work and never asks its client for either (Claude Code, Codex and Pi, from their recorded sessions): the host turns that work to an environment its tools are served from where the agent's vendor answers `tool_hook`, and refuses the connection where it does not.
+
+## `network_route` (`canoa::network_route`, feature `network-route`)
+
+How traffic leaves this computer. A route is one configuration of one provider (`config = ..., form = ...` on the provider, as an account kind's), so its settings are the provider's schema. The host names one route as its own, an account may name another for its calls, a profile names the ones its sessions use; the host pools leases, a provider carries no pooling code. Plain data, the same in every language.
+
+```rust
+pub const KIND: &str = "network_route";
+#[non_exhaustive] pub struct RouteInfo { pub title: String, pub description: Option<String>, pub sharing: Sharing /* Shared (default) | PerSession */, pub secrets: Vec<String> /* settings whose value is a host variable's name */ }
+#[non_exhaustive] pub struct OpenRequest { pub scope: String /* host | account:NAME | session:ID */, pub reaches: Vec<String>, pub variables: Vec<HostVariable> /* the values of the variables `secrets` name that are set */, pub private_dir: Option<String>, pub base_dir: Option<String> /* relative paths in the settings are made from it */ }
+#[non_exhaustive] pub struct Checked { pub problems: Vec<String> }
+#[non_exhaustive] pub struct Reach { pub via: Via /* System | Direct | Proxy | Pac */, pub http_proxy: Option<String>, pub https_proxy: Option<String>, pub all_proxy: Option<String>, pub pac: Option<String>, pub user: Option<String>, pub password: Option<Secret<String>>, pub no_proxy: Option<Vec<String>>, pub negotiate: Option<bool>, pub client_certificate: Option<String> /* system | none | PEM path */, pub ca_file: Option<String>, pub git_tls: Option<String> /* system | git */ }
+impl Reach { pub fn settings(&self) -> Result<NetworkSettings, NetworkError>; }   // also `Network::from_reach(&Reach)`
+#[non_exhaustive] pub struct LeaseVariable { pub name: String, pub value: String, pub secret: bool }
+#[non_exhaustive] pub struct Trust { pub roots_pem: String }
+#[non_exhaustive] pub struct LeaseStatus { pub description: String, pub address: Option<String>, pub detail: Option<String> }
+
+#[guatiao::kind(name = "network_route")]
+pub trait NetworkRoute: Send + Sync {
+    fn describe(&self) -> Result<RouteInfo, ProviderError>;                                   // cheap, the same every call
+    fn check(&self, request: OpenRequest) -> Result<Checked, ProviderError>;                  // judges the settings with nothing started
+    fn open(&self, request: OpenRequest) -> Result<Object<dyn RouteLease>, ProviderError>;    // a lease; a refusal names the setting and holds no password
+}
+#[guatiao::kind(object, name = "route_lease")]
+pub trait RouteLease: Send + Sync {                                                           // destroying it ends it
+    fn reach(&self) -> Result<Reach, ProviderError>;                  // how the host's own connections leave
+    fn variables(&self, request: Urls) -> Result<Vec<LeaseVariable>, ProviderError>;   // environment for a program on the lease, beyond what `reach` implies
+    fn trust(&self) -> Result<Option<Trust>, ProviderError>;          // authorities its programs must trust (a route that ends TLS)
+    fn status(&self) -> Result<LeaseStatus, ProviderError>;           // for a page; no secret
+}
+```
+
+`Network::within(network, run)` makes `network` what `Network::current()` answers on this thread while `run` runs, so a library that reaches the network through `current()` (an account kind) leaves by the route of whoever asked. `ProxyChoice::Each { http, https, all }` is one proxy per scheme, as the proxy variables say it.
 
 ## `canoa::address` (feature `network`)
 

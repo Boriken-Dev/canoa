@@ -1,0 +1,328 @@
+{
+  "RouteInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "description": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "One line on what it does."
+      },
+      "sharing": {
+        "type": "string",
+        "enum": [
+          "shared",
+          "per_session"
+        ],
+        "x-enum-labels": {
+          "shared": "One lease serves every user whose route and settings are equal, and ends after the last one.",
+          "per_session": "Each session has a lease of its own, which ends with the session."
+        },
+        "description": "Whether the host may share a lease between users.",
+        "default": "shared"
+      },
+      "secrets": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The settings whose value is the name of a host variable (a password's), by key. The host reads those variables and hands the values over in [`OpenRequest::variables`]; a page asks for the name.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title"
+    ]
+  },
+  "HostVariable": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "The variable's name."
+      },
+      "value": {
+        "type": "string",
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Its value."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "value"
+    ]
+  },
+  "OpenRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "description": "Who the lease is for: `host`, `account:NAME` or `session:ID`."
+      },
+      "reaches": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The addresses the user will reach, for a route that chooses per destination (a PAC script) or must know where it is going.",
+        "default": []
+      },
+      "variables": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The variable's name."
+            },
+            "value": {
+              "type": "string",
+              "writeOnly": true,
+              "x-sensitive": true,
+              "description": "Its value."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ]
+        },
+        "description": "The values of the variables [`RouteInfo::secrets`] names that are set. A variable that is not set is absent, which [`NetworkRoute::check`] reports.",
+        "default": []
+      },
+      "private_dir": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A folder private to the lease, given only when [`RouteLease::trust`] asks the host to write files."
+      },
+      "base_dir": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder a relative path in the settings is made from (the folder of canoa.cfg), when the configuration has one."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "scope"
+    ]
+  },
+  "Checked": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "problems": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What is wrong, each in words that name the setting and never a value; empty when the route can be opened.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "Reach": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "via": {
+        "type": "string",
+        "enum": [
+          "system",
+          "direct",
+          "proxy",
+          "pac"
+        ],
+        "x-enum-labels": {
+          "system": "What the system says: the proxy variables of the environment, else the operating system's settings, PAC and WPAD included.",
+          "direct": "Straight to the destination.",
+          "proxy": "Through the proxy of `http_proxy`, `https_proxy` or `all_proxy` that fits the destination's scheme (an HTTP proxy, or `socks5://`; it must carry CONNECT, since TLS and WebSocket tunnels use it).",
+          "pac": "A PAC script chooses: `pac` is a URL, a `file:` URL, a path or the script's text."
+        },
+        "description": "Which way.",
+        "default": "system"
+      },
+      "http_proxy": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The proxy of `http` addresses (`[scheme://][user[:password]@]host[:port]`), for [`Via::Proxy`]."
+      },
+      "https_proxy": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The proxy of `https` addresses, for [`Via::Proxy`]."
+      },
+      "all_proxy": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The proxy of every other address, for [`Via::Proxy`]."
+      },
+      "pac": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The PAC script, for [`Via::Pac`]."
+      },
+      "user": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A login for every HTTP proxy that names none of its own."
+      },
+      "password": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Its password."
+      },
+      "no_proxy": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        },
+        "description": "The hosts that go direct, in `NO_PROXY` form, replacing the system's list; absent keeps it."
+      },
+      "negotiate": {
+        "type": [
+          "boolean",
+          "null"
+        ],
+        "description": "Whether a proxy that asks for Negotiate or NTLM is answered with the logon session; absent is the host's default."
+      },
+      "client_certificate": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Which client certificate is sent: `system`, `none` or the path of a PEM file holding a chain and its key."
+      },
+      "ca_file": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Trust exactly the certificates of this PEM file, replacing the system's trust."
+      },
+      "git_tls": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Whose TLS library git uses: `system` or `git`."
+      }
+    },
+    "additionalProperties": false
+  },
+  "Urls": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The addresses.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "LeaseVariable": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name."
+      },
+      "value": {
+        "type": "string",
+        "description": "Its value."
+      },
+      "secret": {
+        "type": "boolean",
+        "description": "Whether the value is secret: a report names the variable and never shows it.",
+        "default": false
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "value"
+    ]
+  },
+  "Trust": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "roots_pem": {
+        "type": "string",
+        "description": "The certificates, as PEM. The host writes them into the session's private folder and names them by the `SSL_CERT_FILE` family of variables."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "roots_pem"
+    ]
+  },
+  "LeaseStatus": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "description": {
+        "type": "string",
+        "description": "What it does now, in a line."
+      },
+      "address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The address it listens on, when it runs a proxy of its own."
+      },
+      "detail": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "More, for a person who asks."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "description"
+    ]
+  }
+}

@@ -1378,6 +1378,102 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "network_route",
+      "floor_hash": 2708680487,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "check",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "route_lease"
+          }
+        }
+      ]
+    },
+    {
+      "name": "route_lease",
+      "floor_hash": 586503406,
+      "object": true,
+      "slots": [
+        {
+          "name": "reach",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "variables",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "trust",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "status",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
       "name": "notifier",
       "floor_hash": 3855728562,
       "object": false,
@@ -2696,6 +2792,19 @@ export const HistoryDb = described["history_db"];
  * its reason; the host asks neither unless `describe` offers it.
  */
 export const ModelStore = described["model_store"];
+
+/**
+ * One way for traffic to leave, as configured. An instance is one configuration of one provider; the provider's settings are its
+ * schema.
+ *
+ * A provider that runs a program or a listener starts it in [`open`](Self::open) and ends it when the lease is destroyed. A
+ * refusal says what the person can act on (a variable that is not set, a file that cannot be read, a program that did not start)
+ * in words that hold no password and no query.
+ */
+export const NetworkRoute = described["network_route"];
+
+/** A route in use. Destroying it ends it. */
+export const RouteLease = described["route_lease"];
 
 /**
  * A place notices are sent to.
