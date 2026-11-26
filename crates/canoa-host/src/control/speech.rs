@@ -576,6 +576,8 @@ fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
                     entry["partials"] = json!(info.partials);
                     entry["max_seconds"] = json!(info.max_seconds);
                     entry["hints"] = json!(info.hints);
+                    entry["version"] = json!(info.version);
+                    entry["built_for"] = json!(info.built_for);
                     if let Some(why) = lend.missing(&table) {
                         entry["problem"] = json!(why);
                     }

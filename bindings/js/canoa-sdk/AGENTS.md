@@ -21,7 +21,7 @@ class StoreExtension extends Provider {       // store.js
 class ProgramStore extends Provider {         // store.js: info() (the StoreInfo), program, latest, plan, apply
 class ModelStore extends Provider {           // store.js: lists, moves and sets up the models of a type's programs; info() (the ModelStoreInfo), list, act, keep, service (each takes the host's spawner)
 }
-class SpeechProvider extends Provider {       // speech.js: static title, encodings, description, partials, max_seconds, hints; open(request, spawner)
+class SpeechProvider extends Provider {       // speech.js: static title, encodings, description, partials, max_seconds, hints, version, built_for; open(request, spawner)
 }
 class CommandSpeech extends SpeechProvider    // a program the person names: audio on its input (a WAV stream or the samples), text on its output; id `speech_command`; `finish` and the catalog source's read let the host's other calls through while they wait (`yieldCalls` of wait.js, 0 under Node), so a `cancel` during `finish` ends the recording
 wavHeader(format); fill(arg, values); languageCode(tag); MAX_OUTPUT; PCM_S16LE

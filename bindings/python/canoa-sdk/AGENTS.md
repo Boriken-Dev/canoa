@@ -28,7 +28,7 @@ class ProgramStore:       # canoa_sdk.store: knows one program; abstract slots p
 class ModelStore:         # canoa_sdk.store: lists, moves and sets up the models of a type's programs; info() (the ModelStoreInfo), abstract slots list, act, keep, service (each takes the host's spawner)
     def info(self) -> dict                                   # the StoreInfo
 class SpeechProvider:     # canoa_sdk.speech: audio in, text out; abstract slot open(request, spawner) -> SpeechSession
-    title: str; encodings: Sequence[str]; description = max_seconds = None; partials = False; hints = ()
+    title: str; encodings: Sequence[str]; description = max_seconds = version = built_for = None; partials = False; hints = ()
 class SpeechOutput:       # canoa_sdk.speech: text in, audio out; abstract slots voices, say; info() -> dict (the OutputInfo)
 class AccountSpeech:      # canoa_sdk.speech: the speech-to-text services the accounts of some kinds can call; services: Sequence[AccountSpeechService] (id, title, standard, address, url, credential, summary, location, models: [AccountSpeechModel(id, label)])
 class SecretProvider:     # canoa_sdk.secret: somewhere a secret comes from; abstract slot get(request, spawner); names, put, forget refuse UNSUPPORTED

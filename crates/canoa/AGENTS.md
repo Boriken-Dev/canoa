@@ -778,7 +778,7 @@ pub trait SpeechSession: Send + Sync {
 Every method is required and synchronous. A recording is `open`, any number of `push`es in order, then `finish` (the final text) or
 `cancel`; dropping a session is a cancel.
 
-- `describe`: cheap, the same on every call. `SpeechInfo { title, description, encodings, partials, max_seconds, hints }`: the encodings
+- `describe`: cheap, the same on every call. `SpeechInfo { title, description, encodings, partials, max_seconds, hints, version, built_for }` (`version`: the engine's release, `built_for`: what it was built for, both optional and shown on About): the encodings
   it reads, whether it answers partial text, its own limit on a recording, and which `Hints` fields it uses (`language`, `vocabulary`,
   `profile`), so a form offers only what has an effect.
 - `open`: nothing is started for a recording it refuses: `UNSUPPORTED` naming the encodings it reads (`unsupported_format`), `BAD_VALUE`
@@ -800,7 +800,7 @@ pub struct VoiceProfile { pub accent: Option<String>, pub voice: Option<String>,
 pub struct Hints { pub language: Option<String>, pub vocabulary: Vec<String>, pub profile: Option<VoiceProfile> }  // language is a BCP 47 tag
 pub struct OpenRequest { pub format: AudioFormat, pub hints: Hints }                   // OpenRequest::new(format)
 pub struct SpeechInfo { pub title: String, pub description: Option<String>, pub encodings: Vec<String>, pub partials: bool,
-                        pub max_seconds: Option<u32>, pub hints: Vec<String> }         // SpeechInfo::new(title, encodings)
+                        pub max_seconds: Option<u32>, pub hints: Vec<String>, pub version: Option<String>, pub built_for: Option<String> }         // SpeechInfo::new(title, encodings)
 pub struct Heard { pub partial: Option<String> }                                       // Heard::nothing(), ::partial(text)
 pub struct Transcript { pub text: String, pub front_matter: Value }                    // Transcript::new(text), .with(key, value)
 ```

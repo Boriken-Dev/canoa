@@ -147,6 +147,8 @@ impl SpeechProvider for WhisperSpeech {
             "Turns the recording into text on this computer, with a whisper.cpp model the Store installed".to_string(),
         );
         info.hints = ["language", "vocabulary"].map(ToString::to_string).to_vec();
+        info.version = Some(whisper_rs_sys::CPP_VERSION.to_string());
+        info.built_for = Some(whisper_rs_sys::CPU_TARGET.to_string());
         Ok(info)
     }
 
@@ -468,6 +470,16 @@ mod tests {
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
             .collect()
+    }
+
+    #[test]
+    fn the_description_says_which_whisper_cpp_it_is_and_what_it_was_built_for() {
+        let info = WhisperSpeech::from(WhisperSettings::new("tiny", "models"))
+            .describe()
+            .expect("a description");
+        assert_eq!(info.version.as_deref(), Some("1.9.6"));
+        let target = info.built_for.expect("the build says its target");
+        assert!(!target.is_empty());
     }
 
     #[test]

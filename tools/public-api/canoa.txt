@@ -7779,12 +7779,14 @@ impl<T> zerocopy::pointer::invariant::Read<zerocopy::pointer::invariant::Exclusi
 impl<V, T> ppv_lite86::types::VZip<V> for canoa::speech::OpenRequest where V: ppv_lite86::types::MultiLane<T>
 pub fn canoa::speech::OpenRequest::vzip(self) -> V
 #[non_exhaustive] pub struct canoa::speech::SpeechInfo
+pub canoa::speech::SpeechInfo::built_for: core::option::Option<alloc::string::String>
 pub canoa::speech::SpeechInfo::description: core::option::Option<alloc::string::String>
 pub canoa::speech::SpeechInfo::encodings: alloc::vec::Vec<alloc::string::String>
 pub canoa::speech::SpeechInfo::hints: alloc::vec::Vec<alloc::string::String>
 pub canoa::speech::SpeechInfo::max_seconds: core::option::Option<u32>
 pub canoa::speech::SpeechInfo::partials: bool
 pub canoa::speech::SpeechInfo::title: alloc::string::String
+pub canoa::speech::SpeechInfo::version: core::option::Option<alloc::string::String>
 impl canoa::speech::SpeechInfo
 pub fn canoa::speech::SpeechInfo::new(impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<alloc::string::String>) -> Self
 impl core::clone::Clone for canoa::speech::SpeechInfo

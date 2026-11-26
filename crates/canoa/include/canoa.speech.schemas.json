@@ -248,6 +248,20 @@
         },
         "description": "The [`Hints`] fields it uses (`language`, `vocabulary`, `profile`), so a form offers only what has an effect.",
         "default": []
+      },
+      "version": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The version of the engine behind it, such as the whisper.cpp release a provider runs; absent when it has none to say."
+      },
+      "built_for": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "What the engine was built for, such as the CPU target of a native library; absent when that does not apply."
       }
     },
     "additionalProperties": false,

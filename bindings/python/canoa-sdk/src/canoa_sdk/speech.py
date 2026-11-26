@@ -46,6 +46,8 @@ class SpeechInfo(Model):
     partials: bool = False
     max_seconds: Optional[int] = None
     hints: List[str] = field(default_factory=list)
+    version: Optional[str] = None
+    built_for: Optional[str] = None
 
 
 @dataclass
@@ -97,6 +99,8 @@ class SpeechProvider(WithForm, provide.Provider, kinds.SpeechProvider, abstract=
     partials: ClassVar[bool] = False
     max_seconds: ClassVar[Optional[int]] = None
     hints: ClassVar[Sequence[str]] = ()
+    version: ClassVar[Optional[str]] = None
+    built_for: ClassVar[Optional[str]] = None
 
     def info(self) -> SpeechInfo:
         """The description, from the class attributes."""
@@ -107,6 +111,8 @@ class SpeechProvider(WithForm, provide.Provider, kinds.SpeechProvider, abstract=
             self.partials,
             self.max_seconds,
             list(self.hints),
+            self.version,
+            self.built_for,
         )
 
     def describe(self) -> ValueAnswer:

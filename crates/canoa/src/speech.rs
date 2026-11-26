@@ -141,6 +141,10 @@ pub struct SpeechInfo {
     /// The [`Hints`] fields it uses (`language`, `vocabulary`, `profile`), so a form offers only what has an effect.
     #[map(default)]
     pub hints: Vec<String>,
+    /// The version of the engine behind it, such as the whisper.cpp release a provider runs; absent when it has none to say.
+    pub version: Option<String>,
+    /// What the engine was built for, such as the CPU target of a native library; absent when that does not apply.
+    pub built_for: Option<String>,
 }
 
 impl SpeechInfo {
@@ -154,6 +158,8 @@ impl SpeechInfo {
             partials: false,
             max_seconds: None,
             hints: Vec::new(),
+            version: None,
+            built_for: None,
         }
     }
 }

@@ -49,6 +49,8 @@ export class SpeechProvider extends Provider {
   /** @type {boolean} */ static partials = false;
   /** @type {number | undefined} */ static max_seconds;
   /** @type {string[]} the hints it uses: `language`, `vocabulary`, `profile` */ static hints = [];
+  /** @type {string | undefined} the engine's release */ static version;
+  /** @type {string | undefined} what the engine was built for */ static built_for;
 
   info() {
     const c = /** @type {typeof SpeechProvider} */ (this.constructor);
@@ -59,6 +61,8 @@ export class SpeechProvider extends Provider {
       partials: c.partials,
       max_seconds: c.max_seconds,
       hints: c.hints,
+      version: c.version,
+      built_for: c.built_for,
     };
   }
 
