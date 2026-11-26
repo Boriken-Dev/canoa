@@ -636,7 +636,16 @@ impl Files {
                     })
                     .filter(|keys: &Vec<String>| !keys.is_empty())
                     .ok_or_else(|| bad("path is the keys from the top, as a list of text"))?;
-                Ok(match op.get("value").filter(|value| !value.is_null()) {
+                let given = op.get("value").filter(|value| !value.is_null());
+                // The rules the person made are `[permissions.rules]`, which only `rules/write` changes.
+                let kept;
+                let given = if path == ["permissions"] {
+                    kept = self.with_held_rules(given.unwrap_or(&Value::Null))?;
+                    kept.as_ref()
+                } else {
+                    given
+                };
+                Ok(match given {
                     Some(value) => Op::set(path.iter().map(String::as_str), value_of(value)),
                     None => Op::remove(path.iter().map(String::as_str)),
                 })

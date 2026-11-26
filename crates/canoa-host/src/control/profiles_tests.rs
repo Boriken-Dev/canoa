@@ -360,3 +360,74 @@ fn a_folder_with_no_profile_cannot_be_trusted_and_a_removed_one_can_be_revoked()
     assert_eq!(said["result"]["projects"], json!([]), "{said}");
     let _ = fs::remove_dir_all(tmp);
 }
+
+#[test]
+fn the_rules_the_person_made_are_permissions_rules_of_canoa_cfg_and_no_page_write_takes_them_out() {
+    let tmp = dir("rules");
+    let config = tmp.join("cfg").join("canoa.cfg");
+    let control = host(
+        &tmp,
+        &config,
+        "# mine\n[permissions]\ndefault_mode = \"manual\"\n",
+    );
+    let owner = Caller::Owner;
+    // An older permissions.json beside canoa.cfg is not read.
+    write(
+        &tmp.join("cfg").join("permissions.json"),
+        r#"{"version":1,"rules":[{"id":"old","source":"s","folder":"/f","tool":"execute","type":"command","value":"ls","made":"2026-01-01T00:00:00Z"}]}"#,
+    );
+    let said = ask(&control, &owner, "rules/read", json!({}));
+    assert_eq!(said["result"]["rules"], json!({}), "{said}");
+
+    let rule = json!({"source": "claude", "folder": "/work", "tool": "execute", "type": "command", "value": "ls", "made": "2026-11-27T00:00:00Z", "by": "canoa"});
+    let said = ask(
+        &control,
+        &owner,
+        "rules/write",
+        json!({"rules": {"0a1b2c3d4e5f6071": rule}}),
+    );
+    assert_eq!(said["result"]["rules"], 1, "{said}");
+    let kept = fs::read_to_string(&config).expect("canoa.cfg");
+    assert!(kept.starts_with("# mine\n"), "{kept}");
+    assert!(kept.contains("rules.0a1b2c3d4e5f6071"), "{kept}");
+    let said = ask(&control, &owner, "rules/read", json!({}));
+    assert_eq!(said["result"]["rules"]["0a1b2c3d4e5f6071"], rule, "{said}");
+
+    // A page that read [permissions] before the rule was made writes it back without the rule, and the rule stays.
+    for value in [json!({"default_mode": "plan"}), Value::Null] {
+        let said = ask(
+            &control,
+            &owner,
+            "config/set",
+            json!({"section": "permissions", "value": value}),
+        );
+        assert!(said["error"].is_null(), "{said}");
+        let said = ask(&control, &owner, "rules/read", json!({}));
+        assert_eq!(said["result"]["rules"]["0a1b2c3d4e5f6071"], rule, "{said}");
+    }
+
+    // What is not a rule is refused, and a key that may not change what agents may do cannot write.
+    for bad in [
+        json!({"x": {"nonsense": "a"}}),
+        json!({"x": {"value": 3}}),
+        json!({"x": 3}),
+    ] {
+        let said = ask(&control, &owner, "rules/write", json!({"rules": bad}));
+        assert_eq!(said["error"]["code"], REFUSED, "{said}");
+    }
+    let reader = key(&[Grant::ConfigRead, Grant::ConfigWrite]);
+    let said = ask(&control, &reader, "rules/read", json!({}));
+    assert!(said["result"]["rules"].is_object(), "{said}");
+    let said = ask(&control, &reader, "rules/write", json!({"rules": {}}));
+    assert_eq!(said["error"]["code"], DENIED, "{said}");
+
+    let said = ask(&control, &owner, "rules/write", json!({"rules": {}}));
+    assert!(said["error"].is_null(), "{said}");
+    assert!(
+        !fs::read_to_string(&config)
+            .expect("canoa.cfg")
+            .contains("rules"),
+        "an emptied table is not left behind"
+    );
+    let _ = fs::remove_dir_all(tmp);
+}

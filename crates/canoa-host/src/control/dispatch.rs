@@ -245,6 +245,16 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_files,
     ),
     rpc(
+        "rules/read",
+        Access::Require(Grant::ConfigRead),
+        Control::r_files,
+    ),
+    rpc(
+        "rules/write",
+        Access::Require(Grant::ConfigWriteSessions),
+        Control::r_files,
+    ),
+    rpc(
         "trust/revoke",
         Access::Require(Grant::ConfigWrite),
         Control::r_files,

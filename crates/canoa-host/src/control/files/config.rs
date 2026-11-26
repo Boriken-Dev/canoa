@@ -285,6 +285,14 @@ impl Files {
         if section == "profiles" {
             check_profiles(value)?;
         }
+        // The rules the person made are `[permissions.rules]`, which only `rules/write` changes.
+        let kept;
+        let value = if section == "permissions" {
+            kept = self.with_held_rules(value)?.unwrap_or(Value::Null);
+            &kept
+        } else {
+            value
+        };
         let op = match toml_value(value) {
             Some(toml::Value::Table(_)) => Op::set([section], value_of(value)),
             _ => Op::remove([section]),

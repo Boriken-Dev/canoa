@@ -95,6 +95,7 @@ import 'ledger/ledger_backend.dart';
 import 'ledger/running_sessions.dart';
 import 'ledger/session_ledger.dart';
 import 'permissions/host_paths.dart';
+import 'permissions/config_rules_backend.dart' show ConfigRulesBackend;
 import 'permissions/permission_rules.dart';
 import 'popout/item_windows.dart';
 import 'popout/open_in.dart';
@@ -292,8 +293,13 @@ Future<void> main(List<String> args) async {
     workspaceOpener = WorkspaceOpener.hosted(openIn);
     await openIn.load();
   }
+  // The rules are `[permissions.rules]` of canoa.cfg, which the host keeps; how often each fired is a document of the host's. With
+  // no host that keeps them, a browser keeps them in its IndexedDB and a desktop only while it runs.
+  final rulesControl = served != null && served.reachable ? served.control : (ownState != null ? HostControl(host!) : null);
   final rules = PermissionRules(
-    hostState == null ? platformLedgerBackend(configPath: configFile, name: 'permissions') : HostDocumentBackend(hostState, 'permissions.json'),
+    hostState == null || rulesControl == null
+        ? platformLedgerBackend(name: 'permissions')
+        : ConfigRulesBackend(rulesControl, HostDocumentBackend(hostState, 'permissions-use.json')),
     log: hostState == null ? platformRuleLog(configPath: configFile) : HostRuleLog(hostState),
     guards: PermissionGuards(
       home: homeFolder(),

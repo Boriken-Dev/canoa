@@ -136,8 +136,8 @@ command or a path (a background run, a second path), asks as before.
 A request that needs the rules is matched after the rules file is read again, in order with the requests before it, and only if
 nothing changed meanwhile: a request that was waiting when the person pressed Stop, closed the conversation, or the connection
 ended is answered cancelled, and one that finds the mode, Bypass or the cards different is decided on what they are now. Each rule
-made and each use is said in the conversation. Rules are kept in `permissions.json` beside {{ config_file }} (in the browser, the origin's
-IndexedDB). On a desktop the file is replaced through a temp file named for that write, under a lock that the read-merge-write holds,
+made and each use is said in the conversation. Rules are `[permissions.rules.ID]` of {{ config_file }}, written by the host, and how often each fired is a document of the host's (in a browser with no host that keeps them, the origin's
+IndexedDB holds both). A rule's file is replaced through a temp file named for that write, under a lock that the read-merge-write holds,
 so another instance cannot write between; a rule another program added is kept and shown as not made in this app, and a rule
 another instance revoked is dropped. A rename another process's open file refuses is tried again for up to two seconds; the read and the
 write wait for the lock for as long, and a read that gives up applies no rule (the request is asked). A file that cannot be read or

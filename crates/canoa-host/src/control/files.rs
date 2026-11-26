@@ -147,6 +147,7 @@ mod folders;
 mod instructions;
 mod links;
 mod profiles;
+mod rules;
 mod uploads;
 pub(crate) mod workspace;
 pub(crate) use config::table_in;

@@ -157,6 +157,8 @@ impl Control {
             "workspace/open" => self.files.workspace_open(caller, params),
             "trust/list" => self.files.trust_list(),
             "trust/set" => self.files.trust_set(caller, params),
+            "rules/read" => self.files.rules_read(),
+            "rules/write" => self.files.rules_write(params),
             _ => self.files.trust_revoke(caller, params),
         }
     }
