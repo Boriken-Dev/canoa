@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-whispercpp", "extensions/canoa-candle"]
+members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch", "extensions/canoa-antigravity", "extensions/canoa-bitwarden", "extensions/canoa-claude", "extensions/canoa-codex", "extensions/canoa-foundry", "extensions/canoa-git-bash", "extensions/canoa-grok", "extensions/canoa-litellm", "extensions/canoa-mail", "extensions/canoa-microsoft-mail", "extensions/canoa-node", "extensions/canoa-office", "extensions/canoa-openai", "extensions/canoa-opencode", "extensions/canoa-pi", "extensions/canoa-piper", "extensions/canoa-powershell", "extensions/canoa-python", "extensions/canoa-sqlite", "extensions/canoa-whispercpp", "extensions/canoa-candle"]
 exclude = ["third_party/whisper-rs-sys"]
 
 [workspace.package]
@@ -173,6 +173,8 @@ windows = "0.62"
 # The macros of the `windows` crate name this crate in what they write.
 windows-core = "0.62"
 object = { version = "0.41", default-features = false, features = ["read_core", "pe", "std"] }
+# SQLite, built into the binary from its amalgamation (`canoa-sqlite` holds the only dependency on it).
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }
 # The member crates themselves.
 canoa = { path = "crates/canoa" }
 canoa-host = { path = "crates/canoa-host" }
@@ -193,6 +195,7 @@ canoa-opencode = { path = "extensions/canoa-opencode" }
 canoa-pi = { path = "extensions/canoa-pi" }
 canoa-powershell = { path = "extensions/canoa-powershell" }
 canoa-python = { path = "extensions/canoa-python" }
+canoa-sqlite = { path = "extensions/canoa-sqlite" }
 canoa-whispercpp = { path = "extensions/canoa-whispercpp" }
 canoa-candle = { path = "extensions/canoa-candle" }
 canoa-piper = { path = "extensions/canoa-piper" }

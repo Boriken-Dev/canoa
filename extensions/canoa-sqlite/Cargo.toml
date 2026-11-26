@@ -1,0 +1,25 @@
+[package]
+name = "canoa-sqlite"
+description = "SQLite for Canoa: the history store that keeps recorded conversations in one database file"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["canoa", "sqlite", "history"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# Canoa itself is not published yet.
+publish = false
+
+[dependencies]
+canoa = { workspace = true, features = ["history-store"] }
+coqui-acp-api.workspace = true
+guatiao.workspace = true
+guatiao-intake.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
