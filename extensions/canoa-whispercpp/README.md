@@ -8,11 +8,13 @@ A build that does not carry it has no whisper.cpp models or offer. Compiling it 
 libclang are needed (see [`AGENTS.md`](AGENTS.md), "Building"). Not published; `canoa-host` carries it. Every export is listed in
 [`AGENTS.md`](AGENTS.md).
 
+`convert` writes whisper.cpp's GGML file (f16, or q5_0, q5_1 or q8_0) from a Hugging Face Whisper folder in pure Rust, so one download of the folder can serve whisper.cpp and Candle's engine. It memory-maps the weights, and its quantizer is the ggml this crate links.
+
 ## Development
 
 ```sh
 cargo test -p canoa-whispercpp
-cargo test -p canoa-whispercpp -- --ignored   # downloads the tiny model and a recording
+cargo test -p canoa-whispercpp -- --ignored   # downloads the tiny model, its Hugging Face folder and a recording
 ```
 
 ## License
