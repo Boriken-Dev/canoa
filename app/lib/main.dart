@@ -130,6 +130,7 @@ import 'settings/provider_switches.dart';
 import 'settings/host_sections.dart';
 import 'shell/panel_tabs.dart';
 import 'settings/shell_settings.dart';
+import 'settings/telemetry_settings.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
 import 'desktop/hosting_panel.dart' show HostingPanel;
@@ -599,6 +600,9 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The providers the libraries register, each with a switch, where this key may change the host's own settings.
   ProviderSwitches? get _providerSwitches => _grants?.may(HostGrants.hosting) ?? false ? _services.providerSwitchesHeld : null;
 
+  /// Telemetry export, set up in Settings where this key may change the host's own settings.
+  TelemetrySettings? get _telemetry => _grants?.may(HostGrants.hosting) ?? false ? _services.telemetryHeld : null;
+
   /// The shells the host found and which of them its terminals and agents use, chosen in Settings where this key may change the
   /// host's own settings.
   ShellSettings? get _shellSettings => _grants?.may(HostGrants.hosting) ?? false ? _services.shellSettingsHeld : null;
@@ -885,6 +889,7 @@ class _CanoaAppState extends State<CanoaApp> {
       accounts: _accounts,
       extensions: _extensionSettings,
       providers: _providerSwitches,
+      telemetry: _telemetry,
       catalogSources: _services.catalogSourcesHeld,
       contentSettings: _services.contentSettingsHeld,
       advancedConfig: _services.advancedConfigHeld,

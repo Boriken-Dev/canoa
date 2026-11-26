@@ -10,6 +10,7 @@ import 'package:canoa/settings/network_routes.dart';
 import 'package:canoa/settings/host_sections.dart';
 import 'package:canoa/settings/provider_switches.dart';
 import 'package:canoa/settings/settings_page.dart';
+import 'package:canoa/settings/telemetry_settings.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/catalog_sources.dart';
 import 'package:canoa/store/content_settings.dart';
@@ -60,6 +61,7 @@ Future<SettingsHarness> openSettings(
   HostSections? hostSections,
   PortalSession? portal,
   ProviderSwitches? providers,
+  TelemetrySettings? telemetry,
   CatalogSources? catalogSources,
   ContentSettings? contentSettings,
   AdvancedConfig? advancedConfig,
@@ -99,6 +101,7 @@ Future<SettingsHarness> openSettings(
       hostSections: hostSections ?? builtInSections(),
       portal: portal,
       providers: providers,
+      telemetry: telemetry,
       catalogSources: catalogSources,
       contentSettings: contentSettings,
       advancedConfig: advancedConfig,

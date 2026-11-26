@@ -19,6 +19,7 @@ A script is shared between hosts as the files it is.
 | `notifier` | somewhere a notice about what happened on the host is sent | `Notifier` |
 | `panel_tab` | a kind of tab of the bottom panel | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` |
 | `file_viewer` | a way to show a file of some type in the Files surface | `FileViewer`, `SurfaceViewer`, `PageViewer` |
+| `telemetry_exporter` | somewhere the host's traces, metrics and events go | `TelemetryExporter` |
 | `speech_provider`, `speech_output` | dictation and a voice | `SpeechProvider`, `SpeechOutput` |
 | `account_speech` | the speech-to-text services the accounts of some kinds can call | `AccountSpeech` |
 

@@ -1397,6 +1397,34 @@ own, or one it names), a log whose latest lines the provider answers, or a page 
 Opening Logs and an extension's logs needs the key to hold `hosting`. A page's tab names its address and has a button that opens it in
 your browser; {{ name }} embeds no web view, and a page on a host that runs on another computer is not offered, since its loopback is not yours.
 
+### Telemetry
+
+{{ name }} can send traces, metrics and events about itself and its sessions to a place you name, and it does nothing of the kind until you ask:
+Settings, Telemetry lists everything it records, and says what it never records (the words of you or an agent, file names and paths, commands
+and the input and output of tools, the working folder, session titles, account names and e-mail addresses, keys and any secret, the host's name,
+the user name, environment variables and error messages), before the switch. A model's name and a tool's name are recorded, cut to 64
+characters of letters, digits and `. _ : / -`. Turning it on needs an exporter and your reading of the list; the list's digest is written as
+`acknowledged`, and a version that records something more has another digest, which pauses export until you read the list again.
+
+```toml
+[host.telemetry]
+enabled = true
+acknowledged = "3f2a9c41d07be5a6"       # the digest Settings, Telemetry shows with "I have read what is recorded"
+record = ["spans", "metrics", "logs"]   # which groups; all three when absent
+stop_wait_seconds = 5                   # how long a clean stop waits for the exporters to finish
+
+[host.telemetry.exporters.local]        # a name of 1 to 32 lower-case letters, digits, - and _
+provider = "file"                       # OTLP's JSON, a line a batch, in spans-DATE.jsonl, metrics-DATE.jsonl and logs-DATE.jsonl
+settings = { folder = "C:/Users/me/telemetry", keep_days = 14 }   # the folder is `telemetry/` in the host's home when left out
+queue = 4096                            # signals waiting for this exporter; the oldest is let go and counted when it is full
+batch_seconds = 5
+sample = 1.0                            # the fraction of sessions whose spans are exported
+```
+
+An exporter is a provider of the `telemetry_exporter` kind, so an extension adds more (`library` or `source` in the
+entry). An exporter that fails or stalls never holds a session: its signals wait in a queue of their own. The host reads this when it
+starts, and only the person at this computer turns it on.
+
 ### Copy and paste in a terminal
 
 Every terminal screen (the Terminal section, the panel's shell tabs, a host's shell) copies and pastes as the terminals you know do, in the

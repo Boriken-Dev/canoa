@@ -26,6 +26,7 @@ import '../served/portal_session.dart';
 import 'notifications_section.dart';
 import 'overlay_sections.dart';
 import 'sign_in_section.dart';
+import 'telemetry_settings.dart';
 import 'extension_settings.dart';
 import 'provider_switches.dart';
 import '../store/catalog_sources.dart';
@@ -104,6 +105,7 @@ class SettingsPage extends StatefulWidget {
     this.version = '',
     this.hostSections,
     this.portal,
+    this.telemetry,
   });
 
   final CanoaConfig config;
@@ -205,6 +207,9 @@ class SettingsPage extends StatefulWidget {
   /// The portal that served this page, whose own pages the Sign-in section opens; none for a page served by anything else.
   final PortalSession? portal;
 
+  /// Telemetry export: what the host records, the switch and the exporters; none where the key may not change the host's own settings.
+  final TelemetrySettings? telemetry;
+
   @override
   State<SettingsPage> createState() => SettingsPageState();
 }
@@ -260,6 +265,7 @@ class SettingsPageState extends State<SettingsPage> {
     'network': (ready: widget.networkRoutes != null, build: () => NetworkSection(key: const Key('settings-network-section'), routes: widget.networkRoutes!)),
     'advanced': (ready: widget.advancedConfig != null, build: () => AdvancedSection(key: const Key('settings-advanced'), config: widget.advancedConfig!)),
     'providers': (ready: widget.providers != null, build: () => ProvidersSection(key: const Key('settings-providers'), switches: widget.providers!)),
+    'telemetry': (ready: widget.telemetry != null, build: () => TelemetrySection(key: const Key('settings-telemetry'), settings: widget.telemetry!)),
     'signin': (ready: widget.portal != null, build: () => SignInSection(key: const Key('settings-signin'), portal: widget.portal!)),
     'about': (ready: true, build: () => AboutSection(version: widget.version, host: widget.hostSpeech)),
   };
