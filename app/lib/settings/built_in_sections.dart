@@ -17,7 +17,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "appearance",
@@ -30,7 +31,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "notifications",
@@ -43,7 +45,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "voice",
@@ -56,7 +59,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "shortcuts",
@@ -69,7 +73,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "sources",
@@ -82,7 +87,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "profiles",
@@ -95,7 +101,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "mcp",
@@ -108,7 +115,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "permissions",
@@ -121,7 +129,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "accounts",
@@ -134,7 +143,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "shells",
@@ -147,7 +157,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "usage",
@@ -160,7 +171,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "extensions",
@@ -173,7 +185,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "catalog_sources",
@@ -186,7 +199,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "advanced",
@@ -199,7 +213,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "providers",
@@ -212,7 +227,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     },
     {
       "id": "about",
@@ -225,7 +241,8 @@ const builtInSectionsListing = r'''
       "origin": "built-in",
       "stored": "config",
       "schema": null,
-      "form": null
+      "form": null,
+      "collection": null
     }
   ]
 }
