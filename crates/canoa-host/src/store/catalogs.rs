@@ -1,10 +1,11 @@
 //! The catalogs each Store type reads, in one shape: `[store.<type>.catalogs.<label>]` in canoa.cfg, and what the Store types
 //! say of their catalogs (the words for them, and the one offered until the person removes it).
 //!
-//! A label's value is a source the `read` provider reads (a bare string, written `{ provider = "read", source = "..." }` in full),
-//! a table naming a provider and the fields its form asks for, or `false`, which turns a default catalog off. The host keeps four
-//! keys of a table for itself, which no provider's form may use: `pin`, `ttl`, `keys` and `endpoints`. One reader serves every type,
-//! so a catalog written under one type is never listed under another.
+//! A label's value is a source (a bare string: the URI of the catalog document, or of what a generator makes it from), a table with
+//! a `source` and, optionally, a `generator` and the fields its form asks for, or `false`, which turns a default catalog off. The
+//! host keeps six keys of a table for itself, which no generator's form may use: `source`, `generator`, `pin`, `ttl`, `keys` and
+//! `endpoints`. A table may instead name a `provider`, a `catalog_source` of an extension not yet converted. One reader serves every
+//! type, so a catalog written under one type is never listed under another.
 //!
 //! A type's catalogs are its defaults (what its extension registers, in the order registered), then canoa.cfg's entries by label:
 //! a label a default has replaces it whole, a new label is added after the defaults, and `false` turns the default of that label off
@@ -35,6 +36,7 @@ pub(crate) struct CatalogTableSchema {
 #[map(crate = ::coqui_acp_api::guatiao)]
 struct CatalogEntryHeader {
     provider: Option<String>,
+    generator: Option<String>,
 }
 
 /// The guatiao schema describing `[store.<type>]` catalog sections in `canoa.cfg`.
@@ -43,11 +45,13 @@ pub(crate) fn schema() -> Result<GuatiaoValue, ValueError> {
     <CatalogTableSchema as Schema>::schema()
 }
 
-/// The provider that reads an address or a file the way the Store type reads one: the default when a label names none.
+/// The provider id of an entry that names neither a provider nor a generator: its source is read as a document the way the Store
+/// type reads one.
 pub(crate) const READ: &str = "read";
 
-/// The keys of a catalog's table that the host owns.
-const HOST_KEYS: [&str; 4] = ["pin", "ttl", "keys", "endpoints"];
+/// The keys of a catalog's table that the host owns besides `provider`: `source` stays among the entry's fields, since what reads
+/// a document reads it from there.
+const HOST_KEYS: [&str; 5] = ["generator", "pin", "ttl", "keys", "endpoints"];
 
 /// Where a catalog of a type comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,13 +78,15 @@ impl Origin {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Entry {
     pub(crate) label: String,
-    /// The `catalog_source` provider that reads it.
+    /// The `catalog_source` provider that reads it, [`READ`] for an entry that names none.
     pub(crate) provider: String,
-    /// What the provider's form holds: the table's keys but `provider` and the host's own.
+    /// The `catalog_generator` that makes the catalog from `source`, when it names one.
+    pub(crate) generator: Option<String>,
+    /// What the form holds: the table's keys but `provider`, `generator` and the host's own, `source` among them.
     pub(crate) fields: Map<String, Value>,
     /// What fixes its answer: a revision the provider understands, or `sha256:<hex>` of the catalog's text.
     pub(crate) pin: Option<String>,
-    /// Seconds before it is read again, in place of `[host.store] source_ttl`.
+    /// Seconds before it is read again, in place of `[host.content] ttl`.
     pub(crate) ttl: Option<u64>,
     /// The publisher key fingerprints it demands a signature from, in place of its provider's.
     pub(crate) keys: Vec<String>,
@@ -95,15 +101,37 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
-    /// The `source` field, for the `read` provider.
+    /// The `source` field: the URI the document, or the generator's input, is at.
     pub(crate) fn source(&self) -> Option<&str> {
         self.fields.get("source").and_then(Value::as_str)
+    }
+
+    /// Whether the entry's source is itself the catalog: no generator and no provider make it from something.
+    pub(crate) fn is_document(&self) -> bool {
+        self.provider == READ && self.generator.is_none()
+    }
+
+    /// What makes the catalog, for a message: the generator, the provider, or the word for a document.
+    pub(crate) fn maker(&self) -> &str {
+        self.generator.as_deref().unwrap_or(&self.provider)
+    }
+
+    /// An entry a generator or a provider makes, from what an index kept of it.
+    pub(crate) fn made(
+        label: &str,
+        provider: &str,
+        generator: Option<String>,
+        fields: Map<String, Value>,
+    ) -> Self {
+        let mut entry = Self::of(label, provider, fields, Origin::Added);
+        entry.generator = generator;
+        entry
     }
 
     /// One text that differs whenever the provider, a field or a host key does, so an index can tell that canoa.cfg now says another
     /// thing.
     pub(crate) fn spec(&self) -> String {
-        if self.provider == READ
+        if self.is_document()
             && self.pin.is_none()
             && self.keys.is_empty()
             && self.endpoints.is_empty()
@@ -113,8 +141,9 @@ impl Entry {
         }
         let sorted: alloc::collections::BTreeMap<_, _> = self.fields.iter().collect();
         format!(
-            "{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}",
             self.provider,
+            self.generator.as_deref().unwrap_or_default(),
             serde_json::to_string(&sorted).unwrap_or_default(),
             self.pin.as_deref().unwrap_or_default(),
             self.keys.join(","),
@@ -136,6 +165,7 @@ impl Entry {
         Self {
             label: label.to_owned(),
             provider: provider.to_owned(),
+            generator: None,
             fields,
             pin: None,
             ttl: None,
@@ -268,7 +298,9 @@ pub(crate) fn read_all(table: &Value) -> Vec<Parsed> {
                     let header = match CatalogEntryHeader::from_value(&gval) {
                         Ok(header) => header,
                         Err(_) => {
-                            return Err(problem("provider is the id of a source provider"));
+                            return Err(problem(
+                                "provider and generator are the ids of a source provider and of a catalog generator",
+                            ));
                         }
                     };
                     let provider = match header.provider {
@@ -276,12 +308,37 @@ pub(crate) fn read_all(table: &Value) -> Vec<Parsed> {
                         Some(id) if !id.is_empty() => id,
                         Some(_) => return Err(problem("provider is the id of a source provider")),
                     };
+                    let generator = match header.generator {
+                        None => None,
+                        Some(id) if canoa::content::is_id(&id) => Some(id),
+                        Some(_) => {
+                            return Err(problem(
+                                "generator is the id of a catalog generator: lower-case letters, digits and _",
+                            ));
+                        }
+                    };
+                    if generator.is_some() && provider != READ {
+                        return Err(problem(
+                            "an entry names a generator or a provider, not both",
+                        ));
+                    }
+                    match table.get("source") {
+                        None | Some(Value::Null) => {}
+                        Some(Value::String(source)) if canoa::content::holds_password(source) => {
+                            return Err(problem(
+                                "source holds a password: a secret does not go in canoa.cfg",
+                            ));
+                        }
+                        Some(Value::String(_)) => {}
+                        Some(_) => return Err(problem("source is an address or a path")),
+                    }
                     let fields = table
                         .iter()
                         .filter(|(key, _)| *key != "provider" && !HOST_KEYS.contains(&key.as_str()))
                         .map(|(key, field)| (key.clone(), field.clone()))
                         .collect();
                     let mut entry = Entry::of(label, &provider, fields, Origin::Added);
+                    entry.generator = generator;
                     entry.pin = match table.get("pin") {
                         None | Some(Value::Null) => None,
                         Some(Value::String(pin)) if !pin.trim().is_empty() => Some(pin.clone()),
@@ -350,7 +407,10 @@ pub(crate) fn names_new_source(current: &Value, wanted: &Value) -> bool {
                     let other = entry
                         .get("provider")
                         .and_then(Value::as_str)
-                        .is_some_and(|provider| provider != READ);
+                        .is_some_and(|provider| provider != READ)
+                        || entry
+                            .get("generator")
+                            .is_some_and(|generator| !generator.is_null());
                     other && table_of(current, kind).get(label) != Some(entry)
                 })
             })
@@ -552,6 +612,7 @@ pub(crate) fn row_of(kind: &TypeCatalogs, merged: &Merged) -> Value {
     let mut row = json!({
         "label": entry.label,
         "provider": entry.provider,
+        "generator": entry.generator,
         "fields": entry.fields,
         "default": entry.origin == Origin::Default,
         "origin": entry.origin.word(),

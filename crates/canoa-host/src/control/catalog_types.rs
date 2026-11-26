@@ -82,6 +82,24 @@ fn answer_for(
         let id = each["id"].as_str().unwrap_or_default().to_owned();
         (id != crate::store::catalogs::READ, id)
     });
+    let generators: Vec<Value> = sources
+        .content()
+        .generators()
+        .filter(|(info, _)| info.serves(&kind.id))
+        .map(|(info, extension)| {
+            json!({
+                "id": info.id,
+                "title": info.title,
+                "help": info.help,
+                "extension": extension,
+                "types": info.types,
+                "source": info.source.word(),
+                "grammar": info.grammar,
+                "schema": info.schema.as_ref().and_then(|schema| crate::forms::json_of(schema).ok()),
+                "form": info.form.as_ref().and_then(|form| crate::forms::json_of(form).ok()),
+            })
+        })
+        .collect();
     let mut row = json!({
         "type": kind.id,
         "title": kind.title,
@@ -105,6 +123,7 @@ fn answer_for(
             })
             .collect::<Vec<_>>(),
         "sources": offered,
+        "generators": generators,
     });
     if kind.id == "skills" {
         row["skills_search"] = json!(crate::control::skill_search::DEFAULT_BASE);

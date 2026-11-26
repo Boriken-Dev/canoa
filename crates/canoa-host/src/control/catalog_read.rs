@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use sha2::Digest as _;
 
 use super::{Caller, Control, NOT_FOUND, REFUSED, bad, text_param};
-use crate::store::catalogs::{self, Entry, READ, TypeCatalogs, built_in_types, table_of};
+use crate::store::catalogs::{self, Entry, TypeCatalogs, built_in_types, table_of};
 use crate::store::listings::{self, SkillSpec};
 
 /// How many servers one page of a registry asks for.
@@ -91,7 +91,7 @@ impl Control {
                 .note(&key, &json!({"type": id, "label": label, "refresh": true}));
         }
         self.caches.catalog.get(&key, refresh, || {
-            let mut answer = if entry.provider == READ {
+            let mut answer = if entry.is_document() {
                 match id {
                     "skills" => self.read_skills(caller, &entry)?,
                     _ => self.read_mcps(caller, &entry, search, cursor)?,
@@ -258,20 +258,15 @@ impl Control {
         entry: &Entry,
         search: &str,
     ) -> Result<Value, Failure> {
-        let request = canoa::store::source::ReadRequest::new(
-            kind.id.as_str(),
-            entry.label.as_str(),
-            Value::Object(entry.fields.clone()).to_string(),
-        );
         let text = self
             .catalog_sources()
-            .read(&entry.provider, request)
+            .make(kind.id.as_str(), entry)
             .map_err(|why| (REFUSED, why))?;
         if kind.id == "skills" {
             let listing = listings::skills_listing(&text).map_err(|why| {
                 (
                     REFUSED,
-                    format!("{} gave no skills listing: {why}", entry.provider),
+                    format!("{} gave no skills listing: {why}", entry.maker()),
                 )
             })?;
             Ok(json!({
@@ -286,7 +281,7 @@ impl Control {
                 .map_err(|why| {
                     (
                         REFUSED,
-                        format!("{} gave no registry list: {why}", entry.provider),
+                        format!("{} gave no registry list: {why}", entry.maker()),
                     )
                 })
         }

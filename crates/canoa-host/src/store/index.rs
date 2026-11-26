@@ -53,7 +53,9 @@ pub(crate) struct CatalogSource {
     pub(crate) extensions: bool,
     /// The `catalog_source` provider that reads it; `repo`, `reference` and `path` name a git source only for `read`.
     pub(crate) provider: String,
-    /// What the provider's form holds.
+    /// The `catalog_generator` that makes it from `source`, when the entry names one.
+    pub(crate) generator: Option<String>,
+    /// What the provider's or generator's form holds, `source` among it.
     pub(crate) fields: serde_json::Map<String, Value>,
 }
 
@@ -132,7 +134,7 @@ fn parse_table(section: &Value, extensions: bool) -> Vec<Row> {
         .map(|parsed| {
             let entry = parsed?;
             let problem = |why: &str| (entry.label.clone(), why.to_owned());
-            if entry.provider != super::catalogs::READ {
+            if !entry.is_document() {
                 return Ok(CatalogSource {
                     label: entry.label.clone(),
                     spec: entry.spec(),
@@ -141,6 +143,7 @@ fn parse_table(section: &Value, extensions: bool) -> Vec<Row> {
                     path: String::new(),
                     extensions,
                     provider: entry.provider.clone(),
+                    generator: entry.generator.clone(),
                     fields: entry.fields.clone(),
                 });
             }
@@ -165,6 +168,7 @@ fn parse_table(section: &Value, extensions: bool) -> Vec<Row> {
                     path,
                     extensions,
                     provider: entry.provider.clone(),
+                    generator: None,
                     fields: entry.fields.clone(),
                 }),
                 _ => Err(problem(
@@ -463,7 +467,7 @@ impl StoreIndex {
         prior: Option<&Cached>,
         attempt: u64,
     ) -> Result<Cached, String> {
-        if source.provider != super::catalogs::READ {
+        if source.generator.is_some() || source.provider != super::catalogs::READ {
             return self.refresh_read(source, prior, attempt);
         }
         let revision = overlays
@@ -523,12 +527,13 @@ impl StoreIndex {
         } else {
             "overlays"
         };
-        let request = canoa::store::source::ReadRequest::new(
-            kind,
+        let entry = super::catalogs::Entry::made(
             source.label.as_str(),
-            Value::Object(source.fields.clone()).to_string(),
+            source.provider.as_str(),
+            source.generator.clone(),
+            source.fields.clone(),
         );
-        let text = sources.read(&source.provider, request)?;
+        let text = sources.make(kind, &entry)?;
         let commit = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()));
         if let Some(prior) = prior
             && prior.problem.is_none()

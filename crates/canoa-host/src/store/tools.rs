@@ -457,6 +457,30 @@ impl LocalTools {
         self
     }
 
+    /// The bytes of the document at `url`, as a lookup (a publisher's `ETag` may answer it): `GUATIAO_ERR_BAD_VALUE` for one over
+    /// `max_bytes`.
+    pub fn fetch_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, ProviderError> {
+        let reply = self.open_with(url, true)?;
+        let mut body = Vec::new();
+        reply
+            .body
+            .take(max_bytes.saturating_add(1))
+            .read_to_end(&mut body)
+            .map_err(|e| {
+                refused(
+                    Status::GUATIAO_ERR_INTERNAL,
+                    &format!("download failed: {e}"),
+                )
+            })?;
+        if body.len() as u64 > max_bytes {
+            return Err(refused(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "the document is larger than the limit",
+            ));
+        }
+        Ok(body)
+    }
+
     fn gone(&self) -> Result<(), ProviderError> {
         if self.cancel.load(Ordering::SeqCst) {
             return Err(refused(Status::GUATIAO_ERR_GONE, "install cancelled"));
@@ -853,24 +877,7 @@ impl InstallTools for LocalTools {
     }
 
     fn fetch_text(&self, url: &str, max_bytes: u64) -> Result<String, ProviderError> {
-        let reply = self.open_with(url, true)?;
-        let mut body = Vec::new();
-        reply
-            .body
-            .take(max_bytes.saturating_add(1))
-            .read_to_end(&mut body)
-            .map_err(|e| {
-                refused(
-                    Status::GUATIAO_ERR_INTERNAL,
-                    &format!("download failed: {e}"),
-                )
-            })?;
-        if body.len() as u64 > max_bytes {
-            return Err(refused(
-                Status::GUATIAO_ERR_BAD_VALUE,
-                "the document is larger than the limit",
-            ));
-        }
+        let body = self.fetch_bytes(url, max_bytes)?;
         String::from_utf8(body)
             .map_err(|_| refused(Status::GUATIAO_ERR_BAD_VALUE, "the document is not text"))
     }

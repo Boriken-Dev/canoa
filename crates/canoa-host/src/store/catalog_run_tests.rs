@@ -154,6 +154,9 @@ fn sources(world: &Arc<World>) -> Sources {
         .add(Some("standins"), Arc::new(registry))
         .expect("added");
     sources
+        .add(Some("demo_ext"), crate::content::tests::demo_registry())
+        .expect("the demonstration scheme");
+    sources
 }
 
 const SHA: &str = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
@@ -465,5 +468,123 @@ fn a_kept_catalog_past_its_time_is_asked_again_by_the_renewal_and_one_never_read
         .read(&kind(), &entry, false)
         .expect("kept");
     assert!(failed.text.contains("small"), "the last good answer stands");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The entry the merge makes of `table`'s one label.
+fn entry_of(table: Value) -> Entry {
+    merge(&kind(), &table)
+        .into_iter()
+        .find_map(|each| each.parsed.ok())
+        .expect("an entry")
+}
+
+#[test]
+fn a_source_is_the_catalog_itself_read_through_its_scheme_and_kept_like_any_other() {
+    let dir = folder("document");
+    let world = Arc::new(World::default());
+    let entry = entry_of(json!({"doc-a": "demo://models"}));
+    assert!(entry.is_document());
+    let reader = run(&dir, &world, 3600);
+    let first = reader.read(&kind(), &entry, false).expect("read");
+    assert_eq!(first.from, "fetched");
+    assert!(first.text.contains("canoa.models/1"), "{}", first.text);
+    let again = reader.read(&kind(), &entry, false).expect("kept");
+    assert_eq!(again.from, "cache");
+    assert_eq!(
+        reader.read(&kind(), &entry, true).expect("asked").from,
+        "fetched"
+    );
+    assert!(kept_file(&dir, "whisper", "doc-a").is_file());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_source_that_is_a_file_is_read_and_a_default_never_names_one() {
+    use sha2::Digest as _;
+
+    let dir = folder("file-source");
+    let world = Arc::new(World::default());
+    let text = models("r1", &["base"]);
+    let file = dir.join("models.json");
+    std::fs::write(&file, &text).expect("written");
+    let path = file.display().to_string();
+    let mut entry = entry_of(json!({"file-a": path.clone()}));
+    let reader = run(&dir, &world, 3600);
+    assert_eq!(
+        reader.read(&kind(), &entry, false).expect("read").text,
+        text
+    );
+
+    // A digest pin checks the text the source answered with.
+    entry.pin = Some(format!("sha256:{}", "00".repeat(32)));
+    let refused = run(&folder("file-source-2"), &world, 3600).read(&kind(), &entry, false);
+    assert!(refused.is_err_and(|why| why.contains("its pin names")));
+    let hex = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()));
+    entry.pin = Some(format!("sha256:{hex}"));
+    assert!(
+        run(&folder("file-source-3"), &world, 3600)
+            .read(&kind(), &entry, false)
+            .is_ok()
+    );
+
+    // What an extension registers as a type's default is not the person's own: a file on this computer is not named by it.
+    let mut shipped = entry_of(json!({"file-b": path}));
+    shipped.origin = Origin::Default;
+    let refused = run(&folder("file-source-4"), &world, 3600).read(&kind(), &shipped, false);
+    assert!(
+        refused.is_err_and(|why| why.contains("named by the person")),
+        "a default reads no file of this computer"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_source_nobody_serves_says_which_schemes_are_offered_and_keeps_the_last_good_text() {
+    let dir = folder("no-scheme");
+    let world = Arc::new(World::default());
+    let reader = run(&dir, &world, 0);
+    let entry = entry_of(json!({"hf-a": "hf://owner/name"}));
+    let refused = reader.read(&kind(), &entry, false).expect_err("nobody");
+    assert!(refused.contains("no provider offers hf:"), "{refused}");
+    assert!(refused.contains("demo"), "{refused}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_generator_makes_the_catalog_from_the_source_through_the_host() {
+    let dir = folder("generator");
+    let world = Arc::new(World::default());
+    let reader = run(&dir, &world, 3600);
+    let entry = entry_of(json!({"gen-a": {"generator": "one_model", "source": "demo://root"}}));
+    let made = reader.read(&kind(), &entry, false).expect("made");
+    assert_eq!(made.from, "fetched");
+    assert!(made.text.contains("\"base\""), "{}", made.text);
+    // A generator that does not exist is an error naming the ones there are.
+    let nobody = entry_of(json!({"gen-b": {"generator": "nobody", "source": "demo://root"}}));
+    let why = run(&folder("generator-2"), &world, 3600)
+        .read(&kind(), &nobody, false)
+        .expect_err("no such generator");
+    assert!(
+        why.contains("no catalog generator") && why.contains("one_model"),
+        "{why}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_command_generator_takes_the_file_the_program_wrote_as_the_catalog() {
+    let dir = folder("command");
+    let world = Arc::new(World::default());
+    std::fs::write(dir.join("made.json"), models("r1", &["small"])).expect("written");
+    let entry = entry_of(json!({"cmd-a": {
+        "generator": "command",
+        "command": ["git", "--version"],
+        "cwd": dir.display().to_string(),
+        "file": "made.json",
+    }}));
+    let reader = run(&dir, &world, 3600);
+    let made = reader.read(&kind(), &entry, false).expect("made");
+    assert!(made.text.contains("small"), "{}", made.text);
     let _ = std::fs::remove_dir_all(dir);
 }

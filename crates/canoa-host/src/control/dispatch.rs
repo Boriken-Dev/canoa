@@ -373,6 +373,11 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_extension_catalogs,
     ),
     rpc(
+        "content/schemes",
+        Access::Require(Grant::ConfigRead),
+        Control::r_content_schemes,
+    ),
+    rpc(
         "store/catalogs",
         Access::Dynamic(&[Grant::OverlayRead]),
         Control::r_store_catalogs,

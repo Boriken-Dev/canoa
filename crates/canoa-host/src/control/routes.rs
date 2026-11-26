@@ -378,6 +378,15 @@ impl Control {
         self.extension_catalogs(caller, params)
     }
 
+    pub(super) fn r_content_schemes(
+        &self,
+        _caller: &Caller,
+        _: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        self.content_schemes(params)
+    }
+
     pub(super) fn r_store_catalogs(
         &self,
         caller: &Caller,

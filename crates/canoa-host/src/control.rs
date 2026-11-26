@@ -36,7 +36,7 @@ use grants::allow;
 pub(crate) use import::{Homes, IMPORT_KEY};
 use ledger::private_file;
 pub(crate) use moves::Moves;
-pub(crate) use overlays::{OverlayLimits, Overlays, valid_skill_name};
+pub(crate) use overlays::{Fetched, GitNode, OverlayLimits, Overlays, Trust, valid_skill_name};
 pub(crate) use registry::Registry;
 use routes::whole_machine;
 use serde_json::{Value, json};
@@ -1149,6 +1149,9 @@ mod changes;
 #[cfg(test)]
 mod changes_tests;
 mod choices;
+mod content_schemes;
+#[cfg(test)]
+mod content_schemes_tests;
 pub(crate) mod discover;
 mod dispatch;
 mod extension_install;

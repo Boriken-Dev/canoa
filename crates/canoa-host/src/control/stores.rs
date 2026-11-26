@@ -168,6 +168,11 @@ impl Stores {
             caches.lookup_response,
             caches.dir.as_ref().map(|dir| dir.join("http")).as_deref(),
         );
+        let folder = caches
+            .dir
+            .as_ref()
+            .and_then(|dir| dir.parent())
+            .map(|cache| cache.join("content"));
         self.sources = self
             .sources
             .clone()
@@ -175,7 +180,8 @@ impl Stores {
                 self.programs.shared_transport(),
                 caches.lookup_connect,
                 caches.lookup_response,
-            ));
+            ))
+            .content_in(folder.as_deref(), caches.document_bytes);
         self.caches = caches;
         self.arm()
     }
@@ -301,7 +307,7 @@ impl Stores {
     }
 
     /// A fetch that reaches `endpoints` and nothing else, through the client and proxy the Store's own reads use, and how long what
-    /// it reads is kept (`[host.store] source_ttl`).
+    /// it reads is kept (`[host.content] ttl`).
     pub(crate) fn fetch_of(
         &self,
         endpoints: Vec<String>,

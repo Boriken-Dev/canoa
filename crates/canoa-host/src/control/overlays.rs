@@ -29,6 +29,8 @@ use crate::profile::prepare;
 mod catalog;
 mod contents;
 mod git;
+mod reach;
+pub(crate) use reach::{Fetched, GitNode};
 mod scan;
 mod skills;
 mod tree;

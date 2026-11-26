@@ -61,14 +61,17 @@ impl Control {
             ));
         }
         if !caller.may(Grant::Hosting)
-            && entry
+            && (entry
                 .get("provider")
                 .and_then(Value::as_str)
                 .is_some_and(|provider| provider != READ)
+                || entry
+                    .get("generator")
+                    .is_some_and(|generator| !generator.is_null()))
         {
             return Err((
                 DENIED,
-                "a catalog that runs a program or reads through an extension's source takes the hosting grant"
+                "a catalog that runs a program, or is made by a generator or an extension's source, takes the hosting grant"
                     .to_owned(),
             ));
         }

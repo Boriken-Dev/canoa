@@ -15,18 +15,14 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use canoa::store::catalog::check_format;
-use canoa::store::source::ReadRequest;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
-use super::catalogs::{Entry, READ, TypeCatalogs};
+use super::catalogs::{Entry, Origin, TypeCatalogs};
 use super::sources::Sources;
 
 /// How long a catalog answers without asking its source, unless `[host.store] source_ttl` says otherwise.
 pub const DEFAULT_SOURCE_TTL: Duration = Duration::from_secs(60 * 60);
-
-/// The most an address a bare `read` entry names may answer with.
-const MOST_BYTES: u64 = 8 << 20;
 
 /// The form of the file kept for a catalog.
 const SCHEMA: u32 = 1;
@@ -237,24 +233,21 @@ impl Run {
 
     /// The source's answer, checked as a document of the format and against the entry's digest pin.
     fn fetch(&self, kind: &TypeCatalogs, entry: &Entry, format: &str) -> Result<String, String> {
-        let text = match entry
-            .source()
-            .filter(|source| entry.provider == READ && source.starts_with("https://"))
-        {
-            // An address a bare entry names is read by the host: the person wrote it, so it is the one place it may reach.
-            Some(url) => self.sources.get_text(url, MOST_BYTES)?,
-            None => {
-                let mut request = ReadRequest::new(
-                    kind.id.as_str(),
-                    entry.label.as_str(),
-                    Value::Object(entry.fields.clone()).to_string(),
+        let text = if entry.is_document() {
+            // The source is the catalog: a URI the content registry reads. The person wrote it unless it is the type's default.
+            let source = entry
+                .source()
+                .ok_or_else(|| format!("{} names no source to read", entry.label))?;
+            let content = self.sources.content();
+            content
+                .open_text(
+                    source,
+                    entry.origin != Origin::Default,
+                    content.most_bytes(),
                 )
-                .signed_by(entry.keys.iter().cloned());
-                if let Some(pin) = &entry.pin {
-                    request = request.pinned(pin.as_str());
-                }
-                self.sources.read(&entry.provider, request)?
-            }
+                .map_err(|refusal| refusal.to_string())?
+        } else {
+            self.sources.make(kind.id.as_str(), entry)?
         };
         check(entry, format, &text)?;
         Ok(text)
@@ -278,7 +271,7 @@ fn check(entry: &Entry, format: &str, text: &str) -> Result<(), String> {
     {
         return Err(format!(
             "what {} answered is not the catalog its pin names (sha256:{pin})",
-            entry.provider
+            entry.maker()
         ));
     }
     check_format(format, text)

@@ -317,3 +317,74 @@ fn the_types_fixed_catalog_cannot_be_replaced_or_turned_off() {
         }
     }
 }
+
+#[test]
+fn a_generator_makes_a_catalog_from_a_source_and_an_entry_never_names_a_provider_too() {
+    let table = json!({
+        "made": {"generator": "command", "command": ["gen"], "timeout": 5},
+        "mirror": {"generator": "codex_releases", "source": "https://mirror.example/openai/", "pin": "abc"},
+        "plain": "D:/models/whisper.json",
+        "both": {"generator": "command", "provider": "command"},
+        "odd": {"generator": 7},
+        "shout": {"generator": "Bad Name"},
+        "secret": {"source": "https://user:hunter2@example.org/x.json"},
+        "number": {"source": 3},
+    });
+    let parsed = read(&table);
+    let entry = |label: &str| {
+        parsed
+            .iter()
+            .find_map(|each| each.as_ref().ok().filter(|entry| entry.label == label))
+            .unwrap_or_else(|| panic!("no entry {label} in {parsed:?}"))
+    };
+    let made = entry("made");
+    assert_eq!(made.generator.as_deref(), Some("command"));
+    assert_eq!(made.provider, READ);
+    assert!(!made.is_document());
+    assert_eq!(made.maker(), "command");
+    assert!(!made.fields.contains_key("generator"));
+    assert_eq!(made.fields["command"], json!(["gen"]));
+    let mirror = entry("mirror");
+    assert_eq!(mirror.source(), Some("https://mirror.example/openai/"));
+    assert_eq!(mirror.pin.as_deref(), Some("abc"));
+    // A source alone is the catalog itself, a path or an address.
+    assert!(entry("plain").is_document());
+    assert_eq!(entry("plain").source(), Some("D:/models/whisper.json"));
+
+    let why = |label: &str| {
+        parsed
+            .iter()
+            .find_map(|each| each.as_ref().err().filter(|(own, _)| own == label))
+            .map(|(_, why)| why.clone())
+            .unwrap_or_else(|| panic!("{label} is no catalog"))
+    };
+    assert!(why("both").contains("not both"));
+    assert!(why("odd").contains("generator"));
+    assert!(why("shout").contains("lower-case"));
+    assert!(why("secret").contains("password"));
+    assert!(!why("secret").contains("hunter2"));
+    assert!(why("number").contains("source"));
+}
+
+#[test]
+fn a_changed_generator_is_another_entry_for_what_was_kept() {
+    let one = read(&json!({"a": {"generator": "x", "source": "https://e.test/"}}));
+    let two = read(&json!({"a": {"generator": "y", "source": "https://e.test/"}}));
+    let (one, two) = (one[0].as_ref().expect("a"), two[0].as_ref().expect("a"));
+    assert_ne!(one.spec(), two.spec());
+    let bare = read(&json!({"a": "https://e.test/"}));
+    assert_eq!(bare[0].as_ref().expect("a").spec(), "https://e.test/");
+}
+
+#[test]
+fn a_generator_counts_as_a_new_source_that_runs_something() {
+    let held = json!({});
+    let wanted =
+        json!({"whisper": {"catalogs": {"mine": {"generator": "command", "command": ["x"]}}}});
+    assert!(names_new_source(&held, &wanted));
+    let again =
+        json!({"whisper": {"catalogs": {"mine": {"generator": "command", "command": ["x"]}}}});
+    assert!(!names_new_source(&again, &wanted));
+    let document = json!({"whisper": {"catalogs": {"mine": "https://e.test/c.json"}}});
+    assert!(!names_new_source(&held, &document));
+}

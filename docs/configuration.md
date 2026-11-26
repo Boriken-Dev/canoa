@@ -66,7 +66,7 @@ Configuration tables:
 - [permissions] default_mode: the mode a new session starts in, one of `manual`, `accept_edits`, `auto`, `plan` and `bypass`, such as `default_mode = "plan"`; unset leaves each agent's own. A session keeps its own choice after that; see [modes](acp-client.md#permission-requests-in-the-chat). An older `full_access` list is read and dropped.
 - Rules made by "Always allow here" are not in {{ config_file }}: they are `permissions.json` beside it (the origin's IndexedDB in a browser) with a `permissions-log.jsonl` beside it (desktop only), edited in Settings, Permissions; see [acp-client](acp-client.md#permission-requests-in-the-chat).
 - [permissions] allow_once_only: `true` makes Bypass answer only with an answer that allows once, so a request that offers only an "always" is left to the person; default `false`.
-- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600; it also keeps what the host found of each installed overlay's source, see [overlay updates](#overlay-updates)), `source_ttl` (3600, a catalog read through a source), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what is past its time (see [what the Store keeps fresh](#what-the-store-keeps-fresh)).
+- [permissions] protected: the paths a remembered rule ("Always allow here") never covers, in gitignore syntax, as text with a pattern a line or an array of such lines; absent, the recommended list applies and a list written replaces it. See [the ACP client](acp-client.md). `[host.store] protected` and `credential_variables` are the same kind of list for the program stores' installs, read by `{{ program }}` ([the host](host.md)). `[host.store] latest_ttl` (3600; it also keeps what the host found of each installed overlay's source, see [overlay updates](#overlay-updates)), `[host.content] ttl` (3600, a catalog read through a source) and `document_bytes` (8 MiB, the most a catalog read into memory may hold), `models_ttl` (300), `catalog_ttl` (300), `index_ttl` (300), `connect_timeout` (10) and `lookup_timeout` (15) and `refresh_every` (300; 0 never) are seconds (the last two timeouts are how long a lookup waits to connect and for an answer; a download waits 60): how long the Store answers from what it kept (a publisher's newest version, a type's models, a catalog's entries, the catalog index) and how often, while a client is connected, the host asks again what is past its time (see [what the Store keeps fresh](#what-the-store-keeps-fresh)).
 - [harnesses] the harness each name an agent reports in `initialize` stands for, such as `"my-acp" = "My Harness"`. It extends and overrides the built-in names for Claude Code, Codex, Gemini, Antigravity, Pi, OpenCode and Grok; an agent named nowhere is labelled by its entry.
 - [agents.NAME] program and args: a source of your own, an ACP agent the app starts on its standard streams; Settings → Sources adds and removes them. See [a new session](#a-new-session).
 - [sources] hidden: the presets, by label, that Settings keeps out of a new session's sources, such as `hidden = ["Antigravity"]`. A preset is never changed, only hidden.
@@ -847,21 +847,36 @@ type, `[store.TYPE.catalogs.LABEL]`, where `TYPE` is `overlays`, `skills`, `mcps
 adds, and `LABEL` is a name of yours (a letter, then letters, digits, `-` or `_`, at most 64). A catalog added under one type is
 never listed under another: Settings, from a type's page, shows and changes that type's catalogs only.
 
-A catalog is read by a **catalog source**, a provider of the host (a `catalog_source` Guatiao kind, so an extension can add one).
-A label's value is the source `read` reads, or a table naming the provider and what its form asks for, or `false`, which takes a default
-catalog away:
+A catalog is a **source**, a URI, and optionally a **generator** that makes the catalog from what the source holds. A label's value
+is the source (a bare string), or a table with a `source` and what a generator asks for, or `false`, which takes a default catalog away.
+
+- **`source`** is read by a **content source**, a provider of the host (a `content_source` Guatiao kind, so an extension can add
+  schemes). `file` (a path with no scheme is a file on this computer, and `file:///D:/x` is the same), `https`, `data:` and
+  `git+https`, `git+ssh` and `git+file` ship in the host; an extension adds more, and Settings lists every scheme and who brought it
+  (`content/schemes`). Two providers claiming a scheme never both load: the second is listed as refused, with the reason. A source
+  with no `generator` is the catalog itself, in the format of the type. An address holding a password is refused: the secret does
+  not go in {{ config_file }}.
+- **`generator`** is a `catalog_generator` provider (a Guatiao kind) that reads the source through the host and returns the catalog:
+  it holds what only it knows (a feed's layout, a file-name grammar) and no address, so a mirror is the same generator with another
+  `source`. A generator reads only the entry's `source` and below, and the places it declares. `command` ships: it reads no source,
+  runs a program on each refresh as you, and what it prints is the catalog.
+- A repository's file is `git+https://host/owner/repo.git!/path/in/the/repo?ref=REV`. A source follows its branch or tag: with no `ref`
+  it is the repository's default branch, and what is read is what the repository serves now. A `pin` is your option, never a default.
 
 ```toml
 [store.overlays.catalogs]
 boriken = false                                                       # the default catalog, taken away
-team = "https://github.com/example/overlays.git@main#catalog.toml"    # the same as { provider = "read", source = "..." }
+team = "git+https://github.com/example/overlays.git!/catalog.toml?ref=main"
 
 [store.overlays.catalogs.generated]
-provider = "command"                                                  # run on each refresh; what it prints is the catalog
+generator = "command"                                                 # run on each refresh; what it prints is the catalog
 command = ["python", "make_catalog.py", "--team"]
 cwd = "C:/work/catalogs"                                              # optional: the folder it runs in
 timeout = 60                                                          # optional: seconds it may run
 ```
+
+An entry may instead name a `provider`, a `catalog_source` of an extension that has not moved to a generator yet; it names a
+generator or a provider, never both.
 
 #### Defaults, replacing, adding and turning off
 
@@ -876,14 +891,15 @@ author = "myorg"                              # a Hugging Face publisher whose W
 pin = "0f3c9d1a5b7e2c4d6f8091a2b3c4d5e6f7a8b9c0"   # a revision the source reads at, or "sha256:<hex>" of the catalog's text
 
 [store.whisper.catalogs]
-mine = { provider = "read", source = "D:/models/whisper.json" }   # a canoa.models/1 file of your own
+mine = "D:/models/whisper.json"               # a canoa.models/1 file of your own
 other = false                                 # a default turned off
 ```
 
-Four keys of an entry are the host's, whatever the provider: `pin` (a pinned catalog is read once and never goes stale by time; a
-`sha256:` pin must match the text the source answers with), `ttl` (seconds before it is read again; `[host.store] source_ttl`,
-3600, otherwise), `keys` (the publisher key fingerprints the entry demands a signature from) and `endpoints` (see below). A provider's
-own form may not use these names. Type catalogs that list models answer in `canoa.models/1` and a program's releases in `canoa.releases/1`
+Six keys of an entry are the host's, whatever the generator: `source`, `generator`, `pin` (a pinned catalog is read once and never goes
+stale by time; a `sha256:` pin must match the text the source answers with), `ttl` (seconds before it is read again;
+`[host.content] ttl`, 3600, otherwise), `keys` (the publisher key fingerprints the entry demands a signature from) and `endpoints`
+(see below). A generator's own form may not use these names. `[host.content] document_bytes` (8 MiB) is the most a catalog read into
+memory may hold. Type catalogs that list models answer in `canoa.models/1` and a program's releases in `canoa.releases/1`
 (`crates/canoa/include/canoa.models.schema.json`, `canoa.releases.schema.json`); every item says which catalog it came from. A file's
 `check` names the algorithm of the digest its publisher states (`sha256`, `sha512`, `md5`, `git_blob`), and the download is checked against
 that one; an item whose files all have one carries a check mark in the Store, which says "Verified with SHA-256" (or the algorithm used),
@@ -1189,7 +1205,6 @@ a renewal can be and never how often a publisher or a repository is asked: that 
 | `latest_ttl` | 3600 | A publisher's newest version of each program, and whether an installed overlay's source holds a newer commit |
 | `models_ttl` | 300 | A Store type's list of models (an install, update or removal empties it) |
 | `catalog_ttl` | 300 | The entries of a skills or MCP servers catalog, as the app lists them |
-| `source_ttl` | 3600 | A catalog read through a source provider (an entry's own `ttl` replaces it) |
 | `refresh_every` | 300 | How often the renewal runs while a client is connected; 0 never |
 | `connect_timeout`, `lookup_timeout` | 10, 15 | How long one lookup waits to connect and for the answer |
 

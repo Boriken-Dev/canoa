@@ -176,6 +176,11 @@ impl Fetching {
         }
     }
 
+    /// Tools that reach `endpoints` and nothing else, over this client and these limits.
+    pub(crate) fn tools(&self, endpoints: Vec<String>) -> LocalTools {
+        LocalTools::new(Arc::clone(&self.transport), endpoints).limits(self.limits.clone())
+    }
+
     /// The object a source's `read` is handed: it reaches `endpoints` and nothing else.
     fn object(&self, endpoints: Vec<String>) -> Object<dyn SourceFetch> {
         Fetch {
@@ -237,6 +242,8 @@ struct Held {
 pub(crate) struct Sources {
     held: Vec<Held>,
     fetching: Fetching,
+    /// The content sources and catalog generators, which read through the same client.
+    content: crate::content::Content,
 }
 
 impl core::fmt::Debug for Sources {
@@ -280,6 +287,7 @@ impl Sources {
         extension: Option<&str>,
         registry: Arc<Registry>,
     ) -> Result<(), String> {
+        self.content.add(extension, &registry);
         let mut found = Vec::new();
         for provider in registry.providers(KIND) {
             let id = provider.id().to_owned();
@@ -327,7 +335,23 @@ impl Sources {
 
     /// These sources reaching the network through `fetching`.
     pub(crate) fn fetching(mut self, fetching: Fetching) -> Self {
+        self.content = self.content.fetching(fetching.clone());
         self.fetching = fetching;
+        self
+    }
+
+    /// The content sources and catalog generators this host offers.
+    pub(crate) const fn content(&self) -> &crate::content::Content {
+        &self.content
+    }
+
+    /// These sources keeping fetched repositories in `folder`, and reading documents of at most `bytes` unless asked for less.
+    pub(crate) fn content_in(
+        mut self,
+        folder: Option<&std::path::Path>,
+        bytes: Option<u64>,
+    ) -> Self {
+        self.content = self.content.keeping_in(folder).document_bytes(bytes);
         self
     }
 
@@ -347,20 +371,42 @@ impl Sources {
             .find(|info| info.id == id)
     }
 
-    /// The text at the `https` address `url`, through the host's fetch, which may reach nothing but that address's origin: the one
-    /// place an entry that names only an address may read.
-    pub(crate) fn get_text(&self, url: &str, max_bytes: u64) -> Result<String, String> {
-        let rest = url
-            .strip_prefix("https://")
-            .ok_or_else(|| format!("{url} is not an https address"))?;
-        let origin = format!("https://{}", rest.split('/').next().unwrap_or_default());
-        let fetch = Fetch {
-            tools: LocalTools::new(Arc::clone(&self.fetching.transport), vec![origin])
-                .limits(self.fetching.limits.clone()),
-        };
-        fetch
-            .get_text(url, max_bytes)
-            .map_err(|error| error.to_string())
+    /// The text of the catalog `entry` of the type `kind`, which a generator or a provider makes (an entry whose source is the
+    /// catalog is read by [`content`](Self::content)).
+    ///
+    /// # Errors
+    ///
+    /// Why the generator or provider gave no catalog.
+    pub(crate) fn make(
+        &self,
+        kind: &str,
+        entry: &crate::store::catalogs::Entry,
+    ) -> Result<String, String> {
+        if let Some(generator) = &entry.generator {
+            let mut fields = entry.fields.clone();
+            let source = fields
+                .remove("source")
+                .and_then(|source| source.as_str().map(str::to_owned));
+            let mut request = canoa::content::GenerateRequest::new(
+                kind,
+                entry.label.as_str(),
+                source,
+                serde_json::Value::Object(fields).to_string(),
+            );
+            request.pin.clone_from(&entry.pin);
+            request.keys.clone_from(&entry.keys);
+            return self.content.generate(generator, request);
+        }
+        let mut request = ReadRequest::new(
+            kind,
+            entry.label.as_str(),
+            serde_json::Value::Object(entry.fields.clone()).to_string(),
+        )
+        .signed_by(entry.keys.iter().cloned());
+        if let Some(pin) = &entry.pin {
+            request = request.pinned(pin.as_str());
+        }
+        self.read(&entry.provider, request)
     }
 
     /// The catalog the provider `id` answers with for `request`, or why it gave none.
