@@ -14,6 +14,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `config-store` | `canoa::config_store` | the `config_store` kind: where the host's configuration lives (`guatiao`, `coqui-acp-api`, `guatiao-serde`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
+| `history-store` | `canoa::history_store` | the `history_store` kind: where recorded conversations and every turn's properties are kept, as typed tables with structured queries (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `data-encoding`, `coqui-acp-history`, `time`) |
 | `session-service` | `canoa::session_service` | the `session_service` kind: something a library runs for a host's sessions (an MCP server of tools, its control methods) and what it reaches of its host (`coqui-acp-api`, `guatiao`, `serde_json`) |
 | `speech` | `canoa::speech` | the `speech_provider`, `account_speech`, and `speech_output` kinds (`guatiao`, `coqui-acp-api`) |
 | `sdk` | `canoa::sdk` | the `sdk_provider` kind: a vendor's client for an account type over HTTP the host lends (implies `coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`) |
