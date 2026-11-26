@@ -438,6 +438,11 @@ impl Programs {
         }
     }
 
+    /// The registry of the libraries this host carries.
+    pub(crate) fn registry(&self) -> Arc<Registry> {
+        Arc::clone(&self.registry)
+    }
+
     /// Also offers the stores of `registry`, which an extension's library was loaded into; a store the first registry offers
     /// is never replaced by one of these.
     pub fn add_registry(&self, registry: Arc<Registry>) {

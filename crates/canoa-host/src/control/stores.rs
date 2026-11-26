@@ -123,12 +123,17 @@ impl Stores {
 
     /// The programs `programs` keeps, through the stores named `providers`.
     pub(crate) fn new(programs: Arc<Programs>, providers: Vec<String>) -> Self {
+        // The catalog sources of the libraries the programs' registry holds (each agent's releases) are offered beside the built-in ones.
+        let mut sources = crate::store::sources::Sources::built_in();
+        if let Err(why) = sources.add(None, programs.registry()) {
+            tracing::warn!("the catalog sources of the bundled libraries were refused: {why}");
+        }
         Self {
             programs,
             providers,
             runtimes: Vec::new(),
             types: Vec::new(),
-            sources: crate::store::sources::Sources::built_in(),
+            sources,
             models: models::ModelStores::default(),
             home: std::env::home_dir(),
             caches: Arc::new(crate::store::caches::StoreCaches::in_memory()),
@@ -1244,6 +1249,31 @@ mod programs_tests {
     }
 
     #[test]
+    fn every_catalog_a_scope_offers_names_a_source_this_host_has() {
+        let (stores, root) = stores("sources");
+        let sources = stores.sources();
+        let mut checked = 0;
+        for scope in stores.catalog_types() {
+            for default in &scope.defaults {
+                assert!(
+                    sources.info(&default.provider).is_some(),
+                    "the catalog {:?} of {:?} names the source {:?}, which this host does not offer",
+                    default.label,
+                    scope.id,
+                    default.provider
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 5, "the scopes offer their catalogs: {checked}");
+        assert!(
+            sources.info("agy_releases").is_some(),
+            "Antigravity's releases are a source"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn every_program_a_library_offers_is_listed_in_one_store_apart_from_the_agents() {
         let (stores, root) = stores("all");
         let registry = crate::store::registry::built_in().expect("the built-in stores");
@@ -1354,7 +1384,7 @@ mod programs_tests {
         for (kind, models) in [
             (canoa_whisper::STORE_TYPE, "whisper_models"),
             (canoa_whisper_candle::STORE_TYPE, "whispercandle_models"),
-            (canoa_piper::STORE_TYPE, "piper_voices"),
+            (canoa_piper::STORE_TYPE, "piper_models"),
         ] {
             let added = types
                 .iter()

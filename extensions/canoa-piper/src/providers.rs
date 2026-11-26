@@ -25,7 +25,7 @@ impl StoreExtension for PiperExtension {
     fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
         let mut local = ExtensionType::new(STORE_TYPE, "Piper", ["piper_store"]);
         local.icon = Some("speaker".to_owned());
-        local.models = Some("piper_voices".to_owned());
+        local.models = Some("piper_models".to_owned());
         local.catalogs = Some(
             CatalogWords::new("catalog", "catalogs", "voices")
                 .in_format(MODELS_FORMAT)
@@ -65,7 +65,7 @@ mod tests {
             .expect("registers");
         assert!(loading.loaded().is_some(), "accepted");
         assert!(registry.offer::<dyn ProgramStore>("piper_store").is_some());
-        assert!(registry.offer::<dyn ModelStore>("piper_voices").is_some());
+        assert!(registry.offer::<dyn ModelStore>("piper_models").is_some());
         assert!(
             registry
                 .offer::<dyn SpeechOutput>(crate::PROVIDER)
@@ -78,6 +78,6 @@ mod tests {
         assert_eq!(kind.id, STORE_TYPE);
         assert_eq!(kind.problem(), None);
         assert_eq!(kind.stores, ["piper_store"]);
-        assert_eq!(kind.models.as_deref(), Some("piper_voices"));
+        assert_eq!(kind.models.as_deref(), Some("piper_models"));
     }
 }

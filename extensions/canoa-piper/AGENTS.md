@@ -17,8 +17,8 @@ pub const PROVIDER: &str = "speech_say_piper";   // the id of the speech-output 
 pub fn library(host: guatiao::library::Host) -> Option<LibraryParts>;   // PiperStore, PiperExtension, PiperModels, PiperVoices, PiperSpeech
 
 pub struct PiperStore;        // a `program_store`, id "piper_store", over `store::PiperRecipe`
-pub struct PiperExtension;    // a `store_extension`, id "piper_extension": the type `piper` ("Piper", icon `speaker`, store `piper_store`, models `piper_voices`)
-pub struct PiperModels;       // a `model_store`, id "piper_voices": `describe().voice` is `speech_say_piper`; `service` says which voices the installed copy speaks with; its page lists nothing of its own, the voices are the catalogs'
+pub struct PiperExtension;    // a `store_extension`, id "piper_extension": the type `piper` ("Piper", icon `speaker`, store `piper_store`, models `piper_models`)
+pub struct PiperModels;       // a `model_store`, id "piper_models": `describe().voice` is `speech_say_piper`; `service` says which voices the installed copy speaks with; its page lists nothing of its own, the voices are the catalogs'
 pub struct PiperSpeech;       // a `speech_output`, id "speech_say_piper", built `From<PiperSettings>`
 pub struct PiperSettings { pub program: String, pub voices_dir: String /* folders, separated as a search path is */, pub default_voice: Option<String>, pub timeout_seconds: u32 }   // `PiperSettings::new(program, voices_dir)`
 

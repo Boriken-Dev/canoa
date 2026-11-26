@@ -32,7 +32,7 @@ const NOT_INSTALLED: &str = "Piper is not installed: install it in the Store fir
 
 /// The voices of Piper, as the voice the host reads replies aloud with. The page's rows are the catalogs'.
 #[derive(Default, Debug, Clone, Copy, Provider)]
-#[provider(ModelStore, id = "piper_voices", crate = ::coqui_acp_api::guatiao)]
+#[provider(ModelStore, id = "piper_models", crate = ::coqui_acp_api::guatiao)]
 pub struct PiperModels;
 
 fn unsupported(why: &str) -> ProviderError {
