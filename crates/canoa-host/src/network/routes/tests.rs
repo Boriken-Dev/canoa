@@ -315,10 +315,9 @@ fn a_command_route_that_cannot_start_or_names_no_program_says_so() {
             &serde_json::json!({"command": ["/no/such/program"]}),
         )
         .expect("a route");
-    let error = missing
-        .open(OpenRequest::new("host"))
-        .err()
-        .expect("refused");
+    let Err(error) = missing.open(OpenRequest::new("host")) else {
+        panic!("a program that does not exist was started");
+    };
     assert!(
         error.message().contains("could not start"),
         "{}",

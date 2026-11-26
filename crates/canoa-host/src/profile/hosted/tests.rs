@@ -3585,7 +3585,7 @@ fn a_route_the_host_lacks_refuses_the_session_instead_of_leaving_it_on_another_p
         "[profiles.default.items.network]\nroutes = [{ route = \"ghost\" }]\n",
         crate::profile::items::ItemCatalog::from_registries(Vec::new()),
     );
-    let why = Connection::prepare_with(
+    let Err(why) = Connection::prepare_with(
         &offer,
         0,
         "a",
@@ -3598,9 +3598,9 @@ fn a_route_the_host_lacks_refuses_the_session_instead_of_leaving_it_on_another_p
             },
             ..Starting::default()
         },
-    )
-    .err()
-    .expect("refused");
+    ) else {
+        panic!("a route the host lacks started the session");
+    };
     assert!(why.contains("ghost") && why.contains("network"), "{why}");
 }
 
