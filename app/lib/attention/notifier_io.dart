@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -39,13 +40,23 @@ final class DesktopNotifier implements Notifier {
   @override
   Future<bool> requestPermission() async => true;
 
-  @override
-  Future<bool> attended() async {
+  Future<bool> _attended() async {
     try {
       return await windowManager.isVisible() && !await windowManager.isMinimized() && await windowManager.isFocused();
     } on Object {
       return true;
     }
+  }
+
+  @override
+  void watchAttention(void Function(bool attended) onChange) {
+    final watcher = _Watcher(() async => onChange(await _attended()));
+    try {
+      windowManager.addListener(watcher);
+    } on Object catch (error) {
+      debugPrint('the window cannot be watched: $error');
+    }
+    unawaited(_attended().then(onChange));
   }
 
   @override
@@ -65,5 +76,29 @@ final class DesktopNotifier implements Notifier {
       _shown.remove(notification);
       debugPrint('a notification was not shown: $error');
     }
+  }
+}
+
+/// Asks again whether the window is looked at each time its focus or its state changes.
+final class _Watcher with WindowListener {
+  _Watcher(this._changed);
+
+  final void Function() _changed;
+
+  @override
+  void onWindowFocus() => _changed();
+
+  @override
+  void onWindowBlur() => _changed();
+
+  @override
+  void onWindowMinimize() => _changed();
+
+  @override
+  void onWindowRestore() => _changed();
+
+  @override
+  void onWindowEvent(String eventName) {
+    if (eventName == 'show' || eventName == 'hide') _changed();
   }
 }

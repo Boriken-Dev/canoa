@@ -59,18 +59,6 @@ void main() {
     expect(h.last.brightness, 'light');
   });
 
-  testWidgets('Notifications', (tester) async {
-    final config = _layered(
-      own: {'notifications': {'finished': true}},
-      system: {'notifications': {'finished': false, 'question': false}},
-    );
-    final h = await openSettings(tester, config: config, section: 'notifications');
-    expect(_from, findsOneWidget, reason: 'the question');
-    expect(_overrides, findsOneWidget, reason: 'finished');
-    await _resetOne(tester);
-    expect(h.last.notifications.finished, isFalse);
-  });
-
   testWidgets('Sources', (tester) async {
     final codex = AgentSource.hosted('Codex', harness: 'codex', local: true);
     final config = _layered(

@@ -20,6 +20,9 @@ final class HostGrants extends ChangeNotifier {
   /// The grant that lists the secrets the host holds, shows one on request, forgets one and sets one.
   static const secrets = 'secrets';
 
+  /// The grant that asks for the host's notices, says which session the person is looking at, and sets up the notifiers.
+  static const notify = 'notify';
+
   /// The grant that writes the app's own tables of canoa.cfg, the saved connections among them.
   static const configWrite = 'config.write';
 

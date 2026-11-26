@@ -346,27 +346,6 @@ void main() {
   });
 
   group('Notifications', () {
-    for (final (label, read) in <(String, bool Function(NotificationSettings))>[
-      ('It asks leave to use a tool', (n) => n.permission),
-      ('It has a question for you', (n) => n.question),
-      ('It finished its turn', (n) => n.finished),
-    ]) {
-      testWidgets('"$label" is a row of its own, and changes only itself', (tester) async {
-        final h = await openSettings(tester, config: every, section: 'notifications');
-        final row = find.widgetWithText(SwitchRow, label);
-        expect(row, findsOneWidget);
-        expect(find.descendant(of: row, matching: find.byType(Switch)), findsOneWidget);
-        final before = read(every.notifications);
-        await tester.tap(find.descendant(of: row, matching: find.byType(Switch)));
-        await tester.pumpAndSettle();
-        expect(read(h.last.notifications), !before);
-        expect(changedTables(every, h.last), {'notifications'});
-        final others = [every.notifications.permission, every.notifications.question, every.notifications.finished];
-        final now = [h.last.notifications.permission, h.last.notifications.question, h.last.notifications.finished];
-        expect([for (var i = 0; i < 3; i++) others[i] != now[i]].where((changed) => changed), hasLength(1));
-      });
-    }
-
     testWidgets('a browser is asked for leave only where that is needed', (tester) async {
       await openSettings(tester, section: 'notifications');
       expect(find.byKey(const Key('settings-allow-notifications')), findsNothing);

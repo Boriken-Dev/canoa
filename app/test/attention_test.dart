@@ -1,22 +1,19 @@
-// A session that needs the person, while they look elsewhere: a notification naming it and the kind, never what the agent sent,
-// and a mark on its row.
+// The host decides which events happen, who is told and what a notice says; the app shows a notice the host pushed, and tells the host
+// which conversation the person is looking at. A conversation that needs the person is also marked on its row.
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:canoa/acp/client.dart';
+import 'package:canoa/attention/host_notices.dart';
 import 'package:canoa/attention/notifier.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/main.dart';
-import 'package:canoa/session_store.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:canoa/desktop/host_control.dart';
+import 'package:canoa/desktop/host_tool.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:canoa/settings/settings_row.dart' show SwitchRow;
-import 'fixtures/settings_fixture.dart';
 
 final class _Notifier implements Notifier {
   final shown = <({String title, String body, String sessionId})>[];
-  bool looking = true;
   void Function(String)? open;
+  void Function(bool)? watcher;
 
   @override
   Future<void> initialize(void Function(String sessionId) onOpen) async => open = onOpen;
@@ -25,180 +22,126 @@ final class _Notifier implements Notifier {
   @override
   Future<bool> requestPermission() async => true;
   @override
-  Future<bool> attended() async => looking;
+  void watchAttention(void Function(bool attended) onChange) => watcher = onChange;
   @override
   Future<void> show({required String title, required String body, required String sessionId}) async =>
       shown.add((title: title, body: body, sessionId: sessionId));
 }
 
-/// An agent in memory, speaking v2, that asks and ends turns when a test says.
-final class _Agent {
-  final incoming = StreamController<String>();
-  late final VerifiedAgent client;
+/// A control link that answers every request with an empty result, keeps what was asked and pushes what a test says.
+final class _Link implements HostLink {
+  final inbox = StreamController<String>();
+  final calls = <({String method, Map<String, Object?> params})>[];
 
-  Future<ChatSession> start(SessionStore store, String title) async {
-    client = VerifiedAgent.fromChild(
-      label: title,
-      messages: incoming.stream,
-      decider: store.askPermission,
-      close: () async {},
-      send: (line) async {
-        final message = jsonDecode(line) as Map<String, dynamic>;
-        final id = message['id'];
-        if (id == null || message['method'] == null) return;
-        incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': switch (message['method']) {
-          'initialize' => {'protocolVersion': 2, 'capabilities': {'session': <String, Object?>{}}},
-          'session/new' => {'sessionId': 's1'},
-          _ => <String, Object?>{},
-        }}));
-      },
-    );
-    await client.initialize();
-    await client.openSession(cwd: '/work');
-    final session = store.addProviderSession(title: title, agent: title, peerId: client.peerId, remoteSessionId: 's1');
-    store.attachVerifiedClient(session.id, client, record: false);
-    return session;
+  @override
+  Stream<String> get messages => inbox.stream;
+
+  @override
+  Future<void> send(String message) async {
+    final request = jsonDecode(message) as Map<String, dynamic>;
+    if (request['method'] == null) return;
+    calls.add((method: '${request['method']}', params: (request['params'] as Map).cast<String, Object?>()));
+    inbox.add(jsonEncode({'jsonrpc': '2.0', 'id': request['id'], 'result': <String, Object?>{}}));
   }
 
-  void update(Map<String, Object?> body) => incoming.add(jsonEncode({
-    'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': 's1', 'update': body},
-  }));
+  @override
+  Future<void> close() async => inbox.close();
 
-  void turn() {
-    update({'sessionUpdate': 'state_update', 'state': 'running'});
-    update({'sessionUpdate': 'state_update', 'state': 'idle', 'stopReason': 'end_turn'});
-  }
+  void notice(Map<String, Object?> params) => inbox.add(jsonEncode({'jsonrpc': '2.0', 'method': 'notify/notice', 'params': params}));
 
-  void ask() => incoming.add(jsonEncode({
-    'jsonrpc': '2.0', 'id': 5, 'method': 'session/request_permission',
-    'params': {
-      'sessionId': 's1',
-      'title': 'Run rm -rf ~/secrets',
-      'subject': {'type': 'command', 'command': 'rm -rf ~/secrets'},
-      'options': [{'optionId': 'y', 'name': 'Yes', 'kind': 'allow_once'}, {'optionId': 'n', 'name': 'No', 'kind': 'reject_once'}],
-    },
-  }));
+  List<Object?> told(String method) => [for (final call in calls) if (call.method == method) call.params];
 }
 
-Future<void> _settle(WidgetTester tester) async {
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
-  await tester.pump();
-}
-
-/// Two conversations, Front chosen and Back behind it, shown in the app with [notifier].
-Future<(_Agent, ChatSession, ChatSession, SessionStore)> _two(WidgetTester tester, _Notifier notifier,
-    {CanoaConfig config = const CanoaConfig()}) async {
-  await tester.binding.setSurfaceSize(const Size(1100, 800));
-  addTearDown(() => tester.binding.setSurfaceSize(null));
-  final store = SessionStore();
-  final back = _Agent();
-  final behind = await tester.runAsync(() => back.start(store, 'Back')) as ChatSession;
-  final front = await tester.runAsync(() => _Agent().start(store, 'Front')) as ChatSession;
-  store.select(front.id);
-  await tester.pumpWidget(CanoaApp(store: store, config: config, notifier: notifier));
-  await tester.pump();
-  return (back, behind, front, store);
-}
-
-Finder _row(String title) => find.ancestor(of: find.text(title), matching: find.byType(ListTile)).first;
+Future<void> _settle() => Future<void>.delayed(const Duration(milliseconds: 30));
 
 void main() {
-  testWidgets('a request in a conversation behind is notified by its name and kind, never by what it would do, and marked', (tester) async {
-    final notifier = _Notifier();
-    final (back, behind, _, _) = await _two(tester, notifier);
-    back.ask();
-    await _settle(tester);
-    expect(notifier.shown, hasLength(1));
-    final shown = notifier.shown.single;
-    expect(shown.title, 'Back');
-    expect(shown.body, 'Back asks leave to use a tool');
-    expect(shown.sessionId, behind.id);
-    expect('${shown.title} ${shown.body}', isNot(contains('rm')));
-    expect(find.descendant(of: _row('Back'), matching: find.byTooltip('Needs you')), findsOneWidget);
+  group('the host\'s notices', () {
+    late _Link link;
+    late _Notifier notifier;
+    late HostNotices notices;
+    final sessions = {'remote-1': (id: 'local-1', title: 'Fix\nthe build')};
+
+    setUp(() async {
+      link = _Link();
+      notifier = _Notifier();
+      notices = HostNotices(
+        control: HostControl.dialing(() async => link),
+        notifier: notifier,
+        language: () => 'es',
+        localSession: (remote) => sessions[remote],
+      );
+      notices.start();
+      await _settle();
+    });
+
+    tearDown(() async {
+      await notices.stop();
+      await link.close();
+    });
+
+    test('the app asks for notices in its language and the host\'s words are shown as they are', () async {
+      expect(link.told('notify/subscribe'), [
+        {'language': 'es'},
+      ]);
+      link.notice({
+        'id': 'n1', 'event': 'permission', 'title': 'Fix the build', 'body': 'Claude asks leave to use a tool', 'urgency': 'high',
+        'session': {'id': 'remote-1', 'title': 'Fix the build', 'agent': 'Claude'},
+      });
+      await _settle();
+      final shown = notifier.shown.single;
+      expect(shown.title, 'Fix the build');
+      expect(shown.body, 'Claude asks leave to use a tool');
+      expect(shown.sessionId, 'local-1', reason: 'the conversation of this app, so choosing it opens that one');
+    });
+
+    test('a conversation the host knew by no title is called what this app calls it, on one line', () async {
+      link.notice({
+        'id': 'n2', 'event': 'finished', 'title': 'A conversation', 'body': 'Claude finished its turn',
+        'session': {'id': 'remote-1', 'title': null, 'agent': 'Claude'},
+      });
+      await _settle();
+      expect(notifier.shown.single.title, 'Fix the build');
+    });
+
+    test('a notice about the host, or a session this app does not have, is still shown', () async {
+      link.notice({'id': 'n3', 'event': 'host_updated', 'title': 'Canoa', 'body': 'The host was updated 1.2', 'session': null});
+      link.notice({
+        'id': 'n4', 'event': 'failed', 'title': 'A conversation', 'body': 'x', 'session': {'id': 'elsewhere', 'title': null},
+      });
+      await _settle();
+      expect(notifier.shown.map((each) => each.sessionId), ['', 'elsewhere']);
+    });
+
+    test('the conversation the person looks at is reported while the window is focused, and none otherwise', () async {
+      notices.selected = 'remote-1';
+      await _settle();
+      expect(link.told('notify/attended'), isEmpty, reason: 'the window is not focused yet');
+      notices.focused = true;
+      await _settle();
+      expect(link.told('notify/attended').last, {'session': 'remote-1'});
+      notices.selected = 'remote-2';
+      await _settle();
+      expect(link.told('notify/attended').last, {'session': 'remote-2'});
+      notices.focused = false;
+      await _settle();
+      expect(link.told('notify/attended').last, {'session': null});
+      final count = link.told('notify/attended').length;
+      notices.focused = false;
+      await _settle();
+      expect(link.told('notify/attended'), hasLength(count), reason: 'a report that says nothing new is not sent');
+    });
   });
 
-  testWidgets('a finished turn behind is notified and marked new until the conversation is chosen', (tester) async {
-    final notifier = _Notifier();
-    final (back, behind, _, store) = await _two(tester, notifier);
-    back.turn();
-    await _settle(tester);
-    expect(notifier.shown.single.body, 'Back finished its turn');
-    expect(behind.unread, isTrue);
-    expect(find.descendant(of: _row('Back'), matching: find.byTooltip('New since you looked')), findsOneWidget);
-    await tester.tap(find.text('Back').first);
-    await tester.pump();
-    expect(behind.unread, isFalse);
-    expect(find.byTooltip('New since you looked'), findsNothing);
-    expect(store.selectedId, behind.id);
-  });
-
-  testWidgets('the conversation the person is looking at is not notified, unless the window is away', (tester) async {
-    final notifier = _Notifier();
-    final (back, behind, _, store) = await _two(tester, notifier);
-    store.select(behind.id);
-    await tester.pump();
-    back.turn();
-    await _settle(tester);
-    expect(notifier.shown, isEmpty);
-    notifier.looking = false;
-    back.turn();
-    await _settle(tester);
-    expect(notifier.shown, hasLength(1));
-    expect(behind.unread, isFalse, reason: 'it is the conversation chosen');
-  });
-
-  testWidgets('each kind can be turned off', (tester) async {
-    final notifier = _Notifier();
-    final (back, _, _, _) = await _two(tester, notifier,
-        config: const CanoaConfig(notifications: NotificationSettings(permission: false, finished: false)));
-    back.ask();
-    back.turn();
-    await _settle(tester);
-    expect(notifier.shown, isEmpty);
-    expect(find.descendant(of: _row('Back'), matching: find.byTooltip('Needs you')), findsOneWidget,
-        reason: 'the row still says so');
-  });
-
-  testWidgets('choosing a notification opens its conversation', (tester) async {
-    final notifier = _Notifier();
-    final (back, behind, _, store) = await _two(tester, notifier);
-    back.turn();
-    await _settle(tester);
-    notifier.open!(notifier.shown.single.sessionId);
-    await tester.pump();
-    expect(store.selectedId, behind.id);
-  });
-
-  testWidgets('a working conversation behind shows that it works', (tester) async {
-    final (back, _, _, _) = await _two(tester, _Notifier());
-    back.update({'sessionUpdate': 'state_update', 'state': 'running'});
-    await _settle(tester);
-    expect(find.descendant(of: _row('Back'), matching: find.byTooltip('Working')), findsOneWidget);
-  });
-
-  test('canoa.cfg keeps each kind, on by default, and refuses what is not yes or no', () {
-    const fallback = CanoaConfig();
-    expect([fallback.notifications.permission, fallback.notifications.question, fallback.notifications.finished], [true, true, true]);
-    final read = CanoaConfig.parse('[notifications]\nfinished = false\n');
-    expect(read.notifications.finished, isFalse);
-    expect(CanoaConfig.parse(read.encode()).notifications.finished, isFalse);
-    expect(CanoaConfig.parse(read.encode()).notifications.permission, isTrue);
-    expect(() => CanoaConfig.parse('[notifications]\nfinished = "no"\n'), throwsFormatException);
-    expect(CanoaConfig.parse('[notifications]\nerrors = true\n').encode(), contains('errors = true'), reason: 'a key it does not know is kept');
-  });
-
-  testWidgets('Settings turns a kind off', (tester) async {
-    final settings = await openSettings(tester, section: 'notifications');
-    await tester.tap(find.descendant(of: find.byType(SwitchRow).at(2), matching: find.byType(Switch)));
-    await tester.pumpAndSettle();
-    expect(settings.last.notifications.finished, isFalse);
-    expect(settings.last.notifications.permission, isTrue);
-  });
-
-  test('the words name the session and the kind, one line each', () {
-    final session = ChatSession(id: 'l', title: 'Fix\nit \u202Enow', agent: 'Claude', status: SessionStatus.connected);
-    final question = attentionText(session, AttentionKind.question);
-    expect(question.title, 'Fix it  now');
-    expect(question.body, 'Claude has a question for you');
+  test('canoa.cfg holds the host\'s [notifications] table as it found it, and the app has no field of its own for it', () {
+    const text = '[notifications]\npermission = ["desktop", "phone"]\nfinished = []\n'
+        '[notifications.notifiers.phone]\nprovider = "ntfy"\n';
+    final written = CanoaConfig.parse(text).documentToWrite;
+    expect(written['notifications'], {
+      'permission': ['desktop', 'phone'],
+      'finished': <Object?>[],
+      'notifiers': {'phone': {'provider': 'ntfy'}},
+    });
+    expect(CanoaConfig.ownTables, isNot(contains('notifications')));
+    expect(CanoaConfig.parse('').documentToWrite.containsKey('notifications'), isFalse, reason: 'a config that names none writes none');
   });
 }

@@ -47,7 +47,14 @@ final class WebNotifier implements Notifier {
   }
 
   @override
-  Future<bool> attended() async => _visibility == 'visible' && _hasFocus();
+  void watchAttention(void Function(bool attended) onChange) {
+    void report() => onChange(_visibility == 'visible' && _hasFocus());
+    final handler = report.toJS;
+    globalContext.callMethod('addEventListener'.toJS, 'focus'.toJS, handler);
+    globalContext.callMethod('addEventListener'.toJS, 'blur'.toJS, handler);
+    globalContext.callMethod('addEventListener'.toJS, 'visibilitychange'.toJS, handler);
+    report();
+  }
 
   @override
   Future<void> show({required String title, required String body, required String sessionId}) async {

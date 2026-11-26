@@ -1,6 +1,8 @@
 import 'desktop/tray_follower.dart';
 import 'brand.dart';
 import 'l10n/app_text.dart';
+import 'attention/host_notices.dart';
+import 'attention/notifications_host.dart';
 import 'attention/notifier.dart';
 import 'dart:async';
 import 'served/folder_dialog.dart';
@@ -825,6 +827,7 @@ class _CanoaAppState extends State<CanoaApp> {
           ? (template) => _hostFolders!.preview(template, source: _lastSource?.label ?? '', handler: _lastSource == null ? '' : handlerOf(_lastSource!))
           : null,
       onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
+      notifications: _notifications,
       presets: [
         for (final source in _hostedSources)
           if (source.local && !config.agents.any((agent) => agent.label == source.label)) source,
@@ -1122,21 +1125,44 @@ class _CanoaAppState extends State<CanoaApp> {
   final _navigator = GlobalKey<NavigatorState>();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
   Timer? _contextTimer;
-  StreamSubscription<(ChatSession, AttentionKind)>? _attention;
   final List<VerifiedAgent> _ownedClients = [];
+  HostNotices? _notices;
+  NotificationsController? _notificationsHeld;
 
-  /// Tells the person about [session] outside the window, when its kind is on and they are not looking at it there.
-  Future<void> _notify(ChatSession session, AttentionKind kind) async {
+  /// What the Notifications page chooses among: the host's events and notifiers, for a key that may set them up.
+  NotificationsController? get _notifications {
+    final control = _control;
+    if (control == null || !(_grants?.may(HostGrants.notify) ?? false)) return null;
+    return _notificationsHeld ??= NotificationsController(host: ControlNotificationsHost(control));
+  }
+
+  /// Shows the host's notices through the platform's notifier. The host decides which events happen, who is told, and when the person
+  /// is looking; this tells it which conversation that is.
+  void _listenForNotices() {
     final notifier = widget.notifier;
-    final wanted = switch (kind) {
-      AttentionKind.permission => config.notifications.permission,
-      AttentionKind.question => config.notifications.question,
-      AttentionKind.finished => config.notifications.finished,
-    };
-    if (notifier == null || !wanted) return;
-    if (session.id == store.selectedId && await notifier.attended()) return;
-    final text = attentionText(session, kind);
-    await notifier.show(title: text.title, body: text.body, sessionId: session.id);
+    final control = _control;
+    if (notifier == null || control == null) return;
+    final notices = _notices = HostNotices(
+      control: control,
+      notifier: notifier,
+      language: () => AppText.resolveLanguage(config.language.isEmpty ? null : config.language, null),
+      localSession: (remote) {
+        final held = store.sessions.where((session) => session.remoteSessionId == remote).firstOrNull;
+        return held == null ? null : (id: held.id, title: held.title);
+      },
+    );
+    notifier.watchAttention((attended) => notices.focused = attended);
+    notices.selected = store.selected?.remoteSessionId;
+    notices.start();
+  }
+
+  String? _noticedSelection;
+
+  void _selectionForNotices() {
+    final remote = store.selected?.remoteSessionId;
+    if (remote == _noticedSelection) return;
+    _noticedSelection = remote;
+    _notices?.selected = remote;
   }
 
   /// The person chose a notification: its conversation, in the window.
@@ -3133,8 +3159,9 @@ class _CanoaAppState extends State<CanoaApp> {
     _conversation.popout = _popout;
     _popout.onNewSession = _newSession;
     _conversation.windows = _itemWindows;
-    _attention = store.attention.listen((needs) => unawaited(_notify(needs.$1, needs.$2)));
     unawaited(widget.notifier?.initialize(_openFromNotification));
+    _listenForNotices();
+    store.addListener(_selectionForNotices);
     store.addListener(_showWaiting);
     final kept = _layout.of(ShellLayout.conversations).item;
     if (kept != null && store.selectedId != kept && store.sessions.any((session) => session.id == kept)) store.select(kept);
@@ -3212,7 +3239,9 @@ class _CanoaAppState extends State<CanoaApp> {
     if (_ownsRelations) (_relations as ChangeNotifier).dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
-    unawaited(_attention?.cancel());
+    unawaited(_notices?.stop());
+    _notificationsHeld?.dispose();
+    store.removeListener(_selectionForNotices);
     store.removeListener(_showWaiting);
     store.removeListener(_noteLast);
     if (identical(store.starter, _startDraft)) store.starter = null;

@@ -29,20 +29,6 @@ final class HostEntry {
   final String? harness;
 }
 
-/// `[notifications]`: which kinds of news from a session reach the person outside the window. Each is on by default.
-final class NotificationSettings {
-  const NotificationSettings({this.permission = true, this.question = true, this.finished = true});
-
-  /// A permission request, a question from the agent, and a turn that ended.
-  final bool permission, question, finished;
-
-  NotificationSettings copyWith({bool? permission, bool? question, bool? finished}) => NotificationSettings(
-    permission: permission ?? this.permission,
-    question: question ?? this.question,
-    finished: finished ?? this.finished,
-  );
-}
-
 /// How a dictation is held: one press starts it and the next ends it, or it lasts while a key is down.
 enum DictationMode { toggle, hold }
 

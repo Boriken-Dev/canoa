@@ -13,7 +13,7 @@ Map<String, dynamic> _rich() => {
   'desktop': {'start_hidden': true, 'close_to_tray': true},
   'appearance': {'look': 'canoa', 'brightness': 'dark'},
   'sessions': {'keep': 200},
-  'notifications': {'finished': true},
+  'notifications': {'finished': ['desktop']},
   'permissions': {'default_mode': 'manual'},
   'sources': {'hidden': ['Gemini']},
   'usage': {'warn_permille': 800, 'limit_phrases': ['rate limit']},

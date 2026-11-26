@@ -1,5 +1,6 @@
 import 'package:canoa/served/portal_session.dart';
 import 'package:canoa/accounts/accounts_controller.dart';
+import 'package:canoa/attention/notifications_host.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
@@ -59,6 +60,7 @@ Future<SettingsHarness> openSettings(
   ProviderSwitches? providers,
   CatalogSources? catalogSources,
   AdvancedConfig? advancedConfig,
+  NotificationsController? notifications,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -95,6 +97,7 @@ Future<SettingsHarness> openSettings(
       providers: providers,
       catalogSources: catalogSources,
       advancedConfig: advancedConfig,
+      notifications: notifications,
     ),
   ));
   await tester.pumpAndSettle();

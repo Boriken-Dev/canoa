@@ -23,15 +23,15 @@ connect_timeout = 12
     expect(parsed.preferWebTransport, false);
     expect(CanoaConfig.parse(parsed.encode()).connectTimeout, 12);
   });
-  test('saving Settings or pinning an overlay keeps the default mode and the notifications', () {
-    final config = CanoaConfig.parse('[permissions]\ndefault_mode = "plan"\n[notifications]\nfinished = false\n'
+  test('saving Settings or pinning an overlay keeps the default mode and the notifications table of the host', () {
+    final config = CanoaConfig.parse('[permissions]\ndefault_mode = "plan"\n[notifications]\nfinished = []\n'
         '[overlays]\nmine = { dir = "mine" }\n');
     for (final saved in [config.withProfilesOf(config), config.withOverlayPin('mine', 'sha256:${'0' * 64}')]) {
       expect(saved.defaultMode, 'plan');
-      expect(saved.notifications.finished, isFalse);
+      expect(saved.encode(), contains('finished = []'));
       final reread = CanoaConfig.parse(saved.encode());
       expect(reread.defaultMode, 'plan');
-      expect(reread.notifications.finished, isFalse);
+      expect(reread.encode(), contains('finished = []'));
     }
   });
 

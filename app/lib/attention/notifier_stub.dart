@@ -16,7 +16,7 @@ final class _None implements Notifier {
   Future<bool> requestPermission() async => false;
 
   @override
-  Future<bool> attended() async => true;
+  void watchAttention(void Function(bool attended) onChange) => onChange(false);
 
   @override
   Future<void> show({required String title, required String body, required String sessionId}) async {}

@@ -11,7 +11,6 @@ const Map<String, String> configPages = {
   'overlays': 'store',
   'profile': 'profiles',
   'permissions': 'permissions',
-  'notifications': 'notifications',
   'store': 'store',
   'skill_pins': 'store',
   'loadouts': 'loadouts',

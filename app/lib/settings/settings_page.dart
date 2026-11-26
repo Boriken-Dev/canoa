@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../l10n/app_text.dart';
 import '../accounts/accounts_controller.dart';
+import '../attention/notifications_host.dart' show NotificationsController;
 import '../accounts/accounts_section.dart';
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
@@ -22,6 +23,7 @@ import 'agent_sections.dart';
 import 'app_sections.dart';
 import '../shell/shell.dart' show ShellScope;
 import '../served/portal_session.dart';
+import 'notifications_section.dart';
 import 'overlay_sections.dart';
 import 'sign_in_section.dart';
 import 'extension_settings.dart';
@@ -75,6 +77,7 @@ class SettingsPage extends StatefulWidget {
     this.programs,
     this.hostWorkspacePreview,
     this.onAllowNotifications,
+    this.notifications,
     this.profileAgents = const [],
     this.profileChoices,
     this.home,
@@ -125,6 +128,9 @@ class SettingsPage extends StatefulWidget {
 
   /// Asks the browser for leave to notify, where it has to be asked; true when it was given.
   final Future<bool> Function()? onAllowNotifications;
+
+  /// What the host says of its events and notifiers, which the Notifications page chooses among; null where there is no host.
+  final NotificationsController? notifications;
 
   /// The agents a profile or an MCP choice is made for.
   final List<String> profileAgents;
@@ -201,7 +207,7 @@ class SettingsPageState extends State<SettingsPage> {
   Map<String, ({bool ready, Widget Function() build})> get _own => {
     'general': (ready: true, build: () => GeneralSection(controller: controller, ledger: widget.ledger, hostWorkspacePreview: widget.hostWorkspacePreview)),
     'appearance': (ready: true, build: () => AppearanceSection(controller: controller)),
-    'notifications': (ready: true, build: () => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications)),
+    'notifications': (ready: true, build: () => NotificationsSection(key: const Key('settings-notifications'), controller: widget.notifications, onAllowNotifications: widget.onAllowNotifications)),
     'voice': (
       ready: true,
       build: () => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech, outputs: widget.voiceOutputs, reader: widget.reader),

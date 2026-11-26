@@ -55,7 +55,6 @@ final class CanoaConfig {
     this.defaultMode,
     this.allowOnceOnly = false,
     this.protectedPaths,
-    this.notifications = const NotificationSettings(),
     this.voice = const VoiceSettings(),
     this.hiddenSources = const {},
     this.shortcuts = const {},
@@ -141,8 +140,6 @@ final class CanoaConfig {
   /// `protected_paths.dart`); null leaves the recommended list, and a list written here replaces it.
   final List<String>? protectedPaths;
 
-  final NotificationSettings notifications;
-
   /// `[voice]`: the speech service and how dictation is held.
   final VoiceSettings voice;
 
@@ -174,7 +171,7 @@ final class CanoaConfig {
       bool? minimizeToTray, bool? startAtLogin, bool? preferWebTransport, num? connectTimeout,
       LookId? look, bool? followProvider, String? brightness, ChatDensity? density, OpenIn? openIn, String? language, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
-      NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
+      VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
       CanoaConfig(
         startHidden: startHidden ?? this.startHidden,
         closeToTray: closeToTray ?? this.closeToTray,
@@ -199,7 +196,6 @@ final class CanoaConfig {
         defaultMode: clearDefaultMode ? null : defaultMode ?? this.defaultMode,
         allowOnceOnly: allowOnceOnly ?? this.allowOnceOnly,
         protectedPaths: clearProtectedPaths ? null : protectedPaths ?? this.protectedPaths,
-        notifications: notifications ?? this.notifications,
         voice: voice ?? this.voice,
         hiddenSources: hiddenSources ?? this.hiddenSources,
         shortcuts: shortcuts ?? this.shortcuts,
@@ -235,7 +231,6 @@ final class CanoaConfig {
     defaultMode: defaultMode,
     allowOnceOnly: allowOnceOnly,
     protectedPaths: protectedPaths,
-    notifications: notifications,
     voice: voice,
     hiddenSources: hiddenSources,
     shortcuts: shortcuts,
@@ -1380,7 +1375,6 @@ final class CanoaConfig {
     defaultMode: defaultMode,
     allowOnceOnly: allowOnceOnly,
     protectedPaths: protectedPaths,
-    notifications: notifications,
     voice: voice,
     hiddenSources: hiddenSources,
     shortcuts: shortcuts,
@@ -1413,7 +1407,6 @@ final class CanoaConfig {
     'appearance': {'look', 'follow_provider', 'brightness', 'density', 'open_in', 'language'},
     'sessions': {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'},
     'permissions': {'default_mode', 'full_access', 'allow_once_only', 'protected'},
-    'notifications': {'permission', 'question', 'finished'},
     'sources': {'hidden'},
     'attachments': {'paste_as_file', 'embed_limit'},
     'usage': {'warn_permille', 'limit_phrases'},
@@ -1457,7 +1450,7 @@ final class CanoaConfig {
   /// The tables of canoa.cfg this app reads; any other is kept as it was found.
   static const _ownTables = {
     'desktop', 'network', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile', 'permissions',
-    'notifications', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'shortcuts', 'attachments', 'usage', 'voice',
+    'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'shortcuts', 'attachments', 'usage', 'voice',
     'speech', 'connections',
   };
 
@@ -1487,7 +1480,6 @@ final class CanoaConfig {
     final appearance = table('appearance');
     final sessions = table('sessions');
     final permissions = table('permissions');
-    final notifications = table('notifications');
     final sources = table('sources');
     final attachments = table('attachments');
     final usage = table('usage');
@@ -1752,11 +1744,6 @@ final class CanoaConfig {
           readReplies: flag(voiceTable, 'read_replies', false),
         ),
       ),
-      notifications: NotificationSettings(
-        permission: flag(notifications, 'permission', true),
-        question: flag(notifications, 'question', true),
-        finished: flag(notifications, 'finished', true),
-      ),
       sessions: LedgerSettings(
         keep: count('keep', LedgerSettings.defaultKeep),
         keepText: flag(sessions, 'keep_text', false),
@@ -1819,11 +1806,6 @@ keep = ${sessions.keep}
 keep_text = ${sessions.keepText}
 text_messages = ${sessions.textMessages}
 ${sessions.workspace == defaultWorkspace ? '' : 'workspace = ${jsonEncode(sessions.workspace)}\n'}${sessions.whileWorking == WhileWorking.queue ? '' : 'while_working = "${sessions.whileWorking.name}"\n'}${sessions.queueDelivery == QueueDelivery.merge ? '' : 'queue_delivery = "${sessions.queueDelivery.name}"\n'}
-[notifications]
-permission = ${notifications.permission}
-question = ${notifications.question}
-finished = ${notifications.finished}
-
 [attachments]
 paste_as_file = $pasteAsFile
 embed_limit = $embedLimit

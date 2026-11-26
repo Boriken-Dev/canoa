@@ -427,68 +427,6 @@ class AppearancePreview extends StatelessWidget {
   }
 }
 
-/// One row per kind of news from a session, each a switch.
-class NotificationsSection extends StatelessWidget {
-  const NotificationsSection({super.key, required this.controller, this.onAllowNotifications});
-
-  final SettingsController controller;
-
-  /// Asks the browser for leave to notify, where it has to be asked; true when it was given.
-  final Future<bool> Function()? onAllowNotifications;
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
-    builder: (context, _) {
-      final n = controller.config.notifications;
-      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SettingsGroup(title: 'When a conversation you are not looking at', children: [
-          SwitchRow(
-            title: 'It asks leave to use a tool',
-            configKey: const ['notifications', 'permission'],
-            description: 'A permission request is waiting for your answer',
-            value: n.permission,
-            onChanged: (v) => controller.change((c) => c.copyWith(notifications: c.notifications.copyWith(permission: v))),
-          ),
-          SwitchRow(
-            title: 'It has a question for you',
-            configKey: const ['notifications', 'question'],
-            description: 'The agent stopped to ask, and waits',
-            value: n.question,
-            onChanged: (v) => controller.change((c) => c.copyWith(notifications: c.notifications.copyWith(question: v))),
-          ),
-          SwitchRow(
-            title: 'It finished its turn',
-            configKey: const ['notifications', 'finished'],
-            description: 'The agent is done and has said what it did',
-            value: n.finished,
-            onChanged: (v) => controller.change((c) => c.copyWith(notifications: c.notifications.copyWith(finished: v))),
-          ),
-        ]),
-        if (onAllowNotifications != null)
-          SettingsGroup(title: 'This browser', children: [
-            SettingsRow(
-              title: 'Allow notifications',
-              description: 'A browser shows them only once you allow it',
-              machine: true,
-              control: TextButton(
-                key: const Key('settings-allow-notifications'),
-                onPressed: () async {
-                  final allowed = await onAllowNotifications!();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-                    content: Text(allowed ? 'This browser shows notifications from Canoa.' : 'This browser did not allow them.'),
-                  ));
-                },
-                child: const Text('Allow'),
-              ),
-            ),
-          ]),
-      ]);
-    },
-  );
-}
-
 /// The keyboard shortcuts, read from the single shortcut table with any `[shortcuts]` overrides in canoa.cfg.
 class ShortcutsSection extends StatelessWidget {
   const ShortcutsSection({super.key, this.controller});

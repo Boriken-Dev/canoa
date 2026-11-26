@@ -16,6 +16,9 @@ import 'dart:io';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/acp/client.dart' show VerifiedPeer;
 import 'package:canoa/acp/served_host.dart';
+import 'package:canoa/attention/host_notices.dart';
+import 'package:canoa/attention/notifications_host.dart';
+import 'package:canoa/attention/notifier.dart';
 import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool_io.dart' show freeLoopbackPort;
@@ -36,7 +39,7 @@ final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
 
 /// What this page's key may do on the host: read its configuration and its Store, run a Store type's program, manage accounts, and
 /// edit the host's own tables (`hosting`).
-const _grants = ['config.read', 'store.read', 'store.programs', 'accounts', 'hosting'];
+const _grants = ['config.read', 'config.write', 'store.read', 'store.programs', 'accounts', 'hosting', 'notify'];
 
 /// The model the stand-in for the Foundry Local program lists.
 const _model = 'qwen3-14b-generic-gpu:2';
@@ -182,6 +185,33 @@ peers = [${jsonEncode(browserId)}]
     expect(models.settings!.schema, isNotEmpty);
   });
 
+  test("the host's events and notifiers are read as the Notifications page reads them, a route is written through the host, and a notice is pushed", () async {
+    final host = ControlNotificationsHost(control);
+    final listed = await host.list();
+    expect(listed.events.map((each) => each.id), ['permission', 'question', 'finished', 'failed', 'usage_warn', 'usage_stop', 'update_failed', 'host_restarted', 'host_updated']);
+    expect(listed.events.firstWhere((each) => each.id == 'finished').notifiers, ['desktop']);
+    expect(listed.events.firstWhere((each) => each.id == 'host_restarted').notifiers, isEmpty);
+    expect(listed.notifiers.first.name, 'desktop');
+    expect(listed.notifiers.first.removable, isFalse);
+
+    await host.route('finished', const []);
+    expect((await host.list()).events.firstWhere((each) => each.id == 'finished').notifiers, isEmpty);
+    expect(config.readAsStringSync(), contains('finished = []'));
+    await expectLater(host.route('finished', ['nobody']), throwsA(anything), reason: 'a name that is no notifier is refused by the host');
+    await host.route('finished', ['desktop']);
+
+    final shown = <String>[];
+    final notifier = _Shown(shown);
+    final notices = HostNotices(control: control, notifier: notifier, language: () => 'en', localSession: (_) => null);
+    notices.start();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    final result = await host.test('desktop');
+    expect(result.ok, isTrue, reason: '${result.why}');
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(shown, ['Canoa: Test']);
+    await notices.stop();
+  });
+
   test("the Advanced page's tables are listed, added, changed and removed through the host, and a refusal is the host's words", () async {
     final advanced = AdvancedConfig((method, params) async => (await control.ready(wait: false)).call(method, params));
     await advanced.load();
@@ -217,4 +247,21 @@ peers = [${jsonEncode(browserId)}]
     expect(config.readAsStringSync(), allOf(isNot(contains('mcp_list')), isNot(contains('My Harness')), contains('[host.agents.scripted]')));
   });
   });
+}
+
+final class _Shown implements Notifier {
+  _Shown(this.shown);
+
+  final List<String> shown;
+
+  @override
+  Future<void> initialize(void Function(String sessionId) onOpen) async {}
+  @override
+  Future<bool> get available async => true;
+  @override
+  Future<bool> requestPermission() async => true;
+  @override
+  void watchAttention(void Function(bool attended) onChange) {}
+  @override
+  Future<void> show({required String title, required String body, required String sessionId}) async => shown.add('$title: $body');
 }
