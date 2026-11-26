@@ -15,6 +15,7 @@ A default build has no dependencies. MSRV Rust 1.89. Not published (`publish = f
 | `content` | `canoa::content` | the `content_source` and `catalog_generator` kinds: a file or a tree by URI, and what turns it into a catalog (`guatiao`, `coqui-acp-api`, `guatiao-intake`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `notifier` | `canoa::notifier` | the `notifier` kind: somewhere a notice about what happened on the host is sent (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
+| `approver` | `canoa::approver` | the `approver` kind: somewhere a permission request can be answered from, besides the window (`coqui-acp-api`, `guatiao`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `file-viewer` | `canoa::file_viewer` | the `file_viewer` kind: a way to show a file of some type in the Files surface, as an A2UI surface or a sealed page (`coqui-acp-api`, `guatiao`) |
 | `history-store` | `canoa::history_store` | the `history_store` kind: where recorded conversations and every turn's properties are kept, as typed tables with structured queries (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `data-encoding`, `coqui-acp-history`, `time`) |
@@ -201,7 +202,7 @@ pub fn name_problem(name: &str) -> Option<String>;   // text of any length that 
 - **`GONE` is "cannot answer now"** (locked, signed out, not installed). The reason holds no value; the host then asks the person for the secret itself.
 - **Written in a script.** A library in Python or JavaScript subclasses the Canoa SDK's `SecretProvider` (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`): `get` is the one slot it must write; `title`, `can_list`, `can_store` and `needs_person` make `describe`; `names`, `put` and `forget` refuse with `UNSUPPORTED` until it overrides them; a slot receives the spawner as its last argument and the provider destroys it. `FormSecretProvider` is the person's form and `SystemStoreSecretProvider` a provider over a store of keys and texts the subclass supplies (`read`, `write`, `remove`), with the index of names such a store needs. A request and an answer cross as plain data: `{name}`, `{name, value}`, `{value, expires_in}` (`{}` for nothing held), `{names}`. The kind reaches a source of JavaScript in the host's one document of descriptions (`descriptions.rs`).
 
-Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`), `store_extension`, `model_store` and `catalog_source` (`store`), `secret_provider` (`secret`), `profile_item` (`profile-item`), `settings_section` (`settings-section`) `panel_tab` (`panel-tab`) and `notifier` (`notifier`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
+Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`), `store_extension`, `model_store` and `catalog_source` (`store`), `secret_provider` (`secret`), `profile_item` (`profile-item`), `settings_section` (`settings-section`) `panel_tab` (`panel-tab`) `notifier` (`notifier`) and `approver` (`approver`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,file-viewer,usage,gateway,environment,config-store,notifier,approver --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
 
 ## `canoa::settings_section` (feature `settings-section`)
 
@@ -229,6 +230,32 @@ impl SectionInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Scre
 - `Stored::Config` values are written by the host into `[settings.ID]` after it checked them, except a member the schema marks sensitive, which the host keeps as the named secret `settings/ID/MEMBER` of the secret providers (the system store by default) and never writes to the file; `read` and `write` are then not asked and answer nothing. `Stored::Provider` values are the provider's: the host calls `read` to show them and `write` with the checked values to keep them.
 - `collection` is a list of rows the section manages through the control methods of a session service (`SERVICE/METHOD`, answered under `services.setup`): `list` answers an object whose member `items` names holds the rows (`name`, `state`, optional `details`, and the member `kind_member` naming the row's kind, with an optional `<kind_member>_title`) and whose member `kinds` names holds the kinds a row may be of (`id`, `title`, optional `description`, `schema`, `form`); `add` takes `name`, the kind under `kind_member` and the values of the kind's form; `test` (optional) and `remove` take the row's `name`, and `test` answers `ok` with a `message`, or a `problem`. The application draws the rows and the add form, and knows nothing of what the rows are; the words (`add_label`, `empty`, `empty_help`, `kind_label`, `test_label`, `remove_note`) are the provider's, and the application's own where none is given. The values the section's own schema holds are drawn below it.
 - `SectionInfo::problem` says why a description cannot be used (a bad id, no title, a section under itself, an empty group, a form its schema does not fit).
+
+## `canoa::approver` (feature `approver`)
+
+The `approver` kind: somewhere an agent's permission request can be answered from, besides the window that runs the session. A rule the person wrote and a phone the person answers on are both providers, the ones the host carries (`policy`) and the ones an extension adds alike. The host puts each request to the approvers of `[permissions.approvers.NAME]` and answers the agent with the first answer; an approver says `Allow` or `Reject` once, never names an option and never answers "always".
+
+```rust
+pub const KIND: &str = "approver";   pub const MAX_TEXT: usize = 300;   pub const MAX_PATHS: usize = 32;   pub const MAX_WAIT_MS: u64 = 5000;
+pub enum Authority { Person, Policy }   pub enum Choice { Allow, Reject }   pub enum Step { Answered, Waiting, Abstain }
+#[non_exhaustive] pub struct ApproverInfo { pub title: String, pub help: Option<String>, pub answers_as: Authority, pub instant: bool, pub wants_detail: bool }
+#[non_exhaustive] pub struct Request { pub id: String, pub session: SessionRef, pub tool: Tool, pub options: Vec<OptionRef>, pub deadline: Option<i64>, pub protected: bool }
+#[non_exhaustive] pub struct Answer { pub step: Step, pub choice: Option<Choice>, pub ticket: Option<String>, pub note: Option<String> }
+#[non_exhaustive] pub struct Ticket { pub ticket: String, pub wait_ms: u64 }
+#[guatiao::kind(name = "approver")] pub trait Approver: Send + Sync {
+    fn describe(&self) -> Result<ApproverInfo, ProviderError>;
+    fn ask(&self, request: Request) -> Result<Answer, ProviderError>;       // returns at once: an answer, a ticket to wait on, or an abstain
+    fn wait(&self, wait: Ticket) -> Result<Answer, ProviderError>;          // looks at a ticket for up to `wait_ms`; an abstain means it is gone
+    fn withdraw(&self, ticket: Ticket) -> Result<(), ProviderError>;        // the request was answered elsewhere, or ended
+}
+impl Request { pub fn new(id, session, tool) -> Self; pub fn clean(self) -> Self }   // control, direction and zero-width characters out, text cut
+impl Answer { pub fn allow() / reject() / waiting(ticket) / abstain(why) -> Self; pub fn noted(self, note) -> Self; pub fn problem(&self) -> Option<String> }
+```
+
+- An `instant` approver answers from `ask`, is asked first and in the file's order, and has no `wait`. One that waits for someone answers `Answer::waiting(ticket)`; the host polls `wait` with `wait_ms` at most `MAX_WAIT_MS` until an answer, the entry's timeout, a `withdraw` or the end of the session. An error from `ask` or `wait` is an abstain and is logged; it never answers.
+- `Authority::Policy` says the allow is a rule's and not the person's: the host never applies it to a place `[permissions] protected` names, a request to widen the sandbox or a call it cannot read, which go on to the window. `Authority::Person` allows those too, since the person answers. A reject always applies. An allow is applied only when the agent offers an unambiguous option that allows once.
+- `Request::tool.command` and `paths` are filled only for an approver whose entry says `detail = "command"`, or whose `ApproverInfo::wants_detail` is set (a rule that reads them); the title and the command are cut at `MAX_TEXT` characters.
+- Optional slots are not offered: every provider answers all four methods. SDK base classes for Python and JavaScript are not written yet.
 
 ## `canoa::panel_tab` (feature `panel-tab`)
 

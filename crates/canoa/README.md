@@ -31,6 +31,7 @@ Not published (`publish = false`). A default build has no dependencies. Cargo fe
 | `content` | `canoa::content` | the `content_source` and `catalog_generator` kinds: a file or a tree by URI, and what turns it into a catalog (`guatiao`, `coqui-acp-api`, `guatiao-intake`, `serde_json`) |
 | `settings-section` | `canoa::settings_section` | the `settings_section` kind: Settings pages and groups (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
 | `notifier` | `canoa::notifier` | the `notifier` kind: somewhere a notice about what happened on the host is sent (`coqui-acp-api`, `guatiao`, `guatiao-intake`) |
+| `approver` | `canoa::approver` | the `approver` kind: somewhere a permission request can be answered from, besides the window (`coqui-acp-api`, `guatiao`) |
 | `panel-tab` | `canoa::panel_tab` | the `panel_tab` kind: bottom-panel tabs (`coqui-acp-api`, `guatiao`) |
 | `file-viewer` | `canoa::file_viewer` | the `file_viewer` kind: a way to show a file of some type in the Files surface, as an A2UI surface or a sealed page (`coqui-acp-api`, `guatiao`) |
 | `history-store` | `canoa::history_store` | the `history_store` kind: where recorded conversations and every turn's properties are kept, as typed tables with structured queries (`coqui-acp-api`, `guatiao`, `guatiao-intake`, `serde_json`, `data-encoding`, `coqui-acp-history`, `time`) |
