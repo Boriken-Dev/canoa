@@ -6,6 +6,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::net::SocketAddr;
 use core::sync::atomic::Ordering;
+use core::time::Duration;
 use std::ffi::OsString;
 use std::thread;
 
@@ -329,15 +330,47 @@ pub(super) fn serve_proven<C: Channel>(
         Ok(Some(first)) => {
             tracing::info!(entry = served.name, %peer, "proven");
             let copy = first.clone();
+            let closing = ClosesOnRevoked(sealed);
             give_agent(
                 shared,
                 served,
-                &Prefilled::new(&super::limit::Naming::new(sealed, shared.max_line), first),
+                &Prefilled::new(&super::limit::Naming::new(&closing, shared.max_line), first),
                 (&copy, peer),
                 (context, reach),
             );
         }
         Ok(None) | Err(_) => {}
+    }
+}
+
+/// `inner`, closed at once when its `receive` answers [`Failure::Permission`] (a peer removed while connected). A sealed
+/// channel leaves itself open for that first answer so a link of streams can tell each stream why; a plain ACP link has no
+/// streams, and what an agent sends back after that answer must not reach the removed key.
+struct ClosesOnRevoked<'a, C: Channel + ?Sized>(&'a C);
+
+impl<C: Channel + ?Sized> Channel for ClosesOnRevoked<'_, C> {
+    fn send(&self, message: &[u8]) -> Result<(), Failure> {
+        self.0.send(message)
+    }
+
+    fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+        let received = self.0.receive(timeout);
+        if received == Err(Failure::Permission) {
+            self.0.close();
+        }
+        received
+    }
+
+    fn close(&self) {
+        self.0.close();
+    }
+
+    fn set_max_message(&self, bytes: usize) {
+        self.0.set_max_message(bytes);
+    }
+
+    fn set_max_receive(&self, bytes: usize) {
+        self.0.set_max_receive(bytes);
     }
 }
 
