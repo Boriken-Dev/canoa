@@ -12,6 +12,7 @@ import '../desktop/control_client.dart' show ControlFailed;
 import '../forms/schema_fields.dart';
 import '../store/store_extensions.dart' show extensionIcons;
 import 'built_in_sections.dart';
+import 'section_collection.dart';
 import 'settings_row.dart';
 
 /// What the app asks the host with: `settings/sections`, `settings/section_get` and `settings/section_set`.
@@ -19,6 +20,53 @@ typedef SectionCall = Future<Object?> Function(String method, Map<String, Object
 
 /// The heading a section sits under when its provider names none.
 const defaultSectionGroup = 'Extensions';
+
+/// A list of rows a section manages through the control methods of a session service: what its provider says of it
+/// (`settings/sections` `"collection"`). The method names are `SERVICE/METHOD`; the words are the provider's, and null where the
+/// application's own are used.
+final class SectionCollection {
+  const SectionCollection({
+    required this.list,
+    required this.add,
+    required this.remove,
+    required this.items,
+    required this.kinds,
+    required this.kindMember,
+    this.test,
+    this.addLabel,
+    this.empty,
+    this.emptyHelp,
+    this.kindLabel,
+    this.testLabel,
+    this.removeNote,
+  });
+
+  final String list, add, remove, items, kinds, kindMember;
+  final String? test, addLabel, empty, emptyHelp, kindLabel, testLabel, removeNote;
+
+  static SectionCollection? read(Object? raw) {
+    if (raw is! Map) return null;
+    String? text(String key) => raw[key] is String && (raw[key] as String).isNotEmpty ? raw[key] as String : null;
+    final list = text('list'), add = text('add'), remove = text('remove');
+    final items = text('items'), kinds = text('kinds'), kindMember = text('kind_member');
+    if (list == null || add == null || remove == null || items == null || kinds == null || kindMember == null) return null;
+    return SectionCollection(
+      list: list,
+      add: add,
+      remove: remove,
+      items: items,
+      kinds: kinds,
+      kindMember: kindMember,
+      test: text('test'),
+      addLabel: text('add_label'),
+      empty: text('empty'),
+      emptyHelp: text('empty_help'),
+      kindLabel: text('kind_label'),
+      testLabel: text('test_label'),
+      removeNote: text('remove_note'),
+    );
+  }
+}
 
 /// One section a provider offers.
 final class HostSection {
@@ -34,6 +82,7 @@ final class HostSection {
     this.stored = 'config',
     this.schema = const {},
     this.form = const {},
+    this.collection,
   });
 
   final String id;
@@ -54,6 +103,9 @@ final class HostSection {
   final Map<String, Object?> schema;
   final Map<String, Object?> form;
 
+  /// The rows the section manages through a service's control methods, when it has any.
+  final SectionCollection? collection;
+
   IconData get iconData => extensionIcons[icon] ?? Icons.extension_outlined;
 
   static HostSection? read(Object? raw) {
@@ -72,6 +124,7 @@ final class HostSection {
       stored: text(raw['stored']) ?? 'config',
       schema: map(raw['schema']),
       form: map(raw['form']),
+      collection: SectionCollection.read(raw['collection']),
     );
   }
 }
@@ -85,7 +138,9 @@ final class HostSections extends ChangeNotifier {
   /// Until the host answers, and for good when it cannot or will not, the sections are the application's own pages: what the host lists
   /// of them, kept in [builtInSectionsListing], so Settings is never empty and the person's own preferences show whatever the host
   /// grants.
-  HostSections(this._call) : _sections = builtIn();
+  ///
+  /// [slow] is how a call that may take minutes is made (a sign-in test), on a link of its own; it is the ordinary call when not given.
+  HostSections(this._call, {SectionCall? slow}) : _slow = slow ?? _call, _sections = builtIn();
 
   /// The application's own pages, as the host lists them.
   static List<HostSection> builtIn() {
@@ -96,7 +151,7 @@ final class HostSections extends ChangeNotifier {
   /// The sections of an app that has no host to ask.
   HostSections.withoutHost() : this((method, params) async => throw const ControlFailed(-32601, 'this app has no host'));
 
-  final SectionCall _call;
+  final SectionCall _call, _slow;
   List<HostSection> _sections;
   bool _disposed = false;
 
@@ -141,6 +196,10 @@ final class HostSections extends ChangeNotifier {
       return;
     }
   }
+
+  /// Calls the control method [method] of a session service, the way a section's collection names them; [slow] for one that may
+  /// take minutes.
+  Future<Object?> service(String method, Map<String, Object?> params, {bool slow = false}) => (slow ? _slow : _call)(method, params);
 
   /// What the section [id] holds.
   Future<SectionValues> values(String id) async {
@@ -287,6 +346,8 @@ class _HostSectionFormState extends State<HostSectionForm> {
           padding: const EdgeInsets.only(bottom: 12),
           child: Text('A secret of this section could not be asked of its secret provider: $problem', key: Key('section-$_id-secrets-problem'), style: TextStyle(color: scheme.error)),
         ),
+      if (section.collection case final collection?)
+        SectionCollectionList(key: Key('section-$_id-collection'), id: _id, collection: collection, sections: widget.sections),
       fields,
     ]);
     if (!widget.asGroup) return body;

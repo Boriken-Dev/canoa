@@ -5,22 +5,20 @@ library;
 
 import 'dart:io';
 
-import 'package:canoa/mail/mail_accounts.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_mail.dart';
-import 'fixtures/sections_fixture.dart';
 import 'fixtures/settings_fixture.dart';
 import 'fixtures/store_fixtures.dart';
 
-FakeMailHost _host() => FakeMailHost(
+FakeMailService _service() => FakeMailService(
   accounts: [
     mailAccount('work', user: 'EXAMPLE\\ana'),
     mailAccount('late', user: 'ana', state: 'needs a password'),
     mailAccount('desktop', backend: 'outlook', server: null, state: 'signed in by Outlook'),
   ],
-  tests: {'late': const MailTest(ok: false, problem: 'The account has no stored password: add it again.')},
+  tests: {'late': {'ok': false, 'problem': 'The account has no stored password: add it again.'}},
 );
 
 void main() {
@@ -28,11 +26,8 @@ void main() {
 
   for (final (label, size) in [('desktop', const Size(1280, 800)), ('phone', const Size(390, 844))]) {
     group('at $label width', () {
-      Future<MailAccountsController> open(WidgetTester tester) async {
-        final controller = MailAccountsController(host: _host());
-        await controller.refresh();
-        await openSettings(tester, size: size, section: 'mail', mail: controller, version: '0.0.1', hostSections: sectionsWithMail());
-        return controller;
+      Future<void> open(WidgetTester tester) async {
+        await openSettings(tester, size: size, section: 'mail', version: '0.0.1', hostSections: _service().sections());
       }
 
       Future<void> golden(WidgetTester tester, String name) async {
@@ -42,21 +37,21 @@ void main() {
 
       testWidgets('Settings, Mail: each mailbox with where it is and whether its password is there, and what a test found', (tester) async {
         await open(tester);
-        await tester.tap(find.byKey(const Key('mail-test work')));
+        await tester.tap(find.byKey(const Key('section-mail-test work')));
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const Key('mail-test late')));
+        await tester.tap(find.byKey(const Key('section-mail-test late')));
         await tester.pumpAndSettle();
         await golden(tester, 'settings');
       });
 
       testWidgets('Add a mailbox: the server, the user and the password', (tester) async {
         await open(tester);
-        await tester.tap(find.byKey(const Key('add-mail-account')));
+        await tester.tap(find.byKey(const Key('section-mail-add')));
         await tester.pumpAndSettle();
-        await tester.enterText(find.byKey(const Key('mail-name')), 'home');
-        await tester.enterText(find.byKey(const Key('mail-field-server')), 'https://mail.example.test/EWS/Exchange.asmx');
-        await tester.enterText(find.byKey(const Key('mail-field-user')), 'EXAMPLE\\ana');
-        await tester.enterText(find.byKey(const Key('mail-field-password')), 'not shown');
+        await tester.enterText(find.byKey(const Key('section-mail-name')), 'home');
+        await tester.enterText(find.byKey(const Key('section-mail-field-server')), 'https://mail.example.test/EWS/Exchange.asmx');
+        await tester.enterText(find.byKey(const Key('section-mail-field-user')), 'EXAMPLE\\ana');
+        await tester.enterText(find.byKey(const Key('section-mail-field-password')), 'not shown');
         FocusManager.instance.primaryFocus?.unfocus();
         await tester.pumpAndSettle();
         await golden(tester, 'add');

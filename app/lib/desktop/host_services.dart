@@ -6,7 +6,6 @@ import '../accounts/accounts_controller.dart';
 import '../chat/session_watch.dart' show SessionWatches;
 import '../history/agent_switch.dart';
 import '../ledger/running_sessions.dart';
-import '../mail/mail_accounts.dart';
 import '../profile/profile_items.dart';
 import '../providers/provider_catalog.dart';
 import '../secrets/secrets_controller.dart';
@@ -39,7 +38,6 @@ final class HostServices {
     HostFiles? hostFilesOverride,
     HostFolders? hostFoldersOverride,
     AudioCapture? speechCapture,
-    MailHost? mailHostOverride,
     AgentMoves? agentMovesOverride,
     this._accountsController,
     VoidCallback? onGrantsChanged,
@@ -86,10 +84,21 @@ final class HostServices {
     hostVoices = hostSpeech == null ? null : HostVoiceCatalog(hostSpeech!.call);
     terminals = c == null ? null : ControlTerminals(c);
     panelTabs = c == null ? null : PanelTabKinds((method, params) async => (await c.ready(wait: false)).call(method, params));
-    hostSections = c == null ? HostSections.withoutHost() : HostSections((method, params) async => (await c.ready(wait: false)).call(method, params));
+    hostSections = c == null
+        ? HostSections.withoutHost()
+        : HostSections(
+            (method, params) async => (await c.ready(wait: false)).call(method, params),
+            // A call that waits on a server (a sign-in test) has a link of its own, so nothing else the app asks of the host waits behind it.
+            slow: (method, params) async {
+              final client = await c.open(wait: false);
+              try {
+                return await client.call(method, params, null, const Duration(minutes: 2));
+              } finally {
+                unawaited(client.close());
+              }
+            },
+          );
     secretsHeld = c == null ? null : SecretsController(host: ControlSecretsHost(c));
-    final mailHost = mailHostOverride ?? (c == null ? null : ControlMailHost(c));
-    mailHeld = mailHost == null ? null : MailAccountsController(host: mailHost);
     moves = agentMovesOverride ?? (c == null ? null : ControlAgentMoves(() => c.ready()));
     portable = moves == null ? null : PortableAgents(moves!);
     extensionSettingsHeld = hostFiles == null
@@ -134,7 +143,6 @@ final class HostServices {
       ? null
       : UsageController(sources: [ControlUsageSource('This host', control!)], accounts: _accountsController?.call());
   late final SecretsController? secretsHeld;
-  late final MailAccountsController? mailHeld;
   late final AgentMoves? moves;
   late final PortableAgents? portable;
   late final ProgramStores? programsHeld;

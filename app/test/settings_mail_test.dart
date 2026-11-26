@@ -6,24 +6,20 @@ import 'dart:convert';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/l10n/app_text.dart';
+import 'package:canoa/l10n/base_text.dart';
 import 'package:canoa/main.dart';
-import 'package:canoa/mail/mail_accounts.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_mail.dart';
-import 'fixtures/sections_fixture.dart';
 import 'fixtures/settings_fixture.dart';
 
-MailAccountsController _controller(FakeMailHost host) => MailAccountsController(host: host);
-
-Future<MailAccountsController> _show(WidgetTester tester, FakeMailHost host) async {
-  final controller = _controller(host);
-  await openSettings(tester, section: 'mail', mail: controller, hostSections: sectionsWithMail());
+Future<void> _show(WidgetTester tester, FakeMailService service) async {
+  await openSettings(tester, section: 'mail', hostSections: service.sections());
   await tester.pumpAndSettle();
-  return controller;
 }
 
 Future<void> _fill(WidgetTester tester, String key, String text) async {
@@ -32,15 +28,16 @@ Future<void> _fill(WidgetTester tester, String key, String text) async {
 }
 
 void main() {
-  testWidgets('Mail is a section only where the host lets this key set mail up', (tester) async {
-    await openSettings(tester, hostSections: sectionsWithMail());
+  spanishWords();
+  testWidgets('Mail is a section only where the host lists one: the app has none of its own', (tester) async {
+    await openSettings(tester);
     expect(find.byKey(const Key('settings-nav-mail')), findsNothing);
-    await openSettings(tester, mail: _controller(FakeMailHost()), hostSections: sectionsWithMail());
+    await openSettings(tester, hostSections: FakeMailService().sections());
     expect(find.byKey(const Key('settings-nav-mail')), findsOneWidget);
   });
 
   testWidgets('the section lists each mailbox with where it is and whether its password is there', (tester) async {
-    final host = FakeMailHost(accounts: [
+    final host = FakeMailService(accounts: [
       mailAccount('work', user: 'EXAMPLE\\ana'),
       mailAccount('late', state: 'needs a password'),
       mailAccount('cloud', backend: 'graph', server: null, email: 'ana@example.com', state: 'signed in by Microsoft'),
@@ -52,93 +49,93 @@ void main() {
     expect(find.text('Microsoft Graph · ana@example.com · signed in by Microsoft'), findsOneWidget);
     expect(find.text('Outlook · signed in by Outlook'), findsOneWidget);
     for (final name in ['work', 'late', 'cloud', 'desktop']) {
-      expect(find.byKey(Key('mail-test $name')), findsOneWidget);
+      expect(find.byKey(Key('section-mail-test $name')), findsOneWidget);
     }
   });
 
   testWidgets('with no mailbox the section says so and offers to add one', (tester) async {
-    await _show(tester, FakeMailHost());
+    await _show(tester, FakeMailService());
     expect(find.text('No mailbox'), findsOneWidget);
-    expect(find.byKey(const Key('add-mail-account')), findsOneWidget);
+    expect(find.byKey(const Key('section-mail-add')), findsOneWidget);
   });
 
   testWidgets('adding a mailbox sends the password to the host once and shows it nowhere', (tester) async {
     const canary = 'Mail-canary-9a7c';
-    final host = FakeMailHost();
+    final host = FakeMailService();
     await _show(tester, host);
-    await tester.tap(find.byKey(const Key('add-mail-account')));
+    await tester.tap(find.byKey(const Key('section-mail-add')));
     await tester.pumpAndSettle();
-    await _fill(tester, 'mail-name', 'work');
-    await _fill(tester, 'mail-field-server', 'https://mail.example.test/EWS/Exchange.asmx');
-    await _fill(tester, 'mail-field-user', 'EXAMPLE\\ana');
-    await _fill(tester, 'mail-field-password', canary);
+    await _fill(tester, 'section-mail-name', 'work');
+    await _fill(tester, 'section-mail-field-server', 'https://mail.example.test/EWS/Exchange.asmx');
+    await _fill(tester, 'section-mail-field-user', 'EXAMPLE\\ana');
+    await _fill(tester, 'section-mail-field-password', canary);
     // The field hides what is typed.
-    expect(tester.widget<TextField>(find.byKey(const Key('mail-field-password'))).obscureText, isTrue);
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    expect(tester.widget<TextField>(find.byKey(const Key('section-mail-field-password'))).obscureText, isTrue);
+    await tester.tap(find.byKey(const Key('section-mail-add-submit')));
     await tester.pumpAndSettle();
 
     expect(host.added, hasLength(1));
     final sent = host.added.single;
-    expect((sent.name, sent.backend, sent.settings['user'], sent.settings['password']), ('work', 'ews', 'EXAMPLE\\ana', canary));
-    expect(find.byKey(const Key('add-mail-dialog')), findsNothing, reason: 'the dialog closed');
-    expect(find.byKey(const Key('mail-account work')), findsOneWidget);
+    expect((sent['name'], sent['backend'], sent['user'], sent['password']), ('work', 'ews', 'EXAMPLE\\ana', canary));
+    expect(find.byKey(const Key('section-mail-add-dialog')), findsNothing, reason: 'the dialog closed');
+    expect(find.byKey(const Key('section-mail-row work')), findsOneWidget);
     expect(find.textContaining(canary), findsNothing, reason: 'nothing on the page shows the password');
     expect(find.text('Exchange Server · https://mail.example.test/EWS/Exchange.asmx · EXAMPLE\\ana · password stored'), findsOneWidget);
   });
 
   testWidgets('a mailbox with no user name signs in with the Windows logon and sends no password', (tester) async {
-    final host = FakeMailHost();
+    final host = FakeMailService();
     await _show(tester, host);
-    await tester.tap(find.byKey(const Key('add-mail-account')));
+    await tester.tap(find.byKey(const Key('section-mail-add')));
     await tester.pumpAndSettle();
-    await _fill(tester, 'mail-name', 'logon');
-    await _fill(tester, 'mail-field-email', 'ana@example.test');
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    await _fill(tester, 'section-mail-name', 'logon');
+    await _fill(tester, 'section-mail-field-email', 'ana@example.test');
+    await tester.tap(find.byKey(const Key('section-mail-add-submit')));
     await tester.pumpAndSettle();
-    expect(host.added.single.settings['password'], isNull);
-    expect(host.added.single.settings['user'], isNull);
+    expect(host.added.single['password'], isNull);
+    expect(host.added.single['user'], isNull);
   });
 
   testWidgets('what is missing is said before the host is asked, and the host\'s own refusal is shown as it words it', (tester) async {
-    final host = FakeMailHost(accounts: [mailAccount('work')]);
+    final host = FakeMailService(accounts: [mailAccount('work')]);
     await _show(tester, host);
-    await tester.tap(find.byKey(const Key('add-mail-account')));
+    await tester.tap(find.byKey(const Key('section-mail-add')));
     await tester.pumpAndSettle();
-    await _fill(tester, 'mail-name', '');
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    await _fill(tester, 'section-mail-name', '');
+    await tester.tap(find.byKey(const Key('section-mail-add-submit')));
     await tester.pump();
-    expect(find.text('Name the mailbox'), findsOneWidget);
-    await _fill(tester, 'mail-name', 'work');
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    expect(find.text('Give it a name'), findsOneWidget);
+    await _fill(tester, 'section-mail-name', 'work');
+    await tester.tap(find.byKey(const Key('section-mail-add-submit')));
     await tester.pump();
-    expect(find.text('A mailbox is called that already'), findsOneWidget);
+    expect(find.text('That name is taken already'), findsOneWidget);
 
     // Switching to Graph validates its required client_id from the backend schema.
-    await _fill(tester, 'mail-name', 'cloud');
-    await tester.tap(find.byKey(const Key('mail-backend-picker')));
+    await _fill(tester, 'section-mail-name', 'cloud');
+    await tester.tap(find.byKey(const Key('section-mail-kind-picker')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Microsoft Graph').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    await tester.tap(find.byKey(const Key('section-mail-add-submit')));
     await tester.pump();
     expect(find.textContaining('Application (client) ID'), findsWidgets);
     expect(host.added, isEmpty);
 
     host.refuseAdd = 'the edited canoa.cfg would not be read: server is an http or https address';
-    await _fill(tester, 'mail-field-client_id', 'app-1');
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    await _fill(tester, 'section-mail-field-client_id', 'app-1');
+    await tester.tap(find.byKey(const Key('section-mail-add-submit')));
     await tester.pumpAndSettle();
     expect(find.textContaining('server is an http or https address'), findsOneWidget);
-    expect(find.byKey(const Key('add-mail-dialog')), findsOneWidget, reason: 'the dialog stays so the address can be fixed');
+    expect(find.byKey(const Key('section-mail-add-dialog')), findsOneWidget, reason: 'the dialog stays so the address can be fixed');
   });
 
   testWidgets('an extension mail backend renders and submits directly from its schema', (tester) async {
-    final host = FakeMailHost(backends: [
-      const MailBackendInfo(
-        id: 'imap',
-        title: 'IMAP',
-        description: 'Connect to any IMAP server.',
-        schema: {
+    final host = FakeMailService(backends: [
+      {
+        'id': 'imap',
+        'title': 'IMAP',
+        'description': 'Connect to any IMAP server.',
+        'schema': {
           'type': 'object',
           'properties': {
             'host': {'type': 'string', 'title': 'IMAP host'},
@@ -146,66 +143,65 @@ void main() {
           },
           'required': ['host'],
         },
-        form: {
+        'form': {
           'fields': {
             'password': {'widget': 'password'},
           },
         },
-      ),
+      },
     ]);
     await _show(tester, host);
-    await tester.tap(find.byKey(const Key('add-mail-account')));
+    await tester.tap(find.byKey(const Key('section-mail-add')));
     await tester.pumpAndSettle();
-    await _fill(tester, 'mail-name', 'fastmail');
-    await _fill(tester, 'mail-field-host', 'imap.fastmail.com');
-    await _fill(tester, 'mail-field-password', 'app-secret');
-    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    await _fill(tester, 'section-mail-name', 'fastmail');
+    await _fill(tester, 'section-mail-field-host', 'imap.fastmail.com');
+    await _fill(tester, 'section-mail-field-password', 'app-secret');
+    await tester.tap(find.byKey(const Key('section-mail-add-submit')));
     await tester.pumpAndSettle();
-    expect(host.added.single.backend, 'imap');
-    expect(host.added.single.settings, {'host': 'imap.fastmail.com', 'password': 'app-secret'});
+    expect(host.added.single, {'name': 'fastmail', 'backend': 'imap', 'host': 'imap.fastmail.com', 'password': 'app-secret'});
     expect(find.text('IMAP · imap.fastmail.com · password stored'), findsOneWidget);
   });
 
   testWidgets('Test sign-in asks the host and says how it went', (tester) async {
-    final host = FakeMailHost(
+    final host = FakeMailService(
       accounts: [mailAccount('work', user: 'u'), mailAccount('bad', user: 'u')],
-      tests: {'bad': const MailTest(ok: false, problem: 'the server refused the user name or password')},
+      tests: {'bad': {'ok': false, 'problem': 'the server refused the user name or password'}},
     );
     await _show(tester, host);
-    await tester.tap(find.byKey(const Key('mail-test work')));
+    await tester.tap(find.byKey(const Key('section-mail-test work')));
     await tester.pumpAndSettle();
     expect(find.text('Signed in. 7 folders.'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('mail-test bad')));
+    await tester.tap(find.byKey(const Key('section-mail-test bad')));
     await tester.pumpAndSettle();
     expect(find.text('the server refused the user name or password'), findsOneWidget);
     expect(host.tested, ['work', 'bad']);
   });
 
   testWidgets('removing a mailbox asks first, then the host forgets it', (tester) async {
-    final host = FakeMailHost(accounts: [mailAccount('work', user: 'u'), mailAccount('home')]);
+    final host = FakeMailService(accounts: [mailAccount('work', user: 'u'), mailAccount('home')]);
     await _show(tester, host);
-    await tester.tap(find.byKey(const Key('mail-remove work')));
+    await tester.tap(find.byKey(const Key('section-mail-remove work')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('remove-mail-account')), findsOneWidget);
+    expect(find.byKey(const Key('section-mail-remove-dialog')), findsOneWidget);
     await tester.tap(find.text('Keep it'));
     await tester.pumpAndSettle();
     expect(host.removed, isEmpty);
 
-    await tester.tap(find.byKey(const Key('mail-remove work')));
+    await tester.tap(find.byKey(const Key('section-mail-remove work')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('remove-mail-account-confirm')));
+    await tester.tap(find.byKey(const Key('section-mail-remove-confirm')));
     await tester.pumpAndSettle();
     expect(host.removed, ['work']);
-    expect(find.byKey(const Key('mail-account work')), findsNothing);
-    expect(find.byKey(const Key('mail-account home')), findsOneWidget);
+    expect(find.byKey(const Key('section-mail-row work')), findsNothing);
+    expect(find.byKey(const Key('section-mail-row home')), findsOneWidget);
   });
 
-  testWidgets('a host that does not answer is said in the section', (tester) async {
-    final controller = MailAccountsController(host: _Unreachable());
-    await openSettings(tester, section: 'mail', mail: controller, hostSections: sectionsWithMail());
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('mail-problem')), findsOneWidget);
-    expect(find.textContaining('did not list the mail accounts'), findsOneWidget);
+  testWidgets('a host that does not answer, or refuses the key, is said in the section', (tester) async {
+    await _show(tester, FakeMailService(unreachable: true));
+    expect(find.byKey(const Key('section-mail-collection-problem')), findsOneWidget);
+    expect(find.textContaining('The host did not list them'), findsOneWidget);
+    await _show(tester, FakeMailService(denied: true));
+    expect(find.text('This key may not manage this list on this host.'), findsOneWidget);
   });
 
   group('in the chat', () {
@@ -270,20 +266,6 @@ void main() {
   });
 }
 
-final class _Unreachable implements MailHost {
-  @override
-  Future<MailAccountsSnapshot> list() async => throw StateError('no link');
-
-  @override
-  Future<MailAccountInfo> add(NewMailAccount account) async => throw StateError('no link');
-
-  @override
-  Future<MailTest> test(String name) async => throw StateError('no link');
-
-  @override
-  Future<void> remove(String name) async => throw StateError('no link');
-}
-
 /// An agent in memory, as the permission card's tests have one: it answers `initialize` and `session/new` and keeps what it was sent.
 final class _Agent {
   final incoming = StreamController<String>();
@@ -343,4 +325,16 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
   await tester.pump();
   await tester.pump(Duration.zero);
+}
+
+void spanishWords() {
+  test('the list controls of a section read in Spanish and in English', () {
+    const es = AppText(language: 'es');
+    expect(es('collection.remove'), 'Quitar');
+    expect(es('collection.remove_title', {'name': 'work'}), '¿Quitar "work"?');
+    expect(const AppText()('collection.remove_title', {'name': 'work'}), 'Remove "work"?');
+    for (final key in baseStrings['en']!.keys.where((key) => key.startsWith('collection.'))) {
+      expect(baseStrings['es']!.containsKey(key), isTrue, reason: key);
+    }
+  });
 }

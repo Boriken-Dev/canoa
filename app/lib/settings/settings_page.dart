@@ -6,8 +6,6 @@ import '../accounts/accounts_section.dart';
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
 import '../providers/provider_catalog.dart';
-import '../mail/mail_accounts.dart';
-import '../mail/mail_section.dart';
 import '../permissions/permission_rules.dart';
 import '../profile/profile_editor.dart' show ProfileChoices;
 import '../profile/profile_home.dart';
@@ -83,7 +81,6 @@ class SettingsPage extends StatefulWidget {
     this.onPin,
     this.onLoadout,
     this.accounts,
-    this.mail,
     this.extensions,
     this.providers,
     this.catalogSources,
@@ -144,9 +141,6 @@ class SettingsPage extends StatefulWidget {
 
   /// The accounts of this computer's host, for the Accounts section; none where the app runs no host.
   final AccountsController? accounts;
-
-  /// The mail accounts of this computer's host, for the Mail section; none where the key may not set them up.
-  final MailAccountsController? mail;
 
   /// The store extensions the host loads, for the Extensions section; none where the key may not change the host's settings.
   final ExtensionSettings? extensions;
@@ -234,7 +228,6 @@ class SettingsPageState extends State<SettingsPage> {
     'mcp': (ready: true, build: () => McpSection(controller: controller, agents: widget.profileAgents, onLoadout: widget.onLoadout)),
     'permissions': (ready: true, build: () => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents)),
     'accounts': (ready: widget.accounts != null, build: () => AccountsSection(controller: widget.accounts!)),
-    'mail': (ready: widget.mail != null, build: () => MailSection(key: const Key('settings-mail'), controller: widget.mail!)),
     'shells': (ready: widget.shells != null, build: () => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!)),
     'usage': (ready: !widget.usageSection, build: () => UsageWarning(controller: controller)),
     'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),

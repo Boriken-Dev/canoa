@@ -56,7 +56,6 @@ import 'accounts/account_models.dart' show AccountEntry, LimitHint, TurnAdvice, 
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
 import 'desktop/host_grants.dart';
-import 'mail/mail_accounts.dart';
 import 'chat/agent_events.dart' show Choice;
 import 'chat/cache_lifetime.dart';
 import 'chat/mentions.dart' show FolderServices;
@@ -331,7 +330,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.home, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.mailHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture, this.voiceOutputs, this.pcmPlayer,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture, this.voiceOutputs, this.pcmPlayer,
     this.mode, this.relations, this.openPage, this.paneLink,
   });
 
@@ -397,10 +396,6 @@ class CanoaApp extends StatefulWidget {
   /// What the app asks of the host about accounts; by default the host this app runs, over its control channel.
   @visibleForTesting
   final AccountsHost? accountsHost;
-
-  /// The host's mail accounts, where a test supplies its own; the app asks the host it reaches otherwise.
-  @visibleForTesting
-  final MailHost? mailHost;
 
   /// What the app asks of the host to change a running conversation's agent; by default the host this app runs, over its control
   /// channel.
@@ -854,7 +849,6 @@ class _CanoaAppState extends State<CanoaApp> {
       },
       onLoadout: _showLoadout,
       accounts: _accounts,
-      mail: _mail,
       extensions: _extensionSettings,
       providers: _providerSwitches,
       catalogSources: _services.catalogSourcesHeld,
@@ -1320,7 +1314,6 @@ class _CanoaAppState extends State<CanoaApp> {
     hostFilesOverride: widget.served?.files,
     hostFoldersOverride: widget.hostFolders,
     speechCapture: widget.speechCapture,
-    mailHostOverride: widget.mailHost,
     agentMovesOverride: widget.agentMoves,
     accountsController: () => _accountsHeld,
     onGrantsChanged: _grantsChanged,
@@ -1343,7 +1336,6 @@ class _CanoaAppState extends State<CanoaApp> {
   ControlTerminals? get _terminals => _services.terminals;
   UsageController? get _usageHeld => _services.usageHeld;
   SecretsController? get _secretsHeld => _services.secretsHeld;
-  MailAccountsController? get _mailHeld => _services.mailHeld;
   AgentMoves? get _moves => _services.moves;
   PortableAgents? get _portable => _services.portable;
   ProgramStores? get _programsHeld => _services.programsHeld;
@@ -1769,10 +1761,6 @@ class _CanoaAppState extends State<CanoaApp> {
   AccountsController? get _accounts => widget.accountsHost != null || (_grants?.may(HostGrants.accounts) ?? false) ? _accountsHeld : null;
 
   late final AccountsController? _accountsHeld = _buildAccounts();
-
-  /// The mail accounts of the host this app reaches, for Settings; none where the app reaches no host or the host does not grant
-  /// setting them up.
-  MailAccountsController? get _mail => widget.mailHost != null || (_grants?.may(HostGrants.mailSetup) ?? false) ? _mailHeld : null;
 
   AccountsController? _buildAccounts() {
     final control = _control;
