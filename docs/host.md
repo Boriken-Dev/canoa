@@ -391,6 +391,23 @@ capabilities = ["embed", "chat"]                  # what it does: embed, chat, r
 # use = "local"
 # fallback = ["openai:work"]
 
+# An agent you already pay for (Claude Code, Codex), offered as the backend `harness:claude` of `complete`, for when no API key is at
+# hand. It runs on this computer under its own login, with no tool (a request for one is refused) and none of your overlays, skills
+# or servers, and each request is a new conversation. `source` is the agent's entry; the profile, account, model and effort are the
+# ones it starts on.
+# [assist_harness.claude]
+# source = "Claude"
+# profile = "terse"
+# account = "work"
+# model = "haiku"
+# effort = "low"
+
+# Starting an agent takes seconds, so the harness sessions are kept warm: one for each agent, account and profile, started when first
+# asked for and ended after this long unasked, and never more than this many at once, all agents together.
+# [assist_pool]
+# idle_seconds = 120
+# max_sessions = 2
+
 # The person's mail as a source (`canoa-mail`): see "Mail as a source".
 # [host.services.mail.accounts.work]
 # backend = "ews"

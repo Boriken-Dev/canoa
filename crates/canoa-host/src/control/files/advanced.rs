@@ -58,6 +58,23 @@ pub(crate) const TABLES: &[Table] = &[
         fields: &[("value", Text)],
     },
     Table {
+        path: &["assist_harness"],
+        shape: Shape::Entries,
+        fields: &[
+            ("source", Text),
+            ("title", Text),
+            ("profile", Text),
+            ("account", Text),
+            ("model", Text),
+            ("effort", Text),
+        ],
+    },
+    Table {
+        path: &["assist_pool"],
+        shape: Shape::Flat,
+        fields: &[("idle_seconds", Int), ("max_sessions", Int)],
+    },
+    Table {
         path: &["host"],
         shape: Shape::Flat,
         fields: &[
@@ -303,6 +320,8 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             // The knowledge search page edits the server it keeps; `[assist.OPERATION]` is edited as JSON until its own page.
             "assist",
             "sdk",
+            "assist_harness",
+            "assist_pool",
         ],
     ),
     (

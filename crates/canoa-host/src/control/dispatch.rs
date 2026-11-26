@@ -732,6 +732,8 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_usage,
     ),
     rpc("options/choices", Access::Open, Control::r_options_choices),
+    rpc("kb/offers", Access::Require(Grant::Accounts), Control::r_kb),
+    rpc("kb/test", Access::Require(Grant::Accounts), Control::r_kb),
     rpc(
         "discover/nearby",
         Access::Require(Grant::Discover),

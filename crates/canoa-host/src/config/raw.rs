@@ -11,8 +11,8 @@ use serde::Deserialize;
 
 use super::entries_parse::TransportSpec;
 use super::{
-    AssistChoice, AssistConfig, ConfigError, DEFAULT_CHOICE, DelegateConfig, KbConfig, KbEmbedder,
-    KbRanker, KbSearch, NetworkConfig, OpenerConfig, SdkTable,
+    AssistChoice, AssistConfig, AssistPool, ConfigError, DEFAULT_CHOICE, DelegateConfig,
+    HarnessTable, KbConfig, KbEmbedder, KbRanker, KbSearch, NetworkConfig, OpenerConfig, SdkTable,
 };
 
 #[derive(Deserialize)]
@@ -147,6 +147,12 @@ pub(super) struct RawFile {
     /// `[sdk.NAME]`: the offers the person makes by address.
     #[serde(default)]
     pub(super) sdk: IndexMap<String, toml::Value>,
+    /// `[assist_harness.NAME]`: the harnesses the person offers as a backend.
+    #[serde(default)]
+    pub(super) assist_harness: IndexMap<String, RawAssistHarness>,
+    /// `[assist_pool]`: the warm sessions the harness backends keep.
+    #[serde(default)]
+    pub(super) assist_pool: Option<RawAssistPool>,
 }
 
 /// `[settings]`: each section's table is the section's; the host reads the Power group's.
@@ -479,10 +485,32 @@ pub(super) struct RawAssist {
     pub(super) fallback: Vec<String>,
 }
 
-/// The `[assist.*]` and `[sdk.*]` tables, read from the top level of the file.
+/// `[assist_harness.NAME]`: a harness on a profile, offered as a backend.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawAssistHarness {
+    pub(super) source: Option<String>,
+    pub(super) title: Option<String>,
+    pub(super) profile: Option<String>,
+    pub(super) account: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) effort: Option<String>,
+}
+
+/// `[assist_pool]`: the warm sessions the harness backends keep.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawAssistPool {
+    pub(super) idle_seconds: Option<u64>,
+    pub(super) max_sessions: Option<usize>,
+}
+
+/// The `[assist.*]`, `[sdk.*]`, `[assist_harness.*]` and `[assist_pool]` tables, read from the top level of the file.
 pub(super) fn assist_of(
     assist: &IndexMap<String, toml::Value>,
     sdk: &IndexMap<String, toml::Value>,
+    harnesses: &IndexMap<String, RawAssistHarness>,
+    pool: Option<&RawAssistPool>,
 ) -> Result<AssistConfig, ConfigError> {
     let invalid = |what: String| ConfigError::Invalid { entry: None, what };
     let word = |text: &str, extra: &[char]| {
@@ -492,6 +520,54 @@ pub(super) fn assist_of(
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || extra.contains(&c))
     };
     let mut out = AssistConfig::default();
+    if let Some(pool) = pool {
+        if pool.idle_seconds == Some(0) {
+            return Err(invalid(
+                "[assist_pool] idle_seconds is at least 1".to_owned(),
+            ));
+        }
+        if pool.max_sessions == Some(0) {
+            return Err(invalid(
+                "[assist_pool] max_sessions is at least 1".to_owned(),
+            ));
+        }
+        out.pool = AssistPool {
+            idle_seconds: pool.idle_seconds,
+            max_sessions: pool.max_sessions,
+        };
+    }
+    for (name, raw) in harnesses {
+        if !word(name, &['_', '-']) {
+            return Err(invalid(format!(
+                "[assist_harness.{name}] is not an offer name (lower-case letters, digits, _ and -)"
+            )));
+        }
+        let text = |key: &str, value: &Option<String>| -> Result<Option<String>, ConfigError> {
+            match value {
+                None => Ok(None),
+                Some(text) if !text.trim().is_empty() => Ok(Some(text.clone())),
+                Some(_) => Err(invalid(format!(
+                    "[assist_harness.{name}] {key} is a non-empty text"
+                ))),
+            }
+        };
+        let source = text("source", &raw.source)?.ok_or_else(|| {
+            invalid(format!(
+                "[assist_harness.{name}] names no source (the agent that runs it)"
+            ))
+        })?;
+        out.harnesses.insert(
+            name.clone(),
+            HarnessTable {
+                source,
+                title: text("title", &raw.title)?,
+                profile: text("profile", &raw.profile)?,
+                account: text("account", &raw.account)?,
+                model: text("model", &raw.model)?,
+                effort: text("effort", &raw.effort)?,
+            },
+        );
+    }
     for (operation, value) in assist {
         if !word(operation, &['_']) {
             return Err(invalid(format!(

@@ -377,6 +377,21 @@ pub struct ResolvedLoadout {
     pub mcp: Vec<String>,
 }
 
+impl ResolvedLoadout {
+    /// The loadout that holds nothing, which a connection names with an empty name to start with none of the person's overlays,
+    /// skills and servers, whatever `[defaults] loadout` says.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            name: String::new(),
+            overlays: Vec::new(),
+            missing_overlays: Vec::new(),
+            skills: Vec::new(),
+            mcp: Vec::new(),
+        }
+    }
+}
+
 /// A session asked for a loadout `[loadouts]` does not hold.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnknownLoadout(pub String);
@@ -1010,7 +1025,37 @@ pub struct SdkTable {
     pub settings: serde_json::Value,
 }
 
-/// `[assist]` and `[sdk]`: which backends serve the host's own model work, and the offers the person makes by address.
+/// `[assist_harness.NAME]`: an agent harness the person has, on a profile, offered as a backend that completes a prompt with the
+/// harness's own login.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HarnessTable {
+    /// `source`: the agent entry that runs it (a name of `[host.agents]`, or a bundled agent's title).
+    pub source: String,
+    /// `title`: what the person calls it.
+    pub title: Option<String>,
+    /// `profile`: the `[host.profiles]` profile the session starts on (its model, effort and instructions).
+    pub profile: Option<String>,
+    /// `account`: the account of the source the session runs as.
+    pub account: Option<String>,
+    /// `model`: the model, when the profile's is not the one wanted.
+    pub model: Option<String>,
+    /// `effort`: the effort, when the profile's is not the one wanted.
+    pub effort: Option<String>,
+}
+
+/// `[assist_pool]`: the warm sessions the harness backends keep.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AssistPool {
+    /// `idle_seconds`: how long a session nobody asked is kept before it is ended (default 120).
+    pub idle_seconds: Option<u64>,
+    /// `max_sessions`: the most sessions kept at once, all harnesses together (default 2).
+    pub max_sessions: Option<usize>,
+}
+
+/// `[assist]`, `[sdk]` and `[assist_harness]`: which backends serve the host's own model work, and the offers the person makes
+/// by address or by harness.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AssistConfig {
@@ -1018,6 +1063,10 @@ pub struct AssistConfig {
     pub operations: IndexMap<String, AssistChoice>,
     /// `[sdk.NAME]`, by name, in the file's order.
     pub sdk: IndexMap<String, SdkTable>,
+    /// `[assist_harness.NAME]`, by name, in the file's order.
+    pub harnesses: IndexMap<String, HarnessTable>,
+    /// `[assist_pool]`.
+    pub pool: AssistPool,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a

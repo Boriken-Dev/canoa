@@ -13,8 +13,8 @@ use crate::worktree::Worktrees;
 
 use super::{
     BAD_PARAMS, Caller, Control, DENIED, Grant, REFUSED, Stores, allow, choices, discover,
-    error_line, files, hosting, looks, panel_tabs, profile_items, providers, registry, secrets,
-    settings_sections, speech_offers, usage_read,
+    error_line, files, hosting, kb_offers, looks, panel_tabs, profile_items, providers, registry,
+    secrets, settings_sections, speech_offers, usage_read,
 };
 
 impl Control {
@@ -626,6 +626,21 @@ impl Control {
         params: &Value,
     ) -> Result<Value, (i32, String)> {
         choices::call(self.accounts()?, caller, params)
+    }
+
+    pub(super) fn r_kb(
+        &self,
+        caller: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        kb_offers::call(
+            self.accounts.as_ref(),
+            self.assist.as_ref(),
+            caller,
+            method,
+            params,
+        )
     }
 
     pub(super) fn r_discover(

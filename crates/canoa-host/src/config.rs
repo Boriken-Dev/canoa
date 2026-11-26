@@ -54,12 +54,12 @@ use sections::{
 };
 pub(crate) use sections::{check_label, check_name, plain_absolute};
 pub use types::{
-    AgentProfile, AssistChoice, AssistConfig, Config, ControlConfig, DEFAULT_CHOICE,
+    AgentProfile, AssistChoice, AssistConfig, AssistPool, Config, ControlConfig, DEFAULT_CHOICE,
     DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS, DEFAULT_MAX_SESSIONS, DEFAULT_PRESET,
-    DelegateConfig, Extension, ExtensionCheck, HistoryConfig, KbConfig, KbEmbedder, KbRanker,
-    KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig, NativeConfig,
-    NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable, StoreConfig,
-    UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
+    DelegateConfig, Extension, ExtensionCheck, HarnessTable, HistoryConfig, KbConfig, KbEmbedder,
+    KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig,
+    NativeConfig, NetworkConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable,
+    StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
@@ -187,7 +187,12 @@ impl Config {
     }
 
     fn from_raw(raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
-        let assist = assist_of(&raw.assist, &raw.sdk)?;
+        let assist = assist_of(
+            &raw.assist,
+            &raw.sdk,
+            &raw.assist_harness,
+            raw.assist_pool.as_ref(),
+        )?;
         let mut config = Self::from_raw_tables(raw, base)?;
         config.assist = assist;
         Ok(config)

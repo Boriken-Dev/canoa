@@ -127,6 +127,8 @@ pub(crate) struct Control {
     history: Option<Moves>,
     /// The owner's accounts, once the host knows where canoa.cfg is.
     accounts: Option<accounts::Accounts>,
+    /// The host's own model work, which `kb/offers` and `kb/test` read the opening of its harnesses from.
+    assist: Option<Arc<crate::assist::Assist>>,
     /// The session services the loaded libraries offer, which answer the control methods of their own namespaces.
     services: Option<Arc<crate::services::Services>>,
     /// What the agents spent, once the host has a home to keep it in.
@@ -264,6 +266,7 @@ impl Control {
             stores: OnceLock::new(),
             history: None,
             accounts: None,
+            assist: None,
             services: None,
             usage: None,
             usage_cache: usage_read::Cache::default(),
@@ -300,6 +303,11 @@ impl Control {
 
     /// Offers these stores instead of the built-in ones.
     #[must_use]
+    pub(crate) fn with_assist(mut self, assist: Arc<crate::assist::Assist>) -> Self {
+        self.assist = Some(assist);
+        self
+    }
+
     pub(crate) fn with_stores(self, stores: Stores) -> Self {
         let _ = self.stores.set(Ok(stores));
         self
@@ -1100,6 +1108,9 @@ mod import;
 #[cfg(test)]
 mod import_tests;
 mod index;
+mod kb_offers;
+#[cfg(test)]
+mod kb_offers_tests;
 mod ledger;
 mod looks;
 #[cfg(test)]

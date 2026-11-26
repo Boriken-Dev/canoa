@@ -34,7 +34,7 @@ use serde_json::{Value, json};
 
 pub(crate) use self::library::Source;
 use self::library::{Builder, Library, Slot};
-use self::rank::Ranker;
+pub(crate) use self::rank::Ranker;
 use crate::assist::Assist;
 use crate::config::KbConfig;
 use crate::delegate::BridgeCommand;

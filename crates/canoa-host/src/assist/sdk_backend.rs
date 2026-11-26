@@ -153,6 +153,17 @@ impl Backend for SdkBackend {
         &self.location
     }
 
+    fn kind(&self) -> &'static str {
+        match self.key {
+            KeySource::Account { .. } => "account",
+            _ => "server",
+        }
+    }
+
+    fn address(&self) -> Option<&str> {
+        Some(&self.address)
+    }
+
     fn serves(&self, operation: Operation) -> bool {
         self.can.contains(operation.capability())
     }

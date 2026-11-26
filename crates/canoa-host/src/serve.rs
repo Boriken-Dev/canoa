@@ -215,6 +215,8 @@ struct Shared {
     /// What gives a connection's sessions the store tools (search and inspect).
     store_tools: Arc<store_mcp::Hub>,
     kb_tools: Arc<kb_mcp::Hub>,
+    /// The host's own model work: knowledge search and the jobs that need a model ask it, and its harness sessions end with the host.
+    assist: Arc<crate::assist::Assist>,
     /// What gives a connection's sessions the environments they use as tools, and the environments themselves.
     env_tools: Arc<environments::mcp::Hub>,
     /// What gives a connection's sessions the tools programs offer (a browser extension's), and takes their offers.
@@ -493,6 +495,7 @@ impl Stopper {
     /// proof ends by [`PROOF_LIMIT`] at the latest.
     pub fn stop(&self) {
         self.0.stopped.store(true, Ordering::SeqCst);
+        self.0.assist.close();
         if let Some(delegation) = &self.0.delegation {
             delegation.stop();
         }

@@ -848,6 +848,7 @@ fn build_control_hub(
     movers: BTreeMap<String, Arc<kind::Harness>>,
     services: Arc<crate::services::Services>,
     environments: &Arc<crate::environments::Environments>,
+    assist: Arc<crate::assist::Assist>,
 ) -> Result<control::Control, ServeError> {
     // What `[host.disabled]` leaves off is read once, as the rest of `[host]` is; what it names that no library offers is only said.
     crate::disabled::install(config.disabled.clone());
@@ -926,6 +927,7 @@ fn build_control_hub(
         .with_extensions(control::ExtensionInstall::new(
             options.state_dir.as_ref().map(|dir| dir.join("extensions")),
         ))
+        .with_assist(assist)
         .with_terminals(
             crate::terminal::Terminals::new(
                 config.shell.clone(),
@@ -1192,6 +1194,13 @@ impl Serving {
         }
         let hosted = Arc::new(super::sessions::Hosted::new(method.peer_id(), kept));
         let office_dir = options.state_dir.as_ref().map(|dir| dir.join("office"));
+        let assist = crate::assist::Assist::of(
+            config,
+            options
+                .account_layers
+                .as_ref()
+                .zip(options.state_dir.as_deref()),
+        );
         let environments = crate::environments::Environments::of(config);
         let control = build_control_hub(
             config,
@@ -1206,6 +1215,7 @@ impl Serving {
             state.movers,
             Arc::clone(&services),
             &environments,
+            Arc::clone(&assist),
         )?;
         let mut serving = Self {
             shared: Arc::new(Shared {
@@ -1220,14 +1230,9 @@ impl Serving {
                     &config.kb,
                     options.state_dir.clone(),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
-                    crate::assist::Assist::of(
-                        config,
-                        options
-                            .account_layers
-                            .as_ref()
-                            .zip(options.state_dir.as_deref()),
-                    ),
+                    Arc::clone(&assist),
                 ),
+                assist,
                 env_tools: crate::environments::mcp::Hub::new(
                     Arc::clone(&environments),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
@@ -1426,9 +1431,6 @@ impl Serving {
         identity: Identity,
         usage: Option<Arc<crate::usage_log::UsageLog>>,
     ) {
-        let Some(delegation) = &self.shared.delegation else {
-            return;
-        };
         let served = self.local().served;
         let mut agents: Vec<delegate::Source> = self
             .listening
@@ -1484,13 +1486,18 @@ impl Serving {
                 source: agent.source.clone(),
             }),
         }));
-        delegation.attach(Arc::new(DelegationHost {
+        let host = Arc::new(DelegationHost {
             shared: Arc::downgrade(&self.shared),
             served,
             agents,
             identity,
             usage,
-        }));
+        });
+        // The harness backends of the assist service open agents the way a task does, whether or not tasks are on.
+        self.shared.assist.attach_host(host.clone());
+        if let Some(delegation) = &self.shared.delegation {
+            delegation.attach(host);
+        }
     }
 }
 

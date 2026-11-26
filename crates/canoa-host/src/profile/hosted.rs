@@ -378,10 +378,17 @@ impl Connection {
                 ));
             }
         }
-        let resolved = listed
-            .resolve_loadout(loadout)
-            .map_err(|error| error.to_string())?;
-        let role = resolved.as_ref().map(|resolved| resolved.name.clone());
+        let resolved = if loadout == Some("") {
+            Some(crate::config::ResolvedLoadout::empty())
+        } else {
+            listed
+                .resolve_loadout(loadout)
+                .map_err(|error| error.to_string())?
+        };
+        let role = resolved
+            .as_ref()
+            .map(|resolved| resolved.name.clone())
+            .filter(|name| !name.is_empty());
         let from_loadout: Option<Vec<String>> = resolved.as_ref().map(|resolved| {
             resolved
                 .overlays

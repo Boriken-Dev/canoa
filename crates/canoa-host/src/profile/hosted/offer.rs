@@ -130,6 +130,10 @@ pub(crate) fn choose_loadout(
             "a client sent something other than a loadout's name as its choice, which was refused",
         ));
     };
+    // An empty name is the loadout that holds nothing: no overlay, skill or server, and not `[defaults] loadout` either.
+    if name.is_empty() {
+        return Ok(Some(String::new()));
+    }
     match offer.profiles[index].1.resolve_loadout(Some(name)) {
         Ok(_) => Ok(Some(name.to_owned())),
         Err(unknown) => Err(refuse(

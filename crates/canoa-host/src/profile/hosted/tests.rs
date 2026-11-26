@@ -1532,6 +1532,33 @@ fn a_session_starts_with_exactly_the_overlays_and_servers_of_its_loadout() {
     assert_eq!(item(&lean, "mcp.ghost")["state"], "not supported", "{lean}");
 }
 
+/// A session that is no work of the person's: an empty loadout name is the loadout that holds nothing, which `[defaults] loadout`
+/// does not replace.
+#[test]
+fn an_empty_loadout_name_starts_a_session_with_none_of_the_persons_overlays_and_servers_whatever_the_default_says()
+ {
+    let temp = temp_with_skill();
+    install_overlay(&temp);
+    let offer = loadout_offer(&temp, LOADOUTS);
+    let (connection, report) = loadout_report(&offer, Some(""));
+    // No loadout is the role, so no template sees one; every overlay and every server of the person's is off, the default's included.
+    assert_eq!(connection.kb_caller().role, None);
+    assert_eq!(item(&report, "overlay")["state"], "off", "{report}");
+    assert_eq!(item(&report, "mcp.own")["state"], "off", "{report}");
+    assert_eq!(item(&report, "mcp.spare")["state"], "off", "{report}");
+    // Naming none, a session still starts with the default's.
+    let (_, default) = loadout_report(&offer, None);
+    assert_ne!(item(&default, "mcp.own")["state"], "off", "{default}");
+    // It is accepted as a choice from the client.
+    let first = serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"_meta": {LOADOUT_META: ""}}}))
+    .expect("json");
+    assert_eq!(
+        choose_loadout(&offer, 0, &first).expect("accepted"),
+        Some(String::new())
+    );
+}
+
 #[test]
 fn an_overlay_the_client_names_wins_over_the_loadouts_and_skills_come_from_the_loadout() {
     let temp = temp_with_skill();

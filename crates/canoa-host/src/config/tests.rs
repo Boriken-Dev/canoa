@@ -2770,3 +2770,48 @@ fn keep_awake_is_off_unless_the_power_table_of_settings_turns_it_on() {
     );
     assert!(with("[settings.power]\nkeep_awake = \"yes\"\n").is_err());
 }
+
+#[test]
+fn a_harness_the_person_offers_and_the_warm_sessions_it_keeps_are_read_and_a_bad_table_is_refused_by_name()
+ {
+    let config = parse(
+        "[assist_harness.claude]\nsource = \"Claude\"\nprofile = \"terse\"\naccount = \"work\"\nmodel = \"haiku\"\neffort = \"low\"\ntitle = \"Claude, terse\"\n\
+         [assist_harness.bare]\nsource = \"Codex\"\n[assist_pool]\nidle_seconds = 90\nmax_sessions = 3\n",
+    )
+    .expect("parses");
+    let names: Vec<&str> = config.assist.harnesses.keys().map(String::as_str).collect();
+    assert_eq!(names, ["claude", "bare"]);
+    let claude = &config.assist.harnesses["claude"];
+    assert_eq!(claude.source, "Claude");
+    assert_eq!(claude.profile.as_deref(), Some("terse"));
+    assert_eq!(claude.account.as_deref(), Some("work"));
+    assert_eq!(claude.model.as_deref(), Some("haiku"));
+    assert_eq!(claude.effort.as_deref(), Some("low"));
+    assert_eq!(claude.title.as_deref(), Some("Claude, terse"));
+    assert_eq!(config.assist.harnesses["bare"].profile, None);
+    assert_eq!(config.assist.pool.idle_seconds, Some(90));
+    assert_eq!(config.assist.pool.max_sessions, Some(3));
+    // Nothing set is nothing kept: the defaults are the pool's own.
+    assert_eq!(
+        parse("").expect("parses").assist.pool,
+        AssistPool::default()
+    );
+    for (text, why) in [
+        ("[assist_harness.x]\nprofile = \"p\"\n", "names no source"),
+        (
+            "[assist_harness.X]\nsource = \"Claude\"\n",
+            "not an offer name",
+        ),
+        ("[assist_harness.x]\nsource = \"\"\n", "non-empty"),
+        (
+            "[assist_harness.x]\nsource = \"Claude\"\nsurprise = 1\n",
+            "assist_harness.x",
+        ),
+        ("[assist_pool]\nidle_seconds = 0\n", "idle_seconds"),
+        ("[assist_pool]\nmax_sessions = 0\n", "max_sessions"),
+        ("[assist_pool]\nsurprise = 1\n", "assist_pool"),
+    ] {
+        let refused = parse(text).expect_err(text).to_string();
+        assert!(refused.contains(why), "{text}: {refused}");
+    }
+}

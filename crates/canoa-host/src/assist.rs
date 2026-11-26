@@ -2,26 +2,27 @@
 //! a model (titles, summaries) and Voice come to it too; none of them calls an account's API, an agent or a program itself.
 //!
 //! A consumer names an operation (`complete`, `embed`, `rerank`) and what it asks for; the service fulfils it from whatever can: a
-//! backend. The ones here are an `sdk_provider` on an account (an API key) and a server by address; a harness session on a
-//! subscription login, a local program or an extension's own are more backends of the same trait. The person chooses a backend per
+//! backend. The ones here are an `sdk_provider` on an account (an API key), a server by address and a harness session on a
+//! subscription login (`[assist_harness.NAME]`); a local program or an extension's own are more backends of the same trait. The person chooses a backend per
 //! operation (`[assist.OPERATION] use`) and the ones that follow it (`fallback`); an operation no backend can serve fails with the
 //! reason, and the consumer decides what to do (knowledge search answers by words).
 //!
 //! A backend may hold state across requests: `&self` methods, a [`Backend::reap`] the host calls from time to time and a
-//! [`Backend::close`] at shutdown. That is where a pool of warm agent sessions goes (keyed by harness, account and profile settings,
-//! started on first use, a new conversation for each request, an idle timeout and a cap, a broken session replaced).
+//! [`Backend::close`] at shutdown. The harness backends keep a pool of warm agent sessions there (keyed by harness, account and
+//! profile, started on first use, a new conversation for each request, an idle timeout and a cap, a broken session replaced).
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "locks and the clock are std's"
 )]
 
+mod harness;
 mod http;
 mod sdk_backend;
 
 use core::time::Duration;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Instant;
 
 use canoa::network::Network;
@@ -30,6 +31,7 @@ use canoa::sdk::{
 };
 use coqui_acp_api::ModelListing;
 
+pub(crate) use self::harness::{DEFAULT_IDLE, DEFAULT_SESSIONS, HarnessBackend, Opener, Pool};
 pub(crate) use self::sdk_backend::backends_of;
 use crate::config::{AssistChoice, DEFAULT_CHOICE};
 
@@ -116,7 +118,7 @@ impl Failure {
 
 /// Something that can serve operations.
 pub(crate) trait Backend: Send + Sync {
-    /// The id a table names it by: `openai:work` for an account's, the table's name for a server.
+    /// The id a table names it by: `openai:work` for an account's, the table's name for a server, `harness:NAME` for a harness.
     fn id(&self) -> &str;
 
     /// What it is called for people.
@@ -124,6 +126,17 @@ pub(crate) trait Backend: Send + Sync {
 
     /// Where the text goes, in a sentence or two, for the page that offers it.
     fn location(&self) -> &str;
+
+    /// What kind of backend it is, for the page that lists them: `account` (an API of an account of the person's), `server` (one
+    /// the person named by address) or `harness` (an agent on a login).
+    fn kind(&self) -> &'static str {
+        "backend"
+    }
+
+    /// Where the text is sent, as an address, when it goes to one.
+    fn address(&self) -> Option<&str> {
+        None
+    }
 
     /// Whether it can serve `operation` at all.
     fn serves(&self, operation: Operation) -> bool;
@@ -137,18 +150,12 @@ pub(crate) trait Backend: Send + Sync {
     ) -> Result<Answer, Failure>;
 
     /// The models it offers, each with what it can do.
-    #[allow(
-        dead_code,
-        reason = "the part of the seam the Settings page lists models through"
-    )]
     fn models(&self, network: &Arc<Network>) -> Result<ModelListing, Failure>;
 
     /// Ends what has been idle too long. Called from time to time by the host.
-    #[allow(dead_code, reason = "the seam of a backend that holds sessions open")]
     fn reap(&self) {}
 
     /// Ends everything it holds, at shutdown.
-    #[allow(dead_code, reason = "the seam of a backend that holds sessions open")]
     fn close(&self) {}
 }
 
@@ -168,6 +175,8 @@ pub(crate) struct Assist {
     /// Backends that failed, and when: they are left alone for `retry`.
     down: Mutex<HashMap<String, (Instant, String)>>,
     retry: Duration,
+    /// How the harness backends reach the host's agents, once the host has them.
+    opener: Opener,
 }
 
 impl core::fmt::Debug for Assist {
@@ -187,6 +196,7 @@ pub(crate) const DEFAULT_RETRY: Duration = Duration::from_secs(60);
 
 impl Assist {
     /// The service over `backends`, in the order the first able one is taken, with the person's `choices`.
+    #[cfg(test)]
     pub(crate) fn new(
         backends: Vec<Arc<dyn Backend>>,
         choices: indexmap::IndexMap<String, AssistChoice>,
@@ -197,7 +207,13 @@ impl Assist {
             choices,
             down: Mutex::new(HashMap::new()),
             retry,
+            opener: Opener::default(),
         })
+    }
+
+    /// Gives the harness backends the host they open agents through. Once.
+    pub(crate) fn attach_host(&self, host: Arc<dyn crate::delegate::Host>) {
+        let _ = self.opener.set(host);
     }
 
     /// The service of `config`: a backend for each of the person's accounts a loaded provider serves and for each `[sdk.NAME]`, the
@@ -206,12 +222,39 @@ impl Assist {
         config: &crate::config::Config,
         accounts: Option<(&crate::config::Layers, &std::path::Path)>,
     ) -> Arc<Self> {
+        Self::build(config, accounts, Opener::default())
+    }
+
+    /// A service of `config` as it is now, which opens harnesses through the host this one does: for the page that lists what is
+    /// offered and tests it, since canoa.cfg may have changed since this one was made. Its sessions are its own.
+    pub(crate) fn fresh(
+        &self,
+        config: &crate::config::Config,
+        accounts: Option<(&crate::config::Layers, &std::path::Path)>,
+    ) -> Arc<Self> {
+        Self::build(config, accounts, Arc::clone(&self.opener))
+    }
+
+    fn build(
+        config: &crate::config::Config,
+        accounts: Option<(&crate::config::Layers, &std::path::Path)>,
+        opener: Opener,
+    ) -> Arc<Self> {
         let registries = crate::control::providers::registries_of(Some(config));
         let retry = config
             .kb
             .retry_seconds
             .map_or(DEFAULT_RETRY, Duration::from_secs);
-        let backends = backends_of(config, &registries, accounts);
+        let mut backends = backends_of(config, &registries, accounts);
+        let pool = Pool::new(&config.assist.pool);
+        for (name, table) in &config.assist.harnesses {
+            backends.push(Arc::new(HarnessBackend::new(
+                name,
+                table,
+                Arc::clone(&opener),
+                Arc::clone(&pool),
+            )));
+        }
         for backend in &backends {
             tracing::info!(
                 backend = backend.id(),
@@ -220,7 +263,34 @@ impl Assist {
                 backend.location()
             );
         }
-        Self::new(backends, config.assist.operations.clone(), retry)
+        let service = Arc::new(Self {
+            backends,
+            choices: config.assist.operations.clone(),
+            down: Mutex::new(HashMap::new()),
+            retry,
+            opener,
+        });
+        if !config.assist.harnesses.is_empty() {
+            Self::keep_tidy(&service, pool.idle_for());
+        }
+        service
+    }
+
+    /// Ends the sessions the backends hold idle, from time to time, for as long as the service lives.
+    fn keep_tidy(service: &Arc<Self>, idle: Duration) {
+        let every = (idle / 2).clamp(Duration::from_secs(1), Duration::from_secs(30));
+        let weak: Weak<Self> = Arc::downgrade(service);
+        let _ = std::thread::Builder::new()
+            .name("canoa-assist-tidy".to_owned())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(every);
+                    let Some(service) = weak.upgrade() else {
+                        break;
+                    };
+                    service.reap();
+                }
+            });
     }
 
     /// A service with no backend: every request fails with the reason.
@@ -230,22 +300,21 @@ impl Assist {
     }
 
     /// Every backend, in order.
-    #[allow(
-        dead_code,
-        reason = "the part of the seam the Settings page lists offers through"
-    )]
     pub(crate) fn backends(&self) -> &[Arc<dyn Backend>] {
         &self.backends
     }
 
     /// Ends what the backends hold idle.
-    #[allow(
-        dead_code,
-        reason = "called from the host's housekeeping once a backend holds sessions"
-    )]
     pub(crate) fn reap(&self) {
         for backend in &self.backends {
             backend.reap();
+        }
+    }
+
+    /// Ends everything the backends hold, at shutdown.
+    pub(crate) fn close(&self) {
+        for backend in &self.backends {
+            backend.close();
         }
     }
 
