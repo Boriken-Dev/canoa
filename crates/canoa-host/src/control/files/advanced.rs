@@ -31,6 +31,8 @@ pub(crate) enum Kind {
     Bool,
     /// A whole number.
     Int,
+    /// A number that may have a fraction: an amount of money.
+    Number,
     Text,
     /// A list of text, one to a line.
     Lines,
@@ -48,7 +50,7 @@ pub(crate) struct Table {
     pub(crate) fields: &'static [(&'static str, Kind)],
 }
 
-use Kind::{Bool, Int, Json, Lines, Text};
+use Kind::{Bool, Int, Json, Lines, Number, Text};
 
 /// Every table the generic editor offers, with each key the host reads in it.
 pub(crate) const TABLES: &[Table] = &[
@@ -286,6 +288,20 @@ pub(crate) const TABLES: &[Table] = &[
         fields: &[("keep_days", Int)],
     },
     Table {
+        path: &["host", "usage", "limits"],
+        shape: Shape::Entries,
+        fields: &[
+            ("account", Text),
+            ("profile", Text),
+            ("bucket", Text),
+            ("usd", Number),
+            ("tokens", Int),
+            ("window", Text),
+            ("warn_permille", Int),
+            ("stop_permille", Int),
+        ],
+    },
+    Table {
         path: &["host", "worktrees"],
         shape: Shape::Flat,
         fields: &[("max_per_repository", Int), ("git_seconds", Int)],
@@ -399,7 +415,7 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
     ("settings", &["power"]),
     ("settings.power", &["keep_awake"]),
     ("permissions", &["protected"]),
-    ("usage", &["limit_phrases"]),
+    ("usage", &["limit_phrases", "warn_permille"]),
     ("notifications", &["notifiers"]),
     (
         "notifications.notifiers.NAME",
@@ -557,6 +573,7 @@ fn schema_of(table: &Table) -> Value {
         let shown = match kind {
             Kind::Bool => KindBuilder::bool(),
             Kind::Int => KindBuilder::int_bounds(Some(0), None),
+            Kind::Number => KindBuilder::float_bounds(Some(0.0), None),
             Kind::Text | Kind::Json => KindBuilder::string(),
             Kind::Lines => KindBuilder::list(KindBuilder::string()),
         };
@@ -578,6 +595,7 @@ fn fits(kind: Kind, value: &Value) -> bool {
     match kind {
         Kind::Bool => value.is_boolean(),
         Kind::Int => value.is_i64() || value.is_u64(),
+        Kind::Number => value.is_number(),
         Kind::Text => value.is_string(),
         Kind::Lines => value
             .as_array()

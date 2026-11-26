@@ -14,6 +14,7 @@ use indexmap::IndexMap;
 mod entries;
 mod entries_parse;
 pub(crate) mod layers;
+mod limits;
 mod notifications;
 mod profiles;
 mod raw;
@@ -22,6 +23,8 @@ mod types;
 
 #[cfg(test)]
 mod coverage_tests;
+#[cfg(test)]
+mod limits_tests;
 #[cfg(test)]
 mod tests;
 
@@ -41,6 +44,9 @@ pub use layers::{ENTRIES, INSTALLED_DIR_VARIABLE, Layers, merge_into};
 
 /// What the host protects when the person wrote no `[permissions] protected` list: the app's recommended list, one file both read.
 pub(crate) const RECOMMENDED_PROTECTED: &str = include_str!("protected_default.txt");
+pub use limits::{
+    DEFAULT_WARN_PERMILLE, LimitConfig, LimitFigure, LimitScope, LimitWindow, MAX_LIMIT_NAME,
+};
 pub use profiles::CLIENT_KINDS;
 use profiles::{
     client_loadouts_of, default_loadout_of, loadouts_of, local_profiles_of, overlay_kb_of,
@@ -74,6 +80,7 @@ struct TopLevel {
     network: NetworkRoutes,
     secrets: Option<serde_json::Value>,
     limit_phrases: Option<Vec<String>>,
+    warn_permille: u32,
     protected_paths: Option<Vec<String>>,
     keep_awake: bool,
     local_agents: Vec<Entry>,
@@ -208,6 +215,10 @@ impl Config {
         let top = resolve_top_level(&mut raw, base)?;
         let Some(mut host) = raw.host else {
             return Ok(Self {
+                usage: UsageConfig {
+                    warn_permille: top.warn_permille,
+                    ..UsageConfig::default()
+                },
                 limit_phrases: top.limit_phrases,
                 protected_paths: top.protected_paths,
                 keep_awake: top.keep_awake,
@@ -273,7 +284,7 @@ impl Config {
             });
         }
         let disabled = core::mem::take(&mut host.disabled);
-        let sub = build_subsystems(&mut host, &directory, &entries)?;
+        let sub = build_subsystems(&mut host, &directory, &entries, top.warn_permille)?;
         Ok(Self {
             origins: host.origins,
             entries,
@@ -346,7 +357,19 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
         .transpose()?
         .unwrap_or_default();
     network.base_dir = Some(directory_of(base).to_string_lossy().into_owned());
-    let limit_phrases = raw.usage.take().and_then(|usage| usage.limit_phrases);
+    let (limit_phrases, warn_permille) = match raw.usage.take() {
+        None => (None, DEFAULT_WARN_PERMILLE),
+        Some(usage) => {
+            let warn = usage.warn_permille.unwrap_or(DEFAULT_WARN_PERMILLE);
+            if warn > 1000 {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: "[usage] warn_permille is a whole number from 0 to 1000".to_owned(),
+                });
+            }
+            (usage.limit_phrases, warn)
+        }
+    };
     let keep_awake = raw
         .settings
         .take()
@@ -391,6 +414,7 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
         network,
         secrets,
         limit_phrases,
+        warn_permille,
         protected_paths,
         keep_awake,
         local_agents,
@@ -1098,6 +1122,7 @@ fn build_subsystems(
     host: &mut RawHost,
     directory: &Path,
     entries: &[Entry],
+    warn_permille: u32,
 ) -> Result<Subsystems, ConfigError> {
     let store = host
         .store
@@ -1226,7 +1251,10 @@ fn build_subsystems(
         }
     };
     let usage = match host.usage.take() {
-        None => UsageConfig::default(),
+        None => UsageConfig {
+            warn_permille,
+            ..UsageConfig::default()
+        },
         Some(raw) => {
             let keep_days = raw.keep_days.unwrap_or(UsageConfig::default().keep_days);
             if keep_days == 0 {
@@ -1235,7 +1263,11 @@ fn build_subsystems(
                     what: "host.usage: keep_days is at least 1".to_owned(),
                 });
             }
-            UsageConfig { keep_days }
+            UsageConfig {
+                keep_days,
+                warn_permille,
+                limits: limits::limits_of(raw.limits, warn_permille)?,
+            }
         }
     };
     if let Some(listen) = control.as_ref().and_then(|control| control.listen.as_ref())

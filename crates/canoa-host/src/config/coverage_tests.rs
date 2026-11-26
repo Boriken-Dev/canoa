@@ -53,6 +53,7 @@ fn tables() -> Vec<(&'static str, Vec<String>)> {
         ("host.kb.search", keys_of("RawKbSearch")),
         ("host.mcp_list", keys_of("RawMcpList")),
         ("host.usage", keys_of("RawHostUsage")),
+        ("host.usage.limits.NAME", keys_of("RawLimit")),
         ("host.worktrees", keys_of("RawWorktrees")),
         ("host.history", keys_of("RawHistory")),
         ("network", keys_of("RawNetwork")),

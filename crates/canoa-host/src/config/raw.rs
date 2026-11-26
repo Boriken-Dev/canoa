@@ -219,6 +219,8 @@ pub(super) struct RawPermissions {
 pub(super) struct RawUsage {
     #[serde(default)]
     pub(super) limit_phrases: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) warn_permille: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -710,6 +712,30 @@ pub(super) struct RawNative {
 #[serde(deny_unknown_fields)]
 pub(super) struct RawHostUsage {
     pub(super) keep_days: Option<u32>,
+    #[serde(default)]
+    pub(super) limits: IndexMap<String, RawLimit>,
+}
+
+/// `[host.usage.limits.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawLimit {
+    pub(super) account: Option<String>,
+    pub(super) profile: Option<String>,
+    pub(super) bucket: Option<String>,
+    pub(super) usd: Option<RawAmount>,
+    pub(super) tokens: Option<u64>,
+    pub(super) window: Option<String>,
+    pub(super) warn_permille: Option<u32>,
+    pub(super) stop_permille: Option<u32>,
+}
+
+/// An amount of money: TOML's integer or its decimal.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(super) enum RawAmount {
+    Whole(u64),
+    Decimal(f64),
 }
 
 /// `[host.worktrees]`.

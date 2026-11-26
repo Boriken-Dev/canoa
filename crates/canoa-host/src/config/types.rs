@@ -723,18 +723,26 @@ impl Default for HistoryConfig {
 }
 
 /// `[host.usage]`: the host records the spend each agent reports, by turn, in its home (`usage/`), and answers `usage/summary` and
-/// `usage/limits` from it. This is not `[usage]`, the app's and the limit phrases' table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `usage/limits` from it; its `limits` warn and stop on what is recorded and reported. This is not `[usage]`, the app's and the limit
+/// phrases' table, whose `warn_permille` the host reads too.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct UsageConfig {
     /// `keep_days`: how many days of records the host keeps; a month's file is removed at start once all of it is older.
     pub keep_days: u32,
+    /// `[usage] warn_permille`: the share of a limit's figure, in thousandths, from which a limit that names no threshold of its own
+    /// warns; the app's usage control reads the same key.
+    pub warn_permille: u32,
+    /// `[host.usage.limits.NAME]`, by name, in the file's order.
+    pub limits: IndexMap<String, super::LimitConfig>,
 }
 
 impl Default for UsageConfig {
     fn default() -> Self {
         Self {
             keep_days: crate::usage_log::DEFAULT_KEEP_DAYS,
+            warn_permille: super::DEFAULT_WARN_PERMILLE,
+            limits: IndexMap::new(),
         }
     }
 }
