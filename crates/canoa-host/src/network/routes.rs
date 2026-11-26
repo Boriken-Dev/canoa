@@ -296,22 +296,6 @@ pub(crate) fn network(route: Option<&str>) -> Result<Arc<Network>, RouteFailure>
     }
 }
 
-/// The settings of the network the route `route` makes, when `None` the host's: the roots it trusts, the certificate it presents and
-/// the proxy it names.
-///
-/// # Errors
-///
-/// As [`network`].
-pub(crate) fn settings(route: Option<&str>) -> Result<NetworkSettings, RouteFailure> {
-    let Some(state) = state() else {
-        return Ok(super::installed_settings());
-    };
-    match route {
-        None => Ok(super::installed_settings()),
-        Some(name) => Ok(held(&state, name, "host")?.settings.clone()),
-    }
-}
-
 /// The network of the route the account whose id is `id` names, when it names one.
 ///
 /// # Errors

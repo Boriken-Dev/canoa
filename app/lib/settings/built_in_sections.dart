@@ -35,6 +35,19 @@ const builtInSectionsListing = r'''
       "collection": null
     },
     {
+      "id": "network",
+      "title": "Network",
+      "help": null,
+      "icon": "alt_route",
+      "group": "App",
+      "under": null,
+      "keywords": "proxy route routes pac manual system direct socks http https no proxy bypass login certificate how traffic leaves default account",
+      "origin": "built-in",
+      "stored": "config",
+      "schema": null,
+      "form": null
+    },
+    {
       "id": "notifications",
       "title": "Notifications",
       "help": null,

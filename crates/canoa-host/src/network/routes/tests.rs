@@ -34,7 +34,7 @@ fn state(dir: &Dir, text: &str) -> State {
 /// A server that answers for [`NAME`], and the proxy that is its only way out: loopback is never sent through a proxy, so the name
 /// is one the proxy alone resolves.
 struct Behind {
-    origin: TlsServer,
+    _origin: TlsServer,
     proxy: StandInProxy,
     dir: Dir,
     ca_file: String,
@@ -54,7 +54,7 @@ fn behind(name: &str) -> Behind {
     let ca_file = dir.0.join("ca.pem");
     fs::write(&ca_file, ca.pem()).expect("writes");
     Behind {
-        origin,
+        _origin: origin,
         proxy,
         dir,
         ca_file: ca_file.to_string_lossy().replace('\\', "/"),

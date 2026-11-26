@@ -252,8 +252,7 @@ impl Reach {
     /// `client_certificate` or `ca_file`.
     pub fn settings(&self) -> Result<NetworkSettings, NetworkError> {
         let refused = |what: &str| NetworkError::new(alloc::format!("route: {what}"));
-        let mut settings = NetworkSettings::default();
-        settings.proxy = match self.via {
+        let proxy = match self.via {
             Via::System => ProxyChoice::System,
             Via::Direct => ProxyChoice::None,
             Via::Proxy => ProxyChoice::Each {
@@ -268,29 +267,36 @@ impl Reach {
                     .ok_or_else(|| refused("a PAC script names no location"))?,
             ),
         };
-        settings.proxy_user.clone_from(&self.user);
-        settings.proxy_password = self
-            .password
-            .as_ref()
-            .map(|password| ProxySecret::new(password.expose().clone()));
-        settings.no_proxy.clone_from(&self.no_proxy);
-        settings.negotiate = self.negotiate;
-        settings.client_certificate = match self.client_certificate.as_deref().map(str::trim) {
+        let client_certificate = match self.client_certificate.as_deref().map(str::trim) {
             None => ClientCertificate::System,
             Some("") => return Err(refused("client_certificate is empty")),
             Some(text) if text.eq_ignore_ascii_case("system") => ClientCertificate::System,
             Some(text) if text.eq_ignore_ascii_case("none") => ClientCertificate::None,
             Some(path) => ClientCertificate::File(path.into()),
         };
-        settings.ca_file = match self.ca_file.as_deref() {
+        let ca_file = match self.ca_file.as_deref() {
             None => None,
             Some("") => return Err(refused("ca_file is empty")),
             Some(path) => Some(path.into()),
         };
-        settings.git_tls = match self.git_tls.as_deref() {
+        let git_tls = match self.git_tls.as_deref() {
             None | Some("system") => GitTls::System,
             Some("git") => GitTls::Git,
             Some(_) => return Err(refused("git_tls is system or git")),
+        };
+        let settings = NetworkSettings {
+            proxy,
+            proxy_user: self.user.clone(),
+            proxy_password: self
+                .password
+                .as_ref()
+                .map(|password| ProxySecret::new(password.expose().clone())),
+            no_proxy: self.no_proxy.clone(),
+            negotiate: self.negotiate,
+            client_certificate,
+            ca_file,
+            git_tls,
+            ..NetworkSettings::default()
         };
         Ok(settings)
     }

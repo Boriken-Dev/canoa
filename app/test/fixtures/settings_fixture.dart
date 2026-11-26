@@ -6,6 +6,7 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/profile/profile_home.dart';
 import 'package:canoa/settings/advanced_config.dart';
+import 'package:canoa/settings/network_routes.dart';
 import 'package:canoa/settings/host_sections.dart';
 import 'package:canoa/settings/provider_switches.dart';
 import 'package:canoa/settings/settings_page.dart';
@@ -63,6 +64,7 @@ Future<SettingsHarness> openSettings(
   ContentSettings? contentSettings,
   AdvancedConfig? advancedConfig,
   NotificationsController? notifications,
+  NetworkRoutes? networkRoutes,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -101,6 +103,7 @@ Future<SettingsHarness> openSettings(
       contentSettings: contentSettings,
       advancedConfig: advancedConfig,
       notifications: notifications,
+      networkRoutes: networkRoutes,
     ),
   ));
   await tester.pumpAndSettle();

@@ -51,6 +51,7 @@ macro_rules! built_in_sections {
 built_in_sections! {
     General("general", "General", "App", "tune", "tray window startup network webtransport timeout sessions remembered folder workspace keep history");
     Appearance("appearance", "Appearance", "App", "palette", "look theme brightness dark light detail verbose density preview");
+    Network("network", "Network", "App", "alt_route", "proxy route routes pac manual system direct socks http https no proxy bypass login certificate how traffic leaves default account");
     Notifications("notifications", "Notifications", "App", "notifications", "alerts permission question finished browser toast");
     Voice("voice", "Voice", "App", "mic", "dictation speech microphone input device language push to talk transcribe audio read aloud voice speak speaker playback tts text to speech");
     Shortcuts("shortcuts", "Shortcuts", "App", "keyboard", "keyboard keys chords hotkeys");

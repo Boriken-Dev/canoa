@@ -12,6 +12,7 @@ import '../secrets/secrets_controller.dart';
 import '../secrets/secrets_host.dart';
 import '../served/host_files.dart' show HostFiles;
 import '../settings/advanced_config.dart';
+import '../settings/network_routes.dart';
 import '../settings/extension_settings.dart';
 import '../settings/provider_switches.dart';
 import '../store/catalog_sources.dart';
@@ -121,6 +122,7 @@ final class HostServices {
     catalogSourcesHeld = c == null ? null : CatalogSources((method, params) async => (await c.ready(wait: false)).call(method, params));
     contentSettingsHeld = c == null ? null : ContentSettings((method, params) async => (await c.ready(wait: false)).call(method, params));
     advancedConfigHeld = c == null ? null : AdvancedConfig((method, params) async => (await c.ready(wait: false)).call(method, params));
+    networkRoutesHeld = c == null ? null : NetworkRoutes((method, params) async => (await c.ready(wait: false)).call(method, params));
     shellSettingsHeld = hostFiles == null
         ? null
         : ShellSettings(files: hostFiles!, restart: onRestartForExtensions, saved: onExtensionsSaved);
@@ -160,6 +162,7 @@ final class HostServices {
   late final CatalogSources? catalogSourcesHeld;
   late final ContentSettings? contentSettingsHeld;
   late final AdvancedConfig? advancedConfigHeld;
+  late final NetworkRoutes? networkRoutesHeld;
 
   bool may(String grant) => grants?.may(grant) ?? false;
 

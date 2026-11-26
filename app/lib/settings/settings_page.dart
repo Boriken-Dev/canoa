@@ -31,6 +31,7 @@ import 'provider_switches.dart';
 import '../store/catalog_sources.dart';
 import '../store/content_settings.dart';
 import 'advanced_config.dart';
+import 'network_routes.dart';
 import 'host_sections.dart';
 import 'shell_settings.dart';
 import 'setting_layers.dart';
@@ -90,6 +91,7 @@ class SettingsPage extends StatefulWidget {
     this.catalogSources,
     this.contentSettings,
     this.advancedConfig,
+    this.networkRoutes,
     this.shells,
     this.usageSection = false,
     this.voiceBackends = const [],
@@ -164,6 +166,9 @@ class SettingsPage extends StatefulWidget {
 
   /// The tables of canoa.cfg no other page edits; null where there is no host to write them.
   final AdvancedConfig? advancedConfig;
+
+  /// The host's network routes, for the Network section; null where there is no host to ask.
+  final NetworkRoutes? networkRoutes;
 
   /// The shells the host found and the choice of which its terminals and agents use, for the Shells section; none where the key may
   /// not change the host's settings.
@@ -242,6 +247,7 @@ class SettingsPageState extends State<SettingsPage> {
     'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),
     'catalog_sources': (ready: widget.catalogSources != null, build: () => CatalogSourcesSection(key: const Key('settings-catalog-sources'), sources: widget.catalogSources!)),
     'content': (ready: widget.contentSettings != null, build: () => ContentSection(key: const Key('settings-content'), content: widget.contentSettings!)),
+    'network': (ready: widget.networkRoutes != null, build: () => NetworkSection(key: const Key('settings-network-section'), routes: widget.networkRoutes!)),
     'advanced': (ready: widget.advancedConfig != null, build: () => AdvancedSection(key: const Key('settings-advanced'), config: widget.advancedConfig!)),
     'providers': (ready: widget.providers != null, build: () => ProvidersSection(key: const Key('settings-providers'), switches: widget.providers!)),
     'signin': (ready: widget.portal != null, build: () => SignInSection(key: const Key('settings-signin'), portal: widget.portal!)),
