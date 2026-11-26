@@ -7,6 +7,10 @@
 //! ([`rewritten`]). The answer carries no decision, so the agent's own mode and the person's rules judge the call. A tool the
 //! vendor lets pass runs as it is; a file tool is refused with the way to do the same in the environment; any other is refused.
 //!
+//! The person's own rules for the agent reach the environment's tools through the same hook (`person.rs`): the agent
+//! applies a rule to the tool it names, so a rule on its file or shell tool never matched the MCP tools of the environment, and the
+//! host answers a call they refuse or ask about in the agent's own form, in every mode.
+//!
 //! Every failure refuses the call and nothing runs on this computer: a forwarder that cannot read its channel or reach the host,
 //! a payload past `[host] max_message_bytes`, an answer not signed for the request, a host that does not answer within the
 //! environment's `hook_seconds` (one budget in all), an `env-exec` naming no command this session's hook prepared within

@@ -64,6 +64,7 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
     fn hooks_delivery(&self, request: HooksRequest) -> Result<Option<HooksDelivery>, ProviderError>;      // the files of a plugin whose hooks run the host's forwarder for the moments ACP does not show; default: its own hooks cannot be given
     fn hook_support(&self, request: HookSupportRequest) -> Result<Option<HookSupport>, ProviderError>;    // what its own hooks do for `cd`, `pre-compact` and a `session-start` after a `compact` or `clear`; default: nothing said
     fn tool_hook(&self) -> Result<Option<ToolHook>, ProviderError>;                              // how a `pre-tool` hook takes its own file and shell tools over, so they act in the environment a session's tools are served from; default: they cannot be
+    fn person_rules(&self, request: RulesRequest) -> Result<Vec<PersonRule>, ProviderError>;   // the deny and ask rules its person gave it, read from its own settings (every layer), in the host's terms; default none
     fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError>;                      // how it is given a gateway the host runs for a session (its own account kind, credential, address setting, suffix, fixed settings); default none
     fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError>;       // the files it reads from its own folder to use a gateway at `address`; default none
     fn entry_settings(&self, request: EntrySettingsRequest) -> Result<Option<Value>, ProviderError>;   // the settings object of its harness provider the host's source for it is started with (a managed copy's launch, the person's protected places); default none
@@ -76,7 +77,8 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 // SessionListing { home?, max_bytes, files (newest first; the newest `peek` carry title and cwd) }, HistoryRequest { text, session }, HistoryAnswer { history, title? }.
 // SkillsRequest { additional_directories }, SkillsDelivery { folder, files, plugin?, directory, how (`{name}`) }, PluginDelivery { folder, meta (value merged into the request's `_meta`; a string `PLUGIN_PATH` is the folder's path) },
 // DeliveredFile { path, text }, HookKind::{Start, PreCompact, Batch, PreTool}, HooksRequest { commands: [HookCommand { kind: HookKind, command }], timeout_seconds }, HooksDelivery { files, plugin },
-// ToolHook { tools: [HookTool { name, role: ToolRole::{Shell, Files, Pass}, command?, shell?: ShellFamily }], pass_prefixes, name_at, input_at, mode_at?, modes: [ModeWord { word, mode }], deny, deny_reason_at, rewrite, rewrite_input_at }
+// ToolHook { tools: [HookTool { name, role: ToolRole::{Shell, Background, Files, Pass}, command?, shell?: ShellFamily }], pass_prefixes, name_at, input_at, mode_at?, modes: [ModeWord { word, mode }], deny, deny_reason_at, rewrite, rewrite_input_at, ask?, ask_reason_at?, mcp_prefix?, mcp_separator?, min_version? }
+// RulesRequest { folder?, cwd }, PersonRule { decision: RuleDecision::{Deny, Ask}, access: RuleAccess::{Read, Write, Run}, pattern? }
 //   (`ToolHook::new(tools, (name_at, input_at), (deny, deny_reason_at), (rewrite, rewrite_input_at))`, `HookTool::shell(name, command, shell)`, `HookTool::files(name)`, `HookTool::passes(name)`, `ModeWord::new(word, mode)`),
 // HookSupportRequest { event, reason? }, HookSupport { fires, text } (`fires`, `cannot`), AccessTarget { harness, at_launch },
 // GatewayRoute { kind, credential, address?, suffix, fixed: [Variable] } (`GatewayRoute::new(kind, credential)`),
@@ -96,7 +98,15 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
   the computer's, which runs as it is, as does a name starting with one of `pass_prefixes`); every other tool is refused. It says where the payload names the tool (`name_at`), holds its input (`input_at`) and says the
   agent's mode (`mode_at`, read through `modes` into `manual`, `accept_edits`, `auto`, `plan`, `bypass` or `dont_ask`), and the
   agent's own answers as JSON text with the place of the reason (`deny`) and of the new input (`rewrite`). The rewrite form must
-  decide nothing: the agent's own rules and mode judge the rewritten call. A tool not listed is not taken over.
+  decide nothing: the agent's own rules and mode judge the rewritten call. A tool not listed is not taken over. `Background` is a
+  tool that starts a command to watch (taken over as a `Shell`, but not offered for a command to wait for). `ask` (with
+  `ask_reason_at`) is the answer that makes the agent ask the person whatever its mode; without it a question is a refusal.
+  `mcp_prefix`, the server's name and `mcp_separator` name the agent's tool for each MCP tool, so the host can tell the calls of
+  its own `env_` servers. `min_version` is the oldest agent version (read from the first dotted number of `agentInfo.title`) whose
+  hook failures refuse the call; an older one is not started.
+- `person_rules`: the rules the person gave the agent that refuse (`deny`) or ask about (`ask`) a `Read`, `Write` or `Run` of a
+  `pattern` (a line of the protected places' syntax for files, whole commands with `*` for commands, none for every one). The host
+  applies them to the calls to its environment servers' tools, which the agent's own rules cannot see into, in every mode.
 
 ## The form a provider asks for
 
