@@ -208,7 +208,7 @@ void main() {
 
     /// The host with the system's proxy named by its environment: [password] is what it logs in with, and [bypass] the names that
     /// go direct. A person's own proxy variables are replaced, so the run depends on nothing of this computer's. [network] is the
-    /// text of its `[host.network]` table: the authority it trusts and the client certificate it presents, and none of that is
+    /// text of its `[network]` table: the authority it trusts and the client certificate it presents, and none of that is
     /// the Dart VM's.
     Future<void> startHost({String password = _password, String bypass = 'unrelated.invalid', String network = ''}) async {
       if (network.isNotEmpty) await File('${dir.path}/network.toml').writeAsString(network);
@@ -228,7 +228,8 @@ void main() {
     }
 
     String trusting(_Certificates made, {bool client = false}) =>
-        '[host.network]\nca_file = "${made.ca}"\n${client ? 'client_certificate = "${made.client}"\n' : ''}';
+        '[network]\nroute = "pinned"\n[network.routes.pinned]\nprovider = "system"\n'
+        'settings = { ca_file = "${made.ca}"${client ? ', client_certificate = "${made.client}"' : ''} }\n';
 
     Future<WebChannel> dial() => connectSystemChannel(
       WebEndpoints(webSocket: Uri.parse('wss://$_remote:${origin!.port}/channel')),
@@ -270,7 +271,7 @@ void main() {
       if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
       if (made == null) return;
       await startRemote();
-      // The authority is in the host's `[host.network]` and nowhere in the Dart VM's trust: only the host makes the TLS.
+      // The authority is in the host's network route and nowhere in the Dart VM's trust: only the host makes the TLS.
       await startHost(network: trusting(made));
       final channel = await dial();
       expect(await channel.messages.first.timeout(const Duration(seconds: 10)), 'hello');

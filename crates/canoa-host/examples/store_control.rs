@@ -6,7 +6,7 @@
 //! serves until standard input closes.
 //!
 //! Usage: `store_control <directory>`; the directory holds the host's home, the programs folder and the user's folders, and is
-//! the caller's to remove. A `network.toml` there is appended to the host's configuration (a `[host.network]` table, say). Its `canoa.cfg`, when there is one, is the host's configuration file for `config/*` and `speech/*`, so
+//! the caller's to remove. A `network.toml` there is appended to the host's configuration (a `[network]` table, say). Its `canoa.cfg`, when there is one, is the host's configuration file for `config/*` and `speech/*`, so
 //! a test that defines a speech provider there reaches it over the same links.
 #![allow(
     clippy::std_instead_of_core,

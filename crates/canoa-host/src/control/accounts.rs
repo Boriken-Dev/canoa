@@ -358,6 +358,29 @@ impl Accounts {
                 params,
             ),
             "pools/turn" => super::pools::turn(self, params),
+            "routes/list" => Ok(super::network_routes::list(&config)),
+            "routes/offers" => Ok(super::network_routes::offers(&config)),
+            "routes/test" => super::network_routes::test(&config, params),
+            "routes/set" => super::network_routes::set(
+                &crate::config_store::FileStore::of(&self.layers),
+                &config,
+                params,
+            ),
+            "routes/remove" => super::network_routes::remove(
+                &crate::config_store::FileStore::of(&self.layers),
+                &config,
+                params,
+            ),
+            "routes/default" => super::network_routes::make_default(
+                &crate::config_store::FileStore::of(&self.layers),
+                &config,
+                params,
+            ),
+            "accounts/set_route" => super::network_routes::set_account_route(
+                &crate::config_store::FileStore::of(&self.layers),
+                &config,
+                params,
+            ),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
         }
     }

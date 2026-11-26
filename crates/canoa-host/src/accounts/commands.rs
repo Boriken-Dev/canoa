@@ -548,6 +548,7 @@ pub(crate) fn add_with(
         kind: outcome.kind.clone(),
         id: id.clone(),
         settings: (!settings.is_empty()).then(|| Settings::new(settings)),
+        route: None,
     };
     if let Err(failed) = append_account(
         &crate::config_store::FileStore::at(cfg.config_path),

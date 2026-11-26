@@ -230,6 +230,10 @@ pub(super) fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, C
         kind: text(raw.kind, "kind")?,
         id,
         settings,
+        route: raw
+            .route
+            .map(|route| text(Some(route), "route"))
+            .transpose()?,
     })
 }
 

@@ -762,6 +762,41 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_accounts,
     ),
     rpc(
+        "routes/list",
+        Access::Require(Grant::ConfigRead),
+        Control::r_accounts,
+    ),
+    rpc(
+        "routes/offers",
+        Access::Require(Grant::ConfigRead),
+        Control::r_accounts,
+    ),
+    rpc(
+        "routes/test",
+        Access::Require(Grant::ConfigRead),
+        Control::r_accounts,
+    ),
+    rpc(
+        "routes/set",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_accounts,
+    ),
+    rpc(
+        "routes/remove",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_accounts,
+    ),
+    rpc(
+        "routes/default",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_accounts,
+    ),
+    rpc(
+        "accounts/set_route",
+        Access::Require(Grant::ConfigWrite),
+        Control::r_accounts,
+    ),
+    rpc(
         "pools/list",
         Access::Require(Grant::Accounts),
         Control::r_accounts,

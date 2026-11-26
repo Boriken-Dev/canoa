@@ -17,6 +17,7 @@ fn account(kind: &str, settings: Option<serde_json::Value>) -> AccountConfig {
         kind: kind.to_owned(),
         id: "id".to_owned(),
         settings: settings.map(|value| Settings::new(value.as_object().cloned().expect("a table"))),
+        route: None,
     }
 }
 

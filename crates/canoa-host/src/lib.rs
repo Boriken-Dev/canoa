@@ -81,8 +81,8 @@ pub use config::{
     AccountConfig, CACHE_LIFETIMES, Config, ConfigError, ContentConfig, ControlConfig,
     DEFAULT_PRESET, DelegateConfig, ENTRIES, Entry, EntryKind, Extension, ExtensionCheck,
     HarnessOptions, INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, NativeConfig,
-    NetworkConfig, OpenerConfig, Origin, PoolConfig, Preset, ResolvedLoadout, Settings,
-    StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, WebConfig, WebMode,
+    NetworkRoutes, OpenerConfig, Origin, PoolConfig, Preset, ResolvedLoadout, RouteConfig,
+    Settings, StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, WebConfig, WebMode,
     cache_lifetime_label, cache_lifetime_name, cache_lifetime_named, merge_into,
 };
 pub use serve::MAX_MESSAGE_META;

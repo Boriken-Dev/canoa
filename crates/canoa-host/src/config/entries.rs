@@ -34,6 +34,8 @@ pub struct AccountConfig {
     pub id: String,
     /// The kind's settings that are not secrets, checked against the provider's schema when the host starts.
     pub settings: Option<Settings>,
+    /// The `network_route` the account's own requests leave by (model lists, usage, sign-in); the host's route when absent.
+    pub route: Option<String>,
 }
 
 impl AccountConfig {
@@ -45,6 +47,7 @@ impl AccountConfig {
             kind: coqui_acp_api::HARNESS_LOGIN.to_owned(),
             id: coqui_acp_api::LOCAL_ACCOUNT.to_owned(),
             settings: None,
+            route: None,
         }
     }
 

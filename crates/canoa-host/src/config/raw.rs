@@ -2,17 +2,16 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use std::path::Path;
 
-use canoa::network::{ClientCertificate, GitTls, ProxyChoice};
 use coqui_peer_webcrypto::PeerId;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
 use super::entries_parse::TransportSpec;
 use super::{
-    AssistChoice, AssistConfig, AssistPool, ConfigError, DEFAULT_CHOICE, DelegateConfig,
-    HarnessTable, KbConfig, KbEmbedder, KbRanker, KbSearch, NetworkConfig, OpenerConfig, SdkTable,
+    AssistChoice, AssistConfig, AssistPool, ConfigError, DEFAULT_CHOICE, DIRECT_ROUTE,
+    DelegateConfig, HarnessTable, KbConfig, KbEmbedder, KbRanker, KbSearch, NetworkRoutes,
+    OpenerConfig, RouteConfig, SYSTEM_ROUTE, SdkTable,
 };
 
 #[derive(Deserialize)]
@@ -166,6 +165,10 @@ pub(super) struct RawFile {
     /// `[notifications]`: the notifiers of each event, and the notifier entries.
     #[serde(default)]
     pub(super) notifications: Option<RawNotifications>,
+    /// `[network]`: how the host reaches the network, which also holds the application's own `prefer_webtransport` and
+    /// `connect_timeout`.
+    #[serde(default)]
+    pub(super) network: Option<RawNetwork>,
 }
 
 /// `[notifications]`: `notifiers`, and every other key is an event's list of notifier names, which the reader checks against the
@@ -251,7 +254,8 @@ pub(super) struct RawHost {
     /// `[host.disabled]`: provider ids by kind name that are not offered or run.
     #[serde(default)]
     pub(super) disabled: IndexMap<String, Vec<String>>,
-    pub(super) network: Option<RawNetwork>,
+    /// `[host.network]` moved to `[network]`; it is read only to be refused by name.
+    pub(super) network: Option<toml::Value>,
     pub(super) delegate: Option<RawDelegate>,
     pub(super) kb: Option<RawKb>,
     /// `[host.services.ID]`: the table of each session service, which the service reads.
@@ -292,83 +296,88 @@ pub(super) struct RawMcpList {
     pub(super) max_reply_bytes: Option<usize>,
 }
 
-/// `[host.network]`.
+/// `[network]`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawNetwork {
-    pub(super) proxy: Option<String>,
-    pub(super) proxy_user: Option<String>,
-    pub(super) proxy_password_env: Option<String>,
-    pub(super) no_proxy: Option<RawLines>,
-    pub(super) negotiate: Option<bool>,
-    pub(super) client_certificate: Option<String>,
-    pub(super) ca_file: Option<String>,
-    pub(super) git_tls: Option<String>,
+    pub(super) route: Option<String>,
+    #[serde(default)]
+    pub(super) routes: IndexMap<String, RawRoute>,
     #[serde(default)]
     pub(super) endpoints: Vec<String>,
-    pub(super) proxy_idle_seconds: Option<u64>,
+    pub(super) idle_seconds: Option<u64>,
+    pub(super) open_seconds: Option<u64>,
+    pub(super) max_leases: Option<usize>,
+    pub(super) prefer_webtransport: Option<bool>,
+    pub(super) connect_timeout: Option<u64>,
 }
 
-/// `[host.network]`, its paths made absolute from canoa.cfg's directory. Errors name a key, never a value.
-pub(super) fn network_of(raw: RawNetwork, directory: &Path) -> Result<NetworkConfig, ConfigError> {
+/// `[network.routes.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawRoute {
+    pub(super) provider: Option<String>,
+    pub(super) settings: Option<toml::Table>,
+}
+
+/// `[network]`. Errors name a key, never a value.
+pub(super) fn network_of(raw: RawNetwork) -> Result<NetworkRoutes, ConfigError> {
     let refused = |what: &str| ConfigError::Invalid {
         entry: None,
         what: format!("network: {what}"),
     };
-    let path = |text: String, key: &str| {
-        if text.is_empty() {
+    let named = |name: &str, key: &str| {
+        if name.trim().is_empty() {
             return Err(refused(&format!("{key} is empty")));
         }
-        let path = directory.join(text);
-        Ok(std::path::absolute(&path).unwrap_or(path))
+        Ok(())
     };
-    let proxy = match raw.proxy.as_deref().map(str::trim) {
-        None => ProxyChoice::System,
-        Some("") => return Err(refused("proxy is empty")),
-        Some(text) if text.eq_ignore_ascii_case("system") => ProxyChoice::System,
-        Some(text) if text.eq_ignore_ascii_case("none") => ProxyChoice::None,
-        Some(text) => match text.strip_prefix("pac:") {
-            Some("") => return Err(refused("proxy pac: names no location")),
-            Some(location) => ProxyChoice::Pac(location.to_owned()),
-            None => ProxyChoice::Proxy(text.to_owned()),
-        },
-    };
-    let client_certificate = match raw.client_certificate {
-        None => ClientCertificate::System,
-        Some(text) if text.eq_ignore_ascii_case("system") => ClientCertificate::System,
-        Some(text) if text.eq_ignore_ascii_case("none") => ClientCertificate::None,
-        Some(text) => ClientCertificate::File(path(text, "client_certificate")?),
-    };
-    let git_tls = match raw.git_tls.as_deref() {
-        None | Some("system") => GitTls::System,
-        Some("git") => GitTls::Git,
-        Some(_) => return Err(refused("git_tls is system or git")),
-    };
-    if raw.proxy_user.as_deref().is_some_and(str::is_empty) {
-        return Err(refused("proxy_user is empty"));
+    if let Some(route) = &raw.route {
+        named(route, "route")?;
     }
-    if raw.proxy_password_env.is_some() && raw.proxy_user.is_none() {
-        return Err(refused("proxy_password_env goes with proxy_user"));
+    if raw.open_seconds == Some(0) {
+        return Err(refused("open_seconds is at least 1"));
     }
-    Ok(NetworkConfig {
-        proxy,
-        proxy_user: raw.proxy_user,
-        proxy_password_env: raw.proxy_password_env,
-        no_proxy: raw.no_proxy.map(|lines| {
-            lines
-                .lines()
-                .iter()
-                .flat_map(|line| line.split(|c: char| c == ',' || c.is_whitespace()))
-                .filter(|entry| !entry.is_empty())
-                .map(str::to_owned)
-                .collect()
-        }),
-        negotiate: raw.negotiate,
-        client_certificate,
-        ca_file: raw.ca_file.map(|file| path(file, "ca_file")).transpose()?,
-        git_tls,
+    if raw.max_leases == Some(0) {
+        return Err(refused("max_leases is at least 1"));
+    }
+    let mut routes = IndexMap::new();
+    for (name, route) in raw.routes {
+        if let Some(why) = canoa::config_store::id_problem(&name) {
+            return Err(refused(&format!("route {name}: {why}")));
+        }
+        if name == SYSTEM_ROUTE || name == DIRECT_ROUTE {
+            return Err(refused(&format!(
+                "{name} is a route every host has: it needs no table, and its name is not given to another"
+            )));
+        }
+        let provider = route
+            .provider
+            .filter(|provider| !provider.trim().is_empty())
+            .ok_or_else(|| refused(&format!("route {name} names no provider")))?;
+        let settings = serde_json::to_value(route.settings.unwrap_or_default())
+            .map_err(|_| refused(&format!("route {name}: its settings cannot be read")))?;
+        routes.insert(name, RouteConfig { provider, settings });
+    }
+    if let Some(route) = &raw.route
+        && route != SYSTEM_ROUTE
+        && route != DIRECT_ROUTE
+        && !routes.contains_key(route)
+    {
+        return Err(refused(&format!(
+            "route names {route}, which [network.routes] does not hold"
+        )));
+    }
+    Ok(NetworkRoutes {
+        route: raw.route,
+        routes,
         endpoints: raw.endpoints,
-        proxy_idle_seconds: raw.proxy_idle_seconds,
+        idle_seconds: raw.idle_seconds,
+        open_seconds: raw.open_seconds,
+        max_leases: raw.max_leases,
+        base_dir: None,
+        prefer_webtransport: raw.prefer_webtransport,
+        connect_timeout: raw.connect_timeout,
     })
 }
 
@@ -744,6 +753,7 @@ pub(super) struct RawAccount {
     pub(super) kind: Option<String>,
     pub(super) id: Option<String>,
     pub(super) settings: Option<toml::Table>,
+    pub(super) route: Option<String>,
     #[serde(flatten)]
     pub(super) rest: toml::Table,
 }

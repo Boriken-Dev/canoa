@@ -393,6 +393,7 @@ fn config(id: &str) -> AccountConfig {
         kind: "claude-login".to_owned(),
         id: id.to_owned(),
         settings: None,
+        route: None,
     }
 }
 
@@ -878,6 +879,7 @@ fn a_harness_is_given_the_address_and_the_key_form_the_account_names_for_the_sta
             .cloned()
             .expect("a table"),
         )),
+        route: None,
     };
     let catalog = |standard: &str, credential: &str| {
         let mut catalog = AccountCatalog::new();

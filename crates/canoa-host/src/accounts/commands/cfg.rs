@@ -444,6 +444,7 @@ mod format_tests {
             kind: "api".to_owned(),
             id: "id-1".to_owned(),
             settings: None,
+            route: None,
         }
     }
 

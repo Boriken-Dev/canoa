@@ -49,7 +49,7 @@ Settings shows the merged values, says on a row which come from a lower layer ("
 
 ### Everything in {{ config_file }} is managed in the app
 
-You never have to edit the file by hand. Each table has a page: the tables of the app's own settings have theirs (General, Appearance, Voice, Sources, Permissions and the rest), and **Settings, Advanced** lists every other table the host reads (`[host.web]`, `[host.control]`, `[host.native]`, `[host.network]`, `[host.store]`, `[host.delegate]`, `[host.kb]`, `[host.mcp_list]`, `[host.usage]`, `[host.worktrees]`, `[host.history]`, `[host.tools.NAME]`, `[host.environments.NAME]`, `[[host.openers]]`, the settings directly under `[host]` and `[harnesses]`). Each is a form made from the settings the host reads, with add, change and remove, and the host refuses a change it would not read, saying why.
+You never have to edit the file by hand. Each table has a page: the tables of the app's own settings have theirs (General, Appearance, Voice, Sources, Permissions and the rest), and **Settings, Advanced** lists every other table the host reads (`[host.web]`, `[host.control]`, `[host.native]`, `[host.store]`, `[host.delegate]`, `[host.kb]`, `[host.mcp_list]`, `[host.usage]`, `[host.worktrees]`, `[host.history]`, `[host.tools.NAME]`, `[host.environments.NAME]`, `[[host.openers]]`, the settings directly under `[host]` and `[harnesses]`). Each is a form made from the settings the host reads, with add, change and remove, and the host refuses a change it would not read, saying why.
 
 Every list in the app removes an entry the same way: it asks first, and says what goes out of {{ config_file }} and what stays. An entry that comes from the installed or the system's file is shown with where it comes from and how to change it there ("Defined in the system file. {{ name }} does not write that file: remove it there."), because your file holds nothing to take out; when your own entry replaces one of a lower layer, removing it brings the lower one back.
 
@@ -58,7 +58,7 @@ The host keeps the configuration in a *store* (the `config_store` kind): {{ conf
 Configuration tables:
 
 - [desktop] start_hidden, close_to_tray, minimize_to_tray, start_at_login (absent until the first run turns it on; true registers the app to start hidden in the tray when you sign in, for your user only; false removes that), local_host (default true: the app runs its own host; false, or `--no-local-host`, leaves it off)
-- [network] prefer_webtransport, connect_timeout (seconds, any number above 0)
+- [network] prefer_webtransport, connect_timeout (seconds, any number above 0), and how the host reaches the network: `route`, `routes.NAME`, `endpoints`, `idle_seconds`, `open_seconds`, `max_leases` (see "The network")
 - [appearance] look (`canoa` or `terminal`), brightness (`dark`, `light` or `system`), density (`normal`, `thinking` or `verbose`, default `normal`), open_in (`this_window`, the default, or `new_windows`: where a plain click on a conversation in the list, on a file in the Files panel and on a new shell in the panel's + menu shows it, here or in a window of its own, on a desktop and in a browser; "Open in new window" stays in each menu either way; Settings, Appearance, Open in), language (a code such as `en` or `es`; empty or absent follows the system's; [the words of the app](themes_and_brands.md)), `[appearance.viewers]` (`"application/json" = "text"`: the viewer you chose for a type of file, made in the file viewer and listed, with Reset, in Settings, Appearance, Open files with): density is how much of an agent's work a conversation shows. `verbose` draws every step as its own card; `thinking` folds each run of finished tool calls into one line ("Edited calc.js, ran a command +1 −1") and keeps the agent's thoughts; `normal` also hides thoughts and folds a finished turn into "Worked for 1m 29s", with what the agent said after its last step left outside. A step that failed, or waits for an answer, is never folded.
 - [host] what `{{ program }}` serves: [host.agents.NAME] and [host.providers.NAME], described in [the host](host.md), and the logins an agent entry may run its sessions on, `[host.accounts.NAME]` and an entry's `accounts`, described in [accounts](host.md#accounts). A credential is never written here: `{{ program }} accounts add` keeps it in the provider `[secrets] accounts` names and writes only the account's kind and id; the account provider that offers the kind made it, and the agents that can run it are the ones that take a standard it provides. The app keeps this table as it is when it saves its settings.
 - [sessions] the list of sessions kept across runs: keep (how many, default 200, 0 for none; the least recently used go first), keep_text (whether what was said is kept with each, default false), text_messages (how many of a session's latest messages, default 200), workspace (the folder of a session started with none chosen, a path template; see [a new session](#a-new-session)), while_working (`queue`, the default, or `steer`: what Enter does with a message written while a turn runs; Alt+Enter does the other, and the composer's Steer and Queue buttons are always there), queue_delivery (`merge`, the default, sends everything queued as one message when the turn ends, joined with a blank line; `each` sends one message with each turn)
@@ -235,9 +235,9 @@ entry whose pattern matches a destination decides, and a destination no entry ma
 (`api.corp.example`), `*.name` for a name and everything under it, an address, or any other regular expression, which must match
 the whole host and ignores case (`(api|auth)[.]corp[.]example`; `.*` matches every host, so one entry can cover them all). It is
 matched against the destination as the program names it: a name, or an address written out. The `identity` is `system` (the
-default: what your keystores, or `[host.network] client_certificate`, choose by the authorities the server names, as a browser
+default: what your keystores, or the route's `client_certificate`, choose by the authorities the server names, as a browser
 would) or the thumbprint (SHA-256, in hex) of one certificate, picked from the list the host gives of the client certificates it
-holds: the Windows certificate store, the macOS Keychain, a PKCS#11 module where one is set up, and the `[host.network]` file
+holds: the Windows certificate store, the macOS Keychain, a PKCS#11 module where one is set up, and the route's file
 (`network/client_certificates`: subject, issuer, expiry and thumbprint, never a key; the form shows it as a pick for each entry,
 as a browser asks which certificate to send). A certificate that is not held here, has expired, or may not authenticate a client
 is the program's `502`, and nothing is sent to the destination.
@@ -267,8 +267,8 @@ that here. A host both matched here and on `bypass` is reached as the network ch
 says of the proxy names the patterns it ends TLS for.
 
 **Sessions share a proxy.** The `system` and `pac` modes run one proxy for every session whose proxy item makes the same settings
-(mode, address, bypass list, login, patterns and their certificates, and the `[host.network]` it follows), with a secret of its
-own: it starts when the first such session does and ends when the last does. `[host.network] proxy_idle_seconds` keeps it that
+(the routes, patterns and their certificates, and the network it follows), with a secret of its
+own: it starts when the first such session does and ends when the last does. `[network] idle_seconds` keeps it that
 long after its last session for the next one that asks (default 0: it ends with its last session).
 
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
@@ -809,36 +809,39 @@ digest = "sha256:..."         # of the server.json that was shown
 
 ### The network
 
-With no `[host.network]` table every fetch the host makes (the Store's downloads and release lists, `registry/fetch`, the servers of `[sdk.NAME]` and the endpoints of the speech providers, the Foundry Local service) and every program it starts follows the computer's own settings, as a browser on it would:
+A **route** says how traffic leaves this computer. With no `[network]` table every fetch the host makes (the Store's downloads and release lists, `registry/fetch`, the servers of `[sdk.NAME]` and the endpoints of the speech providers, the Foundry Local service) and every program it starts leaves by the built-in `system` route, which follows the computer's own settings, as a browser on it would:
 
 - the proxy: the `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` variables of the host's environment, else the operating system's (Windows Internet Options through WinHTTP, `scutil --proxy` on a Mac, GNOME, KDE and NetworkManager settings elsewhere), PAC scripts and WPAD included, with its bypass list; loopback is never sent through a proxy;
-- the proxy's login: Negotiate or NTLM with the logon session on Windows, when the proxy asks for it (`negotiate = false` turns it off); Basic with the login below, when one is given;
+- the proxy's login: Negotiate or NTLM with the logon session on Windows, when the proxy asks for it (`negotiate = false` turns it off); Basic with the login a route names, when one is given;
 - who is trusted: the operating system's certificate verifier, so a TLS-intercepting proxy the computer trusts works;
 - the client certificate: when a server asks for one, the one a browser would offer from the operating system's keystores (the Windows certificate store, the macOS Keychain, a PKCS #11 module through p11-kit) that the server's named authorities issued, chosen by the policy Edge and Chrome read; where that policy picks none, none is sent, even when the keystores hold one that fits (a profile's `client_certificate_hosts` entry is how a destination is given the keystores' only fitting certificate, and a PEM file in `client_certificate` is sent to every server that asks);
 - git (overlay and skill sources): started with the proxy for the remote it is fetching and, on Windows, with `http.sslBackend=schannel`, so it uses the same certificate store; a git configuration of the person's own (`http.proxy`) still wins where the source is one they named.
 
-The desktop app's own requests (the list a saved connection's host serves at `canoa.json`, its status probe, the terminal check) are sent by the host it runs through `network/fetch`, so they follow the same settings; the app's own library would use none of them. A served page's requests are its browser's.
+The desktop app's own requests (the list a saved connection's host serves at `canoa.json`, its status probe, the terminal check) are sent by the host it runs through `network/fetch`, so they follow the same route; the app's own library would use none of them. A served page's requests are its browser's.
 
-The desktop app's WebSocket to a remote {{ name }} host follows all of them too: the app asks its host (`network/tunnel`) to open the connection, and for a `wss` address the host reaches the server through the proxy the system names (logged in as above) or straight, makes the TLS itself (the certificate verifier and client certificates above, with `ca_file` and `client_certificate` over them) and gives the app a loopback connection to the plain WebSocket, which only the app can use. A server whose certificate only the operating system trusts, such as a company or TLS-inspecting proxy's authority, is therefore trusted, and a server that asks for a client certificate is given the one a browser would offer; one the host does not trust is not connected to, and the error says why. A `ws` address is carried through a proxy the system names and opened by the app itself where it names none. This computer's own address is always opened by the app itself. WebTransport, which no HTTP proxy carries, is not used by the desktop app, which dials the WebSocket endpoint.
+The desktop app's WebSocket to a remote {{ name }} host follows it too: the app asks its host (`network/tunnel`) to open the connection, and for a `wss` address the host reaches the server through the proxy the route names (logged in as above) or straight, makes the TLS itself (the certificate verifier and client certificates above, with the route's `ca_file` and `client_certificate` over them) and gives the app a loopback connection to the plain WebSocket, which only the app can use. A server whose certificate only the operating system trusts, such as a company or TLS-inspecting proxy's authority, is therefore trusted, and a server that asks for a client certificate is given the one a browser would offer; one the host does not trust is not connected to, and the error says why. A `ws` address is carried through a proxy the route names and opened by the app itself where it names none. This computer's own address is always opened by the app itself. WebTransport, which no HTTP proxy carries, is not used by the desktop app, which dials the WebSocket endpoint.
 
-A program the host starts (an agent, Node or Python, `git`) is given `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for that proxy when its environment names none; variables the person or the entry set are never replaced. A proxy chosen per URL (PAC, WPAD) cannot be written as variables, so it is asked about the addresses the programs reach (the package registries, GitHub, the agents' own services; `endpoints` adds to them) and the proxy it names for those is the one given. Each key below is an override and none is needed:
+A program the host starts (an agent, Node or Python, `git`) is given `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for the route when its environment names none; variables the person or the entry set are never replaced. A proxy chosen per URL (PAC, WPAD) cannot be written as variables, so it is asked about the addresses the programs reach (the package registries, GitHub, the agents' own services; `endpoints` adds to them) and the proxy it names for those is the one given.
+
+Every route is made by a provider of the `network_route` kind, so an extension adds its own (a proxy that starts per session, say) beside the five the host carries: `system` and `direct`, which every host has under those names and need no table, and `manual` (the proxy you type, as `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` say it), `pac` (a PAC script chooses) and `command` (a program of yours that listens as a proxy, started when the route is used). A route you make is a table, `[network.routes.NAME]`, with the provider's id and its settings; the host's is `[network] route`, an account's is `route` in its `[host.accounts.NAME]`, and a profile's sessions use the routes its `network` item names. Settings, Network, Proxy lists the routes and which is the host's, and makes, tests and removes them.
 
 ```toml
-[host.network]
-proxy = "system"                 # system (the default), none, pac:LOCATION (a URL, a file: URL or a path), or a proxy for every URL:
-                                 # [scheme://][user[:password]@]host[:port]
-proxy_user = "alice"             # a login for every HTTP proxy that names none of its own
-proxy_password_env = "PROXY_PW"  # the variable holding its password; the password is never in {{ config_file }}
-no_proxy = ["corp.example", "*.lan", "10.0.0.0/8"]   # replaces the system's bypass list; "<-loopback>" sends loopback through the proxy too
-negotiate = true                 # answer a proxy's Negotiate or NTLM with the logon session (Windows only)
-client_certificate = "system"    # system (the default), none, or a PEM file holding a certificate chain and its unencrypted key
-ca_file = "roots.pem"            # trust exactly these certificates, replacing the system's
-git_tls = "system"               # system (Schannel on Windows) or git (git's own and the person's git configuration)
+[network]
+route = "corp"                   # the host's route: a name in [network.routes], or system (the default) or direct
 endpoints = ["https://tools.corp.example/"]   # addresses the programs reach, for a PAC script to choose their proxy by
-proxy_idle_seconds = 0             # how long the proxy a profile's system or pac mode runs is kept after its last session
+idle_seconds = 0                 # how long a shared lease nobody uses is kept after its last user
+open_seconds = 10                # how long a route may take to open before it is given up on
+# max_leases = 8                 # how many routes may be open at once (default: no limit)
+
+[network.routes.corp]
+provider = "manual"              # system, direct, manual, pac, command, or a provider an extension offers
+settings = { https_proxy = "proxy.corp.example:8080", all_proxy = "socks5://socks.corp.example:1080", no_proxy = ["corp.example", "*.lan", "10.0.0.0/8"], user = "alice", password_env = "PROXY_PW", ca_file = "roots.pem" }
+
+[host.accounts.work]
+route = "corp"                   # this account's own requests (model lists, usage, sign-in) leave by it; the host's route when absent
 ```
 
-Paths are read from the folder of {{ config_file }}. The host starts only with a setting it can use: a proxy it cannot read, a `proxy_password_env` variable that is not set, or a certificate file that is missing is refused at start, with the key named. Git's client certificate is not chosen from the keystore as a browser's is: Git for Windows presents one only when its `http.sslCert` names it, which a source the person typed gets from their own git configuration.
+`no_proxy` replaces the system's bypass list (`"<-loopback>"` sends loopback through the proxy too); `password_env` is the name of the variable holding the login's password, never the password; `client_certificate` is `system` (the default), `none`, or a PEM file holding a certificate chain and its unencrypted key; `ca_file` trusts exactly those certificates, replacing the system's; `git_tls` is `system` (Schannel on Windows) or `git` (git's own and the person's git configuration). Paths are read from the folder of {{ config_file }}. The host opens a route's lease once for every user whose route and settings are equal, keeps it while it runs and replaces it when the settings change. It starts only with a default route it can open, and refuses a `[host.network]` table of an earlier version, naming it: its proxy and certificate keys are the settings of a route, and `endpoints` and `proxy_idle_seconds` (now `idle_seconds`) moved to `[network]`. An account whose route does not open answers its calls with the route's reason, so its traffic never leaves by a path you did not name. Git's client certificate is not chosen from the keystore as a browser's is: Git for Windows presents one only when its `http.sslCert` names it, which a source the person typed gets from their own git configuration.
 
 ### Catalogs of each Store type
 

@@ -1053,9 +1053,9 @@ pub(crate) fn account_instance_unchecked(
                 other => ProviderError::Settings(other.to_string()),
             })
         })?;
-        Ok(Some(Arc::new(built)))
+        Ok(Some(crate::accounts::routed::wrap(Arc::new(built))))
     } else if own.as_map().is_empty() {
-        Ok(offer.shared())
+        Ok(offer.shared().map(crate::accounts::routed::wrap))
     } else {
         Err(accounts(ProviderError::TakesNoSettings))
     }

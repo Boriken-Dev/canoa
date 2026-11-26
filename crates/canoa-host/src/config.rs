@@ -58,11 +58,11 @@ pub(crate) use sections::{check_label, check_name, plain_absolute};
 pub use types::{
     AgentProfile, AssistChoice, AssistConfig, AssistPool, Config, ContentConfig, ControlConfig,
     DEFAULT_CHOICE, DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS, DEFAULT_MAX_SESSIONS,
-    DEFAULT_PRESET, DelegateConfig, Extension, ExtensionCheck, HarnessTable, HistoryConfig,
-    KbConfig, KbEmbedder, KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE,
-    McpChoice, McpListConfig, NativeConfig, NetworkConfig, NotificationsConfig, NotifierConfig,
-    OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable, StoreConfig, UnknownLoadout,
-    UnknownPreset, UsageConfig, WorktreeConfig,
+    DEFAULT_PRESET, DIRECT_ROUTE, DelegateConfig, Extension, ExtensionCheck, HarnessTable,
+    HistoryConfig, KbConfig, KbEmbedder, KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME,
+    MAX_TITLE, McpChoice, McpListConfig, NativeConfig, NetworkRoutes, NotificationsConfig,
+    NotifierConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, RouteConfig, SYSTEM_ROUTE,
+    SdkTable, StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
@@ -71,6 +71,7 @@ pub use types::{
 };
 
 struct TopLevel {
+    network: NetworkRoutes,
     secrets: Option<serde_json::Value>,
     limit_phrases: Option<Vec<String>>,
     protected_paths: Option<Vec<String>>,
@@ -86,7 +87,6 @@ struct TopLevel {
 struct Subsystems {
     store: StoreConfig,
     content: ContentConfig,
-    network: NetworkConfig,
     kb: KbConfig,
     mcp_list: McpListConfig,
     services: IndexMap<String, String>,
@@ -216,15 +216,23 @@ impl Config {
                 local_profiles: top.local_profiles,
                 skill_pins: top.skill_pins,
                 secrets: top.secrets,
+                network: top.network,
                 ..Self::default()
             });
         };
+        if host.network.is_some() {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: "[host.network] is now [network]: the proxy and certificate keys belong to a route in [network.routes.NAME], whose provider is manual, pac, system or direct, and `route` names the host's; `endpoints` and `proxy_idle_seconds` (now `idle_seconds`) move to [network]".to_owned(),
+            });
+        }
         let directory = directory_of(base);
         let profiles = build_host_profiles(&mut host, &directory, &top)?;
         let (accounts, pools) = build_accounts_and_pools(
             core::mem::take(&mut host.accounts),
             core::mem::take(&mut host.pools),
         )?;
+        check_account_routes(&accounts, &top.network)?;
         let (entries, extensions) = build_entries_and_extensions(
             &mut host,
             base,
@@ -292,7 +300,7 @@ impl Config {
             store: sub.store,
             content: sub.content,
             disabled: crate::disabled::Disabled::new(disabled),
-            network: sub.network,
+            network: top.network,
             kb: sub.kb,
             assist: AssistConfig::default(),
             notifications: NotificationsConfig::default(),
@@ -331,6 +339,13 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
         .secrets
         .take()
         .and_then(|table| serde_json::to_value(table).ok());
+    let mut network = raw
+        .network
+        .take()
+        .map(network_of)
+        .transpose()?
+        .unwrap_or_default();
+    network.base_dir = Some(directory_of(base).to_string_lossy().into_owned());
     let limit_phrases = raw.usage.take().and_then(|usage| usage.limit_phrases);
     let keep_awake = raw
         .settings
@@ -373,6 +388,7 @@ fn resolve_top_level(raw: &mut RawFile, base: &Path) -> Result<TopLevel, ConfigE
     local_profiles.client_loadouts = client_loadouts_of(raw.defaults.as_ref())?;
     local_profiles.protected.clone_from(&protected_paths);
     Ok(TopLevel {
+        network,
         secrets,
         limit_phrases,
         protected_paths,
@@ -425,6 +441,28 @@ type AccountsAndPools = (
     IndexMap<String, AccountConfig>,
     IndexMap<String, PoolConfig>,
 );
+
+/// An account's route is one the host has: `system`, `direct` or a table of `[network.routes]`.
+fn check_account_routes(
+    accounts: &IndexMap<String, AccountConfig>,
+    network: &NetworkRoutes,
+) -> Result<(), ConfigError> {
+    for (name, account) in accounts {
+        if let Some(route) = &account.route
+            && route != SYSTEM_ROUTE
+            && route != DIRECT_ROUTE
+            && !network.routes.contains_key(route)
+        {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: format!(
+                    "account {name}: route names {route}, which [network.routes] does not hold"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
 
 fn build_accounts_and_pools(
     raw_accounts: IndexMap<String, RawAccount>,
@@ -1087,12 +1125,6 @@ fn build_subsystems(
             document_bytes: raw.document_bytes,
             cache_bytes: raw.cache_bytes,
         });
-    let network = host
-        .network
-        .take()
-        .map(|raw| network_of(raw, directory))
-        .transpose()?
-        .unwrap_or_default();
     let kb = host
         .kb
         .take()
@@ -1221,7 +1253,6 @@ fn build_subsystems(
     Ok(Subsystems {
         store,
         content,
-        network,
         kb,
         mcp_list,
         services,

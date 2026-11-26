@@ -1097,7 +1097,7 @@ impl Serving {
         store: TrustStore,
         options: &ServeOptions,
     ) -> Result<Self, ServeError> {
-        crate::network::install(&config.network).map_err(|error| ServeError::Network {
+        crate::network::install(config).map_err(|error| ServeError::Network {
             what: error.to_string(),
         })?;
         // The agents the harness starts in this process are found on this process's PATH and in the Store's runtimes.

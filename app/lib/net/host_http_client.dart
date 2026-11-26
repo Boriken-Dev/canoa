@@ -11,7 +11,7 @@ import '../desktop/host_control.dart';
 ///
 /// The host follows the system: the proxy Windows, macOS or the desktop names (PAC and WPAD included) and its login, the operating
 /// system's certificate verifier, and the client certificate its keystores hold for a server that asks for one, with the person's
-/// `[host.network]` over them. `dart:io` does none of that, so the requests the desktop app makes for itself go there.
+/// the host's network route over them. `dart:io` does none of that, so the requests the desktop app makes for itself go there.
 ///
 /// A request is held whole in memory both ways (the host passes on at most 16 MiB), which suits the small JSON the app reads. When
 /// the host cannot be reached the request fails and says so; it is not sent another way, since that would leave the proxy and the

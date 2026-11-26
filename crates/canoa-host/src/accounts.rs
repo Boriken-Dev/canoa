@@ -24,6 +24,7 @@ mod private;
 pub(crate) mod providers;
 #[cfg(test)]
 mod providers_tests;
+pub(crate) mod routed;
 mod spawner;
 pub(crate) mod standards;
 pub(crate) mod store;

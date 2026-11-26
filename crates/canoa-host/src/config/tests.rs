@@ -2579,87 +2579,56 @@ fn a_control_channel_with_no_key_is_fine_when_the_add_in_page_is_admitted() {
 }
 
 #[test]
-fn with_no_network_table_the_host_follows_the_system_in_everything() {
+fn with_no_network_table_the_host_leaves_by_the_system_route() {
     let none = parse("[host]\n").expect("parses");
-    assert_eq!(none.network, NetworkConfig::default());
-    assert_eq!(none.network.proxy, canoa::network::ProxyChoice::System);
-    assert_eq!(
-        none.network.client_certificate,
-        canoa::network::ClientCertificate::System
-    );
-    assert_eq!(none.network.git_tls, canoa::network::GitTls::System);
-    assert!(none.network.no_proxy.is_none());
-    assert_eq!(none.network.proxy_idle_seconds, None);
-    let settings = none.network.settings().expect("settings");
-    assert_eq!(settings.proxy, canoa::network::ProxyChoice::System);
+    assert_eq!(none.network.default_route(), "system");
+    assert!(none.network.routes.is_empty());
+    assert_eq!(none.network.idle_seconds, None);
+    let bare = parse("").expect("parses");
+    assert_eq!(bare.network.default_route(), "system");
 }
 
 #[test]
-fn the_network_table_overrides_each_part_and_every_part_is_explicit() {
+fn the_network_table_names_the_default_route_and_the_routes() {
     let config = parse(
-        "[host.network]\nproxy = \"http://gateway.corp:3128\"\nproxy_user = \"alice\"\nproxy_password_env = \"CANOA_TEST_NO_SUCH_VARIABLE\"\n\
-         no_proxy = \"a.example, *.corp\\n10.0.0.0/8\"\nnegotiate = false\nclient_certificate = \"me.pem\"\nca_file = \"roots.pem\"\n\
-         git_tls = \"git\"\nendpoints = [\"https://tools.example/\"]\nproxy_idle_seconds = 90\n",
+        "[network]\nroute = \"corp\"\nendpoints = [\"https://tools.example/\"]\nidle_seconds = 90\nopen_seconds = 5\nmax_leases = 4\n\
+         prefer_webtransport = false\nconnect_timeout = 3\n\
+         [network.routes.corp]\nprovider = \"manual\"\n\
+         settings = { https_proxy = \"proxy.corp:8080\", no_proxy = [\"*.lan\"], user = \"alice\", password_env = \"PROXY_PW\" }\n\
+         [host.accounts.work]\nkind = \"k\"\nid = \"id-1\"\nroute = \"corp\"\n",
     )
     .expect("parses");
     let network = &config.network;
-    assert_eq!(
-        network.proxy,
-        canoa::network::ProxyChoice::Proxy("http://gateway.corp:3128".to_owned())
-    );
-    assert_eq!(network.proxy_user.as_deref(), Some("alice"));
-    assert_eq!(
-        network.no_proxy,
-        Some(vec![
-            "a.example".to_owned(),
-            "*.corp".to_owned(),
-            "10.0.0.0/8".to_owned()
-        ])
-    );
-    assert_eq!(network.negotiate, Some(false));
-    assert!(matches!(
-        &network.client_certificate,
-        canoa::network::ClientCertificate::File(path) if path.ends_with("me.pem") && path.is_absolute()
-    ));
-    assert!(
-        network
-            .ca_file
-            .as_ref()
-            .is_some_and(|path| path.ends_with("roots.pem"))
-    );
-    assert_eq!(network.git_tls, canoa::network::GitTls::Git);
+    assert_eq!(network.default_route(), "corp");
     assert_eq!(network.endpoints, ["https://tools.example/"]);
-    assert_eq!(network.proxy_idle_seconds, Some(90));
-    // The password is read when the network is made, from the variable the file names, never from the file.
-    assert!(network.settings().is_err());
+    assert_eq!(network.idle_seconds, Some(90));
+    assert_eq!(network.open_seconds, Some(5));
+    assert_eq!(network.max_leases, Some(4));
+    assert_eq!(network.prefer_webtransport, Some(false));
+    assert_eq!(network.connect_timeout, Some(3));
+    let corp = &network.routes["corp"];
+    assert_eq!(corp.provider, "manual");
+    assert_eq!(corp.settings["https_proxy"], "proxy.corp:8080");
+    assert_eq!(config.accounts["work"].route.as_deref(), Some("corp"));
 }
 
 #[test]
-fn the_network_proxy_is_system_none_a_pac_location_or_a_proxy() {
-    let proxy = |text: &str| {
-        parse(&format!("[host.network]\nproxy = \"{text}\"\n"))
-            .expect("parses")
-            .network
-            .proxy
-    };
-    assert_eq!(proxy("system"), canoa::network::ProxyChoice::System);
-    assert_eq!(proxy("none"), canoa::network::ProxyChoice::None);
-    assert_eq!(
-        proxy("pac:http://wpad.corp/proxy.pac"),
-        canoa::network::ProxyChoice::Pac("http://wpad.corp/proxy.pac".to_owned())
-    );
-    assert_eq!(
-        parse("[host.network]\nclient_certificate = \"none\"\n")
-            .expect("parses")
-            .network
-            .client_certificate,
-        canoa::network::ClientCertificate::None
-    );
-    assert!(parse("[host.network]\nproxy = \"\"\n").is_err());
-    assert!(parse("[host.network]\nproxy = \"pac:\"\n").is_err());
-    assert!(parse("[host.network]\ngit_tls = \"openssl\"\n").is_err());
-    assert!(parse("[host.network]\nproxy_password_env = \"X\"\n").is_err());
-    assert!(parse("[host.network]\nother = 1\n").is_err());
+fn a_route_must_be_one_the_host_has() {
+    assert!(parse("[network]\nroute = \"ghost\"\n").is_err());
+    assert!(parse("[network]\nroute = \"direct\"\n").is_ok());
+    assert!(parse("[network.routes.system]\nprovider = \"manual\"\n").is_err());
+    assert!(parse("[network.routes.direct]\nprovider = \"manual\"\n").is_err());
+    assert!(parse("[network.routes.a]\n").is_err());
+    assert!(parse("[network]\nopen_seconds = 0\n").is_err());
+    assert!(parse("[network]\nmax_leases = 0\n").is_err());
+    assert!(parse("[network]\nother = 1\n").is_err());
+    assert!(parse("[host.accounts.w]\nkind = \"k\"\nid = \"i\"\nroute = \"ghost\"\n").is_err());
+}
+
+#[test]
+fn the_old_host_network_table_is_refused_by_name() {
+    let error = parse("[host.network]\nproxy = \"none\"\n").expect_err("refused");
+    assert!(error.to_string().contains("network"), "{error}");
 }
 
 #[test]

@@ -52,7 +52,7 @@ impl Maker {
 
     /// The provider, to sign in, renew and read usage and models with.
     pub(crate) fn provider(&self) -> Arc<dyn AccountProvider> {
-        Arc::clone(&self.maker)
+        crate::accounts::routed::wrap(Arc::clone(&self.maker))
     }
 
     /// The kind `id`, when this maker makes it.

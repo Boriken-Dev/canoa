@@ -297,6 +297,7 @@ fn offered(provides: &[&str], endpoint: bool) -> kind::Offered {
         kind: "k".to_owned(),
         id: "id".to_owned(),
         settings: None,
+        route: None,
     };
     ("a".to_owned(), account, info)
 }

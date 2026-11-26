@@ -1,28 +1,28 @@
-//! The host's network: `[host.network]` installed as the process's, and the proxy variables of the programs the host starts.
+//! The host's network: the default route of `[network]` installed as the process's, and the proxy variables of the programs the host starts.
 //!
 //! Every fetch the host makes builds its HTTP client from [`canoa::network::Network`], so they all follow one set of rules: the
 //! system's proxy (PAC and WPAD included) and its login, the operating system's certificate verifier and the client certificates of
-//! its keystores, with the person's `[host.network]` overriding any of it. The programs the host starts (agents, runtimes, git)
+//! its keystores, with the route the person chose overriding any of it. The programs the host starts (agents, runtimes, git)
 //! get the proxy as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` when their environment names none.
 
 use core::sync::atomic::{AtomicU64, Ordering};
-use core::time::Duration;
 use std::sync::{Mutex, PoisonError, RwLock};
 
 use canoa::network::{Network, NetworkSettings};
 
 pub(crate) mod proxy_ca;
+pub(crate) mod routes;
 pub(crate) mod session;
 #[cfg(test)]
 pub(crate) mod standins;
 #[cfg(test)]
 pub(crate) mod tests;
 
-use crate::config::{ConfigError, NetworkConfig};
+use crate::config::{Config, ConfigError};
 
 /// What the programs the host starts reach: the addresses the loaded libraries say, which the Store's programs (their endpoints and
 /// the services they reach) and each agent vendor (the API and login hosts of its program) name. A PAC script cannot be written as
-/// environment variables, so it is asked about these to choose the proxy a program is given. `[host.network] endpoints` adds to them.
+/// environment variables, so it is asked about these to choose the proxy a program is given. `[network] endpoints` adds to them.
 static PROGRAM_ENDPOINTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Adds the addresses `urls` to what the programs the host starts reach; one already there is not added again.
@@ -46,23 +46,19 @@ pub(crate) fn program_endpoints() -> Vec<String> {
         .clone()
 }
 
-/// Makes `config` the process's network.
+/// Makes `config`'s default route the process's network; see [`routes::install`].
 ///
 /// # Errors
 ///
-/// A setting that cannot be used: a proxy that cannot be read, a password variable that is not set, a certificate file that is
-/// missing or holds nothing usable.
-pub(crate) fn install(config: &NetworkConfig) -> Result<(), ConfigError> {
-    let settings = config.settings()?;
-    let network = Network::new(&settings).map_err(|error| ConfigError::Invalid {
-        entry: None,
-        what: format!("network: {error}"),
-    })?;
-    Network::install(network);
+/// The default route does not open: its settings are wrong, a variable it names is not set, or what it runs does not start.
+pub(crate) fn install(config: &Config) -> Result<(), ConfigError> {
+    routes::install(config)
+}
+
+/// Records what the process's network was made from, and that it was made again.
+fn set_installed(settings: NetworkSettings) {
     *INSTALLED.write().unwrap_or_else(PoisonError::into_inner) = Some(settings);
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    session::registry().set_idle(Duration::from_secs(config.proxy_idle_seconds.unwrap_or(0)));
-    Ok(())
 }
 
 /// How many times [`install`] has made a network: a proxy a session shares is one made from the same installation.

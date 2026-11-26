@@ -55,7 +55,8 @@ fn tables() -> Vec<(&'static str, Vec<String>)> {
         ("host.usage", keys_of("RawHostUsage")),
         ("host.worktrees", keys_of("RawWorktrees")),
         ("host.history", keys_of("RawHistory")),
-        ("host.network", keys_of("RawNetwork")),
+        ("network", keys_of("RawNetwork")),
+        ("network.routes.NAME", keys_of("RawRoute")),
     ]
 }
 

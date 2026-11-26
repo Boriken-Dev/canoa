@@ -170,6 +170,7 @@ fn config(_harness: &str) -> AccountConfig {
         kind: KIND.to_owned(),
         id: "id-local".to_owned(),
         settings: Some(settings("local-model")),
+        route: None,
     }
 }
 
@@ -594,6 +595,7 @@ fn an_account_made_for_one_harness_runs_another_in_that_harness_s_own_kind_and_k
         kind: "anthropic-api-key".to_owned(),
         id: "id-key".to_owned(),
         settings: None,
+        route: None,
     };
     accounts
         .store_login(

@@ -192,22 +192,6 @@ pub(crate) const TABLES: &[Table] = &[
         ],
     },
     Table {
-        path: &["host", "network"],
-        shape: Shape::Flat,
-        fields: &[
-            ("proxy", Text),
-            ("proxy_user", Text),
-            ("proxy_password_env", Text),
-            ("no_proxy", Lines),
-            ("negotiate", Bool),
-            ("client_certificate", Text),
-            ("ca_file", Text),
-            ("git_tls", Text),
-            ("endpoints", Lines),
-            ("proxy_idle_seconds", Int),
-        ],
-    },
-    Table {
         path: &["host", "store"],
         shape: Shape::Flat,
         fields: &[
@@ -395,6 +379,8 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "assist_pool",
             // Settings' Notifications page edits the routes of each event and the notifier entries.
             "notifications",
+            // Settings > Network edits the routes through `routes/*`.
+            "network",
         ],
     ),
     (
@@ -489,7 +475,21 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "max_peers",
         ],
     ),
-    ("host.accounts.NAME", &["kind", "id", "settings"]),
+    ("host.accounts.NAME", &["kind", "id", "settings", "route"]),
+    (
+        "network",
+        &[
+            "route",
+            "routes",
+            "endpoints",
+            "idle_seconds",
+            "open_seconds",
+            "max_leases",
+            "prefer_webtransport",
+            "connect_timeout",
+        ],
+    ),
+    ("network.routes.NAME", &["provider", "settings"]),
     ("host.pools.NAME", &["standard", "accounts"]),
     (
         "host.extensions.NAME",
@@ -509,6 +509,11 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
 /// The keys the host reads that no page edits because the host or the Store writes them, with why.
 #[cfg(test)]
 pub(crate) const OWNED: &[(&str, &str, &str)] = &[
+    (
+        "host",
+        "network",
+        "the table moved to [network]: the host refuses one that is still here, naming it, so no setting is dropped unseen",
+    ),
     (
         "host.extensions.NAME",
         "pin",

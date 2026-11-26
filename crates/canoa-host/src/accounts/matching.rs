@@ -559,6 +559,7 @@ mod tests {
             kind: kind.to_owned(),
             id: "id".to_owned(),
             settings: None,
+            route: None,
         }
     }
 

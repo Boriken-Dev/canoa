@@ -345,6 +345,7 @@ fn an_account_a_maker_made_fits_only_where_a_standard_it_provides_is_accepted_th
         kind: KIND.to_owned(),
         id: "id".to_owned(),
         settings: None,
+        route: None,
     };
     let lists = |kind: &str| {
         let mut catalog = coqui_acp_api::AccountCatalog::new();
@@ -410,6 +411,7 @@ fn a_kind_that_names_an_address_fits_only_a_harness_that_can_point_its_standard_
                 .cloned()
                 .expect("a table"),
         )),
+        route: None,
     };
     let info = AccountKindInfo::new("litellm", "L").provides([standard::OPENAI_API]);
     assert!(fits(&Makers::default(), &moves, "codex", &account, &info).is_ok());

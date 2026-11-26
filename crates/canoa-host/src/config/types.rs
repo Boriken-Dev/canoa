@@ -6,13 +6,10 @@ use alloc::vec::Vec;
 use core::fmt;
 use std::path::PathBuf;
 
-use canoa::network::{ClientCertificate, GitTls, NetworkSettings, ProxyChoice, Secret};
 use coqui_peer_webcrypto::PeerId;
 use indexmap::IndexMap;
 
-use super::{
-    AccountConfig, ConfigError, Entry, HostProfile, Listen, Origin, PoolConfig, Settings, WebConfig,
-};
+use super::{AccountConfig, Entry, HostProfile, Listen, Origin, PoolConfig, Settings, WebConfig};
 use crate::profile::Profile;
 
 /// The longest ACP message, as one line, either way on a connection, when `[host] max_message_bytes` does not say.
@@ -75,9 +72,8 @@ pub struct Config {
     pub content: ContentConfig,
     /// `[host.disabled]`: the providers the libraries register that this host neither offers nor runs.
     pub disabled: crate::disabled::Disabled,
-    /// `[host.network]`: how the host reaches the network; the system's proxy, login, certificate verifier and client
-    /// certificates unless it says otherwise.
-    pub network: NetworkConfig,
+    /// `[network]`: how the host reaches the network, by which route.
+    pub network: NetworkRoutes,
     /// `[host.kb]`: the knowledge index tools and where their embeddings come from.
     pub kb: KbConfig,
     /// `[assist]` and `[sdk]`: the backends that serve the host's own model work.
@@ -941,71 +937,58 @@ impl StoreConfig {
     }
 }
 
-/// `[host.network]`: how every fetch the host makes, and every program it starts, reaches the network. With no key the host follows
+/// `[network]`: how every fetch the host makes, and every program it starts, reaches the network. With no key the host follows
 /// the system: the proxy variables of its environment, else the operating system's proxy settings (PAC and WPAD included) and its
-/// proxy login, the operating system's certificate verifier and the client certificates of its keystores. Each key is an
-/// override.
+/// proxy login, the operating system's certificate verifier and the client certificates of its keystores. The host's way out is
+/// one named route; an account and a profile may name others.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct NetworkConfig {
-    /// `proxy`: `system` (the default), `none`, `pac:LOCATION` (a URL, a `file:` URL or a path), or a proxy for every URL as
-    /// `[scheme://][user[:password]@]host[:port]`.
-    pub proxy: ProxyChoice,
-    /// `proxy_user`: a login for every HTTP proxy that names none of its own.
-    pub proxy_user: Option<String>,
-    /// `proxy_password_env`: the name of a variable holding that login's password; the password itself is never in canoa.cfg.
-    pub proxy_password_env: Option<String>,
-    /// `no_proxy`: the hosts that go direct, replacing the system's list: names (a name covers its subdomains), `*.suffix`,
-    /// networks (`10.0.0.0/8`), `host:port`, `<-loopback>` to send loopback through the proxy too. A string or a list; an empty
-    /// one sends everything but loopback through the proxy.
-    pub no_proxy: Option<Vec<String>>,
-    /// `negotiate`: whether a proxy that asks for Negotiate or NTLM is answered with the logon session (default true on Windows,
-    /// the only place this build can).
-    pub negotiate: Option<bool>,
-    /// `client_certificate`: `system` (the default: what a browser here would send, from the operating system's keystores, by the browsers' policy: none when it picks none),
-    /// `none`, or the path of a PEM file holding a certificate chain and its unencrypted private key.
-    pub client_certificate: ClientCertificate,
-    /// `ca_file`: trust exactly the certificates of this PEM file, replacing the system's trust.
-    pub ca_file: Option<PathBuf>,
-    /// `git_tls`: `system` (the default: Schannel on Windows, so git uses the system's certificate store) or `git` (git's own, and
-    /// the person's git configuration).
-    pub git_tls: GitTls,
-    /// `endpoints`: URLs the programs the host starts will use, added to the built-in list a PAC script is asked about to give them
-    /// their proxy variables.
+pub struct NetworkRoutes {
+    /// `route`: the host's route, a name in `routes` or one of the built-in `system` and `direct` (default `system`).
+    pub route: Option<String>,
+    /// `routes.NAME`: the routes the person made, in the file's order. The built-in `system` and `direct` need no table and their
+    /// names are not given to another.
+    pub routes: IndexMap<String, RouteConfig>,
+    /// `endpoints`: URLs the programs the host starts will use, added to the built-in list a PAC script is asked about to give
+    /// them their proxy variables.
     pub endpoints: Vec<String>,
-    /// `proxy_idle_seconds`: how long the proxy the host runs for sessions that use `system` or `pac` is kept after its last session
-    /// ends, for the next session that asks for the same one (default 0: it ends with its last session).
-    pub proxy_idle_seconds: Option<u64>,
+    /// `idle_seconds`: how long a shared lease nobody uses is kept for the next user that asks for the same one (default 0: it
+    /// ends with its last user).
+    pub idle_seconds: Option<u64>,
+    /// `open_seconds`: how long a route may take to open before it is given up on (default 10).
+    pub open_seconds: Option<u64>,
+    /// `max_leases`: how many leases may be open at once (default: no limit).
+    pub max_leases: Option<usize>,
+    /// The folder of the file this was read from, which a relative path in a route's settings is made from.
+    pub base_dir: Option<String>,
+    /// `prefer_webtransport`: the application's own setting, which the host leaves be.
+    pub prefer_webtransport: Option<bool>,
+    /// `connect_timeout`: the application's own setting, which the host leaves be.
+    pub connect_timeout: Option<u64>,
 }
 
-impl NetworkConfig {
-    /// The settings the network is built from, with the password read from its variable.
-    ///
-    /// # Errors
-    ///
-    /// `proxy_password_env` names a variable that is not set.
-    pub fn settings(&self) -> Result<NetworkSettings, ConfigError> {
-        let mut settings = NetworkSettings::default();
-        settings.proxy.clone_from(&self.proxy);
-        settings.proxy_user.clone_from(&self.proxy_user);
-        if let Some(name) = &self.proxy_password_env {
-            let password = std::env::var(name).map_err(|_| ConfigError::Invalid {
-                entry: None,
-                what: "network: proxy_password_env names a variable that is not set".to_owned(),
-            })?;
-            settings.proxy_password = Some(Secret::new(password));
-        }
-        settings.no_proxy.clone_from(&self.no_proxy);
-        settings.negotiate = self.negotiate;
-        settings
-            .client_certificate
-            .clone_from(&self.client_certificate);
-        settings.ca_file.clone_from(&self.ca_file);
-        settings.git_tls = self.git_tls;
-        settings.endpoints.clone_from(&self.endpoints);
-        Ok(settings)
+/// One `[network.routes.NAME]`: which provider of the `network_route` kind makes the route, and its settings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RouteConfig {
+    /// The provider's id: `manual`, `pac`, `command`, or one a library offers.
+    pub provider: String,
+    /// The provider's settings, an object its schema accepts. A password is the name of a host variable, never the password.
+    pub settings: serde_json::Value,
+}
+
+impl NetworkRoutes {
+    /// The name of the route the host leaves by.
+    #[must_use]
+    pub fn default_route(&self) -> &str {
+        self.route.as_deref().unwrap_or(SYSTEM_ROUTE)
     }
 }
+
+/// The route every host has, whose name no table takes: the system's way.
+pub const SYSTEM_ROUTE: &str = "system";
+/// The route every host has, whose name no table takes: straight to the destination.
+pub const DIRECT_ROUTE: &str = "direct";
 
 /// What a choice of backend says when the table does not name one: the operation's own choice in `[assist.OPERATION]`.
 pub const DEFAULT_CHOICE: &str = "default";
