@@ -26,5 +26,6 @@ const Map<String, String> configPages = {
   'connections': 'hosts',
 };
 
-/// The pages that are not a section of Settings: the Hosting panel of the desktop app, the Hosts list and the Loadouts of the Store.
-const Set<String> pagesOutsideSettings = {'hosting-panel', 'hosts', 'loadouts'};
+/// The pages that are not a section of Settings: the Hosting panel of the desktop app, the Hosts list, and the Store, which edits its
+/// own tables (overlays, store, skill pins) and the Loadouts.
+const Set<String> pagesOutsideSettings = {'hosting-panel', 'hosts', 'loadouts', 'store'};
