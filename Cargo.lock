@@ -2125,7 +2125,7 @@ dependencies = [
 [[package]]
 name = "coqui-proxy"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-proxy?rev=e66b9ce26b9f0d2dc18f2262ec015742b2fe4829#e66b9ce26b9f0d2dc18f2262ec015742b2fe4829"
+source = "git+https://github.com/Boriken-Dev/coqui-proxy?rev=d96239125f6d3a27bbeddf2c04de5a31be1e89fa#d96239125f6d3a27bbeddf2c04de5a31be1e89fa"
 dependencies = [
  "base64 0.22.1",
  "boa_engine",
@@ -2146,7 +2146,7 @@ dependencies = [
 [[package]]
 name = "coqui-sslcontext"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-sslcontext?rev=955cd9a455a288a523418daad7e846008c2bf291#955cd9a455a288a523418daad7e846008c2bf291"
+source = "git+https://github.com/Boriken-Dev/coqui-sslcontext?rev=a271e69f82b5fe3a4535d3e6b7e96b7232487e81#a271e69f82b5fe3a4535d3e6b7e96b7232487e81"
 dependencies = [
  "base64 0.22.1",
  "cryptoki",
@@ -2170,7 +2170,7 @@ dependencies = [
 [[package]]
 name = "coqui-syshttp"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-syshttp?rev=8622bc90110d43742dea63f2c8f603e1e5014f98#8622bc90110d43742dea63f2c8f603e1e5014f98"
+source = "git+https://github.com/Boriken-Dev/coqui-syshttp?rev=aff414e0348785254fcd7a4c3ed2b815b099c02d#aff414e0348785254fcd7a4c3ed2b815b099c02d"
 dependencies = [
  "coqui-proxy",
  "coqui-sslcontext",
@@ -6340,7 +6340,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "granit-parser 1.3.0",
  "nohash-hasher",
@@ -6357,7 +6357,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "969cde0349344dbbf58b5f9badbfb8f806db13969364eb8007c057ef687007d9"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "granit-parser 2.2.0",
  "nohash-hasher",
