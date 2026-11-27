@@ -11,6 +11,7 @@ import 'package:canoa/session_store.dart';
 import 'package:coqui_acp/secret.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/host_ledger_backend.dart';
+import 'package:canoa/brand.dart';
 import 'package:canoa/desktop/child_flag.dart';
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/worktree/host.dart';
@@ -55,7 +56,10 @@ void main() {
     expect(constant('STATUS_ENDED'), statusEnded);
     expect(constant('ABI_VERSION'), canoaAbiVersion);
     final jobs = File('../crates/canoa-ffi/src/jobs.rs').readAsStringSync();
-    expect(jobs, contains('pub const CHILD_FLAG: &str = "$canoaChildFlag";'));
+    expect(jobs, contains('pub const CHILD_FLAG: &str = canoa::brand::CHILD_FLAG;'));
+    final brand = File('../crates/canoa/src/brand.rs').readAsStringSync();
+    expect(brand, contains('concat!("--", env!("CANOA_BRAND_PROGRAM"), "-child")'));
+    expect(canoaChildFlag, '--${Brand.program}-child');
     for (final entry in ['native/windows/child_entry.cpp', 'native/linux/child_entry.cc']) {
       expect(File(entry).readAsStringSync(), contains('"$canoaChildFlag"'), reason: entry);
     }

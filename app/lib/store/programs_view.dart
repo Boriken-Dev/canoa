@@ -339,7 +339,7 @@ class PlanDialog extends StatelessWidget {
               for (final (at, step) in plan.steps.indexed) Text('• $step', key: Key('plan-step-$at')),
             ],
             const SizedBox(height: 12),
-            Text(remove ? 'It undoes' : 'It changes outside ${Brand.name}\'s folder', style: text.titleSmall),
+            Text(remove ? 'It undoes' : 'It changes outside ${Brand.name}\'s directory', style: text.titleSmall),
             if (plan.changes.isEmpty)
               const Text('Nothing: no PATH entry, registry key or profile file.', key: Key('plan-no-changes'))
             else
