@@ -676,6 +676,7 @@ impl Control {
             "roles/served" => self.roles_served(params),
             "roles/bind" => self.roles_bind(params),
             "roles/unbind" => self.roles_unbind(params),
+            "roles/continue" => self.roles_continue(params),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
         }
     }

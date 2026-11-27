@@ -199,6 +199,8 @@ fn a_session_whose_turn_a_limit_ended_moves_to_the_next_member_cleaned_and_goes_
         accounts: &world.store,
         endpoints: &world.endpoints,
         hands: &hands,
+        hold: None,
+        landed: None,
     };
     let (answer, carried) = {
         switch.ended(
@@ -263,6 +265,8 @@ fn a_turn_that_ended_for_another_reason_or_ended_well_with_usage_left_moves_noth
         accounts: &world.store,
         endpoints: &world.endpoints,
         hands: &hands,
+        hold: None,
+        landed: None,
     };
     for how in [HowEnded::Other, HowEnded::Finished] {
         let (answer, carried) = switch.ended(
@@ -388,15 +392,35 @@ mod hub {
         }
     }
 
+    /// A role whose second member runs another harness, and which waits for the person before a move to it.
+    const ASKING: &str = "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"one\"]\n\
+        [host.accounts.one]\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
+        [host.agents.Codex]\nharness = \"codex\"\n\
+        [host.roles.planner]\nhandover = \"ask\"\nmembers = [\n\
+          { agent = \"Claude\", account = \"one\" },\n\
+          { agent = \"Codex\" },\n\
+        ]\n";
+
+    /// The same, with both members on one harness: it never waits.
+    const ASKING_WITHIN: &str = "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"one\", \"two\"]\n\
+        [host.accounts.one]\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
+        [host.accounts.two]\nkind = \"anthropic-api-key\"\nid = \"id-two\"\n\
+        [host.roles.planner]\nhandover = \"ask\"\nmembers = [\n\
+          { agent = \"Claude\", account = \"one\" },\n\
+          { agent = \"Claude\", account = \"two\" },\n\
+        ]\n";
+
     struct Backed {
         store: Arc<Accounts>,
         history: Arc<Store>,
         told: Arc<Told>,
+        file: &'static str,
     }
 
     impl Backing for Backed {
         fn config(&self) -> Result<Config, String> {
-            Config::from_str_in(FILE, std::path::Path::new("")).map_err(|error| error.to_string())
+            Config::from_str_in(self.file, std::path::Path::new(""))
+                .map_err(|error| error.to_string())
         }
 
         fn accounts(&self, _config: &Config) -> Result<Arc<Accounts>, String> {
@@ -419,6 +443,10 @@ mod hub {
     }
 
     fn ready() -> (Arc<Hub>, Arc<Told>, Arc<Store>, Dir) {
+        ready_with(FILE)
+    }
+
+    fn ready_with(file: &'static str) -> (Arc<Hub>, Arc<Told>, Arc<Store>, Dir) {
         let dir = Dir::new();
         let root = dir.0.join("accounts");
         let store =
@@ -433,6 +461,7 @@ mod hub {
             store,
             history: Arc::clone(&history),
             told: Arc::clone(&told),
+            file,
         }));
         hub.opener(Arc::new(Opener));
         // The session as the host recorded it: two turns, the second one a limit ended.
@@ -525,5 +554,124 @@ mod hub {
                 .is_none()
         );
         assert!(told.asked.lock().expect("told").is_empty());
+    }
+
+    fn reported(hit: &coqui_acp_api::LimitHit) -> Value {
+        json!({ coqui_acp_api::LIMIT_META_KEY: serde_json::to_value(hit).expect("a hit is JSON") })
+    }
+
+    #[test]
+    fn a_limit_the_agent_says_no_other_member_helps_with_leaves_the_session_on_its_member() {
+        let (hub, told, history, _dir) = ready();
+        // The agent's own words name no allowance, so only what it reported says this is a limit, and that it follows the work.
+        let mut turn = ended(false, "The session's budget is used up.");
+        turn.refused = true;
+        turn.stop = Some("refusal".to_owned());
+        turn.meta = Some(reported(
+            &coqui_acp_api::LimitHit::new(1).continuable(false),
+        ));
+        let answer = hub.run("Claude", &turn).expect("a bound session");
+        assert!(matches!(answer, AtTurn::NotContinuable(_)), "{answer:?}");
+        assert!(told.asked.lock().expect("told").is_empty());
+        assert!(hub.binding("Claude", "s-1").is_some());
+        let turns = history.served("Claude", "s-1").expect("read");
+        assert_eq!(turns[0]["limited"], true, "{turns:?}");
+        assert_eq!(turns[0]["moved_on"], false, "{turns:?}");
+        // The same turn of a limit that follows the member moves, though its words name nothing either.
+        let mut again = turn.clone();
+        again.meta = Some(reported(&coqui_acp_api::LimitHit::new(1)));
+        let answer = hub.run("Claude", &again).expect("a bound session");
+        assert!(matches!(answer, AtTurn::Moved(_)), "{answer:?}");
+    }
+
+    /// Runs the turn on a thread, since a move that waits for the person does not return.
+    fn running(hub: &Arc<Hub>) -> std::thread::JoinHandle<Option<AtTurn>> {
+        let hub = Arc::clone(hub);
+        std::thread::spawn(move || {
+            hub.run("Claude", &ended(true, "You have hit your usage limit."))
+        })
+    }
+
+    fn told_of(watching: &std::sync::mpsc::Receiver<Value>, method: &str) -> Option<Value> {
+        told_within(watching, method, 30)
+    }
+
+    fn told_within(
+        watching: &std::sync::mpsc::Receiver<Value>,
+        method: &str,
+        seconds: u64,
+    ) -> Option<Value> {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+        while std::time::Instant::now() < until {
+            if let Ok(note) = watching.recv_timeout(std::time::Duration::from_millis(100))
+                && note["method"] == method
+            {
+                return Some(note);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_move_to_another_harness_waits_for_the_persons_yes_and_tells_the_link_when_it_is_made() {
+        let (hub, told, _history, _dir) = ready_with(ASKING);
+        let watching = hub.watch();
+        let turn = running(&hub);
+        let waiting = told_of(&watching, "roles/ask").expect("the link is told a move waits");
+        assert_eq!(waiting["params"]["role"], "planner");
+        assert_eq!(waiting["params"]["session"], "s-1");
+        assert_eq!(
+            waiting["params"]["from"],
+            json!({"entry": "Claude", "session": "s-1"})
+        );
+        assert_eq!(waiting["params"]["to"], json!({"entry": "Codex"}));
+        assert!(
+            waiting["params"]["reason"]
+                .as_str()
+                .is_some_and(|why| why.contains("out of usage"))
+        );
+        // Nothing was exported, imported or sent while it waits, and no one is told it moved.
+        assert!(!turn.is_finished());
+        assert!(told.asked.lock().expect("told").is_empty());
+        assert!(!hub.go(None, "another-session"));
+        assert!(hub.go(None, "s-1"));
+        let answer = turn.join().expect("the move ends").expect("a session");
+        assert!(matches!(answer, AtTurn::Moved(_)), "{answer:?}");
+        assert_eq!(
+            *told.asked.lock().expect("told"),
+            ["export Claude/one///:s-1", "import Codex////"]
+        );
+        let moved = told_of(&watching, "roles/moved").expect("the link is told it moved");
+        assert_eq!(
+            moved["params"],
+            json!({"role": "planner",
+                "from": {"entry": "Claude", "session": "s-1"},
+                "to": {"entry": "Codex", "session": "moved-session"},
+                "member": {"entry": "Codex"},
+                "replayed": false, "losses": []})
+        );
+    }
+
+    #[test]
+    fn a_move_that_waits_ends_when_the_session_stops_being_the_roles_and_moves_nothing() {
+        let (hub, told, _history, _dir) = ready_with(ASKING);
+        let watching = hub.watch();
+        let turn = running(&hub);
+        told_of(&watching, "roles/ask").expect("a move waits");
+        assert!(hub.unbind("Claude", "s-1"));
+        let answer = turn.join().expect("the move ends").expect("a session");
+        assert!(!matches!(answer, AtTurn::Moved(_)), "{answer:?}");
+        assert!(told.asked.lock().expect("told").is_empty());
+        assert!(told_within(&watching, "roles/moved", 1).is_none());
+    }
+
+    #[test]
+    fn a_move_within_the_harness_never_waits_even_when_the_role_asks() {
+        let (hub, told, _history, _dir) = ready_with(ASKING_WITHIN);
+        let watching = hub.watch();
+        let answer = running(&hub).join().expect("ends").expect("a session");
+        assert!(matches!(answer, AtTurn::Moved(_)), "{answer:?}");
+        assert_eq!(told.asked.lock().expect("told").len(), 2);
+        assert!(told_of(&watching, "roles/moved").is_some());
     }
 }

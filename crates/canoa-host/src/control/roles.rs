@@ -1,6 +1,8 @@
-//! Roles on the control channel: `roles/list`, `roles/resolve` and `roles/served`. A role is a table of canoa.cfg (`[host.roles.NAME]`),
+//! Roles on the control channel: `roles/list`, `roles/resolve`, `roles/served`, `roles/bind`, `roles/unbind` and `roles/continue`. A role is a table of canoa.cfg (`[host.roles.NAME]`),
 //! written through the configuration store (`config/change`) like any other, so there is no method that sets one. Reads need the grant
 //! for accounts that a pool listing needs: a key without it sees no member's account.
+
+use std::time::{Duration, Instant};
 
 use coqui_acp_pool::{Ask, NoneLeft, Reason, Skipped, Switchboard};
 use serde_json::{Value, json};
@@ -188,6 +190,10 @@ impl Control {
 
 type RoleConfigMember = crate::config::RoleMember;
 
+/// How long `roles/continue` looks for the move it answers: the host hears a turn end about when the client does, so a yes that
+/// comes first waits for the move to ask.
+const MOVE_APPEARS: Duration = Duration::from_secs(3);
+
 impl Control {
     fn hub(&self) -> Result<&crate::roles::Hub, Refused> {
         self.roles
@@ -224,6 +230,25 @@ impl Control {
             },
         );
         Ok(json!({"bound": true}))
+    }
+
+    /// `roles/continue` `{"session", "entry"?}`: the person's yes to the move of a session that waits for it (`handover = "ask"`, a move
+    /// to a member of another harness). The move goes on from the export and `roles/moved` follows when it is made. Refused with
+    /// not-found when no move of that session waits.
+    pub(super) fn roles_continue(&self, params: &Value) -> Result<Value, Refused> {
+        let session = text(params, "session")?;
+        let entry = text_param(params, "entry")?;
+        let hub = self.hub()?;
+        let until = Instant::now() + MOVE_APPEARS;
+        loop {
+            if hub.go(entry, session) {
+                return Ok(json!({"continued": true}));
+            }
+            if Instant::now() >= until {
+                return Err((NOT_FOUND, format!("no move of session {session} waits")));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// `roles/unbind` `{"entry", "session"}`: the session is no role's from now on, as when the person picks a member by hand.

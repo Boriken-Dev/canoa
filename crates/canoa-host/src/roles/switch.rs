@@ -144,6 +144,15 @@ impl Hands for Idle {
     }
 }
 
+/// What holds a move to a member of another harness until the person says yes: told the member the session leaves and the one it goes
+/// to, it answers once the person has, or why the move does not go on.
+pub(crate) type Hold<'a> =
+    &'a dyn Fn(&Member<RoleMember>, &Member<RoleMember>) -> Result<(), String>;
+
+/// What is told the member a session was carried to and the id it has there, before the continuation is sent, so the turn that
+/// continues it is already the role's.
+pub(crate) type Landed<'a> = &'a dyn Fn(&Member<RoleMember>, &str);
+
 /// The host's [`Starter`] for one session that moves: the session's folder, the words that name a limit, and, once the import is made,
 /// the session the member it moved to answers to.
 pub(crate) struct Mover<'a> {
@@ -151,6 +160,9 @@ pub(crate) struct Mover<'a> {
     pub(crate) cwd: &'a str,
     pub(crate) phrases: &'a [&'a str],
     moved_to: RefCell<Option<String>>,
+    hold: Option<Hold<'a>>,
+    landed: Option<Landed<'a>>,
+    held: RefCell<Option<Result<(), String>>>,
 }
 
 impl<'a> Mover<'a> {
@@ -160,7 +172,24 @@ impl<'a> Mover<'a> {
             cwd,
             phrases,
             moved_to: RefCell::new(None),
+            hold: None,
+            landed: None,
+            held: RefCell::new(None),
         }
+    }
+
+    /// Tells `landed` where the session went, once it is there.
+    #[must_use]
+    pub(crate) fn landing(mut self, landed: Option<Landed<'a>>) -> Self {
+        self.landed = landed;
+        self
+    }
+
+    /// Holds a move to a member of another harness on `hold`, which is asked once for the whole turn.
+    #[must_use]
+    pub(crate) fn holding(mut self, hold: Option<Hold<'a>>) -> Self {
+        self.hold = hold;
+        self
     }
 
     /// The id of the session on the member the session moved to, once it has.
@@ -185,6 +214,18 @@ impl Starter<RoleMember> for Mover<'_> {
         to: &Member<RoleMember>,
         report: Option<&LimitHit>,
     ) -> Carry {
+        if let Some(hold) = self.hold
+            && from.group != to.group
+        {
+            let answer = self
+                .held
+                .borrow_mut()
+                .get_or_insert_with(|| hold(from, to))
+                .clone();
+            if let Err(why) = answer {
+                return Carry::Refused(why);
+            }
+        }
         let history = match self.hands.history(&from.payload, session, self.cwd) {
             Ok(history) => history,
             Err(why) => return Carry::Refused(why),
@@ -219,6 +260,9 @@ impl Starter<RoleMember> for Mover<'_> {
         to: &Member<RoleMember>,
         resume: &Resume,
     ) -> Result<(), String> {
+        if let (Some(landed), Some(session)) = (self.landed, self.moved_to()) {
+            landed(to, &session);
+        }
         let prompt = match resume {
             Resume::Nothing => return Ok(()),
             Resume::Continue(text) => vec![json!({"type": "text", "text": text})],
@@ -253,6 +297,10 @@ pub(crate) struct Switch<'a> {
     /// Where each provider's usage is read from: its own address, or a stand-in's.
     pub(crate) endpoints: &'a crate::options::limits::Endpoints,
     pub(crate) hands: &'a dyn Hands,
+    /// What holds a move to another harness for the person's yes, when the role asks.
+    pub(crate) hold: Option<Hold<'a>>,
+    /// What is told where a session landed, before its continuation is sent.
+    pub(crate) landed: Option<Landed<'a>>,
 }
 
 impl Switch<'_> {
@@ -270,7 +318,9 @@ impl Switch<'_> {
             || DEFAULT_LIMIT_PHRASES.to_vec(),
             |own| own.iter().map(String::as_str).collect(),
         );
-        let mover = Mover::new(self.hands, end.cwd, &phrases);
+        let mover = Mover::new(self.hands, end.cwd, &phrases)
+            .holding(self.hold)
+            .landing(self.landed);
         let board = Switchboard::new(&pool, &*MEMORY, &gather, &mover).usage(&gather);
         let mut ended =
             Ended::new(end.session, end.member, end.how, end.now).record(end.record.clone());

@@ -1047,11 +1047,23 @@ impl Control {
 /// Answers `channel`'s requests as `caller` until it closes or the host stops it.
 pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C) {
     let _connected = Connected::new(&control.clients);
+    // A link that may read roles is told as they move sessions.
+    let roles = control
+        .roles
+        .as_deref()
+        .filter(|_| caller.may(Grant::Accounts))
+        .map(crate::roles::Hub::watch);
     // The shells this link opens run on threads of this scope, and end with the link.
     std::thread::scope(|scope| {
         let terminals = terminal::Link::new(scope, channel, &control.terminals);
         let notices = notify::Link::new(control.notices.clone());
-        serve_requests(scope, control, caller, channel, (&terminals, &notices));
+        serve_requests(
+            scope,
+            control,
+            caller,
+            channel,
+            (&terminals, &notices, roles.as_ref()),
+        );
         // A reader waiting to hand output to a link that nobody reads is let go by closing it.
         terminals.close_all();
         channel.close();
@@ -1067,11 +1079,21 @@ fn serve_requests<'scope, 'env, C: Channel>(
     control: &'env Control,
     caller: &'env Caller,
     channel: &'env C,
-    (terminals, notices): (&terminal::Link<'_, '_, C>, &notify::Link),
+    (terminals, notices, roles): (
+        &terminal::Link<'_, '_, C>,
+        &notify::Link,
+        Option<&std::sync::mpsc::Receiver<Value>>,
+    ),
 ) {
     let mut last = std::time::Instant::now();
     let running = Arc::new(AtomicUsize::new(0));
     loop {
+        // What roles did since the last look goes to the link first, in the order it happened.
+        while let Some(note) = roles.and_then(|roles| roles.try_recv().ok()) {
+            if channel.send(note.to_string().as_bytes()).is_err() {
+                return;
+            }
+        }
         // What the notifications of this link have to say goes out whether or not the person is asking anything.
         for notice in notices.pending() {
             if channel.send(&notice).is_err() {
