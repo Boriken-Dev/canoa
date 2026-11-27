@@ -7,6 +7,13 @@
 //! standard input (`fake-login` holding `refuse` there refuses it). A start records the names of its environment and the
 //! number its login's access token ends with, never a credential.
 //!
+//! A prompt that starts with `limit` ends the turn the way Claude Code does at a plan's usage limit (the words `Claude AI usage limit
+//! reached|<epoch>` said, then a failed result), asking nothing first; for Codex, a prompt that starts with `budget` ends it in
+//! `sessionBudgetExceeded`, a limit no other account helps with.
+//!
+//! With `STANDIN_LIMIT_IN` set, only a Claude Code whose `CLAUDE_CONFIG_DIR` holds that text ends a `limit` prompt in the limit.
+//! With `STANDIN_DEFAULT_MODEL` set, Claude Code also lists the model `default`, which a session that chose none runs as.
+//!
 //! `STANDIN_VERSION` is the version Claude Code's `initialize` and its first message report, and the prompt `die` ends the process at once.
 //! With `STANDIN_SIGNED_OUT` set, Claude Code's `initialize` names no account's token or key and Codex's `account/read` answers that nobody is
 //! signed in; unset, Claude Code names no account and Codex has one.
@@ -110,6 +117,17 @@ fn record_start(harness: &str, args: &[String]) {
     );
 }
 
+/// Whether a `limit` prompt ends this process's turn in the limit: always, unless `STANDIN_LIMIT_IN` names a part of the Claude Code
+/// configuration folder, and then only in a process whose folder holds it (the plan of one account is used up, another's is not).
+fn limited_here() -> bool {
+    std::env::var("STANDIN_LIMIT_IN").map_or(true, |part| {
+        std::env::var("CLAUDE_CONFIG_DIR").is_ok_and(|dir| dir.contains(&part))
+    })
+}
+
+/// When the plan's window the `limit` prompt reports lifts, in Unix seconds: the year 2100.
+const LIMIT_RESET: i64 = 4_102_444_800;
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -211,12 +229,19 @@ fn claude(args: &[String]) {
                 let subtype = message["request"]["subtype"].as_str().unwrap_or("");
                 record(&json!({"control": subtype, "request": message["request"]}));
                 let response = if subtype == "initialize" {
+                    let mut models = vec![
+                        json!({"value": "standin-small", "resolvedModel": "claude-standin-1-2",
+                        "displayName": "Small", "description": "A stand-in model", "supportsEffort": true,
+                        "supportedEffortLevels": ["low", "high"]}),
+                    ];
+                    if std::env::var_os("STANDIN_DEFAULT_MODEL").is_some() {
+                        models.push(json!({"value": "default", "resolvedModel": "claude-standin-1-2",
+                            "displayName": "Default", "description": "What a session that chose none runs as"}));
+                    }
                     json!({"claude_code_version": version(),
                         "account": signed_out().then(|| json!({"tokenSource": "none", "apiProvider": "firstParty"})),
                         "commands": [{"name": "standin", "description": "A stand-in's command", "argumentHint": ""}],
-                        "models": [{"value": "standin-small", "resolvedModel": "claude-standin-1-2", "displayName": "Small",
-                            "description": "A stand-in model", "supportsEffort": true,
-                            "supportedEffortLevels": ["low", "high"]}]})
+                        "models": models})
                 } else {
                     json!({})
                 };
@@ -233,9 +258,28 @@ fn claude(args: &[String]) {
             Some("user") => {
                 turn += 1;
                 let text = prompt_text(&message["message"]["content"]);
-                record(&json!({"prompt": text}));
+                record(
+                    &json!({"prompt": text, "session": session, "config": std::env::var("CLAUDE_CONFIG_DIR").ok()}),
+                );
                 if text == "die" {
                     std::process::exit(3);
+                }
+                if text.starts_with("limit") && limited_here() {
+                    let said = format!("Claude AI usage limit reached|{LIMIT_RESET}");
+                    send(
+                        &json!({"type": "assistant", "session_id": session, "parent_tool_use_id": null,
+                        "message": {"id": format!("msg_standin_{turn}_limit"), "type": "message", "role": "assistant",
+                            "model": "<synthetic>", "content": [{"type": "text", "text": said}],
+                            "stop_reason": "stop_sequence", "usage": {"input_tokens": 0, "output_tokens": 0}}}),
+                    );
+                    send(
+                        &json!({"type": "result", "subtype": "success", "is_error": true, "result": said,
+                        "stop_reason": "stop_sequence", "session_id": session, "total_cost_usd": 0.0,
+                        "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 0},
+                        "modelUsage": {}, "permission_denials": []}),
+                    );
+                    continue;
                 }
                 let tool = format!("toolu_standin_{turn}");
                 let file = cwd.join("standin.txt");
@@ -354,6 +398,9 @@ fn codex(args: &[String]) {
                     "turn/start" => {
                         turn += 1;
                         let text = prompt_text(&params["input"]);
+                        record(
+                            &json!({"prompt": text, "session": thread, "config": std::env::var("CODEX_HOME").ok()}),
+                        );
                         let turn_id = format!("tu-{turn}");
                         answer(
                             &id,
@@ -363,6 +410,18 @@ fn codex(args: &[String]) {
                             &json!({"method": "turn/started", "params": {"threadId": thread,
                             "turn": {"id": turn_id, "items": [], "status": "inProgress", "error": null}}}),
                         );
+                        if text.starts_with("budget") {
+                            send(
+                                &json!({"method": "error", "params": {"threadId": thread, "turnId": turn_id,
+                                "willRetry": false, "error": {"message": "The session's budget is used up.",
+                                "codexErrorInfo": "sessionBudgetExceeded", "additionalDetails": null}}}),
+                            );
+                            send(
+                                &json!({"method": "turn/completed", "params": {"threadId": thread,
+                                "turn": {"id": turn_id, "items": [], "status": "failed", "error": null}}}),
+                            );
+                            continue;
+                        }
                         let request = 9000 + u64::from(turn);
                         send(
                             &json!({"method": "item/commandExecution/requestApproval", "id": request, "params": {
