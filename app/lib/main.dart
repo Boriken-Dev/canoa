@@ -321,11 +321,11 @@ Future<void> main(List<String> args) async {
   );
   // The windows of a desktop are drawn beside the app, in the same engine: its root says where.
   final windows = popout_platform.createPopoutWindows();
-  runApp(windows.host(CanoaApp(
+  popout_platform.startApp(windows, CanoaApp(
     config: config, shell: shell, settingsSignal: settingsSignal,
     host: host, hostingSignal: hostingSignal, ledger: ledger, rules: rules, notifier: platformNotifier(), drafts: drafts, served: served, layout: layout,
     localHost: localHost, popoutWindows: windows,
-  )));
+  ));
   await hosting;
 }
 

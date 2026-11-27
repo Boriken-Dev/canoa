@@ -75,7 +75,7 @@ class ItemWindows extends ChangeNotifier {
     if (held != null) return held.window.focus();
     if (!available) throw StateError('This platform has no windows of its own for this');
     // Two requests for the same item can both pass the check above; the second finds the first at work.
-    final linked = !windows.drawsWidgets;
+    final linked = !(item == null ? windows.drawsWidgets : windows.drawsItem(item));
     if (linked && (item == null || serve == null)) throw StateError('This item has no window of its own on this platform');
     if (!_opening.add(key)) return;
     try {

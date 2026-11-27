@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
+import 'package:canoa/popout/platform.dart' as platform;
+import 'package:canoa/popout/popout_window.dart' show NoPopoutWindows;
 import 'package:canoa/settings/shell_settings.dart' show HostShell;
 import 'package:canoa/surfaces/terminal_clipboard.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
@@ -70,7 +72,7 @@ void main() {
   globalContext['terminalWrites'] = (() => jsonEncode(shell.writes).toJS).toJS;
   globalContext['terminalPrint'] = ((JSString text) => shell.output$.add(utf8.encode(text.toDart))).toJS;
   globalContext['terminalSelection'] = (() => (workspace.focused?.selection ?? '').toJS).toJS;
-  runApp(MaterialApp(
+  platform.startApp(NoPopoutWindows(), MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(),
     home: Scaffold(body: TerminalPanel(workspace: workspace, focusOnMount: true)),

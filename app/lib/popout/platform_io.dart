@@ -1,4 +1,5 @@
 import 'package:coqui_acp_chat/experimental.dart' show ChatViewLink;
+import 'package:flutter/widgets.dart' show Widget, runApp;
 
 import 'flutter_windows.dart';
 import 'popout_launch.dart';
@@ -15,3 +16,5 @@ Future<ChatViewLink> connectPopout(PopoutLaunch launch) => throw UnsupportedErro
 Future<void> preparePopoutWindow(PopoutLaunch launch) async {}
 
 Future<void> closePopoutWindow() async {}
+
+void startApp(PopoutWindows windows, Widget app) => runApp(windows.host(app));
