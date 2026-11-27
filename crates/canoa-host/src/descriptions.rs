@@ -61,7 +61,6 @@ pub(crate) fn document() -> String {
         SettingsSectionVtable::description(),
         PanelTabVtable::description(),
         NotifierVtable::description(),
-
         FileViewerVtable::description(),
         ModelGatewayVtable::description(),
         GatewayLeaseVtable::description(),
@@ -153,7 +152,6 @@ mod tests {
             "settings_section",
             "panel_tab",
             "notifier",
-
             "file_viewer",
             "model_gateway",
             "gateway_lease",

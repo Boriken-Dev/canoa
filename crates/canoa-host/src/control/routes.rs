@@ -13,7 +13,8 @@ use crate::worktree::Worktrees;
 
 use super::{
     BAD_PARAMS, Caller, Control, DENIED, Grant, REFUSED, Stores, allow, choices, discover,
-    error_line, file_viewers, files, hosting, kb_offers, looks, notify, panel_tabs, profile_items, providers, registry, secrets, settings_sections, speech_offers, usage_read,
+    error_line, file_viewers, files, hosting, kb_offers, looks, notify, panel_tabs, profile_items,
+    providers, registry, secrets, settings_sections, speech_offers, usage_read,
 };
 
 impl Control {
