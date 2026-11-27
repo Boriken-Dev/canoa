@@ -234,11 +234,23 @@ class ChoiceRow<T> extends StatelessWidget {
     enabled: enabled,
     machine: machine,
     configKey: configKey,
-    control: DropdownButton<T>(
-      key: fieldKey,
-      value: value,
-      items: [for (final (v, label) in choices) DropdownMenuItem<T>(value: v, child: Text(label))],
-      onChanged: enabled ? (picked) => picked == null ? null : onChanged(picked) : null,
+    // Where the width is bounded (a phone puts the control under the text), a long choice is cut to what is left beside the arrow.
+    control: LayoutBuilder(
+      builder: (context, constraints) {
+        final room = constraints.hasBoundedWidth ? constraints.maxWidth - 56 : double.infinity;
+        return DropdownButton<T>(
+          key: fieldKey,
+          value: value,
+          items: [
+            for (final (v, label) in choices)
+              DropdownMenuItem<T>(
+                value: v,
+                child: ConstrainedBox(constraints: BoxConstraints(maxWidth: room), child: Text(label, overflow: TextOverflow.ellipsis)),
+              ),
+          ],
+          onChanged: enabled ? (picked) => picked == null ? null : onChanged(picked) : null,
+        );
+      },
     ),
   );
 }
