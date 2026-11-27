@@ -2955,3 +2955,14 @@ fn a_pool_takes_its_accounts_by_its_strategy_and_a_headroom_role_reads_the_unkno
         .to_string();
     assert!(why.contains("strategy"), "{why}");
 }
+
+#[test]
+fn a_pool_takes_the_least_recent_strategy() {
+    let config =
+        parse("[host.pools.p]\nstandard = \"anthropic-api\"\nstrategy = \"least_recent\"\n")
+            .expect("parses");
+    assert_eq!(
+        config.pools["p"].strategy,
+        coqui_acp_pool::Strategy::LeastRecent
+    );
+}

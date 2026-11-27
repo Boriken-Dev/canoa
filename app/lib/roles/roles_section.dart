@@ -349,7 +349,7 @@ class _RoleDialogState extends State<RoleDialog> {
                 isExpanded: true,
                 decoration: InputDecoration(labelText: text('roles.strategy')),
                 items: [
-                  for (final each in const ['priority', 'headroom', 'round_robin'])
+                  for (final each in const ['priority', 'headroom', 'round_robin', 'least_recent'])
                     DropdownMenuItem(value: each, child: Text(text('roles.strategy.$each'))),
                 ],
                 onChanged: _saving ? null : (value) => setState(() => _strategy = value ?? _strategy),

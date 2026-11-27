@@ -37,7 +37,7 @@ pub(super) fn list(config: &Config) -> Value {
 }
 
 /// `pools/set` `{"name", "standard", "accounts", "strategy"?}`: makes the pool `name`, or changes it to hold exactly those accounts, in
-/// that order, taken by `strategy` (`round_robin`, `priority` or `headroom`; `round_robin` when absent). Every account has to provide the standard; one that does not is refused, naming the account, its kind's standards and
+/// that order, taken by `strategy` (`round_robin`, `priority`, `headroom` or `least_recent`; `round_robin` when absent). Every account has to provide the standard; one that does not is refused, naming the account, its kind's standards and
 /// the pool's. The host reads its pools when it starts, so the answer says it has to start again.
 pub(super) fn set(
     own: &dyn canoa::config_store::ConfigStore,
