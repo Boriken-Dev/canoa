@@ -466,10 +466,10 @@ impl Splice {
         self
     }
 
-    /// This connection telling `ends` of each turn that ends; a splice with no usage log tells no one.
+    /// This connection telling `ends` of each turn that ends, as turns of the entry `entry`; a splice with no usage log tells no one.
     #[must_use]
-    pub(crate) fn watching(mut self, ends: Option<Arc<dyn Ends>>) -> Self {
-        self.tap = self.tap.take().map(|tap| tap.watching(ends));
+    pub(crate) fn watching(mut self, ends: Option<Arc<dyn Ends>>, entry: String) -> Self {
+        self.tap = self.tap.take().map(|tap| tap.watching(ends, entry));
         self
     }
 

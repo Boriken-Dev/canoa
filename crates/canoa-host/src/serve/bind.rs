@@ -554,6 +554,7 @@ fn bind_harness_entry(
             agent: Agent::Harness(provider),
             scope: Scope::new(entry.working_roots.clone())
                 .account(entry.name.clone())
+                .entry(entry.name.clone())
                 .limit_phrases(state.config.limit_phrases.clone())
                 .usage_log(state.usage_log.clone(), harness)
                 .watching(state.roles.clone()),
@@ -605,6 +606,7 @@ fn bind_entry(state: &mut BindState<'_>, entry: &Entry) -> Result<(), ServeError
                 .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
             let scope = Scope::new(entry.working_roots.clone())
                 .account(entry.name.clone())
+                .entry(entry.name.clone())
                 .limit_phrases(state.config.limit_phrases.clone())
                 .usage_log(state.usage_log.clone(), &harness)
                 .watching(state.roles.clone());

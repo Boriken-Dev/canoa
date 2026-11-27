@@ -54,6 +54,8 @@ pub(crate) struct Scope {
     parent: Option<String>,
     /// Who hears each turn of this entry's sessions end.
     ends: Option<Arc<dyn Ends>>,
+    /// The name of the entry in canoa.cfg, which those who hear a turn end are told it under.
+    entry: Option<String>,
 }
 
 /// What becomes of one message from the client.
@@ -80,6 +82,7 @@ impl Scope {
             log: None,
             parent: None,
             ends: None,
+            entry: None,
         }
     }
 
@@ -149,9 +152,16 @@ impl Scope {
                 .recording(Arc::clone(log), harness.clone())
                 .child_of(self.parent.clone())
                 .profile(own)
-                .watching(self.ends.clone()),
+                .watching(self.ends.clone(), self.entry.clone().unwrap_or_default()),
             None => splice.profile(own),
         }
+    }
+
+    /// This scope serving the entry `entry` of canoa.cfg.
+    #[must_use]
+    pub(crate) fn entry(mut self, entry: String) -> Self {
+        self.entry = Some(entry);
+        self
     }
 
     /// This scope with `account` as the id usage is reported under.

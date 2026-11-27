@@ -50,8 +50,9 @@ pub(crate) struct Tap {
     parent: Option<String>,
     /// The profile this connection's sessions run under.
     profile: Option<String>,
-    /// Who hears each turn end, when anyone wants to.
+    /// Who hears each turn end, when anyone wants to, and the entry's name they are told it under.
     ends: Option<Arc<dyn Ends>>,
+    entry: String,
     open: Mutex<Open>,
 }
 
@@ -64,6 +65,7 @@ impl Tap {
             parent: None,
             profile: None,
             ends: None,
+            entry: String::new(),
             open: Mutex::new(Open::default()),
         }
     }
@@ -96,8 +98,9 @@ impl Tap {
     }
 
     /// This connection telling `ends` of each turn that ends.
-    pub(crate) fn watching(mut self, ends: Option<Arc<dyn Ends>>) -> Self {
+    pub(crate) fn watching(mut self, ends: Option<Arc<dyn Ends>>, entry: String) -> Self {
         self.ends = ends;
+        self.entry = entry;
         self
     }
 
@@ -322,7 +325,7 @@ impl Tap {
         }
         words.truncate(cut);
         ends.ended(
-            &self.account,
+            &self.entry,
             TurnEnded {
                 session: session.to_owned(),
                 failed: error.is_some(),

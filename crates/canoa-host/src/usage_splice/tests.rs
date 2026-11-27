@@ -1814,10 +1814,10 @@ mod ends {
         let heard = Arc::new(Heard::default());
         let splice = Splice::new(
             Arc::new(Inference::new(Some(Vec::new()))),
-            Some("Claude".to_owned()),
+            Some("account-id".to_owned()),
         )
         .recording(log, "claude".to_owned())
-        .watching(Some(heard.clone()));
+        .watching(Some(heard.clone()), "Claude".to_owned());
         (splice, heard, dir)
     }
 
