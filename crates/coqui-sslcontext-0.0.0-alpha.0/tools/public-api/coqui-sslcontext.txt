@@ -66,6 +66,11 @@ impl rustls::crypto::signer::SigningKey for coqui_sslcontext::testing::SoftwareS
 pub fn coqui_sslcontext::testing::SoftwareSigningKey::algorithm(&self) -> rustls::enums::SignatureAlgorithm
 pub fn coqui_sslcontext::testing::SoftwareSigningKey::choose_scheme(&self, &[rustls::enums::SignatureScheme]) -> core::option::Option<alloc::boxed::Box<dyn rustls::crypto::signer::Signer>>
 pub fn coqui_sslcontext::testing::software_identity(&[u8], &[u8], &coqui_sslcontext::KeyPassword) -> core::result::Result<(coqui_sslcontext::Identity, coqui_sslcontext::testing::SoftwareSigningKey), coqui_sslcontext::Error>
+#[non_exhaustive] pub enum coqui_sslcontext::CertificateChoice
+pub coqui_sslcontext::CertificateChoice::Default
+pub coqui_sslcontext::CertificateChoice::First
+pub coqui_sslcontext::CertificateChoice::None
+pub coqui_sslcontext::CertificateChoice::Pin(coqui_sslcontext::IdentityQuery)
 #[non_exhaustive] pub enum coqui_sslcontext::ClientAuth
 pub coqui_sslcontext::ClientAuth::None
 pub coqui_sslcontext::ClientAuth::Optional(coqui_sslcontext::Trust)
@@ -191,6 +196,7 @@ pub fn coqui_sslcontext::CertificateAuthority::builder(impl core::convert::Into<
 pub fn coqui_sslcontext::CertificateAuthority::certificate_der(&self) -> &rustls_pki_types::CertificateDer<'static>
 pub fn coqui_sslcontext::CertificateAuthority::certificate_pem(&self) -> alloc::string::String
 pub fn coqui_sslcontext::CertificateAuthority::from_pem(&[u8], &[u8], &coqui_sslcontext::KeyPassword) -> core::result::Result<Self, coqui_sslcontext::Error>
+pub fn coqui_sslcontext::CertificateAuthority::from_pem_with_settings(&[u8], &[u8], &coqui_sslcontext::KeyPassword, &coqui_sslcontext::KeySettings) -> core::result::Result<Self, coqui_sslcontext::Error>
 pub fn coqui_sslcontext::CertificateAuthority::info(&self) -> &coqui_sslcontext::CertificateInfo
 pub fn coqui_sslcontext::CertificateAuthority::issue<I, S>(&self, I) -> core::result::Result<coqui_sslcontext::IssuedCertificate, coqui_sslcontext::Error> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
 pub fn coqui_sslcontext::CertificateAuthority::leaf<I, S>(&self, I) -> coqui_sslcontext::LeafBuilder<'_> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
@@ -257,9 +263,12 @@ pub fn coqui_sslcontext::Identity::new(alloc::vec::Vec<rustls_pki_types::Certifi
 impl coqui_sslcontext::Identity
 pub fn coqui_sslcontext::Identity::from_der<I, C>(I, &[u8]) -> core::result::Result<Self, coqui_sslcontext::Error> where I: core::iter::traits::collect::IntoIterator<Item = C>, C: core::convert::AsRef<[u8]>
 pub fn coqui_sslcontext::Identity::from_pem_with(&[u8], &[u8], &coqui_sslcontext::KeyPassword) -> core::result::Result<Self, coqui_sslcontext::Error>
+pub fn coqui_sslcontext::Identity::from_pem_with_settings(&[u8], &[u8], &coqui_sslcontext::KeyPassword, &coqui_sslcontext::KeySettings) -> core::result::Result<Self, coqui_sslcontext::Error>
 pub fn coqui_sslcontext::Identity::from_pkcs12(&[u8], &coqui_sslcontext::KeyPassword) -> core::result::Result<Self, coqui_sslcontext::Error>
 pub fn coqui_sslcontext::Identity::load(impl core::convert::AsRef<std::path::Path>, impl core::convert::AsRef<std::path::Path>, coqui_sslcontext::KeyPassword) -> core::result::Result<Self, coqui_sslcontext::Error>
 pub fn coqui_sslcontext::Identity::load_combined(impl core::convert::AsRef<std::path::Path>, coqui_sslcontext::KeyPassword) -> core::result::Result<Self, coqui_sslcontext::Error>
+pub fn coqui_sslcontext::Identity::load_combined_with_settings(impl core::convert::AsRef<std::path::Path>, coqui_sslcontext::KeyPassword, &coqui_sslcontext::KeySettings) -> core::result::Result<Self, coqui_sslcontext::Error>
+pub fn coqui_sslcontext::Identity::load_with_settings(impl core::convert::AsRef<std::path::Path>, impl core::convert::AsRef<std::path::Path>, coqui_sslcontext::KeyPassword, &coqui_sslcontext::KeySettings) -> core::result::Result<Self, coqui_sslcontext::Error>
 impl coqui_sslcontext::IdentitySource for coqui_sslcontext::Identity
 pub fn coqui_sslcontext::Identity::close(&self)
 pub fn coqui_sslcontext::Identity::find(&self, &coqui_sslcontext::IdentityQuery) -> core::result::Result<alloc::vec::Vec<coqui_sslcontext::Identity>, coqui_sslcontext::Error>
@@ -302,6 +311,15 @@ pub fn coqui_sslcontext::IssuedCertificate::private_key(&self) -> rustls_pki_typ
 pub fn coqui_sslcontext::IssuedCertificate::server_config(&self, coqui_sslcontext::ClientAuth) -> core::result::Result<alloc::sync::Arc<rustls::server::server_conn::ServerConfig>, coqui_sslcontext::Error>
 impl core::fmt::Debug for coqui_sslcontext::IssuedCertificate
 pub fn coqui_sslcontext::IssuedCertificate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct coqui_sslcontext::KeySettings
+pub coqui_sslcontext::KeySettings::max_pbkdf2_iterations: u32
+pub coqui_sslcontext::KeySettings::max_scrypt_memory: u64
+impl coqui_sslcontext::KeySettings
+pub const coqui_sslcontext::KeySettings::DEFAULT_MAX_PBKDF2_ITERATIONS: u32
+pub const coqui_sslcontext::KeySettings::DEFAULT_MAX_SCRYPT_MEMORY: u64
+pub fn coqui_sslcontext::KeySettings::non_defaults(&self) -> alloc::vec::Vec<coqui_sslcontext::NonDefault>
+impl core::default::Default for coqui_sslcontext::KeySettings
+pub fn coqui_sslcontext::KeySettings::default() -> Self
 pub struct coqui_sslcontext::LeafBuilder<'a>
 impl coqui_sslcontext::LeafBuilder<'_>
 pub fn coqui_sslcontext::LeafBuilder<'_>::common_name(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -386,6 +404,7 @@ pub fn coqui_sslcontext::Selector::candidates(&self, &coqui_sslcontext::Certific
 pub fn coqui_sslcontext::Selector::find(&self, &coqui_sslcontext::IdentityQuery) -> alloc::vec::Vec<coqui_sslcontext::Identity>
 pub fn coqui_sslcontext::Selector::forget(&self, core::option::Option<&str>)
 pub fn coqui_sslcontext::Selector::identities(&self) -> alloc::vec::Vec<coqui_sslcontext::Identity>
+pub fn coqui_sslcontext::Selector::non_defaults(&self) -> alloc::vec::Vec<coqui_sslcontext::NonDefault>
 pub fn coqui_sslcontext::Selector::policies(&self) -> alloc::vec::Vec<coqui_sslcontext::policy::AutoSelectRule>
 pub fn coqui_sslcontext::Selector::refresh(&self)
 pub fn coqui_sslcontext::Selector::resolver(&alloc::sync::Arc<Self>, core::option::Option<alloc::string::String>) -> alloc::sync::Arc<dyn rustls::client::client_conn::ResolvesClientCert>
@@ -401,9 +420,11 @@ pub fn coqui_sslcontext::SelectorBuilder::browser_policy(self, bool) -> Self
 pub fn coqui_sslcontext::SelectorBuilder::build(self) -> coqui_sslcontext::Selector
 pub fn coqui_sslcontext::SelectorBuilder::cache_ttl(self, core::time::Duration) -> Self
 pub fn coqui_sslcontext::SelectorBuilder::chooser(self, coqui_sslcontext::Chooser) -> Self
+pub fn coqui_sslcontext::SelectorBuilder::policy(self, coqui_sslcontext::CertificatePolicy) -> Self
 pub fn coqui_sslcontext::SelectorBuilder::remember(self, bool) -> Self
 pub fn coqui_sslcontext::SelectorBuilder::remembered_capacity(self, usize) -> Self
 pub fn coqui_sslcontext::SelectorBuilder::rules(self, impl core::iter::traits::collect::IntoIterator<Item = coqui_sslcontext::policy::AutoSelectRule>) -> Self
+pub fn coqui_sslcontext::SelectorBuilder::send_sole_candidate(self, bool) -> Self
 pub fn coqui_sslcontext::SelectorBuilder::settings(self, coqui_sslcontext::SelectorSettings) -> Self
 pub fn coqui_sslcontext::SelectorBuilder::source(self, impl coqui_sslcontext::IdentitySource + 'static) -> Self
 #[non_exhaustive] pub struct coqui_sslcontext::SelectorSettings
@@ -411,6 +432,7 @@ pub coqui_sslcontext::SelectorSettings::browser_policy: bool
 pub coqui_sslcontext::SelectorSettings::cache_ttl: core::time::Duration
 pub coqui_sslcontext::SelectorSettings::remember: bool
 pub coqui_sslcontext::SelectorSettings::remembered_capacity: usize
+pub coqui_sslcontext::SelectorSettings::send_sole_candidate: bool
 impl coqui_sslcontext::SelectorSettings
 pub const coqui_sslcontext::SelectorSettings::DEFAULT_REMEMBERED: usize
 impl core::default::Default for coqui_sslcontext::SelectorSettings
@@ -446,6 +468,7 @@ pub struct coqui_sslcontext::TlsBuilder
 impl coqui_sslcontext::TlsBuilder
 pub fn coqui_sslcontext::TlsBuilder::alpn<I, P>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = P>, P: core::convert::Into<alloc::vec::Vec<u8>>
 pub fn coqui_sslcontext::TlsBuilder::build(self) -> core::result::Result<coqui_sslcontext::Tls, coqui_sslcontext::Error>
+pub fn coqui_sslcontext::TlsBuilder::certificate_policy(self, coqui_sslcontext::CertificatePolicy) -> Self
 pub fn coqui_sslcontext::TlsBuilder::client_certificates(self, coqui_sslcontext::ClientCertificates) -> Self
 pub fn coqui_sslcontext::TlsBuilder::fallback_identity(self, coqui_sslcontext::Identity) -> Self
 pub fn coqui_sslcontext::TlsBuilder::key_log(self, coqui_sslcontext::KeyLogging) -> Self
@@ -454,10 +477,13 @@ pub fn coqui_sslcontext::TlsBuilder::minimum_version(self, coqui_sslcontext::Tls
 pub fn coqui_sslcontext::TlsBuilder::non_defaults(&self) -> alloc::vec::Vec<coqui_sslcontext::NonDefault>
 pub fn coqui_sslcontext::TlsBuilder::pin(self, impl core::convert::Into<coqui_sslcontext::Pin>) -> Self
 pub fn coqui_sslcontext::TlsBuilder::pins(self, coqui_sslcontext::Pins) -> Self
+pub fn coqui_sslcontext::TlsBuilder::send_sole_candidate(self, bool) -> Self
 pub fn coqui_sslcontext::TlsBuilder::settings(self, coqui_sslcontext::TlsSettings) -> Self
 pub fn coqui_sslcontext::TlsBuilder::trust(self, coqui_sslcontext::Trust) -> Self
 impl core::default::Default for coqui_sslcontext::TlsBuilder
 pub fn coqui_sslcontext::TlsBuilder::default() -> Self
+impl core::fmt::Debug for coqui_sslcontext::TlsBuilder
+pub fn coqui_sslcontext::TlsBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct coqui_sslcontext::TlsSettings
 pub coqui_sslcontext::TlsSettings::config_cache_capacity: usize
 pub coqui_sslcontext::TlsSettings::key_log: coqui_sslcontext::KeyLogging
@@ -498,5 +524,6 @@ pub fn coqui_sslcontext::client_config() -> core::result::Result<alloc::sync::Ar
 pub fn coqui_sslcontext::rules_from_plist(&[u8]) -> core::result::Result<alloc::vec::Vec<coqui_sslcontext::policy::AutoSelectRule>, coqui_sslcontext::Error>
 pub fn coqui_sslcontext::rules_from_policy<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a str>) -> alloc::vec::Vec<coqui_sslcontext::policy::AutoSelectRule>
 pub fn coqui_sslcontext::rules_from_policy_values<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a serde_json::value::Value>) -> alloc::vec::Vec<coqui_sslcontext::policy::AutoSelectRule>
+pub type coqui_sslcontext::CertificatePolicy = alloc::sync::Arc<(dyn core::ops::function::Fn(&str) -> coqui_sslcontext::CertificateChoice + core::marker::Send + core::marker::Sync)>
 pub type coqui_sslcontext::Chooser = alloc::sync::Arc<(dyn core::ops::function::Fn(&coqui_sslcontext::CertificateRequest, &[coqui_sslcontext::Identity]) -> core::option::Option<usize> + core::marker::Send + core::marker::Sync)>
 pub type coqui_sslcontext::PinCallback = alloc::sync::Arc<(dyn core::ops::function::Fn(&coqui_sslcontext::PinRequest) -> coqui_sslcontext::PinAnswer + core::marker::Send + core::marker::Sync)>

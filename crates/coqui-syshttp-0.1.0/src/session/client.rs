@@ -86,6 +86,7 @@ struct Inner {
     auth_provider: Option<Arc<dyn AuthProvider>>,
     hooks: Vec<HookEntry>,
     busy: Mutex<Busy>,
+    non_defaults: Vec<String>,
 }
 
 /// A transport with the settings every request is sent with, the rules for what happens after a
@@ -138,7 +139,7 @@ impl fmt::Debug for ClientBuilder {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ClientBuilder")
-            .field("settings", &self.settings.non_defaults())
+            .field("non_defaults", &self.non_defaults())
             .finish_non_exhaustive()
     }
 }
@@ -272,6 +273,44 @@ impl ClientBuilder {
         self
     }
 
+    /// What this builder does that is looser than the defaults, one line each; an empty list is
+    /// the strict configuration. It gathers the settings, the failover, the trust and the TLS
+    /// given, the origin login policy and the connector's. A transport of your own is its own
+    /// to report; a raw `proxy_tls` configuration cannot say what it loosens.
+    #[must_use]
+    pub fn non_defaults(&self) -> Vec<String> {
+        let mut loose = self.settings.non_defaults();
+        loose.extend(self.adapter.non_defaults());
+        if matches!(self.trust, Some(Trust::Disabled)) {
+            loose.push("trust(Disabled): certificates are not verified".to_string());
+        }
+        if let Some(tls) = &self.tls {
+            loose.extend(crate::adapter::tls_non_defaults(tls));
+        }
+        if let Some(auth) = &self.origin_auth {
+            loose.extend(auth.non_defaults());
+        }
+        if let Some(connector) = &self.connector {
+            loose.extend(connector.non_defaults());
+        }
+        loose
+    }
+
+    /// Whether a token may be sent over plain `http:` to a host that is not loopback (default:
+    /// no; weaker, and listed by the settings' `non_defaults()`).
+    pub fn token_plain_http(mut self, allow: bool) -> Self {
+        self.settings.tokens.plain_http = allow;
+        self
+    }
+
+    /// Whether a token kept for a host is sent to every port of it (default: only the scheme's
+    /// default port, and a `host:port` entry for another; weaker, and listed by the settings'
+    /// `non_defaults()`).
+    pub fn token_any_port(mut self, allow: bool) -> Self {
+        self.settings.tokens.any_port = allow;
+        self
+    }
+
     /// Groups of hosts that share cookies (default: `SYSHTTP_COOKIE_HOSTS`).
     pub fn cookie_hosts<G, H>(mut self, groups: impl IntoIterator<Item = G>) -> Self
     where
@@ -323,6 +362,7 @@ impl ClientBuilder {
     /// [`Error::InvalidRequest`] for a transport of your own beside settings that configure the
     /// default one, and [`Error::Tls`] when the system's verifier cannot start.
     pub fn build(self) -> Result<Client, Error> {
+        let non_defaults = self.non_defaults();
         let settings = self.settings;
         let zero = |name: &str, value: Option<Duration>| {
             if value.is_some_and(|limit| limit.is_zero()) {
@@ -401,12 +441,18 @@ impl ClientBuilder {
             TokenStore::PerHost => Some(Tokens::new(
                 Arc::new(FileTokenJar::builder().env(env.clone()).build_tokens()),
                 JarKey::ByHost,
+                &settings.tokens,
             )),
             TokenStore::Key(name) => Some(Tokens::new(
                 Arc::new(FileTokenJar::builder().env(env.clone()).build_tokens()),
                 JarKey::Named(name.clone()),
+                &settings.tokens,
             )),
-            TokenStore::Jar(jar) => Some(Tokens::new(Arc::clone(jar), JarKey::ByHost)),
+            TokenStore::Jar(jar) => Some(Tokens::new(
+                Arc::clone(jar),
+                JarKey::ByHost,
+                &settings.tokens,
+            )),
         };
         let cookies = Cookies::new(jar, key, aliases, settings.cookies.clone());
         Ok(Client {
@@ -419,6 +465,7 @@ impl ClientBuilder {
                 auth_provider: self.auth_provider,
                 hooks: self.hooks,
                 busy: Mutex::new(Busy::default()),
+                non_defaults,
             }),
         })
     }
@@ -521,6 +568,13 @@ impl Client {
     #[must_use]
     pub fn settings(&self) -> &SessionSettings {
         &self.inner.settings
+    }
+
+    /// What the client was built to do that is looser than the defaults, as
+    /// [`ClientBuilder::non_defaults`] listed it.
+    #[must_use]
+    pub fn non_defaults(&self) -> Vec<String> {
+        self.inner.non_defaults.clone()
     }
 
     /// The transport: the one the client was given, or the one it made.
@@ -701,7 +755,7 @@ impl Client {
     }
 
     fn drain(&self, response: Response) {
-        response.discard(Some(64 * 1024));
+        response.discard(Some(self.inner.settings.drain_bytes));
     }
 
     /// A request that carries no body, following its redirects up to `max_redirects`.

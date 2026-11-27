@@ -59,10 +59,12 @@ pub use policy::{
 };
 pub use secret::Secret;
 pub use select::{
-    CertificateRequest, Chooser, IdentityQuery, IdentityQueryBuilder, IdentitySource, Selector,
-    SelectorBuilder,
+    CertificateChoice, CertificatePolicy, CertificateRequest, Chooser, IdentityQuery,
+    IdentityQueryBuilder, IdentitySource, Selector, SelectorBuilder,
 };
 pub use server::{ClientAuth, ServerTls, ServerTlsBuilder};
 #[cfg(feature = "issue")]
 pub use settings::IssueSettings;
-pub use settings::{KeyLogging, Pkcs11Settings, SelectorSettings, TlsSettings, TlsVersion};
+pub use settings::{
+    KeyLogging, KeySettings, Pkcs11Settings, SelectorSettings, TlsSettings, TlsVersion,
+};

@@ -16,7 +16,7 @@ use std::io;
 use std::sync::Mutex;
 
 use bytes::Bytes;
-use http::header::{HOST, HeaderValue, PROXY_AUTHENTICATE};
+use http::header::{CONNECTION, HOST, HeaderValue, PROXY_AUTHENTICATE};
 use http::{Method, Request, Response, StatusCode, Uri, Version};
 use http_body_util::{Either, Empty, Full};
 use hyper::body::Incoming;
@@ -365,6 +365,10 @@ async fn handle(request: Request<Incoming>, shared: Arc<Shared>, slot: Slot) -> 
         reply
             .headers_mut()
             .insert(PROXY_AUTHENTICATE, HeaderValue::from_static(CHALLENGE));
+        // Closing keeps a client without the credential from holding a slot with repeated requests.
+        reply
+            .headers_mut()
+            .insert(CONNECTION, HeaderValue::from_static("close"));
         return reply;
     }
     if request.method() == Method::CONNECT {

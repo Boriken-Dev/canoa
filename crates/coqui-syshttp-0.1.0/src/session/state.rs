@@ -18,7 +18,7 @@ use super::cookies::{Cookie, HostAliases, SetCookieContext, domain_covers, parse
 use super::cookies::{is_ip, path_matches, url_host};
 use super::error::Error;
 use super::jar::{CookieJar, TokenJar};
-use super::settings::CookieSettings;
+use super::settings::{CookieSettings, TokenSettings};
 
 const SECURE_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
 
@@ -236,7 +236,9 @@ impl Cookies {
             .now(now)
             .request_path(url.path())
             .aliases(self.aliases.clone())
-            .max_age(self.settings.max_age);
+            .max_age(self.settings.max_age)
+            .public_suffixes(self.settings.public_suffixes.iter().cloned())
+            .public_suffix_list(self.settings.public_suffix_list);
         let found = parse_set_cookie(values, &url_host(url), &context);
         let secure = url.scheme() == "https" || SECURE_HOSTS.contains(&url_host(url).as_str());
         let Ok(mut rows) = self.rows.lock() else {
@@ -311,24 +313,49 @@ impl Cookies {
 pub(crate) struct Tokens {
     jar: Arc<dyn TokenJar>,
     key: JarKey,
+    plain_http: bool,
+    any_port: bool,
 }
 
 impl Tokens {
-    pub(crate) fn new(jar: Arc<dyn TokenJar>, key: JarKey) -> Self {
-        Self { jar, key }
+    pub(crate) fn new(jar: Arc<dyn TokenJar>, key: JarKey, settings: &TokenSettings) -> Self {
+        Self {
+            jar,
+            key,
+            plain_http: settings.plain_http,
+            any_port: settings.any_port,
+        }
     }
 
     /// The `Authorization` value for `url`'s host, or `None`. A token that already names its
     /// scheme (`Basic ...`, `token ...`) is sent verbatim; a bare one is a bearer token.
+    ///
+    /// A token goes only over `https:` or to a loopback host, and only to the port it is kept
+    /// for: the host's entry serves the scheme's default port, `host:port` another one. The
+    /// settings `plain_http` and `any_port` lift either rule.
     ///
     /// # Errors
     ///
     /// [`Error::Configuration`] naming the key, never the value, for a token with a CR, LF or
     /// NUL.
     pub(crate) fn authorization(&self, url: &Url) -> Result<Option<Secret>, Error> {
+        if !self.plain_http
+            && url.scheme() != "https"
+            && !SECURE_HOSTS.contains(&url_host(url).as_str())
+        {
+            return Ok(None);
+        }
         let key = match &self.key {
             JarKey::Named(name) => name.clone(),
-            JarKey::ByHost => url.host_str().unwrap_or("").to_ascii_lowercase(),
+            JarKey::ByHost => {
+                let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+                match url.port() {
+                    Some(port) if !self.any_port && !host.is_empty() => {
+                        alloc::format!("{host}:{port}")
+                    }
+                    _ => host,
+                }
+            }
         };
         if key.is_empty() {
             return Ok(None);

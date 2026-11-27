@@ -155,6 +155,14 @@ pub struct CookieSettings {
     pub max_per_host: usize,
     /// Most bytes in a cookie's name and value together; a larger cookie is ignored (4096).
     pub max_bytes: usize,
+    /// Domains that are public suffixes besides those the Public Suffix List and the built-in
+    /// checks know (none): a cookie whose `Domain` names one is refused unless it is the host.
+    /// Case is ignored and a leading dot is dropped.
+    pub public_suffixes: Vec<String>,
+    /// Whether a cookie's `Domain` is checked against the Public Suffix List (yes). Off, only
+    /// top level domains, `co.uk`-style registries and `public_suffixes` are refused, so a host
+    /// under a shared-hosting suffix can set a cookie for every other tenant of it.
+    pub public_suffix_list: bool,
 }
 
 impl Default for CookieSettings {
@@ -165,6 +173,8 @@ impl Default for CookieSettings {
             max_age: Duration::from_secs(400 * 24 * 3600),
             max_per_host: 180,
             max_bytes: 4096,
+            public_suffixes: Vec::new(),
+            public_suffix_list: true,
         }
     }
 }
@@ -175,6 +185,13 @@ impl Default for CookieSettings {
 pub struct TokenSettings {
     /// Where tokens are read ([`TokenStore::None`]).
     pub store: TokenStore,
+    /// Whether a token may be sent over plain `http:` to a host that is not loopback (no). A token
+    /// is a long-lived secret that anyone on the path reads from a plain request.
+    pub plain_http: bool,
+    /// Whether a token kept for a host goes to every port of it (no). By default the host's
+    /// entry serves the scheme's default port and `host:port` another one, so a service on
+    /// another port of the host does not receive it.
+    pub any_port: bool,
 }
 
 /// Every setting of a [`Client`](super::Client), with Python syshttp's defaults.
@@ -219,6 +236,10 @@ pub struct SessionSettings {
     pub system_proxy_max_age: Duration,
     /// Most characters of text from the peer that a message shows (120).
     pub peer_text_limit: usize,
+    /// Most bytes of a redirect's body read to keep its connection for the next request (64
+    /// KiB); a longer body is abandoned with the connection. Raising it makes a client read more
+    /// of a body it does not want.
+    pub drain_bytes: usize,
 }
 
 impl SessionSettings {
@@ -248,10 +269,26 @@ impl SessionSettings {
         if self.max_redirects > defaults.max_redirects {
             loose.push("max_redirects above the default".to_string());
         }
+        if self.drain_bytes > defaults.drain_bytes {
+            loose
+                .push("drain_bytes above the default: more of a redirect body is read".to_string());
+        }
         if self.cookies.max_per_host > defaults.cookies.max_per_host
             || self.cookies.max_bytes > defaults.cookies.max_bytes
         {
             loose.push("cookie bounds above the defaults".to_string());
+        }
+        if !self.cookies.public_suffix_list {
+            loose.push(
+                "cookies.public_suffix_list: a Domain is not checked against the Public Suffix List"
+                    .to_string(),
+            );
+        }
+        if self.tokens.plain_http {
+            loose.push("tokens.plain_http: a token may cross plain http".to_string());
+        }
+        if self.tokens.any_port {
+            loose.push("tokens.any_port: a token goes to any port of its host".to_string());
         }
         loose
     }
@@ -276,6 +313,7 @@ impl Default for SessionSettings {
             tls_max_age: Duration::from_secs(60),
             system_proxy_max_age: Duration::from_secs(60),
             peer_text_limit: 120,
+            drain_bytes: 64 * 1024,
         }
     }
 }

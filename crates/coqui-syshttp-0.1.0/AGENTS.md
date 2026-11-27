@@ -22,7 +22,8 @@ own `AGENTS.md`:
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper`, `hyper-util`, `tokio`, `tokio-rustls`, `tower-service` | the `hyper` module: `client()` | off |
 | `reqwest` | `tls`, `coqui-proxy/relay`, `reqwest` 0.13 (no TLS backend of its own, `socks`), `rustls`, `tracing`, `tokio` (the runtime handle) | the `reqwest` module: `client()` | off |
 | `reqwest-blocking` | `reqwest`, `reqwest/blocking`, `coqui-proxy/relay-blocking` | the `reqwest::blocking` module: `client()` | off |
-| `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs`, `percent-encoding` | the `session` module | off |
+| `psl` | `psl` (the Public Suffix List as Rust source) | a cookie `Domain` naming a public suffix is refused; `session` turns it on | off |
+| `session` | `ureq`, `psl`, `url`, `regex`, `flate2`, `encoding_rs`, `percent-encoding` | the `session` module | off |
 | `json` | `session`, `serde`, `serde_json` | `Response::json`, `FetchBuilder::json` | off |
 | `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` | off |
 
@@ -86,7 +87,9 @@ I/O error of kind `PermissionDenied`.
 `AdapterSettings { failover: bool = true, bad_proxy_ttl: Duration = 300 s }` (non_exhaustive, `Default`,
 `non_defaults()`), taken by the builders of all three adapters as `failover(bool)`, `bad_proxy_ttl(Duration)`
 and `adapter_settings(AdapterSettings)`. Failover is only for connecting: once a request is sent, a failure is
-the caller's.
+the caller's. Each builder's `non_defaults()` also lists what the `Tls` (key log, `Trust::Disabled`), the connector
+(`Negotiate::plain_http`) and, in the session layer, the origin login policy it was given loosen; the `reqwest`
+builders take a raw `rustls::ClientConfig` (`tls_config`), which cannot say what it loosens, so it is not inspected.
 
 ## Module `hyper` (feature `hyper`)
 
@@ -156,7 +159,7 @@ proxy is one of two things:
   gateways (skipped to the next route) and `Upgrade` requests over plain `http:`.
 - **`failover(false)`: `Proxy::custom`** answering the first usable route of the resolver for each URL (HTTP,
   HTTPS, SOCKS 5 with the proxy resolving the name); SOCKS 4/4a, gateways and proxies with extra headers are
-  skipped to the next route and, when none is usable, the request fails (it never goes direct past the proxy
+  skipped to the next route and, when none is usable or the lookup itself fails (a PAC error, a malformed proxy setting), the request fails (it never goes direct past the proxy
   the system asked for). A route that fails to connect fails the request; Negotiate and NTLM proxy login and
   the connector's reply limits are not available, and `not_applied()` says so. No runtime is needed.
 
@@ -198,6 +201,12 @@ A client with memory above `ureq`, a port of the Python library `syshttp` 0.1.0:
 the same environment variable names (`SYSHTTP_*`, below) and the same file formats, so a Python and a
 Rust program in one environment share them. Secrets (`Secret`): token and cookie values, never in
 `Debug`, `Display`, an error or a log; a token with CR, LF or NUL is `Error::Configuration` naming the key.
+A jar token is sent only over `https:` or to a loopback host (`tokens.plain_http` lifts it) and only to the port it is
+kept for: the jar key is the host for the scheme's default port and `host:port` for another (a file `<host>_<port>.token`);
+`tokens.any_port` sends the host's entry to every port. Both are listed by `SessionSettings::non_defaults()`.
+A cookie `Domain` that is a public suffix is refused unless it is the host: a top level domain, a `co.uk`-style
+registry, a name in `cookies.public_suffixes`, or an entry of the Public Suffix List (feature `psl`, on with `session`);
+`cookies.public_suffix_list = false` skips the list and is listed by `non_defaults()`.
 
 ```rust
 // session::{Client, ClientBuilder, RequestBuilder, HookRequest}
@@ -205,10 +214,11 @@ Client::builder() -> ClientBuilder
 ClientBuilder::{settings(SessionSettings), header(name, Option<value>), user_agent, timeout(connect, read),
     deadline(Option<Duration>), env(HttpEnv), resolver, tls(Tls), proxy_tls(Arc<ClientConfig>), trust(Trust),
     connector, adapter_settings, origin_auth(OriginAuth), transport(impl Transport), cookies(CookieStore),
-    tokens(TokenStore), cookie_hosts(groups), auth_provider(Arc<dyn AuthProvider>),
+    tokens(TokenStore), token_plain_http(bool), token_any_port(bool), cookie_hosts(groups), auth_provider(Arc<dyn AuthProvider>),
+    non_defaults() -> Vec<String>,
     hook(Regex, Fn(&Client, &mut HookRequest) -> Result<Option<Response>, BoxError>), build() -> Result<Client, Error>}
 Client::{request(Method, url) -> RequestBuilder, follow(Method, url, &Response) -> RequestBuilder, settings(), transport(),
-    close(), cookies() -> Vec<Cookie>, token_for(&Url)}                 // Clone; clones share state
+    close(), cookies() -> Vec<Cookie>, token_for(&Url), non_defaults() -> Vec<String>}                 // Clone; clones share state
 RequestBuilder::{body(impl Into<Body>), header(name, Option<value>), stream(bool), redirects(bool),
     timeout(connect, read), deadline(Option<Duration>), auth(Auth), send() -> Result<Response, Error>}
 session::fetch(url) -> FetchBuilder   // method, header, body, form, json (feature json), timeout, client, transport,
@@ -242,14 +252,16 @@ retries is returned. `gzip` and `deflate` are decoded unless the caller set `Acc
 `retry` {`count` 3, `backoff` 1 s, `backoff_max` 120 s, `statuses` 408 429 500 502 503 504, `methods` GET HEAD OPTIONS
 PUT DELETE TRACE PROPFIND}, `max_reply_bytes` 8 MiB, `decode_chunk` 256 KiB, `max_interim_replies` 8, `pool` {`max_idle` 8,
 `max_idle_per_route` 1, `reuse_window` 1 s, `idle_timeout` 15 s}, `cookies` {`store` `Memory`|`PerHost`|`Key`|`Jar`, `hosts`,
-`max_age` 400 d, `max_per_host` 180, `max_bytes` 4096}, `tokens.store` `None`|`PerHost`|`Key`|`Jar`, `tls_max_age` 60 s,
-`system_proxy_max_age` 60 s, `peer_text_limit` 120.
+`max_age` 400 d, `max_per_host` 180, `max_bytes` 4096, `public_suffixes` none, `public_suffix_list` true}, `tokens` {`store` `None`|`PerHost`|`Key`|`Jar`, `plain_http` false, `any_port` false}, `tls_max_age` 60 s,
+`system_proxy_max_age` 60 s, `peer_text_limit` 120, `drain_bytes` 64 KiB (most of a redirect's body read to keep its
+connection; more is abandoned with it). `UreqTransportBuilder::peer_text_limit(usize)` (also from `settings(..)`).
 
 Sub-modules: `session::env` (`HttpEnv::{process, builder, prefixes, name, find, get, family, environment,
 system_proxy_enabled, proxy_auth_header, proxy_type, configured_proxy, check_proxy_settings, resolver(ProxyOverrides),
 resolver_with}` and the setting-name constants), `session::cookies` (`Cookie`, `CookieLike`, `HostAliases`,
-`parse_set_cookie`, `SetCookieContext`, `domain_covers`, `load_netscape`, `save_netscape`), `session::jar`
-(`CookieJar`, `TokenJar`, `MemoryCookieJar`, `MemoryTokenJar`, `FileCookieJar`, `FileTokenJar`, `store_root`,
+`parse_set_cookie`, `SetCookieContext` (`public_suffixes(..)`, `public_suffix_list(bool)`), `domain_covers`, `load_netscape`, `save_netscape`, `load_netscape_with`, `save_netscape_with` taking a `&FileRetry`), `session::jar`
+(`CookieJar`, `TokenJar`, `MemoryCookieJar`, `MemoryTokenJar`, `FileCookieJar`, `FileTokenJar`, `FileJarBuilder`
+(`root`, `env`, `file_retries(tries, wait)`: 10 tries, 10 ms, for a file another handle holds), `FileRetry`, `store_root`,
 `default_root`, `safe_name`, `HOME`), `session::hooks` (`Hook`, `HookKind`, `from_env`, `matching`, `skipped`,
 `split_command`, `curl_command`, `wrapper_environment`, the `SYSHTTP_HOOK*` constants).
 

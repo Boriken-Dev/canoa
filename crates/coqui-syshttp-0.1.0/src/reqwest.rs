@@ -150,12 +150,17 @@ impl Builder {
         self
     }
 
-    /// What this builder does that is looser than the defaults.
+    /// What this builder does that is looser than the defaults, the relay and the connector it
+    /// was given included. A TLS configuration given to [`Builder::tls_config`] is a raw
+    /// `rustls::ClientConfig`, which cannot say what it loosens: it is not inspected.
     #[must_use]
     pub fn non_defaults(&self) -> Vec<String> {
         let mut loose = self.adapter.non_defaults();
         if self.adapter.failover {
             loose.extend(self.relay.non_defaults());
+            if let Some(connector) = &self.connector {
+                loose.extend(connector.non_defaults());
+            }
         }
         loose
     }
@@ -211,13 +216,14 @@ impl Builder {
         } else {
             system_proxy(resolver)
         };
-        let mut builder = ClientBuilder::new()
-            .use_preconfigured_tls((*config).clone())
-            .proxy(proxy);
+        // The closures run first, so the proxy and the TLS configuration are the last word.
+        let mut builder = ClientBuilder::new();
         for configure in self.configure {
             builder = configure(builder);
         }
-        Ok(builder)
+        Ok(builder
+            .use_preconfigured_tls((*config).clone())
+            .proxy(proxy))
     }
 
     /// The client.
@@ -316,8 +322,9 @@ pub(crate) fn system_proxy(resolver: Resolver) -> ReqwestProxy {
         let routes = match resolver.lookup(url.as_str()) {
             Ok(routes) => routes,
             Err(error) => {
-                tracing::warn!(target: "coqui_syshttp", %error, "no route for a request; it goes direct");
-                return None;
+                // reqwest reads `None` as "no proxy": a failed lookup must not send the request direct.
+                tracing::warn!(target: "coqui_syshttp", %error, "no route for a request; the request fails");
+                return Url::parse(UNUSABLE).ok();
             }
         };
         let mut refused = Vec::new();

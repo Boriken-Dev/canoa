@@ -75,7 +75,7 @@ pub(crate) fn refused(
     )
     .trim_end()
     .to_string();
-    let target = location.map_or_else(|| "(none)".to_string(), |url| peer_text(&shown(url), 200));
+    let target = location.map_or_else(|| "(none)".to_string(), |url| peer_text(&shown(url), limit));
     super::error::Error::Redirect(alloc::format!(
         "{status} for {method} {}: redirect to {target} not followed ({reason})",
         shown(url)

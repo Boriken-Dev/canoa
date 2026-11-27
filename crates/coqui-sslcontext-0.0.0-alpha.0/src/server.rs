@@ -16,7 +16,9 @@ use crate::identity::Identity;
 use crate::keylog::key_log;
 use crate::settings::{KeyLogging, TlsSettings, TlsVersion};
 
-/// What a server does about client certificates.
+/// What a server does about client certificates. [`Trust::System`] accepts a client certificate
+/// from any public CA with the client-authentication usage, so it vouches for strangers: it is
+/// listed by `non_defaults()`; name the roots of your own CA instead.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub enum ClientAuth {
@@ -80,9 +82,10 @@ impl ServerTlsBuilder {
         self
     }
 
-    /// The settings that are not the default, as data: logging session secrets.
+    /// The settings that are not the default, as data: logging session secrets, and client
+    /// certificates verified against the system's roots.
     pub fn non_defaults(&self) -> Vec<NonDefault> {
-        non_defaults(&self.settings)
+        non_defaults(&self.settings, &self.client_auth)
     }
 
     /// The server configuration source.
@@ -202,14 +205,22 @@ impl ServerTls {
         &self.settings
     }
 
-    /// The settings that are not the default, as data: logging session secrets.
+    /// The settings that are not the default, as data: logging session secrets, and client
+    /// certificates verified against the system's roots.
     pub fn non_defaults(&self) -> Vec<NonDefault> {
-        non_defaults(&self.settings)
+        non_defaults(&self.settings, &self.client_auth)
     }
 }
 
-fn non_defaults(settings: &TlsSettings) -> Vec<NonDefault> {
+fn non_defaults(settings: &TlsSettings, client_auth: &ClientAuth) -> Vec<NonDefault> {
     let mut found = Vec::new();
+    if let ClientAuth::Optional(Trust::System) | ClientAuth::Required(Trust::System) = client_auth {
+        found.push(NonDefault {
+            setting: "client_auth",
+            value: "system roots".into(),
+            default: "none, or the roots you name",
+        });
+    }
     if settings.key_log != KeyLogging::Off {
         found.push(NonDefault {
             setting: "key_log",

@@ -24,7 +24,7 @@ core rust-component rustfmt any - -
 core llvm 22.1.8 windows-arm64 de718c58ebbc5f61d58c17b90457fcf42983bc2c4a4aba3e010d108713bfd7f1 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz
 
 # The deps branch's commit holding crates/ for Cargo.lock. Its own group, so `sdk install` never clones it.
-deps crates 296197fc959e4340a67a8987dbecd9f20ef06e61 any - https://github.com/Boriken-Dev/coqui-syshttp.git
+deps crates eca346d4ea4e81d49a77ee53de3fe0e5cc40ad56 any - https://github.com/Boriken-Dev/coqui-syshttp.git
 
 # The container build's base image (the digest is the image index's), pinned in packaging/container/Containerfile.
 release rust-image 1.89-bookworm any 948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88c07bb14563c84ff docker://docker.io/library/rust

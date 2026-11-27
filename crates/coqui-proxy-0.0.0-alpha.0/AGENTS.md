@@ -188,7 +188,7 @@ ProxyConnector::default(); ProxyConnector::builder() -> ProxyConnectorBuilder
 ProxyConnectorBuilder::{failover(bool), bad_proxy_ttl(Duration), timeout(Duration), user_agent(String), negotiate(Negotiate), settings(ConnectorSettings), proxy_tls(Arc<rustls::ClientConfig>) /*tls*/, non_defaults(), build()}
 ProxyConnector::connect(&self, route: &Route, host: &str, port: u16) -> Result<Connection, Error>
 ProxyConnector::connect_url(&self, resolver: &Resolver, url: &str) -> Result<Connection, Error>
-ProxyConnector::{with_timeout(Duration), with_failover(bool, Duration), non_defaults()}
+ProxyConnector::{with_timeout(Duration), with_failover(bool, Duration), with_proxy_tls(Arc<ClientConfig>) (feature `tls`), non_defaults()}
 enum Connection { Tcp(TcpStream), Tls(Box<StreamOwned<..>>) /*tls*/ }   // Read + Write; socket()
 ```
 
@@ -259,7 +259,7 @@ keep the handle as long as the client.
   A malformed `CONNECT` target: `400`. Anything else, including an `https:` absolute form: `405`.
 - **Credential**: every request needs `Proxy-Authorization: Basic` with the relay's own
   credential, user `coqui-relay` and a random 256-bit password from the operating system's
-  generator, compared in constant time; otherwise `407` with `Proxy-Authenticate`. `Debug` never
+  generator, compared in constant time; otherwise `407` with `Proxy-Authenticate` and the connection is closed. `Debug` never
   shows it; `proxy_url()` leaves it out; `proxy()` and `credentials()` carry it. It is never forwarded.
   The same secret is also accepted as the value of the `x-coqui-relay-token` header (`token_header()`), for
   a client that drops `Proxy-Authorization` when a redirect leads to another host (`reqwest` does, for
@@ -270,7 +270,7 @@ keep the handle as long as the client.
 
 `RelaySettings` (also at the crate root; `#[non_exhaustive]`, `Default`, `DEFAULT_*`, `non_defaults()`):
 `address` 127.0.0.1, `port` 0 (any free), `max_connections` 256 (more connections wait in the
-listener's backlog; the blocking relay answers `503` and closes them), `header_timeout` 30 s (a head sent slower is cut off), `idle_timeout` 300 s (no
+listener's backlog; the blocking relay answers `503` and closes them), `header_timeout` 30 s (a head sent slower is cut off, and so is a connection that sends no first request), `idle_timeout` 300 s (no
 byte either way on the client's or the destination's connection closes it; a reply that begins
 later than this is cut), `max_head_bytes` 64 KiB (longer: `431`, minimum 8 KiB), `accept_retry`
 100 ms, `shutdown_wait` 5 s and `poll_interval` 10 ms (both blocking relay only, see below). Raising any of the

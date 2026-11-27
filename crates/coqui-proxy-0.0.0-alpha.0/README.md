@@ -181,6 +181,25 @@ Real peers (`squid`, `dante-server`, `libproxy`) are opt-in: `COQUI_PROXY_TEST_S
 `COQUI_PROXY_TEST_DANTE=1`, `COQUI_PROXY_TEST_LIBPROXY=1` with
 `cargo test --features libproxy --test real_peers -- --ignored`.
 
+### Building without a network, and in a container
+
+The `deps` branch holds every crate `Cargo.lock` names as text, and `tools/sdk.lock` records the toolchains, `rustup` and the
+`deps` commit a build is made with. `tools/build.py` (Python 3.11, standard library only; `python3 tools/build.py --help`)
+holds them to the repository and builds from them:
+
+```text
+python3 tools/build.py sdk check                       # the lock, the Containerfile's pins and the deps commit agree
+python3 tools/build.py container build --target build  # compile the library offline, in a container
+python3 tools/build.py container test                  # `cargo test --all-features` offline, in the same container
+python3 tools/build.py container build --print         # the overrides and the engine command, nothing run
+```
+
+The library ships no image: `packaging/container/Containerfile` has the `sdk`, `build` and `test` stages and nothing to run.
+Where a build gets its toolchain, mirrors, base image or Visual Studio paths from is set in `.env` or `.env.local` (both
+ignored by git; `.env.example` lists every key and `python3 tools/build.py help env` explains them). A pin changes in
+`tools/sdk.lock` first; `sdk check` fails until the Containerfile follows. To change `Cargo.lock`, refresh the branch on a
+clean checkout of main with `python3 tools/build.py deps refresh` and push `deps` before `main`.
+
 ### Releasing
 
 No release is cut yet; the crate is consumed by git revision.

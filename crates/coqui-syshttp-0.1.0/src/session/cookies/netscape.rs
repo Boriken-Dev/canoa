@@ -10,7 +10,7 @@ use coqui_proxy::Secret;
 
 use super::parse::from_unix;
 use super::{Cookie, CookieLike, HTTP_ONLY_PREFIX};
-use crate::session::fileio::{read_text, write_private};
+use crate::session::fileio::{FileRetry, read_text, write_private};
 
 /// A name or value that holds a control character but the tab is neither read nor written, so a
 /// value cannot end a line of a jar file.
@@ -40,7 +40,13 @@ fn ascii_seconds(text: &str) -> Option<u64> {
 /// `\x85`) are part of a value, not the end of a row.
 #[must_use]
 pub fn load_netscape(path: &Path) -> Vec<Cookie> {
-    let Ok(text) = read_text(path) else {
+    load_netscape_with(path, &FileRetry::default())
+}
+
+/// [`load_netscape`] with the retries of a read of a file another handle holds that `retry` names.
+#[must_use]
+pub fn load_netscape_with(path: &Path, retry: &FileRetry) -> Vec<Cookie> {
+    let Ok(text) = read_text(path, retry) else {
         return Vec::new();
     };
     let mut cookies = Vec::new();
@@ -112,6 +118,20 @@ pub fn save_netscape<C: CookieLike>(
     cookies: impl IntoIterator<Item = C>,
     path: &Path,
 ) -> io::Result<()> {
+    save_netscape_with(cookies, path, &FileRetry::default())
+}
+
+/// [`save_netscape`] with the retries of a replace of a file another handle holds that `retry`
+/// names.
+///
+/// # Errors
+///
+/// What creating the directory, writing or replacing the file reports.
+pub fn save_netscape_with<C: CookieLike>(
+    cookies: impl IntoIterator<Item = C>,
+    path: &Path,
+    retry: &FileRetry,
+) -> io::Result<()> {
     let mut text = String::from("# Netscape HTTP Cookie File\n");
     for cookie in cookies {
         let mut domain = String::from(cookie.domain());
@@ -143,5 +163,5 @@ pub fn save_netscape<C: CookieLike>(
             cookie.value()
         ));
     }
-    write_private(path, text.as_bytes())
+    write_private(path, text.as_bytes(), retry)
 }

@@ -25,6 +25,8 @@ pub struct SetCookieContext {
     request_path: String,
     aliases: HostAliases,
     max_age: Duration,
+    suffixes: Vec<String>,
+    suffix_list: bool,
 }
 
 impl Default for SetCookieContext {
@@ -34,6 +36,8 @@ impl Default for SetCookieContext {
             request_path: "/".to_string(),
             aliases: HostAliases::default(),
             max_age: Duration::from_secs(400 * 24 * 3600),
+            suffixes: Vec::new(),
+            suffix_list: true,
         }
     }
 }
@@ -69,6 +73,43 @@ impl SetCookieContext {
         self.max_age = max_age;
         self
     }
+
+    /// Domains that are public suffixes beyond those the built-in checks know (none): a `Domain`
+    /// attribute naming one is refused unless it is the host itself.
+    pub fn public_suffixes<S: Into<String>>(
+        mut self,
+        suffixes: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.suffixes = suffixes
+            .into_iter()
+            .map(|suffix| {
+                let suffix: String = suffix.into();
+                suffix.trim().trim_start_matches('.').to_ascii_lowercase()
+            })
+            .collect();
+        self
+    }
+
+    /// Whether the Public Suffix List is consulted (default: yes; it needs the `psl` feature,
+    /// which `session` turns on). Off, only the registry-label heuristic and
+    /// [`public_suffixes`](Self::public_suffixes) decide.
+    pub fn public_suffix_list(mut self, consult: bool) -> Self {
+        self.suffix_list = consult;
+        self
+    }
+
+    /// Whether `domain` (lower case, no leading dot) is a public suffix: the registry heuristic
+    /// first, then the operator's list, then the Public Suffix List.
+    fn is_public_suffix(&self, domain: &str) -> bool {
+        if is_registry(domain) || self.suffixes.iter().any(|suffix| suffix == domain) {
+            return true;
+        }
+        #[cfg(feature = "psl")]
+        if self.suffix_list {
+            return psl::suffix_str(domain) == Some(domain);
+        }
+        false
+    }
 }
 
 fn has_control(text: &str) -> bool {
@@ -99,7 +140,8 @@ pub(crate) fn from_unix(seconds: i64) -> SystemTime {
     }
 }
 
-fn is_public_suffix(domain: &str) -> bool {
+/// A single label or a `co.uk`-style registry.
+fn is_registry(domain: &str) -> bool {
     let labels: Vec<&str> = domain.split('.').collect();
     labels.len() == 1
         || (labels.len() == 2 && REGISTRY_LABELS.contains(&labels[0]) && labels[1].len() == 2)
@@ -107,7 +149,11 @@ fn is_public_suffix(domain: &str) -> bool {
 
 /// RFC 6265 section 5.3 steps 4-6: the domain and whether it covers subdomains, for a cookie set
 /// by `host` with the Domain `attribute`, or `None` to drop it.
-fn cookie_domain(host: &str, attribute: Option<&str>) -> Option<(String, bool)> {
+fn cookie_domain(
+    host: &str,
+    attribute: Option<&str>,
+    context: &SetCookieContext,
+) -> Option<(String, bool)> {
     let host = host.to_ascii_lowercase();
     let domain = attribute.unwrap_or("").trim();
     let domain = domain
@@ -126,7 +172,7 @@ fn cookie_domain(host: &str, attribute: Option<&str>) -> Option<(String, bool)> 
     if host != domain && !host.ends_with(&alloc::format!(".{domain}")) {
         return None;
     }
-    if is_public_suffix(&domain) {
+    if context.is_public_suffix(&domain) {
         return (domain == host).then_some((host, false));
     }
     Some((domain, true))
@@ -138,19 +184,19 @@ fn cookie_domain(host: &str, attribute: Option<&str>) -> Option<(String, bool)> 
 fn placed_for(
     host: &str,
     attribute: Option<&str>,
-    aliases: &HostAliases,
+    context: &SetCookieContext,
 ) -> Option<(String, bool)> {
-    let Some(target) = aliases.first(host) else {
-        return cookie_domain(host, attribute);
+    let Some(target) = context.aliases.first(host) else {
+        return cookie_domain(host, attribute, context);
     };
     let named = normal_host(attribute.unwrap_or("").trim().trim_start_matches('.'));
     if named.is_empty() {
         return Some((target.to_string(), false));
     }
-    if aliases.first(&named) == Some(target) {
-        return cookie_domain(target, Some(target));
+    if context.aliases.first(&named) == Some(target) {
+        return cookie_domain(target, Some(target), context);
     }
-    cookie_domain(host, attribute)
+    cookie_domain(host, attribute, context)
 }
 
 /// RFC 6265 section 5.1.4: the directory of the request path.
@@ -235,8 +281,9 @@ fn parse_header(header: &str, now: i64, max_age: i64) -> Option<Parsed> {
 /// section 5.2 does.
 ///
 /// `default_domain` is the host asked. A `Domain` attribute is kept only when that host
-/// domain-matches it and it is not a public suffix (judged without the Public Suffix List: a top
-/// level domain or a `co.uk`-style registry); it then covers subdomains. Without one the cookie is
+/// domain-matches it and it is not a public suffix (a top level domain, a `co.uk`-style registry, a
+/// suffix the context lists, or an entry of the Public Suffix List unless the context turns that
+/// off); it then covers subdomains. Without one the cookie is
 /// host-only. A cookie with no `Path` gets the directory of the request path. `gone` marks a cookie
 /// the server expires: an empty value, `Max-Age` of zero or less, a past date. A header that is not
 /// a cookie, or names a foreign domain, is skipped. An expiry beyond the context's lifetime cap is
@@ -255,7 +302,7 @@ pub fn parse_set_cookie<S: AsRef<str>>(
             continue;
         };
         let Some((domain, subdomains)) =
-            placed_for(default_domain, parsed.domain.as_deref(), &context.aliases)
+            placed_for(default_domain, parsed.domain.as_deref(), context)
         else {
             continue;
         };

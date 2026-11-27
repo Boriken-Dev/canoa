@@ -155,6 +155,8 @@ pub fn coqui_syshttp::session::cookies::SetCookieContext::aliases(self, coqui_sy
 pub fn coqui_syshttp::session::cookies::SetCookieContext::max_age(self, core::time::Duration) -> Self
 pub fn coqui_syshttp::session::cookies::SetCookieContext::new() -> Self
 pub fn coqui_syshttp::session::cookies::SetCookieContext::now(self, std::time::SystemTime) -> Self
+pub fn coqui_syshttp::session::cookies::SetCookieContext::public_suffix_list(self, bool) -> Self
+pub fn coqui_syshttp::session::cookies::SetCookieContext::public_suffixes<S: core::convert::Into<alloc::string::String>>(self, impl core::iter::traits::collect::IntoIterator<Item = S>) -> Self
 pub fn coqui_syshttp::session::cookies::SetCookieContext::request_path(self, impl core::convert::Into<alloc::string::String>) -> Self
 impl core::default::Default for coqui_syshttp::session::cookies::SetCookieContext
 pub fn coqui_syshttp::session::cookies::SetCookieContext::default() -> Self
@@ -188,8 +190,10 @@ pub fn &T::subdomains(&self) -> bool
 pub fn &T::value(&self) -> &str
 pub fn coqui_syshttp::session::cookies::domain_covers(&str, &str) -> bool
 pub fn coqui_syshttp::session::cookies::load_netscape(&std::path::Path) -> alloc::vec::Vec<coqui_syshttp::session::cookies::Cookie>
+pub fn coqui_syshttp::session::cookies::load_netscape_with(&std::path::Path, &coqui_syshttp::session::jar::FileRetry) -> alloc::vec::Vec<coqui_syshttp::session::cookies::Cookie>
 pub fn coqui_syshttp::session::cookies::parse_set_cookie<S: core::convert::AsRef<str>>(impl core::iter::traits::collect::IntoIterator<Item = S>, &str, &coqui_syshttp::session::cookies::SetCookieContext) -> alloc::vec::Vec<(coqui_syshttp::session::cookies::Cookie, bool)>
 pub fn coqui_syshttp::session::cookies::save_netscape<C: coqui_syshttp::session::cookies::CookieLike>(impl core::iter::traits::collect::IntoIterator<Item = C>, &std::path::Path) -> core::io::error::Result<()>
+pub fn coqui_syshttp::session::cookies::save_netscape_with<C: coqui_syshttp::session::cookies::CookieLike>(impl core::iter::traits::collect::IntoIterator<Item = C>, &std::path::Path, &coqui_syshttp::session::jar::FileRetry) -> core::io::error::Result<()>
 pub mod coqui_syshttp::session::env
 pub struct coqui_syshttp::session::env::HttpEnv
 impl coqui_syshttp::session::env::HttpEnv
@@ -269,7 +273,17 @@ impl coqui_syshttp::session::jar::FileJarBuilder
 pub fn coqui_syshttp::session::jar::FileJarBuilder::build_cookies(self) -> coqui_syshttp::session::jar::FileCookieJar
 pub fn coqui_syshttp::session::jar::FileJarBuilder::build_tokens(self) -> coqui_syshttp::session::jar::FileTokenJar
 pub fn coqui_syshttp::session::jar::FileJarBuilder::env(self, coqui_syshttp::session::env::HttpEnv) -> Self
+pub fn coqui_syshttp::session::jar::FileJarBuilder::file_retries(self, u32, core::time::Duration) -> Self
 pub fn coqui_syshttp::session::jar::FileJarBuilder::root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+#[non_exhaustive] pub struct coqui_syshttp::session::jar::FileRetry
+pub coqui_syshttp::session::jar::FileRetry::tries: u32
+pub coqui_syshttp::session::jar::FileRetry::wait: core::time::Duration
+impl coqui_syshttp::session::jar::FileRetry
+pub const coqui_syshttp::session::jar::FileRetry::DEFAULT_TRIES: u32
+pub const coqui_syshttp::session::jar::FileRetry::DEFAULT_WAIT: core::time::Duration
+pub fn coqui_syshttp::session::jar::FileRetry::new(u32, core::time::Duration) -> Self
+impl core::default::Default for coqui_syshttp::session::jar::FileRetry
+pub fn coqui_syshttp::session::jar::FileRetry::default() -> Self
 pub struct coqui_syshttp::session::jar::FileTokenJar
 impl coqui_syshttp::session::jar::FileTokenJar
 pub fn coqui_syshttp::session::jar::FileTokenJar::builder() -> coqui_syshttp::session::jar::FileJarBuilder
@@ -388,6 +402,7 @@ pub fn coqui_syshttp::session::Client::builder() -> coqui_syshttp::session::Clie
 pub fn coqui_syshttp::session::Client::close(&self)
 pub fn coqui_syshttp::session::Client::cookies(&self) -> alloc::vec::Vec<coqui_syshttp::session::cookies::Cookie>
 pub fn coqui_syshttp::session::Client::follow(&self, http::method::Method, &str, &coqui_syshttp::session::Response) -> coqui_syshttp::session::RequestBuilder
+pub fn coqui_syshttp::session::Client::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn coqui_syshttp::session::Client::request(&self, http::method::Method, impl core::convert::AsRef<str>) -> coqui_syshttp::session::RequestBuilder
 pub fn coqui_syshttp::session::Client::settings(&self) -> &coqui_syshttp::session::SessionSettings
 pub fn coqui_syshttp::session::Client::token_for(&self, &url::Url) -> core::result::Result<core::option::Option<coqui_proxy::proxy::Secret>, coqui_syshttp::session::Error>
@@ -407,12 +422,15 @@ pub fn coqui_syshttp::session::ClientBuilder::env(self, coqui_syshttp::session::
 pub fn coqui_syshttp::session::ClientBuilder::header(self, impl core::convert::Into<alloc::string::String>, core::option::Option<impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::hook(self, regex::regex::string::Regex, impl core::ops::function::Fn(&coqui_syshttp::session::Client, &mut coqui_syshttp::session::HookRequest) -> core::result::Result<core::option::Option<coqui_syshttp::session::Response>, coqui_syshttp::session::BoxError> + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::new() -> Self
+pub fn coqui_syshttp::session::ClientBuilder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn coqui_syshttp::session::ClientBuilder::origin_auth(self, coqui_proxy::auth::origin::OriginAuth) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::proxy_tls(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::resolver(self, coqui_proxy::resolver::Resolver) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::settings(self, coqui_syshttp::session::SessionSettings) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::timeout(self, core::option::Option<core::time::Duration>, core::option::Option<core::time::Duration>) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::tls(self, coqui_sslcontext::client::Tls) -> Self
+pub fn coqui_syshttp::session::ClientBuilder::token_any_port(self, bool) -> Self
+pub fn coqui_syshttp::session::ClientBuilder::token_plain_http(self, bool) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::tokens(self, coqui_syshttp::session::TokenStore) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::transport(self, impl coqui_syshttp::session::Transport + 'static) -> Self
 pub fn coqui_syshttp::session::ClientBuilder::trust(self, coqui_sslcontext::client::Trust) -> Self
@@ -426,6 +444,8 @@ pub coqui_syshttp::session::CookieSettings::hosts: core::option::Option<alloc::v
 pub coqui_syshttp::session::CookieSettings::max_age: core::time::Duration
 pub coqui_syshttp::session::CookieSettings::max_bytes: usize
 pub coqui_syshttp::session::CookieSettings::max_per_host: usize
+pub coqui_syshttp::session::CookieSettings::public_suffix_list: bool
+pub coqui_syshttp::session::CookieSettings::public_suffixes: alloc::vec::Vec<alloc::string::String>
 pub coqui_syshttp::session::CookieSettings::store: coqui_syshttp::session::CookieStore
 impl core::default::Default for coqui_syshttp::session::CookieSettings
 pub fn coqui_syshttp::session::CookieSettings::default() -> Self
@@ -581,6 +601,7 @@ pub coqui_syshttp::session::SessionSettings::connect_timeout: core::option::Opti
 pub coqui_syshttp::session::SessionSettings::cookies: coqui_syshttp::session::CookieSettings
 pub coqui_syshttp::session::SessionSettings::deadline: core::option::Option<core::time::Duration>
 pub coqui_syshttp::session::SessionSettings::decode_chunk: usize
+pub coqui_syshttp::session::SessionSettings::drain_bytes: usize
 pub coqui_syshttp::session::SessionSettings::headers: alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>
 pub coqui_syshttp::session::SessionSettings::max_interim_replies: usize
 pub coqui_syshttp::session::SessionSettings::max_redirects: u32
@@ -614,6 +635,8 @@ impl coqui_syshttp::session::Timeouts
 pub fn coqui_syshttp::session::Timeouts::both(core::option::Option<core::time::Duration>) -> Self
 pub fn coqui_syshttp::session::Timeouts::unlimited() -> Self
 #[non_exhaustive] pub struct coqui_syshttp::session::TokenSettings
+pub coqui_syshttp::session::TokenSettings::any_port: bool
+pub coqui_syshttp::session::TokenSettings::plain_http: bool
 pub coqui_syshttp::session::TokenSettings::store: coqui_syshttp::session::TokenStore
 pub struct coqui_syshttp::session::UreqTransport
 impl coqui_syshttp::session::UreqTransport
@@ -635,6 +658,7 @@ pub fn coqui_syshttp::session::UreqTransportBuilder::max_reply_bytes(self, usize
 pub fn coqui_syshttp::session::UreqTransportBuilder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn coqui_syshttp::session::UreqTransportBuilder::not_applied(&self) -> alloc::vec::Vec<&'static str>
 pub fn coqui_syshttp::session::UreqTransportBuilder::origin_auth(self, coqui_proxy::auth::origin::OriginAuth) -> Self
+pub fn coqui_syshttp::session::UreqTransportBuilder::peer_text_limit(self, usize) -> Self
 pub fn coqui_syshttp::session::UreqTransportBuilder::pool(self, coqui_syshttp::session::PoolSettings) -> Self
 pub fn coqui_syshttp::session::UreqTransportBuilder::proxy_tls(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
 pub fn coqui_syshttp::session::UreqTransportBuilder::resolver(self, coqui_proxy::resolver::Resolver) -> Self

@@ -1,4 +1,4 @@
-# coqui-syshttp/. at 8622bc90110d43742dea63f2c8f603e1e5014f98, with what it inherits written out.
+# coqui-syshttp/. at aff414e0348785254fcd7a4c3ed2b815b099c02d, with what it inherits written out.
 [package]
 name = "coqui-syshttp"
 version = "0.1.0"
@@ -26,17 +26,18 @@ ureq = ["tls", "dep:ureq", "dep:rustls"]
 hyper = ["tls", "coqui-proxy/hyper", "dep:hyper", "dep:hyper-util", "dep:tokio", "dep:tokio-rustls", "dep:tower-service"]
 reqwest = ["tls", "coqui-proxy/relay", "dep:reqwest", "dep:rustls", "dep:tracing", "dep:tokio"]
 reqwest-blocking = ["reqwest", "reqwest/blocking", "coqui-proxy/relay-blocking"]
-session = ["ureq", "dep:url", "dep:regex", "dep:flate2", "dep:percent-encoding", "dep:encoding_rs"]
+session = ["ureq", "psl", "dep:url", "dep:regex", "dep:flate2", "dep:percent-encoding", "dep:encoding_rs"]
+psl = ["dep:psl"]
 json = ["session", "dep:serde", "dep:serde_json"]
 session-reqwest = ["session", "reqwest", "reqwest/cookies"]
 [dependencies]
 thiserror = "2"
 [dependencies.coqui-proxy]
 git = "https://github.com/Boriken-Dev/coqui-proxy"
-rev = "e66b9ce26b9f0d2dc18f2262ec015742b2fe4829"
+rev = "d96239125f6d3a27bbeddf2c04de5a31be1e89fa"
 [dependencies.coqui-sslcontext]
 git = "https://github.com/Boriken-Dev/coqui-sslcontext"
-rev = "955cd9a455a288a523418daad7e846008c2bf291"
+rev = "a271e69f82b5fe3a4535d3e6b7e96b7232487e81"
 optional = true
 [dependencies.tracing]
 version = "0.1"
@@ -93,6 +94,9 @@ version = "2"
 optional = true
 [dependencies.encoding_rs]
 version = "0.8"
+optional = true
+[dependencies.psl]
+version = "2"
 optional = true
 [dependencies.serde]
 version = "1"

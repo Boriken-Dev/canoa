@@ -46,3 +46,22 @@ impl AdapterSettings {
         loose
     }
 }
+
+/// The lines a [`Tls`](coqui_sslcontext::Tls) gives for what it does that is looser than the
+/// defaults, in the words the other `non_defaults()` use.
+#[cfg(feature = "tls")]
+pub(crate) fn tls_non_defaults(
+    tls: &coqui_sslcontext::Tls,
+) -> alloc::vec::Vec<alloc::string::String> {
+    tls.non_defaults()
+        .into_iter()
+        .map(|entry| {
+            alloc::format!(
+                "tls {}({}): the default is {}",
+                entry.setting,
+                entry.value,
+                entry.default
+            )
+        })
+        .collect()
+}

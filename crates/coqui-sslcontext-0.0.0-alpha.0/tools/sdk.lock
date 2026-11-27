@@ -1,0 +1,54 @@
+# Every SDK a build of coqui-sslcontext needs, and the only file to trust for them.
+#
+#   <group> <name> <version> <os-arch|any> <sha256|-> <url|->
+#
+# Space separated, one item a line, # for a comment. `python3 tools/build.py sdk check` holds it to the
+# repository, `sdk install` installs a group of it, and tools/build.cfg says how. A system line names what is
+# checked and never installed; its version column is the group that needs it.
+
+# Rust. The first rust line is the default toolchain: an exact stable, the newest the repository has been
+# tested on. The second is the minimum, Cargo.toml's rust-version.
+core rustup-init 1.29.2 windows-x64 00f139da614dced87d3c3d4121c43eebdac3c1bf8a5ee86b9d80dfd71c8d70fd https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-pc-windows-msvc/rustup-init.exe
+core rustup-init 1.29.2 windows-arm64 58005a321c5dcb9c4457c0a13bb5d6a56a5793efaef429004edaa1db33019b59 https://static.rust-lang.org/rustup/archive/1.29.2/aarch64-pc-windows-msvc/rustup-init.exe
+core rustup-init 1.29.2 linux-x64 5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init
+core rustup-init 1.29.2 linux-arm64 a9c168dbea81a84671c6b7a5c1795cb0eb699020110d107ddfca427bd797e697 https://static.rust-lang.org/rustup/archive/1.29.2/aarch64-unknown-linux-gnu/rustup-init
+core rustup-init 1.29.2 macos-arm64 f7c7e11eb2e07f006e532a8aaac77b32f4527d305ac386c0c633ca6133d35ca9 https://static.rust-lang.org/rustup/archive/1.29.2/aarch64-apple-darwin/rustup-init
+core rustup-init 1.29.2 macos-x64 b9610730ddeef52765723847866fd1e3540b2bf7d5ab0c324aa143a5edf25ba0 https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-apple-darwin/rustup-init
+core rust 1.100.0 any - -
+core rust 1.89.0 any - -
+core rust-component clippy any - -
+core rust-component rustfmt any - -
+
+# ring compiles with clang on Windows ARM64. Used only where neither Visual Studio's Clang component nor a
+# clang on PATH is found.
+core llvm 22.1.8 windows-arm64 de718c58ebbc5f61d58c17b90457fcf42983bc2c4a4aba3e010d108713bfd7f1 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz
+
+# The deps branch's commit holding crates/ for Cargo.lock. Its own group, so `sdk install` never clones it.
+deps crates b904f6a7e3f229668108e01f06e5f31364b23ee7 any - https://github.com/Boriken-Dev/coqui-sslcontext.git
+
+# The container build's base image (the digest is the image index's), pinned in packaging/container/Containerfile.
+release rust-image 1.89-bookworm any 948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88c07bb14563c84ff docker://docker.io/library/rust
+
+# Windows: Visual Studio components by ID, found with vswhere. Licensed by the vendor, so never fetched here.
+system git core windows-x64 - -
+system git core windows-arm64 - -
+system Microsoft.VisualStudio.Component.VC.Tools.x86.x64 core windows-x64 - -
+system Microsoft.VisualStudio.Component.VC.Tools.ARM64 core windows-arm64 - -
+system windows-sdk core windows-x64 - -
+system windows-sdk core windows-arm64 - -
+
+# Linux: commands.
+system git core linux-x64 - -
+system git core linux-arm64 - -
+system cc core linux-x64 - -
+system cc core linux-arm64 - -
+
+# macOS.
+system git core macos-arm64 - -
+system git core macos-x64 - -
+system xcodebuild core macos-arm64 - -
+system xcodebuild core macos-x64 - -
+
+# The container build, run by a person or a runner.
+system podman release linux-x64 - -
+system podman release linux-arm64 - -

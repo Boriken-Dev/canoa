@@ -292,6 +292,30 @@ impl CertificateRequest {
 /// Picks one of the candidates by index, or `None` to send no certificate.
 pub type Chooser = Arc<dyn Fn(&CertificateRequest, &[Identity]) -> Option<usize> + Send + Sync>;
 
+/// What to send to a server, as the caller's own host rules decide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CertificateChoice {
+    /// Send no certificate, whatever the rules, browser policies and chooser would pick.
+    None,
+    /// The selector's own choice: the identity remembered for the host, the first
+    /// [`AutoSelectRule`] that matches, the browsers' policies when enabled, then the
+    /// [`Chooser`]. When none of them picks, none is sent (the only candidate is sent only with
+    /// [`SelectorSettings::send_sole_candidate`]).
+    Default,
+    /// The first candidate: the one expiring last among those valid now, usable for client
+    /// authentication, with a key type the server's signature schemes allow, issued under a CA
+    /// the server names.
+    First,
+    /// The first candidate that also matches this query.
+    Pin(IdentityQuery),
+}
+
+/// The caller's rule for one server: the host name (SNI; empty when the connection's host is not
+/// known) in, what to send out. It runs at each certificate request, so a host matcher the caller
+/// already has can drive it.
+pub type CertificatePolicy = Arc<dyn Fn(&str) -> CertificateChoice + Send + Sync>;
+
 struct State {
     listed: Option<(Instant, Vec<Identity>)>,
     policies: Option<(Instant, Vec<AutoSelectRule>)>,
@@ -304,12 +328,15 @@ struct State {
 /// key type the server's signature schemes allow, and, when the server names CAs, issued under
 /// one of them (the leaf's issuer, or any subject or issuer in its chain); the one expiring
 /// last first. The choice, in order: the identity remembered for the host, the first rule that
-/// matches the host and a candidate, the same for the browsers' policies when enabled, the
-/// [`Chooser`], and, with none, the only candidate when there is exactly one. Otherwise no
-/// certificate is sent and the server decides.
+/// matches the host and a candidate, the same for the browsers' policies when enabled, and the
+/// [`Chooser`]. Otherwise no certificate is sent and the server decides: a single fitting
+/// candidate is sent unasked only with [`SelectorSettings::send_sole_candidate`]. A
+/// [`CertificatePolicy`] is asked first and can send none, or pick without the rest.
 pub struct Selector {
     sources: Vec<Box<dyn IdentitySource>>,
     chooser: Option<Chooser>,
+    policy: Option<CertificatePolicy>,
+    send_sole_candidate: bool,
     rules: Vec<AutoSelectRule>,
     browser_policy: bool,
     remember: bool,
@@ -325,6 +352,7 @@ impl fmt::Debug for Selector {
             .field("sources", &self.sources)
             .field("rules", &self.rules.len())
             .field("browser_policy", &self.browser_policy)
+            .field("policy", &self.policy.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -361,6 +389,20 @@ impl SelectorBuilder {
         self
     }
 
+    /// The caller's rule per host (default none: the selector's own choice, as
+    /// [`CertificateChoice::Default`]).
+    pub fn policy(mut self, policy: CertificatePolicy) -> Self {
+        self.selector.policy = Some(policy);
+        self
+    }
+
+    /// Whether the only fitting candidate is sent although no rule, policy or chooser picked it
+    /// (default `false`: a server that asks learns nothing about a person's certificates).
+    pub fn send_sole_candidate(mut self, send: bool) -> Self {
+        self.selector.send_sole_candidate = send;
+        self
+    }
+
     /// Whether the choice made for a host is reused for it (default `true`).
     pub fn remember(mut self, remember: bool) -> Self {
         self.selector.remember = remember;
@@ -385,6 +427,7 @@ impl SelectorBuilder {
         self.selector.remember = settings.remember;
         self.selector.browser_policy = settings.browser_policy;
         self.selector.remembered_capacity = settings.remembered_capacity;
+        self.selector.send_sole_candidate = settings.send_sole_candidate;
         self
     }
 
@@ -401,6 +444,8 @@ impl Selector {
             selector: Self {
                 sources: Vec::new(),
                 chooser: None,
+                policy: None,
+                send_sole_candidate: false,
                 rules: Vec::new(),
                 browser_policy: false,
                 remember: true,
@@ -433,6 +478,11 @@ impl Selector {
             builder.selector.sources.push(source);
         }
         builder
+    }
+
+    /// The settings that are not the default, as data: sending the only fitting candidate unasked.
+    pub fn non_defaults(&self) -> Vec<crate::NonDefault> {
+        sole_candidate_non_default(self.send_sole_candidate)
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -531,6 +581,18 @@ impl Selector {
         if candidates.is_empty() {
             return None;
         }
+        if let Some(policy) = &self.policy {
+            match policy(request.host().unwrap_or_default()) {
+                CertificateChoice::None => return None,
+                CertificateChoice::First => return candidates.into_iter().next(),
+                CertificateChoice::Pin(query) => {
+                    return candidates
+                        .into_iter()
+                        .find(|identity| query.matches(identity));
+                }
+                CertificateChoice::Default => {}
+            }
+        }
         let host = request.host().map(str::to_lowercase);
         if let Some(host) = &host
             && let Some(fingerprint) = self.state().remembered.get(host).copied()
@@ -555,11 +617,13 @@ impl Selector {
             Some(chooser) => {
                 chooser(request, &candidates).and_then(|index| candidates.get(index).cloned())
             }
-            None if candidates.len() == 1 => candidates.first().cloned(),
+            None if self.send_sole_candidate && candidates.len() == 1 => {
+                candidates.first().cloned()
+            }
             None => {
                 tracing::info!(
                     candidates = candidates.len(),
-                    "several certificates fit and nothing picks one; sending none"
+                    "no rule, policy or chooser picks a certificate; sending none"
                 );
                 None
             }
@@ -629,4 +693,16 @@ impl ResolvesClientCert for HostResolver {
     fn has_certs(&self) -> bool {
         true
     }
+}
+
+/// The listing of `SelectorSettings::send_sole_candidate` when it is on.
+pub(crate) fn sole_candidate_non_default(send: bool) -> Vec<crate::NonDefault> {
+    if !send {
+        return Vec::new();
+    }
+    alloc::vec![crate::NonDefault {
+        setting: "client_certificates",
+        value: "sole candidate sent unasked".into(),
+        default: "none sent unless a rule, policy or chooser picks",
+    }]
 }

@@ -243,7 +243,21 @@ impl CertificateAuthority {
     /// [`Error::Credential`] for text that is not a CA certificate with its key, or a missing or
     /// wrong password.
     pub fn from_pem(certificate: &[u8], key: &[u8], password: &KeyPassword) -> Result<Self, Error> {
-        let key = crate::load::pem_private_key(key, password)?;
+        Self::from_pem_with_settings(certificate, key, password, &crate::KeySettings::default())
+    }
+
+    /// Like [`from_pem`](Self::from_pem), with the key derivation bounds of `settings`.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_pem`](Self::from_pem), and for a key asking for more work than `settings` allow.
+    pub fn from_pem_with_settings(
+        certificate: &[u8],
+        key: &[u8],
+        password: &KeyPassword,
+        settings: &crate::KeySettings,
+    ) -> Result<Self, Error> {
+        let key = crate::load::pem_private_key(key, password, settings)?;
         let key = KeyPair::try_from(&key).map_err(|_| credential("the CA key is not usable"))?;
         let text = core::str::from_utf8(certificate)
             .map_err(|_| credential("the certificate text is not PEM"))?;

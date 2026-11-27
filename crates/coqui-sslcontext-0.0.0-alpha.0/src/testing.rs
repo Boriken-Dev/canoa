@@ -41,7 +41,7 @@ impl SoftwareSigningKey {
     /// [`Error::Credential`] for a key `rustls` cannot sign with, or a missing or wrong password.
     pub fn new(key: &[u8], password: &KeyPassword) -> Result<Self, Error> {
         let key = if key.windows(11).any(|window| window == b"-----BEGIN ") {
-            crate::load::pem_private_key(key, password)?
+            crate::load::pem_private_key(key, password, &crate::KeySettings::default())?
         } else {
             PrivateKeyDer::try_from(key)
                 .map_err(|_| Error::Credential(Reason::new("the key is not DER")))?

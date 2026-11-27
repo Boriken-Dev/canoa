@@ -171,6 +171,7 @@ impl coqui_proxy::connect::ProxyConnector
 pub fn coqui_proxy::connect::ProxyConnector::builder() -> coqui_proxy::connect::ProxyConnectorBuilder
 pub fn coqui_proxy::connect::ProxyConnector::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn coqui_proxy::connect::ProxyConnector::with_failover(&self, bool, core::time::Duration) -> Self
+pub fn coqui_proxy::connect::ProxyConnector::with_proxy_tls(&self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
 pub fn coqui_proxy::connect::ProxyConnector::with_timeout(&self, core::time::Duration) -> Self
 impl coqui_proxy::connect::ProxyConnector
 pub fn coqui_proxy::connect::ProxyConnector::connect(&self, &coqui_proxy::Route, &str, u16) -> core::result::Result<coqui_proxy::connect::Connection, coqui_proxy::Error>
@@ -777,6 +778,7 @@ impl coqui_proxy::connect::ProxyConnector
 pub fn coqui_proxy::connect::ProxyConnector::builder() -> coqui_proxy::connect::ProxyConnectorBuilder
 pub fn coqui_proxy::connect::ProxyConnector::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn coqui_proxy::connect::ProxyConnector::with_failover(&self, bool, core::time::Duration) -> Self
+pub fn coqui_proxy::connect::ProxyConnector::with_proxy_tls(&self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
 pub fn coqui_proxy::connect::ProxyConnector::with_timeout(&self, core::time::Duration) -> Self
 impl coqui_proxy::connect::ProxyConnector
 pub fn coqui_proxy::connect::ProxyConnector::connect(&self, &coqui_proxy::Route, &str, u16) -> core::result::Result<coqui_proxy::connect::Connection, coqui_proxy::Error>

@@ -22,7 +22,7 @@ use crate::identity::Identity;
 use crate::keylog::key_log;
 use crate::pin::Pin;
 use crate::pins::{PinnedLeafVerifier, PinningVerifier, Pins};
-use crate::select::{IdentityQuery, Selector};
+use crate::select::{CertificatePolicy, IdentityQuery, Selector, sole_candidate_non_default};
 use crate::settings::{KeyLogging, TlsSettings, TlsVersion};
 
 /// Who is trusted to vouch for a server.
@@ -118,7 +118,7 @@ pub struct NonDefault {
 }
 
 /// Builds a [`Tls`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[must_use]
 pub struct TlsBuilder {
     trust: Trust,
@@ -128,6 +128,8 @@ pub struct TlsBuilder {
     fallback: Option<Identity>,
     pins: Option<Pins>,
     settings: TlsSettings,
+    policy: Option<CertificatePolicy>,
+    send_sole_candidate: bool,
 }
 
 impl Default for TlsBuilder {
@@ -140,18 +142,36 @@ impl Default for TlsBuilder {
             fallback: None,
             pins: None,
             settings: TlsSettings::default(),
+            policy: None,
+            send_sole_candidate: false,
         }
     }
 }
 
 impl TlsBuilder {
+    /// The caller's rule per server host for the system's certificates (`ClientCertificates::System`
+    /// and `Query`; default none, so the selector's own choice applies). A `Selector` given outright
+    /// carries its own policy ([`SelectorBuilder::policy`](crate::SelectorBuilder::policy)).
+    pub fn certificate_policy(mut self, policy: CertificatePolicy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    /// Whether the system's only fitting certificate is sent although no rule, policy or chooser
+    /// picked it (default `false`; on is listed by `non_defaults()`).
+    pub fn send_sole_candidate(mut self, send: bool) -> Self {
+        self.send_sole_candidate = send;
+        self
+    }
+
     /// Who is trusted (default: the system).
     pub fn trust(mut self, trust: Trust) -> Self {
         self.trust = trust;
         self
     }
 
-    /// What to send when a server asks for a certificate (default: what a browser would).
+    /// What to send when a server asks for a certificate (default: what a browser would choose by a
+    /// rule, browser policy or chooser; with none of them, no certificate).
     pub fn client_certificates(mut self, certificates: ClientCertificates) -> Self {
         self.client_certificates = certificates;
         self
@@ -213,7 +233,11 @@ impl TlsBuilder {
 
     /// The settings that are not the default, as data (see [`Tls::non_defaults`]).
     pub fn non_defaults(&self) -> Vec<NonDefault> {
-        non_defaults(&self.trust, &self.settings)
+        let sole = match &self.client_certificates {
+            ClientCertificates::Selector(selector) => selector.non_defaults(),
+            _ => sole_candidate_non_default(self.send_sole_candidate),
+        };
+        non_defaults(&self.trust, &self.settings, sole)
     }
 
     /// The TLS configuration source.
@@ -266,7 +290,12 @@ impl TlsBuilder {
         };
         let selector = match &self.client_certificates {
             ClientCertificates::System | ClientCertificates::Query(_) => {
-                Some(Arc::new(Selector::system_builder(self.pin.clone()).build()))
+                let mut builder = Selector::system_builder(self.pin.clone())
+                    .send_sole_candidate(self.send_sole_candidate);
+                if let Some(policy) = &self.policy {
+                    builder = builder.policy(Arc::clone(policy));
+                }
+                Some(Arc::new(builder.build()))
             }
             ClientCertificates::Selector(selector) => Some(Arc::clone(selector)),
             ClientCertificates::None
@@ -345,8 +374,8 @@ pub(crate) fn protocol_versions(
     Ok(versions)
 }
 
-fn non_defaults(trust: &Trust, settings: &TlsSettings) -> Vec<NonDefault> {
-    let mut found = Vec::new();
+fn non_defaults(trust: &Trust, settings: &TlsSettings, sole: Vec<NonDefault>) -> Vec<NonDefault> {
+    let mut found = sole;
     if matches!(trust, Trust::Disabled) {
         found.push(NonDefault {
             setting: "trust",
@@ -402,7 +431,12 @@ impl Tls {
 
     /// The settings that are not the default, as data.
     pub fn non_defaults(&self) -> Vec<NonDefault> {
-        non_defaults(&self.trust, &self.settings)
+        let sole = self
+            .selector
+            .as_ref()
+            .map(|selector| selector.non_defaults())
+            .unwrap_or_default();
+        non_defaults(&self.trust, &self.settings, sole)
     }
 
     /// The plain settings this source was built with.
@@ -645,5 +679,18 @@ impl ServerCertVerifier for DisabledVerifier {
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.0.supported_schemes()
+    }
+}
+
+impl fmt::Debug for TlsBuilder {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TlsBuilder")
+            .field("trust", &self.trust)
+            .field("client_certificates", &self.client_certificates)
+            .field("settings", &self.settings)
+            .field("policy", &self.policy.is_some())
+            .field("send_sole_candidate", &self.send_sole_candidate)
+            .finish_non_exhaustive()
     }
 }

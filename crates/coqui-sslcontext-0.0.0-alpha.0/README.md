@@ -43,7 +43,7 @@ cargo add --git https://github.com/Boriken-Dev/coqui-sslcontext coqui-sslcontext
 ## Quick start
 
 A client configuration that verifies as the system does and answers certificate requests as a
-browser would:
+browser would, except that it sends none unless a rule, browser policy, chooser or `CertificatePolicy` picks one:
 
 ```rust,no_run
 # fn main() -> Result<(), coqui_sslcontext::Error> {
@@ -97,7 +97,7 @@ let config = server.server_config(); // Arc<rustls::ServerConfig>
 | `policy` | browser auto-select rules |
 | `ServerTls`, `ClientAuth` | server configurations |
 | `CertificateAuthority`, `IssuedCertificate`, `LeafBuilder` | the test CA (feature `issue`) |
-| `TlsSettings`, `SelectorSettings`, `Pkcs11Settings`, `IssueSettings` | every bound and switch, as data |
+| `TlsSettings`, `SelectorSettings`, `KeySettings`, `Pkcs11Settings`, `IssueSettings` | every bound and switch, as data |
 | `testing` | counting software keys (feature `testing`) |
 
 ## Development
@@ -111,6 +111,25 @@ cargo test --all-features
 Real-peer tests are ignored by default: `COQUI_SSLCONTEXT_TEST_PKCS11=1` (SoftHSM, `softhsm2-util`,
 `pkcs11-tool`, `openssl`), `COQUI_SSLCONTEXT_TEST_CNG=1` (Windows) and
 `COQUI_SSLCONTEXT_TEST_OPENSSL=1` (`openssl s_server`), each run with `-- --ignored`.
+
+### Building without a network, and in a container
+
+The `deps` branch holds every crate `Cargo.lock` names as text, and `tools/sdk.lock` records the toolchains, `rustup` and the
+`deps` commit a build is made with. `tools/build.py` (Python 3.11, standard library only; `python3 tools/build.py --help`)
+holds them to the repository and builds from them:
+
+```text
+python3 tools/build.py sdk check                       # the lock, the Containerfile's pins and the deps commit agree
+python3 tools/build.py container build --target build  # compile the library offline, in a container
+python3 tools/build.py container test                  # `cargo test --all-features` offline, in the same container
+python3 tools/build.py container build --print         # the overrides and the engine command, nothing run
+```
+
+The library ships no image: `packaging/container/Containerfile` has the `sdk`, `build` and `test` stages and nothing to run.
+Where a build gets its toolchain, mirrors, base image or Visual Studio paths from is set in `.env` or `.env.local` (both
+ignored by git; `.env.example` lists every key and `python3 tools/build.py help env` explains them). A pin changes in
+`tools/sdk.lock` first; `sdk check` fails until the Containerfile follows. To change `Cargo.lock`, refresh the branch on a
+clean checkout of main with `python3 tools/build.py deps refresh` and push `deps` before `main`.
 
 ### Releasing
 

@@ -124,10 +124,18 @@ impl<B> Builder<B> {
         self
     }
 
-    /// What this builder does that is looser than the defaults.
+    /// What this builder does that is looser than the defaults, the TLS and the connector it was
+    /// given included.
     #[must_use]
     pub fn non_defaults(&self) -> Vec<String> {
-        self.adapter.non_defaults()
+        let mut loose = self.adapter.non_defaults();
+        if let Some(tls) = &self.tls {
+            loose.extend(crate::adapter::tls_non_defaults(tls));
+        }
+        if let Some(connector) = &self.connector {
+            loose.extend(connector.non_defaults());
+        }
+        loose
     }
 
     /// The connector service alone, for a client of your own.

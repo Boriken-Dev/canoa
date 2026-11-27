@@ -42,3 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ends the connections and joins the threads.
 - `RelaySettings::{shutdown_wait, poll_interval}` (blocking relay only) and `not_applied()` on both relays, which lists
   the settings that mean nothing to that relay.
+- `tools/sdk.lock` and the `deps` branch's pin in it; `packaging/container/Containerfile` builds the library and runs its tests
+  from the `deps` branch with no network, through `python3 tools/build.py container build|test`; `.env.example` lists the
+  overrides.
+- `ProxyConnector::with_proxy_tls` (feature `tls`): the same connector speaking to an `https:` proxy with another TLS
+  configuration, so a caller can add it without rebuilding the connector.
+
+### Fixed
+
+- The asynchronous relay closes the connection after a `407`, as the blocking relay does, so a client without the
+  credential cannot hold a connection slot with repeated requests. The blocking relay waits for a connection's first
+  request only `header_timeout`; `idle_timeout` applies between authenticated requests.

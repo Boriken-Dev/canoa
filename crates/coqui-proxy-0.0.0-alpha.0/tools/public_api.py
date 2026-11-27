@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/public_api.py, at commit 5444fe93fa71619ef293f6136bf0474f7c0d93fe.
+# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/public_api.py, at commit 11ed4ddf58fd3cabe76484d953071167c4e3c428.
 # Copyright (c) 2026 Jose A.
 """Keeps checked-in public API snapshots equal to what cargo-public-api prints.
 

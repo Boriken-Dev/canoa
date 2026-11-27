@@ -57,15 +57,19 @@ verifies.
 chain member) whose public key is pinned. An empty `Pins` is an error at `build()`.
 `pin(..)` gives the system keystores' PIN source (default `Pin::Keystore`, as a browser).
 
-`NonDefault { setting, value, default }`: `non_defaults()` lists `trust = disabled` and a key log; a
+`NonDefault { setting, value, default }`: `non_defaults()` lists `trust = disabled`, a key log and
+`client_certificates = sole candidate sent unasked`; a
 stricter choice (TLS 1.3 only, pins, `remember(false)`) is not listed.
 
 ## Settings
 
 `TlsSettings { minimum_version: TlsVersion (Tls12), maximum_version (Tls13), key_log: KeyLogging (Off),
 config_cache_capacity: usize (256) }`; `KeyLogging::{Off, Environment, File(PathBuf)}` (the NSS key
-log format; `File` appends, so protect it); `TlsVersion::{Tls12, Tls13}`.
+log format; `File` appends, is created mode 0600 on Unix and logs a warning when an existing file is
+readable by group or others; on Windows no owner-only ACL is set, so keep it in a private directory); `TlsVersion::{Tls12, Tls13}`.
 `SelectorSettings { cache_ttl (60 s), remember (true), browser_policy (false), remembered_capacity (256) }`.
+`KeySettings { max_pbkdf2_iterations: u32 (10_000_000), max_scrypt_memory: u64 (1 GiB, 128 * r * (N + p)) }`
+(`KeySettings::non_defaults()` lists a bound raised above its default; see Identities).
 `Pkcs11Settings { module_candidates: Vec<PathBuf> }` (default: p11-kit's proxy then OpenSC's module
 by platform; `Pkcs11Settings::default_candidates()`). `IssueSettings` (feature `issue`):
 `ca_validity` 3650 d, `leaf_validity` 30 d, `backdate` 1 h, `key_type` EC P-256, `rsa_bits` 2048,
@@ -86,10 +90,22 @@ find(&IdentityQuery) -> Vec<Identity>, candidates(&CertificateRequest), select(&
 policies() -> Vec<AutoSelectRule>, refresh(), forget(Option<&str>), resolver(Arc<Self>, Option<String>),
 resolver_for(Arc<Self>, Option<String>, Option<TlsVersion>)}`. Candidates are valid now, usable for
 client authentication, of a key type the server's schemes allow and issued under a CA the server
-names; the choice order is: the identity remembered for the host, the first rule, the browser
-policies, the `Chooser`, the only candidate. Otherwise none is sent. `Selector::system()` asks the
+names; the choice order is: the `CertificatePolicy` (below), the identity remembered for the host, the
+first rule, the browser policies, the `Chooser`. Otherwise **none is sent**: the only fitting candidate
+is sent unasked only with `SelectorSettings::send_sole_candidate` (default false; listed by
+`non_defaults()` as `client_certificates = sole candidate sent unasked`). `Selector::system()` asks the
 keystore for PINs (`Pin::Keystore`); `system_builder(Pin::None)` never waits on a person.
-`SelectorBuilder::{source, rules, browser_policy, chooser, remember, cache_ttl, remembered_capacity, settings, build}`.
+`SelectorBuilder::{source, rules, browser_policy, chooser, policy(CertificatePolicy), send_sole_candidate(bool),
+remember, cache_ttl, remembered_capacity, settings, build}`; `Selector::non_defaults() -> Vec<NonDefault>`.
+
+`CertificatePolicy = Arc<dyn Fn(&str) -> CertificateChoice + Send + Sync>` is the caller's rule per server
+host (the SNI name; `""` for a host-blind configuration), so a host matcher the caller already has decides.
+`CertificateChoice` (non_exhaustive): `None` sends nothing, whatever rules, browser policies or the chooser
+would pick; `Default` is the selector's own order above (remembered, rules, browser policies, chooser; nothing
+when none picks); `First` is the first candidate (the one expiring last); `Pin(IdentityQuery)` is the first
+candidate that matches the query (none if none does). `First` and `Pin` skip the remembered choice and the
+rules. `TlsBuilder::{certificate_policy(CertificatePolicy), send_sole_candidate(bool)}` configure the selector
+that `ClientCertificates::System` and `Query` build; a `Selector` given outright carries its own.
 
 `IdentitySource` (trait; `Send + Sync + Debug`): `identities() -> Result<Vec<Identity>, Error>`
 (required); provided `find(&IdentityQuery)`, `find_one(&IdentityQuery) -> Result<Identity, Error>`
@@ -109,9 +125,13 @@ tell a resolver the negotiated version), otherwise `None`.
 
 `Identity::{new(chain, Arc<dyn SigningKey>, label), from_pem(certs, key), from_pem_with(certs, key, &KeyPassword),
 from_der(chain, key_der), load(cert_path, key_path, KeyPassword), load_combined(path, KeyPassword),
-from_pkcs12(&[u8], &KeyPassword) (feature pkcs12), info() -> &CertificateInfo, label(), chain()}`. Keys may
+from_pkcs12(&[u8], &KeyPassword) (feature pkcs12), from_pem_with_settings(certs, key, &KeyPassword, &KeySettings),
+load_with_settings(cert_path, key_path, KeyPassword, &KeySettings), load_combined_with_settings(path, KeyPassword, &KeySettings), info() -> &CertificateInfo, label(), chain()}`. Keys may
 be PKCS#8, PKCS#1 or SEC1; encrypted PKCS#8 needs `encrypted-keys` (else `Error::Unsupported`).
-`load` takes PEM or DER for each file; `load_combined` takes combined PEM, or PKCS#12 (found by its
+An encrypted PKCS#8 key names its own PBKDF2 iteration count or scrypt cost; a document asking for more than
+`KeySettings` allows is `Error::Credential`, refused before any work (the plain methods use the defaults;
+`CertificateAuthority::from_pem_with_settings` too). PKCS#12 is not covered: `p12-keystore` refuses more than
+1 000 000 PBKDF2 iterations and 1 GiB of scrypt memory as fixed limits. `load` takes PEM or DER for each file; `load_combined` takes combined PEM, or PKCS#12 (found by its
 shape). `KeyPassword::{None, Secret(Secret), File(PathBuf), Callback(Arc<dyn Fn() -> Option<Secret>>)}`
 is consulted only when the key turns out encrypted; `File` is its first line.
 `CertificateInfo::{subject, issuer, serial() (bytes), not_before, not_after, sha1, sha256, fingerprint
@@ -141,7 +161,7 @@ so a retry cannot lock a card; make a new source to try another PIN.
 `CngSource::{current_user(&str), local_machine(&str), from_store(Arc<CertStore>, label), pin(impl Into<Pin>)}`
 (Windows, `system`): a key is opened silently first; when it needs a PIN the source's `Pin` decides
 (default `Pin::Keystore`: Windows shows its dialog).
-`KeychainSource::{new(), keychain(path), pin(impl Into<Pin>)}` (macOS, `system`): the PIN is the keychain
+`KeychainSource::{new(), keychain(path), pin(impl Into<Pin>), identities()}` (macOS, `system`; `identities` is its `IdentitySource` method): the PIN is the keychain
 file's password; the system prompts for key use on its own.
 `Pkcs11Source::{builder(module), discover(&Pkcs11Settings), system_default(), tokens() -> Result<Vec<String>, Error>}`
 and `Pkcs11SourceBuilder::{pin, token_label, token_serial, token (label or serial), slot, build}`
@@ -160,7 +180,10 @@ ServerTls::{server_config() -> Arc<rustls::ServerConfig>, settings(), non_defaul
 
 `ClientAuth::{None (default), Optional(Trust), Required(Trust)}`: client certificates are verified
 against the trust's roots (`System` loads the OS roots; `Disabled` and an empty trust are errors:
-ask for none instead). A keystore-held key works through `Identity`.
+ask for none instead). **System roots vouch for strangers**: any public CA issues client-auth
+certificates to anyone, so `Trust::System` authenticates nobody in particular; `non_defaults()` lists
+it as `client_auth = system roots`. Name your own CA's roots (`Trust::Roots`, `Trust::Bundle`). A
+keystore-held key works through `Identity`.
 
 ## Policy (`coqui_sslcontext::policy`, also at the root)
 

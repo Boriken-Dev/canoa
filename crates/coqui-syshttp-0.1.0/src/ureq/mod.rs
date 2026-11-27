@@ -79,10 +79,18 @@ impl AgentBuilder {
         self
     }
 
-    /// What this builder does that is looser than the defaults.
+    /// What this builder does that is looser than the defaults, the TLS and the connector it was
+    /// given included.
     #[must_use]
     pub fn non_defaults(&self) -> Vec<String> {
-        self.adapter.non_defaults()
+        let mut loose = self.adapter.non_defaults();
+        for tls in self.tls.iter().chain(self.shared_tls.as_deref()) {
+            loose.extend(crate::adapter::tls_non_defaults(tls));
+        }
+        if let Some(connector) = &self.connector {
+            loose.extend(connector.non_defaults());
+        }
+        loose
     }
 
     /// The longest the agent waits on a connection at each step, whatever `ureq`'s own timeouts

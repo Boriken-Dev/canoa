@@ -195,6 +195,17 @@ impl ProxyConnector {
         connector
     }
 
+    /// The same connector with `config` for speaking to an `https:` proxy, keeping its bounds and
+    /// login policy. The memory of failed proxies is shared with this connector.
+    #[cfg(feature = "tls")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tls")))]
+    #[must_use]
+    pub fn with_proxy_tls(&self, config: alloc::sync::Arc<rustls::ClientConfig>) -> Self {
+        let mut connector = self.clone();
+        connector.proxy_tls = Some(config);
+        connector
+    }
+
     /// The same connector with another time limit.
     pub fn with_timeout(&self, timeout: Duration) -> Self {
         let mut connector = self.clone();

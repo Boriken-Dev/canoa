@@ -473,7 +473,7 @@ source = "git+https://github.com/Boriken-Dev/coqui-net-acl?rev=839435acc29b76ec0
 [[package]]
 name = "coqui-proxy"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-proxy?rev=e66b9ce26b9f0d2dc18f2262ec015742b2fe4829#e66b9ce26b9f0d2dc18f2262ec015742b2fe4829"
+source = "git+https://github.com/Boriken-Dev/coqui-proxy?rev=d96239125f6d3a27bbeddf2c04de5a31be1e89fa#d96239125f6d3a27bbeddf2c04de5a31be1e89fa"
 dependencies = [
  "base64 0.22.1",
  "boa_engine",
@@ -504,7 +504,7 @@ dependencies = [
 [[package]]
 name = "coqui-sslcontext"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-sslcontext?rev=955cd9a455a288a523418daad7e846008c2bf291#955cd9a455a288a523418daad7e846008c2bf291"
+source = "git+https://github.com/Boriken-Dev/coqui-sslcontext?rev=a271e69f82b5fe3a4535d3e6b7e96b7232487e81#a271e69f82b5fe3a4535d3e6b7e96b7232487e81"
 dependencies = [
  "base64 0.22.1",
  "cryptoki",
@@ -541,6 +541,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "proptest",
+ "psl",
  "rcgen",
  "regex",
  "reqwest",
@@ -1829,6 +1830,15 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "psl"
+version = "2.1.264"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8782e35cade255f17d5ad527b899ea5b4e6bef29dcdc3502965a7d8d2f3fc3f5"
+dependencies = [
+ "psl-types",
 ]
 
 [[package]]

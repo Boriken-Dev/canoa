@@ -734,11 +734,14 @@ fn serve(stream: TcpStream, shared: &Shared, id: u64) {
     let _ = stream.set_nodelay(true);
     let _ = stream.set_write_timeout(Some(settings.idle_timeout));
     let mut client = Buffered::new(stream);
+    let mut authenticated = false;
     loop {
         let waiting = |socket: &mut TcpStream, started: Option<Instant>| {
-            // Waiting for a request takes the idle time; a head that has begun the header time.
+            // The wait for a first request, and a head that has begun, take the header time;
+            // only the wait between authenticated requests takes the idle time.
             let wait = match started {
-                None => Some(settings.idle_timeout),
+                None if authenticated => Some(settings.idle_timeout),
+                None => Some(settings.header_timeout),
                 Some(since) => settings.header_timeout.checked_sub(since.elapsed()),
             };
             match wait.filter(|wait| !wait.is_zero()) {
@@ -774,6 +777,7 @@ fn serve(stream: TcpStream, shared: &Shared, id: u64) {
             );
             return;
         }
+        authenticated = true;
         // A body is read with the idle time, not what was left of the time for the head.
         let _ = client.inner.set_read_timeout(Some(settings.idle_timeout));
         if head.method == Method::CONNECT {

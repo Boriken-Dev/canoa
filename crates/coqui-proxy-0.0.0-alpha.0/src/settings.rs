@@ -332,7 +332,7 @@ pub struct RelaySettings {
     /// connections wait in the listener's backlog and the blocking one answers `503` and closes them.
     /// Raising it lets more local clients hold sockets and tasks or threads.
     pub max_connections: usize,
-    /// How long a client may take to send a request head (30 s). Raising it lets a client hold a
+    /// How long a client may take to send a request head, and to send a connection's first one (30 s). Raising it lets a client hold a
     /// connection slot while sending slowly.
     pub header_timeout: Duration,
     /// How long a connection, to the client or to the destination, may carry no byte in either

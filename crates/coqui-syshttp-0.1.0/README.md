@@ -53,7 +53,8 @@ feature:
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper-util`, `tokio-rustls` | the `hyper` module and `hyper::client()` |
 | `reqwest` | `tls`, `coqui-proxy/relay`, `reqwest` 0.13 | the `reqwest` module and `reqwest::client()` |
 | `reqwest-blocking` | `reqwest`, `reqwest/blocking`, `coqui-proxy/relay-blocking` | `reqwest::blocking::client()`, failover through a relay with no Tokio of its own |
-| `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs` | the `session` module |
+| `psl` | `psl` | the Public Suffix List, to refuse a cookie `Domain` that is a shared suffix (`session` turns it on) |
+| `session` | `ureq`, `psl`, `url`, `regex`, `flate2`, `encoding_rs` | the `session` module |
 | `json` | `session`, `serde_json` | JSON bodies and replies of the session layer |
 | `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` |
 

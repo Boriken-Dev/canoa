@@ -1,4 +1,4 @@
-# coqui-proxy/. at e66b9ce26b9f0d2dc18f2262ec015742b2fe4829, with what it inherits written out.
+# coqui-proxy/. at d96239125f6d3a27bbeddf2c04de5a31be1e89fa, with what it inherits written out.
 [package]
 name = "coqui-proxy"
 version = "0.0.0-alpha.0"
@@ -11,7 +11,7 @@ repository = "https://github.com/Boriken-Dev/coqui-proxy"
 keywords = ["proxy", "pac", "wpad", "socks", "system"]
 categories = ["network-programming"]
 publish = false
-exclude = [".*", "*.local.*", "/tools/"]
+exclude = [".*", "*.local.*", "/tools/", "/packaging/"]
 [package.metadata]
 [package.metadata.docs]
 [package.metadata.docs.rs]

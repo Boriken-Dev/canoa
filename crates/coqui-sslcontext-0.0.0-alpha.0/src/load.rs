@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 use crate::error::{Error, Reason};
 use crate::identity::Identity;
 use crate::password::KeyPassword;
+use crate::settings::KeySettings;
 
 fn credential(what: &'static str) -> Error {
     Error::Credential(Reason::new(what))
@@ -29,23 +30,29 @@ fn pem_chain(text: &[u8]) -> Result<Vec<CertificateDer<'static>>, Error> {
 pub(crate) fn pem_private_key(
     text: &[u8],
     password: &KeyPassword,
+    settings: &KeySettings,
 ) -> Result<PrivateKeyDer<'static>, Error> {
     if text
         .windows(29)
         .any(|window| window == b"BEGIN ENCRYPTED PRIVATE KEY--")
     {
-        return decrypt_pem(text, password);
+        return decrypt_pem(text, password, settings);
     }
     PrivateKeyDer::from_pem_slice(text).map_err(|_| credential("the key text is not PEM"))
 }
 
 #[cfg(feature = "encrypted-keys")]
-fn decrypt_pem(text: &[u8], password: &KeyPassword) -> Result<PrivateKeyDer<'static>, Error> {
+fn decrypt_pem(
+    text: &[u8],
+    password: &KeyPassword,
+    settings: &KeySettings,
+) -> Result<PrivateKeyDer<'static>, Error> {
     let text = core::str::from_utf8(text).map_err(|_| credential("the key text is not PEM"))?;
     let (_, document) = pkcs8::SecretDocument::from_pem(text)
         .map_err(|_| credential("the encrypted key does not decode"))?;
     let info = pkcs8::EncryptedPrivateKeyInfoRef::try_from(document.as_bytes())
         .map_err(|_| credential("the encrypted key does not decode"))?;
+    check_kdf_cost(&info, settings)?;
     let password = password
         .resolve_bytes()?
         .ok_or_else(|| credential("the key is encrypted and no password was given"))?;
@@ -57,8 +64,41 @@ fn decrypt_pem(text: &[u8], password: &KeyPassword) -> Result<PrivateKeyDer<'sta
     ))
 }
 
+/// Refuses a key whose key derivation asks for more than `settings` allow; `pkcs5` checks its
+/// bounds only when it builds parameters, not when it decodes them.
+#[cfg(feature = "encrypted-keys")]
+fn check_kdf_cost(
+    info: &pkcs8::EncryptedPrivateKeyInfoRef<'_>,
+    settings: &KeySettings,
+) -> Result<(), Error> {
+    use pkcs8::pkcs5::pbes2::Kdf;
+    let Some(parameters) = info.encryption_algorithm.pbes2() else {
+        return Ok(());
+    };
+    match &parameters.kdf {
+        Kdf::Pbkdf2(params) if params.iteration_count > settings.max_pbkdf2_iterations => Err(
+            credential("the key asks for more PBKDF2 iterations than the settings allow"),
+        ),
+        Kdf::Scrypt(params) => {
+            let blocks = u128::from(params.cost_parameter) + u128::from(params.parallelization);
+            let memory = blocks.saturating_mul(128 * u128::from(params.block_size));
+            if memory > u128::from(settings.max_scrypt_memory) {
+                return Err(credential(
+                    "the key asks for more scrypt memory than the settings allow",
+                ));
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 #[cfg(not(feature = "encrypted-keys"))]
-fn decrypt_pem(_text: &[u8], _password: &KeyPassword) -> Result<PrivateKeyDer<'static>, Error> {
+fn decrypt_pem(
+    _text: &[u8],
+    _password: &KeyPassword,
+    _settings: &KeySettings,
+) -> Result<PrivateKeyDer<'static>, Error> {
     Err(Error::Unsupported(Reason::new(
         "an encrypted key needs the `encrypted-keys` feature",
     )))
@@ -107,8 +147,24 @@ impl Identity {
         key: &[u8],
         password: &KeyPassword,
     ) -> Result<Self, Error> {
+        Self::from_pem_with_settings(certificates, key, password, &KeySettings::default())
+    }
+
+    /// Like [`from_pem_with`](Self::from_pem_with), with the key derivation bounds of `settings`
+    /// instead of the defaults.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_pem_with`](Self::from_pem_with); [`Error::Credential`] too for a key asking for
+    /// more work than `settings` allow, refused before any is done.
+    pub fn from_pem_with_settings(
+        certificates: &[u8],
+        key: &[u8],
+        password: &KeyPassword,
+        settings: &KeySettings,
+    ) -> Result<Self, Error> {
         let chain = pem_chain(certificates)?;
-        let key = pem_private_key(key, password)?;
+        let key = pem_private_key(key, password, settings)?;
         Self::from_parts(chain, &key, "pem")
     }
 
@@ -124,17 +180,32 @@ impl Identity {
         key: impl AsRef<Path>,
         password: KeyPassword,
     ) -> Result<Self, Error> {
+        Self::load_with_settings(certificate, key, password, &KeySettings::default())
+    }
+
+    /// Like [`load`](Self::load), with the key derivation bounds of `settings`.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_pem_with_settings`](Self::from_pem_with_settings), and [`Error::Io`] for a file
+    /// that cannot be read.
+    pub fn load_with_settings(
+        certificate: impl AsRef<Path>,
+        key: impl AsRef<Path>,
+        password: KeyPassword,
+        settings: &KeySettings,
+    ) -> Result<Self, Error> {
         let certificates = std::fs::read(certificate)?;
         let key = Zeroizing::new(std::fs::read(key)?);
         match (is_pem(&certificates), is_pem(&key)) {
-            (true, true) => Self::from_pem_with(&certificates, &key, &password),
+            (true, true) => Self::from_pem_with_settings(&certificates, &key, &password, settings),
             (true, false) => {
                 let key = PrivateKeyDer::try_from(key.as_slice())
                     .map_err(|_| credential("the key is not DER"))?;
                 Self::from_parts(pem_chain(&certificates)?, &key, "file")
             }
             (false, true) => {
-                let key = pem_private_key(&key, &password)?;
+                let key = pem_private_key(&key, &password, settings)?;
                 let chain = alloc::vec![CertificateDer::from(certificates)];
                 Self::from_parts(chain, &key, "file")
             }
@@ -149,9 +220,24 @@ impl Identity {
     ///
     /// [`Error::Io`] when the file cannot be read, otherwise as [`load`](Self::load).
     pub fn load_combined(path: impl AsRef<Path>, password: KeyPassword) -> Result<Self, Error> {
+        Self::load_combined_with_settings(path, password, &KeySettings::default())
+    }
+
+    /// Like [`load_combined`](Self::load_combined), with the key derivation bounds of `settings`
+    /// for a PEM key. A PKCS#12 file is not covered: see [`KeySettings`].
+    ///
+    /// # Errors
+    ///
+    /// As [`load_combined`](Self::load_combined), and as
+    /// [`from_pem_with_settings`](Self::from_pem_with_settings).
+    pub fn load_combined_with_settings(
+        path: impl AsRef<Path>,
+        password: KeyPassword,
+        settings: &KeySettings,
+    ) -> Result<Self, Error> {
         let bytes = Zeroizing::new(std::fs::read(path)?);
         if is_pem(&bytes) {
-            return Self::from_pem_with(&bytes, &bytes, &password);
+            return Self::from_pem_with_settings(&bytes, &bytes, &password, settings);
         }
         #[cfg(feature = "pkcs12")]
         if bytes.first() == Some(&0x30) {

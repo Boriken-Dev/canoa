@@ -12,8 +12,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The proxy half moved to [coqui-proxy](https://github.com/Boriken-Dev/coqui-proxy) and the TLS half to
   [coqui-sslcontext](https://github.com/Boriken-Dev/coqui-sslcontext). Both are re-exported at the
   paths they had (root items, `auth`, `system`, `pac`, and `tls`), and as `proxy` and `tls`.
+- A client sends a certificate from the keystore only when a rule, policy or chooser picks one for the server (coqui-sslcontext
+  `CertificatePolicy`, `TlsBuilder::certificate_policy`); the sole fitting identity is no longer sent unasked unless
+  `TlsBuilder::send_sole_candidate(true)` is set, which `Tls::non_defaults()` lists.
 - The `client` module is now `ureq`.
 - `Error` wraps the two crates' errors (`Proxy`, `Tls`) and has an `Http` variant.
+
+### Fixed
+
+- A jar token is sent only over `https:` or to a loopback host, and only to the port it is kept for (the host's entry
+  serves the scheme's default port, `host:port` another one). `TokenSettings::{plain_http, any_port}` and
+  `ClientBuilder::{token_plain_http, token_any_port}` lift either rule and are listed by
+  `SessionSettings::non_defaults()`.
+- A `reqwest` or `reqwest::blocking` client with `failover(false)` fails a request whose proxy lookup fails (an
+  erroring PAC, a malformed proxy setting) instead of sending it direct.
+- A cookie `Domain` that is a public suffix is refused unless it is the host: the Public Suffix List (feature `psl`, on
+  with `session`) joins the registry heuristic. `CookieSettings::{public_suffixes, public_suffix_list}` add suffixes
+  and turn the list off (listed by `SessionSettings::non_defaults()`); `SetCookieContext::{public_suffixes,
+  public_suffix_list}`.
+- `session::ClientBuilder::non_defaults()` and `Client::non_defaults()` list what the client loosens: its settings,
+  failover, the trust and `Tls` given, the origin login policy and the connector. The `ureq`, `hyper` and
+  `UreqTransport` builders also list the `Tls` and connector they were given, and the `reqwest` builders their
+  connector (a raw `rustls::ClientConfig` cannot be inspected).
+- `UreqTransportBuilder::proxy_tls` beside `connector` adds the TLS configuration to the given connector instead of
+  replacing it with a default one, so the connector's reply limits, timeout, user agent and login policy hold.
+- `reqwest::Builder::configure` and its blocking twin run before the proxy and TLS configuration are set, as their doc
+  says, so a closure that calls `no_proxy()` or `proxy(..)` can no longer take the relay out of the request's path.
+- The bounds that were constants are settings with the same values: `SessionSettings::drain_bytes` (64 KiB, the
+  redirect body read to keep a connection), `FileJarBuilder::file_retries` (10 tries, 10 ms) with
+  `cookies::{load_netscape_with, save_netscape_with}` and `jar::FileRetry`, and `UreqTransportBuilder::peer_text_limit`.
+  The cut of a redirect target and of a transport error's text in a message follows `peer_text_limit` (120) instead
+  of a fixed 200.
 
 ### Added
 
