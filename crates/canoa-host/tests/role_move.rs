@@ -329,7 +329,6 @@ fn a_session_a_usage_limit_ended_moves_to_the_next_member_by_itself_and_a_sessio
 }
 
 #[test]
-#[ignore = "coqui-acp f58a7baf: the cleaner removes an earlier limit turn's end and leaves its prompt, so the import refuses the history (prompt_inside_turn)"]
 fn a_limit_turn_from_before_the_role_served_the_session_is_not_carried_either() {
     scenario(true);
 }
