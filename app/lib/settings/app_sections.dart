@@ -9,6 +9,7 @@ import '../chat/palette.dart' show ShortcutSpec, appShortcutTable, parseShortcut
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
 import '../popout/open_in.dart';
+import '../theme/interface_zoom.dart' show zoomSteps;
 import '../theme/look.dart';
 import '../theme/vendor_looks.dart';
 import '../workspace/workspace_template.dart';
@@ -299,6 +300,17 @@ class AppearanceSection extends StatelessWidget {
               for (final code in AppText.of(context).languages) (code, AppText.of(context).languageName(code)),
             ],
             onChanged: (v) => controller.change((c) => c.copyWith(language: v)),
+          ),
+          ChoiceRow<double>(
+            title: context.t('settings.zoom'),
+            configKey: const ['appearance', 'zoom'],
+            description: context.t('settings.zoom_description'),
+            fieldKey: const Key('settings-zoom'),
+            value: config.zoom,
+            choices: [
+              for (final step in {...zoomSteps, config.zoom}.toList()..sort()) (step, '${(step * 100).round()}%'),
+            ],
+            onChanged: (v) => controller.change((c) => c.copyWith(zoom: v)),
           ),
           ChoiceRow<ChatDensity>(
             title: 'Detail of the agent\'s work',

@@ -162,6 +162,7 @@ import 'welcome/welcome_view.dart';
 import 'drafts/draft_backend.dart';
 import 'drafts/draft_store.dart';
 import 'theme/follow_provider.dart';
+import 'theme/interface_zoom.dart';
 import 'theme/look.dart';
 import 'theme/vendor_looks.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
@@ -892,6 +893,13 @@ class _CanoaAppState extends State<CanoaApp> {
       version: const String.fromEnvironment('APP_VERSION'),
     );
 
+  /// Moves the interface's zoom a step toward larger (above 0) or smaller (below 0), or back to its own size (0), and keeps it in canoa.cfg.
+  void _zoom(int direction) {
+    final next = direction == 0 ? 1.0 : steppedZoom(config.zoom, direction);
+    if (next == config.zoom) return;
+    unawaited(_applySettings(config.copyWith(zoom: next)).then((changed) => _settingsKey.currentState?.controller.adopt(changed)));
+  }
+
   /// The first run turns starting at sign-in on and writes that down; once canoa.cfg holds an answer, on or off, it is the person's
   /// and never decided again. A computer that could not register it is asked again at the next start.
   Future<void> _decideStartAtLogin() async {
@@ -1136,7 +1144,10 @@ class _CanoaAppState extends State<CanoaApp> {
         debugShowCheckedModeBanner: false,
         builder: (context, child) => UsageWarn(
           permille: config.warnPermille,
-          child: AppTextHost(language: config.language.isEmpty ? null : config.language, child: child ?? const SizedBox.shrink()),
+          child: AppTextHost(
+            language: config.language.isEmpty ? null : config.language,
+            child: InterfaceZoom(factor: config.zoom, child: child ?? const SizedBox.shrink()),
+          ),
         ),
         theme: _theme(family, Brightness.light),
         darkTheme: _theme(family, Brightness.dark),
@@ -3591,7 +3602,7 @@ class _CanoaAppState extends State<CanoaApp> {
       ..look = config.look.name
       ..density = config.density.name
       ..openInNewWindows = config.openIn == OpenIn.newWindows;
-    final style = (config.look, config.density, config.language, config.themeMode, config.followProvider, config.warnPermille);
+    final style = (config.look, config.density, config.language, config.themeMode, config.followProvider, config.warnPermille, config.zoom);
     if (_windowStyleShown != null && _windowStyleShown != style) {
       // The windows are not built by this state, so they are told once this frame is over.
       WidgetsBinding.instance.addPostFrameCallback((_) => _windowStyle.value++);
@@ -3615,7 +3626,7 @@ class _CanoaAppState extends State<CanoaApp> {
         permille: config.warnPermille,
         child: AppTextHost(
           language: config.language.isEmpty ? null : config.language,
-          child: TrayFollower(shell: widget.shell, child: child ?? const SizedBox.shrink()),
+          child: InterfaceZoom(factor: config.zoom, child: TrayFollower(shell: widget.shell, child: child ?? const SizedBox.shrink())),
         ),
       ),
       theme: _theme(family, Brightness.light),
@@ -3624,7 +3635,7 @@ class _CanoaAppState extends State<CanoaApp> {
       home: AnimatedBuilder(
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => CanoaHome(
-          store: store, onNewSession: _newSession, onSettings: _showSettings,
+          store: store, onNewSession: _newSession, onSettings: _showSettings, onZoom: _zoom,
           onHosts: () => _showSection(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen, running: _running, onAttach: _attachRunning,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),

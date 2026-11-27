@@ -36,6 +36,7 @@ class CanoaHome extends StatelessWidget {
     required this.store,
     required this.onNewSession,
     required this.onSettings,
+    this.onZoom,
     this.onHosts,
     this.onLoadout,
     this.onLoadouts,
@@ -103,6 +104,9 @@ class CanoaHome extends StatelessWidget {
   final ComposerKit kit;
   final chat.ChatRenderers renderers;
   final VoidCallback onSettings;
+
+  /// Steps the interface's zoom by the sign of its argument, or back to 1 for 0; null where the app has no zoom.
+  final void Function(int direction)? onZoom;
   final VoidCallback? onHosts;
   final VoidCallback? onLoadout, onLoadouts;
   final String? account;
@@ -161,6 +165,7 @@ class CanoaHome extends StatelessWidget {
         kit: kit,
         onNewSession: onNewSession,
         onSettings: onSettings,
+        onZoom: onZoom,
         onPalette: () => _palette(context),
         overrides: shortcutOverrides,
       ),

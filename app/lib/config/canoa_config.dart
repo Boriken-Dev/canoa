@@ -20,6 +20,7 @@ import '../profile/profile.dart';
 import '../store/skill_sources.dart';
 import '../store/store_settings.dart';
 import '../popout/open_in.dart';
+import '../theme/interface_zoom.dart' show maxZoom, minZoom;
 import '../theme/look.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, defaultWarnPermille;
 import '../workspace/workspace_template.dart' show defaultWorkspace, workspaceProblem;
@@ -46,6 +47,7 @@ final class CanoaConfig {
     this.openIn = OpenIn.thisWindow,
     this.language = '',
     this.viewers = const {},
+    this.zoom = 1,
     this.agents = const [],
     this.host,
     this.sessions = const LedgerSettings(),
@@ -164,6 +166,8 @@ final class CanoaConfig {
 
   /// `[appearance.viewers]`: the viewer the person chose for each type of file, by MIME type (`"application/json" = "text"`).
   final Map<String, String> viewers;
+  /// `[appearance] zoom`: the factor the whole interface is drawn at; 1 is the size the app was designed for.
+  final double zoom;
 
   ThemeMode get themeMode => switch (brightness) {
     'light' => ThemeMode.light,
@@ -173,7 +177,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? startAtLogin, bool? preferWebTransport, num? connectTimeout,
-      LookId? look, bool? followProvider, String? brightness, ChatDensity? density, OpenIn? openIn, String? language, Map<String, String>? viewers, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
+      LookId? look, bool? followProvider, String? brightness, ChatDensity? density, OpenIn? openIn, String? language, Map<String, String>? viewers, double? zoom, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
       VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, Map<String, String>? shortcuts, int? warnPermille}) =>
       CanoaConfig(
@@ -191,6 +195,7 @@ final class CanoaConfig {
         openIn: openIn ?? this.openIn,
         language: language ?? this.language,
         viewers: viewers ?? this.viewers,
+        zoom: zoom ?? this.zoom,
         agents: agents ?? this.agents,
         host: host,
         sessions: sessions ?? this.sessions,
@@ -227,6 +232,7 @@ final class CanoaConfig {
     openIn: openIn,
     language: language,
     viewers: viewers,
+    zoom: zoom,
     agents: agents,
     host: host,
     sessions: sessions,
@@ -1372,6 +1378,7 @@ final class CanoaConfig {
     openIn: openIn,
     language: language,
     viewers: viewers,
+    zoom: zoom,
     agents: agents,
     host: host,
     sessions: sessions,
@@ -1411,7 +1418,7 @@ final class CanoaConfig {
   static const _editedKeys = <String, Set<String>>{
     'desktop': {'start_hidden', 'close_to_tray', 'minimize_to_tray', 'local_host', 'start_at_login'},
     'network': {'prefer_webtransport', 'connect_timeout'},
-    'appearance': {'look', 'follow_provider', 'brightness', 'density', 'open_in', 'language', 'viewers'},
+    'appearance': {'look', 'follow_provider', 'brightness', 'density', 'open_in', 'language', 'viewers', 'zoom'},
     'sessions': {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'},
     'permissions': {'default_mode', 'full_access', 'allow_once_only', 'protected'},
     'sources': {'hidden'},
@@ -1574,6 +1581,10 @@ final class CanoaConfig {
       throw const FormatException('canoa.cfg: appearance.viewers must be a table of viewer ids by MIME type');
     }
     final viewers = {for (final MapEntry(:key, :value) in rawViewers.entries) '$key': value as String};
+    final zoom = appearance['zoom'] ?? 1;
+    if (zoom is! num || !zoom.isFinite || zoom < minZoom || zoom > maxZoom) {
+      throw FormatException('canoa.cfg: appearance.zoom must be a number from $minZoom to $maxZoom');
+    }
     final agents = <AgentCommand>[];
     final agentProfiles = <String, Profile>{};
     final agentTables = <String, Object?>{};
@@ -1722,7 +1733,7 @@ final class CanoaConfig {
       },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
-      look: look, followProvider: flag(appearance, 'follow_provider', false), brightness: brightness, density: density, openIn: openIn, language: languageName, viewers: viewers,
+      look: look, followProvider: flag(appearance, 'follow_provider', false), brightness: brightness, density: density, openIn: openIn, language: languageName, viewers: viewers, zoom: zoom.toDouble(),
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
@@ -1812,7 +1823,7 @@ look = "${look.name}"
 follow_provider = $followProvider
 brightness = "$brightness"
 density = "${density.name}"
-${openIn == OpenIn.thisWindow ? '' : 'open_in = "${openIn.key}"\n'}${language.isEmpty ? '' : 'language = ${jsonEncode(language)}\n'}${viewers.isEmpty ? '' : '\n[appearance.viewers]\n${viewers.entries.map((e) => '${jsonEncode(e.key)} = ${jsonEncode(e.value)}\n').join()}'}
+${openIn == OpenIn.thisWindow ? '' : 'open_in = "${openIn.key}"\n'}${language.isEmpty ? '' : 'language = ${jsonEncode(language)}\n'}${zoom == 1 ? '' : 'zoom = $zoom\n'}${viewers.isEmpty ? '' : '\n[appearance.viewers]\n${viewers.entries.map((e) => '${jsonEncode(e.key)} = ${jsonEncode(e.value)}\n').join()}'}
 [sessions]
 keep = ${sessions.keep}
 keep_text = ${sessions.keepText}

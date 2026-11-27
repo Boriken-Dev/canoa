@@ -87,6 +87,8 @@ LogicalKeyboardKey? _parseKey(String name) => switch (name) {
   '.' || 'period' => LogicalKeyboardKey.period,
   '/' || 'slash' => LogicalKeyboardKey.slash,
   '`' || 'backquote' => LogicalKeyboardKey.backquote,
+  '=' || 'equal' => LogicalKeyboardKey.equal,
+  '-' || 'minus' => LogicalKeyboardKey.minus,
   _ when name.length == 1 && name.codeUnitAt(0) >= 97 && name.codeUnitAt(0) <= 122 =>
     LogicalKeyboardKey(LogicalKeyboardKey.keyA.keyId + name.codeUnitAt(0) - 97),
   _ when name.length == 1 && name.codeUnitAt(0) >= 48 && name.codeUnitAt(0) <= 57 =>
@@ -104,6 +106,9 @@ final List<ShortcutSpec> appShortcutTable = [
   ShortcutSpec(id: 'toggle_right', what: 'Hide or show the right panel', defaultKeys: (m) => '$m+Alt+B', defaultActivator: () => chord(LogicalKeyboardKey.keyB, alt: true)),
   ShortcutSpec(id: 'toggle_bottom', what: 'Hide or show the bottom panel', defaultKeys: (m) => '$m+`', defaultActivator: () => chord(LogicalKeyboardKey.backquote)),
   ShortcutSpec(id: 'settings', what: 'Open Settings', defaultKeys: (m) => '$m+,', defaultActivator: () => chord(LogicalKeyboardKey.comma)),
+  ShortcutSpec(id: 'zoom_in', what: 'Make the interface larger', defaultKeys: (m) => '$m+=', defaultActivator: () => chord(LogicalKeyboardKey.equal)),
+  ShortcutSpec(id: 'zoom_out', what: 'Make the interface smaller', defaultKeys: (m) => '$m+-', defaultActivator: () => chord(LogicalKeyboardKey.minus)),
+  ShortcutSpec(id: 'zoom_reset', what: 'Draw the interface at its own size', defaultKeys: (m) => '$m+0', defaultActivator: () => chord(LogicalKeyboardKey.digit0)),
   ShortcutSpec(id: 'dictation', what: 'Dictate into the message, and stop', defaultKeys: (_) => dictationKeys, defaultActivator: () => chord(LogicalKeyboardKey.space, shift: true)),
   ShortcutSpec(id: 'paste_file', what: 'Paste: an image or files go with it, long text as a file', defaultKeys: (m) => '$m+V in a message'),
   ShortcutSpec(id: 'select_all', what: 'Select all of the conversation, or of the message being written', defaultKeys: (m) => '$m+A'),

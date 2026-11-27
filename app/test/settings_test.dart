@@ -340,6 +340,9 @@ void main() {
       await choose(tester, 'settings-open-in', 'New windows');
       expect(h.last.openIn, OpenIn.newWindows);
       expect(CanoaConfig.parse(h.last.encode()).openIn, OpenIn.newWindows, reason: 'and it is written back, so a restart finds it');
+      await choose(tester, 'settings-zoom', '150%');
+      expect(h.last.zoom, 1.5);
+      expect(CanoaConfig.parse(h.last.encode()).zoom, 1.5);
       expect(changedTables(every, h.last), {'appearance'});
       expect(find.textContaining('return a + b;'), findsOneWidget);
     });

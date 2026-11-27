@@ -48,6 +48,7 @@ Map<ShortcutActivator, VoidCallback> buildAppShortcuts(
   required ComposerKit kit,
   required VoidCallback onNewSession,
   required VoidCallback onSettings,
+  void Function(int direction)? onZoom,
   required Future<void> Function() onPalette,
   Map<String, String> overrides = const {},
 }) {
@@ -71,6 +72,11 @@ Map<ShortcutActivator, VoidCallback> buildAppShortcuts(
       if (layout.section == ShellLayout.conversations) layout.toggleIndex(layout.section);
     },
     'settings': onSettings,
+    if (onZoom != null) ...{
+      'zoom_in': () => onZoom(1),
+      'zoom_out': () => onZoom(-1),
+      'zoom_reset': () => onZoom(0),
+    },
     'focus_composer': () => conversation.focusComposer?.call(),
     'dictation': () => unawaited(kit.dictation?.press() ?? Future.value()),
     'stop_turn': () => stopActiveSession(store),
@@ -99,6 +105,13 @@ Map<ShortcutActivator, VoidCallback> buildAppShortcuts(
         final ordered = listOrder(store.listed, grouping.value);
         if (index < ordered.length) store.select(ordered[index].id);
       },
+    // The plus key and the keypad's keys do what Ctrl+= and Ctrl+- do.
+    if (onZoom != null) ...{
+      chord(LogicalKeyboardKey.equal, shift: true): () => onZoom(1),
+      chord(LogicalKeyboardKey.numpadAdd): () => onZoom(1),
+      chord(LogicalKeyboardKey.numpadSubtract): () => onZoom(-1),
+      chord(LogicalKeyboardKey.numpad0): () => onZoom(0),
+    },
     chord(LogicalKeyboardKey.tab): () => stepAppSession(store, grouping, 1),
     chord(LogicalKeyboardKey.tab, shift: true): () => stepAppSession(store, grouping, -1),
   };

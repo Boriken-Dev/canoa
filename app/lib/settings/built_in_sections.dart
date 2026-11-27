@@ -27,7 +27,7 @@ const builtInSectionsListing = r'''
       "icon": "palette",
       "group": "App",
       "under": null,
-      "keywords": "look theme brightness dark light detail verbose density preview",
+      "keywords": "look theme brightness dark light detail verbose density preview zoom scale larger smaller text size",
       "origin": "built-in",
       "stored": "config",
       "schema": null,
