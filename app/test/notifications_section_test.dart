@@ -38,6 +38,20 @@ final class _Host implements NotificationsHost {
       },
       form: {},
     ),
+    NotifierProvider(
+      id: 'mail',
+      title: 'Mail as the provider names it',
+      help: 'Sends by mail.',
+      schema: {
+        'type': 'object',
+        'required': ['account', 'to'],
+        'properties': {
+          'account': {'type': 'string', 'title': 'Mail account as the schema names it'},
+          'to': {'type': 'array', 'title': 'Send to as the schema names it', 'items': {'type': 'string'}},
+        },
+      },
+      form: {},
+    ),
   ];
 
   @override
@@ -155,6 +169,32 @@ void main() {
     expect(find.byKey(const Key('add-notifier-dialog')), findsNothing);
   });
 
+  testWidgets('a notifier the app has words for is offered by them, its form too, and the mail one saves its account and addresses', (tester) async {
+    final (host, _) = await _open(tester);
+    await tester.tap(find.byKey(const Key('add-notifier')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('notifier-kind-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('Mail as the provider names it'), findsNothing);
+    await tester.tap(find.text('Mail').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Sends each notice by mail from one of your mail accounts'), findsOneWidget);
+    expect(find.text('Mail account'), findsOneWidget);
+    expect(find.text('Send to'), findsOneWidget);
+    expect(find.text('Mail account as the schema names it'), findsNothing);
+    await tester.enterText(find.byKey(const Key('notifier-name')), 'inbox');
+    await tester.enterText(find.byKey(const Key('notifier-field-account')), 'work');
+    await tester.enterText(find.byKey(const Key('notifier-field-to')), 'me@example.test\nphone@carrier.example');
+    await tester.tap(find.byKey(const Key('add-notifier-submit')));
+    await tester.pumpAndSettle();
+    final saved = host.saved.single;
+    expect(saved.provider, 'mail');
+    expect(saved.settings, {
+      'account': 'work',
+      'to': ['me@example.test', 'phone@carrier.example'],
+    });
+  });
+
   testWidgets('a notifier is removed after asking, and with it the name goes out of every list that held it', (tester) async {
     final host = _Host()
       ..entries['phone'] = {}
@@ -199,5 +239,9 @@ void main() {
       expect(spanish(key), isNot(english(key)), reason: key);
     }
     expect(english.maybe('notifications.event.something_new'), isNull);
+    for (final key in ['mail', 'mail.help', 'mail.account', 'mail.account.help', 'mail.to', 'mail.to.help']) {
+      expect(english.maybe('notifications.provider.$key'), isNotNull, reason: key);
+      expect(spanish('notifications.provider.$key'), isNot(english('notifications.provider.$key')), reason: '$key is translated');
+    }
   });
 }

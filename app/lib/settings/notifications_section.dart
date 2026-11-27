@@ -183,14 +183,14 @@ class _NotificationsSectionState extends State<NotificationsSection> {
     final scheme = Theme.of(context).colorScheme;
     final result = host.testOf(row.name);
     final testing = host.isTesting(row.name);
-    final description = row.name == 'desktop' ? context.t('notifications.desktop_description') : row.help;
+    final description = row.name == 'desktop' ? context.t('notifications.desktop_description') : providerHelp(context, row.provider, row.help);
     final state = row.ready ? context.t('notifications.ready') : row.state;
     return SettingsRow(
       key: Key('notifier ${row.name}'),
       title: row.name == 'desktop' ? context.t('notifications.desktop') : row.name,
       leading: Icon(row.name == 'desktop' ? Icons.desktop_windows_outlined : Icons.notifications_outlined, size: 24),
       description: [
-        if (row.name != 'desktop') row.title,
+        if (row.name != 'desktop') providerTitle(context, row.provider, row.title),
         ?description,
         state,
         if (row.replies) context.t('notifications.replies'),
@@ -318,7 +318,7 @@ class _AddNotifierDialogState extends State<AddNotifierDialog> {
               isExpanded: true,
               initialValue: provider?.id,
               decoration: InputDecoration(labelText: context.t('notifications.kind')),
-              items: [for (final each in providers) DropdownMenuItem<String>(value: each.id, child: Text(each.title))],
+              items: [for (final each in providers) DropdownMenuItem<String>(value: each.id, child: Text(providerTitle(context, each.id, each.title)))],
               onChanged: _saving
                   ? null
                   : (id) => setState(() {
@@ -327,7 +327,7 @@ class _AddNotifierDialogState extends State<AddNotifierDialog> {
                         _problem = null;
                       }),
             ),
-            if (provider?.help case final help?)
+            if (providerHelp(context, provider?.id ?? '', provider?.help) case final help?)
               Padding(padding: const EdgeInsets.only(top: 6), child: Text(help, style: Theme.of(context).textTheme.bodySmall)),
             if (provider != null && schema.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -337,6 +337,7 @@ class _AddNotifierDialogState extends State<AddNotifierDialog> {
                 form: form,
                 values: _values[provider.id] ?? const {},
                 idPrefix: 'notifier',
+                textPrefix: 'notifications.provider.${provider.id}',
                 unsetEntry: true,
                 onValues: (values) => _values[provider.id] = values,
                 onSubmitted: () => unawaited(_submit()),
@@ -360,3 +361,9 @@ class _AddNotifierDialogState extends State<AddNotifierDialog> {
     );
   }
 }
+
+/// What a notifier provider is called: the app's own word for it when it has one, else the title the provider gives.
+String providerTitle(BuildContext context, String id, String title) => AppText.of(context).maybe('notifications.provider.$id') ?? title;
+
+/// What a notifier provider says of itself: the app's own words for it when it has them, else the help the provider gives.
+String? providerHelp(BuildContext context, String id, String? help) => AppText.of(context).maybe('notifications.provider.$id.help') ?? help;

@@ -7,6 +7,7 @@ library;
 
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/app_text.dart';
 import '../settings/settings_row.dart';
 
 /// A member's schema and its form hints, read the way the rows are drawn from them.
@@ -304,6 +305,7 @@ class SchemaFields extends StatefulWidget {
     this.sourceChoices = const [],
     this.onSource,
     this.sourceNamePrefix = '',
+    this.textPrefix,
   });
 
   final Map<String, Object?> schema;
@@ -344,6 +346,10 @@ class SchemaFields extends StatefulWidget {
 
   /// What the name of a secret starts with when an entry is first chosen for a member: `<prefix>_<member>`.
   final String sourceNamePrefix;
+
+  /// Where the app's own words for the members are looked up: `<textPrefix>.<member>` for a member's title and
+  /// `<textPrefix>.<member>.help` for its description, each used in place of the schema's English where the app has one.
+  final String? textPrefix;
 
   @override
   State<SchemaFields> createState() => _SchemaFieldsState();
@@ -591,8 +597,10 @@ class _SchemaFieldsState extends State<SchemaFields> {
 
   Widget _row(String key) {
     final field = _field(key);
-    final title = field['title'] is String ? field['title']! as String : key;
-    final description = field['description'] is String ? field['description']! as String : null;
+    final prefix = widget.textPrefix;
+    final text = AppText.of(context);
+    final title = (prefix == null ? null : text.maybe('$prefix.$key')) ?? (field['title'] is String ? field['title']! as String : key);
+    final description = (prefix == null ? null : text.maybe('$prefix.$key.help')) ?? (field['description'] is String ? field['description']! as String : null);
     final entry = _entrySchema(field);
     if (entry != null) {
       final id = widget.keys[key] ?? '${widget.idPrefix}-field-$key';
