@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use coqui_acp_api::{CacheLifetime, Credentials, Status};
+use coqui_acp_api::{Credentials, Status};
 use coqui_acp_api::{LoginPrompter as _, ProcessSpawner as _};
 use standin::{Proxy, VIRTUAL_KEY};
 
@@ -25,7 +25,8 @@ use crate::kind;
 use crate::options::limits::Endpoints;
 use crate::options::{harness_of, offering};
 use crate::pools::gather::{candidates, forget_reports};
-use crate::pools::turn::{Candidate, Cursor, Turn, decide};
+use crate::pools::policy;
+use coqui_acp_pool::{Ask, SharedMemory, Standing, Usage};
 
 struct Dir(PathBuf);
 
@@ -57,14 +58,24 @@ fn config(address: &str) -> Config {
     Config::from_str_in(&text, std::path::Path::new("")).expect("parses")
 }
 
-fn turn() -> Turn<'static> {
-    Turn {
-        current: None,
-        model: None,
-        idle: None,
-        lifetime: CacheLifetime::Default,
-        now: 1_800_000_000,
+fn report(standing: &Standing) -> &coqui_acp_api::UsageReport {
+    match &standing.usage {
+        Usage::Known(report) => report,
+        other => panic!("a report was expected, found {other:?}"),
     }
+}
+
+/// The account of the pool `names` that takes a start, each with its standing, in a memory of its own.
+fn pick(names: &[&str], standings: &[Standing]) -> Result<String, String> {
+    let names: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+    policy::decide_with(
+        &SharedMemory::new(),
+        "p",
+        &names,
+        standings,
+        &Ask::new(1_800_000_000),
+    )
+    .map(|chosen| chosen.member)
 }
 
 #[test]
@@ -138,22 +149,11 @@ fn one_litellm_account_runs_both_harnesses_on_one_budget_and_a_spent_budget_stop
     let room = [read(&built[0]), read(&built[1])];
     assert_eq!(proxy.to("/key/info").len(), 1, "{:?}", proxy.seen());
     for pool in &room {
-        let report = pool[0].usage.as_ref().expect("the budget");
-        assert_eq!(report.buckets[0].id, "budget");
-        assert_eq!(report.buckets[0].status, Status::Ok);
-        let with_other = [
-            pool[0].clone(),
-            Candidate {
-                name: "other".to_owned(),
-                ..Candidate::default()
-            },
-        ];
-        assert_eq!(
-            decide("p", &Cursor::default(), &with_other, &turn())
-                .expect("room")
-                .account,
-            "lite"
-        );
+        let budget = report(&pool[0]);
+        assert_eq!(budget.buckets[0].id, "budget");
+        assert_eq!(budget.buckets[0].status, Status::Ok);
+        let with_other = [pool[0].clone(), Standing::new()];
+        assert_eq!(pick(&["lite", "other"], &with_other).expect("room"), "lite");
     }
 
     // The two APIs spend on the one key, and when the budget is gone the account is left in both pools.
@@ -177,21 +177,11 @@ fn one_litellm_account_runs_both_harnesses_on_one_budget_and_a_spent_budget_stop
     forget_reports();
     for harness in &built {
         let pool = read(harness);
-        assert_eq!(
-            pool[0].usage.as_ref().expect("report").buckets[0].status,
-            Status::Exhausted
-        );
-        let with_other = [
-            pool[0].clone(),
-            Candidate {
-                name: "other".to_owned(),
-                ..Candidate::default()
-            },
-        ];
-        let chosen =
-            decide("p", &Cursor::default(), &with_other, &turn()).expect("another has room");
-        assert_eq!(chosen.account, "other", "{}", harness.id());
-        let alone = decide("p", &Cursor::default(), &pool, &turn()).expect_err("nothing has room");
+        assert_eq!(report(&pool[0]).buckets[0].status, Status::Exhausted);
+        let with_other = [pool[0].clone(), Standing::new()];
+        let chosen = pick(&["lite", "other"], &with_other).expect("another has room");
+        assert_eq!(chosen, "other", "{}", harness.id());
+        let alone = pick(&["lite"], &pool).expect_err("nothing has room");
         assert!(alone.contains("lite"), "{alone}");
     }
     assert_eq!(proxy.to("/key/info").len(), 2, "one more read, for both");

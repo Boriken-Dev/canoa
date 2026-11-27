@@ -95,7 +95,7 @@ fn pools_of(
     crate::pools::for_entry(config, catalogs, harness, names)
         .unwrap_or_default()
         .iter()
-        .filter(|pool| crate::pools::worth_listing(pool.automatic, pool.members.len()))
+        .filter(|pool| coqui_acp_pool::accounts::worth_listing(pool.automatic, pool.members.len()))
         .map(|pool| {
             json!({
                 "name": pool.name,

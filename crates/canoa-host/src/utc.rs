@@ -64,19 +64,6 @@ pub(crate) fn today_and_clock() -> (String, String) {
     )
 }
 
-/// Formats Unix `seconds` as `YYYY-MM-DD HH:MM UTC`.
-pub(crate) fn utc_minutes(seconds: i64) -> String {
-    let dt = utc_of(seconds);
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
-        dt.year(),
-        u8::from(dt.month()),
-        dt.day(),
-        dt.hour(),
-        dt.minute(),
-    )
-}
-
 /// Formats `at` as an HTTP-date (`Sun, 06 Nov 1994 08:49:37 GMT`).
 pub(crate) fn http_date(at: SystemTime) -> String {
     const MONTHS: [&str; 12] = [

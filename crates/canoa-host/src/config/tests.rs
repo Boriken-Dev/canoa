@@ -2840,3 +2840,118 @@ fn a_harness_the_person_offers_and_the_warm_sessions_it_keeps_are_read_and_a_bad
         assert!(refused.contains(why), "{text}: {refused}");
     }
 }
+
+const ROLE_FILE: &str = "[host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n\
+    [host.pools.keys]\nstandard = \"anthropic-api\"\n\
+    [host.profiles.plan]\n\
+    [host.roles.planner]\ntitle = \"Planner\"\nstrategy = \"headroom\"\nneeds = [\"chat\"]\nstick = false\nhandover = \"ask\"\n\
+    resume_prompt = \"Go on.\"\nretry_task = true\n\
+    members = [\n\
+      { agent = \"Claude\", account = \"work\", model = \"opus\", effort = \"high\", profile = \"plan\", priority = 2, max_concurrent = 1, stop_permille = 900 },\n\
+      { agent = \"Codex\", account = \"keys\" },\n\
+    ]\n";
+
+#[test]
+fn a_role_is_a_name_for_agents_with_an_account_a_model_an_effort_and_a_profile_in_order() {
+    let config = parse(ROLE_FILE).expect("parses");
+    let role = &config.roles["planner"];
+    assert_eq!(role.title.as_deref(), Some("Planner"));
+    assert_eq!(role.strategy, coqui_acp_pool::Strategy::Headroom);
+    assert_eq!(role.needs, ["chat"]);
+    assert!(!role.stick);
+    assert_eq!(role.handover, crate::config::Handover::Ask);
+    assert_eq!(role.resume_prompt.as_deref(), Some("Go on."));
+    assert!(role.retry_task);
+    let first = &role.members[0];
+    assert_eq!(
+        (
+            first.agent.as_str(),
+            first.account.as_deref(),
+            first.model.as_deref()
+        ),
+        ("Claude", Some("work"), Some("opus"))
+    );
+    assert_eq!(
+        (
+            first.effort.as_deref(),
+            first.profile.as_deref(),
+            first.priority
+        ),
+        (Some("high"), Some("plan"), 2)
+    );
+    assert_eq!(
+        (first.max_concurrent, first.stop_permille),
+        (Some(1), Some(900))
+    );
+    assert_eq!(first.id(), "Claude/work/opus/high/plan");
+    // A member that names an account pool is one account choice and a pool of accounts together.
+    assert_eq!(role.members[1].account.as_deref(), Some("keys"));
+    // Nothing in a file with no role defines one, and a role's defaults are the first member and sticking.
+    assert!(parse("").expect("parses").roles.is_empty());
+    let plain = parse("[host.roles.executor]\nmembers = [{ agent = \"Pi\" }]\n").expect("parses");
+    let role = &plain.roles["executor"];
+    assert_eq!(role.strategy, coqui_acp_pool::Strategy::Priority);
+    assert!(role.stick && !role.retry_task);
+    assert_eq!(role.handover, crate::config::Handover::Auto);
+    assert!(role.resume_prompt.is_none() && role.needs.is_empty());
+}
+
+#[test]
+fn a_role_that_names_what_does_not_exist_or_what_it_does_not_take_is_refused_by_key() {
+    let refused = |extra: &str| {
+        parse(&format!("{ROLE_FILE}{extra}"))
+            .expect_err("refused")
+            .to_string()
+    };
+    let why = refused("[host.roles.a]\nmembers = [{ agent = \"Claude\", account = \"nobody\" }]\n");
+    assert!(why.contains("role a") && why.contains("nobody"), "{why}");
+    let why = refused("[host.roles.a]\nmembers = [{ agent = \"Claude\", profile = \"nope\" }]\n");
+    assert!(why.contains("profile") && why.contains("nope"), "{why}");
+    let why = refused("[host.roles.a]\nmembers = [{ model = \"opus\" }]\n");
+    assert!(why.contains("agent is missing"), "{why}");
+    let why = refused("[host.roles.a]\nmembers = [{ agent = \"Pi\" }, { agent = \"Pi\" }]\n");
+    assert!(why.contains("same"), "{why}");
+    let why = refused("[host.roles.a]\nstrategy = \"fastest\"\n");
+    assert!(why.contains("strategy"), "{why}");
+    let why = refused("[host.roles.a]\nhandover = \"sometimes\"\n");
+    assert!(why.contains("handover"), "{why}");
+    let why = refused("[host.roles.a]\nsurprise = 1\n");
+    assert!(why.contains("host.roles.a"), "{why}");
+    let why = refused("[host.roles.a]\nmembers = [{ agent = \"Pi\", api_key = \"sk-secret\" }]\n");
+    assert!(!why.contains("sk-secret"), "{why}");
+    // A name is a short lower-case word, and has no namespace in common with accounts, pools or agents.
+    for name in ["Planner", "has space", &"x".repeat(33)] {
+        let why = parse(&format!("[host.roles.\"{name}\"]\n"))
+            .expect_err("refused")
+            .to_string();
+        assert!(why.contains("lower-case"), "{name:?}: {why}");
+    }
+    parse(&format!("{ROLE_FILE}[host.roles.work]\n")).expect("a role may share an account's name");
+}
+
+#[test]
+fn a_pool_takes_its_accounts_by_its_strategy_and_a_headroom_role_reads_the_unknown_figure() {
+    let config = parse("[host.pools.p]\nstandard = \"anthropic-api\"\nstrategy = \"priority\"\n")
+        .expect("parses");
+    assert_eq!(
+        config.pools["p"].strategy,
+        coqui_acp_pool::Strategy::Priority
+    );
+    let config = parse("[host.pools.p]\nstandard = \"anthropic-api\"\n").expect("parses");
+    assert_eq!(
+        config.pools["p"].strategy,
+        coqui_acp_pool::Strategy::RoundRobin
+    );
+    assert_eq!(config.usage.unknown_permille, 500);
+    assert_eq!(
+        parse("[host.usage]\nunknown_permille = 300\n")
+            .expect("parses")
+            .usage
+            .unknown_permille,
+        300
+    );
+    let why = parse("[host.pools.p]\nstandard = \"anthropic-api\"\nstrategy = \"never\"\n")
+        .expect_err("refused")
+        .to_string();
+    assert!(why.contains("strategy"), "{why}");
+}

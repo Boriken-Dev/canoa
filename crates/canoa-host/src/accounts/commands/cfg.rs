@@ -345,6 +345,12 @@ pub(crate) fn set_pool(
                 .collect(),
         ),
     );
+    if pool.strategy != coqui_acp_pool::Strategy::RoundRobin {
+        table.insert(
+            "strategy".into(),
+            toml::Value::String(pool.strategy.name().to_owned()),
+        );
+    }
     let at = ["host", "pools", name];
     apply(store, vec![set_op(&at, &table)])
 }

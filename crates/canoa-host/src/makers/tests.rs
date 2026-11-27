@@ -14,9 +14,9 @@ use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{
     AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer, AccountProvider,
-    AccountProviderInfo, AccountUsage, AccountUsageQuery, AccountWatch, Bucket, CacheLifetime,
-    Coverage, Credentials, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest,
-    ModelListing, ProcessSpawner, Refill, RenewReport, RenewRequest, WatchRequest, standard,
+    AccountProviderInfo, AccountUsage, AccountUsageQuery, AccountWatch, Bucket, Coverage,
+    Credentials, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest, ModelListing,
+    ProcessSpawner, Refill, RenewReport, RenewRequest, WatchRequest, standard,
 };
 
 use super::*;
@@ -27,7 +27,8 @@ use crate::kind;
 use crate::options::limits::Endpoints;
 use crate::options::{harness_of, offering};
 use crate::pools::gather::candidates;
-use crate::pools::turn::{Candidate, Cursor, Turn, decide};
+use crate::pools::policy;
+use coqui_acp_pool::{Ask, SharedMemory, Standing, Usage};
 
 /// The kind the stand-in makes, and the account that holds it.
 const KIND: &str = "standin-two";
@@ -196,14 +197,24 @@ fn store(dir: &Dir) -> Arc<Accounts> {
     store
 }
 
-fn turn(current: Option<&str>) -> Turn<'_> {
-    Turn {
-        current,
-        model: None,
-        idle: None,
-        lifetime: CacheLifetime::Default,
-        now: 1_800_000_000,
+fn report(standing: &Standing) -> &coqui_acp_api::UsageReport {
+    match &standing.usage {
+        Usage::Known(report) => report,
+        other => panic!("a report was expected, found {other:?}"),
     }
+}
+
+/// The account of the pool `names` that takes a start, each with its standing, in a memory of its own.
+fn pick(names: &[&str], standings: &[Standing]) -> Result<String, String> {
+    let names: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+    policy::decide_with(
+        &SharedMemory::new(),
+        "p",
+        &names,
+        standings,
+        &Ask::new(1_800_000_000),
+    )
+    .map(|chosen| chosen.member)
 }
 
 #[test]
@@ -268,17 +279,11 @@ fn one_account_of_two_standards_runs_both_harnesses_sits_in_both_pools_and_one_r
         "one report serves both pools"
     );
     for pool in &room {
-        let usage = pool[0].usage.as_ref().expect("a report");
+        let usage = report(&pool[0]);
         assert_eq!(usage.buckets.len(), 1);
-        let one: Vec<Candidate> = vec![
-            pool[0].clone(),
-            Candidate {
-                name: "other".to_owned(),
-                ..Candidate::default()
-            },
-        ];
-        let chosen = decide("p", &Cursor::default(), &one, &turn(None)).expect("room");
-        assert_eq!(chosen.account, "shared", "room is left");
+        let one = [pool[0].clone(), Standing::new()];
+        let chosen = pick(&["shared", "other"], &one).expect("room");
+        assert_eq!(chosen, "shared", "room is left");
     }
 
     // The same account used up stops it in both pools, from the one report.
@@ -287,15 +292,9 @@ fn one_account_of_two_standards_runs_both_harnesses_sits_in_both_pools_and_one_r
     assert!(kept >= 1);
     for harness in &built {
         let pool = read(harness);
-        let one = vec![
-            pool[0].clone(),
-            Candidate {
-                name: "other".to_owned(),
-                ..Candidate::default()
-            },
-        ];
-        let chosen = decide("p", &Cursor::default(), &one, &turn(None)).expect("another has room");
-        assert_eq!(chosen.account, "other", "the used-up account is left");
+        let one = vec![pool[0].clone(), Standing::new()];
+        let chosen = pick(&["shared", "other"], &one).expect("another has room");
+        assert_eq!(chosen, "other", "the used-up account is left");
     }
     assert_eq!(asked.load(Ordering::SeqCst), 2, "one more report, for both");
 }

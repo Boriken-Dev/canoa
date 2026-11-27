@@ -34,6 +34,7 @@ pub use entries::{
     Settings, TransportListen, WebConfig, WebMode, WebTls, cache_lifetime_label,
     cache_lifetime_name, cache_lifetime_named,
 };
+pub use entries::{Handover, RoleConfig, RoleMember};
 pub(crate) use entries::{PoolIssue, usage_id};
 use entries_parse::{
     OriginKeys, TransportKeys, built_in_settings, check_unique, entry, extension_check,
@@ -54,11 +55,11 @@ use profiles::{
 };
 use raw::{
     RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawEnvironment, RawExtension, RawFile,
-    RawHost, RawKb, RawLines, RawPool, RawProvider, assist_of, network_of, schedules_of,
+    RawHost, RawKb, RawLines, RawPool, RawProvider, RawRole, assist_of, network_of, schedules_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
-    native_of, pool_of, read_raw, web_of,
+    native_of, pool_of, read_raw, role_of, web_of,
 };
 pub(crate) use sections::{check_label, check_name, plain_absolute};
 pub use types::{
@@ -259,6 +260,12 @@ impl Config {
             core::mem::take(&mut host.pools),
         )?;
         check_account_routes(&accounts, &top.network)?;
+        let roles = build_roles(
+            core::mem::take(&mut host.roles),
+            &accounts,
+            &pools,
+            &profiles,
+        )?;
         let (entries, extensions) = build_entries_and_extensions(
             &mut host,
             base,
@@ -309,6 +316,7 @@ impl Config {
             protected_paths: top.protected_paths,
             accounts,
             pools,
+            roles,
             secrets: top.secrets,
             shell: host.shell,
             openers,
@@ -525,7 +533,7 @@ fn build_accounts_and_pools(
                 ),
             });
         }
-        if crate::pools::automatic_standard(&name).is_some() {
+        if coqui_acp_pool::accounts::automatic_standard(&name).is_some() {
             return Err(ConfigError::Invalid {
                 entry: None,
                 what: format!(
@@ -551,6 +559,22 @@ fn build_accounts_and_pools(
         pools.insert(name, pool);
     }
     Ok((accounts, pools))
+}
+
+/// Every `[host.roles.NAME]`, checked against what the file holds: the accounts, pools and profiles a member names. Whether an agent
+/// is installed, or an account signed in, is for the host to say when it asks (`roles/list`), not for the file to refuse.
+fn build_roles(
+    raw_roles: IndexMap<String, RawRole>,
+    accounts: &IndexMap<String, AccountConfig>,
+    pools: &IndexMap<String, PoolConfig>,
+    profiles: &IndexMap<String, HostProfile>,
+) -> Result<IndexMap<String, RoleConfig>, ConfigError> {
+    let mut roles = IndexMap::new();
+    for (name, raw) in raw_roles {
+        let role = role_of(&name, raw, (accounts, pools, profiles))?;
+        roles.insert(name, role);
+    }
+    Ok(roles)
 }
 
 fn build_entries_and_extensions(
@@ -706,7 +730,7 @@ fn build_agent_entry(
         if account != coqui_acp_api::LOCAL_ACCOUNT
             && !accounts.contains_key(account)
             && !pools.contains_key(account)
-            && crate::pools::automatic_standard(account).is_none()
+            && coqui_acp_pool::accounts::automatic_standard(account).is_none()
         {
             return Err(invalid(
                 &name,
@@ -1290,6 +1314,9 @@ fn build_subsystems(
                 keep_days,
                 warn_permille,
                 limits: limits::limits_of(raw.limits, warn_permille)?,
+                unknown_permille: raw
+                    .unknown_permille
+                    .unwrap_or(UsageConfig::default().unknown_permille),
             }
         }
     };

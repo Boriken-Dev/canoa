@@ -21,12 +21,13 @@ use crate::accounts::store::FileStore;
 use crate::config::Config;
 use crate::options::limits::Endpoints;
 use crate::options::{harness_of, offering};
-use crate::pools::turn::{Cursor, Turn, Why, decide};
+use crate::pools::policy;
+use coqui_acp_pool::{Ask, SharedMemory, Standing, Why};
 
-struct Dir(PathBuf);
+pub(crate) struct Dir(pub(crate) PathBuf);
 
 impl Dir {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "canoa-pool-turn-{}-{}",
@@ -45,7 +46,7 @@ impl Drop for Dir {
 }
 
 /// A usage endpoint on loopback that answers the document of the token the request carries.
-fn standin(documents: Vec<(&'static str, Value)>) -> String {
+pub(crate) fn standin(documents: Vec<(&'static str, Value)>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("binds");
     let address = format!("http://{}", listener.local_addr().expect("an address"));
     std::thread::spawn(move || {
@@ -81,7 +82,7 @@ fn standin(documents: Vec<(&'static str, Value)>) -> String {
     address
 }
 
-fn login_of(token: &str) -> String {
+pub(crate) fn login_of(token: &str) -> String {
     json!({"claudeAiOauth": {
         "accessToken": token,
         "refreshToken": format!("{token}-refresh"),
@@ -102,7 +103,7 @@ fn read(
     work2_doc: Value,
     model: Option<&str>,
     current: Option<&str>,
-) -> Vec<crate::pools::turn::Candidate> {
+) -> Vec<Standing> {
     let dir = Dir::new();
     let root = dir.0.join("accounts");
     let store = Accounts::with_store(root.clone(), Box::new(FileStore::new(root))).expect("opens");
@@ -136,14 +137,25 @@ fn read(
     )
 }
 
-fn turn<'a>(current: Option<&'a str>, model: Option<&'a str>, now: i64) -> Turn<'a> {
-    Turn {
-        current,
-        model,
-        idle: current.map(|_| std::time::Duration::from_secs(5)),
-        lifetime: CacheLifetime::Long,
-        now,
+fn turn<'a>(current: Option<&'a str>, model: Option<&'a str>, now: i64) -> Ask<'a> {
+    let mut ask = Ask::new(now).lifetime(CacheLifetime::Long);
+    if let Some(current) = current {
+        ask = ask.current(current).idle(std::time::Duration::from_secs(5));
     }
+    if let Some(model) = model {
+        ask = ask.model(model);
+    }
+    ask
+}
+
+/// The account `ask` is given by the pool of `work` and `work2`, in a memory of the test's own.
+fn decide(
+    memory: &SharedMemory,
+    standings: &[Standing],
+    ask: &Ask<'_>,
+) -> Result<coqui_acp_pool::Chosen, String> {
+    let names = ["work".to_owned(), "work2".to_owned()];
+    policy::decide_with(memory, "both", &names, standings, ask)
 }
 
 const NOW: i64 = 4_000_000_000;
@@ -153,24 +165,18 @@ fn an_account_whose_provider_reports_its_allowance_used_up_is_left_for_the_one_w
     let out = json!({"five_hour": {"utilization": 100.0, "resets_at": "2099-01-01T05:00:00Z"}});
     let room = json!({"five_hour": {"utilization": 12.5, "resets_at": "2099-01-01T05:00:00Z"}});
     let accounts = read(out, room, None, None);
-    assert_eq!(
-        accounts
-            .iter()
-            .map(|each| each.name.as_str())
-            .collect::<Vec<_>>(),
-        ["work", "work2"]
-    );
+    assert_eq!(accounts.len(), 2);
     assert!(
         accounts.iter().all(|each| each.unavailable.is_none()),
         "{accounts:?}"
     );
     // A session that starts goes to the one with room, and a session on the other moves to it and says why.
-    let cursor = Cursor::default();
-    let start = decide("both", &cursor, &accounts, &turn(None, None, NOW)).expect("room");
-    assert_eq!((start.account.as_str(), start.why), ("work2", Why::Start));
-    let on_work = decide("both", &cursor, &accounts, &turn(Some("work"), None, NOW)).expect("room");
+    let memory = SharedMemory::new();
+    let start = decide(&memory, &accounts, &turn(None, None, NOW)).expect("room");
+    assert_eq!((start.member.as_str(), start.why), ("work2", Why::Start));
+    let on_work = decide(&memory, &accounts, &turn(Some("work"), None, NOW)).expect("room");
     assert_eq!(
-        (on_work.account.as_str(), on_work.moved, on_work.why),
+        (on_work.member.as_str(), on_work.moved, on_work.why),
         ("work2", true, Why::Exhausted)
     );
     assert_eq!(
@@ -184,13 +190,8 @@ fn every_account_out_of_usage_refuses_the_turn_and_names_when_the_soonest_refill
     let soon = json!({"five_hour": {"utilization": 100.0, "resets_at": "2099-01-01T05:00:00Z"}});
     let later = json!({"seven_day": {"utilization": 100.0, "resets_at": "2099-01-05T00:00:00Z"}});
     let accounts = read(soon, later, None, None);
-    let why = decide(
-        "both",
-        &Cursor::default(),
-        &accounts,
-        &turn(None, None, NOW),
-    )
-    .expect_err("none has room");
+    let why =
+        decide(&SharedMemory::new(), &accounts, &turn(None, None, NOW)).expect_err("none has room");
     assert!(why.contains("pool both") && why.contains("work2"), "{why}");
     assert!(why.contains("2099-01-01 05:00 UTC"), "{why}");
 }
@@ -203,11 +204,11 @@ fn a_bucket_for_one_model_stops_the_account_for_that_model_only() {
     });
     let room = json!({"five_hour": {"utilization": 10.0, "resets_at": "2099-01-01T05:00:00Z"}});
     let accounts = read(sonnet_out, room, None, None);
-    let cursor = Cursor::default();
+    let memory = SharedMemory::new();
     let on = |model: Option<&str>| {
-        decide("both", &cursor, &accounts, &turn(None, model, NOW))
+        decide(&memory, &accounts, &turn(None, model, NOW))
             .expect("room")
-            .account
+            .member
     };
     assert_eq!(on(Some("sonnet")), "work2");
     // For another model the first account has room: it is the next in turn after the one that just took the sonnet turn.

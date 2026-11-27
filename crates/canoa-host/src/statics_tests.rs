@@ -60,7 +60,11 @@ const ALLOWED: &[(&str, &str)] = &[
     ("options.rs", "static PROBED:"),
     ("pools/gather.rs", "static LISTED:"),
     ("pools/gather.rs", "static REPORTED:"),
-    ("pools/turn.rs", "pub(crate) static CURSOR:"),
+    ("pools/policy.rs", "static MEMORY:"),
+    // The round-robin memory every role of the process shares, and the per-hub cells the host fills once it can move sessions
+    ("roles.rs", "pub(crate) static MEMORY:"),
+    ("roles/hub.rs", "backing: OnceLock::new(),"),
+    ("roles/hub.rs", "opener: OnceLock::new(),"),
     // Bundled JS script bundles & interpreter/overlay/version caches
     ("profile/bundled.rs", "static BUNDLE:"),
     ("profile/hosted/cache.rs", "static INTERPRETERS:"),

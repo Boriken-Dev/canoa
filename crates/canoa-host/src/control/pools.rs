@@ -11,11 +11,12 @@ use crate::accounts::commands;
 use crate::accounts::matching::Catalogs;
 use crate::config::{Config, EntryKind, PoolConfig, PoolIssue};
 use crate::options::limits::Endpoints;
-use crate::pools::turn::{self, Turn, Why};
-use crate::pools::{self, Pool, gather};
+use crate::pools::{self, gather, policy};
+use coqui_acp_pool::Ask;
+use coqui_acp_pool::accounts::{AccountPool, automatic_standard};
 
 /// A pool as the control channel says it.
-pub(super) fn pool_json(pool: &Pool) -> Value {
+pub(super) fn pool_json(pool: &AccountPool) -> Value {
     json!({
         "name": pool.name,
         "standard": pool.standard,
@@ -35,8 +36,8 @@ pub(super) fn list(config: &Config) -> Value {
     json!({"pools": rows})
 }
 
-/// `pools/set` `{"name", "standard", "accounts"}`: makes the pool `name`, or changes it to hold exactly those accounts, in that
-/// order. Every account has to provide the standard; one that does not is refused, naming the account, its kind's standards and
+/// `pools/set` `{"name", "standard", "accounts", "strategy"?}`: makes the pool `name`, or changes it to hold exactly those accounts, in
+/// that order, taken by `strategy` (`round_robin`, `priority` or `headroom`; `round_robin` when absent). Every account has to provide the standard; one that does not is refused, naming the account, its kind's standards and
 /// the pool's. The host reads its pools when it starts, so the answer says it has to start again.
 pub(super) fn set(
     own: &dyn canoa::config_store::ConfigStore,
@@ -46,39 +47,34 @@ pub(super) fn set(
     let name = text(params, "name")?;
     let standard = text(params, "standard")?;
     let members = string_list(params, "accounts")?;
+    let strategy = match params.get("strategy") {
+        None | Some(Value::Null) => coqui_acp_pool::Strategy::RoundRobin,
+        Some(Value::String(text)) => text
+            .parse()
+            .map_err(|error: coqui_acp_pool::UnknownStrategy| (BAD_PARAMS, error.to_string()))?,
+        Some(_) => return Err((BAD_PARAMS, "strategy is text".to_owned())),
+    };
     let pool = PoolConfig {
         standard: standard.to_owned(),
         accounts: members,
+        strategy,
     };
     if let Err(issue) = pool.validate(name, &config.accounts) {
         return Err(match issue {
-            PoolIssue::InvalidLabel(error) => (BAD_PARAMS, error.to_string()),
-            PoolIssue::AccountName(name) => (
-                REFUSED,
-                format!("{name} is an account's name, and a pool and an account do not share one"),
-            ),
-            PoolIssue::AutomaticPool(name) => (
-                REFUSED,
-                format!(
-                    "{name} is taken by the pool the host makes of every account that provides that standard"
-                ),
-            ),
-            PoolIssue::InvalidStandard => (
-                BAD_PARAMS,
-                "standard is a credential standard's id: lower-case letters, digits and single hyphens"
-                    .to_owned(),
-            ),
-            PoolIssue::UnknownMember(member) => (NOT_FOUND, format!("no account called {member}")),
-            PoolIssue::DuplicateMember(member) => {
-                (BAD_PARAMS, format!("{member} is listed twice"))
+            PoolIssue::InvalidLabel { .. } | PoolIssue::InvalidStandard => {
+                (BAD_PARAMS, issue.to_string())
             }
+            PoolIssue::NameTaken(_) | PoolIssue::AutomaticPool(_) => (REFUSED, issue.to_string()),
+            PoolIssue::UnknownMember(member) => (NOT_FOUND, format!("no account called {member}")),
+            PoolIssue::DuplicateMember(member) => (BAD_PARAMS, format!("{member} is listed twice")),
+            other => (BAD_PARAMS, other.to_string()),
         });
     }
     let catalogs = Catalogs::new(config);
     pools::check_one(config, &catalogs, name, &pool).map_err(|why| (REFUSED, why))?;
     commands::set_pool(own, name, &pool).map_err(|failed| refusal(&failed))?;
     Ok(json!({
-        "pool": {"name": name, "standard": pool.standard, "automatic": false, "accounts": pool.accounts},
+        "pool": {"name": name, "standard": pool.standard, "automatic": false, "accounts": pool.accounts, "strategy": pool.strategy.name()},
         "restart": true,
     }))
 }
@@ -91,7 +87,7 @@ pub(super) fn remove(
     params: &Value,
 ) -> Result<Value, Refusal> {
     let name = text(params, "name")?;
-    if pools::automatic_standard(name).is_some() {
+    if automatic_standard(name).is_some() {
         return Err((
             REFUSED,
             format!(
@@ -118,18 +114,16 @@ pub(super) fn remove(
     Ok(json!({"removed": true, "restart": true}))
 }
 
-/// What one account of a turn's candidates was left out for.
-fn left_out(candidates: &[turn::Candidate], model: Option<&str>, now: i64) -> Vec<Value> {
-    candidates
+/// What one account of a turn's pool was left out for.
+fn left_out(skipped: &[coqui_acp_pool::Skipped]) -> Vec<Value> {
+    skipped
         .iter()
-        .filter_map(|candidate| {
-            let why = candidate.unavailable.clone().or_else(|| {
-                turn::blocked(candidate, model, now).map(|held| match held.until {
-                    Some(at) => format!("{}; it refills at unix time {at}", held.what),
-                    None => held.what,
-                })
-            })?;
-            Some(json!({"account": candidate.name, "why": why}))
+        .map(|each| {
+            let why = match each.reason.until() {
+                Some(at) => format!("{}; it refills at unix time {at}", each.reason.text()),
+                None => each.reason.text(),
+            };
+            json!({"account": each.member, "why": why})
         })
         .collect()
 }
@@ -202,13 +196,16 @@ pub(super) fn turn_with(
     let built = crate::options::offering(&config, source, built, &store, true)
         .map_err(|why| (REFUSED, why))?;
     let now = crate::usage_splice::unix_now();
-    let ask = Turn {
-        current,
-        model,
-        idle,
-        lifetime,
-        now,
-    };
+    let mut ask = Ask::new(now).lifetime(lifetime);
+    if let Some(current) = current {
+        ask = ask.current(current);
+    }
+    if let Some(model) = model {
+        ask = ask.model(model);
+    }
+    if let Some(idle) = idle {
+        ask = ask.idle(idle);
+    }
     let Some(pool) = built.pool_named(choice, true) else {
         // One account is never moved by the host: when it has run out, what could take the session in its place is said.
         if built.account_named(choice, true).is_none() {
@@ -225,14 +222,14 @@ pub(super) fn turn_with(
             (&hits, endpoints),
             true,
         );
-        let held = own.first().and_then(|one| turn::blocked(one, model, now));
+        let held = own.first().and_then(|one| policy::blocker(one, model, now));
         let others: Vec<String> = built
             .offered()
             .iter()
             .map(|(name, ..)| name.clone())
             .filter(|name| name != choice)
             .collect();
-        let tried = gather::candidates(
+        let standings = gather::candidates(
             &config,
             &built,
             &others,
@@ -240,18 +237,21 @@ pub(super) fn turn_with(
             (&hits, endpoints),
             true,
         );
-        let alternatives: Vec<&str> = tried
+        let alternatives: Vec<&str> = others
             .iter()
-            .filter(|each| each.unavailable.is_none() && turn::blocked(each, model, now).is_none())
-            .map(|each| each.name.as_str())
+            .zip(&standings)
+            .filter(|(_, each)| {
+                each.unavailable.is_none() && policy::blocker(each, model, now).is_none()
+            })
+            .map(|(name, _)| name.as_str())
             .collect();
         return Ok(json!({
             "pool": null,
             "account": choice,
             "moved": false,
             "exhausted": held.is_some(),
-            "left": held.as_ref().map(|held| held.what.clone()),
-            "refills_at": held.as_ref().and_then(|held| held.until),
+            "left": held.as_ref().map(coqui_acp_pool::Reason::text),
+            "refills_at": held.as_ref().and_then(coqui_acp_pool::Reason::until),
             "alternatives": if held.is_some() { alternatives } else { Vec::new() },
         }));
     };
@@ -259,7 +259,7 @@ pub(super) fn turn_with(
         .usable(true)
         .map(|member| member.name.clone())
         .collect();
-    let candidates = gather::candidates(
+    let standings = gather::candidates(
         &config,
         &built,
         &names,
@@ -268,19 +268,14 @@ pub(super) fn turn_with(
         true,
     );
     let chosen =
-        turn::decide(&pool.name, &turn::CURSOR, &candidates, &ask).map_err(|why| (REFUSED, why))?;
+        policy::decide(&pool.name, &names, &standings, &ask).map_err(|why| (REFUSED, why))?;
     Ok(json!({
         "pool": pool.name,
-        "account": chosen.account,
+        "account": chosen.member,
         "moved": chosen.moved,
-        "why": match chosen.why {
-            Why::Start => "start",
-            Why::Kept => "kept",
-            Why::InTurn => "in_turn",
-            Why::Exhausted => "exhausted",
-        },
+        "why": chosen.why.name(),
         "left": chosen.left,
-        "skipped": left_out(&candidates, model, now),
+        "skipped": left_out(&chosen.skipped),
     }))
 }
 

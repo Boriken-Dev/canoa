@@ -285,7 +285,7 @@ pub(crate) const TABLES: &[Table] = &[
     Table {
         path: &["host", "usage"],
         shape: Shape::Flat,
-        fields: &[("keep_days", Int)],
+        fields: &[("keep_days", Int), ("unknown_permille", Int)],
     },
     Table {
         path: &["host", "usage", "limits"],
@@ -427,6 +427,7 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "profiles",
             "accounts",
             "pools",
+            "roles",
             "disabled",
             "services",
         ],
@@ -536,7 +537,20 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
         ],
     ),
     ("network.routes.NAME", &["provider", "settings"]),
-    ("host.pools.NAME", &["standard", "accounts"]),
+    ("host.pools.NAME", &["standard", "accounts", "strategy"]),
+    (
+        "host.roles.NAME",
+        &[
+            "title",
+            "strategy",
+            "needs",
+            "stick",
+            "handover",
+            "resume_prompt",
+            "retry_task",
+            "members",
+        ],
+    ),
     (
         "host.extensions.NAME",
         &[

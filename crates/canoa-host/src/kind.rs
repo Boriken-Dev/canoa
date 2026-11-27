@@ -29,8 +29,8 @@ use crate::accounts::matching::Runs;
 use crate::accounts::{ACCOUNT_META, Accounts, Held, Watcher};
 use crate::config::{AccountConfig, Config, Origin, Settings, cache_lifetime_named};
 use crate::makers::Makers;
-use crate::pools::EntryPool;
 use crate::provider::{ProviderError, map_of, open};
+use coqui_acp_pool::accounts::EntryPool;
 
 mod settle;
 

@@ -48,6 +48,9 @@ pub struct Config {
     /// session may run on whichever account of them has usage left. The host adds an `any-<standard>` pool of its own for each
     /// standard an account provides; those are in no file.
     pub pools: IndexMap<String, PoolConfig>,
+    /// `[host.roles]`, by name, in the file's order: pools named by the work they do, whose members are agents with an account, a
+    /// model, an effort and a profile, in the order they serve.
+    pub roles: IndexMap<String, super::RoleConfig>,
     /// `[secrets]` as the file has it, which the secret providers read: who keeps the accounts' credentials and the session services'
     /// passwords is among it (`accounts`).
     pub secrets: Option<serde_json::Value>,
@@ -130,6 +133,7 @@ impl Default for Config {
             protected_paths: Default::default(),
             accounts: Default::default(),
             pools: Default::default(),
+            roles: Default::default(),
             secrets: Default::default(),
             shell: Default::default(),
             openers: Default::default(),
@@ -741,6 +745,9 @@ pub struct UsageConfig {
     pub warn_permille: u32,
     /// `[host.usage.limits.NAME]`, by name, in the file's order.
     pub limits: IndexMap<String, super::LimitConfig>,
+    /// `unknown_permille`: what a member whose usage is not reported counts as under the `headroom` strategy, in thousandths of its
+    /// allowance.
+    pub unknown_permille: u16,
 }
 
 impl Default for UsageConfig {
@@ -749,6 +756,7 @@ impl Default for UsageConfig {
             keep_days: crate::usage_log::DEFAULT_KEEP_DAYS,
             warn_permille: super::DEFAULT_WARN_PERMILLE,
             limits: IndexMap::new(),
+            unknown_permille: coqui_acp_pool::Settings::default().unknown_permille,
         }
     }
 }

@@ -14,7 +14,6 @@ use coqui_peer_webcrypto::PeerId;
 use coqui_transport_pipe::PipeName;
 use indexmap::IndexMap;
 
-use super::check_label;
 use super::types::{
     DEFAULT_PRESET, Loadout, Preset, ResolvedLoadout, UnknownLoadout, UnknownPreset, empty_preset,
     resolve_loadout,
@@ -80,16 +79,24 @@ pub struct PoolConfig {
     pub standard: String,
     /// The members, by name in `[host.accounts]` (or the automatic `local`), in the order the pool takes them.
     pub accounts: Vec<String>,
+    /// How the pool orders the accounts that can serve: `round_robin` unless the file says otherwise.
+    pub strategy: coqui_acp_pool::Strategy,
 }
 
 /// Validation failure for a pool definition under [`Config`].
-pub(crate) enum PoolIssue {
-    InvalidLabel(ConfigError),
-    AccountName(String),
-    AutomaticPool(String),
-    InvalidStandard,
-    UnknownMember(String),
-    DuplicateMember(String),
+pub(crate) use coqui_acp_pool::PoolIssue;
+
+/// What the host holds that a pool's name and members are checked against: the accounts and the automatic `local`.
+struct AccountNames<'a>(&'a IndexMap<String, AccountConfig>);
+
+impl coqui_acp_pool::Known for AccountNames<'_> {
+    fn taken(&self, name: &str) -> bool {
+        name == coqui_acp_api::LOCAL_ACCOUNT || self.0.contains_key(name)
+    }
+
+    fn member(&self, name: &str) -> bool {
+        self.taken(name)
+    }
 }
 
 impl PoolConfig {
@@ -99,25 +106,112 @@ impl PoolConfig {
         name: &str,
         accounts: &IndexMap<String, AccountConfig>,
     ) -> Result<(), PoolIssue> {
-        check_label(name).map_err(PoolIssue::InvalidLabel)?;
-        if name == coqui_acp_api::LOCAL_ACCOUNT || accounts.contains_key(name) {
-            return Err(PoolIssue::AccountName(name.to_owned()));
-        }
-        if crate::pools::automatic_standard(name).is_some() {
-            return Err(PoolIssue::AutomaticPool(name.to_owned()));
-        }
-        if !coqui_acp_api::standard::is_standard(&self.standard) {
-            return Err(PoolIssue::InvalidStandard);
-        }
-        for (index, account) in self.accounts.iter().enumerate() {
-            if account != coqui_acp_api::LOCAL_ACCOUNT && !accounts.contains_key(account) {
-                return Err(PoolIssue::UnknownMember(account.clone()));
+        coqui_acp_pool::check_pool(
+            name,
+            Some(&self.standard),
+            &self.accounts,
+            &AccountNames(accounts),
+            &coqui_acp_pool::Settings::default(),
+        )
+    }
+}
+
+/// How a role hands a session to a member of another harness when its own runs out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Handover {
+    /// The host moves it at once.
+    #[default]
+    Auto,
+    /// The host holds the move until the person says yes.
+    Ask,
+}
+
+/// One member of a role, `{ agent, account, model, effort, profile, ... }`: an agent entry with the account, model, effort and profile
+/// a session of it runs on. Every value is what the host discovers; none is named by the host.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RoleMember {
+    /// The agent entry of canoa.cfg.
+    pub agent: String,
+    /// An account, an account pool, or `None` for the entry's first.
+    pub account: Option<String>,
+    /// The model a session of it asks for.
+    pub model: Option<String>,
+    /// The reasoning effort.
+    pub effort: Option<String>,
+    /// A `[host.profiles]` name.
+    pub profile: Option<String>,
+    /// Higher goes first under the `priority` strategy.
+    pub priority: i32,
+    /// The runs it takes at once; `None` is no cap.
+    pub max_concurrent: Option<u32>,
+    /// The use, in thousandths of a bucket, at which it stops taking turns; `None` is 1000.
+    pub stop_permille: Option<u16>,
+}
+
+impl RoleMember {
+    /// The name a role's pool knows this member by: its agent, account, model, effort and profile, joined by `/`.
+    #[must_use]
+    pub fn id(&self) -> String {
+        let part = |value: &Option<String>| value.clone().unwrap_or_default();
+        format!(
+            "{}/{}/{}/{}/{}",
+            self.agent,
+            part(&self.account),
+            part(&self.model),
+            part(&self.effort),
+            part(&self.profile)
+        )
+    }
+}
+
+/// One `[host.roles.NAME]`: a pool named by what the work is, whose members are the agents, accounts and models able to do it, in
+/// order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RoleConfig {
+    /// What the person sees; the name when unset.
+    pub title: Option<String>,
+    /// How members are ordered: `priority` unless the file says otherwise.
+    pub strategy: coqui_acp_pool::Strategy,
+    /// Capability names a member's model must report; a model that reports none passes.
+    pub needs: Vec<String>,
+    /// Whether a running session stays on its member while it can serve.
+    pub stick: bool,
+    /// What a move to another harness waits for.
+    pub handover: Handover,
+    /// What continues a session that moved; `None` is the library's one line.
+    pub resume_prompt: Option<String>,
+    /// Whether a delegated task that hit a limit starts again on the next member.
+    pub retry_task: bool,
+    /// The members, in order.
+    pub members: Vec<RoleMember>,
+}
+
+impl RoleConfig {
+    /// The role as the shared pool code sees it: each member keyed by [`RoleMember::id`] and grouped by its agent entry's kind.
+    pub(crate) fn pool(
+        &self,
+        name: &str,
+        group_of: &dyn Fn(&str) -> String,
+        settings: coqui_acp_pool::Settings,
+    ) -> coqui_acp_pool::Pool<RoleMember> {
+        let mut pool = coqui_acp_pool::Pool::new(name)
+            .strategy(self.strategy)
+            .settings(settings);
+        for member in &self.members {
+            let mut seat = coqui_acp_pool::Member::new(member.id(), member.clone())
+                .group(group_of(&member.agent))
+                .priority(member.priority);
+            if let Some(runs) = member.max_concurrent {
+                seat = seat.max_concurrent(runs);
             }
-            if self.accounts[..index].contains(account) {
-                return Err(PoolIssue::DuplicateMember(account.clone()));
+            if let Some(stop) = member.stop_permille {
+                seat = seat.stop_permille(stop);
             }
+            pool = pool.member(seat);
         }
-        Ok(())
+        pool
     }
 }
 

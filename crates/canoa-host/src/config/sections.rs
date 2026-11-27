@@ -11,10 +11,13 @@ use coqui_peer_webcrypto::PeerId;
 use indexmap::IndexMap;
 
 use super::profiles::settings_of;
-use super::raw::{RawAccount, RawControl, RawFile, RawHistory, RawNative, RawPool, RawWeb};
+use super::raw::{
+    RawAccount, RawControl, RawFile, RawHistory, RawNative, RawPool, RawRole, RawWeb,
+};
 use super::{
-    AccountConfig, ConfigError, ControlConfig, Entry, HistoryConfig, Listen, MAX_NAME, MAX_TITLE,
-    NativeConfig, PoolConfig, PoolIssue, WebConfig, WebMode, WebTls,
+    AccountConfig, ConfigError, ControlConfig, Entry, Handover, HistoryConfig, HostProfile, Listen,
+    MAX_NAME, MAX_TITLE, NativeConfig, PoolConfig, PoolIssue, RoleConfig, RoleMember, WebConfig,
+    WebMode, WebTls,
 };
 use crate::format::formats;
 
@@ -252,31 +255,157 @@ pub(super) fn pool_of(
     let standard = raw
         .standard
         .ok_or_else(|| refused("standard is missing".to_owned()))?;
+    let strategy = match raw.strategy.as_deref() {
+        None => coqui_acp_pool::Strategy::RoundRobin,
+        Some(text) => text
+            .parse()
+            .map_err(|error: coqui_acp_pool::UnknownStrategy| {
+                refused(format!("strategy: {error}"))
+            })?,
+    };
     let pool = PoolConfig {
         standard,
         accounts: raw.accounts,
+        strategy,
     };
     if let Err(issue) = pool.validate(name, accounts) {
         return Err(match issue {
-            PoolIssue::InvalidLabel(error) => error,
-            PoolIssue::AccountName(_) => refused(
-                "that name is an account's, and a pool and an account do not share one".to_owned(),
-            ),
-            PoolIssue::AutomaticPool(_) => refused(
-                "that name is taken by the pool the host makes of every account that provides that standard".to_owned(),
-            ),
-            PoolIssue::InvalidStandard => refused(
-                "standard is a credential standard's id: lower-case letters, digits and single hyphens".to_owned(),
-            ),
             PoolIssue::UnknownMember(account) => refused(format!(
                 "accounts names {account}, which [host.accounts] does not hold"
             )),
             PoolIssue::DuplicateMember(account) => {
                 refused(format!("accounts names {account} twice"))
             }
+            PoolIssue::NameTaken(_) => refused(
+                "that name is an account's, and a pool and an account do not share one".to_owned(),
+            ),
+            other => refused(other.to_string()),
         });
     }
     Ok(pool)
+}
+
+/// What a role's members are checked against: the accounts, the pools and the profiles of the file.
+pub(super) type Held<'a> = (
+    &'a IndexMap<String, AccountConfig>,
+    &'a IndexMap<String, PoolConfig>,
+    &'a IndexMap<String, HostProfile>,
+);
+
+/// One `[host.roles.NAME]`: its name, strategy, handover and members, with each member's account and profile checked against what the
+/// file holds (`accounts`, `pools` and `profiles`).
+pub(super) fn role_of(
+    name: &str,
+    raw: RawRole,
+    (accounts, pools, profiles): Held<'_>,
+) -> Result<RoleConfig, ConfigError> {
+    let refused = |what: String| ConfigError::Invalid {
+        entry: None,
+        what: format!("role {name}: {what}"),
+    };
+    if name.chars().count() > MAX_ROLE_NAME
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+        || name.is_empty()
+    {
+        return Err(refused(format!(
+            "a role's name is 1 to {MAX_ROLE_NAME} lower-case letters, digits, hyphens and underscores"
+        )));
+    }
+    if let Some(title) = &raw.title {
+        check_title(name, title)?;
+    }
+    let strategy = match raw.strategy.as_deref() {
+        None => coqui_acp_pool::Strategy::Priority,
+        Some(text) => text
+            .parse()
+            .map_err(|error: coqui_acp_pool::UnknownStrategy| {
+                refused(format!("strategy: {error}"))
+            })?,
+    };
+    let handover = match raw.handover.as_deref() {
+        None | Some("auto") => Handover::Auto,
+        Some("ask") => Handover::Ask,
+        Some(_) => return Err(refused("handover is auto or ask".to_owned())),
+    };
+    let mut members = Vec::new();
+    for (at, member) in raw.members.into_iter().enumerate() {
+        let place = format!("members[{at}]");
+        let agent = member
+            .agent
+            .filter(|agent| !agent.trim().is_empty())
+            .ok_or_else(|| refused(format!("{place}: agent is missing")))?;
+        if let Some(account) = &member.account
+            && account != coqui_acp_api::LOCAL_ACCOUNT
+            && !accounts.contains_key(account)
+            && !pools.contains_key(account)
+            && coqui_acp_pool::accounts::automatic_standard(account).is_none()
+        {
+            return Err(refused(format!(
+                "{place}: account names {account}, which neither [host.accounts] nor [host.pools] holds"
+            )));
+        }
+        if let Some(profile) = &member.profile
+            && !profiles.contains_key(profile)
+        {
+            return Err(refused(format!(
+                "{place}: profile names {profile}, which [host.profiles] does not hold"
+            )));
+        }
+        members.push(RoleMember {
+            agent,
+            account: member.account,
+            model: member.model,
+            effort: member.effort,
+            profile: member.profile,
+            priority: member.priority.unwrap_or(0),
+            max_concurrent: member.max_concurrent,
+            stop_permille: member.stop_permille,
+        });
+    }
+    let role = RoleConfig {
+        title: raw.title,
+        strategy,
+        needs: raw.needs,
+        stick: raw.stick.unwrap_or(true),
+        handover,
+        resume_prompt: raw.resume_prompt.filter(|text| !text.trim().is_empty()),
+        retry_task: raw.retry_task.unwrap_or(false),
+        members,
+    };
+    let ids: Vec<String> = role.members.iter().map(RoleMember::id).collect();
+    if let Err(issue) = coqui_acp_pool::check_pool(
+        name,
+        None,
+        &ids,
+        &EveryMember,
+        &coqui_acp_pool::Settings::default(),
+    ) {
+        return Err(match issue {
+            coqui_acp_pool::PoolIssue::DuplicateMember(_) => refused(
+                "two members name the same agent, account, model, effort and profile".to_owned(),
+            ),
+            other => refused(other.to_string()),
+        });
+    }
+    Ok(role)
+}
+
+/// The most characters a role's name has.
+const MAX_ROLE_NAME: usize = 32;
+
+/// A role's members are checked by the host's own lookups, so the shared check asks nothing more of them.
+struct EveryMember;
+
+impl coqui_acp_pool::Known for EveryMember {
+    fn taken(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn member(&self, _name: &str) -> bool {
+        true
+    }
 }
 
 /// A name the person gives an account or a pool: any text they can read, 1 to [`MAX_NAME`] characters and no control character. It

@@ -260,6 +260,8 @@ pub(super) struct RawHost {
     pub(super) accounts: IndexMap<String, RawAccount>,
     #[serde(default)]
     pub(super) pools: IndexMap<String, RawPool>,
+    #[serde(default)]
+    pub(super) roles: IndexMap<String, RawRole>,
     pub(super) shell: Option<String>,
     pub(super) openers: Option<Vec<RawOpener>>,
     pub(super) max_message_bytes: Option<usize>,
@@ -870,6 +872,7 @@ pub(super) struct RawNative {
 #[serde(deny_unknown_fields)]
 pub(super) struct RawHostUsage {
     pub(super) keep_days: Option<u32>,
+    pub(super) unknown_permille: Option<u16>,
     #[serde(default)]
     pub(super) limits: IndexMap<String, RawLimit>,
 }
@@ -949,6 +952,37 @@ pub(super) struct RawPool {
     pub(super) standard: Option<String>,
     #[serde(default)]
     pub(super) accounts: Vec<String>,
+    pub(super) strategy: Option<String>,
+}
+
+/// `[host.roles.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawRole {
+    pub(super) title: Option<String>,
+    pub(super) strategy: Option<String>,
+    #[serde(default)]
+    pub(super) needs: Vec<String>,
+    pub(super) stick: Option<bool>,
+    pub(super) handover: Option<String>,
+    pub(super) resume_prompt: Option<String>,
+    pub(super) retry_task: Option<bool>,
+    #[serde(default)]
+    pub(super) members: Vec<RawRoleMember>,
+}
+
+/// One member of `[host.roles.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawRoleMember {
+    pub(super) agent: Option<String>,
+    pub(super) account: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) effort: Option<String>,
+    pub(super) profile: Option<String>,
+    pub(super) priority: Option<i32>,
+    pub(super) max_concurrent: Option<u32>,
+    pub(super) stop_permille: Option<u16>,
 }
 
 #[derive(Deserialize)]

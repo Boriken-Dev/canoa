@@ -40,6 +40,7 @@ fn tables() -> Vec<(&'static str, Vec<String>)> {
         ("host.providers.NAME", keys_of("RawProvider")),
         ("host.accounts.NAME", keys_of("RawAccount")),
         ("host.pools.NAME", keys_of("RawPool")),
+        ("host.roles.NAME", keys_of("RawRole")),
         ("host.extensions.NAME", keys_of("RawExtension")),
         ("host.environments.NAME", keys_of("RawEnvironment")),
         ("host.openers", keys_of("RawOpener")),

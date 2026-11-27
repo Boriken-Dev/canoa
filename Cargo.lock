@@ -1133,6 +1133,7 @@ dependencies = [
  "coqui-acp-harness",
  "coqui-acp-history",
  "coqui-acp-hub",
+ "coqui-acp-pool",
  "coqui-acp-provider",
  "coqui-acp-secrets",
  "coqui-aos",
@@ -1982,6 +1983,16 @@ dependencies = [
  "coqui-acp-history",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "coqui-acp-pool"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=6d9aee38c8d7caa5741a10f6b3ae34ecc81b7393#6d9aee38c8d7caa5741a10f6b3ae34ecc81b7393"
+dependencies = [
+ "coqui-acp-api",
+ "coqui-acp-history",
+ "serde_json",
 ]
 
 [[package]]

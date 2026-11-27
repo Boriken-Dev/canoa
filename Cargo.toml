@@ -84,6 +84,8 @@ coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "17
 coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "171e08ec92af4044377bcae77e9fb6aa391ca499", features = ["history"] }
 # The session-history format: the recorder, the reader and the loss report.
 coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "171e08ec92af4044377bcae77e9fb6aa391ca499" }
+# The policy that picks which agent or account serves a session and moves it on when its usage runs out: no I/O, no clock.
+coqui-acp-pool = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "171e08ec92af4044377bcae77e9fb6aa391ca499" }
 # The host side of secret prompts: the tools an agent is served and what the person is asked.
 coqui-acp-secrets = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "171e08ec92af4044377bcae77e9fb6aa391ca499" }
 coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "171e08ec92af4044377bcae77e9fb6aa391ca499", features = ["history"] }

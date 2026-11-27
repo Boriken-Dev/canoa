@@ -79,6 +79,7 @@ coqui-acp-bridge.workspace = true
 coqui-acp-secrets.workspace = true
 coqui-acp-harness.workspace = true
 coqui-acp-history.workspace = true
+coqui-acp-pool.workspace = true
 coqui-acp-hub.workspace = true
 coqui-acp-provider.workspace = true
 coqui-aos = { workspace = true, features = ["index", "embeddings"] }

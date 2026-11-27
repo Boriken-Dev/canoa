@@ -94,6 +94,7 @@ fn a_pool_changed_stays_where_it_is_with_the_text_around_it() {
     let pool = PoolConfig {
         standard: "anthropic-api".to_owned(),
         accounts: vec!["work".to_owned(), "spare".to_owned()],
+        strategy: coqui_acp_pool::Strategy::RoundRobin,
     };
     set_pool(&file(&path), "team", &pool).expect("set");
     let written = fs::read_to_string(&path).expect("read");

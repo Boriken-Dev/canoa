@@ -18,11 +18,11 @@ fn with(extra: &str) -> Config {
     config(&format!("{ACCOUNTS}{extra}"))
 }
 
-fn names(pool: &Pool) -> Vec<&str> {
+fn names(pool: &AccountPool) -> Vec<&str> {
     pool.accounts.iter().map(String::as_str).collect()
 }
 
-fn pool_named<'a>(pools: &'a [Pool], name: &str) -> &'a Pool {
+fn pool_named<'a>(pools: &'a [AccountPool], name: &str) -> &'a AccountPool {
     pools
         .iter()
         .find(|pool| pool.name == name)

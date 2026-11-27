@@ -497,7 +497,7 @@ pub(crate) fn as_account(
 pub(crate) fn pool_choices(
     config: &Config,
     built: &kind::Harness,
-    pool: &crate::pools::EntryPool,
+    pool: &coqui_acp_pool::accounts::EntryPool,
     any: bool,
 ) -> Choices {
     let mut merged = Choices::unknown("no account of the pool listed its models");

@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::{ACCOUNT_META, Harness, MODEL_META};
-use crate::pools::EntryPool;
+use coqui_acp_pool::accounts::EntryPool;
 
 /// The model a client's `initialize` names under [`MODEL_META`]; `None` when it names none.
 ///
@@ -130,7 +130,7 @@ impl Harness {
             return Err(format!("this entry offers no pool {}", pool.name));
         };
         let names: Vec<String> = pool.usable(any).map(|member| member.name.clone()).collect();
-        let candidates = crate::pools::gather::candidates(
+        let standings = crate::pools::gather::candidates(
             config,
             self,
             &names,
@@ -138,14 +138,11 @@ impl Harness {
             (&[], &crate::options::limits::Endpoints::default()),
             any,
         );
-        let turn = crate::pools::turn::Turn {
-            current: None,
-            model,
-            idle: None,
-            lifetime: coqui_acp_api::CacheLifetime::Default,
-            now: crate::usage_splice::unix_now(),
-        };
-        crate::pools::turn::decide(&pool.name, &crate::pools::turn::CURSOR, &candidates, &turn)
-            .map(|chosen| chosen.account)
+        let mut ask = coqui_acp_pool::Ask::new(crate::usage_splice::unix_now());
+        if let Some(model) = model {
+            ask = ask.model(model);
+        }
+        crate::pools::policy::decide(&pool.name, &names, &standings, &ask)
+            .map(|chosen| chosen.member)
     }
 }
