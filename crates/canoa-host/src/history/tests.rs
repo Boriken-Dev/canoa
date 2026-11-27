@@ -417,3 +417,85 @@ fn a_count_that_disagrees_with_the_history_cuts_nothing() {
         CutError::Differs
     );
 }
+
+#[test]
+fn a_served_turn_writes_its_properties_into_the_columns_of_its_row() {
+    let dir = dir("served");
+    let store = Arc::new(Store::open(Some(dir.clone()), limits()));
+    session(&store, "Claude", "hi there");
+    let mut record = coqui_acp_history::TurnRecord::new(1_800_000_000);
+    record.session = Some(ID.to_owned());
+    record.turn = Some(1);
+    record.harness = Some("harness:claude".to_owned());
+    record.agent = Some("Claude".to_owned());
+    record.account = Some("work".to_owned());
+    record.model = Some("opus".to_owned());
+    record.effort = Some("high".to_owned());
+    record.role = Some("planner".to_owned());
+    record.pool = Some("planner".to_owned());
+    record.member = Some("Claude/work/opus/high/".to_owned());
+    record.why = Some("start".to_owned());
+    let mut tokens = coqui_acp_history::Tokens::new();
+    tokens.input = Some(120);
+    record.tokens = Some(tokens);
+    record.tag("ai6:run", "r1").expect("a tag");
+    store.note_turn("Claude", ID, &record).expect("written");
+    // A turn the history has no lines for yet waits for them, and is written when they are.
+    record.turn = Some(2);
+    record.moved_from = Some("Claude/work/opus/high/".to_owned());
+    record.member = Some("Codex/any-codex/gpt-5/high/".to_owned());
+    store.note_turn("Claude", ID, &record).expect("kept");
+    assert_eq!(store.served("Claude", ID).expect("read").len(), 1);
+    session(&store, "Claude", "second answer");
+    let turns = store.served("Claude", ID).expect("read");
+    assert_eq!(turns.len(), 2, "{turns:?}");
+    assert_eq!(turns[0]["role"], "planner");
+    assert_eq!(turns[0]["member"], "Claude/work/opus/high/");
+    assert_eq!(turns[0]["effort"], "high");
+    assert_eq!(turns[1]["moved_from"], "Claude/work/opus/high/");
+    // The columns hold what the record said, and a figure it did not say is null, never zero.
+    let db = store.db().expect("a store");
+    let mut select = canoa::history_store::Select::new("turns", 10).filtered(
+        canoa::history_store::all_of(vec![canoa::history_store::Cond::eq(
+            "no",
+            canoa::history_store::Cell::int(1),
+        )]),
+    );
+    select.columns = ["tokens_input", "tokens_output", "tags"]
+        .map(str::to_owned)
+        .to_vec();
+    let rows = db.select(select).expect("select");
+        rows.rows[0][0],
+        canoa::history_store::Cell::int(120),
+        "{rows:?}"
+    );
+    assert_eq!(rows.rows[0][1], canoa::history_store::Cell::Null);
+    assert!(
+        rows.rows[0][2]
+            .as_text()
+            .is_some_and(|tags| tags.contains("ai6:run")),
+        "{rows:?}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_turn_noted_before_the_session_has_any_lines_goes_to_its_latest_turn_when_they_come() {
+    let dir = dir("served-none");
+    let store = Arc::new(Store::open(Some(dir.clone()), limits()));
+    let mut record = coqui_acp_history::TurnRecord::new(1_800_000_000);
+    record.role = Some("planner".to_owned());
+    record.member = Some("Claude/work///".to_owned());
+    store.note_turn("Claude", ID, &record).expect("kept");
+        store.served("Claude", ID),
+        Err(StoreError::Missing)
+    ));
+    session(&store, "Claude", "hi there");
+    let turns = store.served("Claude", ID).expect("read");
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["member"], "Claude/work///");
+    // Written once: a turn that has its properties is not the latest one without.
+    session(&store, "Claude", "again");
+    assert_eq!(store.served("Claude", ID).expect("read").len(), 1);
+    let _ = fs::remove_dir_all(dir);
+}

@@ -10,7 +10,7 @@ use alloc::format;
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 
-use coqui_acp_history::{ATTACHMENT_META_KEY, Body, Document, HistoryError, Trigger};
+use coqui_acp_history::{ATTACHMENT_META_KEY, Body, Document, HistoryError, Trigger, TurnRecord};
 use serde_json::Value;
 
 use super::schema::{ATTACHMENTS, EVENT_ATTACHMENTS, EVENTS, SESSIONS, TURNS};
@@ -403,4 +403,97 @@ pub fn read_document(db: &dyn HistoryDb, id: &str) -> Result<Option<Document>, S
     to_document(&header, lines.iter().map(String::as_str))
         .map(Some)
         .map_err(|e| StoreError::Corrupt(format!("a stored history is not in the format: {e}")))
+}
+
+/// The columns of a `turns` row that a [`TurnRecord`] fills: who served the turn (harness, agent, account, model, effort, role, pool,
+/// member, profile), how it came to be there (`why`, `moved_from`, `usage_known`), what it used, how long it ran and how it ended,
+/// with the open `tags` as one JSON object. A figure the record does not know is null, never zero.
+#[must_use]
+pub fn turn_cells(record: &TurnRecord) -> Vec<(&'static str, Cell)> {
+    let count =
+        |value: Option<u64>| Cell::opt_int(value.map(|n| i64::try_from(n).unwrap_or(i64::MAX)));
+    let outcome = record.outcome.as_ref();
+    let tags = if record.tags.is_empty() {
+        Cell::Null
+    } else {
+        Cell::json(serde_json::to_string(&record.tags).unwrap_or_default())
+    };
+    alloc::vec![
+        ("recorded_at", Cell::int(record.at.saturating_mul(1000))),
+        ("harness", Cell::opt_text(record.harness.as_deref())),
+        ("agent", Cell::opt_text(record.agent.as_deref())),
+        ("account", Cell::opt_text(record.account.as_deref())),
+        ("model", Cell::opt_text(record.model.as_deref())),
+        ("effort", Cell::opt_text(record.effort.as_deref())),
+        ("role", Cell::opt_text(record.role.as_deref())),
+        ("pool", Cell::opt_text(record.pool.as_deref())),
+        ("member", Cell::opt_text(record.member.as_deref())),
+        ("profile", Cell::opt_text(record.profile.as_deref())),
+        ("why", Cell::opt_text(record.why.as_deref())),
+        ("moved_from", Cell::opt_text(record.moved_from.as_deref())),
+        (
+            "usage_known",
+            record.usage_known.map_or(Cell::Null, Cell::bool)
+        ),
+        ("tokens_input", count(record.tokens.and_then(|t| t.input))),
+        ("tokens_output", count(record.tokens.and_then(|t| t.output))),
+        ("tokens_cached", count(record.tokens.and_then(|t| t.cached))),
+        ("cost_micros", count(record.cost.as_ref().map(|c| c.micros))),
+        (
+            "cost_currency",
+            Cell::opt_text(record.cost.as_ref().map(|c| c.currency.as_str())),
+        ),
+        ("duration_ms", count(record.duration_ms)),
+        (
+            "limited",
+            outcome.map_or(Cell::Null, |o| Cell::bool(o.limit))
+        ),
+        (
+            "moved_on",
+            outcome.map_or(Cell::Null, |o| Cell::bool(o.moved_on))
+        ),
+        ("tags", tags),
+    ]
+}
+
+#[cfg(test)]
+mod turn_tests {
+    use coqui_acp_history::{Cost, Tokens, TurnOutcome, TurnRecord};
+
+    use super::*;
+    use crate::history_store::schema;
+
+    #[test]
+    fn every_column_a_record_fills_is_a_nullable_column_of_the_turns_table() {
+        let table = schema::table(schema::TURNS).expect("the table");
+        let mut record = TurnRecord::new(1_800_000_000);
+        record.cost = Some(Cost::new(2500, "USD"));
+        record.outcome = Some(TurnOutcome::default());
+        for (column, _) in turn_cells(&record) {
+            let found = table
+                .columns
+                .iter()
+                .find(|each| each.name == column)
+                .unwrap_or_else(|| panic!("the turns table has no column {column}"));
+            assert!(found.nullable, "{column} may be unknown");
+        }
+    }
+
+    #[test]
+    fn what_the_record_does_not_say_is_null_and_never_zero() {
+        let mut record = TurnRecord::new(1_800_000_000);
+        let mut tokens = Tokens::new();
+        tokens.output = Some(0);
+        record.tokens = Some(tokens);
+        let cells: BTreeMap<_, _> = turn_cells(&record).into_iter().collect();
+        assert_eq!(cells["tokens_input"], Cell::Null);
+        assert_eq!(
+            cells["tokens_output"],
+            Cell::int(0),
+            "a reported zero is kept"
+        );
+        assert_eq!(cells["cost_micros"], Cell::Null);
+        assert_eq!(cells["limited"], Cell::Null);
+        assert_eq!(cells["tags"], Cell::Null);
+    }
 }

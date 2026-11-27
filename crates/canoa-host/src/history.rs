@@ -18,14 +18,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use canoa::history_store::rows::{Source, read_document, to_rows};
+use canoa::history_store::rows::{Source, read_document, to_rows, turn_cells};
 use canoa::history_store::{
     AggFn, Aggregate, Cell, Change, Cond, Figure, Order, Select, Update, Write, all_of,
 };
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_history::conversation::{derived_uuid, is_uuid};
 use coqui_acp_history::record::{Direction, SessionRecorder};
-use coqui_acp_history::{Body, Document, Header, Line, Origin, Stop};
+use coqui_acp_history::{Body, Document, Header, Line, Origin, Stop, TurnRecord};
 use coqui_transport::{Channel, Failure};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -117,6 +117,8 @@ pub(crate) struct Store {
     read_only: bool,
     /// What the person is told about the store, when there is something to tell.
     notice: Option<String>,
+    /// The properties of turns whose rows the history has not written yet, by entry and session, written when their lines are.
+    pending: Mutex<BTreeMap<(String, String), Vec<TurnRecord>>>,
 }
 
 impl core::fmt::Debug for Store {
@@ -127,6 +129,9 @@ impl core::fmt::Debug for Store {
             .finish_non_exhaustive()
     }
 }
+
+/// How many records of turns whose lines are not written yet one session keeps.
+const MAX_PENDING: usize = 64;
 
 /// The name of the file of the session `session` of the entry `entry` in the layout earlier versions kept: a hash, so no recorded text
 /// is a path. Only the move of those files names it.
@@ -178,6 +183,7 @@ impl Store {
             counts: Mutex::new(Counts::default()),
             read_only: false,
             notice: None,
+            pending: Mutex::new(BTreeMap::new()),
         };
         // The store is opened whether or not sessions are recorded: the session list lives in it too.
         let Some(home) = home else {
@@ -222,6 +228,7 @@ impl Store {
             counts: Mutex::new(counts),
             read_only: chosen.read_only,
             notice: chosen.notice,
+            pending: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -378,6 +385,8 @@ impl Store {
             }
         }
         counts.total = counts.total.saturating_add(size);
+        drop(counts);
+        self.flush(db, entry, session);
         Ok(())
     }
 
@@ -502,6 +511,171 @@ impl Store {
         counts.total = counts.total.saturating_add(size);
         counts.sessions += 1;
         Ok(())
+    }
+}
+
+impl Store {
+    /// Writes the properties of a served turn (who served it, what it used, how it ended, its tags) into the columns of the turn's row
+    /// of the session `session` of `entry`: the turn `record.turn`, else the latest one that has none yet. A turn whose lines the
+    /// history has not written yet is kept until they are, so the order in which a turn ends and its lines arrive does not matter.
+    ///
+    /// # Errors
+    ///
+    /// The store is off or read-only, or refused the write.
+    pub(crate) fn note_turn(
+        &self,
+        entry: &str,
+        session: &str,
+        record: &TurnRecord,
+    ) -> Result<(), StoreError> {
+        let db = self.writable_db()?;
+        if self.write_turn(db, entry, session, record)? {
+            return Ok(());
+        }
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let waiting = pending
+            .entry((entry.to_owned(), session.to_owned()))
+            .or_default();
+        if waiting.len() < MAX_PENDING {
+            waiting.push(record.clone());
+        }
+        Ok(())
+    }
+
+    /// Writes what `record` says into its turn's row; `false` when the history has no such row yet.
+    fn write_turn(
+        &self,
+        db: &Db,
+        entry: &str,
+        session: &str,
+        record: &TurnRecord,
+    ) -> Result<bool, StoreError> {
+        let Some(held) = self.lookup(db, entry, session)? else {
+            return Ok(false);
+        };
+        let session_is = Cond::eq("session_id", Cell::text(&held.id));
+        let no = match record.turn.and_then(|turn| i64::try_from(turn).ok()) {
+            Some(no) => Some(no),
+            None => {
+                let mut latest = Select::new("turns", 1)
+                    .filtered(all_of(vec![session_is.clone(), Cond::is_null("member")]))
+                    .ordered(vec![Order::desc("no")]);
+                latest.columns = vec!["no".to_owned()];
+                db.select(latest)
+                    .map_err(io)?
+                    .rows
+                    .first()
+                    .and_then(|row| row.first())
+                    .and_then(Cell::as_int)
+            }
+        };
+        let Some(no) = no else {
+            return Ok(false);
+        };
+        let filter = all_of(vec![session_is, Cond::eq("no", Cell::int(no))]);
+        if db
+            .count(Select::new("turns", 1).filtered(filter.clone()))
+            .map_err(io)?
+            == 0
+        {
+            return Ok(false);
+        }
+        db.write(Write {
+            ops: vec![Change::Update {
+                update: Update {
+                    table: "turns".to_owned(),
+                    filter,
+                    set: turn_cells(record)
+                        .into_iter()
+                        .map(|(column, cell)| (column.to_owned(), cell))
+                        .collect(),
+                    add: BTreeMap::new(),
+                },
+            }],
+        })
+        .map_err(io)?;
+        Ok(true)
+    }
+
+    /// Writes the properties that waited for the lines of `session`, now that some are written.
+    fn flush(&self, db: &Db, entry: &str, session: &str) {
+        let key = (entry.to_owned(), session.to_owned());
+        let waiting = self
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&key)
+            .unwrap_or_default();
+        let mut still = Vec::new();
+        for record in waiting {
+            match self.write_turn(db, entry, session, &record) {
+                Ok(true) => {}
+                Ok(false) => still.push(record),
+                Err(error) => tracing::warn!("a served turn's properties were not kept: {error}"),
+            }
+        }
+        if !still.is_empty() {
+            self.pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(key, still);
+        }
+    }
+
+    /// The turns of the session that a pool served, in order, each as the properties the host recorded of it: `no`, `role`, `pool`,
+    /// `member`, `why`, `moved_from`, `harness`, `agent`, `account`, `model`, `effort`, `profile`, `limited`, `moved_on`.
+    pub(crate) fn served(&self, entry: &str, session: &str) -> Result<Vec<Value>, StoreError> {
+        let Some(db) = &self.db else {
+            return Err(StoreError::Off);
+        };
+        let held = self
+            .lookup(db, entry, session)?
+            .ok_or(StoreError::Missing)?;
+        let columns = [
+            "no",
+            "role",
+            "pool",
+            "member",
+            "why",
+            "moved_from",
+            "harness",
+            "agent",
+            "account",
+            "model",
+            "effort",
+            "profile",
+            "limited",
+            "moved_on",
+        ];
+        let mut select = Select::new("turns", 1000)
+            .filtered(all_of(vec![Cond::eq("session_id", Cell::text(&held.id))]))
+            .ordered(vec![Order::asc("no")]);
+        select.columns = columns.map(str::to_owned).to_vec();
+        let mut found = Vec::new();
+        loop {
+            let rows = db.select(select.clone()).map_err(io)?;
+            for row in &rows.rows {
+                if row.get(3).is_none_or(|member| matches!(member, Cell::Null)) {
+                    continue;
+                }
+                let mut turn = serde_json::Map::new();
+                for (name, cell) in columns.iter().zip(row) {
+                    let value = match cell {
+                        Cell::Int { value } => Value::from(*value),
+                        Cell::Bool { value } => Value::from(*value),
+                        Cell::Text { value } => Value::from(value.clone()),
+                        _ => continue,
+                    };
+                    turn.insert((*name).to_owned(), value);
+                }
+                found.push(Value::Object(turn));
+            }
+            match rows.next {
+                Some(next) => select.after = Some(next),
+                None => break,
+            }
+        }
+        Ok(found)
     }
 }
 
