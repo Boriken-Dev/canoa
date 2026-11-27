@@ -57,7 +57,7 @@ import 'package:material_ui/material_ui.dart';
 import 'accounts/account_models.dart' show AccountEntry, AccountInfo, LimitHint, TurnAdvice, accountMeta, machineLogin, modelMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
-import 'roles/role_models.dart' show RoleRefused, RoleResolution;
+import 'roles/role_models.dart' show RoleMoved, RoleRefused, RoleResolution;
 import 'roles/roles_controller.dart';
 import 'roles/roles_host.dart';
 import 'desktop/host_grants.dart';
@@ -1897,6 +1897,7 @@ class _CanoaAppState extends State<CanoaApp> {
   RolesController? get _roles => widget.rolesHost != null || (_grants?.may(HostGrants.accounts) ?? false) ? _rolesHeld : null;
 
   late final RolesController? _rolesHeld = _buildRoles();
+  StreamSubscription<RoleMoved>? _roleMoves;
 
   RolesController? _buildRoles() {
     final control = _control;
@@ -2591,6 +2592,42 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// The host moved a session of a role on to its next member: the conversation open here goes on in the same tab, at the session id
+  /// the host imported it as, with the transcript kept.
+  Future<void> _followRole(RoleMoved moved) async {
+    final session = store.sessionMoved(moved), roles = _rolesHeld;
+    if (session == null || roles == null) return;
+    await roles.refresh();
+    if (!mounted) return;
+    final member = roles.landedOn(moved);
+    final target = _kit.sourcesFor(session).where((each) => (each.hostEntry ?? each.label) == moved.to.entry).firstOrNull;
+    if (member == null || target == null) {
+      store.roleFailed(session, 'role.problem.follow', AppText.of(context)('role.member_unknown', {'entry': moved.to.entry}), moved.role);
+      return;
+    }
+    await store.followRoleMove(
+      session,
+      moved,
+      target: target,
+      member: member,
+      start: (moving) async {
+        final client = await _agentFor(
+          place: moving.place,
+          entryName: moving.agent,
+          address: moving.endpoint?.toString(),
+          fallback: moving.websocketFallback?.toString(),
+          methodId: moving.method,
+          peerId: moving.peerId,
+          cacheLifetime: moving.cacheLifetime?.id,
+          overlays: moving.overlays?.toList(),
+          account: moving.account,
+        );
+        _ownedClients.add(client);
+        return client;
+      },
+    );
+  }
+
   /// Starts [draft]'s agent on its first message, on the source it names.
   Future<void> _startDraftOn(ChatSession draft) async {
     final source = draft.source;
@@ -3282,6 +3319,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.moveAccount = _switchAccount;
     store.defaultAccountOf = _defaultAccountOf;
     store.roles = _rolesHeld;
+    _roleMoves = _rolesHeld?.moves.listen((moved) => unawaited(_followRole(moved)));
     store.gitReader = _gitReaderFor;
     store.pathsOnHost ??= _pathsOnHost;
     if (_control case final control?) widget.rules?.useHost(HostPaths(control), up: () => _hostUp);
@@ -3412,6 +3450,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.pathsOnHost, _pathsOnHost)) store.pathsOnHost = null;
     widget.host?.removeListener(_hostChanged);
     unawaited(_reconnects?.cancel());
+    unawaited(_roleMoves?.cancel());
     if (identical(store.roles, _rolesHeld)) store.roles = null;
     _services.dispose();
     _dictation.dispose();
