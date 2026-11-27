@@ -231,6 +231,17 @@ try {
     await shot(sessionWindow, "session_after_send.png");
   });
 
+  await check("a paste key puts the clipboard's text in the composer once, in either backend", async () => {
+    const [width, height] = await sessionWindow.run("[innerWidth, innerHeight]");
+    await click(sessionWindow, width / 2, height - 46);
+    await waitFor("the keyboard in the composer", () => sessionWindow.run("/INPUT|TEXTAREA/.test(document.activeElement?.tagName ?? '')").catch(() => false), 10_000);
+    await sessionWindow.run("navigator.clipboard.writeText('PASTE')", { gesture: true });
+    await key(sessionWindow, keys.V);
+    const held = await sessionWindow.run("document.activeElement?.value ?? ''");
+    same(held.split("PASTE").length - 1, 1, `the composer holds ${JSON.stringify(held)}, PASTE`);
+    for (let i = 0; i < 5; i++) await key(sessionWindow, keys.Backspace);
+  });
+
   let terminalWindow;
   await check("a terminal opens in a window that types into the page's shell", async () => {
     await app.run("window.canoaWindowsOpenTerminal()", { gesture: true });
@@ -533,7 +544,11 @@ try {
   chrome?.kill();
   server.close();
   await sleep(1500);
-  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  try {
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  } catch {
+    // The browser may still hold its profile; the folder is in the temporary directory.
+  }
 }
 console.log(exitCode === 0 ? "PASSED" : "FAILED");
 process.exit(exitCode);
