@@ -1256,7 +1256,7 @@ impl Serving {
             &environments,
             Arc::clone(&assist),
         )?
-            .with_notices(Arc::clone(&notices));
+        .with_notices(Arc::clone(&notices));
         let mut serving = Self {
             shared: Arc::new(Shared {
                 services: Arc::clone(&services),

@@ -60,8 +60,9 @@ pub use types::{
     DEFAULT_MAX_MESSAGE_BYTES, DEFAULT_MAX_PEERS, DEFAULT_MAX_SESSIONS, DEFAULT_PRESET,
     DelegateConfig, Extension, ExtensionCheck, HarnessTable, HistoryConfig, KbConfig, KbEmbedder,
     KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME, MAX_TITLE, McpChoice, McpListConfig,
-    NativeConfig, NetworkConfig, NotificationsConfig, NotifierConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, SdkTable,
-    StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
+    NativeConfig, NetworkConfig, NotificationsConfig, NotifierConfig, OpenerConfig, Preset,
+    RemoteAgent, ResolvedLoadout, SdkTable, StoreConfig, UnknownLoadout, UnknownPreset,
+    UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
