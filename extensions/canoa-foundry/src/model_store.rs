@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use canoa::store::models::{
-    Fact, ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
-    ModelSettings, ModelStore, ModelStoreInfo, ModelVariant, RowAction, Section, ServedModel,
-    ServiceQuery, ServiceReport, SpeechService, SpeechUse, last_words, run,
+    Fact, ModelAct, ModelActed, ModelBuild, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
+    ModelSettings, ModelStore, ModelStoreInfo, RowAction, Section, ServedModel, ServiceQuery,
+    ServiceReport, SpeechService, SpeechUse, last_words, run,
 };
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -290,7 +290,7 @@ fn window_section(model: &models::Model, home: Option<&Path>) -> Section {
 }
 
 /// One build of a model: where it stands, what hardware it is for, what its buttons do and what its part of the page shows.
-fn variant_of(model: &models::Model, home: Option<&Path>) -> ModelVariant {
+fn build_of(model: &models::Model, home: Option<&Path>) -> ModelBuild {
     let row = &model.row;
     let stand = if model.loaded {
         "Loaded"
@@ -317,7 +317,7 @@ fn variant_of(model: &models::Model, home: Option<&Path>) -> ModelVariant {
     let whisper = format!("{} {}", row.id, row.alias.as_deref().unwrap_or_default())
         .to_ascii_lowercase()
         .contains("whisper");
-    let mut variant = ModelVariant::new(
+    let mut variant = ModelBuild::new(
         row.id.clone(),
         if label.is_empty() {
             row.id.clone()
@@ -414,10 +414,10 @@ fn row_of(entry: &models::Entry, home: Option<&Path>) -> ModelRow {
         .facts
         .push(Fact::new("Builds", entry.variants.len().to_string()));
     shown.actions = entry_actions(entry);
-    shown.variants = entry
+    shown.builds = entry
         .variants
         .iter()
-        .map(|variant| variant_of(variant, home))
+        .map(|variant| build_of(variant, home))
         .collect();
     shown
 }
@@ -804,16 +804,16 @@ mod tests {
             "no file of its own, so the host shows it as not verified"
         );
         let ids: Vec<_> = row
-            .variants
+            .builds
             .iter()
             .map(|variant| variant.id.as_str())
             .collect();
         assert_eq!(ids, ["qwen3-14b-generic-cpu:3", "qwen3-14b-generic-gpu:2"]);
-        assert_eq!(row.variants[1].label, "GPU · Some");
-        assert!(row.variants[1].installed && !row.variants[0].installed);
-        assert!(row.variants.iter().all(|variant| variant.speech.is_none()));
+        assert_eq!(row.builds[1].label, "GPU · Some");
+        assert!(row.builds[1].installed && !row.builds[0].installed);
+        assert!(row.builds.iter().all(|variant| variant.speech.is_none()));
         assert_eq!(
-            row.variants[1]
+            row.builds[1]
                 .sections
                 .iter()
                 .map(|section| section.settings)
@@ -832,7 +832,7 @@ mod tests {
             let mut model = models::merge(rows, &[], &[]).remove(0);
             model.cached = true;
             model.loaded = loaded;
-            variant_of(&model, None)
+            build_of(&model, None)
         };
         assert!(
             whisper(false)

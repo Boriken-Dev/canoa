@@ -51,7 +51,7 @@ fn the_catalog_is_one_row_for_each_alias_with_the_cache_listing_saying_which_bui
     let row = &listed.models[0];
     assert_eq!(row.id, "deepseek-r1-14b");
     let builds: Vec<_> = row
-        .variants
+        .builds
         .iter()
         .map(|variant| (variant.id.as_str(), variant.installed))
         .collect();

@@ -261,15 +261,15 @@ fn a_model_is_installed_then_loaded_then_unloaded_then_removed_and_the_listing_f
     assert_eq!(first["tags"], json!(["chat", "gpu"]));
     assert_eq!(steps(&first), ["download"]);
     assert_eq!(first["actions"][0]["removes"], false);
-    assert_eq!(first["variants"][0]["id"], ID);
-    assert_eq!(first["variants"][0]["label"], "GPU");
+    assert_eq!(first["builds"][0]["id"], ID);
+    assert_eq!(first["builds"][0]["label"], "GPU");
     assert_eq!(
         first["verified"],
         Value::Null,
         "Foundry Local states no digest"
     );
     assert_eq!(first["values"], json!({}));
-    assert_eq!(first["variants"][0]["values"], json!({}));
+    assert_eq!(first["builds"][0]["values"], json!({}));
 
     // A model that is not downloaded is refused with the program's own words, and stays unloaded.
     let early = held.act(ID, "load").expect_err("not downloaded");
@@ -283,7 +283,7 @@ fn a_model_is_installed_then_loaded_then_unloaded_then_removed_and_the_listing_f
     let installed = held.row(ALIAS);
     assert_eq!(steps(&installed), ["remove"]);
     assert_eq!(installed["actions"][0]["removes"], true);
-    assert_eq!(steps_of(&installed["variants"][0]["actions"][0]), ["load"]);
+    assert_eq!(steps_of(&installed["builds"][0]["actions"][0]), ["load"]);
 
     let done = held.act(ID, "load").expect("loaded");
     assert!(
@@ -306,7 +306,7 @@ fn a_model_is_installed_then_loaded_then_unloaded_then_removed_and_the_listing_f
     assert_eq!(listed["models"][0]["id"], ALIAS, "loaded first");
     assert_eq!(listed["models"][0]["state"], "Loaded");
     assert_eq!(
-        steps_of(&held.row(ALIAS)["variants"][0]["actions"][0]),
+        steps_of(&held.row(ALIAS)["builds"][0]["actions"][0]),
         ["unload"]
     );
 
@@ -448,7 +448,7 @@ fn a_downloaded_model_page_says_its_own_window_and_where_the_form_goes() {
     held.cached_model(ID, 40960, 8192);
     held.act(ID, "download").expect("downloaded");
     let row = held.row(ALIAS);
-    let window = &row["variants"][0]["sections"][0];
+    let window = &row["builds"][0]["sections"][0];
     assert_eq!(window["title"], "Window");
     assert_eq!(window["settings"], true);
     assert_eq!(
@@ -469,7 +469,7 @@ fn a_downloaded_model_page_says_its_own_window_and_where_the_form_goes() {
         .as_array()
         .expect("rows")
         .iter()
-        .flat_map(|row| row["variants"].as_array().expect("builds"))
+        .flat_map(|row| row["builds"].as_array().expect("builds"))
         .filter(|build| build["speech"].is_object())
         .filter_map(|build| build["id"].as_str())
         .collect();
@@ -491,7 +491,7 @@ fn a_setting_is_kept_in_canoa_cfg_per_model_held_to_the_models_own_limit_and_tak
     let text = held.config();
     assert!(text.contains("models") && text.contains("16384"), "{text}");
     assert_eq!(
-        held.row(ALIAS)["variants"][0]["values"],
+        held.row(ALIAS)["builds"][0]["values"],
         json!({"window": 16384}),
         "a build keeps its settings under its own id"
     );
@@ -509,7 +509,7 @@ fn a_setting_is_kept_in_canoa_cfg_per_model_held_to_the_models_own_limit_and_tak
         "{capped}"
     );
     assert_eq!(
-        held.row(ALIAS)["variants"][0]["values"],
+        held.row(ALIAS)["builds"][0]["values"],
         json!({"window": 40960})
     );
 

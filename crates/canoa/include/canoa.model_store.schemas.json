@@ -520,7 +520,7 @@
               "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`]. A model whose program fetches and keeps its own files has none, and the host shows it as not verified.",
               "default": []
             },
-            "variants": {
+            "builds": {
               "type": "array",
               "items": {
                 "type": "object",
@@ -998,7 +998,7 @@
         "description": "The files that are the model, which the host downloads for [`STEP_FETCH_FILES`] and takes away for [`STEP_DELETE_FILES`]. A model whose program fetches and keeps its own files has none, and the host shows it as not verified.",
         "default": []
       },
-      "variants": {
+      "builds": {
         "type": "array",
         "items": {
           "type": "object",

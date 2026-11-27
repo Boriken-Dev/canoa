@@ -233,7 +233,7 @@ pub struct RowAction {
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
-pub struct ModelVariant {
+pub struct ModelBuild {
     /// The name the other methods take for this build.
     pub id: String,
     /// What tells it from the model's other builds, in a few words.
@@ -309,7 +309,7 @@ pub struct ModelRow {
     pub files: Vec<ModelFile>,
     /// The builds of the model, when it has several; `actions` then act on the model as a whole and the program picks the build.
     #[map(default)]
-    pub variants: Vec<ModelVariant>,
+    pub builds: Vec<ModelBuild>,
 }
 
 /// One way a row can be run, which the tile shows as a pill.
@@ -851,7 +851,7 @@ impl RowAction {
     }
 }
 
-impl ModelVariant {
+impl ModelBuild {
     /// A build named `id`, told from the others by `label`, standing as `summary` says, with nothing else.
     #[must_use]
     pub fn new(
@@ -901,7 +901,7 @@ impl ModelRow {
             speech: None,
             engines: Vec::new(),
             files: Vec::new(),
-            variants: Vec::new(),
+            builds: Vec::new(),
         }
     }
 }

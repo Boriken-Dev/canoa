@@ -43,7 +43,7 @@ const _grants = ['config.read', 'config.write', 'store.read', 'store.programs', 
 
 /// The model the stand-in for the Foundry Local program lists: one row per alias, its builds inside.
 const _model = 'qwen3-14b';
-const _variant = 'qwen3-14b-generic-gpu:2';
+const _build = 'qwen3-14b-generic-gpu:2';
 
 void main() {
   final skip = _hostBinary == null
@@ -179,7 +179,7 @@ peers = [${jsonEncode(browserId)}]
     final listed = [for (final model in models.models) model.id];
     expect(listed, contains(_model));
     final row = models.models.firstWhere((model) => model.id == _model);
-    expect([for (final variant in row.variants) variant.id], contains(_variant));
+    expect([for (final build in row.builds) build.id], contains(_build));
     expect(row.summary, isNotEmpty);
     expect(row.actions, isNotEmpty, reason: 'a model that is not downloaded can be');
     expect(row.actions.first.steps, isNotEmpty);

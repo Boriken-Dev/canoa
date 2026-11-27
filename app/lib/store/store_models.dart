@@ -68,7 +68,7 @@ final class ModelEngine {
   final bool installed;
 
   /// The forms its file is written in at install, the first the default; empty when the install offers no choice.
-  final List<ModelBuild> builds;
+  final List<ModelVariant> variants;
 }
 
 /// What + does for a model once the person has read what it takes.
@@ -477,8 +477,8 @@ List<ExtensionStoreItem> _itemsOf(TypeModels models) {
         installed: model.on,
         verified: model.verified,
         engines: [for (final engine in model.engines) StoreEngine(id: engine.id, label: engine.label, installed: engine.installed)],
-        install: model.installAction == null ? null : (context) => _choose(context, models, model.id, model.installAction!),
-        remove: model.removeAction == null ? null : (context) => _choose(context, models, model.id, model.removeAction!),
+        install: model.installAction == null ? null : (context) => _choose(context, models, model.id, model.installAction!, model.engines),
+        remove: model.removeAction == null ? null : (context) => _choose(context, models, model.id, model.removeAction!, model.engines),
         details: (context, config) => ModelPage(models: models, id: model.id),
       ),
   ];
