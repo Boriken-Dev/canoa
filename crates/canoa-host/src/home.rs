@@ -1,5 +1,5 @@
 //! The directory of a host's identity and trust store, and the lock that keeps two hosts off it. The directory's layout is
-//! [`coqui_agentic_peer::home`]'s; this names any directory rather than only the one this user's environment gives.
+//! [`agentic_peer::home`]'s; this names any directory rather than only the one this user's environment gives.
 //!
 //! The lock is the operating system's, so a holder that dies gives it up however it died and a process id used again by
 //! something else proves nothing. On Unix it is on the home's directory itself, which no file removed from it takes away;
@@ -18,9 +18,9 @@ use std::fs::{self, File, TryLockError};
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
+use agentic_peer::home::{self, METHOD_FILE, identity_file};
 use cabuya::Error;
 use cabuya::auth::{Identity, Method};
-use coqui_agentic_peer::home::{self, METHOD_FILE, identity_file};
 use coqui_peer_webcrypto::TrustStore;
 use serde_json::{Value, json};
 
@@ -152,7 +152,7 @@ impl Home {
     }
 
     /// The identity of `method`, made when absent; with no method, the one the home records, else the one it holds, else a
-    /// new one of the default method. It then records that method, as [`coqui_agentic_peer::home`] does for its own.
+    /// new one of the default method. It then records that method, as [`agentic_peer::home`] does for its own.
     ///
     /// # Errors
     ///

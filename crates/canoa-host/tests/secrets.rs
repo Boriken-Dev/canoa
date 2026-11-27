@@ -15,13 +15,13 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
+use agentic_peer::home::identity_file;
 use cabuya::auth::{self, Identity, Sealed};
 use coqui_acp::secret::{
     CAPABILITY, Capability, DEFAULT_LIFETIME, IdentityId, Limits, Method, Prover, Receiver,
     RequestParams, RequestReply, ShowDeliver, ShowDone, ShowOpen, ShowOpened, Verifier,
     unprotected,
 };
-use coqui_agentic_peer::home::identity_file;
 use coqui_transport::Channel as _;
 use coqui_transport_web::Dialer as _;
 use coqui_transport_web::websocket::{self, Frames};

@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use coqui_agentic_peer::companion::{read_message_up_to, write_message};
+use agentic_peer::companion::{read_message_up_to, write_message};
 use coqui_transport::{Channel, Failure};
 use coqui_transport_web::frame;
 use data_encoding::BASE64;

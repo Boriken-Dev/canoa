@@ -331,10 +331,10 @@ pub(super) fn native(action: NativeAction, front: &dyn Front) -> Result<(), Fail
                 .iter()
                 .map(|browser| match browser {
                     NativeBrowser::Chrome | NativeBrowser::ChromeForTesting => {
-                        coqui_agentic_peer::companion::Browser::Chrome
+                        agentic_peer::companion::Browser::Chrome
                     }
-                    NativeBrowser::Edge => coqui_agentic_peer::companion::Browser::Edge,
-                    NativeBrowser::Chromium => coqui_agentic_peer::companion::Browser::Chromium,
+                    NativeBrowser::Edge => agentic_peer::companion::Browser::Edge,
+                    NativeBrowser::Chromium => agentic_peer::companion::Browser::Chromium,
                 })
                 .collect();
             let options = crate::native::Install {

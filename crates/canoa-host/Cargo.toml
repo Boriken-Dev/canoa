@@ -83,7 +83,7 @@ coqui-acp-hub.workspace = true
 coqui-acp-provider.workspace = true
 coqui-aos = { workspace = true, features = ["index", "embeddings"] }
 coqui-a2a.workspace = true
-coqui-agentic-peer.workspace = true
+agentic-peer.workspace = true
 cabuya.workspace = true
 coqui-peer.workspace = true
 coqui-peer-webcrypto.workspace = true

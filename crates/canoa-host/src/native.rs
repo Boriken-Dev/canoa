@@ -15,8 +15,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use coqui_agentic_peer::Error;
-use coqui_agentic_peer::companion::{self, Browser, Registration};
+use agentic_peer::Error;
+use agentic_peer::companion::{self, Browser, Registration};
 use coqui_transport_pipe::{OsIdentity, ReadTimeout as _};
 use coqui_transport_web::frame;
 use data_encoding::BASE64;

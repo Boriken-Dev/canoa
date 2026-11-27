@@ -136,7 +136,7 @@ dependencies = [
 [[package]]
 name = "coqui-peer-noise"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-peer-noise?rev=bb4b538a8f2e2a02b9b6271b002d66668bd0bd7b#bb4b538a8f2e2a02b9b6271b002d66668bd0bd7b"
+source = "git+https://github.com/Boriken-Dev/coqui-peer-noise?rev=518dd9f5693161d74af7b2ddb27ac0c4061b35b9#518dd9f5693161d74af7b2ddb27ac0c4061b35b9"
 dependencies = [
  "aes-gcm",
  "coqui-builder",

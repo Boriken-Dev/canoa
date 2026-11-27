@@ -10,7 +10,7 @@
 use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
-use coqui_agentic_peer::discovery::{self, DirectoryCheck};
+use agentic_peer::discovery::{self, DirectoryCheck};
 use serde_json::{Value, json};
 
 use super::BAD_PARAMS;
