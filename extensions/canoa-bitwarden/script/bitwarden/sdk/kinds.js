@@ -530,6 +530,64 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "approver",
+      "floor_hash": 3596803942,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "ask",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "wait",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "wait",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "withdraw",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "ticket",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "catalog_generator",
       "floor_hash": 1677861760,
       "object": false,
@@ -2705,6 +2763,14 @@ export const AccountSpeech = described["account_speech"];
  * no connection opened.
  */
 export const AccountSpeechOutput = described["account_speech_output"];
+
+/**
+ * An approver. One instance is one configuration of one provider (an entry of `[permissions.approvers]`); its settings are the
+ * provider's own schema.
+ *
+ * An error from `ask` or `wait` is an abstain: the host logs it and goes on to the others. It never answers.
+ */
+export const Approver = described["approver"];
 
 /**
  * Where a catalog's text is made from what a content source holds.

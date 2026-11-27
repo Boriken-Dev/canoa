@@ -446,6 +446,42 @@ class AccountSpeechOutput(KindProtocol, Protocol, kind="account_speech_output", 
         ...
 
 
+class Approver(KindProtocol, Protocol, kind="approver", floor_hash=3596803942):
+    """An approver. One instance is one configuration of one provider (an entry of `[permissions.approvers]`); its settings are the
+    provider's own schema.
+
+    An error from `ask` or `wait` is an abstain: the host logs it and goes on to the others. It never answers.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What it is. Cheap, and the same on every call."""
+        ...
+
+    @required
+    @fallible
+    def ask(self, request: Ref) -> ValueAnswer:
+        """Puts `request` to it, and returns at once: an answer, a ticket to wait on, or an abstain."""
+        ...
+
+    @required
+    @fallible
+    def wait(self, wait: Ref) -> ValueAnswer:
+        """Looks at a wait it gave a ticket for, for up to `wait` milliseconds: still waiting, an answer, or an abstain for a ticket that
+        is gone. An instant approver answers an abstain.
+        """
+        ...
+
+    @required
+    @fallible
+    def withdraw(self, ticket: Ref) -> None:
+        """Ends a wait that is no longer needed (the request was answered elsewhere, or the turn ended); ending one that is gone is no
+        error.
+        """
+        ...
+
+
 class ContentHost(KindProtocol, Protocol, kind="content_host", floor_hash=1967041331, is_object=True):
     """What the host lends a [`CatalogGeneratorProvider`] to read with: any registered scheme, through the same registry, route and
     trust rules as the host's own readers, and only the places the generator may read (the entry's `source` and below, and the
@@ -1597,4 +1633,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=883587
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "FileViewer", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "RouteLease", "NetworkRoute", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "Approver", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "FileViewer", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "RouteLease", "NetworkRoute", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

@@ -707,6 +707,57 @@ export interface AccountSpeechOutputRemote extends k.RemoteBase<typeof AccountSp
 export declare const AccountSpeechOutput: k.DescribedKind<AccountSpeechOutput, AccountSpeechOutputRemote, false>;
 
 /**
+ * An approver. One instance is one configuration of one provider (an entry of `[permissions.approvers]`); its settings are the
+ * provider's own schema.
+ *
+ * An error from `ask` or `wait` is an abstain: the host logs it and goes on to the others. It never answers.
+ *
+ * The `approver` kind: what a provider of it implements.
+ */
+export interface Approver {
+  /** What it is. Cheap, and the same on every call. */
+  describe(): unknown;
+  /** Puts `request` to it, and returns at once: an answer, a ticket to wait on, or an abstain. */
+  ask(request: g.Ref): unknown;
+  /**
+   * Looks at a wait it gave a ticket for, for up to `wait` milliseconds: still waiting, an answer, or an abstain for a ticket that
+   * is gone. An instant approver answers an abstain.
+   */
+  wait(wait: g.Ref): unknown;
+  /**
+   * Ends a wait that is no longer needed (the request was answered elsewhere, or the turn ended); ending one that is gone is no
+   * error.
+   */
+  withdraw(ticket: g.Ref): void;
+}
+
+/** A caller's handle on a `approver` table: a method per slot. */
+export interface ApproverRemote extends k.RemoteBase<typeof Approver> {
+  /** What it is. Cheap, and the same on every call. */
+  describe(): g.Value;
+  /** Puts `request` to it, and returns at once: an answer, a ticket to wait on, or an abstain. */
+  ask(request: unknown): g.Value;
+  /**
+   * Looks at a wait it gave a ticket for, for up to `wait` milliseconds: still waiting, an answer, or an abstain for a ticket that
+   * is gone. An instant approver answers an abstain.
+   */
+  wait(wait: unknown): g.Value;
+  /**
+   * Ends a wait that is no longer needed (the request was answered elsewhere, or the turn ended); ending one that is gone is no
+   * error.
+   */
+  withdraw(ticket: unknown): void;
+}
+
+/**
+ * An approver. One instance is one configuration of one provider (an entry of `[permissions.approvers]`); its settings are the
+ * provider's own schema.
+ *
+ * An error from `ask` or `wait` is an abstain: the host logs it and goes on to the others. It never answers.
+ */
+export declare const Approver: k.DescribedKind<Approver, ApproverRemote, false>;
+
+/**
  * Where a catalog's text is made from what a content source holds.
  *
  * `generate` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last
