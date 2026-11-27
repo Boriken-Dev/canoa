@@ -56,7 +56,7 @@ void main() {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             for (final size in [16.0, 24.0, 64.0, 256.0]) ...[
-              CanoaMark(size: size, color: const Color(0xFF6DE2D2)),
+              CanoaMark(size: size, color: const Color(0xFFD9A066)),
               const SizedBox(width: 8),
             ],
           ],

@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:canoa/brand.dart';
 import 'package:canoa/theme/canoa_mark.dart';
+import 'package:canoa/theme/look.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -15,6 +17,13 @@ void main() {
     expect(Brand.envPrefix, file['env_prefix']);
     expect(Brand.accentHex.toUpperCase(), (file['accent'] as String).toUpperCase());
     expect(Brand.markJson, isEmpty);
+  });
+
+  String hex(Color c) => '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}'.toUpperCase();
+
+  test('the brand file draws the mark in the default look\'s accent, light and dark', () {
+    expect((file['accent'] as String).toUpperCase(), hex(lookFor(LookId.canoa, Brightness.light).accent));
+    expect((file['accent_on_dark'] as String).toUpperCase(), hex(lookFor(LookId.canoa, Brightness.dark).accent));
   });
 
   test('an environment variable carries the brand prefix', () {

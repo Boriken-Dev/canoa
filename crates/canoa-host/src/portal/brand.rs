@@ -333,9 +333,9 @@ mod tests {
         assert_eq!(brand.name_html(), "Canoa");
         assert!(brand.mark().starts_with("<svg class=\"mark\""));
         assert!(!brand.mark().contains("<title") && !brand.mark().contains("<!--"));
-        assert!(brand.css().contains("--mark: #3dafa1"));
-        assert!(brand.css().contains("--mark: #6de2d2"));
-        assert!(brand.css().contains("[fill=\"#3DAFA1\" i]"));
+        assert!(brand.css().contains("--mark: #9a5b1e"));
+        assert!(brand.css().contains("--mark: #d9a066"));
+        assert!(brand.css().contains("[fill=\"#9A5B1E\" i]"));
     }
 
     #[test]
@@ -357,8 +357,8 @@ mod tests {
         ] {
             assert!(css.contains(colour), "{colour}");
         }
-        // The brand's teal is the mark's alone.
-        assert!(!css.contains("--accent: #3dafa1") && !css.contains("--accent: #6de2d2"));
+        // The mark is drawn in the default look's own accent, so the buttons and the mark agree.
+        assert!(css.contains("--mark: #9a5b1e") && css.contains("--mark: #d9a066"));
     }
 
     /// The default look's amber already holds 4.5 on its card, so the check moves nothing.
@@ -384,7 +384,7 @@ mod tests {
         let card = scheme("light").card;
         let night = scheme("dark").card;
         for (accent, dark) in [
-            ("#3DAFA1", "#6DE2D2"),
+            ("#3D6DAF", "#7FA8E6"),
             ("#ffff00", "#101010"),
             ("#000000", "#ffffff"),
         ] {

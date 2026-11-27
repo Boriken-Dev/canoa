@@ -14,7 +14,7 @@ import 'package:canoa/theme/look.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const _teal = Color(0xFF3DAFA1), _red = Color(0xFFC0392B);
+const _amber = Color(0xFF9A5B1E), _red = Color(0xFFC0392B);
 
 Future<List<int>> _solidPixels(Uint8List png) async {
   final codec = await ui.instantiateImageCodec(png);
@@ -33,9 +33,9 @@ void main() {
 
   testWidgets('the mark is drawn in the accent it is given, and two accents give two icons', (tester) async {
     await tester.runAsync(() async {
-      final one = await renderMarkPng(_teal, 32);
+      final one = await renderMarkPng(_amber, 32);
       final other = await renderMarkPng(_red, 32);
-      expect(await _solidPixels(one), [0x3DAFA1]);
+      expect(await _solidPixels(one), [0x9A5B1E]);
       expect(await _solidPixels(other), [0xC0392B]);
       expect(one, isNot(other));
     });
@@ -64,7 +64,7 @@ void main() {
     await tester.runAsync(() async {
       final folder = await Directory.systemTemp.createTemp('tray_icon_test');
       addTearDown(() => folder.delete(recursive: true));
-      final first = await writeTrayIcon(_teal, ico: true, folder: folder);
+      final first = await writeTrayIcon(_amber, ico: true, folder: folder);
       final second = await writeTrayIcon(_red, ico: true, folder: folder);
       expect(first, isNot(second));
       expect(second, endsWith('tray-c0392b.ico'));

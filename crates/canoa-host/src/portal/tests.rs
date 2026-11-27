@@ -1857,10 +1857,9 @@ fn the_pages_carry_the_builds_brand() {
     let policy = login.header("content-security-policy").unwrap();
     assert!(policy.contains("img-src 'self'"));
     let css = call(rig.addr, "GET", "/portal/login.css", &[], "");
-    assert!(css.body.contains("--mark: #3dafa1") && css.body.contains("--mark: #6de2d2"));
-    // The brand's teal draws the mark; the buttons and links are the default look's amber.
+    assert!(css.body.contains("--mark: #9a5b1e") && css.body.contains("--mark: #d9a066"));
+    // The default brand draws the mark in the default look's accent, which the buttons and links use too.
     assert!(css.body.contains("--accent: #9a5b1e") && css.body.contains("--accent: #d9a066"));
-    assert!(!css.body.contains("--accent: #3dafa1") && !css.body.contains("--accent: #6de2d2"));
     let icon = call(rig.addr, "GET", "/portal/icon.svg", &[], "");
     assert_eq!(icon.status, 200);
     assert!(
@@ -1868,7 +1867,7 @@ fn the_pages_carry_the_builds_brand() {
             .unwrap()
             .starts_with("image/svg+xml")
     );
-    assert!(icon.body.contains("<svg") && icon.body.contains("#3DAFA1"));
+    assert!(icon.body.contains("<svg") && icon.body.contains("#9A5B1E"));
     let cookie = signed_in(&rig, "canoatesta");
     for path in [CERTIFICATE, FACTOR, PASSKEYS] {
         let page = call(rig.addr, "GET", path, &[("Cookie", cookie.clone())], "");
@@ -1911,7 +1910,7 @@ fn a_brand_file_changes_the_name_the_mark_and_the_accent() {
     let css = call(rig.addr, "GET", "/portal/login.css", &[], "");
     assert!(css.body.contains("--mark: #aa2200") && css.body.contains("--mark: #ffb09a"));
     assert!(css.body.contains("[fill=\"#aa2200\" i]"));
-    assert!(!css.body.contains("#3dafa1"));
+    assert!(!css.body.contains("[fill=\"#9a5b1e\" i]"));
     let icon = call(rig.addr, "GET", "/portal/icon.svg", &[], "");
     assert!(icon.body.contains("<rect"));
     let cookie = signed_in(&rig, "canoatesta");
