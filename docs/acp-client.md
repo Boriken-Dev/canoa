@@ -286,7 +286,7 @@ what the app can do, the other sessions to go to and the agent's own commands; t
 left. A command chosen there is written into the message, not sent.
 
 Ctrl+= and Ctrl+- make the whole interface larger and smaller, one step at a time, and Ctrl+0 draws it at its own size; the factor is
-`[appearance] zoom` in canoa.cfg, also chosen in Settings, Appearance.
+`[appearance] zoom` in {{ config_file }}, also chosen in Settings, Appearance.
 
 ## A side chat
 
