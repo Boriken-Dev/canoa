@@ -45,8 +45,11 @@ final class FakeRolesHost implements RolesHost {
   final resolutions = <String, RoleResolution>{};
   String? refusal;
 
-  /// What `roles/resolve` answers once the caller names the member it runs on: where the host would move it.
-  final movedOn = <String, RoleResolution>{};
+  /// How many times the roles were listed.
+  int listCalls = 0;
+
+  /// What `roles/served` answers, by `entry/session`; a session it holds no record of is a host failure.
+  final served_ = <String, RoleServedInfo>{};
   String? listFails;
   final resolves = <({String role, String? model, String? current})>[];
 
@@ -61,6 +64,17 @@ final class FakeRolesHost implements RolesHost {
   String? writeRefusal;
 
   final _moves = StreamController<RoleMoved>.broadcast();
+  final _asks = StreamController<RoleAskPush>.broadcast();
+
+  /// The host holds a move for the person's yes.
+  void ask(RoleAskPush push) => _asks.add(push);
+
+  @override
+  Stream<RoleAskPush> get asks => _asks.stream;
+
+  @override
+  Future<RoleServedInfo> served(String entry, String session) async =>
+      served_['$entry/$session'] ?? (throw StateError('no record of $session'));
 
   /// The host moves a session on by itself.
   void move(RoleMoved moved) => _moves.add(moved);
@@ -70,6 +84,7 @@ final class FakeRolesHost implements RolesHost {
 
   @override
   Future<List<RoleInfo>> list() async {
+    listCalls++;
     if (listFails != null) throw StateError(listFails!);
     return List.of(roles);
   }
@@ -78,7 +93,6 @@ final class FakeRolesHost implements RolesHost {
   Future<RoleResolution> resolve(String role, {String? model, String? current}) async {
     resolves.add((role: role, model: model, current: current));
     if (refusal != null) throw RoleRefused(refusal!);
-    if (current != null && movedOn.containsKey(role)) return movedOn[role]!;
     return resolutions[role] ?? (throw StateError('no resolution for $role'));
   }
 
@@ -113,5 +127,8 @@ final class FakeRolesHost implements RolesHost {
     roles.removeWhere((each) => each.name == name);
   }
 
-  Future<void> close() => _moves.close();
+  Future<void> close() async {
+    await _moves.close();
+    await _asks.close();
+  }
 }

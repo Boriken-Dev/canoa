@@ -84,13 +84,36 @@ extension SessionRoles on SessionStore {
     _notify();
   }
 
-  /// The open session the host moved ([moved]'s from end), when this app has it open.
-  ChatSession? sessionMoved(RoleMoved moved) {
+  /// The open session at [end], when this app has it open.
+  ChatSession? sessionAt(RoleEnd end) {
     for (final session in _sessions) {
-      if (session.isDraft || session.remoteSessionId != moved.from.session) continue;
-      if ((session.source?.hostEntry ?? session.agent) == moved.from.entry) return session;
+      if (session.isDraft || session.remoteSessionId != end.session) continue;
+      if ((session.source?.hostEntry ?? session.agent) == end.entry) return session;
     }
     return null;
+  }
+
+  /// The open session the host moved ([moved]'s from end), when this app has it open.
+  ChatSession? sessionMoved(RoleMoved moved) => sessionAt(moved.from);
+
+  /// Restores the "served by" line of [session], opened again from the list: the host's record of its turns says which role served
+  /// the last of them and by which member. Asked once per session; a session no role served keeps no line.
+  void restoreRole(ChatSession session) {
+    final roles = this.roles, id = session.remoteSessionId;
+    if (roles == null || id == null || session.isDraft || session.roleServing != null || session.roleRestored) return;
+    session.roleRestored = true;
+    unawaited(() async {
+      try {
+        final served = await roles.served(session.source?.hostEntry ?? session.agent, id);
+        final role = served.role, member = served.member;
+        if (_disposed || role == null || member == null || session.roleServing != null) return;
+        if (!roles.asked) await roles.refresh();
+        session.roleServing = RoleServing(role: role, title: roles.named(role)?.label ?? role, member: member);
+        _notify();
+      } on Object {
+        // A host with no record of the session, or none to ask, leaves it without a line.
+      }
+    }());
   }
 
   /// Follows a move the host made on its own: the conversation goes on in the same tab, at the session id on [target]'s entry that the
@@ -187,24 +210,18 @@ extension SessionRoles on SessionStore {
     return true;
   }
 
-  /// When a role whose handover is `ask` has a session whose member has run out and the next one is of another harness, offers the
-  /// person the move: the host holds it until they say yes. Asked of the host as the turn ends, once, and nothing moves by itself.
-  void _watchRoleHandover(ChatSession session) {
-    final roles = this.roles, serving = session.roleServing;
-    if (roles == null || serving == null || session.isDraft || session.roleAsk != null || _moving.contains(session.id)) return;
-    final info = roles.named(serving.role);
-    if (info == null || info.handover != 'ask') return;
-    unawaited(() async {
-      try {
-        final next = await roles.resolve(serving.role, current: serving.member.id);
-        if (_disposed || !next.moved || next.sameHarness || next.member.id == serving.member.id) return;
-        if (session.roleServing?.member.id != serving.member.id) return;
-        session.roleAsk = RoleAsk(role: serving.role, from: serving.member, to: next.member, left: next.left);
-        _notify();
-      } on Object {
-        // A host that cannot say, or has no member left, leaves the conversation as it is.
-      }
-    }());
+  /// The host holds a move of a session for the person's yes: the conversation it names asks "Continue on Y?", and nothing moves until
+  /// the person says so. A session this app does not have open is not asked about.
+  void askRole(RoleAskPush push) {
+    final roles = this.roles, session = sessionAt(push.from);
+    if (roles == null || session == null) return;
+    session.roleAsk = RoleAsk(
+      role: push.role,
+      from: session.roleServing?.member ?? RoleMember(id: '', agent: push.from.entry),
+      to: roles.memberAt(push.role, push.to),
+      left: push.reason,
+    );
+    _notify();
   }
 
   /// The person's yes: the host runs the move it holds, and the conversation follows it when it says where it went.

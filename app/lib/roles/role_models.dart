@@ -239,10 +239,23 @@ final class RoleEnd {
   final String entry, session;
 }
 
-/// The host moved a role's session to its next member: the conversation now lives at [to], and what the import could not carry is
-/// in [losses] (`roles/moved`).
+/// The member a push names: its agent entry, and its account and model when it has them.
+final class RoleTarget {
+  const RoleTarget({required this.entry, this.account, this.model});
+
+  static RoleTarget? parse(Object? json) {
+    if (json is! Map || json['entry'] is! String) return null;
+    return RoleTarget(entry: json['entry'] as String, account: _text(json['account']), model: _text(json['model']));
+  }
+
+  final String entry;
+  final String? account, model;
+}
+
+/// The host moved a role's session to its next member: the conversation now lives at [to], on the member [member] names, and what the
+/// import could not carry is in [losses] (`roles/moved`).
 final class RoleMoved {
-  const RoleMoved({required this.role, required this.from, required this.to, this.replayed = false, this.losses = const []});
+  const RoleMoved({required this.role, required this.from, required this.to, this.member, this.replayed = false, this.losses = const []});
 
   static RoleMoved? parse(Object? json) {
     if (json is! Map || json['role'] is! String) return null;
@@ -258,8 +271,18 @@ final class RoleMoved {
         }
       }
     }
-    return RoleMoved(role: json['role'] as String, from: from, to: to, replayed: json['replayed'] == true, losses: losses);
+    return RoleMoved(
+      role: json['role'] as String,
+      from: from,
+      to: to,
+      member: RoleTarget.parse(json['member']),
+      replayed: json['replayed'] == true,
+      losses: losses,
+    );
   }
+
+  /// The member the session runs on now, as the host names it; null when it names none.
+  final RoleTarget? member;
 
   final String role;
   final RoleEnd from, to;
@@ -306,6 +329,41 @@ final class RoleServing {
     replayed: replayed,
     losses: losses,
   );
+}
+
+/// The host holds a move for the person's yes (`roles/ask`): the session [from] would go to [to], and [reason] says why.
+final class RoleAskPush {
+  const RoleAskPush({required this.role, required this.from, required this.to, this.reason});
+
+  static RoleAskPush? parse(Object? json) {
+    if (json is! Map || json['role'] is! String) return null;
+    final from = RoleEnd.parse(json['from']), to = RoleTarget.parse(json['to']);
+    if (from == null || to == null) return null;
+    return RoleAskPush(role: json['role'] as String, from: from, to: to, reason: _text(json['reason']));
+  }
+
+  final String role;
+  final RoleEnd from;
+  final RoleTarget to;
+  final String? reason;
+}
+
+/// What `roles/served` says of a session: the role and member of the last turn a role served, null when no role served it.
+final class RoleServedInfo {
+  const RoleServedInfo({this.role, this.member});
+
+  static RoleServedInfo parse(Object? json) {
+    final turns = json is Map && json['turns'] is List ? json['turns'] as List : const [];
+    for (final turn in turns.reversed) {
+      if (turn is! Map || _text(turn['role']) == null) continue;
+      final member = RoleMember.parse({...turn.cast<String, Object?>(), 'id': turn['member']});
+      return RoleServedInfo(role: _text(turn['role']), member: member);
+    }
+    return const RoleServedInfo();
+  }
+
+  final String? role;
+  final RoleMember? member;
 }
 
 /// A move the host holds for the person's yes (`handover = "ask"`): the member whose usage ran out, the one that would take over, and

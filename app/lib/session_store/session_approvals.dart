@@ -409,6 +409,8 @@ extension SessionApprovals on SessionStore {
     _watchContext(session, client);
     _watchHub(session, client);
     if (record) _record(session, client);
+    // A session opened again from the list says which role served it, when one did.
+    if (!record) restoreRole(session);
     unawaited(refreshGit(session));
     unawaited(refreshMcpInventory(session));
     _notify();

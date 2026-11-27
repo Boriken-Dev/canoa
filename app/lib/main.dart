@@ -57,7 +57,7 @@ import 'package:material_ui/material_ui.dart';
 import 'accounts/account_models.dart' show AccountEntry, AccountInfo, LimitHint, TurnAdvice, accountMeta, machineLogin, modelMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
-import 'roles/role_models.dart' show RoleMoved, RoleRefused, RoleResolution;
+import 'roles/role_models.dart' show RoleAskPush, RoleMoved, RoleRefused, RoleResolution;
 import 'roles/roles_controller.dart';
 import 'roles/roles_host.dart';
 import 'desktop/host_grants.dart';
@@ -1898,6 +1898,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   late final RolesController? _rolesHeld = _buildRoles();
   StreamSubscription<RoleMoved>? _roleMoves;
+  StreamSubscription<RoleAskPush>? _roleAsks;
 
   RolesController? _buildRoles() {
     final control = _control;
@@ -1937,6 +1938,12 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<String, Object?> _modelMeta(ChatSession draft) {
     final model = draft.pending.values.where((choice) => choice.role == OptionRole.model).firstOrNull?.value ?? draft.roleServing?.member.model;
     return model == null ? const {} : {modelMeta: model};
+  }
+
+  /// `initialize`'s `_meta` for the host profile the member a role gave [draft] runs with, when it names one.
+  Map<String, Object?> _roleProfileMeta(ChatSession draft) {
+    final profile = draft.roleServing?.member.profile;
+    return profile == null ? const {} : {hostProfileMeta: profile};
   }
 
   /// The open session that runs on [account], which a login that rotates its credential allows only one of.
@@ -2598,12 +2605,10 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _followRole(RoleMoved moved) async {
     final session = store.sessionMoved(moved), roles = _rolesHeld;
     if (session == null || roles == null) return;
-    await roles.refresh();
-    if (!mounted) return;
     final member = roles.landedOn(moved);
     final target = _kit.sourcesFor(session).where((each) => (each.hostEntry ?? each.label) == moved.to.entry).firstOrNull;
-    if (member == null || target == null) {
-      store.roleFailed(session, 'role.problem.follow', AppText.of(context)('role.member_unknown', {'entry': moved.to.entry}), moved.role);
+    if (target == null) {
+      store.roleFailed(session, 'role.problem.follow', AppText.of(context)('role.agent_missing', {'agent': moved.to.entry}), moved.role);
       return;
     }
     await store.followRoleMove(
@@ -2622,6 +2627,7 @@ class _CanoaAppState extends State<CanoaApp> {
           cacheLifetime: moving.cacheLifetime?.id,
           overlays: moving.overlays?.toList(),
           account: moving.account,
+          hostProfile: member.profile,
         );
         _ownedClients.add(client);
         return client;
@@ -2726,7 +2732,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// overlays for this session, which they are. Sent unasked, a name from canoa.cfg's own `[overlays]` would narrow an operator's
   /// profile of the entry by names that mean nothing there.
   Map<String, Object?> _startMeta(ChatSession draft) {
-    final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account), ..._modelMeta(draft)};
+    final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account), ..._modelMeta(draft), ..._roleProfileMeta(draft)};
     final asked = draft.overlays;
     final withLoadout = {...cache, ..._loadoutMeta(draft), ..._presetMeta(draft), clientMeta: ?_clientKind};
     if (widget.served == null || asked == null || config.overlays.isEmpty) return withLoadout;
@@ -2956,6 +2962,7 @@ class _CanoaAppState extends State<CanoaApp> {
         ..._cacheMeta(store.cacheLifetimeOf(draft)),
         ..._accountMeta(draft.account),
         ..._modelMeta(draft),
+        ..._roleProfileMeta(draft),
         ..._loadoutMeta(draft),
         ..._presetMeta(draft),
         if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),
@@ -3060,6 +3067,7 @@ class _CanoaAppState extends State<CanoaApp> {
     String? cacheLifetime,
     List<String>? overlays,
     String? account,
+    String? hostProfile,
   }) async {
     final VerifiedAgent client;
     if (widget.served != null && place == SessionPlace.local) {
@@ -3088,6 +3096,7 @@ class _CanoaAppState extends State<CanoaApp> {
           )),
           if (overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
           ..._accountMeta(account),
+          hostProfileMeta: ?hostProfile,
         });
       case SessionPlace.local:
         throw StateError('$entryName is not one of the sources of this computer now');
@@ -3321,6 +3330,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.defaultAccountOf = _defaultAccountOf;
     store.roles = _rolesHeld;
     _roleMoves = _rolesHeld?.moves.listen((moved) => unawaited(_followRole(moved)));
+    _roleAsks = _rolesHeld?.asks.listen(store.askRole);
     store.gitReader = _gitReaderFor;
     store.pathsOnHost ??= _pathsOnHost;
     if (_control case final control?) widget.rules?.useHost(HostPaths(control), up: () => _hostUp);
@@ -3452,6 +3462,7 @@ class _CanoaAppState extends State<CanoaApp> {
     widget.host?.removeListener(_hostChanged);
     unawaited(_reconnects?.cancel());
     unawaited(_roleMoves?.cancel());
+    unawaited(_roleAsks?.cancel());
     if (identical(store.roles, _rolesHeld)) store.roles = null;
     _services.dispose();
     _dictation.dispose();

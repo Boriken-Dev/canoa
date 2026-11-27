@@ -192,6 +192,9 @@ class ChatSession {
   /// nothing did.
   ({String key, String reason, String role})? roleProblem;
 
+  /// Whether the host has been asked which role served this session, as it is when a session is opened again from the list.
+  bool roleRestored = false;
+
   /// The move the host holds for the person's yes (the role's handover is `ask`); null when none waits.
   RoleAsk? roleAsk;
 

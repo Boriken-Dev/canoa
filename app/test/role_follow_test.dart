@@ -7,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'fixtures/app_fixture.dart';
-import 'fixtures/fake_roles.dart';
 import 'fixtures/options_agent.dart';
 import 'fixtures/role_scene.dart';
 
@@ -15,17 +14,10 @@ RoleMoved _moved({String toEntry = 'Codex', String toSession = 'o7', String from
   'role': 'planner',
   'from': {'entry': 'Claude', 'session': fromSession},
   'to': {'entry': toEntry, 'session': toSession},
+  'member': {'entry': toEntry, 'model': 'gpt-5'},
   'replayed': false,
   'losses': losses,
 })!;
-
-/// Claude has run out and Codex serves now, as the host lists it after the move.
-void _afterMove(FakeRolesHost roles) {
-  roles.roles[0] = roleOf('planner', [
-    memberJson('Claude', account: 'work', model: 'opus', effort: 'high', whyNot: {'member': 'Claude/work/opus/high/', 'why': 'five-hour window used up', 'until': 1796126640, 'allowance': true, 'unavailable': false}),
-    memberJson('Codex', model: 'gpt-5', serving: true),
-  ], title: 'Planner');
-}
 
 /// What the person said in [session], as its transcript holds it.
 List<String> _said(ChatSession session) => [for (final each in session.messages) if (each.role == MessageRole.user) each.text];
@@ -39,8 +31,8 @@ void main() {
     expect(session.remoteSessionId, 'o1');
     expect(_said(session), contains('Plan it'));
     final tabs = store.sessions.where((each) => !each.isDraft).length;
-    _afterMove(roles);
 
+    final lists = roles.listCalls;
     roles.move(_moved(losses: [
       {'kind': 'thinking', 'count': 3},
       'tool_as_note',
@@ -61,6 +53,7 @@ void main() {
     expect(find.textContaining('Planner moved from Claude · work · opus · high to Codex · gpt-5 at '), findsOneWidget);
     expect(find.textContaining('· 2 did not carry'), findsOneWidget);
     expect(session.roleProblem, isNull);
+    expect(roles.listCalls, lists, reason: 'the move names the member, so the roles are not read again');
     await finish(tester);
   });
 
@@ -69,7 +62,6 @@ void main() {
     final agent = OptionsAgent();
     final store = roleStore();
     final session = await startPlanner(tester, roles, agent, store);
-    _afterMove(roles);
     roles.move(_moved(fromSession: 'elsewhere'));
     await settle(tester, 150);
     expect(session.remoteSessionId, 'o1');
@@ -83,7 +75,6 @@ void main() {
     final agent = OptionsAgent();
     final store = roleStore();
     final session = await startPlanner(tester, roles, agent, store);
-    _afterMove(roles);
     roles.move(_moved(toEntry: 'Elsewhere'));
     await settle(tester, 200);
     expect(session.remoteSessionId, 'o1');
@@ -98,7 +89,6 @@ void main() {
     final agent = OptionsAgent();
     final store = roleStore();
     final session = await startPlanner(tester, roles, agent, store);
-    _afterMove(roles);
     agent.failNextStarts = 1;
     roles.move(_moved());
     await until(tester, () => session.roleProblem != null, 'the failure to be said');

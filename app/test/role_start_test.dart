@@ -4,6 +4,7 @@
 import 'package:canoa/accounts/account_models.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/profile/report.dart' show hostProfileMeta;
 import 'package:canoa/roles/role_models.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -30,12 +31,15 @@ FakeAccountsHost _accounts() => FakeAccountsHost(accounts: [account('work', kind
 
 final _claude = memberJson('Claude', account: 'work', model: 'opus', effort: 'high', serving: true);
 final _codex = memberJson('Codex', model: 'gpt-5');
+final _planned = memberJson('Claude', account: 'work', model: 'opus', profile: 'plan', serving: true);
 
 FakeRolesHost _roles({String handover = 'auto'}) => FakeRolesHost(roles: [
   roleOf('planner', [_claude, _codex], title: 'Planner', handover: handover),
   roleOf('reviewer', [_codex], title: 'Reviewer'),
+  roleOf('executor', [_planned], title: 'Executor'),
 ])
   ..resolutions['planner'] = RoleResolution.parse({'role': 'planner', 'member': _claude, 'moved': false, 'why': 'start', 'usage_known': true, 'same_harness': true, 'skipped': []})!
+  ..resolutions['executor'] = RoleResolution.parse({'role': 'executor', 'member': _planned, 'moved': false, 'why': 'start', 'usage_known': true, 'same_harness': true, 'skipped': []})!
   ..resolutions['reviewer'] = RoleResolution.parse({
     'role': 'reviewer',
     'member': _codex,
@@ -115,6 +119,30 @@ void main() {
     expect(session.roleServing?.member.model, 'opus');
     // Asked again when it starts, since the usage may have moved since the screen showed it.
     expect(roles.resolves.map((each) => each.role), ['planner', 'planner']);
+    await finish(tester);
+  });
+
+  testWidgets('the host profile of the member goes to the host when the role starts the session, and none is named when there is none', (tester) async {
+    final agent = OptionsAgent();
+    await _open(tester, _roles(), agent: agent);
+    await _choose(tester, 'executor');
+    await openFolder(tester);
+    await settle(tester);
+    await send(tester, 'Do it');
+    await settle(tester, 150);
+    expect(_meta(agent)[hostProfileMeta], 'plan');
+    await finish(tester);
+  });
+
+  testWidgets('a member with no profile names none', (tester) async {
+    final agent = OptionsAgent();
+    await _open(tester, _roles(), agent: agent);
+    await _choose(tester, 'planner');
+    await openFolder(tester);
+    await settle(tester);
+    await send(tester, 'Plan it');
+    await settle(tester, 150);
+    expect(_meta(agent).containsKey(hostProfileMeta), isFalse);
     await finish(tester);
   });
 

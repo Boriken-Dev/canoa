@@ -34,12 +34,20 @@ class RolesController extends ChangeNotifier {
 
   RoleInfo? named(String name) => _roles.where((each) => each.name == name).firstOrNull;
 
-  /// The member [moved] landed the session on: the one of [moved]'s role on the entry it went to that serves now, else the first of
-  /// that entry that can serve, else the first of it. The move names the entry and the session, not the member.
-  RoleMember? landedOn(RoleMoved moved) {
-    final there = [for (final each in named(moved.role)?.members ?? const <RoleMember>[]) if (each.agent == moved.to.entry) each];
-    return there.where((each) => each.serving).firstOrNull ?? there.where((each) => each.whyNot == null).firstOrNull ?? there.firstOrNull;
+  /// The member of [role] that [target] names: the one listed with that entry, account and model (which also has its effort and
+  /// profile), else one made of what the host said.
+  RoleMember memberAt(String role, RoleTarget target) {
+    final listed = named(role)?.members ?? const <RoleMember>[];
+    final match = listed
+        .where((each) => each.agent == target.entry && each.account == target.account && (target.model == null || each.model == target.model))
+        .firstOrNull;
+    return match ?? RoleMember(id: '', agent: target.entry, account: target.account, model: target.model);
   }
+
+  /// The member [moved] landed the session on, as the host names it.
+  RoleMember landedOn(RoleMoved moved) => memberAt(moved.role, moved.member ?? RoleTarget(entry: moved.to.entry));
+
+  Future<RoleServedInfo> served(String entry, String session) => host.served(entry, session);
 
   /// What the entry [entry] is called, as the app lists it; the entry's own name when it lists none.
   String agentName(String entry) => agents().where((each) => each.entry == entry).firstOrNull?.name ?? entry;
@@ -81,6 +89,8 @@ class RolesController extends ChangeNotifier {
   }
 
   Stream<RoleMoved> get moves => host.moves;
+
+  Stream<RoleAskPush> get asks => host.asks;
 
   void _notify() {
     if (!_disposed) notifyListeners();

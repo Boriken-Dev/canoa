@@ -30,18 +30,26 @@ abstract interface class RolesHost {
   /// Takes `[host.roles.NAME]` out of the person's layer of canoa.cfg.
   Future<void> removeRole(String name);
 
+  /// What a role served of the session [session] of [entry], from the host's record of its turns.
+  Future<RoleServedInfo> served(String entry, String session);
+
   /// The moves the host makes by itself, as it makes them.
   Stream<RoleMoved> get moves;
+
+  /// The moves the host holds for the person's yes, as it holds them.
+  Stream<RoleAskPush> get asks;
 }
 
 /// The host's roles over its control channel.
 final class ControlRolesHost implements RolesHost {
   ControlRolesHost(this._control) {
     _moves = StreamController<RoleMoved>.broadcast(onListen: _attach, onCancel: _detach);
+    _asks = StreamController<RoleAskPush>.broadcast(onListen: _attach, onCancel: _detach);
   }
 
   final HostControl _control;
   late final StreamController<RoleMoved> _moves;
+  late final StreamController<RoleAskPush> _asks;
   StreamSubscription<ControlPush>? _pushes;
   StreamSubscription<void>? _again;
   ControlClient? _heard;
@@ -62,13 +70,17 @@ final class ControlRolesHost implements RolesHost {
       await _pushes?.cancel();
       _heard = client;
       _pushes = client.pushes.listen((push) {
-        if (push.method != 'roles/moved') return;
-        final moved = RoleMoved.parse(push.params);
-        if (moved != null && !_moves.isClosed) _moves.add(moved);
+        if (push.method == 'roles/moved') {
+          final moved = RoleMoved.parse(push.params);
+          if (moved != null && !_moves.isClosed) _moves.add(moved);
+        } else if (push.method == 'roles/ask') {
+          final ask = RoleAskPush.parse(push.params);
+          if (ask != null && !_asks.isClosed) _asks.add(ask);
+        }
       });
     } on Object {
       // A host that is not up yet is tried again, a few times: the link announces itself only when it comes back after an earlier one.
-      if (attempt < _tries && _moves.hasListener) {
+      if (attempt < _tries && (_moves.hasListener || _asks.hasListener)) {
         _retry?.cancel();
         _retry = Timer(_pause, () => unawaited(_listen(attempt + 1)));
       }
@@ -80,6 +92,8 @@ final class ControlRolesHost implements RolesHost {
   Timer? _retry;
 
   void _detach() {
+    // The one link serves both streams: it is let go when neither is listened to.
+    if (_moves.hasListener || _asks.hasListener) return;
     _retry?.cancel();
     unawaited(_pushes?.cancel());
     unawaited(_again?.cancel());
@@ -90,6 +104,13 @@ final class ControlRolesHost implements RolesHost {
 
   @override
   Stream<RoleMoved> get moves => _moves.stream;
+
+  @override
+  Stream<RoleAskPush> get asks => _asks.stream;
+
+  @override
+  Future<RoleServedInfo> served(String entry, String session) async =>
+      RoleServedInfo.parse(await _call('roles/served', {'entry': entry, 'session': session}));
 
   @override
   Future<List<RoleInfo>> list() async {

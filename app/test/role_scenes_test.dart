@@ -15,15 +15,12 @@ import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 const _sizes = [('phone', Size(390, 844)), ('desktop', Size(1280, 800))];
 
-RoleResolution _next() => RoleResolution.parse({
+RoleAskPush _ask() => RoleAskPush.parse({
   'role': 'planner',
-  'member': codexMember,
-  'moved': true,
-  'why': 'exhausted',
-  'left': 'Claude: the five-hour window is used up, refills 15:04',
-  'usage_known': true,
-  'same_harness': false,
-  'skipped': [],
+  'session': 'o1',
+  'from': {'entry': 'Claude', 'session': 'o1'},
+  'to': {'entry': 'Codex', 'model': 'gpt-5'},
+  'reason': 'Claude: the five-hour window is used up, refills 15:04',
 })!;
 
 void main() {
@@ -42,8 +39,9 @@ void main() {
     });
 
     testWidgets('a conversation asking before it moves to another agent, at $label width', (tester) async {
-      final roles = plannerHost(handover: 'ask')..movedOn['planner'] = _next();
+      final roles = plannerHost(handover: 'ask');
       final session = await startPlanner(tester, roles, OptionsAgent(), roleStore(), size: size);
+      roles.ask(_ask());
       await until(tester, () => session.roleAsk != null, 'the question');
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/role_ask_$label.png'));
@@ -61,6 +59,7 @@ void main() {
         'role': 'planner',
         'from': {'entry': 'Claude', 'session': 'o1'},
         'to': {'entry': 'Codex', 'session': 'o7'},
+        'member': {'entry': 'Codex', 'model': 'gpt-5'},
         'replayed': false,
         'losses': [
           {'kind': 'thinking', 'count': 3},
