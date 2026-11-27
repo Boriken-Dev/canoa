@@ -41,6 +41,8 @@ import 'accounts/account_models.dart' show AccountMove, AccountOffer, LimitHint,
 import 'history/session_move.dart' show MoveReport, lossText;
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
+import 'roles/role_models.dart';
+import 'roles/roles_controller.dart' show RolesController;
 import 'profile/report.dart';
 import 'sources/source_choices.dart';
 import 'sources/source_options.dart';
@@ -83,6 +85,7 @@ part 'session_store/session_drafts.dart';
 part 'session_store/session_approvals.dart';
 part 'session_store/session_updates.dart';
 part 'session_store/session_switching.dart';
+part 'session_store/session_roles.dart';
 part 'session_store/session_sending.dart';
 part 'session_store/session_history.dart';
 part 'session_store/session_a2ui.dart';
@@ -189,6 +192,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     ({String pool, String why})? pool,
   })?
   moveAccount;
+
+  /// The host's roles, set by the app. Without it no role is offered, bound or followed.
+  RolesController? roles;
 
   /// Asks for a source's choices as one of its accounts, so that a signed-in account lists what it may use; set by the app. When
   /// it is not set or says nothing, [choicesLoader] asks as the machine's own login.

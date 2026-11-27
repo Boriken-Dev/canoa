@@ -180,6 +180,21 @@ class ChatSession {
   /// Kept with the draft and, as a name, with the session in the ledger: no credential is ever held here.
   String? account;
 
+  /// The role the person chose for a draft, by its name in `[host.roles]`; null chose none. A role gives the draft its agent, account,
+  /// model and effort when it starts, from the member the host says has usage left.
+  String? role;
+
+  /// The role that serves a started session and the member it runs on now, as the host said when it started and when it moved; null
+  /// for a session no role serves. Not kept: the host knows the binding, and the next start says it again.
+  RoleServing? roleServing;
+
+  /// What went wrong with the role of this session, as a text key and the host's words, for the "served by" line to say; null when
+  /// nothing did.
+  ({String key, String reason, String role})? roleProblem;
+
+  /// The move the host holds for the person's yes (the role's handover is `ask`); null when none waits.
+  RoleAsk? roleAsk;
+
   /// The account the host ran the session on, and the pool it took it from when [account] names a pool, as the host said them when
   /// the session started; null before then and for a host that names none. Not kept: the next start says them again.
   String? ranOnAccount, ranOnPool;

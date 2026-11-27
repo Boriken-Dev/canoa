@@ -86,9 +86,9 @@ final class ControlClient {
 
   final _pushes = StreamController<ControlPush>.broadcast(sync: true);
 
-  /// What the host pushes under `terminal/` and `notify/`: a shell's output, or a notice. It names no request, so it is not routed to a
-  /// request's listener.
-  /// A broadcast stream: whoever listens hears what comes after.
+  /// What the host pushes under `terminal/`, `notify/` and `roles/`: a shell's output, a notice, or a move a role made. It names no
+  /// request (a terminal's `id` is a shell's), so it is not routed to a request's listener. A broadcast stream: whoever listens hears
+  /// what comes after.
   Stream<ControlPush> get pushes => _pushes.stream;
 
   /// Whether the link has ended, so nothing more can be asked.
@@ -145,7 +145,7 @@ final class ControlClient {
     };
     final id = message['id'];
     if (id == null) {
-      if (method.startsWith('terminal/') || method.startsWith('notify/')) {
+      if (method.startsWith('terminal/') || method.startsWith('notify/') || method.startsWith('roles/')) {
         if (!_pushes.isClosed) _pushes.add(ControlPush(method, params));
         return;
       }

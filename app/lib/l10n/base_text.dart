@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'roles_text.dart';
+
 /// The language every text exists in; a key with no text in another language reads in this one.
 const String baseLanguage = 'en';
 
@@ -7,6 +9,7 @@ const String baseLanguage = 'en';
 /// some keys reads the rest in English. `{brand}` is the build's name; other `{name}`s are filled by the call.
 const Map<String, Map<String, String>> baseStrings = {
   'en': {
+    ...rolesEnglish,
     'language.name': 'English',
     'model.unreported': 'Other models (capabilities not reported)',
     'kb.intro': 'An agent can search the knowledge its overlays ship. By default that matches the words it uses. Choose a backend to match what is meant, and one to put the best passages first: an account with an API key, a server of your own, or an agent on its own login. Searched text goes where that backend sends it, which is said under each choice: every passage of the knowledge to the one that matches what is meant, once and again when it changes, and the query to both.',
@@ -760,6 +763,7 @@ const Map<String, Map<String, String>> baseStrings = {
     'approvers.problem.settings': 'The settings are a JSON object.',
   },
   'es': {
+    ...rolesSpanish,
     'language.name': 'Español',
     'model.unreported': 'Otros modelos (sin capacidades declaradas)',
     'kb.intro': 'Un agente puede buscar en el conocimiento que traen sus overlays. De forma predeterminada se buscan las palabras que usa. Elige un backend para buscar por significado y otro para poner primero los mejores pasajes: una cuenta con clave de API, un servidor propio o un agente con su propia sesión. El texto buscado va adonde ese backend lo envía, y se dice bajo cada elección: cada pasaje del conocimiento va al que busca por significado, una vez y de nuevo cuando cambia, y la consulta va a los dos.',

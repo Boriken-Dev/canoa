@@ -10,6 +10,7 @@ extension SessionUpdates on SessionStore {
       ..lastTurnEnded = clock()
       ..lastTurnFailed = outcome == TurnOutcome.failed;
     _watchExhaustion(session);
+    _watchRoleHandover(session);
     _keepText(session);
     _keepCursor(session);
     unawaited(refreshGit(session));

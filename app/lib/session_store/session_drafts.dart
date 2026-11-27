@@ -173,7 +173,11 @@ extension SessionDrafts on SessionStore {
   /// the source's first. A session that has started keeps its own.
   void setAccount(ChatSession session, String? account) {
     if (!session.isDraft) return;
-    session.account = account;
+    // An account picked by hand is the person's own choice of member: the role no longer gives the draft its agent.
+    session
+      ..account = account
+      ..role = null
+      ..roleServing = null;
     _keepDraft(session);
     // What an account may use is what its own login lists: the choices are asked again as the one chosen.
     _askChoices(session.source, account: account);
@@ -343,8 +347,15 @@ extension SessionDrafts on SessionStore {
     SessionKind? kind,
     String? host,
     bool localHost = false,
+    String? role,
+    bool noRole = false,
   }) {
     if (text != null) session.draftText = text;
+    if (session.status == SessionStatus.draft && (role != null || noRole)) {
+      session
+        ..role = noRole ? null : role
+        ..roleServing = null;
+    }
     if (session.status == SessionStatus.draft) {
       // A workspace is (host, path): another host holds none of this one's folders, nor a worktree of them.
       if (localHost ? session.host != null : host != null && host != session.host) {
