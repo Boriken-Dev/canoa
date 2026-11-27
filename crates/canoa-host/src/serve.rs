@@ -191,6 +191,8 @@ struct Served {
 /// What every connection shares.
 struct Shared {
     method: Proof,
+    /// The sessions roles serve, moved to the next member when a turn of one ends out of usage.
+    roles: Arc<crate::roles::Hub>,
     /// The session services the loaded libraries offer.
     services: Arc<crate::services::Services>,
     store: Arc<TrustStore>,

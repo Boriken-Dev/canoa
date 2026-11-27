@@ -45,6 +45,40 @@ pub(crate) use reader::{Launch, Quota, Reader, Starter};
 use reader::{Link, Reading};
 use tap::Tap;
 
+/// A turn of a session that ended, as the host read the agent's answer to the prompt.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TurnEnded {
+    /// The agent's id of the session.
+    pub(crate) session: String,
+    /// The answer was a JSON-RPC error.
+    pub(crate) failed: bool,
+    /// The answer was `stopReason: refusal`.
+    pub(crate) refused: bool,
+    /// The agent reported an allowance covering the model used up while the turn ran.
+    pub(crate) exhausted: bool,
+    /// The agent's stop reason, or `error` for a failed turn.
+    pub(crate) stop: Option<String>,
+    /// The model the session ran, as far as the connection saw.
+    pub(crate) model: Option<String>,
+    /// The words of the turn: the error's message and data, and what the agent said, cut at [`MAX_SAID`] bytes.
+    pub(crate) said: String,
+    /// What the agent's answer says the turn used, when it says: tokens read, written and served from the prompt cache, and the cost
+    /// in millionths of a dollar.
+    pub(crate) input: Option<u64>,
+    pub(crate) output: Option<u64>,
+    pub(crate) cached: Option<u64>,
+    pub(crate) cost_micros: Option<u64>,
+    /// What the agent put in the answer's `_meta`.
+    pub(crate) meta: Option<Value>,
+}
+
+/// Something that wants to hear each turn of an entry's sessions end, such as the roles that move a session when its usage runs out.
+/// It is told on the thread that carries the agent's messages, so it hands anything slow to a thread of its own.
+pub(crate) trait Ends: Send + Sync + core::fmt::Debug {
+    /// The turn of the session described by `ended`, which ran on the entry `entry`, ended.
+    fn ended(&self, entry: &str, ended: TurnEnded);
+}
+
 /// JSON-RPC's code for a message the receiver cannot place.
 const INTERNAL_ERROR: i64 = -32603;
 /// How many open turns and sessions' words one connection keeps; a client past it is not read.
@@ -429,6 +463,13 @@ impl Splice {
             .account
             .clone()
             .map(|account| Tap::new(log, account, harness));
+        self
+    }
+
+    /// This connection telling `ends` of each turn that ends; a splice with no usage log tells no one.
+    #[must_use]
+    pub(crate) fn watching(mut self, ends: Option<Arc<dyn Ends>>) -> Self {
+        self.tap = self.tap.take().map(|tap| tap.watching(ends));
         self
     }
 

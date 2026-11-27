@@ -53,6 +53,7 @@ pub mod portal_link;
 pub mod profile;
 pub mod provider;
 mod replace;
+mod roles;
 mod schedules;
 mod scope;
 mod scripts;

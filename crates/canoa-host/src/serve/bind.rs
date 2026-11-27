@@ -310,6 +310,8 @@ struct BindState<'a> {
     listening: Vec<Listening>,
     movers: BTreeMap<String, Arc<kind::Harness>>,
     missing_of: BTreeMap<&'a str, &'a Vec<String>>,
+    /// The sessions roles serve, which each entry's connections tell when a turn ends.
+    roles: Arc<crate::roles::Hub>,
 }
 
 /// What tells the person of events: it follows canoa.cfg through the host's configuration store, or what the host started with when
@@ -553,7 +555,8 @@ fn bind_harness_entry(
             scope: Scope::new(entry.working_roots.clone())
                 .account(entry.name.clone())
                 .limit_phrases(state.config.limit_phrases.clone())
-                .usage_log(state.usage_log.clone(), harness),
+                .usage_log(state.usage_log.clone(), harness)
+                .watching(state.roles.clone()),
             offer: hosted::offer(
                 profiles,
                 &state.config.profiles,
@@ -603,7 +606,8 @@ fn bind_entry(state: &mut BindState<'_>, entry: &Entry) -> Result<(), ServeError
             let scope = Scope::new(entry.working_roots.clone())
                 .account(entry.name.clone())
                 .limit_phrases(state.config.limit_phrases.clone())
-                .usage_log(state.usage_log.clone(), &harness);
+                .usage_log(state.usage_log.clone(), &harness)
+                .watching(state.roles.clone());
             let scope = match usage.as_deref() {
                 Some(id) => {
                     let config = state.config;
@@ -890,7 +894,7 @@ fn build_control_hub(
     movers: BTreeMap<String, Arc<kind::Harness>>,
     services: Arc<crate::services::Services>,
     environments: &Arc<crate::environments::Environments>,
-    assist: Arc<crate::assist::Assist>,
+    (assist, roles): (Arc<crate::assist::Assist>, &Arc<crate::roles::Hub>),
 ) -> Result<control::Control, ServeError> {
     // What `[host.disabled]` leaves off is read once, as the rest of `[host]` is; what it names that no library offers is only said.
     crate::disabled::install(config.disabled.clone());
@@ -1049,11 +1053,23 @@ fn build_control_hub(
     };
     let kept = kept
         .with_sealer(control::Sealer::new(Arc::clone(&secrets), options.ask_wait))
+        .with_roles(Arc::clone(roles))
         .with_history(control::Moves {
-            store: recorded,
-            targets: movers,
+            store: Arc::clone(&recorded),
+            targets: movers.clone(),
             homes: control::Homes::of_this_computer(),
         });
+    if let (Some(layers), Some(home)) = (&options.account_layers, &options.state_dir) {
+        roles.attach(Arc::new(crate::roles::hub::HostBacking {
+            moves: Arc::new(control::Moves {
+                store: recorded,
+                targets: movers,
+                homes: control::Homes::of_this_computer(),
+            }),
+            layers: layers.clone(),
+            home: home.clone(),
+        }));
+    }
     let kept = match (&options.account_layers, &options.state_dir) {
         (Some(layers), Some(home)) => kept.with_accounts(control::accounts::Accounts::new(
             layers.clone(),
@@ -1207,6 +1223,7 @@ impl Serving {
             listening: Vec::new(),
             movers: BTreeMap::new(),
             missing_of,
+            roles: crate::roles::Hub::new(),
         };
         for entry in config
             .entries
@@ -1279,11 +1296,12 @@ impl Serving {
             state.movers,
             Arc::clone(&services),
             &environments,
-            Arc::clone(&assist),
+            (Arc::clone(&assist), &state.roles),
         )?
         .with_notices(Arc::clone(&notices));
         let mut serving = Self {
             shared: Arc::new(Shared {
+                roles: Arc::clone(&state.roles),
                 services: Arc::clone(&services),
                 history: recorded,
                 secrets,
@@ -1562,6 +1580,7 @@ impl Serving {
         });
         // The harness backends of the assist service open agents the way a task does, whether or not tasks are on.
         self.shared.assist.attach_host(host.clone());
+        self.shared.roles.opener(host.clone());
         if let Some(delegation) = &self.shared.delegation {
             delegation.attach(host);
         }

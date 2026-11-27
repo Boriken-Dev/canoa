@@ -662,6 +662,24 @@ impl Control {
         }
     }
 
+    pub(super) fn r_roles(
+        &self,
+        _: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        match method {
+            "roles/list" => self.roles_list(&crate::options::limits::Endpoints::default()),
+            "roles/resolve" => {
+                self.roles_resolve(params, &crate::options::limits::Endpoints::default())
+            }
+            "roles/served" => self.roles_served(params),
+            "roles/bind" => self.roles_bind(params),
+            "roles/unbind" => self.roles_unbind(params),
+            _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
+        }
+    }
+
     pub(super) fn r_accounts(
         &self,
         _: &Caller,

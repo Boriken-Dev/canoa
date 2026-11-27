@@ -25,7 +25,7 @@ use crate::config::plain_absolute;
 use crate::share;
 use crate::site::Sites;
 use crate::usage_log::UsageLog;
-use crate::usage_splice::{Client, Inference, Launch, Splice};
+use crate::usage_splice::{Client, Ends, Inference, Launch, Splice};
 use crate::worktree::Worktrees;
 
 /// JSON-RPC's code for a message that is not JSON.
@@ -52,6 +52,8 @@ pub(crate) struct Scope {
     log: Option<(Arc<UsageLog>, String)>,
     /// The session a delegated task's connection was started from.
     parent: Option<String>,
+    /// Who hears each turn of this entry's sessions end.
+    ends: Option<Arc<dyn Ends>>,
 }
 
 /// What becomes of one message from the client.
@@ -77,6 +79,7 @@ impl Scope {
             documents: None,
             log: None,
             parent: None,
+            ends: None,
         }
     }
 
@@ -98,6 +101,13 @@ impl Scope {
     #[must_use]
     pub(crate) fn usage_log(mut self, log: Option<Arc<UsageLog>>, harness: &str) -> Self {
         self.log = log.map(|log| (log, harness.to_owned()));
+        self
+    }
+
+    /// This scope's connections telling `ends` of each turn that ends.
+    #[must_use]
+    pub(crate) fn watching(mut self, ends: Arc<dyn Ends>) -> Self {
+        self.ends = Some(ends);
         self
     }
 
@@ -138,7 +148,8 @@ impl Scope {
             Some((log, harness)) => splice
                 .recording(Arc::clone(log), harness.clone())
                 .child_of(self.parent.clone())
-                .profile(own),
+                .profile(own)
+                .watching(self.ends.clone()),
             None => splice.profile(own),
         }
     }

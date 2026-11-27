@@ -9,7 +9,7 @@
     reason = "locks and clocks are std's"
 )]
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use std::sync::{Mutex, PoisonError};
@@ -17,7 +17,7 @@ use std::sync::{Mutex, PoisonError};
 use coqui_acp_api::{ModelSpend, Spend, USAGE_NOTIFICATION, UsageReport};
 use serde_json::Value;
 
-use super::{MAX_OPEN, contains, unix_now};
+use super::{Ends, MAX_OPEN, MAX_SAID, TurnEnded, contains, unix_now};
 use crate::usage_log::{Turn, UsageLog};
 
 #[derive(Debug, Default)]
@@ -34,6 +34,10 @@ struct Open {
     acp_turn: BTreeMap<String, Spend>,
     /// Cumulative ACP spend recorded for sessions that report standard ACP `usage` rather than `_coqui_acp/usage_update`.
     acp_totals: BTreeMap<String, Spend>,
+    /// What the agent said in each session during its open turn, for the words of a limit.
+    said: BTreeMap<String, String>,
+    /// The sessions whose open turn saw a report with an allowance used up.
+    exhausted: BTreeSet<String>,
 }
 
 /// A connection's side of the usage log.
@@ -46,6 +50,8 @@ pub(crate) struct Tap {
     parent: Option<String>,
     /// The profile this connection's sessions run under.
     profile: Option<String>,
+    /// Who hears each turn end, when anyone wants to.
+    ends: Option<Arc<dyn Ends>>,
     open: Mutex<Open>,
 }
 
@@ -57,6 +63,7 @@ impl Tap {
             harness,
             parent: None,
             profile: None,
+            ends: None,
             open: Mutex::new(Open::default()),
         }
     }
@@ -85,6 +92,12 @@ impl Tap {
     /// This connection's spend recorded as that of sessions started from `parent`.
     pub(crate) fn child_of(mut self, parent: Option<String>) -> Self {
         self.parent = parent;
+        self
+    }
+
+    /// This connection telling `ends` of each turn that ends.
+    pub(crate) fn watching(mut self, ends: Option<Arc<dyn Ends>>) -> Self {
+        self.ends = ends;
         self
     }
 
@@ -136,7 +149,10 @@ impl Tap {
             && (contains(message, b"\"usage_update\"")
                 || contains(message, b"\"state_update\"")
                 || contains(message, b"\"current_model_update\"")
-                || contains(message, b"\"config_option_update\""));
+                || contains(message, b"\"config_option_update\"")
+                || (self.ends.is_some()
+                    && (contains(message, b"\"agent_message_chunk\"")
+                        || contains(message, b"\"agent_thought_chunk\""))));
         let answer = contains(message, b"\"id\"") && {
             let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
             !(open.prompts.is_empty() && open.opens.is_empty())
@@ -163,6 +179,7 @@ impl Tap {
                     return;
                 };
                 if let Some(session) = self.take_prompt(&id) {
+                    self.tell_end(&session, &value);
                     self.finish(&session, value.get("result"));
                 } else if let Some(named) = self.take_open(&id) {
                     self.opened(&value, named);
@@ -217,6 +234,16 @@ impl Tap {
         let kind = update.get("sessionUpdate").and_then(Value::as_str);
         let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
         match kind {
+            Some("agent_message_chunk" | "agent_thought_chunk") => {
+                if open.prompts.values().any(|each| each == session)
+                    && let Some(text) = update.pointer("/content/text").and_then(Value::as_str)
+                {
+                    let said = open.said.entry(session.to_owned()).or_default();
+                    if said.len() < MAX_SAID {
+                        said.push_str(text);
+                    }
+                }
+            }
             Some("current_model_update") => {
                 if let Some(model) = update.get("currentModelId").and_then(Value::as_str) {
                     remember(&mut open.models, session, model);
@@ -255,11 +282,86 @@ impl Tap {
         }
     }
 
+    /// Tells whoever listens that the turn of `session` ended with `answer`, what the agent answered to its prompt.
+    fn tell_end(&self, session: &str, answer: &Value) {
+        let (said, exhausted, model) = {
+            let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+            (
+                open.said.remove(session).unwrap_or_default(),
+                open.exhausted.remove(session),
+                open.models.get(session).cloned(),
+            )
+        };
+        let Some(ends) = &self.ends else {
+            return;
+        };
+        let error = answer.get("error");
+        let stop = answer
+            .pointer("/result/stopReason")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let used = answer
+            .pointer("/result/usage")
+            .and_then(|usage| parse_acp_usage(session, usage));
+        let mut words = said;
+        if let Some(error) = error {
+            for part in [error.get("message"), error.get("data")]
+                .into_iter()
+                .flatten()
+            {
+                words.push('\n');
+                match part.as_str() {
+                    Some(text) => words.push_str(text),
+                    None => words.push_str(&part.to_string()),
+                }
+            }
+        }
+        let mut cut = MAX_SAID.min(words.len());
+        while !words.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        words.truncate(cut);
+        ends.ended(
+            &self.account,
+            TurnEnded {
+                session: session.to_owned(),
+                failed: error.is_some(),
+                refused: stop.as_deref() == Some("refusal"),
+                exhausted,
+                stop: stop.or_else(|| error.map(|_| "error".to_owned())),
+                model,
+                said: words,
+                input: used.as_ref().map(|spend| spend.input),
+                output: used.as_ref().map(|spend| spend.output),
+                cached: used.as_ref().map(|spend| spend.cache_read),
+                cost_micros: used.as_ref().and_then(|spend| spend.cost_micro_usd),
+                meta: answer.pointer("/result/_meta").cloned(),
+            },
+        );
+    }
+
     /// A usage report: its allowances are kept, and its spend is the turn's once the turn ends.
     fn report(&self, report: &Value, session: Option<&str>) {
         let Ok(report) = serde_json::from_value::<UsageReport>(report.clone()) else {
             return;
         };
+        if let Some(session) = session {
+            let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+            let model = open.models.get(session).cloned();
+            if open.prompts.values().any(|each| each == session)
+                && report.buckets.iter().any(|bucket| {
+                    bucket.status == coqui_acp_api::Status::Exhausted
+                        && match &bucket.models {
+                            coqui_acp_api::Coverage::Only { models } => model
+                                .as_deref()
+                                .is_some_and(|asked| models.iter().any(|each| each == asked)),
+                            _ => true,
+                        }
+                })
+            {
+                open.exhausted.insert(session.to_owned());
+            }
+        }
         self.log
             .note_report(&self.account, Some(&self.harness), &report, unix_now());
         let Some(spend) = report.spend else { return };

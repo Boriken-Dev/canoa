@@ -188,6 +188,87 @@ impl Moves {
         )
     }
 
+    /// The whole history of `session` of the entry `entry`: as this host recorded it, else as the entry's own agent exports it from the
+    /// folder of `account` (the entry's login when `None`), in `cwd`.
+    ///
+    /// # Errors
+    ///
+    /// The entry is not one that runs a harness, or neither the record nor the agent has the session.
+    pub(crate) fn recorded_or_exported(
+        &self,
+        entry: &str,
+        account: Option<&str>,
+        session: &str,
+        cwd: &str,
+    ) -> Result<coqui_acp_history::Document, String> {
+        if self.store.recording() {
+            match self.store.load(entry, session) {
+                Ok(doc) => return Ok(doc),
+                Err(StoreError::Missing) => {}
+                Err(other) => return Err(other.to_string()),
+            }
+        }
+        let harness = self
+            .targets
+            .get(entry)
+            .ok_or_else(|| format!("{entry} runs no harness whose sessions can be exported"))?;
+        let text =
+            super::account_move::export_from(harness, account, session, cwd).map_err(|failed| {
+                match failed {
+                    Ok((_, why)) => {
+                        format!("{entry} cannot export it, and the host has no record: {why}")
+                    }
+                    Err((_, why)) => why,
+                }
+            })?;
+        text.parse()
+            .map_err(|error: coqui_acp_history::HistoryError| {
+                format!("the exported history cannot be read: {error}")
+            })
+    }
+
+    /// Imports `doc` into the entry `entry` at a new session id, on the account `account` when it has one, and keeps it as that
+    /// session's history. Answers the id and what the import could not carry.
+    ///
+    /// # Errors
+    ///
+    /// The entry is not one that runs a harness, or it did not take the history.
+    pub(crate) fn take(
+        &self,
+        entry: &str,
+        account: Option<&str>,
+        doc: &coqui_acp_history::Document,
+        cwd: &str,
+    ) -> Result<(String, coqui_acp_api::ImportReport), String> {
+        let target = self
+            .targets
+            .get(entry)
+            .ok_or_else(|| format!("{entry} runs no harness that takes a history"))?;
+        let session = new_uuid().map_err(|(_, why)| why)?;
+        let moved = history::reidentified(doc, &session);
+        let text = moved
+            .to_string()
+            .map_err(|e| format!("the history cannot be written: {e}"))?;
+        let held = account
+            .map(|name| super::account_move::hold(target, name))
+            .transpose()
+            .map_err(|(_, why)| why)?;
+        let connection = target.connection(None, held.as_ref(), CacheLifetime::default());
+        let mut ask = SessionImport::new(session.clone(), cwd, text);
+        if let Some(held) = &held {
+            ask = ask.account(held.grant());
+        }
+        let report = connection
+            .harness
+            .import_session(ask, connection.spawner)
+            .map_err(|error| format!("{entry} did not take the history: {}", error.message()))?;
+        drop(held);
+        if let Err(error) = self.store.seed(entry, &session, &moved) {
+            tracing::warn!("a moved session's history was not kept: {error}");
+        }
+        Ok((session, report))
+    }
+
     /// `history/move`: the session as this host recorded it, else as its own agent exports it (the entry's provider, asked for
     /// the session in `cwd`, which the move then needs from the caller), carried to the source `to`.
     pub(super) fn moved_from(

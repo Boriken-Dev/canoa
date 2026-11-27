@@ -147,6 +147,8 @@ pub(crate) struct Control {
     services: Option<Arc<crate::services::Services>>,
     /// What the agents spent, once the host has a home to keep it in.
     usage: Option<Arc<crate::usage_log::UsageLog>>,
+    /// The sessions roles serve.
+    roles: Option<Arc<crate::roles::Hub>>,
     /// Per-host `usage/read` allowance cache.
     usage_cache: usage_read::Cache,
     /// The paired keys, so a key can take itself out.
@@ -249,6 +251,7 @@ impl Control {
             assist: None,
             services: None,
             usage: None,
+            roles: None,
             usage_cache: usage_read::Cache::default(),
             trust: None,
             sealer: None,
@@ -564,6 +567,13 @@ impl Control {
             .as_ref()
             .ok_or_else(|| (NOT_FOUND, "this host keeps no shared sessions".to_owned()))?;
         sessions.0.watch(caller.key(), params)
+    }
+
+    /// Answers `roles/bind` and `roles/unbind` for the sessions `roles` serves.
+    #[must_use]
+    pub(crate) fn with_roles(mut self, roles: Arc<crate::roles::Hub>) -> Self {
+        self.roles = Some(roles);
+        self
     }
 
     /// Answers `usage/*` from this log.
@@ -1213,6 +1223,7 @@ pub(crate) mod profile_items;
 pub(crate) mod providers;
 #[cfg(test)]
 mod providers_tests;
+mod roles;
 mod routes;
 mod say;
 #[cfg(test)]

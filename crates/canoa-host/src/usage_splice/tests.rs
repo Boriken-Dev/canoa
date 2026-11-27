@@ -1788,3 +1788,121 @@ stop_permille = 1000
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+mod ends {
+    use std::sync::Mutex;
+
+    use super::*;
+    use crate::usage_log::UsageLog;
+
+    #[derive(Debug, Default)]
+    struct Heard(Mutex<Vec<(String, TurnEnded)>>);
+
+    impl Ends for Heard {
+        fn ended(&self, entry: &str, ended: TurnEnded) {
+            self.0
+                .lock()
+                .expect("heard")
+                .push((entry.to_owned(), ended));
+        }
+    }
+
+    fn listening(name: &str) -> (Splice, Arc<Heard>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("canoa-ends-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let heard = Arc::new(Heard::default());
+        let splice = Splice::new(
+            Arc::new(Inference::new(Some(Vec::new()))),
+            Some("Claude".to_owned()),
+        )
+        .recording(log, "claude".to_owned())
+        .watching(Some(heard.clone()));
+        (splice, heard, dir)
+    }
+
+    fn prompt(splice: &Splice, id: u64, session: &str) {
+        assert!(
+            read_client(
+                splice,
+                &json!({"id": id, "method": "session/prompt", "params": {"sessionId": session, "prompt": []}})
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_turn_a_limit_ended_is_told_to_whoever_listens_with_its_words_and_the_entry() {
+        let (splice, heard, dir) = listening("limit");
+        prompt(&splice, 1, "s1");
+        from_agent(
+            &splice,
+            &json!({"method": "session/update", "params": {"sessionId": "s1",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Working on it. "}}}}),
+        );
+        from_agent(
+            &splice,
+            &json!({"id": 1, "error": {"code": -32000, "message": "You have hit your usage limit", "data": "resets at 5pm"}}),
+        );
+        let heard = heard.0.lock().expect("heard");
+        assert_eq!(heard.len(), 1, "{heard:?}");
+        let (entry, ended) = &heard[0];
+        assert_eq!(entry, "Claude");
+        assert_eq!(ended.session, "s1");
+        assert!(ended.failed && !ended.refused);
+        assert_eq!(ended.stop.as_deref(), Some("error"));
+        assert!(ended.said.contains("Working on it."), "{ended:?}");
+        assert!(ended.said.contains("usage limit"), "{ended:?}");
+        assert!(ended.said.contains("resets at 5pm"), "{ended:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_refusal_and_a_good_turn_are_told_as_what_they_are_and_words_of_an_earlier_turn_are_not_carried()
+     {
+        let (splice, heard, dir) = listening("kinds");
+        prompt(&splice, 1, "s1");
+        from_agent(
+            &splice,
+            &json!({"method": "session/update", "params": {"sessionId": "s1",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Usage limit reached"}}}}),
+        );
+        from_agent(
+            &splice,
+            &json!({"id": 1, "result": {"stopReason": "refusal"}}),
+        );
+        prompt(&splice, 2, "s1");
+        from_agent(
+            &splice,
+            &json!({"id": 2, "result": {"stopReason": "end_turn"}}),
+        );
+        let heard = heard.0.lock().expect("heard");
+        assert_eq!(heard.len(), 2);
+        assert!(heard[0].1.refused && !heard[0].1.failed);
+        assert!(heard[0].1.said.contains("Usage limit reached"));
+        assert!(!heard[1].1.refused && !heard[1].1.failed);
+        assert_eq!(heard[1].1.stop.as_deref(), Some("end_turn"));
+        assert!(heard[1].1.said.is_empty(), "{:?}", heard[1].1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_report_with_an_allowance_used_up_during_a_turn_is_told_with_its_end() {
+        let (splice, heard, dir) = listening("exhausted");
+        prompt(&splice, 1, "s1");
+        let mut bucket = Bucket::new("five_hour");
+        bucket.status = coqui_acp_api::Status::Exhausted;
+        let mut report = UsageReport::new();
+        report.buckets.push(bucket);
+        from_agent(
+            &splice,
+            &json!({"method": USAGE_NOTIFICATION, "params": {"sessionId": "s1", "report": serde_json::to_value(&report).expect("JSON")}}),
+        );
+        from_agent(
+            &splice,
+            &json!({"id": 1, "result": {"stopReason": "end_turn"}}),
+        );
+        assert!(heard.0.lock().expect("heard")[0].1.exhausted);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

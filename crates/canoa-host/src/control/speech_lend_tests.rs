@@ -1328,3 +1328,64 @@ fn an_account_that_cannot_speak_through_a_service_is_told_so_in_words_of_speakin
     );
     let _ = fs::remove_dir_all(&home.root);
 }
+
+const ROLES: &str = "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"plain\", \"moved\"]\n\
+    [host.roles.planner]\nstrategy = \"priority\"\nmembers = [\n\
+      { agent = \"Claude\", account = \"moved\", priority = 1 },\n\
+      { agent = \"Claude\", account = \"plain\" },\n\
+      { agent = \"Missing\" },\n\
+    ]\n";
+
+#[test]
+fn roles_are_listed_resolved_and_bound_through_the_control_channel() {
+    let home = home("roles-control", &STAND_IN_ACCOUNTS, None, ROLES);
+    let hub = crate::roles::Hub::new();
+    let control = say_control(&home).with_roles(std::sync::Arc::clone(&hub));
+    let listed = ask_control(&control, "roles/list", json!({}));
+    let role = &listed["result"]["roles"][0];
+    assert_eq!(role["name"], "planner", "{listed}");
+    // The member with the higher priority serves, and the one the host has no agent for says so by name.
+    assert_eq!(role["serving"], "Claude/moved///", "{listed}");
+    let members = role["members"].as_array().expect("members");
+    assert_eq!(members.len(), 3);
+    assert_eq!(members[0]["serving"], true);
+    assert_eq!(members[2]["why_not"]["why"], "no agent called Missing");
+    assert!(!listed.to_string().contains("sk-"), "{listed}");
+
+    let resolved = ask_control(&control, "roles/resolve", json!({"role": "planner"}));
+    assert_eq!(
+        resolved["result"]["member"]["id"], "Claude/moved///",
+        "{resolved}"
+    );
+    assert_eq!(resolved["result"]["why"], "start");
+    assert_eq!(
+        resolved["result"]["usage_known"], false,
+        "no usage is reported for a key"
+    );
+    let missing = ask_control(&control, "roles/resolve", json!({"role": "nobody"}));
+    assert_eq!(missing["error"]["code"], super::NOT_FOUND, "{missing}");
+
+    // A client says a session it started was given by the role, on a member the role has.
+    let bind = |member: &str| {
+        ask_control(
+            &control,
+            "roles/bind",
+            json!({"role": "planner", "member": member, "entry": "Claude", "session": "s-1", "cwd": "/work"}),
+        )
+    };
+    assert_eq!(bind("Claude/other///")["error"]["code"], super::NOT_FOUND);
+    assert!(hub.binding("Claude", "s-1").is_none());
+    assert_eq!(bind("Claude/plain///")["result"]["bound"], true);
+    assert_eq!(
+        hub.binding("Claude", "s-1").map(|each| each.member),
+        Some("Claude/plain///".to_owned())
+    );
+    let unbound = ask_control(
+        &control,
+        "roles/unbind",
+        json!({"entry": "Claude", "session": "s-1"}),
+    );
+    assert_eq!(unbound["result"]["unbound"], true);
+    assert!(hub.binding("Claude", "s-1").is_none());
+    let _ = fs::remove_dir_all(&home.root);
+}

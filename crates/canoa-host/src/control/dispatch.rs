@@ -840,6 +840,31 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_accounts,
     ),
     rpc(
+        "roles/list",
+        Access::Require(Grant::Accounts),
+        Control::r_roles,
+    ),
+    rpc(
+        "roles/resolve",
+        Access::Require(Grant::Accounts),
+        Control::r_roles,
+    ),
+    rpc(
+        "roles/served",
+        Access::Require(Grant::Accounts),
+        Control::r_roles,
+    ),
+    rpc(
+        "roles/bind",
+        Access::Require(Grant::Accounts),
+        Control::r_roles,
+    ),
+    rpc(
+        "roles/unbind",
+        Access::Require(Grant::Accounts),
+        Control::r_roles,
+    ),
+    rpc(
         "usage/summary",
         Access::Require(Grant::Usage),
         Control::r_usage,

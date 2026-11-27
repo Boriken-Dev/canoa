@@ -26,7 +26,7 @@ type Refused = (i32, String);
 
 /// The account `name` of `harness`, waiting a little while the connection that ran on it is still ending. A move is the person's
 /// own, so it may use any account of the provider that a connection may name.
-fn held(harness: &kind::Harness, name: &str) -> Result<Held, Refused> {
+pub(super) fn hold(harness: &kind::Harness, name: &str) -> Result<Held, Refused> {
     for look in 0..LOOKS {
         match harness.hold_account(name, "moving a conversation", true) {
             Ok(held) => return Ok(held),
@@ -53,7 +53,7 @@ pub(super) fn export_from(
     cwd: &str,
 ) -> Result<String, Result<(Status, String), Refused>> {
     let held = from
-        .map(|name| held(harness, name))
+        .map(|name| hold(harness, name))
         .transpose()
         .map_err(Err)?;
     let mut text = String::new();
@@ -184,7 +184,7 @@ impl Control {
         let body = moved
             .to_string()
             .map_err(|e| (REFUSED, format!("the history cannot be written: {e}")))?;
-        let account = to.map(|name| held(harness, name)).transpose()?;
+        let account = to.map(|name| hold(harness, name)).transpose()?;
         let connection = harness.connection(None, account.as_ref(), CacheLifetime::default());
         let mut take = SessionImport::new(new.clone(), cwd, body);
         if let Some(account) = &account {
