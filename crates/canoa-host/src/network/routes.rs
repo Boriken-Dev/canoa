@@ -107,7 +107,11 @@ struct Held {
     _lease: Object<dyn RouteLease>,
 }
 
+/// What the host knows of its routes, replaced by each [`install`]: process-wide because the network it installs
+/// (`Network::install`, the session registry) is.
 static STATE: RwLock<Option<Arc<State>>> = RwLock::new(None);
+/// The open leases by pool key, shared by every caller of the process and cleared by each [`install`]; a lease is a
+/// running program or connection, so two lookups of one route must find one.
 static HELD: Mutex<Option<HashMap<String, Arc<Held>>>> = Mutex::new(None);
 
 fn state() -> Option<Arc<State>> {

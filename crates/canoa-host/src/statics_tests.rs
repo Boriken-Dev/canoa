@@ -54,6 +54,8 @@ const ALLOWED: &[(&str, &str)] = &[
     ("network.rs", "static INSTALLED:"),
     ("network/proxy_ca.rs", "static AUTHORITIES:"),
     ("network/session.rs", "static REGISTRY:"),
+    ("network/routes.rs", "static STATE:"),
+    ("network/routes.rs", "static HELD:"),
     // Short-lived provider model probe / pool turn caches & cursors
     ("options.rs", "static PROBED:"),
     ("pools/gather.rs", "static LISTED:"),
