@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../brand.dart';
 import '../config/canoa_config.dart';
 import '../providers/provider_catalog.dart';
+import '../roles/roles_controller.dart';
 import 'account_models.dart';
 import 'accounts_host.dart';
 
@@ -23,9 +24,13 @@ class AccountsController extends ChangeNotifier {
     this.usage,
     this.holder,
     this.hostIsHere = true,
+    this.roles,
   });
 
   final AccountsHost host;
+
+  /// The host's roles, which Settings lists beside the pools; null where the app has none.
+  final RolesController? roles;
 
   /// The configuration as the app holds it now: which entries offer which accounts is read from it.
   final CanoaConfig Function() config;

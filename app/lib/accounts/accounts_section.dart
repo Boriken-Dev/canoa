@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../brand.dart';
+import '../roles/roles_section.dart';
 import '../settings/settings_row.dart';
 import '../shell/confirm_remove.dart';
 import '../sources/source_icons.dart';
@@ -179,6 +180,7 @@ class _AccountsSectionState extends State<AccountsSection> {
             ],
           ),
         PoolsGroup(controller: _accounts),
+        if (_accounts.roles case final roles?) RolesGroup(roles: roles, accounts: _accounts),
       ],
     );
   }

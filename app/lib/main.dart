@@ -1925,6 +1925,7 @@ class _CanoaAppState extends State<CanoaApp> {
       usage: (id) => store.accountUsage[id],
       // A page a host served is not on the host's machine as far as its browser's loopback goes.
       hostIsHere: widget.served == null,
+      roles: _rolesHeld,
     );
   }
 
