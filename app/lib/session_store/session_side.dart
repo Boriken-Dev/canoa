@@ -38,7 +38,7 @@ extension SessionSide on SessionStore {
 
     String cut(String text) => text.length <= sideContextLimit ? text : '${text.substring(0, sideContextLimit)}…';
     final asked = last(MessageRole.user), said = last(MessageRole.agent);
-    final where = parent.cwd == null || parent.cwd!.isEmpty ? '' : ' in ${parent.cwd}';
+    final where = parent.kind != SessionKind.workspace || parent.cwd == null || parent.cwd!.isEmpty ? '' : ' in ${parent.cwd}';
     return [
       'This is a side question about another conversation, "${parent.title}"$where. Answer briefly, and change nothing unless asked.',
       if (asked != null) 'It was last asked:\n${cut(asked)}',

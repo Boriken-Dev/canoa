@@ -1,5 +1,7 @@
 // A side chat: `/btw` and a question, or Side chat in the conversation's menu, asks the same agent about the conversation in a session
 // of its own that is in no list and not in the ledger, and nothing of it reaches the conversation.
+import 'dart:io';
+
 import 'package:canoa/chat/side_chat.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,12 +9,15 @@ import 'package:material_ui/material_ui.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
+import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 List<Map<String, dynamic>> _prompts(OptionsAgent agent) => [for (final request in agent.requests) if (request['method'] == 'session/prompt') request];
 
 String _promptText(Map<String, dynamic> request) => [for (final part in (request['params'] as Map)['prompt'] as List) (part as Map)['text']].join();
 
 void main() {
+  setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/side_chat_test.dart')));
+
   test('/btw and what follows it is a side question, anything else is not', () {
     expect(sideQuestionOf('/btw is it done'), 'is it done');
     expect(sideQuestionOf('  /BTW   why\nnot  '), 'why\nnot');
@@ -46,6 +51,8 @@ void main() {
     expect(store.sessions, [parent]);
     expect(parent.messages, hasLength(before), reason: 'what is said in the side chat is not said in the conversation');
     expect(find.byType(TextField), findsWidgets);
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/side_chat_desktop.png'));
 
     await tester.tap(find.byKey(const Key('side-close')));
     await settle(tester);
