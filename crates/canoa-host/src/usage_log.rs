@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use coqui_acp_api::{Spend, UsageReport};
 use serde::{Deserialize, Serialize};
@@ -133,7 +133,7 @@ pub(crate) struct UsageLog {
     dir: PathBuf,
     state: Mutex<State>,
     /// The limits that read this log, once the host has any to keep.
-    rules: OnceLock<Arc<Limits>>,
+    rules: Mutex<Option<Arc<Limits>>>,
 }
 
 /// The difference between two running totals. A total that fell is a counter that started over.
@@ -188,7 +188,7 @@ impl UsageLog {
         let log = Self {
             dir,
             state: Mutex::new(State::default()),
-            rules: OnceLock::new(),
+            rules: Mutex::new(None),
         };
         log.retire(keep_days, now);
         log.load(keep_days, now);
@@ -234,17 +234,17 @@ impl UsageLog {
     /// The limits that read this log: they are looked at again each time a line is appended or an account's allowances change. A
     /// log keeps the first it is given.
     pub(crate) fn keep_rules(&self, rules: Arc<Limits>) {
-        let _ = self.rules.set(rules);
+        lock(&self.rules).get_or_insert(rules);
     }
 
     /// The limits that read this log.
-    pub(crate) fn rules(&self) -> Option<&Arc<Limits>> {
-        self.rules.get()
+    pub(crate) fn rules(&self) -> Option<Arc<Limits>> {
+        lock(&self.rules).clone()
     }
 
     /// Lets the limits look again, on the thread that changed the log and with none of its locks held.
     fn changed(&self) {
-        if let Some(rules) = self.rules.get() {
+        if let Some(rules) = self.rules() {
             rules.recheck();
         }
     }

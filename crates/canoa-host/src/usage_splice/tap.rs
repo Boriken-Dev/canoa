@@ -68,7 +68,7 @@ impl Tap {
     }
 
     /// The limits that read the log this connection tells.
-    pub(crate) fn rules(&self) -> Option<&Arc<crate::limits::Limits>> {
+    pub(crate) fn rules(&self) -> Option<Arc<crate::limits::Limits>> {
         self.log.rules()
     }
 
