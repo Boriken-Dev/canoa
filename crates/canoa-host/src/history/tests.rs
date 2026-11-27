@@ -21,6 +21,11 @@ fn send(from: &local::Link, value: &Value) {
 
 /// One whole session through a recording: initialize, open, one turn with a message.
 fn session(store: &Arc<Store>, entry: &str, say: &str) {
+    session_opened(store, entry, say, json!({"cwd":"/work","mcpServers":[]}));
+}
+
+/// As [`session`], opened with `open` as the parameters of `session/new`.
+fn session_opened(store: &Arc<Store>, entry: &str, say: &str, open: Value) {
     let (client, host) = local::pair(1 << 20, Arc::new(AtomicBool::new(false)));
     let recording = Recording::new(&host, store, entry, "claude");
     let answer = |value: Value| recording.send(value.to_string().as_bytes()).expect("sent");
@@ -32,7 +37,7 @@ fn session(store: &Arc<Store>, entry: &str, say: &str) {
     answer(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}));
     send(
         &client,
-        &json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/work","mcpServers":[]}}),
+        &json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":open}),
     );
     recording.receive(None).expect("read");
     answer(json!({"jsonrpc":"2.0","id":2,"result":{"sessionId":ID}}));
@@ -63,6 +68,21 @@ fn a_turn_is_kept_when_it_ends_and_read_back_whole() {
     assert_eq!(summary.turns, 1);
     assert!(!summary.open_turn);
     assert!(doc.to_string().expect("written").contains("hi there"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_session_that_asks_to_be_ephemeral_is_not_recorded_and_one_that_says_false_is() {
+    let dir = dir("ephemeral");
+    let store = Arc::new(Store::open(Some(dir.clone()), limits()));
+    let open = |flag: Value| json!({"cwd":"/work","mcpServers":[],"_meta":{EPHEMERAL_META: flag}});
+    session_opened(&store, "Claude", "a side answer", open(json!(true)));
+    assert!(store.load("Claude", ID).is_err(), "nothing of it is kept");
+    session_opened(&store, "Claude", "a real answer", open(json!(false)));
+    assert!(
+        store.load("Claude", ID).is_ok(),
+        "the flag is honoured only as true"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 

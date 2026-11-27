@@ -355,6 +355,8 @@ pub(super) struct Session {
     /// The agent's process id once a program entry's agent has started; 0 before, after, and for an agent that is no process
     /// of this computer's own (a harness in the host, or one in an environment).
     agent_pid: Arc<AtomicU32>,
+    /// Whether the session that opened it asked to be listed nowhere (`EPHEMERAL_META`).
+    ephemeral: AtomicBool,
     /// What the agent's processes use now; it reads the process table, so it is never called with `state` held.
     read_processes: fn(u32) -> TreeUse,
     state: Mutex<State>,
@@ -453,6 +455,9 @@ impl Session {
     /// What this session says of itself to `asker`, with when it was last active, or `None` when it is not open or the policy
     /// would turn `asker` away from attaching.
     fn describe(&self, asker: &Client) -> Option<(u64, Value)> {
+        if self.ephemeral.load(Ordering::SeqCst) {
+            return None;
+        }
         if !matches!(self.access.check(asker, &Action::Attach), Verdict::Allow) {
             return None;
         }
@@ -564,7 +569,11 @@ impl Session {
                         .map(str::to_owned)
                         .or_else(|| boot.cwd.take());
                     match method {
-                        "session/new" => boot.opening = Some((request.clone(), None)),
+                        "session/new" => {
+                            self.ephemeral
+                                .store(crate::history::is_ephemeral(&message), Ordering::SeqCst);
+                            boot.opening = Some((request.clone(), None));
+                        }
                         "session/load" | "session/resume" => {
                             let named = message
                                 .pointer("/params/sessionId")
@@ -1365,6 +1374,7 @@ fn open<C: Channel>(
         max_line: shared.max_line,
         access,
         agent_pid: Arc::new(AtomicU32::new(0)),
+        ephemeral: AtomicBool::new(false),
         read_processes: crate::usage_splice::tree_use,
         state: Mutex::new(State {
             phase: Phase::Boot(Box::new(Boot {
@@ -1580,6 +1590,7 @@ mod tests {
             max_line: 1024,
             access: Arc::new(Anyone),
             agent_pid: Arc::new(AtomicU32::new(4242)),
+            ephemeral: AtomicBool::new(false),
             read_processes,
             state: Mutex::new(State {
                 phase: Phase::Boot(Box::new(Boot {

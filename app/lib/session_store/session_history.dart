@@ -386,8 +386,17 @@ extension SessionHistory on SessionStore {
   /// uses it. What the agent saved stays with the agent, for Earlier conversations to open again.
   Future<void> close(ChatSession session) async {
     final client = _clients[session.id];
+    final remote = session.remoteSessionId;
     session.chat.close();
     forget(session);
+    // A side chat ends with its window, also where the entry keeps a session running after its connection.
+    if (session.sideOf != null && client != null && remote != null) {
+      try {
+        await client.closeSession(remote);
+      } on Object {
+        // The connection ends next, which ends it where the entry does not keep sessions.
+      }
+    }
     if (client != null && !_clients.values.contains(client)) {
       await client.close();
     }

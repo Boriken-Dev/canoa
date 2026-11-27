@@ -4,6 +4,19 @@ import 'package:coqui_acp/coqui_acp.dart' show AcpSessionSetup;
 /// own Documents folder and says which one in its answer under the same key.
 const siteMeta = 'dev.boriken.canoa/site';
 
+/// The `_meta` key of a `session/new` that asks the host to record the session nowhere and list it nowhere: a side chat's.
+const ephemeralMeta = 'dev.boriken.canoa/ephemeral';
+
+/// [base], with the mark that keeps the session out of the host's record and lists when [ephemeral].
+AcpSessionSetup ephemeralSetup(AcpSessionSetup base, {required bool ephemeral}) => !ephemeral
+    ? base
+    : AcpSessionSetup(
+        mcpServers: base.mcpServers,
+        systemPrompt: base.systemPrompt,
+        additionalDirectories: base.additionalDirectories,
+        meta: {...?base.meta, ephemeralMeta: true},
+      );
+
 /// The `cwd` a webpage's `session/new` carries: ACP wants one and the page has none to name. The host replaces it.
 const siteStandInFolder = '/';
 

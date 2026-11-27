@@ -35,6 +35,19 @@ use crate::config::HistoryConfig;
 pub(crate) use choose::Db;
 pub(crate) use old::{mark_moved, moved};
 
+/// The `_meta` key of a `session/new` that asks the host to keep no record of the session and to list it nowhere: `true` for a
+/// session that answers a side question and ends with its window. The host honours it for what it records and lists; it does
+/// not end the session, which the client does.
+pub const EPHEMERAL_META: &str = "dev.boriken.canoa/ephemeral";
+
+/// Whether the request `message` carries [`EPHEMERAL_META`] as `true`.
+pub(crate) fn is_ephemeral(message: &Value) -> bool {
+    message
+        .pointer("/params/_meta")
+        .and_then(|meta| meta.get(EPHEMERAL_META))
+        == Some(&Value::Bool(true))
+}
+
 /// What one session's history may take unless `[host.history] max_session_bytes` says otherwise.
 pub const DEFAULT_MAX_SESSION_BYTES: u64 = 16 * 1024 * 1024;
 /// How many sessions have a history unless `[host.history] max_sessions` says otherwise.
@@ -549,6 +562,7 @@ impl Log {
                 Some(key),
             ) => {
                 if self.opening.len() < MAX_OPENING
+                    && !is_ephemeral(message)
                     && let Some(kept) = small(message)
                 {
                     self.opening.insert(key.clone(), kept);

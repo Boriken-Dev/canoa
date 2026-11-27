@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:canoa/chat/side_chat.dart';
 import 'package:canoa/session_store.dart';
+import 'package:canoa/workspace/site_meta.dart' show ephemeralMeta;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -46,6 +47,10 @@ void main() {
     expect(asked, contains('which file did you read'));
     expect(asked, contains('Fix the failing test'), reason: 'the side session knows where the question comes from and what was last asked');
     expect(_prompts(agent).where((request) => _promptText(request).contains('/btw')), isEmpty, reason: 'the command is the app\'s: it is sent to nobody');
+    final opens = [for (final request in agent.requests) if (request['method'] == 'session/new') request['params'] as Map];
+    expect(opens, hasLength(2));
+    expect((opens.first['_meta'] as Map?)?[ephemeralMeta], isNull, reason: 'the conversation is an ordinary session');
+    expect((opens.last['_meta'] as Map)[ephemeralMeta], true, reason: 'the side chat asks the host to record and list it nowhere');
     expect(store.selected, same(parent), reason: 'the conversation stays the one shown');
     expect(store.listed, [parent]);
     expect(store.sessions, [parent]);

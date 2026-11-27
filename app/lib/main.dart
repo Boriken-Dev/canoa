@@ -2516,7 +2516,7 @@ class _CanoaAppState extends State<CanoaApp> {
       );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
-      final opened = await client.openSession(cwd: where);
+      final opened = await client.openSession(cwd: where, setup: ephemeralSetup(AcpSessionSetup.none, ephemeral: draft.sideOf != null));
       if (!mounted || _quitting) throw StateError('Canoa UI closed');
       store.bindDraft(draft, client, opened, cwd: where, worktree: made, place: place, endpoint: endpoint, method: method.id);
       _ownedClients.add(client);
@@ -2746,7 +2746,10 @@ class _CanoaAppState extends State<CanoaApp> {
             );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
-      final opened = await client.openSession(cwd: where, setup: hostMakes ? siteSetup(servedSite) : AcpSessionSetup.none);
+      final opened = await client.openSession(
+        cwd: where,
+        setup: ephemeralSetup(hostMakes ? siteSetup(servedSite) : AcpSessionSetup.none, ephemeral: draft.sideOf != null),
+      );
       final placed = hostMakes ? madeFolder(opened.raw) : null;
       if (hostMakes && placed == null) throw StateError('The host did not say which workspace it made for this chat');
       if (!mounted || _quitting) throw StateError('Canoa UI closed');
@@ -2863,7 +2866,7 @@ class _CanoaAppState extends State<CanoaApp> {
       }));
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
-      final opened = await client.openSession(cwd: where);
+      final opened = await client.openSession(cwd: where, setup: ephemeralSetup(AcpSessionSetup.none, ephemeral: draft.sideOf != null));
       if (!mounted || _quitting) throw StateError('Canoa UI closed');
       store.bindDraft(draft, client, opened, cwd: where, worktree: made);
       _ownedClients.add(client);
