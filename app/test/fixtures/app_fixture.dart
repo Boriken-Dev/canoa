@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:canoa/shell/hosts/host_status.dart' show ConnectionProbe;
 import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/accounts/accounts_host.dart';
+import 'package:canoa/roles/roles_host.dart';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/browser_connect.dart' show ConnectEndpoint;
 import 'package:canoa/acp/local_agent.dart' show InsideFile;
@@ -114,6 +115,7 @@ Future<List<CanoaConfig>> pumpApp(
   // What the app's root goes through, as the platform's windows are drawn beside it.
   Widget Function(Widget app)? around,
   AccountsHost? accountsHost,
+  RolesHost? rolesHost,
   AgentMoves? agentMoves,
   ServedApp? served,
   ConnectEndpoint? connectEndpoint,
@@ -175,6 +177,7 @@ Future<List<CanoaConfig>> pumpApp(
     askChoices: hostChoices ? null : askChoices ?? FakeHost().call,
     popoutWindows: popoutWindows,
     accountsHost: accountsHost,
+    rolesHost: rolesHost,
     agentMoves: agentMoves,
     served: served,
     connectEndpoint: connectEndpoint,

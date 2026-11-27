@@ -10,6 +10,7 @@ import '../accounts/add_account_dialog.dart';
 import '../accounts/usage_view.dart' show windowSummary;
 import '../brand.dart';
 import '../history/agent_switch.dart' show cannotTake;
+import '../roles/role_control.dart';
 import '../session_store.dart';
 import '../sources/source_choices.dart' show ModelChoice;
 import '../sources/source_icons.dart';
@@ -168,7 +169,13 @@ class _SessionPickerState extends State<SessionPicker> {
     ];
   }
 
+  /// A draft's agent, account, model or effort chosen here is the person's own pick, which ends the hold of the role it was given.
+  void _byHand() {
+    if (draft && session.role != null) store.updateDraft(session, noRole: true);
+  }
+
   void _pickModel(_ModelRow row) {
+    _byHand();
     final source = row.source;
     if (source != null && source != session.source) {
       if (!draft) return;
@@ -187,6 +194,7 @@ class _SessionPickerState extends State<SessionPicker> {
       unawaited(switchAgent(session, source));
       return;
     }
+    _byHand();
     store.updateDraft(session, source: source);
     setState(() => _stars = false);
   }
@@ -392,7 +400,9 @@ class _SessionPickerState extends State<SessionPicker> {
     final modelOption = optionIn(options, OptionRole.model);
     final known = modelOption != null || pendingChoice(session, OptionRole.model) != null;
     final highlighted = rows.isEmpty ? null : rows[_highlight.clamp(0, rows.length - 1)];
+    final roles = kit.roles;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (roles != null) RoleControl(store: store, session: session, roles: roles, sources: kit.sourcesFor(session)),
       _accounts(context),
       TextField(
         key: const Key('picker-search'),
@@ -701,6 +711,7 @@ class _SessionPickerState extends State<SessionPicker> {
     Widget item(String? value, String label) {
       final selected = (value ?? '') == (current ?? '');
       void choose() {
+        _byHand();
         chooseRole(store, session, OptionRole.effort, option, value);
         _close();
       }

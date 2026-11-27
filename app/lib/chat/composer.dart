@@ -12,6 +12,7 @@ import '../acp/local_agent.dart' show InsideFile;
 import '../history/agent_switch.dart' show PortableAgents;
 import '../config/canoa_config.dart' show Preset, ResolvedLoadout;
 import '../extension/composer_extension.dart';
+import '../roles/roles_controller.dart';
 import '../session_store.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart' show ProgramStores;
@@ -72,6 +73,7 @@ final class ComposerKit {
     this.onProfile,
     this.onDelegate,
     this.accounts,
+    this.roles,
     this.accountsOf,
     this.onAccountSettings,
     this.switchAccount,
@@ -230,6 +232,9 @@ final class ComposerKit {
 
   /// The accounts the host knows, for the chip that names the one a session runs on; null where the app has none.
   final AccountsController? accounts;
+
+  /// The host's roles, for the Role control of a new session and of the picker; null where the app has none.
+  final RolesController? roles;
 
   /// The accounts of the saved connection a session was aimed at, null while that host has told none; used instead of [accounts]
   /// for a session that has a host.

@@ -57,6 +57,9 @@ import 'package:material_ui/material_ui.dart';
 import 'accounts/account_models.dart' show AccountEntry, AccountInfo, LimitHint, TurnAdvice, accountMeta, machineLogin, modelMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
+import 'roles/role_models.dart' show RoleRefused, RoleResolution;
+import 'roles/roles_controller.dart';
+import 'roles/roles_host.dart';
 import 'desktop/host_grants.dart';
 import 'chat/agent_events.dart' show Choice;
 import 'chat/cache_lifetime.dart';
@@ -340,7 +343,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.home, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture, this.voiceOutputs, this.pcmPlayer,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.rolesHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture, this.voiceOutputs, this.pcmPlayer,
     this.mode, this.relations, this.openPage, this.paneLink,
   });
 
@@ -406,6 +409,10 @@ class CanoaApp extends StatefulWidget {
   /// What the app asks of the host about accounts; by default the host this app runs, over its control channel.
   @visibleForTesting
   final AccountsHost? accountsHost;
+
+  /// What the app asks of the host about roles; by default the host this app runs, over its control channel.
+  @visibleForTesting
+  final RolesHost? rolesHost;
 
   /// What the app asks of the host to change a running conversation's agent; by default the host this app runs, over its control
   /// channel.
@@ -1848,7 +1855,10 @@ class _CanoaAppState extends State<CanoaApp> {
     unawaited(_loadProfileItems());
     await _grants?.refresh();
     if (!mounted) return;
-    if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
+    if (_grants?.may(HostGrants.accounts) ?? false) {
+      unawaited(_accountsHeld?.refresh());
+      unawaited(_rolesHeld?.refresh());
+    }
     if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
     if (_grants?.may(HostGrants.voice) ?? false) {
       unawaited(_hostSpeech?.refresh());
@@ -1860,7 +1870,10 @@ class _CanoaAppState extends State<CanoaApp> {
   void _grantsChanged() {
     if (!mounted) return;
     setState(() {});
-    if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
+    if (_grants?.may(HostGrants.accounts) ?? false) {
+      unawaited(_accountsHeld?.refresh());
+      unawaited(_rolesHeld?.refresh());
+    }
     if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
     if (_grants?.may(HostGrants.voice) ?? false) {
       unawaited(_hostSpeech?.refresh());
@@ -1878,6 +1891,25 @@ class _CanoaAppState extends State<CanoaApp> {
   AccountsController? get _accounts => widget.accountsHost != null || (_grants?.may(HostGrants.accounts) ?? false) ? _accountsHeld : null;
 
   late final AccountsController? _accountsHeld = _buildAccounts();
+
+  /// The host's roles, for the Role control, the "served by" line and Settings; none where the app reaches no host or the host does
+  /// not grant accounts, which roles are read with.
+  RolesController? get _roles => widget.rolesHost != null || (_grants?.may(HostGrants.accounts) ?? false) ? _rolesHeld : null;
+
+  late final RolesController? _rolesHeld = _buildRoles();
+
+  RolesController? _buildRoles() {
+    final control = _control;
+    final host = widget.rolesHost ?? (control == null ? null : ControlRolesHost(control));
+    if (host == null) return null;
+    return RolesController(
+      host: host,
+      agents: () => [
+        for (final source in _hostedSources)
+          if (source.host == null) (entry: source.hostEntry ?? source.label, name: source.displayName),
+      ],
+    );
+  }
 
   AccountsController? _buildAccounts() {
     final control = _control;
@@ -1901,7 +1933,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// `initialize`'s `_meta` for the model [draft] starts on, when the person chose one: the host checks it against what the account lists.
   Map<String, Object?> _modelMeta(ChatSession draft) {
-    final model = draft.pending.values.where((choice) => choice.role == OptionRole.model).firstOrNull?.value;
+    final model = draft.pending.values.where((choice) => choice.role == OptionRole.model).firstOrNull?.value ?? draft.roleServing?.member.model;
     return model == null ? const {} : {modelMeta: model};
   }
 
@@ -2535,6 +2567,32 @@ class _CanoaAppState extends State<CanoaApp> {
   /// to approve, the agent started and its session opened, and the draft bound to it. Anything made is taken back when it
   /// fails, and the draft stays as it was.
   Future<void> _startDraft(ChatSession draft) async {
+    if (draft.role case final role?) await _chooseRoleMember(draft, role);
+    await _startDraftOn(draft);
+    // The host moves a session of a role by itself once it knows which role serves it.
+    if (draft.role != null && !draft.isDraft) await store.bindRole(draft);
+  }
+
+  /// Asks the host which member of [role] takes a new session now, and gives [draft] its agent, account, model and effort. The host's
+  /// refusal, when no member has usage left, stops the start and says when the soonest refills.
+  Future<void> _chooseRoleMember(ChatSession draft, String role) async {
+    final roles = _roles;
+    final text = AppText.of(context);
+    if (roles == null) throw StateError(text('role.host_none'));
+    final RoleResolution resolved;
+    try {
+      resolved = await roles.resolve(role);
+    } on RoleRefused catch (refused) {
+      throw StateError(refused.message);
+    }
+    final title = roles.named(role)?.label ?? role;
+    if (!store.applyRole(draft, resolved, sources: _kit.sourcesFor(draft), title: title)) {
+      throw StateError(text('role.agent_missing', {'agent': resolved.member.agent}));
+    }
+  }
+
+  /// Starts [draft]'s agent on its first message, on the source it names.
+  Future<void> _startDraftOn(ChatSession draft) async {
     final source = draft.source;
     if (source == null) throw StateError('Choose where its agent comes from first');
     if (draft.host case final name?) return _startOnConnection(draft, name);
@@ -3223,6 +3281,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.poolTurn = _askTurn;
     store.moveAccount = _switchAccount;
     store.defaultAccountOf = _defaultAccountOf;
+    store.roles = _rolesHeld;
     store.gitReader = _gitReaderFor;
     store.pathsOnHost ??= _pathsOnHost;
     if (_control case final control?) widget.rules?.useHost(HostPaths(control), up: () => _hostUp);
@@ -3353,6 +3412,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.pathsOnHost, _pathsOnHost)) store.pathsOnHost = null;
     widget.host?.removeListener(_hostChanged);
     unawaited(_reconnects?.cancel());
+    if (identical(store.roles, _rolesHeld)) store.roles = null;
     _services.dispose();
     _dictation.dispose();
     _reader.stop();
@@ -3498,6 +3558,7 @@ class _CanoaAppState extends State<CanoaApp> {
     reader: _reader,
     onVoiceMode: _voiceModeChanged,
     accounts: _accounts,
+    roles: _roles,
     accountsOf: (session) => _accountsOn(session.host),
     onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
     switchAccount: (session, account) => _switchAccount(session, account),

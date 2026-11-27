@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../roles/role_control.dart';
 import '../session_store.dart';
 import '../theme/canoa_mark.dart';
 import 'composer.dart';
@@ -145,6 +146,10 @@ class NewSessionView extends StatelessWidget {
               if (hostChip != null || !chat) ...[
                 if (kind != null) const SizedBox(height: 10),
                 Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [?hostChip, if (!chat) folder]),
+              ],
+              if (kit.roles != null && draft) ...[
+                const SizedBox(height: 10),
+                RoleControl(store: store, session: session, roles: kit.roles!, sources: kit.sourcesFor(session)),
               ],
               const SizedBox(height: 20),
               composer,
