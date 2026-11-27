@@ -32,6 +32,19 @@ final class _Disk {
     sizes[file.path] = bytes.length;
     return file.path;
   }
+
+  /// Removes the folder. Windows refuses while something that just read a file still holds it, so this tries again, and a folder
+  /// that stays held is left to the system's temporary files rather than failing a test that passed.
+  Future<void> remove() async {
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        dir.deleteSync(recursive: true);
+        return;
+      } on FileSystemException {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
 }
 
 Future<void> _paste(WidgetTester tester) async {
@@ -45,7 +58,7 @@ Future<void> _paste(WidgetTester tester) async {
 Future<(SessionStore, OptionsAgent, FakeClipboard, _Disk)> _started(WidgetTester tester,
     {bool images = true, bool files = true, Size size = const Size(1280, 800)}) async {
   final disk = _Disk();
-  addTearDown(() => disk.dir.deleteSync(recursive: true));
+  addTearDown(disk.remove);
   final agent = OptionsAgent(images: images, files: files);
   final clipboard = FakeClipboard();
   final store = SessionStore();
