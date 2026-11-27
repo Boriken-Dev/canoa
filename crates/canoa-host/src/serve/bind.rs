@@ -1064,6 +1064,13 @@ fn build_control_hub(
         )),
         _ => kept,
     };
+    let kept = match &options.account_layers {
+        Some(layers) => kept.with_schedules(crate::schedules::Schedules::new(
+            layers.clone(),
+            options.state_dir.as_deref(),
+        )),
+        None => kept,
+    };
     let kept = kept.with_services(services);
     Ok(match &options.programs {
         Some((programs, providers)) => kept.with_stores(

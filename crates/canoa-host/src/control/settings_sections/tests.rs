@@ -80,6 +80,7 @@ const BUILT_IN: [&str; 19] = [
     "accounts",
     "shells",
     "usage",
+    "schedules",
     "extensions",
     "catalog_sources",
     "content",

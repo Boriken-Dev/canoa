@@ -189,6 +189,20 @@ const builtInSectionsListing = r'''
       "collection": null
     },
     {
+      "id": "schedules",
+      "title": "Scheduled tasks",
+      "help": null,
+      "icon": "schedule",
+      "group": "Agents",
+      "under": null,
+      "keywords": "schedule timer cron daily weekly once repeat prompt run later automatic background recurring",
+      "origin": "built-in",
+      "stored": "config",
+      "schema": null,
+      "form": null,
+      "collection": null
+    },
+    {
       "id": "extensions",
       "title": "Libraries",
       "help": null,

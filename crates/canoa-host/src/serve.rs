@@ -52,7 +52,7 @@ mod kept;
 mod limit;
 mod options;
 mod sessions;
-mod watch;
+pub(crate) mod watch;
 
 #[cfg(test)]
 mod tests;
@@ -625,6 +625,14 @@ impl Serving {
                 .map(|(served, _)| Arc::clone(served))
                 .chain(self.local_only.iter().map(Arc::clone))
                 .collect(),
+        }
+    }
+
+    /// Starts the host's scheduled tasks (`[schedules.ID]`): from here the host runs each at its time, whether or not any
+    /// application is connected, until it stops. A host with no home or no canoa.cfg has none.
+    pub(crate) fn start_schedules(&self) {
+        if let Some(schedules) = self.shared.control.schedules() {
+            schedules.start(self.local(), Arc::clone(&self.shared.stopped));
         }
     }
 

@@ -671,6 +671,28 @@ impl Control {
         self.accounts()?.call(method, params)
     }
 
+    pub(super) fn r_schedules(
+        &self,
+        _: &Caller,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        use crate::schedules::Refused;
+        let schedules = self
+            .schedules()
+            .ok_or((REFUSED, "this host keeps no scheduled tasks".to_owned()))?;
+        schedules.call(method, params).map_err(|(why, message)| {
+            (
+                match why {
+                    Refused::BadParams => super::BAD_PARAMS,
+                    Refused::NotFound => super::NOT_FOUND,
+                    Refused::Failed => REFUSED,
+                },
+                message,
+            )
+        })
+    }
+
     /// A control method of a service's namespace, once the key's grant is checked.
     pub(super) fn services_call(
         &self,

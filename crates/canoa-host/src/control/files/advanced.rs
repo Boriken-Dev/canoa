@@ -397,6 +397,25 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "notifications",
             // Settings > Network edits the routes through `routes/*`.
             "network",
+            // Settings, Scheduled tasks lists, adds and removes them through `schedules/*`.
+            "schedules",
+        ],
+    ),
+    (
+        "schedules",
+        &[
+            "entry",
+            "folder",
+            "prompt",
+            "title",
+            "repeat",
+            "at",
+            "date",
+            "weekdays",
+            "utc_offset_minutes",
+            "enabled",
+            "mode",
+            "timeout_minutes",
         ],
     ),
     (

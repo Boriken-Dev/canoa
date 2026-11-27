@@ -62,6 +62,7 @@ built_in_sections! {
     Accounts("accounts", "Accounts", "Agents", "accounts", "login sign in api key subscription credentials add remove several");
     Shells("shells", "Shells", "Agents", "terminal", "bash git bash powershell pwsh wsl msys2 terminal shell command windows");
     Usage("usage", "Usage", "Agents", "speed", "limit warn percent quota");
+    Schedules("schedules", "Scheduled tasks", "Agents", "schedule", "schedule timer cron daily weekly once repeat prompt run later automatic background recurring");
     Extensions("extensions", "Libraries", "Extensions", "extension", "extensions libraries library file source host loads load add by hand provider store types restart");
     CatalogSources("catalog_sources", "Catalog sources", "Store", "hub", "catalogs sources models releases default replace add off pin trust verified pinned unverified checksum digest mirror");
     Content("content", "Content", "Store", "hub", "content sources schemes uri file https git data generators cache try read list stat resolve documents ttl provider scheme");

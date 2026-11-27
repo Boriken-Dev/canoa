@@ -224,6 +224,7 @@ pub(super) fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
             _ => Failed::run(error),
         })?;
     front.local(serving.local());
+    serving.start_schedules();
     let web = web
         .map(|web| WebServer::bind(&web, &serving))
         .transpose()

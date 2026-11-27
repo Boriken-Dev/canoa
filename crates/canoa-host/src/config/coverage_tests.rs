@@ -28,6 +28,7 @@ fn tables() -> Vec<(&'static str, Vec<String>)> {
         ("host", keys_of("RawHost")),
         ("assist_harness", keys_of("RawAssistHarness")),
         ("assist_pool", keys_of("RawAssistPool")),
+        ("schedules", keys_of("RawSchedule")),
         ("settings", keys_of("RawSettings")),
         ("settings.power", keys_of("RawPower")),
         ("permissions", keys_of("RawPermissions")),

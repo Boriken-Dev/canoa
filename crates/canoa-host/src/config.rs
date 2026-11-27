@@ -54,7 +54,7 @@ use profiles::{
 };
 use raw::{
     RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawEnvironment, RawExtension, RawFile,
-    RawHost, RawKb, RawLines, RawPool, RawProvider, assist_of, network_of,
+    RawHost, RawKb, RawLines, RawPool, RawProvider, assist_of, network_of, schedules_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
@@ -67,8 +67,9 @@ pub use types::{
     DEFAULT_PRESET, DIRECT_ROUTE, DelegateConfig, Extension, ExtensionCheck, HarnessTable,
     HistoryConfig, KbConfig, KbEmbedder, KbRanker, KbSearch, Loadout, LocalProfiles, MAX_NAME,
     MAX_TITLE, McpChoice, McpListConfig, NativeConfig, NetworkRoutes, NotificationsConfig,
-    NotifierConfig, OpenerConfig, Preset, RemoteAgent, ResolvedLoadout, RouteConfig, SYSTEM_ROUTE,
-    SdkTable, StoreConfig, UnknownLoadout, UnknownPreset, UsageConfig, WorktreeConfig,
+    NotifierConfig, OpenerConfig, Preset, RemoteAgent, Repeat, ResolvedLoadout, RouteConfig,
+    SYSTEM_ROUTE, ScheduleConfig, SdkTable, StoreConfig, UnknownLoadout, UnknownPreset,
+    UsageConfig, WorktreeConfig,
 };
 pub use types::{
     DEFAULT_EXEC_SECONDS, DEFAULT_HOOK_HANDLERS, DEFAULT_HOOK_READ_MS, DEFAULT_HOOK_SECONDS,
@@ -189,6 +190,17 @@ impl Config {
         Self::from_str_named(text, CONFIG_FILE, base)
     }
 
+    /// Whether `task`, a JSON object, is a `[schedules.ID]` table this host reads; the refusal is in the reader's words.
+    pub(crate) fn check_schedule(id: &str, task: &serde_json::Value) -> Result<(), String> {
+        let raw: raw::RawSchedule =
+            serde_json::from_value(task.clone()).map_err(|error| error.to_string())?;
+        let mut tasks = IndexMap::new();
+        tasks.insert(id.to_owned(), raw);
+        schedules_of(&tasks)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     /// As [`Config::from_str_in`] for text that is a file called `name`, whose extension (`.yaml`, `.json`, `.toml`) fixes
     /// its format; `.cfg` leaves it to the first line.
     pub(crate) fn from_str_named(text: &str, name: &str, base: &Path) -> Result<Self, ConfigError> {
@@ -205,9 +217,11 @@ impl Config {
             raw.assist_pool.as_ref(),
         )?;
         let notifications = notifications::notifications_of(raw.notifications.take(), base)?;
+        let schedules = schedules_of(&raw.schedules)?;
         let mut config = Self::from_raw_tables(raw, base)?;
         config.assist = assist;
         config.notifications = notifications;
+        config.schedules = schedules;
         Ok(config)
     }
 
@@ -315,6 +329,7 @@ impl Config {
             kb: sub.kb,
             assist: AssistConfig::default(),
             notifications: NotificationsConfig::default(),
+            schedules: IndexMap::new(),
             mcp_list: sub.mcp_list,
             services: sub.services,
             delegate: sub.delegate,

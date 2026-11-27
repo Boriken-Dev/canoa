@@ -139,6 +139,8 @@ pub(crate) struct Control {
     history: Option<Moves>,
     /// The owner's accounts, once the host knows where canoa.cfg is.
     accounts: Option<accounts::Accounts>,
+    /// The prompts the host runs on a schedule, once it knows where canoa.cfg is.
+    schedules: Option<Arc<crate::schedules::Schedules>>,
     /// The host's own model work, which `kb/offers` and `kb/test` read the opening of its harnesses from.
     assist: Option<Arc<crate::assist::Assist>>,
     /// The session services the loaded libraries offer, which answer the control methods of their own namespaces.
@@ -243,6 +245,7 @@ impl Control {
             stores: OnceLock::new(),
             history: None,
             accounts: None,
+            schedules: None,
             assist: None,
             services: None,
             usage: None,
@@ -501,6 +504,18 @@ impl Control {
     pub(crate) fn with_accounts(mut self, accounts: accounts::Accounts) -> Self {
         self.accounts = Some(accounts);
         self
+    }
+
+    /// Answers `schedules/*` for the owner, and gives the host the tasks to run.
+    #[must_use]
+    pub(crate) fn with_schedules(mut self, schedules: Arc<crate::schedules::Schedules>) -> Self {
+        self.schedules = Some(schedules);
+        self
+    }
+
+    /// The scheduled tasks, when this host keeps any.
+    pub(crate) fn schedules(&self) -> Option<&Arc<crate::schedules::Schedules>> {
+        self.schedules.as_ref()
     }
 
     /// Answers the control methods of each service's namespace (`ID/METHOD`) for a key that holds `services.setup`.

@@ -19,6 +19,7 @@ import '../settings/provider_switches.dart';
 import '../store/catalog_sources.dart';
 import '../store/content_settings.dart';
 import '../settings/host_sections.dart';
+import '../settings/schedules_settings.dart';
 import '../settings/shell_settings.dart';
 import '../files/viewers/extension_viewers.dart' show ExtensionViewers;
 import '../shell/panel_tabs.dart';
@@ -120,6 +121,7 @@ final class HostServices {
             saved: onExtensionsSaved,
           );
     providerSwitchesHeld = c == null ? null : ProviderSwitches((method, params) async => (await c.ready(wait: false)).call(method, params), restart: onRestartForExtensions);
+    schedulesHeld = c == null ? null : ScheduledTasks((method, params) async => (await c.ready(wait: false)).call(method, params));
     catalogSourcesHeld = c == null ? null : CatalogSources((method, params) async => (await c.ready(wait: false)).call(method, params));
     contentSettingsHeld = c == null ? null : ContentSettings((method, params) async => (await c.ready(wait: false)).call(method, params));
     advancedConfigHeld = c == null ? null : AdvancedConfig((method, params) async => (await c.ready(wait: false)).call(method, params));
@@ -161,6 +163,7 @@ final class HostServices {
   late final ExtensionSettings? extensionSettingsHeld;
   late final ShellSettings? shellSettingsHeld;
   late final ProviderSwitches? providerSwitchesHeld;
+  late final ScheduledTasks? schedulesHeld;
   late final CatalogSources? catalogSourcesHeld;
   late final ContentSettings? contentSettingsHeld;
   late final AdvancedConfig? advancedConfigHeld;

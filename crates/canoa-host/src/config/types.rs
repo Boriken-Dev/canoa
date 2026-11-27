@@ -80,6 +80,8 @@ pub struct Config {
     pub assist: AssistConfig,
     /// `[notifications]`: who is told about each event, and the notifier entries that add places to tell.
     pub notifications: NotificationsConfig,
+    /// `[schedules.ID]`: the prompts the host runs on a schedule, by id, in the file's order.
+    pub schedules: IndexMap<String, ScheduleConfig>,
     /// `[host.mcp_list]`: how long and how much listing a session's MCP servers takes.
     pub mcp_list: McpListConfig,
     /// `[host.services.ID]`: the table of each session service as the text of a JSON object whose members keep the file's order,
@@ -141,6 +143,7 @@ impl Default for Config {
             kb: Default::default(),
             assist: Default::default(),
             notifications: Default::default(),
+            schedules: IndexMap::new(),
             mcp_list: Default::default(),
             services: IndexMap::new(),
             delegate: Default::default(),
@@ -1131,6 +1134,50 @@ pub struct AssistConfig {
     pub harnesses: IndexMap<String, HarnessTable>,
     /// `[assist_pool]`.
     pub pool: AssistPool,
+}
+
+/// How often a scheduled task runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Repeat {
+    /// At one date and time.
+    Once,
+    /// Every day at a time.
+    Daily,
+    /// On some days of the week at a time.
+    Weekly,
+}
+
+/// `[schedules.ID]`: a prompt the host runs on a schedule, as a session of the entry it names, in a folder, by the person's own
+/// rules. Times are read on a clock `utc_offset_minutes` from UTC, as a session watch's cron line is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScheduleConfig {
+    /// `entry`: the agent entry the session runs on.
+    pub entry: String,
+    /// `folder`: the folder the session works in.
+    pub folder: String,
+    /// `prompt`: what the session is asked.
+    pub prompt: String,
+    /// `title`: what the person calls it, when not its id.
+    pub title: Option<String>,
+    /// `repeat`: `once`, `daily` (the default) or `weekly`.
+    pub repeat: Repeat,
+    /// `at`: the time of day, `HH:MM`, as `(hour, minute)`.
+    pub at: (u8, u8),
+    /// `date`: with `once`, the day, `YYYY-MM-DD`, as `(year, month, day)`.
+    pub date: Option<(i32, u8, u8)>,
+    /// `weekdays`: with `weekly`, the days, from 0 for Sunday, in order and once each.
+    pub weekdays: Vec<u8>,
+    /// `utc_offset_minutes`: how far the clock `at` and `date` are read on is from UTC (0 by default).
+    pub utc_offset_minutes: i32,
+    /// `enabled`: whether it runs (default true).
+    pub enabled: bool,
+    /// `mode`: the mode the session is put in when the agent offers it; absent leaves the agent's own.
+    pub mode: Option<String>,
+    /// `timeout_minutes`: how long a run may take before the host ends it (default 120): a hung agent would otherwise hold its
+    /// task for ever.
+    pub timeout_minutes: u64,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a

@@ -97,6 +97,8 @@ const fn raw(method: &'static str, access: Access, handler: RawHandler) -> Route
 const OWNER_NETWORK_MSG: &str =
     "only the person running this host sends requests through its network";
 const OWNER_PUBLISH_MSG: &str = "only the person running this host commits, pushes or opens a pull request with their own git and gh";
+const OWNER_SCHEDULES_MSG: &str =
+    "only the person running this host sets what it runs on a schedule, which runs as them";
 const OWNER_HISTORY_MSG: &str =
     "only the person running this host reads or moves a recorded session";
 const OWNER_LIMITS_MSG: &str = "only the person running this host lets a turn through a limit";
@@ -731,6 +733,26 @@ pub(super) static ROUTES: &[Route] = &[
         "history/imported",
         Access::Owner(OWNER_HISTORY_MSG),
         Control::r_history,
+    ),
+    rpc(
+        "schedules/list",
+        Access::Owner(OWNER_SCHEDULES_MSG),
+        Control::r_schedules,
+    ),
+    rpc(
+        "schedules/set",
+        Access::Owner(OWNER_SCHEDULES_MSG),
+        Control::r_schedules,
+    ),
+    rpc(
+        "schedules/remove",
+        Access::Owner(OWNER_SCHEDULES_MSG),
+        Control::r_schedules,
+    ),
+    rpc(
+        "schedules/run",
+        Access::Owner(OWNER_SCHEDULES_MSG),
+        Control::r_schedules,
     ),
     rpc(
         "accounts/providers",

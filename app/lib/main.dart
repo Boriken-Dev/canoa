@@ -885,6 +885,10 @@ class _CanoaAppState extends State<CanoaApp> {
       hostSections: _hostSections,
       portal: widget.served?.portal,
       shells: _shellSettings,
+      schedules: _services.schedulesHeld,
+      scheduleFolders: [
+        for (final folder in {for (final session in store.sessions) if (session.kind == SessionKind.workspace && session.cwd != null) session.cwd!}) folder,
+      ],
       usageSection: _usage != null,
       voiceBackends: _speech,
       hostSpeech: _hostSpeech,

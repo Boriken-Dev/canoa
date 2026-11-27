@@ -33,6 +33,7 @@ import '../store/content_settings.dart';
 import 'advanced_config.dart';
 import 'network_routes.dart';
 import 'host_sections.dart';
+import 'schedules_settings.dart';
 import 'shell_settings.dart';
 import 'setting_layers.dart';
 import 'settings_controller.dart';
@@ -93,6 +94,8 @@ class SettingsPage extends StatefulWidget {
     this.advancedConfig,
     this.networkRoutes,
     this.shells,
+    this.schedules,
+    this.scheduleFolders = const [],
     this.usageSection = false,
     this.voiceBackends = const [],
     this.hostSpeech,
@@ -174,6 +177,12 @@ class SettingsPage extends StatefulWidget {
   /// not change the host's settings.
   final ShellSettings? shells;
 
+  /// The host's scheduled tasks; null where this app has no host to run them or may not set them.
+  final ScheduledTasks? schedules;
+
+  /// The folders a task may be offered to run in.
+  final List<String> scheduleFolders;
+
   /// Whether the app has a Usage section of its own, which then holds the usage warning.
   final bool usageSection;
 
@@ -243,6 +252,7 @@ class SettingsPageState extends State<SettingsPage> {
     'permissions': (ready: true, build: () => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents)),
     'accounts': (ready: widget.accounts != null, build: () => AccountsSection(controller: widget.accounts!)),
     'shells': (ready: widget.shells != null, build: () => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!)),
+    'schedules': (ready: widget.schedules != null, build: () => SchedulesSection(key: const Key('settings-schedules'), tasks: widget.schedules!, folders: widget.scheduleFolders)),
     'usage': (ready: !widget.usageSection, build: () => UsageWarning(controller: controller)),
     'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),
     'catalog_sources': (ready: widget.catalogSources != null, build: () => CatalogSourcesSection(key: const Key('settings-catalog-sources'), sources: widget.catalogSources!)),

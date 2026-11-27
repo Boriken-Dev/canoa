@@ -48,6 +48,7 @@ const Map<String, IconData> extensionIcons = {
   'accounts': Icons.manage_accounts_outlined,
   'mail': Icons.mail_outline,
   'speed': Icons.speed,
+  'schedule': Icons.schedule,
   'info': Icons.info_outline,
 };
 

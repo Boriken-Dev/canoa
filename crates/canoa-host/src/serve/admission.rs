@@ -209,6 +209,14 @@ impl Local {
         self.open_with(entry, None)
     }
 
+    /// Whether `entry`'s sessions outlive their connections (`shared = true`); `None` when the host serves no such entry.
+    pub(crate) fn keeps(&self, entry: &str) -> Option<bool> {
+        self.served
+            .iter()
+            .find(|served| served.name == entry)
+            .map(|served| served.keep.is_some())
+    }
+
     /// The secret this host shares with an application in its process, for the secret prompts of the connections [`Local::open`]
     /// gives it: 32 bytes minted when the host started, kept in memory, sent over no wire and to no agent. The application derives
     /// its half of the binding from it (`coqui_acp::secret::LinkKey`); `None` when the system has no randomness to mint one from.

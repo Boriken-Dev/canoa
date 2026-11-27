@@ -11,7 +11,7 @@ use super::entries_parse::TransportSpec;
 use super::{
     AssistChoice, AssistConfig, AssistPool, ConfigError, DEFAULT_CHOICE, DIRECT_ROUTE,
     DelegateConfig, HarnessTable, KbConfig, KbEmbedder, KbRanker, KbSearch, NetworkRoutes,
-    OpenerConfig, RouteConfig, SYSTEM_ROUTE, SdkTable,
+    OpenerConfig, Repeat, RouteConfig, SYSTEM_ROUTE, ScheduleConfig, SdkTable,
 };
 
 #[derive(Deserialize)]
@@ -169,6 +169,9 @@ pub(super) struct RawFile {
     /// `connect_timeout`.
     #[serde(default)]
     pub(super) network: Option<RawNetwork>,
+    /// `[schedules.ID]`: the prompts the host runs on a schedule.
+    #[serde(default)]
+    pub(super) schedules: IndexMap<String, RawSchedule>,
 }
 
 /// `[notifications]`: `notifiers`, and every other key is an event's list of notifier names, which the reader checks against the
@@ -543,6 +546,142 @@ pub(super) struct RawAssistHarness {
     pub(super) account: Option<String>,
     pub(super) model: Option<String>,
     pub(super) effort: Option<String>,
+}
+
+/// `[schedules.ID]`: a prompt the host runs on a schedule.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawSchedule {
+    pub(super) entry: Option<String>,
+    pub(super) folder: Option<String>,
+    pub(super) prompt: Option<String>,
+    pub(super) title: Option<String>,
+    pub(super) repeat: Option<String>,
+    pub(super) at: Option<String>,
+    pub(super) date: Option<String>,
+    pub(super) weekdays: Option<Vec<String>>,
+    pub(super) utc_offset_minutes: Option<i32>,
+    pub(super) enabled: Option<bool>,
+    pub(super) mode: Option<String>,
+    pub(super) timeout_minutes: Option<u64>,
+}
+
+/// The names of the days of the week a schedule's `weekdays` takes, from Sunday (0).
+const DAY_NAMES: [&str; 7] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/// `[schedules.ID]`, checked: a refusal names the table and the key, never a value.
+pub(super) fn schedules_of(
+    schedules: &IndexMap<String, RawSchedule>,
+) -> Result<IndexMap<String, ScheduleConfig>, ConfigError> {
+    let mut out = IndexMap::new();
+    for (id, raw) in schedules {
+        let bad = |what: &str| ConfigError::Invalid {
+            entry: None,
+            what: format!("[schedules.{id}] {what}"),
+        };
+        if !(1..=32).contains(&id.len())
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        {
+            return Err(bad(
+                "is not a task name (1 to 32 lower-case letters, digits, _ and -)",
+            ));
+        }
+        let text = |key: &str, value: &Option<String>| match value {
+            Some(text) if !text.trim().is_empty() => Ok(Some(text.clone())),
+            Some(_) => Err(bad(&format!("{key} is a non-empty text"))),
+            None => Ok(None),
+        };
+        let need =
+            |key: &str, value: Option<String>| value.ok_or_else(|| bad(&format!("names no {key}")));
+        let repeat = match raw.repeat.as_deref() {
+            None | Some("daily") => Repeat::Daily,
+            Some("once") => Repeat::Once,
+            Some("weekly") => Repeat::Weekly,
+            Some(_) => return Err(bad("repeat is once, daily or weekly")),
+        };
+        let at = {
+            let at = need("at (the time of day, HH:MM)", text("at", &raw.at)?)?;
+            let parsed = at.split_once(':').and_then(|(hour, minute)| {
+                Some((hour.parse::<u8>().ok()?, minute.parse::<u8>().ok()?))
+            });
+            parsed
+                .filter(|(hour, minute)| *hour < 24 && *minute < 60)
+                .ok_or_else(|| bad("at is a time of day as HH:MM, from 00:00 to 23:59"))?
+        };
+        let date = match (repeat, text("date", &raw.date)?) {
+            (Repeat::Once, Some(date)) => {
+                let mut parts = date.split('-');
+                let parsed = (|| {
+                    let year = parts.next()?.parse::<i32>().ok()?;
+                    let month = parts.next()?.parse::<u8>().ok()?;
+                    let day = parts.next()?.parse::<u8>().ok()?;
+                    parts.next().is_none().then_some((year, month, day))
+                })();
+                let valid = parsed.filter(|(year, month, day)| {
+                    time::Month::try_from(*month)
+                        .ok()
+                        .and_then(|month| time::Date::from_calendar_date(*year, month, *day).ok())
+                        .is_some()
+                });
+                Some(valid.ok_or_else(|| bad("date is a day as YYYY-MM-DD"))?)
+            }
+            (Repeat::Once, None) => {
+                return Err(bad("repeat = \"once\" names no date (YYYY-MM-DD)"));
+            }
+            (_, Some(_)) => return Err(bad("date goes with repeat = \"once\"")),
+            (_, None) => None,
+        };
+        let weekdays = match (repeat, &raw.weekdays) {
+            (Repeat::Weekly, Some(names)) if !names.is_empty() => {
+                let mut days = Vec::new();
+                for name in names {
+                    let day = DAY_NAMES
+                        .iter()
+                        .position(|each| *each == name.to_ascii_lowercase())
+                        .and_then(|day| u8::try_from(day).ok())
+                        .ok_or_else(|| {
+                            bad("weekdays names days as sun, mon, tue, wed, thu, fri or sat")
+                        })?;
+                    if !days.contains(&day) {
+                        days.push(day);
+                    }
+                }
+                days.sort_unstable();
+                days
+            }
+            (Repeat::Weekly, _) => return Err(bad("repeat = \"weekly\" names no weekdays")),
+            (_, Some(_)) => return Err(bad("weekdays goes with repeat = \"weekly\"")),
+            (_, None) => Vec::new(),
+        };
+        let utc_offset_minutes = raw.utc_offset_minutes.unwrap_or(0);
+        if utc_offset_minutes.abs() >= 24 * 60 {
+            return Err(bad("utc_offset_minutes is less than a day from UTC"));
+        }
+        let timeout_minutes = raw.timeout_minutes.unwrap_or(120);
+        if timeout_minutes == 0 {
+            return Err(bad("timeout_minutes is at least 1"));
+        }
+        out.insert(
+            id.clone(),
+            ScheduleConfig {
+                entry: need("entry (the agent that runs it)", text("entry", &raw.entry)?)?,
+                folder: need("folder", text("folder", &raw.folder)?)?,
+                prompt: need("prompt", text("prompt", &raw.prompt)?)?,
+                title: text("title", &raw.title)?,
+                repeat,
+                at,
+                date,
+                weekdays,
+                utc_offset_minutes,
+                enabled: raw.enabled.unwrap_or(true),
+                mode: text("mode", &raw.mode)?,
+                timeout_minutes,
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// `[assist_pool]`: the warm sessions the harness backends keep.
