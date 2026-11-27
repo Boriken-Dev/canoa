@@ -7,18 +7,18 @@
 const config = { fontFallbackBaseUrl: "assets/fonts/fallback/" };
 
 // Whether this page starts the engine in multi-view mode, so that a browser window the app opens is another view of the one
-// running app (lib/popout/platform_web.dart). Only when `?windows=views` asks for it, and not where the page is a window of its
-// own (`popout`), the chat alone in a frame or the extension's panel (`mode=chat`, the extension's bridge, a framing page), nor in
-// a browser whose navigator has no `userAgentData`: the shims that view needs lean on the engine's use of the opener's window and
-// document, which was measured in Chromium only. It is not the default because xterm2 5.4.0 opens its text input on the engine's
-// implicit view, which a multi-view engine has none of, so the Terminal section would take no input in such a page.
-// `?windows=copy` is the default's name: a second copy of the app in the window.
+// running app (lib/popout/platform_web.dart). Not where the page is a window of its own (`popout`), the chat alone in a frame or
+// the extension's panel (`mode=chat`, the extension's bridge, a framing page), nor in a browser whose navigator has no
+// `userAgentData`: the shims that view needs lean on the engine's use of the opener's window and document, which was measured in
+// Chromium only. `?windows=copy` asks for a second copy of the app in each window instead, and `?windows=views` for the views in a
+// browser that is not measured.
 function startsViews() {
   const query = new URLSearchParams(location.search);
   const asked = query.get("windows");
   if (query.has("popout") || query.get("mode") === "chat" || window.canoaBridge || window.top !== window) return false;
   if (typeof window.open !== "function") return false;
-  return asked === "views" && navigator.userAgentData !== undefined;
+  if (asked === "copy") return false;
+  return asked === "views" || navigator.userAgentData !== undefined;
 }
 
 _flutter.loader.load({

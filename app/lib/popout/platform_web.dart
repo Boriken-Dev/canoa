@@ -354,7 +354,9 @@ final class _Shims {
           web.window.dispatchEvent(copy);
           // The framework moves the focus on Tab itself, and the engine does not report that key handled: the browser's own
           // Tab, which would take the focus out of the view, is always refused here.
-          if (copy.defaultPrevented || event.key == 'Tab') event.preventDefault();
+          // The paste key is the framework's too (it reads the clipboard itself), and the browser's own paste would insert the text again.
+          final paste = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() == 'v';
+          if (copy.defaultPrevented || event.key == 'Tab' || paste) event.preventDefault();
         }).toJS,
         true.toJS,
       );
@@ -555,16 +557,6 @@ final class _ViewWindows extends WindowList {
   bool get drawsWidgets => available;
 
   @override
-  bool get linksItems => available;
-
-  // xterm2 5.4.0 opens its text input on the engine's implicit view, which a multi-view engine has none of (its CustomTextEdit takes
-  // a viewId only from there, and TerminalView passes none), so a terminal is a second copy of the app in a window of its own.
-  @override
-  bool drawsItem(PopoutItem item) => item.kind != PopoutItem.terminal;
-
-  final _copies = _WebWindows();
-
-  @override
   Future<PopoutWindow> open({
     required String title,
     required String look,
@@ -574,10 +566,7 @@ final class _ViewWindows extends WindowList {
     WidgetBuilder? builder,
     PopoutItem? item,
   }) async {
-    if (builder == null) {
-      if (item == null) throw ArgumentError.notNull('builder');
-      return track(await _copies.open(title: title, look: look, density: density, session: session, size: size, item: item));
-    }
+    if (builder == null) throw ArgumentError.notNull('builder');
     // Called inside the person's click, so that the browser lets it open: nothing is awaited before it.
     final popup = web.window.open('', 'canoa-window-${_next++}', 'popup=yes,width=${size.width.round()},height=${size.height.round()}');
     if (popup == null) throw StateError('The browser did not open the window: allow pop-ups for this page');

@@ -67,10 +67,6 @@ abstract interface class PopoutWindows implements Listenable {
   /// its link brings. A platform that [drawsWidgets] does not need it.
   bool get linksItems;
 
-  /// Whether a window draws [item] itself from the widget it is given. A platform that [drawsWidgets] but cannot draw one kind of
-  /// item (the browser's views cannot draw a terminal) opens that item as a window that is another page, if it [linksItems].
-  bool drawsItem(PopoutItem item);
-
   /// The windows open now, oldest first.
   List<PopoutWindow> get windows;
 
@@ -106,9 +102,6 @@ abstract class WindowList extends ChangeNotifier implements PopoutWindows {
 
   @override
   bool get linksItems => false;
-
-  @override
-  bool drawsItem(PopoutItem item) => drawsWidgets;
 
   @override
   Widget host(Widget app) => app;
