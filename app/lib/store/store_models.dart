@@ -636,7 +636,7 @@ class _ModelPageState extends State<ModelPage> {
                 ),
             ]),
           if (model.addActions.isNotEmpty)
-            DetailSection(key: const Key('model-engines'), title: 'Engines', children: [
+            DetailSection(key: const Key('model-engines'), title: context.t('store.engines'), children: [
               for (final (at, action) in model.addActions.indexed)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
