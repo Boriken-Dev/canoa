@@ -137,11 +137,6 @@ fn count(value: u64) -> Option<u64> {
 }
 
 impl Watch {
-    /// A watch on a connection of `harness`, when the host exports telemetry.
-    pub(crate) fn new(harness: &str) -> Option<Self> {
-        super::current().map(|hub| Self::with_hub(hub, harness))
-    }
-
     pub(crate) fn with_hub(hub: Arc<Hub>, harness: &str) -> Self {
         Self {
             hub,

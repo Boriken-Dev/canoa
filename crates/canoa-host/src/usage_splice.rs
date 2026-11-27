@@ -458,10 +458,14 @@ impl Splice {
         self
     }
 
-    /// This connection telling the host's telemetry of its sessions, turns, tool calls and permissions, as the agent `harness`.
+    /// This connection telling `telemetry` of its sessions, turns, tool calls and permissions, as the agent `harness`.
     #[must_use]
-    pub(crate) fn watching(mut self, harness: &str) -> Self {
-        self.watch = crate::telemetry::watch::Watch::new(harness);
+    pub(crate) fn watching(
+        mut self,
+        telemetry: &crate::telemetry::Telemetry,
+        harness: &str,
+    ) -> Self {
+        self.watch = telemetry.watch(harness);
         self
     }
 

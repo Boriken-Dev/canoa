@@ -24,6 +24,7 @@ use serde_json::{Map, Value, json};
 use crate::config::plain_absolute;
 use crate::share;
 use crate::site::Sites;
+use crate::telemetry::Telemetry;
 use crate::usage_log::UsageLog;
 use crate::usage_splice::{Client, Ends, Inference, Launch, Splice};
 use crate::worktree::Worktrees;
@@ -52,6 +53,8 @@ pub(crate) struct Scope {
     log: Option<(Arc<UsageLog>, String)>,
     /// The harness this entry runs, which its connections tell the host's telemetry.
     harness: Option<String>,
+    /// The telemetry of the host this entry is served by.
+    telemetry: Option<Arc<Telemetry>>,
     /// The session a delegated task's connection was started from.
     parent: Option<String>,
     /// Who hears each turn of this entry's sessions end.
@@ -83,6 +86,7 @@ impl Scope {
             documents: None,
             log: None,
             harness: None,
+            telemetry: None,
             parent: None,
             ends: None,
             entry: None,
@@ -118,6 +122,13 @@ impl Scope {
         self
     }
 
+    /// This scope's connections telling `telemetry` what they do.
+    #[must_use]
+    pub(crate) fn telemetry(mut self, telemetry: Arc<Telemetry>) -> Self {
+        self.telemetry = Some(telemetry);
+        self
+    }
+
     /// This scope reading failed turns of an agent that reports no usage with `phrases`: `None` for coqui-acp's defaults, a
     /// list instead of them, an empty one not at all.
     #[must_use]
@@ -149,9 +160,9 @@ impl Scope {
     /// One connection's share in the entry's inferred usage.
     pub(crate) fn splice(&self) -> Splice {
         let splice = Splice::new(Arc::clone(&self.usage), self.account.clone());
-        let splice = match &self.harness {
-            Some(harness) => splice.watching(harness),
-            None => splice,
+        let splice = match (&self.harness, &self.telemetry) {
+            (Some(harness), Some(telemetry)) => splice.watching(telemetry, harness),
+            _ => splice,
         };
         // A session with no profile of its own runs on the host's own sources.
         let own = Some(crate::profile::hosted::LOCAL_PROFILE.to_owned());

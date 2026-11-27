@@ -195,6 +195,8 @@ struct Shared {
     roles: Arc<crate::roles::Hub>,
     /// The session services the loaded libraries offer.
     services: Arc<crate::services::Services>,
+    /// What this host exports of its sessions, when the person turned that on.
+    telemetry: Arc<crate::telemetry::Telemetry>,
     store: Arc<TrustStore>,
     registry: Registry,
     unproven: Gate,
@@ -690,7 +692,7 @@ impl Serving {
         }
         // The stop that ended the listeners may still be ending agents on its own thread.
         stopper.stop_agents();
-        crate::telemetry::stop();
+        self.shared.telemetry.stop();
     }
 }
 

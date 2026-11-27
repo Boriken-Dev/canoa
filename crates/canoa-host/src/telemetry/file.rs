@@ -10,7 +10,9 @@
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError, RwLock};
+use std::sync::{Mutex, PoisonError};
+
+use serde_json::{Map, Value};
 
 use canoa::telemetry::{Batch, ExporterError, ExporterInfo, TelemetryExporter, otlp};
 use coqui_acp_api::guatiao::library::ProviderError;
@@ -19,18 +21,33 @@ use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
 /// How many days of files the exporter keeps unless `keep_days` says another number.
 pub(crate) const DEFAULT_KEEP_DAYS: u32 = 14;
 
+/// The id of the exporter the host carries.
+pub(crate) const ID: &str = "file";
 const GROUPS: [&str; 3] = ["spans", "metrics", "logs"];
 const SECONDS_A_DAY: i64 = 86_400;
 
-static HOME: RwLock<Option<PathBuf>> = RwLock::new(None);
-
-/// The host's home, which `telemetry/` of an exporter that names no folder is in.
-pub(crate) fn set_home(home: Option<PathBuf>) {
-    *HOME.write().unwrap_or_else(PoisonError::into_inner) = home;
-}
-
-fn home() -> Option<PathBuf> {
-    HOME.read().unwrap_or_else(PoisonError::into_inner).clone()
+/// The settings of the `file` exporter with `folder` filled in from `home` when the person named none, so the folder is
+/// `telemetry/` in the host's home. Settings of any other provider are returned as they are.
+pub(crate) fn with_home(
+    provider: &str,
+    settings: &Map<String, Value>,
+    home: Option<&Path>,
+) -> Map<String, Value> {
+    let mut settings = settings.clone();
+    let named = settings
+        .get("folder")
+        .and_then(Value::as_str)
+        .is_some_and(|folder| !folder.trim().is_empty());
+    if provider == ID
+        && !named
+        && let Some(home) = home
+    {
+        settings.insert(
+            "folder".to_owned(),
+            Value::String(home.join("telemetry").to_string_lossy().into_owned()),
+        );
+    }
+    settings
 }
 
 /// What the `file` exporter is configured with.
@@ -100,9 +117,7 @@ impl FileExporter {
     }
 
     fn folder(&self) -> Option<PathBuf> {
-        self.folder
-            .clone()
-            .or_else(|| home().map(|home| home.join("telemetry")))
+        self.folder.clone()
     }
 
     /// Removes this exporter's files that are older than `keep_days` days before `now`, once a day.

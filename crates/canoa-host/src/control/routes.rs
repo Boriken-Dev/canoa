@@ -230,11 +230,18 @@ impl Control {
     ) -> Result<Value, (i32, String)> {
         match method {
             "telemetry/catalog" => Ok(crate::telemetry::catalog_answer()),
-            "telemetry/status" => Ok(crate::telemetry::status_answer(&self.loaded_config()?)),
+            "telemetry/status" => Ok(crate::telemetry::status_answer(
+                &self.telemetry,
+                &self.loaded_config()?,
+            )),
             _ => {
                 let name = super::text_param(params, "name")?
                     .ok_or_else(|| super::bad("name is needed"))?;
-                Ok(crate::telemetry::test_answer(&self.loaded_config()?, name))
+                Ok(crate::telemetry::test_answer(
+                    &self.telemetry,
+                    &self.loaded_config()?,
+                    name,
+                ))
             }
         }
     }

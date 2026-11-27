@@ -302,6 +302,7 @@ struct BindState<'a> {
     items: &'a crate::profile::ItemSet,
     accounts: Option<&'a Arc<Accounts>>,
     usage_log: Option<Arc<crate::usage_log::UsageLog>>,
+    telemetry: Arc<crate::telemetry::Telemetry>,
     agents: Arc<Mutex<Agents>>,
     library_readers: Option<Vec<Arc<GuatiaoRegistry>>>,
     registry: Registry,
@@ -556,6 +557,7 @@ fn bind_harness_entry(
                 .account(entry.name.clone())
                 .entry(entry.name.clone())
                 .limit_phrases(state.config.limit_phrases.clone())
+                .telemetry(Arc::clone(&state.telemetry))
                 .usage_log(state.usage_log.clone(), harness)
                 .watching(state.roles.clone()),
             offer: hosted::offer(
@@ -608,6 +610,7 @@ fn bind_entry(state: &mut BindState<'_>, entry: &Entry) -> Result<(), ServeError
                 .account(entry.name.clone())
                 .entry(entry.name.clone())
                 .limit_phrases(state.config.limit_phrases.clone())
+                .telemetry(Arc::clone(&state.telemetry))
                 .usage_log(state.usage_log.clone(), &harness)
                 .watching(state.roles.clone());
             let scope = match usage.as_deref() {
@@ -891,6 +894,7 @@ fn build_control_hub(
     hosted: &Arc<super::sessions::Hosted>,
     pairing_identity: &Arc<Identity>,
     usage_log: Option<&Arc<crate::usage_log::UsageLog>>,
+    telemetry: &Arc<crate::telemetry::Telemetry>,
     secrets: Arc<secrets::Hub>,
     recorded: Arc<history::Store>,
     movers: BTreeMap<String, Arc<kind::Harness>>,
@@ -1054,6 +1058,7 @@ fn build_control_hub(
         None => kept,
     };
     let kept = kept
+        .with_telemetry(Arc::clone(telemetry))
         .with_sealer(control::Sealer::new(Arc::clone(&secrets), options.ask_wait))
         .with_roles(Arc::clone(roles))
         .with_history(control::Moves {
@@ -1206,7 +1211,10 @@ impl Serving {
                 }),
             );
         }
-        crate::telemetry::start(config, options.state_dir.as_deref());
+        let telemetry = Arc::new(crate::telemetry::Telemetry::start(
+            config,
+            options.state_dir.as_deref(),
+        ));
         let agents = Arc::new(Mutex::new(Agents::default()));
         let missing_of: BTreeMap<&str, &Vec<String>> = sources
             .iter()
@@ -1218,6 +1226,7 @@ impl Serving {
             items: &items,
             accounts: accounts.as_ref(),
             usage_log: usage_log.clone(),
+            telemetry: Arc::clone(&telemetry),
             agents: Arc::clone(&agents),
             library_readers: None,
             registry: Registry::new(),
@@ -1294,6 +1303,7 @@ impl Serving {
             &hosted,
             &pairing_identity,
             usage_log.as_ref(),
+            &telemetry,
             Arc::clone(&secrets),
             recorded.clone(),
             state.movers,
@@ -1306,6 +1316,7 @@ impl Serving {
             shared: Arc::new(Shared {
                 roles: Arc::clone(&state.roles),
                 services: Arc::clone(&services),
+                telemetry,
                 history: recorded,
                 secrets,
                 store_tools: store_mcp::Hub::new(

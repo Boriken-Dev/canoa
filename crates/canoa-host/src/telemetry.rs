@@ -18,8 +18,8 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use canoa::telemetry::{Attr, Batch, ExporterInfo, LogRecord, Signals, TelemetryExporter};
@@ -49,20 +49,16 @@ coqui_acp_api::guatiao::local_providers!(
 /// The origin of the providers the host itself carries.
 const BUILT_IN: &str = "built-in";
 
-static CURRENT: RwLock<Option<(Arc<Hub>, Duration)>> = RwLock::new(None);
-static ACTIVE: AtomicBool = AtomicBool::new(false);
-static STARTUP: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
-
-/// The hub of this process, when the host exports telemetry.
-pub(crate) fn current() -> Option<Arc<Hub>> {
-    if !ACTIVE.load(Ordering::Acquire) {
-        return None;
-    }
-    CURRENT
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-        .map(|(hub, _)| Arc::clone(hub))
+/// One host's telemetry: the hub its connections tell, and what it needs to make an exporter. Each host makes its own, so two hosts
+/// in one process keep their signals, exporters and files apart.
+#[derive(Debug, Default)]
+pub(crate) struct Telemetry {
+    /// The host's home, which `telemetry/` of an exporter that names no folder is in.
+    home: Option<PathBuf>,
+    /// The hub and the longest [`Telemetry::stop`] waits for it, while export runs.
+    running: Mutex<Option<(Arc<Hub>, Duration)>>,
+    /// Why each exporter that was named did not start.
+    failed: Mutex<BTreeMap<String, String>>,
 }
 
 /// Whether export runs, and if not why not.
@@ -146,9 +142,10 @@ fn guatiao_of(settings: &Map<String, Value>) -> Result<coqui_acp_api::guatiao::V
 }
 
 /// The exporter `each` names, made with its settings.
-pub(crate) fn make(
+fn make(
     config: &Config,
     each: &TelemetryExporterConfig,
+    home: Option<&Path>,
 ) -> Result<Arc<dyn TelemetryExporter>, String> {
     let registries = registries_for(config, Some(each));
     for (_, registry) in &registries {
@@ -164,7 +161,11 @@ pub(crate) fn make(
                 continue;
             }
             return if offer.builds_instances() {
-                let value = guatiao_of(each.settings.as_map())?;
+                let value = guatiao_of(&file::with_home(
+                    &each.provider,
+                    each.settings.as_map(),
+                    home,
+                ))?;
                 let built = offer
                     .instantiate(&value)
                     .map_err(|error| error.to_string())?;
@@ -184,76 +185,105 @@ pub(crate) fn make(
     ))
 }
 
-/// Starts exporting as `config` says, in `home`: replaces what ran before in this process. Logs at `warn` why export is paused when
-/// the person turned it on and it cannot run.
-pub(crate) fn start(config: &Config, home: Option<&Path>) {
-    stop();
-    file::set_home(home.map(Path::to_path_buf));
-    STARTUP
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clear();
-    match state_of(&config.telemetry) {
-        State::Off => return,
-        State::Paused(why) => {
-            tracing::warn!("telemetry export is paused: {why}");
-            return;
+impl Telemetry {
+    /// Export that does not run, for a host that has none: exporters made through it still find `home`.
+    pub(crate) fn off(home: Option<&Path>) -> Self {
+        Self {
+            home: home.map(Path::to_path_buf),
+            ..Self::default()
         }
-        State::Running => {}
     }
-    let record = groups_of(&config.telemetry);
-    let mut lanes = Vec::new();
-    for (name, each) in &config.telemetry.exporters {
-        let made = make(config, each).and_then(|exporter| {
-            let info: ExporterInfo = exporter.describe().map_err(|error| error.to_string())?;
-            Ok((exporter, info.signals))
-        });
-        match made {
-            Ok((exporter, takes)) => lanes.push((
-                LaneOptions {
-                    name: name.clone(),
-                    queue: each.queue,
-                    batch: Duration::from_secs(each.batch_seconds),
-                    sample: f64::from(each.sample) / f64::from(crate::config::TELEMETRY_SAMPLE_ALL),
-                    first_pause: hub::FIRST_PAUSE,
-                },
-                exporter,
-                takes,
-            )),
-            Err(why) => {
-                tracing::warn!("telemetry exporter {name} is not started: {why}");
-                STARTUP
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .insert(name.clone(), why);
+
+    /// Starts exporting as `config` says, in `home`. Logs at `warn` why export is paused when the person turned it on and it
+    /// cannot run.
+    pub(crate) fn start(config: &Config, home: Option<&Path>) -> Self {
+        let this = Self::off(home);
+        match state_of(&config.telemetry) {
+            State::Off => return this,
+            State::Paused(why) => {
+                tracing::warn!("telemetry export is paused: {why}");
+                return this;
+            }
+            State::Running => {}
+        }
+        let record = groups_of(&config.telemetry);
+        let mut lanes = Vec::new();
+        for (name, each) in &config.telemetry.exporters {
+            let made = this.make(config, each).and_then(|exporter| {
+                let info: ExporterInfo = exporter.describe().map_err(|error| error.to_string())?;
+                Ok((exporter, info.signals))
+            });
+            match made {
+                Ok((exporter, takes)) => lanes.push((
+                    LaneOptions {
+                        name: name.clone(),
+                        queue: each.queue,
+                        batch: Duration::from_secs(each.batch_seconds),
+                        sample: f64::from(each.sample)
+                            / f64::from(crate::config::TELEMETRY_SAMPLE_ALL),
+                        first_pause: hub::FIRST_PAUSE,
+                    },
+                    exporter,
+                    takes,
+                )),
+                Err(why) => {
+                    tracing::warn!("telemetry exporter {name} is not started: {why}");
+                    this.failed
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(name.clone(), why);
+                }
             }
         }
+        if lanes.is_empty() {
+            return this;
+        }
+        let hub = Hub::new(lanes, record, resource());
+        *this.running.lock().unwrap_or_else(PoisonError::into_inner) = Some((
+            Arc::clone(&hub),
+            Duration::from_secs(config.telemetry.stop_wait_seconds),
+        ));
+        hub.emit(Signal::HostStarted {
+            version: signal::Text::new(env!("CARGO_PKG_VERSION")),
+            at: now_ns(),
+        });
+        this
     }
-    if lanes.is_empty() {
-        return;
-    }
-    let hub = Hub::new(lanes, record, resource());
-    *CURRENT.write().unwrap_or_else(PoisonError::into_inner) = Some((
-        Arc::clone(&hub),
-        Duration::from_secs(config.telemetry.stop_wait_seconds),
-    ));
-    ACTIVE.store(true, Ordering::Release);
-    hub.emit(Signal::HostStarted {
-        version: signal::Text::new(env!("CARGO_PKG_VERSION")),
-        at: now_ns(),
-    });
-}
 
-/// Ends export: what waits is delivered once and the exporters are asked to finish, for as long as `stop_wait_seconds` allows.
-pub(crate) fn stop() {
-    ACTIVE.store(false, Ordering::Release);
-    let held = CURRENT
-        .write()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take();
-    if let Some((hub, wait)) = held {
-        hub.emit(Signal::HostStopped { at: now_ns() });
-        hub.stop(wait);
+    /// The hub, while export runs.
+    pub(crate) fn hub(&self) -> Option<Arc<Hub>> {
+        self.running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|(hub, _)| Arc::clone(hub))
+    }
+
+    /// A watch on a connection of `harness`, when export runs.
+    pub(crate) fn watch(&self, harness: &str) -> Option<watch::Watch> {
+        self.hub().map(|hub| watch::Watch::with_hub(hub, harness))
+    }
+
+    /// Ends export: what waits is delivered once and the exporters are asked to finish, for as long as `stop_wait_seconds` allows.
+    pub(crate) fn stop(&self) {
+        let held = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some((hub, wait)) = held {
+            hub.emit(Signal::HostStopped { at: now_ns() });
+            hub.stop(wait);
+        }
+    }
+
+    /// The exporter `each` names, made with its settings. The `file` exporter that names no folder writes in this host's home.
+    pub(crate) fn make(
+        &self,
+        config: &Config,
+        each: &TelemetryExporterConfig,
+    ) -> Result<Arc<dyn TelemetryExporter>, String> {
+        make(config, each, self.home.as_deref())
     }
 }
 
@@ -291,11 +321,12 @@ fn providers_of(config: &Config) -> Vec<Value> {
 }
 
 /// `telemetry/status`: whether export runs, why not when it does not, and how each exporter is doing.
-pub(crate) fn status_answer(config: &Config) -> Value {
+pub(crate) fn status_answer(this: &Telemetry, config: &Config) -> Value {
     let telemetry = &config.telemetry;
     let state = state_of(telemetry);
-    let lanes = current().map(|hub| hub.lanes()).unwrap_or_default();
-    let started = STARTUP
+    let lanes = this.hub().map(|hub| hub.lanes()).unwrap_or_default();
+    let started = this
+        .failed
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
@@ -332,11 +363,11 @@ pub(crate) fn status_answer(config: &Config) -> Value {
 }
 
 /// `telemetry/test` `{name}`: one `host.test` record through the exporter `name`, made as the configuration says, running or not.
-pub(crate) fn test_answer(config: &Config, name: &str) -> Value {
+pub(crate) fn test_answer(this: &Telemetry, config: &Config, name: &str) -> Value {
     let Some(each) = config.telemetry.exporters.get(name) else {
         return json!({"ok": false, "why": format!("no exporter {name}")});
     };
-    let sent = make(config, each).and_then(|exporter| {
+    let sent = this.make(config, each).and_then(|exporter| {
         let mut batch = Batch::new(resource());
         batch
             .logs

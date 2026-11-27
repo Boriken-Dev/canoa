@@ -149,6 +149,8 @@ pub(crate) struct Control {
     usage: Option<Arc<crate::usage_log::UsageLog>>,
     /// The sessions roles serve.
     roles: Option<Arc<crate::roles::Hub>>,
+    /// What this host exports of its sessions; export that does not run until the host hands its own in.
+    telemetry: Arc<crate::telemetry::Telemetry>,
     /// Per-host `usage/read` allowance cache.
     usage_cache: usage_read::Cache,
     /// The paired keys, so a key can take itself out.
@@ -252,6 +254,7 @@ impl Control {
             services: None,
             usage: None,
             roles: None,
+            telemetry: Arc::new(crate::telemetry::Telemetry::default()),
             usage_cache: usage_read::Cache::default(),
             trust: None,
             sealer: None,
@@ -580,6 +583,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_usage(mut self, usage: Arc<crate::usage_log::UsageLog>) -> Self {
         self.usage = Some(usage);
+        self
+    }
+
+    /// Answers `telemetry/*` from `telemetry`.
+    #[must_use]
+    pub(crate) fn with_telemetry(mut self, telemetry: Arc<crate::telemetry::Telemetry>) -> Self {
+        self.telemetry = telemetry;
         self
     }
 

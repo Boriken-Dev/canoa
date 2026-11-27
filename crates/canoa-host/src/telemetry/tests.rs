@@ -9,7 +9,7 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use canoa::telemetry::{
@@ -22,15 +22,8 @@ use super::catalog::{self, CATALOG, Kind, Ty};
 use super::hub::{Hub, LaneOptions};
 use super::signal::{self, Record, Signal, Text};
 use super::watch::Watch;
-use super::{State, state_of};
+use super::{State, Telemetry, state_of};
 use crate::config::{Config, TelemetryConfig};
-
-/// The tests that install the process's hub take this, so that two do not replace each other's.
-static GLOBAL: Mutex<()> = Mutex::new(());
-
-fn one_at_a_time() -> MutexGuard<'static, ()> {
-    GLOBAL.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 fn scratch(name: &str) -> PathBuf {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -372,11 +365,10 @@ fn the_table_refuses_what_it_does_not_know_and_a_value_that_makes_no_sense() {
 
 #[test]
 fn nothing_is_installed_queued_or_watched_while_it_is_off_or_paused() {
-    let _one = one_at_a_time();
     let home = scratch("off");
-    super::start(&config(""), Some(&home));
-    assert!(super::current().is_none());
-    assert!(Watch::new("claude").is_none());
+    let off = Telemetry::start(&config(""), Some(&home));
+    assert!(off.hub().is_none());
+    assert!(off.watch("claude").is_none());
     // Turned on and not accepted, and accepted for another list: the same.
     for acknowledged in ["", "ffffffffffffffff"] {
         let folder = home.join("out");
@@ -384,20 +376,19 @@ fn nothing_is_installed_queued_or_watched_while_it_is_off_or_paused() {
             "[host.telemetry]\nenabled = true\nacknowledged = \"{acknowledged}\"\n[host.telemetry.exporters.local]\nprovider = \"file\"\nsettings = {{ folder = {:?} }}\n",
             folder.display().to_string()
         ));
-        super::start(&paused, Some(&home));
-        assert!(super::current().is_none());
-        assert!(Watch::new("claude").is_none());
-        let status = super::status_answer(&paused);
+        let held = Telemetry::start(&paused, Some(&home));
+        assert!(held.hub().is_none());
+        assert!(held.watch("claude").is_none());
+        let status = super::status_answer(&held, &paused);
         assert_eq!(status["state"], "paused", "{status}");
         assert!(status["paused"].is_string());
         assert!(!folder.exists(), "nothing was written");
     }
-    assert_eq!(super::status_answer(&config(""))["state"], "off");
+    assert_eq!(super::status_answer(&off, &config(""))["state"], "off");
 }
 
 #[test]
 fn the_file_exporter_writes_what_the_hub_hands_it_once_the_list_is_accepted() {
-    let _one = one_at_a_time();
     let home = scratch("on");
     let folder = home.join("out");
     let accepted = config(&format!(
@@ -405,8 +396,8 @@ fn the_file_exporter_writes_what_the_hub_hands_it_once_the_list_is_accepted() {
         catalog::digest(),
         folder.display().to_string()
     ));
-    super::start(&accepted, Some(&home));
-    let hub = super::current().expect("running");
+    let telemetry = Telemetry::start(&accepted, Some(&home));
+    let hub = telemetry.hub().expect("running");
     hub.emit(Signal::HostTest {
         at: super::hub::now_ns(),
     });
@@ -415,9 +406,12 @@ fn the_file_exporter_writes_what_the_hub_hands_it_once_the_list_is_accepted() {
         stop: signal::StopReason::EndTurn,
         at: super::hub::now_ns(),
     });
-    assert_eq!(super::status_answer(&accepted)["state"], "running");
-    super::stop();
-    assert!(super::current().is_none());
+    assert_eq!(
+        super::status_answer(&telemetry, &accepted)["state"],
+        "running"
+    );
+    telemetry.stop();
+    assert!(telemetry.hub().is_none());
     let mut lines = Vec::new();
     for entry in std::fs::read_dir(&folder).expect("the folder") {
         let entry = entry.expect("an entry");
@@ -467,14 +461,12 @@ fn the_file_exporter_writes_what_the_hub_hands_it_once_the_list_is_accepted() {
 
 #[test]
 fn the_default_folder_is_inside_the_hosts_home_and_a_folder_is_private_to_this_user() {
-    let _one = one_at_a_time();
     let home = scratch("home");
     let accepted = config(&format!(
         "[host.telemetry]\nenabled = true\nacknowledged = \"{}\"\n[host.telemetry.exporters.local]\nprovider = \"file\"\n",
         catalog::digest()
     ));
-    super::start(&accepted, Some(&home));
-    super::stop();
+    Telemetry::start(&accepted, Some(&home)).stop();
     let folder = home.join("telemetry");
     assert!(folder.is_dir(), "the exporter made telemetry/ in the home");
     #[cfg(unix)]
