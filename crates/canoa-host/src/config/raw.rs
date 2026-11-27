@@ -560,7 +560,7 @@ pub(super) struct RawSchedule {
     pub(super) at: Option<String>,
     pub(super) date: Option<String>,
     pub(super) weekdays: Option<Vec<String>>,
-    pub(super) utc_offset_minutes: Option<i32>,
+    pub(super) time_zone: Option<String>,
     pub(super) enabled: Option<bool>,
     pub(super) mode: Option<String>,
     pub(super) timeout_minutes: Option<u64>,
@@ -655,9 +655,13 @@ pub(super) fn schedules_of(
             (_, Some(_)) => return Err(bad("weekdays goes with repeat = \"weekly\"")),
             (_, None) => Vec::new(),
         };
-        let utc_offset_minutes = raw.utc_offset_minutes.unwrap_or(0);
-        if utc_offset_minutes.abs() >= 24 * 60 {
-            return Err(bad("utc_offset_minutes is less than a day from UTC"));
+        let time_zone = text("time_zone", &raw.time_zone)?;
+        if let Some(name) = &time_zone
+            && jiff::tz::TimeZone::get(name).is_err()
+        {
+            return Err(bad(
+                "time_zone is no IANA zone name this computer knows (America/Puerto_Rico)",
+            ));
         }
         let timeout_minutes = raw.timeout_minutes.unwrap_or(120);
         if timeout_minutes == 0 {
@@ -674,7 +678,7 @@ pub(super) fn schedules_of(
                 at,
                 date,
                 weekdays,
-                utc_offset_minutes,
+                time_zone,
                 enabled: raw.enabled.unwrap_or(true),
                 mode: text("mode", &raw.mode)?,
                 timeout_minutes,

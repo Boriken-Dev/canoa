@@ -52,7 +52,7 @@ mod kept;
 mod limit;
 mod options;
 mod sessions;
-pub(crate) mod watch;
+mod watch;
 
 #[cfg(test)]
 mod tests;

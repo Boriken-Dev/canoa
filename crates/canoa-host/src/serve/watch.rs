@@ -42,7 +42,7 @@ enum Schedule {
 /// A five-field cron line (`minute hour day-of-month month day-of-week`), read on a clock `offset_minutes` from UTC. As in
 /// Vixie cron, when both day fields are restricted a day matching either one is taken, and `7` is Sunday as `0` is.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Cron {
+struct Cron {
     line: String,
     offset_minutes: i32,
     minutes: [bool; 60],
@@ -55,7 +55,7 @@ pub(crate) struct Cron {
 }
 
 impl Cron {
-    pub(crate) fn parse(line: &str, offset_minutes: i32) -> Result<Self, String> {
+    fn parse(line: &str, offset_minutes: i32) -> Result<Self, String> {
         let fields: Vec<&str> = line.split_whitespace().collect();
         let [minute, hour, day, month, weekday] = fields.as_slice() else {
             return Err(format!(
@@ -94,7 +94,7 @@ impl Cron {
 
     /// The first minute this line names after `unix_ms`, as milliseconds since the Unix epoch; `None` when none comes within
     /// [`CRON_HORIZON_DAYS`].
-    pub(crate) fn next_after(&self, unix_ms: u64) -> Option<u64> {
+    fn next_after(&self, unix_ms: u64) -> Option<u64> {
         let first = i64::try_from(unix_ms / 60_000).ok()?.checked_add(1)?;
         let local = first.checked_add(i64::from(self.offset_minutes))?;
         let start = OffsetDateTime::from_unix_timestamp(local.checked_mul(60)?).ok()?;

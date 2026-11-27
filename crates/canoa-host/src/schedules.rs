@@ -7,8 +7,8 @@
 //! whoever attaches next; on any other the agent ends with the connection, and the person reads what it asked in the recorded
 //! session. Which of the two it was is in the run's note.
 //!
-//! Times are read on the clock `utc_offset_minutes` names, as a session watch's cron line is, so a daylight-saving change moves
-//! a task by the hour until the person edits the offset.
+//! Times are read in the zone `time_zone` names, else the computer's own, so a task stays at its wall-clock time across a
+//! daylight-saving change.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -23,12 +23,10 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
-use time::{Date, Month};
 
 use crate::config::{Config, Layers, Repeat, ScheduleConfig};
 use crate::local::{Link, LinkError};
 use crate::serve::Local;
-use crate::serve::watch::Cron;
 
 /// How often the host looks for a task that has come due.
 const TICK: Duration = Duration::from_secs(15);
@@ -101,29 +99,54 @@ pub(crate) enum Due {
     Missed,
 }
 
-/// The cron line a repeating task is read as; `None` for one that is not repeating.
-fn cron_of(task: &ScheduleConfig) -> Option<Cron> {
-    let (hour, minute) = task.at;
-    let line = match task.repeat {
-        Repeat::Once => return None,
-        Repeat::Daily => format!("{minute} {hour} * * *"),
-        Repeat::Weekly => {
-            let days: Vec<String> = task.weekdays.iter().map(u8::to_string).collect();
-            format!("{minute} {hour} * * {}", days.join(","))
-        }
-    };
-    Cron::parse(&line, task.utc_offset_minutes).ok()
+/// The zone a task's times are read in: the one it names, else the computer's own.
+fn zone_of(task: &ScheduleConfig) -> jiff::tz::TimeZone {
+    task.time_zone
+        .as_deref()
+        .and_then(|name| jiff::tz::TimeZone::get(name).ok())
+        .unwrap_or_else(jiff::tz::TimeZone::system)
+}
+
+/// `date` at `hour:minute` in `zone`, in milliseconds since the Unix epoch. A time the zone skips (the hour a daylight-saving change
+/// puts forward) is the same wall time after the change, and one it repeats is its first.
+fn at_on(zone: &jiff::tz::TimeZone, date: jiff::civil::Date, hour: u8, minute: u8) -> Option<u64> {
+    let time = date.at(i8::try_from(hour).ok()?, i8::try_from(minute).ok()?, 0, 0);
+    let zoned = time.to_zoned(zone.clone()).ok()?;
+    u64::try_from(zoned.timestamp().as_millisecond()).ok()
 }
 
 /// When a `once` task's time is, in milliseconds since the Unix epoch.
 fn once_at(task: &ScheduleConfig) -> Option<u64> {
     let (year, month, day) = task.date?;
-    let date = Date::from_calendar_date(year, Month::try_from(month).ok()?, day).ok()?;
-    let epoch = Date::from_calendar_date(1970, Month::January, 1).ok()?;
-    let days = i64::from(date.to_julian_day() - epoch.to_julian_day());
-    let local = days * 1440 + i64::from(task.at.0) * 60 + i64::from(task.at.1);
-    let utc = local.checked_sub(i64::from(task.utc_offset_minutes))?;
-    u64::try_from(utc).ok()?.checked_mul(60_000)
+    let date = jiff::civil::Date::new(
+        i16::try_from(year).ok()?,
+        i8::try_from(month).ok()?,
+        i8::try_from(day).ok()?,
+    )
+    .ok()?;
+    at_on(&zone_of(task), date, task.at.0, task.at.1)
+}
+
+/// The first time after `after` that a daily or weekly task's day and time come, in the zone's own calendar.
+fn repeating_after(task: &ScheduleConfig, after: u64) -> Option<u64> {
+    let zone = zone_of(task);
+    let start = jiff::Timestamp::from_millisecond(i64::try_from(after).ok()?)
+        .ok()?
+        .to_zoned(zone.clone())
+        .date();
+    let mut date = start;
+    // A weekly task is at most a week away; two weeks leave room for a day the zone skips whole.
+    for _ in 0..15 {
+        let day = u8::try_from(date.weekday().to_sunday_zero_offset()).ok()?;
+        if (task.repeat == Repeat::Daily || task.weekdays.contains(&day))
+            && let Some(at) = at_on(&zone, date, task.at.0, task.at.1)
+            && at > after
+        {
+            return Some(at);
+        }
+        date = date.tomorrow().ok()?;
+    }
+    None
 }
 
 /// The next time after `after` the task runs, in milliseconds since the Unix epoch; `None` for a `once` task that has run or whose
@@ -134,7 +157,7 @@ pub(crate) fn next_after(task: &ScheduleConfig, last: Option<&Last>, after: u64)
             let at = once_at(task)?;
             (at > after && last.is_none_or(|last| last.at < at)).then_some(at)
         }
-        Repeat::Daily | Repeat::Weekly => cron_of(task)?.next_after(after),
+        Repeat::Daily | Repeat::Weekly => repeating_after(task, after),
     }
 }
 
@@ -153,12 +176,10 @@ pub(crate) fn due(task: &ScheduleConfig, last: Option<&Last>, previous: u64, now
                 Due::Run
             }
         }
-        Repeat::Daily | Repeat::Weekly => {
-            match cron_of(task).and_then(|cron| cron.next_after(previous)) {
-                Some(next) if next <= now => Due::Run,
-                _ => Due::No,
-            }
-        }
+        Repeat::Daily | Repeat::Weekly => match repeating_after(task, previous) {
+            Some(next) if next <= now => Due::Run,
+            _ => Due::No,
+        },
     }
 }
 
@@ -355,7 +376,7 @@ impl Schedules {
             "at": format!("{:02}:{:02}", task.at.0, task.at.1),
             "date": task.date.map(|(year, month, day)| format!("{year:04}-{month:02}-{day:02}")),
             "weekdays": weekdays,
-            "utc_offset_minutes": task.utc_offset_minutes,
+            "time_zone": task.time_zone,
             "enabled": task.enabled,
             "mode": task.mode,
             "timeout_minutes": task.timeout_minutes,

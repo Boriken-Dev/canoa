@@ -130,6 +130,7 @@ keyring-core = "1"
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "getrandom", "zeroize"] }
 zeroize = "1"
 time = { version = "0.3", default-features = false, features = ["parsing"] }
+jiff = "0.2"
 # whisper.cpp inside the host's process; its sources are carried by whisper-rs-sys and built with cmake.
 whisper-rs = { version = "=0.16.0", default-features = false }
 # The ggml that whisper.cpp links, for quantizing a converted model (`canoa-whispercpp`), and what reads a Hugging Face folder: its weights, mapped.

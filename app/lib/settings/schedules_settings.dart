@@ -49,7 +49,7 @@ final class ScheduledTask {
     required this.at,
     this.date,
     this.weekdays = const [],
-    this.utcOffsetMinutes = 0,
+    this.timeZone,
     this.enabled = true,
     this.mode,
     this.timeoutMinutes = 120,
@@ -65,13 +65,15 @@ final class ScheduledTask {
   /// `once`, `daily` or `weekly`.
   final String repeat;
 
-  /// The time of day, `HH:MM`, and with `once` the day, `YYYY-MM-DD`, on the clock [utcOffsetMinutes] says.
+  /// The time of day, `HH:MM`, and with `once` the day, `YYYY-MM-DD`, in [timeZone].
   final String at;
   final String? date;
 
   /// The days of a weekly task, from 0 for Sunday.
   final List<int> weekdays;
-  final int utcOffsetMinutes;
+
+  /// The IANA zone the times are read in; null reads them in the host's computer's own.
+  final String? timeZone;
   final bool enabled;
   final String? mode;
   final int timeoutMinutes;
@@ -96,7 +98,7 @@ final class ScheduledTask {
       at: json['at'] is String ? json['at']! as String : '00:00',
       date: json['date'] is String ? json['date'] as String : null,
       weekdays: [if (json['weekdays'] is List) for (final day in json['weekdays'] as List) if (day is int) day],
-      utcOffsetMinutes: json['utc_offset_minutes'] is int ? json['utc_offset_minutes']! as int : 0,
+      timeZone: json['time_zone'] is String ? json['time_zone'] as String : null,
       enabled: json['enabled'] != false,
       mode: json['mode'] is String ? json['mode'] as String : null,
       timeoutMinutes: json['timeout_minutes'] is int ? json['timeout_minutes']! as int : 120,
@@ -116,7 +118,7 @@ final class ScheduledTask {
     'at': at,
     'date': ?date,
     if (repeat == 'weekly') 'weekdays': [for (final day in weekdays) weekdayKeys[day]],
-    'utc_offset_minutes': utcOffsetMinutes,
+    'time_zone': ?timeZone,
     'enabled': enabled ?? this.enabled,
     'mode': ?mode,
     'timeout_minutes': timeoutMinutes,
@@ -459,8 +461,6 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
           'at': '$hour:${time.group(2)}',
           if (_repeat == 'once') 'date': _date.text.trim(),
           if (_repeat == 'weekly') 'weekdays': [for (final day in _days.toList()..sort()) weekdayKeys[day]],
-          // Read on the clock this computer shows now: the host has no way to ask which that is.
-          'utc_offset_minutes': DateTime.now().timeZoneOffset.inMinutes,
         },
       ),
     );

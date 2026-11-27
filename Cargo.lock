@@ -1160,6 +1160,7 @@ dependencies = [
  "if-addrs",
  "indexmap 2.14.2",
  "is_elevated",
+ "jiff",
  "keyring-core",
  "md-5",
  "passkey-authenticator",

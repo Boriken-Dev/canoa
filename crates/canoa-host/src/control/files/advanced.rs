@@ -412,7 +412,7 @@ pub(crate) const DEDICATED: &[(&str, &[&str])] = &[
             "at",
             "date",
             "weekdays",
-            "utc_offset_minutes",
+            "time_zone",
             "enabled",
             "mode",
             "timeout_minutes",

@@ -1149,7 +1149,7 @@ pub enum Repeat {
 }
 
 /// `[schedules.ID]`: a prompt the host runs on a schedule, as a session of the entry it names, in a folder, by the person's own
-/// rules. Times are read on a clock `utc_offset_minutes` from UTC, as a session watch's cron line is.
+/// rules. Times are read in `time_zone`, else the computer's own, so a daylight-saving change does not move a task.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ScheduleConfig {
@@ -1169,8 +1169,9 @@ pub struct ScheduleConfig {
     pub date: Option<(i32, u8, u8)>,
     /// `weekdays`: with `weekly`, the days, from 0 for Sunday, in order and once each.
     pub weekdays: Vec<u8>,
-    /// `utc_offset_minutes`: how far the clock `at` and `date` are read on is from UTC (0 by default).
-    pub utc_offset_minutes: i32,
+    /// `time_zone`: the IANA name of the zone `at` and `date` are read in (`America/Puerto_Rico`); absent reads them in the
+    /// computer's own.
+    pub time_zone: Option<String>,
     /// `enabled`: whether it runs (default true).
     pub enabled: bool,
     /// `mode`: the mode the session is put in when the agent offers it; absent leaves the agent's own.

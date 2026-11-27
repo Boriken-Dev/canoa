@@ -14,8 +14,14 @@ use crate::config::{Config, ScheduleConfig};
 
 /// The one task of a configuration made of `table`'s lines.
 fn task(lines: &str) -> ScheduleConfig {
+    // Read in UTC unless the lines name a zone, so what is expected does not depend on the computer.
+    let zone = if lines.contains("time_zone") {
+        ""
+    } else {
+        "time_zone = \"UTC\"\n"
+    };
     let text = format!(
-        "[schedules.t]\nentry = \"claude\"\nfolder = \"/work\"\nprompt = \"go\"\n{lines}\n"
+        "[schedules.t]\nentry = \"claude\"\nfolder = \"/work\"\nprompt = \"go\"\n{zone}{lines}\n"
     );
     Config::from_str_in(&text, Path::new(""))
         .expect("parses")
@@ -52,8 +58,8 @@ fn last(at: u64) -> Last {
 
 #[test]
 fn a_daily_task_comes_at_its_time_on_its_own_clock() {
-    // 09:30 four hours behind UTC is 13:30 UTC.
-    let task = task("at = \"09:30\"\nutc_offset_minutes = -240");
+    // 09:30 in Puerto Rico, four hours behind UTC all year, is 13:30 UTC.
+    let task = task("at = \"09:30\"\ntime_zone = \"America/Puerto_Rico\"");
     let morning = utc(2026, Month::December, 1, 8, 0);
     assert_eq!(
         next_after(&task, None, morning),
@@ -64,6 +70,50 @@ fn a_daily_task_comes_at_its_time_on_its_own_clock() {
         next_after(&task, None, after),
         Some(utc(2026, Month::December, 2, 13, 30))
     );
+}
+
+#[test]
+fn a_task_stays_at_its_wall_clock_time_across_a_daylight_saving_change() {
+    // New York is five hours behind UTC in winter and four in summer: the US changed on 2026-03-08 and changes back on 2026-11-01.
+    let task = task("at = \"09:30\"\ntime_zone = \"America/New_York\"");
+    let saturday = utc(2026, Month::March, 7, 14, 30);
+    assert_eq!(
+        next_after(&task, None, saturday),
+        Some(utc(2026, Month::March, 8, 13, 30)),
+        "the morning after the clocks went forward is an hour earlier in UTC"
+    );
+    let friday = utc(2026, Month::October, 31, 13, 30);
+    assert_eq!(
+        next_after(&task, None, friday),
+        Some(utc(2026, Month::November, 1, 14, 30)),
+        "and the morning after they went back an hour later"
+    );
+    // The time a change skips (02:30 on the day the clocks go forward) comes at the same wall time after it.
+    let skipped = self::task("at = \"02:30\"\ntime_zone = \"America/New_York\"");
+    let night = utc(2026, Month::March, 8, 6, 0);
+    assert_eq!(
+        next_after(&skipped, None, night),
+        Some(utc(2026, Month::March, 8, 7, 30))
+    );
+}
+
+#[test]
+fn a_task_that_names_no_zone_is_read_in_the_computers_own() {
+    let task = task("at = \"09:30\"");
+    assert!(task.time_zone.is_some(), "the helper reads these in UTC");
+    let text = "[schedules.t]\nentry = \"a\"\nfolder = \"/w\"\nprompt = \"p\"\nat = \"09:30\"\n";
+    let own = Config::from_str_in(text, Path::new(""))
+        .expect("parses")
+        .schedules["t"]
+        .clone();
+    assert_eq!(own.time_zone, None);
+    let now = utc(2026, Month::June, 1, 0, 0);
+    let next = next_after(&own, None, now).expect("a next time");
+    let zone = jiff::tz::TimeZone::system();
+    let local = jiff::Timestamp::from_millisecond(i64::try_from(next).expect("fits"))
+        .expect("a time")
+        .to_zoned(zone);
+    assert_eq!((local.hour(), local.minute()), (9, 30));
 }
 
 #[test]
@@ -135,7 +185,18 @@ fn what_a_task_says_is_checked_when_the_file_is_read() {
             .contains("weekdays names days")
     );
     assert!(refused("at = \"09:00\"\nweekdays = [\"mon\"]").contains("weekdays goes with"));
-    assert!(refused("at = \"09:00\"\nutc_offset_minutes = 2000").contains("utc_offset_minutes"));
+    assert!(
+        refused("at = \"09:00\"\ntime_zone = \"Nowhere/Land\"")
+            .contains("time_zone is no IANA zone")
+    );
+    assert!(
+        !refused(
+            "at = \"09:00\"
+utc_offset_minutes = 60"
+        )
+        .is_empty(),
+        "the fixed offset is gone"
+    );
     assert!(refused("at = \"09:00\"\ntimeout_minutes = 0").contains("timeout_minutes"));
     assert!(!refused("at = \"09:00\"\nsurprise = 1").is_empty());
     let text = "[schedules.Bad]\nentry = \"a\"\nfolder = \"/w\"\nprompt = \"p\"\nat = \"09:00\"\n";

@@ -126,6 +126,7 @@ aes-gcm.workspace = true
 zeroize.workspace = true
 # An account's renewal compared with the stored copy by when each stops working.
 time.workspace = true
+jiff.workspace = true
 # A secret typed at the terminal, with no echo.
 rpassword.workspace = true
 # The digest of a worktree's status listing, and of what the examples print; the version the dependency graph already holds.

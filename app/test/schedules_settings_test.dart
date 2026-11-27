@@ -14,7 +14,7 @@ import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 final class _Host {
   final asked = <(String, Map<String, Object?>)>[];
   final tables = <String, Map<String, Object?>>{
-    'nightly': {'entry': 'fixture', 'folder': '/work', 'prompt': 'run the tests', 'repeat': 'daily', 'at': '03:00', 'utc_offset_minutes': 0, 'enabled': true, 'timeout_minutes': 120},
+    'nightly': {'entry': 'fixture', 'folder': '/work', 'prompt': 'run the tests', 'repeat': 'daily', 'at': '03:00', 'enabled': true, 'timeout_minutes': 120},
   };
   ControlFailed? refuse;
 
@@ -92,7 +92,6 @@ void main() {
       'repeat': 'weekly',
       'at': '08:15',
       'weekdays': ['mon', 'fri'],
-      'utc_offset_minutes': 0,
       'enabled': false,
       'timeout_minutes': 120,
     };
@@ -111,7 +110,7 @@ void main() {
     expect(find.byKey(const Key('schedules-empty')), findsOneWidget);
   });
 
-  testWidgets('adds a weekly task through the dialog, read on this computer\'s clock', (tester) async {
+  testWidgets('adds a weekly task through the dialog, read in the host\'s own time zone', (tester) async {
     final (host, _) = await _page(tester);
     await tester.tap(find.byKey(const Key('schedule-add')));
     await tester.pumpAndSettle();
@@ -136,7 +135,6 @@ void main() {
       'repeat': 'weekly',
       'at': '08:15',
       'weekdays': ['mon', 'fri'],
-      'utc_offset_minutes': DateTime.now().timeZoneOffset.inMinutes,
     });
     expect(find.byKey(const Key('schedule-weekly-review')), findsOneWidget);
   });
