@@ -26,3 +26,15 @@ Open **Settings, Accounts**. Each provider (Claude, Codex, OpenCode and the othe
 An account's row has a menu with the other actions, including removing it.
 
 Accounts are also where a local model (Foundry Local) or a LiteLLM proxy is added; the [host's page](../host.md#accounts) lists the account kinds and their settings.
+
+## Roles
+
+A role is a pool named by the work: a planner, an executor, a reviewer, or any you define. It lists, in order, the agents, accounts and models that can do that work, and the first one with usage left serves it.
+
+**Settings, Accounts, Roles** has a card for each role. Each member shows a chip: *Serving now*, *Available*, or why it cannot serve (its usage is used up until a time, it is not installed, it is not signed in, its model is not listed). **Add a role** asks for a name, a title, how a member is chosen (first with usage, most usage left, or in turn), what its models must report, whether a running conversation stays on its member, and the members in the order they are taken. A member is an agent, an account or pool, a model, an effort and a profile; the arrows reorder them. The host writes the role into the configuration file, and refuses a member it cannot use in its own words.
+
+To start on a role, choose it in the **Role** control of the new-conversation screen (or at the top of the picker). The screen says which member a conversation of that role would run on and why ("Claude · work · opus: first with usage"; the tooltip lists the members left out and why), and the first message starts that member's agent on its account and model. Picking a member by hand, in the picker of a running conversation, ends the role's hold on it.
+
+A conversation a role serves says so under the turn: *Served by Claude · work · opus · planner*. When its member's usage runs out, the host moves the conversation to the next member by itself, and the conversation goes on in the same tab with its transcript kept. The line then says when and from whom ("planner moved from Claude to Codex at 15:04"), and hovering it lists what the move could not carry between the two agents, such as thoughts that only the agent that wrote them can read.
+
+A role whose handover is **Ask me first** asks before a move to a different agent: "Usage ran out on Claude. Continue on Codex?" **Continue** lets the host go on; **Not now** keeps the conversation as it is and asks again when its next turn ends. A move to another account or model of the same agent never asks.
