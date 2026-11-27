@@ -227,9 +227,9 @@ void main() {
       useHostDials(control);
     }
 
-    String trusting(_Certificates made, {bool client = false}) =>
+    String trusting(_Certificates made, {String? client}) =>
         '[network]\nroute = "pinned"\n[network.routes.pinned]\nprovider = "system"\n'
-        'settings = { ca_file = "${made.ca}"${client ? ', client_certificate = "${made.client}"' : ''} }\n';
+        'settings = { ca_file = "${made.ca}"${client == null ? '' : ', client_certificate = "$client"'} }\n';
 
     Future<WebChannel> dial() => connectSystemChannel(
       WebEndpoints(webSocket: Uri.parse('wss://$_remote:${origin!.port}/channel')),
@@ -299,7 +299,7 @@ void main() {
       if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
       if (made == null) return;
       await startRemote(wantsClientCertificate: true);
-      await startHost(network: trusting(made, client: true));
+      await startHost(network: trusting(made, client: made.client));
       final channel = await dial();
       expect(await channel.messages.first.timeout(const Duration(seconds: 10)), contains('Alice Example'));
       await channel.close();
@@ -310,7 +310,7 @@ void main() {
       if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
       if (made == null) return;
       await startRemote(wantsClientCertificate: true);
-      await startHost(network: '${trusting(made)}client_certificate = "none"\n');
+      await startHost(network: trusting(made, client: 'none'));
       final channel = await dial();
       expect(await channel.messages.first.timeout(const Duration(seconds: 10)), 'hello nobody');
       await channel.close();
