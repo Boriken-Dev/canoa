@@ -37,7 +37,7 @@ jobs:
         with:
           ref: deps
           path: deps-cache
-          sparse-checkout: cdn/officeapis.public.onecdn.static.microsoft
+          sparse-checkout: cdn/office-js
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
