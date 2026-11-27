@@ -352,13 +352,14 @@ impl Schedules {
             .iter()
             .map(|(id, last)| (id.clone(), last.json()))
             .collect();
-        drop(inner);
         let text = Value::Object(state).to_string();
+        // Written before the lock is let go, so a task that `schedules/list` reports as finished is already in the file.
         if let Err(error) =
             crate::replace::write_file(file, text.as_bytes(), crate::replace::PRIVATE)
         {
             tracing::warn!("what became of the scheduled tasks was not kept: {error}");
         }
+        drop(inner);
     }
 
     /// The task as `schedules/list` says it.
