@@ -167,6 +167,7 @@ export class StampViewer extends SurfaceViewer {
   static extensions = ['stamp'];
   static priority = 20;
 
+  /** @param {import('../../../../bindings/js/canoa-sdk/src/viewer.js').ViewedFile} file */
   surface(file) {
     const text = `${file.name}: ${file.text().trim()}`;
     return [{ version: '1.0', createSurface: { surfaceId: 'stamp', components: [{ id: 'root', component: 'Text', text }] } }];
