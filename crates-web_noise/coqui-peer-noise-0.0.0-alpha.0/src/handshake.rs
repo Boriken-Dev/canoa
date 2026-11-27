@@ -13,7 +13,7 @@ use crate::identity::{Identity, key_material};
 use crate::noise::{DHLEN, TAGLEN, Xx};
 use crate::session::{Limits, Session};
 use crate::settings::NoiseSettings;
-use crate::trust::{Admit, Trust};
+use crate::trust::{Admission, Trust};
 
 /// The method name: the `<method>` of `coqui-peer-<method>`, under which a trust store keeps the
 /// keys of this method.
@@ -57,8 +57,8 @@ pub(crate) fn field(out: &mut Vec<u8>, bytes: &[u8]) {
 struct Config {
     identity: Identity,
     purpose: &'static [u8],
-    responders: Option<Admit>,
-    initiators: Option<Admit>,
+    responders: Option<Admission>,
+    initiators: Option<Admission>,
     settings: NoiseSettings,
     random: Random,
     random_replaced: bool,
@@ -136,8 +136,8 @@ impl From<NoiseParts> for Noise {
             parts.identity,
             PURPOSE_ORDINARY,
             parts.settings,
-            parts.responders.map(Admit::Trust),
-            parts.initiators.map(Admit::Trust),
+            parts.responders.map(Admission::Trust),
+            parts.initiators.map(Admission::Trust),
             parts.random,
         )
     }
@@ -150,8 +150,8 @@ impl Noise {
         identity: Identity,
         purpose: &'static [u8],
         settings: NoiseSettings,
-        responders: Option<Admit>,
-        initiators: Option<Admit>,
+        responders: Option<Admission>,
+        initiators: Option<Admission>,
         random: Option<Random>,
     ) -> Noise {
         let random_replaced = random.is_some();
@@ -168,7 +168,7 @@ impl Noise {
 
     /// Whether an initiator's peer is admitted by a pin or a store, and not as any proved key.
     pub(crate) fn verifies_responders(&self) -> bool {
-        matches!(self.0.responders, Some(Admit::Trust(_)))
+        matches!(self.0.responders, Some(Admission::Trust(_)))
     }
 
     /// This method's identity.
@@ -343,7 +343,12 @@ impl NoiseHandshake {
 
     /// What every static key read must pass, then whether the peer is admitted. Trust is only ever
     /// asked about a key the handshake just proved.
-    fn admit(&self, xx: &Xx, trust: Option<&Admit>, waiting: bool) -> Result<KeyMaterial, Error> {
+    fn admit(
+        &self,
+        xx: &Xx,
+        trust: Option<&Admission>,
+        waiting: bool,
+    ) -> Result<KeyMaterial, Error> {
         let key = xx.remote_static().ok_or(Error::State)?;
         let trust = trust.ok_or(Error::Unsupported)?;
         let material = key_material(key);

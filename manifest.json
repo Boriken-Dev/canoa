@@ -4543,7 +4543,7 @@
       "libxi-dev"
     ]
   },
-  "sourceCommit": "ef9dcb206db935cd70543fb4da4d9a3da5385109",
+  "sourceCommit": "0a18b20f63dce0e4b28e5ffbcb91ba331bfb3384",
   "trees": {
     "office-js": {
       "commit": "498e88261bc578243d40dd79083953d86f84e7f6",
@@ -8418,7 +8418,7 @@
       "crates": 696,
       "gitSources": 23,
       "lock": "Cargo.lock",
-      "lockSha256": "4393440d2b96e1e9ca453c35920ffaa35a8ba9a2f5a41a3a17f978fa043ec604"
+      "lockSha256": "dd2024d2008b6adc9fad41d3c81a482d37d318696d3472526714d9eb9a418268"
     },
     "crates-wasm-bindgen-cli": {
       "crates": 254,
@@ -8430,7 +8430,7 @@
       "crates": 66,
       "gitSources": 3,
       "lock": "app/web_noise/Cargo.lock",
-      "lockSha256": "a179a8132680ac3962362fdc12c43620fa2278d58e38bf50aacfca9636a630ba"
+      "lockSha256": "f918539af3c41217231cc041a8bfe448c150f3c8f1bd219029cba73500d4e23b"
     },
     "crates-web_whisper": {
       "crates": 164,

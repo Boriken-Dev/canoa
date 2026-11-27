@@ -1,4 +1,4 @@
-# coqui-access/providers/access/totp at 0c73889f7e38310f8bea4614e7a77657520b628a, with what it inherits written out.
+# coqui-access/providers/access/totp at e0b452292306df7d70b3bb64670c16300bb415f3, with what it inherits written out.
 [package]
 name = "coqui-access-totp"
 description = "One-time codes (TOTP, RFC 6238) as a second factor, with enrolment, recovery codes and reset through the Accounts kind"

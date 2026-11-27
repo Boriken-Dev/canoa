@@ -52,11 +52,21 @@ directory's ACL. Errors: `Error::Key` for what is not such a key, `Error::Io` fo
 
 ```rust
 #[non_exhaustive]
-pub enum Trust { Pinned(BTreeSet<PeerId>), Store(TrustStore) }
-impl Trust { pub fn pinned(ids: impl IntoIterator<Item = PeerId>) -> Trust; }
+pub enum Trust { Pinned(BTreeSet<PeerId>), Store(TrustStore), Asked(Arc<dyn Admit>) }
+impl Trust {
+    pub fn pinned(ids: impl IntoIterator<Item = PeerId>) -> Trust;
+    pub fn asked(f: impl Fn(&KeyMaterial, bool, Option<SocketAddr>) -> bool + Send + Sync + 'static) -> Trust;
+}
+pub trait Admit: Send + Sync {
+    fn admit(&self, key: &KeyMaterial, answering: bool, source: Option<SocketAddr>) -> bool;
+}
 ```
 
 Decided after the peer proved its key, never before.
+
+`Asked` hands the decision to the host: `admit` is called once per handshake, only for a key whose proof held, with
+`answering` true on the responder and `source` the address given to `respond` (`None` for a dialer). It records nothing
+itself: a host that wants a refused stranger queued does that in `admit`. `Debug` shows `Asked` and nothing of the host's value.
 
 - `Pinned`: fixed at build; an empty set admits nobody; a pin of a digest other than SHA-256 matches
   nothing.

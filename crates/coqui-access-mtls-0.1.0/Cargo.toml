@@ -1,4 +1,4 @@
-# coqui-access/providers/access/mtls at 0c73889f7e38310f8bea4614e7a77657520b628a, with what it inherits written out.
+# coqui-access/providers/access/mtls at e0b452292306df7d70b3bb64670c16300bb415f3, with what it inherits written out.
 [package]
 name = "coqui-access-mtls"
 description = "Map verified peer certificate fingerprints to directory identities, with account management"

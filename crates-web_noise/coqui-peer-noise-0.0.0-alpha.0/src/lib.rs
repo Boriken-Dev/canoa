@@ -37,4 +37,4 @@ pub use pairing::{
 };
 pub use session::{DEFAULT_KEY_LIMIT, Opener, Sealer, Session, record_length};
 pub use settings::{NoiseSettings, PairingSettings};
-pub use trust::Trust;
+pub use trust::{Admit, Trust};

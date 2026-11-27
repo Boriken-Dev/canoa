@@ -1,4 +1,4 @@
-# coqui-peer-noise/. at bb4b538a8f2e2a02b9b6271b002d66668bd0bd7b, with what it inherits written out.
+# coqui-peer-noise/. at 518dd9f5693161d74af7b2ddb27ac0c4061b35b9, with what it inherits written out.
 test = [{ name = "pair", required-features = ["pin"] }, { name = "pair_vectors", required-features = ["pin"] }]
 example = [{ name = "pair", required-features = ["pin"] }]
 [package]

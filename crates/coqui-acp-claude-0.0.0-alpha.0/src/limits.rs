@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use coqui_acp_api::usage::{
-    Bucket, Coverage, LimitHit, ModelSpend, Refill, Source, Spend, Status, Unit, infer_limit,
+    Bucket, Coverage, LimitHit, LimitKind, ModelSpend, Refill, Source, Spend, Status, Unit,
+    infer_limit, limit_kind_of,
 };
 use coqui_acp_harness::event::Usage;
 use serde_json::Value;
@@ -36,6 +37,18 @@ pub(crate) fn limit(value: &Value) -> Option<LimitHit> {
                 return None;
             }
             let mut limit = LimitHit::new(0);
+            let window = info
+                .get("rateLimitType")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            // Claude Code's own event names the window: the plan's windows are quotas, `overage` is the extra usage bought
+            // with money.
+            limit.kind = Some(if window.contains("overage") {
+                LimitKind::Credit
+            } else {
+                LimitKind::UsageQuota
+            });
+            limit.continuable = Some(true);
             limit.resets_at = info
                 .get("resetsAt")
                 .and_then(Value::as_i64)
@@ -68,6 +81,14 @@ pub(crate) fn limit(value: &Value) -> Option<LimitHit> {
             let mut limit = LimitHit::new(0);
             limit.resets_at = resets_at;
             limit.bucket = bucket;
+            // A 429 that names no usage limit is the API's rate limit; the words of a usage limit are Claude Code's own.
+            limit.kind = Some(if infer_limit(text, LIMIT_PHRASES).is_some() {
+                LimitKind::UsageQuota
+            } else {
+                limit_kind_of(text).unwrap_or(LimitKind::RateLimit)
+            });
+            // A full context window follows the session to any account: another one cannot take the work.
+            limit.continuable = Some(limit.kind != Some(LimitKind::ContextWindow));
             limit.source = Source::Inferred;
             limit.text = Some(text.to_string());
             Some(limit)
@@ -229,6 +250,40 @@ pub(crate) fn buckets(value: &Value) -> Vec<Bucket> {
     )]
 }
 
+/// The words of a `type: error` line: its `result`, `error.message`, first text block, `message` or `error`.
+pub(crate) fn line_text(value: &Value) -> String {
+    [
+        "/result",
+        "/error/message",
+        "/message/content/0/text",
+        "/message",
+        "/error",
+    ]
+    .iter()
+    .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+    .unwrap_or("Claude Code reported an error")
+    .to_string()
+}
+
+/// The limit a line of Claude Code's `--output-format stream-json` states, as the provider reads it: a `rate_limit_event`
+/// whose status is `rejected`, a `result` that is an error naming a limit (the words `usage limit`, `limit reached` or
+/// `hit your limit`, or `api_error_status` 429), or a `type: error` line whose words do. `kind` says what it is (a
+/// plan's windows are `UsageQuota`, the `overage` window and money `Credit`, a 429 that names no usage limit
+/// `RateLimit`, a full context window `ContextWindow`) and `continuable` says whether another account can take the work: true,
+/// but for a context window, which the session takes with it. A reset comes from `resetsAt` or the
+/// number after a trailing `|` of the words; a clock time is left unset. `None` for any other line.
+///
+/// The provider also joins a rejected event to the error that follows it; a host that wants that keeps the event's hit and
+/// copies its `resets_at`, `kind` and `bucket` over the later one.
+#[must_use]
+pub fn limit_of_line(line: &Value) -> Option<LimitHit> {
+    if line.get("type").and_then(Value::as_str) == Some("error") {
+        limit_of_text(&line_text(line))
+    } else {
+        limit(line)
+    }
+}
+
 /// The limit an `error` line says, by the same words as a result's; a reset time follows a trailing `|`.
 pub(crate) fn limit_of_text(text: &str) -> Option<LimitHit> {
     limit(&serde_json::json!({"type": "result", "is_error": true, "result": text}))
@@ -240,6 +295,7 @@ pub(crate) fn limit_of_text(text: &str) -> Option<LimitHit> {
 pub(crate) fn with_hint(mut limit: LimitHit, hint: Option<LimitHit>) -> LimitHit {
     if let Some(hint) = hint {
         limit.resets_at = hint.resets_at.or(limit.resets_at);
+        limit.kind = hint.kind.or(limit.kind.take());
         limit.bucket = hint.bucket.or(limit.bucket);
         limit.source = hint.source;
     }

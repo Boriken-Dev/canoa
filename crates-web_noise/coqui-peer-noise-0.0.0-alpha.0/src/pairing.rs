@@ -21,7 +21,7 @@ use crate::identity::Identity;
 use crate::noise::DHLEN;
 use crate::session::Session;
 use crate::settings::PairingSettings;
-use crate::trust::{Admit, Trust};
+use crate::trust::{Admission, Trust};
 
 /// The export label [`PairingSession::pair_channel`] binds a pairing to.
 pub const PAIR_EXPORT_LABEL: &str = "EXPORTER-coqui-pair";
@@ -96,8 +96,8 @@ impl TryFrom<PairingMethodParts> for PairingMethod {
                 parts.identity,
                 PURPOSE_PAIR,
                 parts.settings.noise(),
-                Some(parts.responders.map_or(Admit::Any, Admit::Trust)),
-                Some(Admit::Any),
+                Some(parts.responders.map_or(Admission::Any, Admission::Trust)),
+                Some(Admission::Any),
                 parts.random,
             ),
             first_message_timeout: parts.settings.first_message_timeout,
