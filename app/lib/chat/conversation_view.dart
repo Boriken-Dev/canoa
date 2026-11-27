@@ -37,6 +37,7 @@ import 'composer.dart';
 import 'delegation_row.dart';
 import 'conversation_find.dart';
 import 'conversation_tools.dart';
+import 'side_chat.dart';
 import 'delegation_view.dart';
 import 'file_links.dart';
 import 'inspector.dart' show changeTotals;
@@ -128,7 +129,7 @@ class _ConversationViewState extends State<ConversationView> {
       }
       ..tools = () {
         final session = widget.store.selected;
-        return session == null || session.isDraft ? const [] : conversationTools(context, session, _find);
+        return session == null || session.isDraft ? const [] : conversationTools(context, session, _find, onSide: () => _openSide(session));
       }
       ..insert = (text) {
         _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
@@ -285,9 +286,20 @@ class _ConversationViewState extends State<ConversationView> {
     _composerFocus.requestFocus();
   }
 
+  /// Opens the side chat on [session], with [question] asked at once when it is not empty.
+  void _openSide(ChatSession session, [String question = '']) =>
+      unawaited(showSideChat(context, store: widget.store, parent: session, question: question, renderers: _renderersFor(session)));
+
   void _send({bool steer = false}) {
     final text = _input.text;
     final session = widget.store.selected;
+    // `/btw` and a question is a side chat, whichever agent the conversation is with: nothing of it reaches the conversation.
+    final question = session == null || session.isDraft ? null : sideQuestionOf(text);
+    if (session != null && question != null) {
+      _input.clear();
+      _openSide(session, question);
+      return;
+    }
     final attached = session?.attachments.isNotEmpty ?? false;
     if (text.trim().isEmpty && !attached) return;
     final starting = session != null && session.isDraft;
@@ -340,7 +352,7 @@ class _ConversationViewState extends State<ConversationView> {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && (widget.store.canListEarlier(session) || (widget.handle.canListImported?.call(session) ?? false)))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
-      if (session != null && !session.isDraft) ...conversationTools(context, session, _find),
+      if (session != null && !session.isDraft) ...conversationTools(context, session, _find, onSide: () => _openSide(session)),
       if (session != null && !session.isDraft && !widget.chatOnly) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
       if (session != null && !widget.chatOnly && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),

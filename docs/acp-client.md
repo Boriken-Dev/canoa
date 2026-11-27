@@ -285,6 +285,18 @@ agent's own allow-once and refuse-once options for the question shown (never an 
 what the app can do, the other sessions to go to and the agent's own commands; typing narrows it, and Enter runs the first
 left. A command chosen there is written into the message, not sent.
 
+Ctrl+= and Ctrl+- make the whole interface larger and smaller, one step at a time, and Ctrl+0 draws it at its own size; the factor is
+`[appearance] zoom` in canoa.cfg, also chosen in Settings, Appearance.
+
+## A side chat
+
+Side chat, in a conversation's menu and the palette, or `/btw` and a question in its message box, asks the conversation's agent a
+quick question about it in a window on the right. The question is a session of its own on the same source and in the same folder,
+and its first message says which conversation it comes from and carries the last thing asked and the last thing the agent said (no
+harness offers forking a session, so the new one is told as much as fits in a message). It is in no list, tab or ledger, the
+conversation never hears of it, and it ends when the window closes. What its agent asks to do it asks in the window, by the same
+rules as any session.
+
 ## Verification
 
 ```sh

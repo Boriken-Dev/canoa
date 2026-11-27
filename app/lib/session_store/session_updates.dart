@@ -223,7 +223,7 @@ extension SessionUpdates on SessionStore {
   void _record(ChatSession session, VerifiedAgent client) {
     final remote = session.remoteSessionId;
     final peerId = session.peerId;
-    if (ledger == null || remote == null || peerId == null) return;
+    if (ledger == null || remote == null || peerId == null || session.sideOf != null) return;
     final identity = client.identity;
     ledger!.record(
       peerId: peerId,

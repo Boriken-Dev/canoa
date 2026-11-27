@@ -166,6 +166,9 @@ class ChatSession {
   /// draft's kind is the person's choice until it starts.
   SessionKind kind = SessionKind.workspace;
 
+  /// The id of the session this one answers side questions about, which is in no list and not in the ledger; null for any other.
+  String? sideOf;
+
   /// Whether the person named it, which the ledger keeps so that no title an agent reports replaces the name later.
   bool namedByPerson = false;
 

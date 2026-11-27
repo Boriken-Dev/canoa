@@ -86,6 +86,7 @@ part 'session_store/session_sending.dart';
 part 'session_store/session_history.dart';
 part 'session_store/session_a2ui.dart';
 part 'session_store/session_limits.dart';
+part 'session_store/session_side.dart';
 
 /// Shared UI state for desktop, PWA and packaged Chromium extension: Canoa's conversations, each a `coqui_acp_chat` conversation
 /// with what is Canoa's own beside it. Transport, verified peers and persistence are intentionally outside it.
@@ -496,13 +497,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   int _nextId = 0;
   String? _selectedId;
 
-  List<ChatSession> get sessions => List.unmodifiable(_sessions);
+  /// Every session of the app but the side chats, which belong to the dialog that asked for them.
+  List<ChatSession> get sessions => List.unmodifiable([for (final session in _sessions) if (session.sideOf == null) session]);
 
   /// The sessions the side list shows: every one that exists. A new session that has not been sent a first message is a page
   /// of choices, not a session, so it has no row until Send; one that is starting has its row from then.
   List<ChatSession> get listed => List.unmodifiable([
     for (final session in _sessions)
-      if (session.status != SessionStatus.draft) session,
+      if (session.status != SessionStatus.draft && session.sideOf == null) session,
   ]);
   String? get selectedId => _selectedId;
 

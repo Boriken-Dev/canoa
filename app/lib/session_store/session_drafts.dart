@@ -90,6 +90,7 @@ extension SessionDrafts on SessionStore {
     String? host,
     String? preset,
     Map<String, String> presetWants = const {},
+    String? sideOf,
   }) {
     final session =
         _newSession(
@@ -110,7 +111,8 @@ extension SessionDrafts on SessionStore {
           ..loadout = loadout
           ..host = host
           ..preset = preset
-          ..draftId = id ?? newDraftId()
+          ..sideOf = sideOf
+          ..draftId = sideOf == null ? id ?? newDraftId() : null
           ..workspaceId = workspaceId ?? newSessionUuid()
           ..draftText = text
           ..keptSource = source == null ? keptSource : null
