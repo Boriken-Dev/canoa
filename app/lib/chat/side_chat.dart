@@ -70,7 +70,7 @@ class _SideChatDialogState extends State<SideChatDialog> {
   void _ask(String question) {
     final text = question.trim();
     if (text.isEmpty) return;
-    final side = _side ??= widget.store.startSide(widget.parent);
+    final side = _side ??= widget.store.startSide(widget.parent, context.t('side.session', {'title': widget.parent.title}));
     _input.clear();
     setState(() => _problem = null);
     unawaited(

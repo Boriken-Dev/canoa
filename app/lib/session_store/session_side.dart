@@ -6,8 +6,8 @@ const int sideContextLimit = 1500;
 extension SessionSide on SessionStore {
   /// A new session for questions about [parent], on the same source and in the same folder, kept out of every list, tab and
   /// the ledger, and never selected: [parent] stays what the person is looking at. Nothing is sent to [parent]'s agent, and it
-  /// hears nothing of the side chat. The agent starts with the first message, as a draft's does.
-  ChatSession startSide(ChatSession parent) {
+  /// hears nothing of the side chat. [title] names it. The agent starts with the first message, as a draft's does.
+  ChatSession startSide(ChatSession parent, String title) {
     final keep = _selectedId;
     final side = createDraft(
       source: parent.source,
@@ -15,7 +15,7 @@ extension SessionSide on SessionStore {
       cwd: parent.kind == SessionKind.chat ? null : parent.worktree?.repo ?? parent.cwd,
       overlays: parent.overlays,
       loadout: parent.loadout,
-      title: 'Side chat on ${parent.title}',
+      title: title,
       keptSource: parent.keptSource,
       cacheLifetime: parent.cacheLifetime,
       account: parent.account,
