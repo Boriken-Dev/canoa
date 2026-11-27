@@ -97,7 +97,7 @@ fn present(service: &str, touched: &Touched) -> Vec<String> {
         .into_iter()
         .filter(|user| {
             probe
-                .entry_raw(user)
+                .entry(user)
                 .is_ok_and(|entry| entry.get_secret().is_ok())
         })
         .collect()
@@ -117,7 +117,7 @@ fn forget(service: &str, touched: &Touched) -> Vec<String> {
         .cloned()
         .collect();
     for user in &users {
-        if let Ok(entry) = remover.entry_raw(user) {
+        if let Ok(entry) = remover.entry(user) {
             let _ = patiently(|| match entry.delete_credential() {
                 Err(KeyError::NoEntry) => Ok(()),
                 other => other,
@@ -131,7 +131,7 @@ fn forget(service: &str, touched: &Touched) -> Vec<String> {
         }
         std::thread::sleep(core::time::Duration::from_millis(250));
         for user in &left {
-            if let Ok(entry) = remover.entry_raw(user) {
+            if let Ok(entry) = remover.entry(user) {
                 let _ = entry.delete_credential();
             }
         }

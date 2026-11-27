@@ -91,6 +91,8 @@ pub(crate) struct SystemSecrets {
     outside: Option<Box<dyn Outside>>,
     /// One change of the index at a time.
     index: Mutex<()>,
+    /// Whether the operating system's own store is behind it, so that a host with none says so in one clear sentence.
+    system: bool,
 }
 
 /// What the index entry is kept as; a secret's own is `s:` and its name.
@@ -102,10 +104,13 @@ impl From<SystemSettings> for SystemSecrets {
             .service
             .filter(|service| !service.trim().is_empty())
             .unwrap_or_else(|| format!("{}.secrets", canoa::brand::ID));
-        Self::over_with(
-            Box::new(KeyringStore::new(service.clone())),
-            Box::new(KeyringStore::new(service)),
-        )
+        Self {
+            system: true,
+            ..Self::over_with(
+                Box::new(KeyringStore::new(service.clone())),
+                Box::new(KeyringStore::new(service)),
+            )
+        }
     }
 }
 
@@ -121,7 +126,20 @@ impl SystemSecrets {
             store,
             outside: None,
             index: Mutex::new(()),
+            system: false,
         }
+    }
+
+    /// Why this provider cannot answer on this host, when the operating system's store is behind it and does not.
+    fn ready(&self) -> Result<(), ProviderError> {
+        if !self.system {
+            return Ok(());
+        }
+        crate::accounts::store::os_store().map_err(|why| {
+            unavailable(format!(
+                "this host has no operating system credential store to use ({why}); keep it in another entry, such as `file`"
+            ))
+        })
     }
 
     /// The provider over `store`, which also lists and reads the entries `outside` shows.
@@ -194,6 +212,7 @@ impl SecretProvider for SystemSecrets {
     }
 
     fn names(&self, _: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError> {
+        self.ready()?;
         let _one = self.index.lock().unwrap_or_else(PoisonError::into_inner);
         let own = self.names_held()?;
         let mut others = Vec::new();
@@ -213,6 +232,7 @@ impl SecretProvider for SystemSecrets {
     }
 
     fn get(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<Held, ProviderError> {
+        self.ready()?;
         check(&request.name)?;
         let key = format!("s:{}", request.name);
         let Some(mut bytes) = self.store.get(&key).map_err(|why| failed(&why))? else {
@@ -233,6 +253,7 @@ impl SecretProvider for SystemSecrets {
     }
 
     fn put(&self, request: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
+        self.ready()?;
         check(&request.name)?;
         let value = request.value.expose();
         let _one = self.index.lock().unwrap_or_else(PoisonError::into_inner);
@@ -248,6 +269,7 @@ impl SecretProvider for SystemSecrets {
     }
 
     fn forget(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
+        self.ready()?;
         check(&request.name)?;
         let _one = self.index.lock().unwrap_or_else(PoisonError::into_inner);
         let mut names = self.names_held()?;
@@ -660,6 +682,28 @@ mod tests {
         );
         assert!(form.put(Keeping::new("x", "v"), spawner()).is_err());
         assert!(form.names(spawner()).is_err());
+    }
+
+    /// A host with no operating system store says so in one sentence, and not in the platform's words about a bus.
+    #[test]
+    fn the_provider_built_from_its_settings_says_a_missing_store_in_one_sentence() {
+        let _no_store = crate::accounts::store::naming_os_store(Err(
+            "the operating system's credential store is not available (no session bus)".to_owned(),
+        ));
+        let provider = SystemSecrets::from(SystemSettings {
+            service: Some("in-memory.absent".to_owned()),
+        });
+        let error = provider
+            .put(Keeping::new("probe", "a-made-up-value"), spawner())
+            .expect_err("nothing to keep it in");
+        let said = error.message().to_string();
+        assert!(
+            said.contains("has no operating system credential store to use"),
+            "{said}"
+        );
+        assert!(said.contains("another entry, such as `file`"), "{said}");
+        assert!(provider.get(Named::new("probe"), spawner()).is_err());
+        assert!(provider.names(spawner()).is_err());
     }
 
     /// The provider the host builds from its settings keeps what it is given under the service they name (in memory, as every test but

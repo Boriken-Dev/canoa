@@ -267,12 +267,50 @@ impl Backend {
 pub(crate) fn probe(service: &str) -> Result<(), StoreError> {
     let _turn = one_at_a_time();
     let store = KeyringStore::new(service);
-    match store.entry_raw("probe")?.get_secret() {
+    match store.entry("probe")?.get_secret() {
         Ok(_) | Err(KeyError::NoEntry) => Ok(()),
         Err(error) => Err(failed(
             "the operating system's credential store failed",
             error,
         )),
+    }
+}
+
+/// Whether the operating system's store answers on this host: asked once for the process, since a bus that is missing when a host
+/// starts as a service stays missing. The error is the store's own words.
+pub(crate) fn os_store() -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(named) = NAMED_OS_STORE.with(|named| named.borrow().clone()) {
+        return named;
+    }
+    static ONCE: OnceLock<Result<(), String>> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        probe(&format!("{}.probe", canoa::brand::ID)).map_err(|StoreError(why)| why)
+    })
+    .clone()
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// What a test says the operating system's store answers on its own thread.
+    static NAMED_OS_STORE: core::cell::RefCell<Option<Result<(), String>>> = const { core::cell::RefCell::new(None) };
+}
+
+/// Makes the operating system's store answer `result` on the calling thread, until the guard drops.
+#[cfg(test)]
+pub(crate) fn naming_os_store(result: Result<(), String>) -> NamedOsStore {
+    NAMED_OS_STORE.with(|named| *named.borrow_mut() = Some(result));
+    NamedOsStore
+}
+
+/// Takes the named answer away when it drops.
+#[cfg(test)]
+pub(crate) struct NamedOsStore;
+
+#[cfg(test)]
+impl Drop for NamedOsStore {
+    fn drop(&mut self) {
+        NAMED_OS_STORE.with(|named| *named.borrow_mut() = None);
     }
 }
 
@@ -371,17 +409,8 @@ impl KeyringStore {
         }
     }
 
-    pub(crate) fn entry(&self, user: &str) -> Result<Entry, StoreError> {
-        let (store, platform) = self.backend.open().map_err(|StoreError(why)| {
-            StoreError(format!(
-                "{why}; [secrets] accounts = \"auto\" uses sealed files when there is none, and \"file\" always does"
-            ))
-        })?;
-        self.build(&*store, platform, user)
-    }
-
     /// An entry of this store, its failure in the platform's words only.
-    fn entry_raw(&self, user: &str) -> Result<Entry, StoreError> {
+    pub(crate) fn entry(&self, user: &str) -> Result<Entry, StoreError> {
         let (store, platform) = self.backend.open()?;
         self.build(&*store, platform, user)
     }

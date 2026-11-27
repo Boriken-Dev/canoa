@@ -114,20 +114,46 @@ fn configure(vault: &Arc<Vault>, files: &Files, params: &Value) -> Outcome {
     Ok(json!({"name": name, "saved": !remove, "removed": remove}))
 }
 
+/// `secrets/providers`: the providers this host offers and the entries the settings hold. The operating system's store is left out
+/// where it does not answer, with why, and the sealed files say they are what `auto` keeps in its place.
+fn providers(vault: &Vault) -> Value {
+    use crate::secrets::builtin::{FILE, SYSTEM};
+    let system = crate::accounts::store::os_store();
+    let off = |provider: &str| provider == SYSTEM && system.is_err();
+    let listed = vault.providers().into_iter().filter(|each| !off(&each.id));
+    json!({
+        "providers": listed.map(|each| {
+            let mut shown = each.json();
+            if each.id == FILE && let Err(why) = &system {
+                let note = format!(
+                    "On this host `auto` keeps accounts and remembered secrets here, because {why}."
+                );
+                shown["description"] = json!(match &each.info.description {
+                    Some(text) => format!("{text} {note}"),
+                    None => note,
+                });
+            }
+            shown
+        }).collect::<Vec<_>>(),
+        "entries": vault.entries().into_iter().filter(|(_, entry)| !off(&entry.provider)).map(|(name, entry)| json!({
+            "name": name, "provider": entry.provider, "keep": entry.keep.id(),
+            "settings": entry.config,
+            "from": entry.from.iter().map(|(setting, taken)| (
+                setting.clone(), json!({"entry": taken.entry, "name": taken.name}),
+            )).collect::<serde_json::Map<String, Value>>(),
+        })).collect::<Vec<_>>(),
+        "system_store": match &system {
+            Ok(()) => json!({"available": true}),
+            Err(why) => json!({"available": false, "why": why}),
+        },
+    })
+}
+
 /// `secrets/providers`, `secrets/list`, `secrets/reveal`, `secrets/forget` and `secrets/configure`.
 pub(crate) fn call(vault: &Arc<Vault>, files: &Files, method: &str, params: &Value) -> Outcome {
     match method {
         "secrets/configure" => configure(vault, files, params),
-        "secrets/providers" => Ok(json!({
-            "providers": vault.providers().iter().map(|listed| listed.json()).collect::<Vec<_>>(),
-            "entries": vault.entries().into_iter().map(|(name, entry)| json!({
-                "name": name, "provider": entry.provider, "keep": entry.keep.id(),
-                "settings": entry.config,
-                "from": entry.from.iter().map(|(setting, taken)| (
-                    setting.clone(), json!({"entry": taken.entry, "name": taken.name}),
-                )).collect::<serde_json::Map<String, Value>>(),
-            })).collect::<Vec<_>>(),
-        })),
+        "secrets/providers" => Ok(providers(vault)),
         "secrets/list" => Ok(json!({
             "secrets": vault.rows().iter().map(crate::secrets::vault::Row::json).collect::<Vec<_>>(),
             "keeps": vault.keeps().into_iter().map(|keep| json!({"id": keep.id(), "label": keep.label()})).collect::<Vec<_>>(),

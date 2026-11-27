@@ -232,6 +232,14 @@ pub(crate) fn keeping(
         .entries
         .get(&entry)
         .map(|each| each.provider.as_str());
+    if provider == Some(SYSTEM)
+        && settings.accounts != AUTO
+        && let Err(why) = probe(&store::service_for(home))
+    {
+        return Err(StoreError(format!(
+            "[secrets] accounts is {entry:?}, which keeps in the operating system's credential store, and this host has none to use: {why}. Set [secrets] accounts to \"auto\" (the credential store when there is one, sealed files when there is not) or \"file\""
+        )));
+    }
     let catalog = if matches!(provider, Some(SYSTEM | FILE)) {
         crate::secrets::catalog::Catalog::built_in()
     } else {

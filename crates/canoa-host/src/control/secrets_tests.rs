@@ -678,3 +678,37 @@ fn the_system_vault_lists_what_canoa_holds_and_what_the_stores_other_programs_ho
             .expect("removed");
     }
 }
+
+#[test]
+fn the_operating_systems_store_is_not_offered_where_it_does_not_answer() {
+    let _no_store = crate::accounts::store::naming_os_store(Err(
+        "the operating system's credential store is not available (no session bus)".to_owned(),
+    ));
+    let rig = rig("no-store");
+    let providers = ask(&rig.control, &Caller::Owner, "secrets/providers", json!({}));
+    let result = &providers["result"];
+    let ids: Vec<&str> = result["providers"]
+        .as_array()
+        .expect("providers")
+        .iter()
+        .filter_map(|provider| provider["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["file", "form"], "{providers}");
+    let names: Vec<&str> = result["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert_eq!(names, ["file", "form"], "{providers}");
+    assert_eq!(result["system_store"]["available"], false);
+    let file = result["providers"]
+        .as_array()
+        .and_then(|all| all.iter().find(|provider| provider["id"] == "file"))
+        .expect("the sealed files");
+    let said = file["description"].as_str().expect("a description");
+    assert!(
+        said.contains("`auto` keeps accounts") && said.contains("no session bus"),
+        "{said}"
+    );
+}

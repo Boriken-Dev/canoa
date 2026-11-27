@@ -521,6 +521,43 @@ fn auto_keeps_accounts_in_sealed_files_and_says_why_when_the_store_does_not_answ
 }
 
 #[test]
+fn naming_the_system_store_where_it_does_not_answer_is_refused_in_plain_words() {
+    let dir = Dir::new();
+    let error = Accounts::open_probing(
+        &config_of(
+            "[secrets]
+accounts = \"system\"
+",
+        ),
+        &dir.0,
+        &no_bus,
+    )
+    .expect_err("there is no store to keep them in");
+    let said = error.to_string();
+    assert!(
+        said.starts_with("[secrets] accounts is \"system\""),
+        "{said}"
+    );
+    assert!(
+        said.contains("\"auto\"") && said.contains("\"file\""),
+        "{said}"
+    );
+    // `file` and `auto` still open on the same host.
+    assert!(
+        Accounts::open_probing(
+            &config_of(
+                "[secrets]
+accounts = \"file\"
+"
+            ),
+            &dir.0,
+            &no_bus
+        )
+        .is_ok()
+    );
+}
+
+#[test]
 fn auto_uses_the_operating_systems_store_when_it_answers() {
     let dir = Dir::new();
     let accounts = Accounts::open_probing(&config_of(""), &dir.0, &|_| Ok(())).expect("opens");
@@ -731,20 +768,6 @@ fn an_entry_that_keeps_nothing_it_is_given_cannot_hold_the_accounts() {
         &no_bus,
     );
     assert!(unknown.is_err());
-}
-
-#[test]
-fn an_unreachable_os_store_names_auto_and_file() {
-    let real = RealStore::new();
-    let error = real.store().get("one").err();
-    if let Some(error) = error.map(|error| error.to_string())
-        && error.contains("is not available")
-    {
-        assert!(
-            error.contains("\"auto\"") && error.contains("\"file\""),
-            "{error}"
-        );
-    }
 }
 
 fn holds_files_in(home: &std::path::Path) -> bool {

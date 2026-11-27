@@ -204,7 +204,7 @@ struct RawSection {
     store: Option<String>,
     /// Default lifetime option offered by the prompt form (`once`, `session`, `close`, `15m`, `1h`, `8h`, `1d`, `ttl:SECONDS`).
     keep: Option<String>,
-    /// Entry keeping account credentials and the session services' passwords (`auto` or an entry name).
+    /// Entry keeping account credentials and the session services' passwords: `auto` (the operating system's credential store when the host has one, sealed files when it has none) or an entry name.
     accounts: Option<String>,
     /// Most seconds a prompt waits for the person (at least 1).
     max_wait: Option<u64>,
