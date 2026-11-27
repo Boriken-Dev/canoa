@@ -283,6 +283,8 @@ pub(crate) fn os_store() -> Result<(), String> {
     if let Some(named) = NAMED_OS_STORE.with(|named| named.borrow().clone()) {
         return named;
     }
+    /// Whether the operating system's store answers is a fact of the process's session (its D-Bus bus, its keychain), the same
+    /// for every host the process runs, so it is asked once.
     static ONCE: OnceLock<Result<(), String>> = OnceLock::new();
     ONCE.get_or_init(|| {
         probe(&format!("{}.probe", canoa::brand::ID)).map_err(|StoreError(why)| why)
