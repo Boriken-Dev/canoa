@@ -1088,3 +1088,64 @@ fn the_real_windows_sign_in_answers_without_asking() {
         Err(error) => eprintln!("Windows gave none: {error}"),
     }
 }
+
+#[test]
+fn a_new_message_is_sent_with_a_copy_kept_and_a_reply_is_not() {
+    let (standin, graph) = connected();
+    graph
+        .send_message(Draft::new_message(
+            vec!["ana@example.test".to_owned()],
+            vec![],
+            vec!["boss@example.test".to_owned()],
+            "Usage <near>".to_owned(),
+            "A limit is near.".to_owned(),
+        ))
+        .expect("sends");
+    assert_eq!(standin.sent(), ["/me/sendMail"]);
+    let log = standin.log();
+    let posted = log
+        .iter()
+        .find(|logged| logged.body.contains("saveToSentItems"))
+        .expect("the request");
+    let body: Value = serde_json::from_str(&posted.body).expect("JSON");
+    assert_eq!(body["saveToSentItems"], true);
+    assert_eq!(body["message"]["subject"], "Usage <near>");
+    assert_eq!(
+        body["message"]["toRecipients"][0]["emailAddress"]["address"],
+        "ana@example.test"
+    );
+    assert_eq!(
+        body["message"]["bccRecipients"][0]["emailAddress"]["address"],
+        "boss@example.test"
+    );
+    let refused = graph
+        .send_message(Draft::reply("AAMk/1+x=".to_owned(), false, "ok".to_owned()))
+        .expect_err("a reply is no new message");
+    assert!(refused.to_string().contains("reply"), "{refused}");
+    assert_eq!(standin.sent().len(), 1);
+}
+
+#[test]
+fn only_an_account_allowed_to_send_asks_for_the_permission_to_send() {
+    if !windows_powershell() {
+        return;
+    }
+    let plain = wam_over_standin("app-1", None).token().expect("a token");
+    assert!(
+        !plain.value.expose().contains("Mail.Send"),
+        "{}",
+        plain.value.expose()
+    );
+    let allowed = wam_over_standin("app-1", None)
+        .allowing_send(true)
+        .token()
+        .expect("a token");
+    assert!(
+        allowed
+            .value
+            .expose()
+            .contains("Mail.ReadWrite https://graph.microsoft.com/Mail.Send"),
+        "{}",
+        allowed.value.expose()
+    );
+}

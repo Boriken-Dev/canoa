@@ -12,6 +12,7 @@ mod config;
 mod forms;
 pub mod mail_backend;
 mod mailboxes;
+mod notifier;
 mod service;
 #[cfg(test)]
 mod service_tests;
@@ -19,6 +20,7 @@ mod service_tests;
 mod testkit;
 mod tools;
 
+pub use notifier::MailNotifier;
 pub use service::{MailSection, MailService, library};
 
 /// The name this crate's library is registered under.

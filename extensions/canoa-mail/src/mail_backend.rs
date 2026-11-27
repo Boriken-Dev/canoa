@@ -465,7 +465,7 @@ pub struct Page {
     pub more: bool,
 }
 
-/// A draft to save into Drafts; drafts are never sent.
+/// A message to save into Drafts, or, through [`Mailbox::send_message`], to send.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 pub struct Draft {
@@ -948,6 +948,17 @@ pub trait Mailbox: Send + Sync {
 
     /// Applies `change` to `ids`.
     fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError>;
+
+    /// Sends `message`, a new message and no reply, from this mailbox to the addresses it names, and keeps a copy in Sent Items where
+    /// the backend does. Nothing an agent can call reaches it: the agent's tools only save drafts, and the host's mail notifier is
+    /// what sends. The default: the backend cannot send, which it says with `GUATIAO_ERR_UNSUPPORTED`.
+    fn send_message(&self, message: Draft) -> Result<(), ProviderError> {
+        drop(message);
+        Err(ProviderError::new(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "this mail backend cannot send",
+        ))
+    }
 }
 
 /// A mail backend provider: describes its settings schema, validates account configuration, and opens a [`Mailbox`].

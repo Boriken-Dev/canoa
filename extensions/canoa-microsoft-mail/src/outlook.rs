@@ -377,6 +377,26 @@ impl Mailbox for Outlook {
         Ok(summary_of(&self.ask(&request)?))
     }
 
+    fn send_message(&self, message: Draft) -> Result<(), ProviderError> {
+        let DraftKind::New {
+            to,
+            cc,
+            bcc,
+            subject,
+            body,
+        } = message.kind()
+        else {
+            return Err(
+                MailError::Bad("a reply is not sent: only a new message is".to_owned()).into(),
+            );
+        };
+        Ok(self
+            .ask(&json!({
+                "op": "send", "to": to, "cc": cc, "bcc": bcc, "subject": subject, "body": body,
+            }))
+            .map(drop)?)
+    }
+
     fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError> {
         let kind = match change.kind() {
             ChangeKind::Move { folder } => json!({"kind": "move", "folder": folder}),

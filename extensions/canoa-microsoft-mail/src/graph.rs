@@ -480,6 +480,48 @@ impl Mailbox for Graph {
         Ok(saved)
     }
 
+    fn send_message(&self, message: Draft) -> Result<(), ProviderError> {
+        let DraftKind::New {
+            to,
+            cc,
+            bcc,
+            subject,
+            body,
+        } = message.kind()
+        else {
+            return Err(
+                MailError::Bad("a reply is not sent: only a new message is".to_owned()).into(),
+            );
+        };
+        let recipients = |addresses: &[String]| -> Vec<Value> {
+            addresses
+                .iter()
+                .map(|address| json!({"emailAddress": {"address": address}}))
+                .collect()
+        };
+        self.post(
+            "/me/sendMail",
+            &json!({
+                "message": {
+                    "subject": subject,
+                    "body": {"contentType": "text", "content": body},
+                    "toRecipients": recipients(to),
+                    "ccRecipients": recipients(cc),
+                    "bccRecipients": recipients(bcc),
+                },
+                "saveToSentItems": true,
+            }),
+        )
+        .map(drop)
+        .map_err(|error| match error {
+            MailError::Auth(_) => MailError::Auth(
+                "Graph refused to send: allow sending on this mail account (Settings, Mail) so the sign-in asks for the Mail.Send permission".to_owned(),
+            ),
+            other => other,
+        })?;
+        Ok(())
+    }
+
     fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError> {
         if ids.is_empty() {
             return Ok(());

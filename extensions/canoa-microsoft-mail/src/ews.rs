@@ -250,6 +250,15 @@ impl Mailbox for Ews {
         Ok(saved)
     }
 
+    fn send_message(&self, message: Draft) -> Result<(), ProviderError> {
+        if !matches!(message.kind(), DraftKind::New { .. }) {
+            return Err(
+                MailError::Bad("a reply is not sent: only a new message is".to_owned()).into(),
+            );
+        }
+        Ok(self.call(&request::send_item(&message)).map(drop)?)
+    }
+
     fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError> {
         if ids.is_empty() {
             return Ok(());

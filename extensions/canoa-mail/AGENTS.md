@@ -6,9 +6,10 @@ The person's own mail as a Canoa session service: the `mail` provider of the `se
 
 ```rust
 pub const LIBRARY: &str = "canoa-mail";
-pub fn library(host: Host) -> Option<LibraryParts>;     // offers MailService and MailSection
+pub fn library(host: Host) -> Option<LibraryParts>;     // offers MailService, MailSection and MailNotifier
 pub struct MailService;                                 // #[provider(SessionService, id = "mail")]
 pub struct MailSection;                                 // #[provider(SettingsSection, id = "mail")]
+pub struct MailNotifier;                                // #[provider(Notifier, id = "mail_notifier")]: the `mail` notifier
 ```
 
 ## The table (`[host.services.mail]`)
@@ -32,7 +33,7 @@ Offered to the sessions of a connection whose key holds the host's `services` gr
 
 - `mail_list {account?}` (accounts, folders with counts), `mail_search {query?, from?, to?, subject?, folder?, after?, before?, has_attachment?, unread?, flagged?, limit?, offset?, account?}` (default 25, at most 100; with no account every account is searched and one that fails is reported in `errors`), `mail_read {id | message_id | item_id, account?, thread?, max_chars?}`, `mail_related {id | message_id | item_id, account?, limit?}` (each result has `related_by`: `conversation`, `subject`, `person`), `mail_draft {to, cc?, bcc?, subject?, body, account?}` or `{reply_to, reply_all?, body}`, `mail_move {ids, folder}`, `mail_archive {ids}`, `mail_update {ids, read?, flag?, add_categories?, remove_categories?}`.
 - A message id is `ACCOUNT:` and the backend's own id; one change names at most 50 ids of one account. `message_id` (the Internet message id, tried with and without its brackets) and `item_id` are looked for in every account in the table's order, or only in `account`; the first account that holds it answers, and an account that cannot be searched is named in the error when none does.
-- **Never sends.** There is no tool or `Mailbox` call that sends. A draft is saved in Drafts, and the answer says `"sent": false`.
+- **The agent's tools never send; the mail notifier does.** There is no tool, and no `Mailbox` call the tools make, that sends: a draft is saved in Drafts, and the answer says `"sent": false`. The one thing here that sends is the `mail` notifier (`MailNotifier`, a `notifier` provider): it sends the host's notice of an event through `Mailbox::send_message` of one account of `[host.services.mail.accounts]` to the addresses its notifier entry lists, any addresses (`[notifications.notifiers.NAME]` with `provider = "mail"` and `settings = { account, to }`). A backend that cannot send answers UNSUPPORTED and the notifier says so.
 - **Asked first.** `mail_move`, `mail_archive` and `mail_update` read the named messages from the mailbox and answer an `Outcome` whose `ask` is the change and those messages in plain words and a digest of both; the host puts it to the person and calls `resume`, and nothing changes until the answer is `Allowed` (or `Silent`, when the session is in a mode that asks for nothing, which the host then says in the session).
 - **Mail is data.** Every string of a message is stripped of control, direction and zero-width characters and cut (subject and names 300 characters, body `max_chars`, default 20000, at most 200000, newlines kept); every answer carries the note and the skill says the same.
 - Related mail (`canoa_mail::mail_backend::related`) and thread summaries run over a backend's `Mailbox` methods (`search`, `summaries`, `thread`).
@@ -44,7 +45,23 @@ Answered to a key holding the host's `services.setup` grant; an answer never car
 - `mail/accounts {}` -> `{accounts: [{name, backend, backend_title, state, details, settings, server?, email?, user?}], backends: [{id, title, description, no_secret_state, schema, form}], tools}`. `state` is `password stored`, `needs a password`, `password from VAR`, `needs VAR set`, or the backend's own words.
 - `mail/add {name, backend, settings.., password?, id?, password_env?, timeout_secs?}` -> `{account}`: validates through `MailBackend::validate`, keeps the password with the host (`put_secret`) under a new id when the backend needs one and none was given, writes the table, and forgets the password again if the table cannot be written. A backend that needs a secret and got none is a usage error.
 - `mail/test {name}` -> `{ok: true, folders, message}` or `{ok: false, problem}`: opens the mailbox and lists its folders; a sign-in that fails is an answer, not an error (`-32003` for an unknown name).
+- `mail/allow_send {name, allow?}` -> `{allowed, ok}` or `{allowed, ok: false, problem}`: sets `send` of an account whose backend asks for the permission to send (Graph: its sign-in then also asks for Mail.Send, no other account is asked), opens the mailbox again and says whether the sign-in was given it; a backend with no `send` setting is refused.
 - `mail/remove {name}` -> `{removed: true}`: takes the table out and forgets the stored password.
+
+## The `mail` notifier
+
+`MailNotifier` is the `mail` provider of the `notifier` kind (`canoa::notifier`): Settings, Notifications offers it as **Mail**, and `[notifications.notifiers.NAME]` with `provider = "mail"` uses it.
+
+```toml
+[notifications.notifiers.inbox]
+provider = "mail"
+settings = { account = "work", to = ["me@example.com", "phone@carrier.example"] }
+```
+
+- `account` is a name in `[host.services.mail.accounts]`; `to` is any addresses, as a list or as one text divided by commas, semicolons or lines. An entry with no account, an unknown one, no address or an address that is not one word with an `@` between two parts (a space, a control character, `<`, `>`, `,` or `;` in it) is refused before anything is sent.
+- The message is a new one from that account with the notice's title and words as its subject (`TITLE: BODY`) and the words as its body. It carries nothing else of the notice (no action, reply nonce or session id) and nothing of the entry's settings. The host builds a notice from the session's title, the agent's name and a fixed phrase in the app's language, never a prompt, a command, a path or a tool input.
+- It reaches the account through the handle of the host's session services that the host puts into a provider's settings as `_services`; a host with none, or one that is gone, answers `Unavailable`. A backend that cannot send answers `Unavailable("this mail backend cannot send")`, a refusal by the server `Rejected` with the server's words, a sign-in that fails `Auth`.
+- The Graph backend sends only when its account has `send = true` (the add form's **Allow sending** box, or `mail/allow_send`): the sign-in then also asks for the Mail.Send permission. Exchange Server and Outlook send as they sign in.
 
 ## Tests
 
@@ -74,6 +91,7 @@ pub trait Mailbox: Send + Sync {
     fn thread(&self, id: String) -> Result<Vec<Summary>, ProviderError>;
     fn draft(&self, draft: Draft) -> Result<String, ProviderError>;
     fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError>;
+    fn send_message(&self, message: Draft) -> Result<(), ProviderError>;   // optional: a new message, sent; the default answers UNSUPPORTED
 }
 ```
 

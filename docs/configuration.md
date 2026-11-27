@@ -1346,7 +1346,7 @@ and tells nobody when no window is open. Another is an entry of `[notifications.
 
 ```toml
 [notifications]
-permission = ["desktop", "phone"]   # a session asks leave to use a tool
+permission = ["desktop", "inbox"]   # a session asks leave to use a tool
 question = ["desktop"]              # a session asks a question
 finished = ["desktop"]              # a turn finished
 failed = ["desktop"]                # a turn failed, or its agent ended while it ran
@@ -1356,16 +1356,17 @@ update_failed = ["desktop"]         # an install or an update ended in failure
 host_restarted = []                 # the host started again with the same version (off unless you list a notifier)
 host_updated = []                   # the host started with another version than its last run
 
-[notifications.notifiers.phone]
-provider = "ntfy"                   # a notifier an extension offers, with the settings its form asks for
-settings = { server = "https://ntfy.example", topic = "mine" }
+[notifications.notifiers.inbox]
+provider = "mail"
+settings = { account = "work", to = ["me@example.com"] }
 ```
 
 An event not named goes to `desktop`, but the two host events. A name that is no notifier, an event this host does not know, and the older
 `permission = true` form are refused when {{ config_file }} is read, with the key named. A notifier's sensitive setting (a token) is kept as
 the secret `notifiers/NAME/MEMBER`, never in {{ config_file }}. A notice is built from the session's title, the agent's name and a fixed
 phrase in the app's language, and never names a command, a path or anything an agent sent. A window reports the session it shows while it
-is focused, and the host tells nobody, through any notifier, of an event of that session. Settings,
+is focused, and the host tells nobody, through any notifier, of an event of that session. The `mail` notifier sends from one of the accounts of
+`[host.services.mail.accounts]` to the addresses it lists, any addresses; the `canoa-mail` tools an agent is given never send. Settings,
 Notifications edits all of this, and its Test button sends a notice of the words "Test" to one notifier.
 
 ### File viewers from extensions

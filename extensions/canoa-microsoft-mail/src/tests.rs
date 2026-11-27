@@ -796,3 +796,34 @@ fn autodiscover_follows_a_redirect_to_a_server_the_account_names() {
         "the redirect was followed: {operations:?}"
     );
 }
+
+#[test]
+fn a_new_message_is_sent_and_saved_in_sent_items_and_a_reply_is_not_sent() {
+    let (standin, ews) = connected();
+    ews.send_message(Draft::new_message(
+        vec!["ana@example.test".to_owned()],
+        vec![],
+        vec![],
+        "Usage <near>".to_owned(),
+        "A limit is near & rising.".to_owned(),
+    ))
+    .expect("sends");
+    assert_eq!(standin.sent(), ["CreateItem SendAndSaveCopy"]);
+    let log = standin.log();
+    let request = log
+        .iter()
+        .find(|logged| logged.body.contains("SendAndSaveCopy"))
+        .expect("the request");
+    assert!(
+        request
+            .body
+            .contains("DistinguishedFolderId Id=\"sentitems\"")
+    );
+    assert!(request.body.contains("ana@example.test"));
+    assert!(request.body.contains("Usage &lt;near&gt;"));
+    let refused = ews
+        .send_message(Draft::reply("AAMk/1+x=".to_owned(), false, "ok".to_owned()))
+        .expect_err("a reply is no new message");
+    assert!(refused.to_string().contains("reply"), "{refused}");
+    assert_eq!(standin.sent().len(), 1);
+}

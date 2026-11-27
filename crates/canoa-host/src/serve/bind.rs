@@ -318,6 +318,7 @@ struct BindState<'a> {
 fn bind_notices(
     config: &Config,
     options: &ServeOptions,
+    services: String,
 ) -> (Arc<crate::notify::Hub>, Option<crate::notify::run::Record>) {
     let store: Option<Arc<dyn canoa::config_store::ConfigStore>> =
         match (&options.account_layers, &options.config_file) {
@@ -329,7 +330,7 @@ fn bind_notices(
         Some(store) => crate::notify::watching(store, options.state_dir.clone()),
         None => crate::notify::fixed(config, options.state_dir.clone()),
     };
-    let hub = crate::notify::Hub::new(source);
+    let hub = crate::notify::Hub::new(source, Some(services));
     let record = options.state_dir.as_ref().map(|home| {
         let (record, start) = crate::notify::run::Record::begin(home, env!("CARGO_PKG_VERSION"));
         let event = match start {
@@ -1241,7 +1242,7 @@ impl Serving {
                 .zip(options.state_dir.as_deref()),
         );
         let environments = crate::environments::Environments::of(config);
-        let (notices, run_record) = bind_notices(config, options);
+        let (notices, run_record) = bind_notices(config, options, services.handle());
         let control = build_control_hub(
             config,
             options,

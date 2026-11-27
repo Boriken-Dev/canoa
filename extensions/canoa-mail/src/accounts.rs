@@ -278,6 +278,42 @@ pub(crate) fn remove(
     Ok(())
 }
 
+/// Sets `send` of the account `name`, which a backend that can send only on the person's say (Graph, whose sign-in then asks for the
+/// permission to send) reads. A backend whose settings have no `send` is refused.
+pub(crate) fn allow_send(
+    host: &dyn ServiceHost,
+    config: &MailConfig,
+    catalog: &BackendCatalog,
+    name: &str,
+    allow: bool,
+) -> Result<(), Failed> {
+    let account = config
+        .accounts
+        .get(name)
+        .ok_or_else(|| Failed::usage(format!("no mail account is called {name}")))?;
+    let takes = catalog
+        .get(&account.backend)
+        .and_then(|entry| entry.info.schema.as_ref())
+        .and_then(|schema| crate::forms::json_of(schema).ok())
+        .is_some_and(|schema| schema["properties"].get("send").is_some());
+    if !takes {
+        return Err(Failed::usage(format!(
+            "the backend {} needs no permission to send: it sends as it signs in",
+            account.backend
+        )));
+    }
+    let mut settings = account.settings.clone();
+    settings.insert("send".to_owned(), json!(allow));
+    let block = block_of(
+        &account.backend,
+        account.id.as_deref(),
+        account.password_env.as_deref(),
+        Some(account.timeout_secs),
+        &settings,
+    )?;
+    set_account(host, name, Some(&block))
+}
+
 /// What an account's credential status is, in plain words. Never exposes the secret.
 pub(crate) fn state_of(
     account: &MailAccount,

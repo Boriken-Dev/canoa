@@ -234,6 +234,7 @@ impl ServiceEntry {
 /// The services of one host: what the loaded libraries offer, and what they reach.
 pub(crate) struct Services {
     entries: Vec<Arc<ServiceEntry>>,
+    registration: Arc<Registration>,
 }
 
 impl core::fmt::Debug for Services {
@@ -291,7 +292,15 @@ impl Services {
                 }));
             }
         }
-        Self { entries }
+        Self {
+            entries,
+            registration,
+        }
+    }
+
+    /// The handle providers reach this host's services by (`canoa::session_service::host`).
+    pub(crate) fn handle(&self) -> String {
+        self.registration.context().host
     }
 
     /// The services as MCP servers a connection may be given.

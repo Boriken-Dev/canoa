@@ -30,6 +30,10 @@ pub(crate) const SCRIPT: &str = include_str!("wam.ps1");
 /// include sending.
 pub(crate) const SCOPE: &str = "https://graph.microsoft.com/Mail.ReadWrite";
 
+/// The permission added for an account the person allowed to send (`send = true`): the host's mail notifier sends through it, and
+/// no other account is asked for it.
+pub(crate) const SEND_SCOPE: &str = "https://graph.microsoft.com/Mail.Send";
+
 /// How long before its end a token is no longer used, so a call that starts with it does not finish without it.
 const MARGIN: Duration = Duration::from_secs(300);
 
@@ -114,6 +118,7 @@ pub(crate) struct Wam {
     client_id: String,
     tenant: String,
     login_hint: Option<String>,
+    send: bool,
 }
 
 impl Wam {
@@ -128,7 +133,15 @@ impl Wam {
             client_id: client_id.to_owned(),
             tenant: tenant.to_owned(),
             login_hint,
+            send: false,
         }
+    }
+
+    /// This sign-in also asks for the permission to send, which only an account the person allowed to send is given.
+    #[must_use]
+    pub(crate) fn allowing_send(mut self, send: bool) -> Self {
+        self.send = send;
+        self
     }
 
     /// The Windows sign-in reached by the helper through the command and time an account names.
@@ -152,7 +165,7 @@ impl TokenSource for Wam {
                 "op": "token",
                 "client_id": self.client_id,
                 "tenant": self.tenant,
-                "scope": SCOPE,
+                "scope": if self.send { format!("{SCOPE} {SEND_SCOPE}") } else { SCOPE.to_owned() },
                 "login_hint": self.login_hint,
             }))
             .map_err(|error| {

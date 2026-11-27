@@ -215,15 +215,21 @@ fn the_helper_finds_a_message_by_its_internet_message_id_in_the_standins_mailbox
 }
 
 #[test]
-fn the_helper_never_sends() {
-    assert!(
-        !SCRIPT.contains(".Send("),
-        "no function of the helper sends a message"
+fn the_helper_sends_in_one_place_only() {
+    assert_eq!(
+        SCRIPT.matches(".Send(").count(),
+        1,
+        "only the `send` operation calls a message's Send"
     );
     assert!(!SCRIPT.contains(".Send ("));
+    let sender = SCRIPT.find("function Send-Mail").expect("the sender");
+    let call = SCRIPT.find(".Send(").expect("the call");
+    let next = SCRIPT[sender..]
+        .find("\nfunction Set-Change")
+        .expect("the next function");
     assert!(
-        STANDIN.contains("SEND WAS CALLED"),
-        "the stand-in fails a send loudly"
+        call > sender && call < sender + next,
+        "the call is inside Send-Mail"
     );
     assert!(
         SCRIPT.is_ascii(),
@@ -417,6 +423,40 @@ fn the_helper_saves_drafts_and_never_sends() {
             .unwrap()
             .starts_with("Travel is in.")
     );
+}
+
+#[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "needs Windows PowerShell that reads this process's files: only on Windows"
+)]
+fn the_helper_sends_a_new_message_and_keeps_it_in_sent_items() {
+    let dir = Dir::new("send");
+    let outlook = outlook_over_standin(&dir.state());
+    outlook
+        .send_message(Draft::new_message(
+            vec!["ana@example.test".to_owned()],
+            vec![],
+            vec![],
+            "Usage".to_owned(),
+            "A limit is near.".to_owned(),
+        ))
+        .expect("sends");
+    let sent: Vec<Value> = dir
+        .mail()
+        .into_iter()
+        .filter(|row| row["folder"] == "Sent Items" && row["subject"] == "Usage")
+        .collect();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["body"], "A limit is near.");
+    assert!(
+        dir.mail().iter().all(|row| row["folder"] != "Drafts"),
+        "nothing was left in Drafts"
+    );
+    let refused = outlook
+        .send_message(Draft::reply("M3".to_owned(), false, "ok".to_owned()))
+        .expect_err("a reply is no new message");
+    assert!(refused.to_string().contains("reply"), "{refused}");
 }
 
 #[test]

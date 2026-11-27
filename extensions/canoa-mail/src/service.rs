@@ -34,7 +34,7 @@ pub struct MailService;
 
 /// The mailboxes opened so far, by host: registries are made again as often as the host loads them, and a mailbox that holds a
 /// token or a connection should outlive them.
-fn opened() -> &'static Arc<Opened> {
+pub(crate) fn opened() -> &'static Arc<Opened> {
     static OPENED: OnceLock<Arc<Opened>> = OnceLock::new();
     OPENED.get_or_init(Arc::default)
 }
@@ -249,6 +249,32 @@ impl MailService {
                     }),
                 })
             }
+            "allow_send" => {
+                let name = text(params, "name")?;
+                let allow = params.get("allow").and_then(Value::as_bool).unwrap_or(true);
+                let catalog = BackendCatalog::of(&**host);
+                accounts::allow_send(&**host, &config, &catalog, name, allow)
+                    .map_err(|failed| refusal(&failed))?;
+                // The mailbox is opened again with the new sign-in, which asks for the permission and so shows at once whether it was given.
+                opened().forget(&context.host);
+                let config = config_of(&**host).map_err(|why| (Refusal::Refused, why))?;
+                let account = config.accounts.get(name).ok_or_else(|| {
+                    (
+                        Refusal::NotFound,
+                        format!("no mail account is called {name}"),
+                    )
+                })?;
+                let outcome = open_account(&catalog, account, &**host)
+                    .and_then(|backend| backend.folders().map_err(MailError::from));
+                Ok(match outcome {
+                    Ok(_) => json!({"allowed": allow, "ok": true}),
+                    Err(error) => json!({
+                        "allowed": allow,
+                        "ok": false,
+                        "problem": tools::clean(&error.to_string(), 600, false),
+                    }),
+                })
+            }
             "remove" => {
                 accounts::remove(&**host, &config, text(params, "name")?)
                     .map_err(|failed| refusal(&failed))?;
@@ -274,7 +300,7 @@ impl SettingsSection for MailSection {
         info.group = Some("Agents".to_owned());
         info.icon = Some("mail".to_owned());
         info.help = Some(
-            "An agent can search, read and draft in these mailboxes, and asks you before it moves or changes a message.              It never sends. Passwords stay in this computer's credential store, never in canoa.cfg."
+            "An agent can search, read and draft in these mailboxes, and asks you before it moves or changes a message.              An agent never sends; only the Mail notifier of Notifications does. Passwords stay in this computer's credential store, never in canoa.cfg."
                 .to_owned(),
         );
         let mut mailboxes = Collection::new(
@@ -314,5 +340,5 @@ impl SettingsSection for MailSection {
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-mail",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [MailService, MailSection]
+    providers = [MailService, MailSection, crate::notifier::MailNotifier]
 );

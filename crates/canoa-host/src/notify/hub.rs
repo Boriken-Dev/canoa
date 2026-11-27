@@ -19,6 +19,9 @@ use super::directory::{BUILT_IN, Directory, Offered};
 use super::events;
 use super::words::{self, Facts};
 
+/// The key under which a provider is handed the handle of its host's session services (`canoa::session_service::host`).
+pub(crate) const SERVICES_KEY: &str = "_services";
+
 /// How many `(event, session, request)` triples are remembered to tell one request's notice from its repeat.
 const REMEMBERED: usize = 1024;
 
@@ -53,6 +56,8 @@ pub(crate) struct Hub {
     seen: Mutex<VecDeque<String>>,
     sequence: AtomicU64,
     source: Source,
+    /// The handle of this host's session services, for a provider that reaches what they hold.
+    services: Option<String>,
 }
 
 impl core::fmt::Debug for Hub {
@@ -73,7 +78,7 @@ fn now() -> i64 {
 
 impl Hub {
     /// A hub that reads what to do from `source` each time an event fires.
-    pub(crate) fn new(source: Source) -> Arc<Self> {
+    pub(crate) fn new(source: Source, services: Option<String>) -> Arc<Self> {
         let links = Arc::new(Links::default());
         let id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -84,6 +89,7 @@ impl Hub {
             seen: Mutex::new(VecDeque::new()),
             sequence: AtomicU64::new(0),
             source,
+            services,
         })
     }
 
@@ -91,7 +97,7 @@ impl Hub {
     #[cfg(test)]
     pub(crate) fn fixed(directory: Directory) -> Arc<Self> {
         let directory = Arc::new(directory);
-        Self::new(Box::new(move || Ok(Arc::clone(&directory))))
+        Self::new(Box::new(move || Ok(Arc::clone(&directory))), None)
     }
 
     /// What `[notifications]` says now.
@@ -199,14 +205,21 @@ impl Hub {
     }
 
     /// Delivers `notice` through `offered`: the host's own provider (the windows) is told by the host that owns the windows.
+    ///
+    /// A provider is handed, besides its settings, the handle of this host's session services under [`SERVICES_KEY`], which it may use
+    /// to reach what they hold.
     fn dispatch(
         links: &Links,
+        services: Option<&str>,
         offered: &Offered,
-        settings: serde_json::Map<String, Value>,
+        mut settings: serde_json::Map<String, Value>,
         notice: Notice,
     ) -> Result<(), String> {
         if offered.origin == BUILT_IN {
             return super::desktop::push(links, &notice);
+        }
+        if let Some(services) = services {
+            settings.insert(SERVICES_KEY.to_owned(), Value::from(services));
         }
         offered
             .send(Value::Object(settings).to_string(), notice)
@@ -246,6 +259,7 @@ impl Hub {
             }
             let settings = resolved.settings;
             let links = Arc::clone(&self.links);
+            let services = self.services.clone();
             let directory = Arc::clone(&directory);
             let notice = notice.clone();
             let notifier = name.clone();
@@ -253,7 +267,13 @@ impl Hub {
                 name,
                 std::thread::spawn(move || {
                     let outcome = directory.resolve(&notifier).and_then(|resolved| {
-                        Self::dispatch(&links, resolved.offered, settings, notice)
+                        Self::dispatch(
+                            &links,
+                            services.as_deref(),
+                            resolved.offered,
+                            settings,
+                            notice,
+                        )
                     });
                     if let Err(why) = &outcome {
                         tracing::warn!(notifier, "a notice was not delivered: {why}");
@@ -286,6 +306,12 @@ impl Hub {
         };
         let mut notice = Notice::new(format!("test-{}", self.id), "test", title, body, now());
         notice.urgency = canoa::notifier::Urgency::Low;
-        Self::dispatch(&self.links, resolved.offered, resolved.settings, notice)
+        Self::dispatch(
+            &self.links,
+            self.services.as_deref(),
+            resolved.offered,
+            resolved.settings,
+            notice,
+        )
     }
 }

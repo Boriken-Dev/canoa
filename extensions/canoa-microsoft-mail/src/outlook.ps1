@@ -3,7 +3,8 @@
 # (base64, as the argument of Invoke-CanoaMail), does it as the person signed in to Outlook, and writes one JSON answer to
 # standard output: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
 #
-# It never sends: nothing here calls a MailItem's Send, and a draft is only saved. Outlook may ask the person to allow
+# It sends only for the 'send' operation, which the host's mail notifier asks for and no agent's tool can: Send-Mail is the one
+# place a MailItem's Send is called, and a draft is only saved. Outlook may ask the person to allow
 # programmatic access (an antivirus product or a policy decides); the call then waits for the answer.
 
 $ErrorActionPreference = 'Stop'
@@ -263,6 +264,18 @@ function New-Draft($app, $ns, $d) {
     return Get-Summary $draft
 }
 
+function Send-Mail($app, $d) {
+    $mail = $app.CreateItem(0)
+    $mail.To = (@($d.to) -join ';')
+    if ($d.cc) { $mail.CC = (@($d.cc) -join ';') }
+    if ($d.bcc) { $mail.BCC = (@($d.bcc) -join ';') }
+    $mail.Subject = [string]$d.subject
+    $mail.Body = [string]$d.body
+    if (-not $mail.Recipients.ResolveAll()) { throw 'Outlook could not resolve every address' }
+    $mail.Send()
+    return $true
+}
+
 function Set-Change($ns, $id, $change, $all) {
     $item = Get-MailItem $ns $id
     switch ($change.kind) {
@@ -309,6 +322,7 @@ function Invoke-CanoaMail([string]$encoded) {
             'summaries' { @(@($request.ids) | ForEach-Object { Get-Summary (Get-MailItem $ns ([string]$_)) }) }
             'thread' { Get-Thread $ns (Get-MailItem $ns ([string]$request.id)) }
             'draft' { New-Draft $app $ns $request }
+            'send' { Send-Mail $app $request }
             'change' {
                 $all = Get-AllFolders $ns
                 foreach ($id in @($request.ids)) { Set-Change $ns ([string]$id) $request.change $all }

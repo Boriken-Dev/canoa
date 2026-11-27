@@ -197,8 +197,18 @@ fn mailboxes(tag: &str, addresses: &[String]) -> String {
     format!("<t:{tag}>{inner}</t:{tag}>")
 }
 
-/// A draft saved in Drafts. The disposition is `SaveOnly` for every draft: no request this connector writes can send.
+/// A draft saved in Drafts. The disposition is `SaveOnly` for every draft: no request an agent's tool makes can send.
 pub(super) fn create_draft(draft: &Draft) -> String {
+    create_item(draft, "SaveOnly", "drafts")
+}
+
+/// A new message sent, with a copy kept in Sent Items: the one request this connector writes that sends, made for the host's mail
+/// notifier and never for an agent's tool.
+pub(super) fn send_item(draft: &Draft) -> String {
+    create_item(draft, "SendAndSaveCopy", "sentitems")
+}
+
+fn create_item(draft: &Draft, disposition: &str, folder: &str) -> String {
     let item = match draft.kind() {
         DraftKind::New {
             to,
@@ -224,8 +234,8 @@ pub(super) fn create_draft(draft: &Draft) -> String {
         }
     };
     format!(
-        "<m:CreateItem MessageDisposition=\"SaveOnly\"><m:SavedItemFolderId>\
-         <t:DistinguishedFolderId Id=\"drafts\"/></m:SavedItemFolderId><m:Items>{item}</m:Items></m:CreateItem>"
+        "<m:CreateItem MessageDisposition=\"{disposition}\"><m:SavedItemFolderId>\
+         <t:DistinguishedFolderId Id=\"{folder}\"/></m:SavedItemFolderId><m:Items>{item}</m:Items></m:CreateItem>"
     )
 }
 

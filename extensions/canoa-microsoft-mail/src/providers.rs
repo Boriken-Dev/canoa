@@ -70,6 +70,11 @@ struct GraphFields {
     #[schema(title = "Email address")]
     #[form(placeholder = "ana@example.com")]
     email: Option<String>,
+    #[schema(
+        title = "Allow sending",
+        description = "Also ask Microsoft for the permission to send, so the Mail notifier can send from this account. Agents' tools never send."
+    )]
+    send: Option<bool>,
     #[schema(advanced, title = "Graph service address")]
     #[form(placeholder = "https://graph.microsoft.com/v1.0")]
     server: Option<String>,
@@ -381,11 +386,15 @@ struct ParsedGraph {
     email: Option<String>,
     server: Option<String>,
     command: Option<Vec<String>>,
+    send: bool,
 }
 
 impl GraphBackend {
     fn parse_fields(map: &Map<String, Value>) -> Result<ParsedGraph, ProviderError> {
-        reject_unknown(map, &["client_id", "tenant", "email", "server", "command"])?;
+        reject_unknown(
+            map,
+            &["client_id", "tenant", "email", "server", "command", "send"],
+        )?;
         if map.contains_key("autodiscover") {
             return Err(MailError::Bad("graph does not use autodiscover".to_owned()).into());
         }
@@ -399,12 +408,18 @@ impl GraphBackend {
             None => None,
         };
         let command = optional_command(map, "command")?;
+        let send = match map.get("send") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(send)) => *send,
+            Some(_) => return Err(MailError::Bad("send is true or false".to_owned()).into()),
+        };
         Ok(ParsedGraph {
             client_id,
             tenant,
             email,
             server,
             command,
+            send,
         })
     }
 }
@@ -454,6 +469,7 @@ impl MailBackend for GraphBackend {
             email,
             server,
             command,
+            send,
         } = Self::parse_fields(&map)?;
         let timeout = Duration::from_secs(request.timeout_secs.max(1));
         let graph = Graph::new(
@@ -461,13 +477,16 @@ impl MailBackend for GraphBackend {
                 server: server.unwrap_or_else(|| DEFAULT_SERVER.to_owned()),
                 timeout,
             },
-            Arc::new(Wam::powershell(
-                command,
-                &client_id,
-                tenant.as_deref().unwrap_or("organizations"),
-                email,
-                timeout,
-            )),
+            Arc::new(
+                Wam::powershell(
+                    command,
+                    &client_id,
+                    tenant.as_deref().unwrap_or("organizations"),
+                    email,
+                    timeout,
+                )
+                .allowing_send(send),
+            ),
             Network::current(),
         );
         Ok(graph.into_object())

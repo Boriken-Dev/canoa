@@ -14,7 +14,7 @@ exclude = [".*", "*.local.*"]
 publish = false
 
 [dependencies]
-canoa = { workspace = true, features = ["session-service", "settings-section", "store", "network"] }
+canoa = { workspace = true, features = ["notifier", "session-service", "settings-section", "store", "network"] }
 coqui-acp-api.workspace = true
 data-encoding.workspace = true
 guatiao.workspace = true

@@ -67,6 +67,10 @@ impl Mailbox for ObjectMailbox {
     fn change(&self, ids: Vec<String>, change: Change) -> Result<(), ProviderError> {
         self.0.change(ids, change)
     }
+
+    fn send_message(&self, message: Draft) -> Result<(), ProviderError> {
+        self.0.send_message(message)
+    }
 }
 
 /// One offered `mail_backend` provider from a loaded registry.

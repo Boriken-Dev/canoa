@@ -1,6 +1,6 @@
 # A stand-in for Outlook's object model, for tests: the helper's own functions run against it unchanged. It holds a small
 # mailbox in memory, keeps what a call changed in the file $script:StatePath names (each call is a new process), and
-# understands the DASL and Jet filters the helper writes. Its Send throws, so a helper that sent would fail the test.
+# understands the DASL and Jet filters the helper writes. Its Send moves the message to Sent Items and keeps it, which is how a test sees that one was sent.
 
 class SPerson {
     [string]$Name
@@ -82,7 +82,10 @@ class SMail {
     [SRecipients]$Recipients = (New-Object SRecipients)
     [object]$PropertyAccessor = (New-Object SAccessor)
 
-    [void] Send() { throw 'SEND WAS CALLED' }
+    [void] Send() {
+        $this.Parent = @($script:Standin.Flat | Where-Object { $_.Name -eq 'Sent Items' })[0]
+        $this.Save()
+    }
 
     [void] Save() {
         if (-not $this.Parent) { $this.Parent = $script:Standin.Drafts }

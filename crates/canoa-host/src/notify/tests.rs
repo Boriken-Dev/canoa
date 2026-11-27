@@ -26,6 +26,9 @@ use crate::config::{NotificationsConfig, NotifierConfig, Settings};
 /// What the recording notifier was sent: its `topic` setting, so each test reads only its own, and the notice.
 static RECORDS: Mutex<Vec<(String, Notice)>> = Mutex::new(Vec::new());
 
+/// The `_services` setting each recording carried, by topic: what a provider is handed to reach the host's session services.
+static HANDLES: Mutex<Vec<(String, Option<String>)>> = Mutex::new(Vec::new());
+
 fn topic_of(settings: &str) -> String {
     serde_json::from_str::<Value>(settings)
         .ok()
@@ -53,6 +56,18 @@ impl Notifier for Recorder {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push((topic_of(&request.settings), request.notice.clone()));
+        let handle = serde_json::from_str::<Value>(&request.settings)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("_services")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+        HANDLES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((topic_of(&request.settings), handle));
         Ok(Delivery::new(request.notice.id))
     }
 }
@@ -385,6 +400,40 @@ fn a_test_notice_reaches_one_notifier_whatever_the_routes_say() {
             .is_err_and(|why| why.contains("the service said no"))
     );
     assert!(hub.test("ghost").is_err());
+}
+
+#[test]
+fn a_provider_is_handed_the_handle_of_the_hosts_services_and_none_when_the_host_has_none() {
+    let handles = |topic: &str| -> Vec<Option<String>> {
+        HANDLES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(held, _)| held == topic)
+            .map(|(_, handle)| handle.clone())
+            .collect()
+    };
+    let with = |topic: &str, services: Option<&str>| {
+        let mut config = NotificationsConfig::default();
+        config
+            .notifiers
+            .insert("rec".to_owned(), entry("recorder", topic));
+        let directory = Arc::new(Directory::from_registries(
+            config,
+            vec![("standins".to_owned(), registry())],
+            None,
+        ));
+        Hub::new(
+            Box::new(move || Ok(Arc::clone(&directory))),
+            services.map(str::to_owned),
+        )
+    };
+    with("handle-some", Some("host-42"))
+        .test("rec")
+        .expect("delivered");
+    with("handle-none", None).test("rec").expect("delivered");
+    assert_eq!(handles("handle-some"), [Some("host-42".to_owned())]);
+    assert_eq!(handles("handle-none"), [None]);
 }
 
 /// A channel with a queue of what the client sends and a record of what reaches it.
