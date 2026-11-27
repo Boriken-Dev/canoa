@@ -8,7 +8,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
-import 'dart:typed_data';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/popout/item_windows.dart' show ItemWindows;
@@ -23,6 +22,8 @@ import 'package:canoa/shell/surface.dart';
 import 'package:canoa/surfaces/files_surface.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
 import 'package:canoa/surfaces/terminal_surface.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// An agent in the page: it answers a prompt with `echo: TEXT` and ends the turn.
@@ -142,10 +143,33 @@ final class _Host implements TerminalHost {
   Future<List<HostShell>> shells() async => const [];
 }
 
+/// What the framework holds of the focus and of the text field that has it, in whichever window: the view it is drawn in, and the
+/// field's text, selection and composing range, which only the framework knows (the browser's own input may have moved on).
+String _focusState() {
+  final primary = FocusManager.instance.primaryFocus;
+  final context = primary?.context;
+  final field = context?.findAncestorStateOfType<EditableTextState>();
+  final value = field?.widget.controller.value;
+  return jsonEncode({
+    'view': context == null ? null : View.maybeOf(context)?.viewId,
+    'field': value == null ? null : {'text': value.text, 'selection': [value.selection.start, value.selection.end], 'composing': [value.composing.start, value.composing.end]},
+  });
+}
+
+int _frames = 0;
+final _keys = <String>[];
+
 Future<void> main(List<String> args) async {
   final popped = platform.popoutLaunch(args);
   if (popped != null) return runPopout(popped);
   WidgetsFlutterBinding.ensureInitialized();
+  // What the checks of the keyboard and of the frames read: the keys the framework heard, and how many frames it drew.
+  HardwareKeyboard.instance.addHandler((event) {
+    _keys.add('${event is KeyDownEvent ? 'down' : event is KeyUpEvent ? 'up' : 'repeat'}:${event.logicalKey.keyLabel}${HardwareKeyboard.instance.isControlPressed ? '+ctrl' : ''}');
+    if (_keys.length > 60) _keys.removeAt(0);
+    return false;
+  });
+  SchedulerBinding.instance.addPersistentFrameCallback((_) => _frames++);
 
   final store = SessionStore();
   final first = await _Echo('s1').start(store, 'Fix calc');
@@ -182,6 +206,10 @@ Future<void> main(List<String> args) async {
     'shellScreen': terminal.workspaceFor(controller, store.sessions.first)?.focused?.terminal.buffer.getText() ?? '',
   });
 
+  globalContext['canoaWindowsFocus'] = (() => _focusState().toJS).toJS;
+  globalContext['canoaWindowsFrames'] = (() => _frames.toJS).toJS;
+  globalContext['canoaWindowsKeys'] = (() => jsonEncode(_keys).toJS).toJS;
+  globalContext['canoaWindowsKeysReset'] = (_keys.clear).toJS;
   globalContext['canoaWindowsOpenIn'] = ((JSString value) => openIn(value.toDart)).toJS;
   globalContext['canoaWindowsState'] = (() => describe().toJS).toJS;
   globalContext['canoaWindowsOpenSession'] = ((JSString title) {
@@ -194,7 +222,7 @@ Future<void> main(List<String> args) async {
 
   final filesSurface = FilesSurface((session) => files);
   final filesController = SurfaceController(FilesSurface.surfaceId);
-  runApp(MaterialApp(
+  platform.startApp(windows, MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(),
     home: ListenableBuilder(
@@ -219,7 +247,13 @@ Future<void> main(List<String> args) async {
                   opensInWindow: hub.openInNewWindows,
                 ),
               ),
-              Expanded(child: filesSurface.build(context, first, filesController)),
+              Expanded(
+                child: Column(children: [
+                  // A text field of the page's own view, for the checks of the focus between the page and its windows.
+                  const Padding(padding: EdgeInsets.all(8), child: TextField(decoration: InputDecoration(labelText: 'opener field'))),
+                  Expanded(child: filesSurface.build(context, first, filesController)),
+                ]),
+              ),
             ]),
           ),
         ),

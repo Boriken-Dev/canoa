@@ -215,7 +215,7 @@ final class _ProbeState extends State<_Probe> with SingleTickerProviderStateMixi
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text('view ${widget.id}'),
-                  AnimatedBuilder(animation: spin, builder: (_, __) => LinearProgressIndicator(value: spin.value)),
+                  AnimatedBuilder(animation: spin, builder: (_, _) => LinearProgressIndicator(value: spin.value)),
                   const SizedBox(height: 12),
                   TextField(
                     key: probe.aKey,
@@ -229,7 +229,7 @@ final class _ProbeState extends State<_Probe> with SingleTickerProviderStateMixi
                   const SizedBox(height: 12),
                   TextField(key: probe.bKey, controller: probe.b, focusNode: probe.bFocus),
                   const SizedBox(height: 12),
-                  ValueListenableBuilder<int>(valueListenable: shared, builder: (_, value, __) => Text('shared $value')),
+                  ValueListenableBuilder<int>(valueListenable: shared, builder: (_, value, _) => Text('shared $value')),
                   Row(
                     children: [
                       ElevatedButton(key: probe.openKey, onPressed: _openPopup, child: const Text('open')),
