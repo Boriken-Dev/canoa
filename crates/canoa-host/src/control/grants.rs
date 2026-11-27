@@ -302,7 +302,7 @@ pub(super) const GRANT_SPECS: [GrantSpec; 31] = [
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub const fn all() -> [Self; 30] {
+    pub const fn all() -> [Self; 31] {
         [
             GRANT_SPECS[0].grant,
             GRANT_SPECS[1].grant,
@@ -334,6 +334,7 @@ impl Grant {
             GRANT_SPECS[27].grant,
             GRANT_SPECS[28].grant,
             GRANT_SPECS[29].grant,
+            GRANT_SPECS[30].grant,
         ]
     }
 
