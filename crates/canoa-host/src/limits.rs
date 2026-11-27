@@ -76,6 +76,31 @@ pub(crate) trait Announce: Send + Sync {
     fn raise(&self, event: &LimitEvent);
 }
 
+/// Tells the person of a limit's events through the host's notifiers: a warning is `usage_warn` and a stop is `usage_stop`.
+pub(crate) struct Notices(pub(crate) Arc<crate::notify::Hub>);
+
+impl Notices {
+    /// Fires the event of `event` on the hub; the thread that delivers it is the answer.
+    pub(crate) fn tell(
+        &self,
+        event: &LimitEvent,
+    ) -> Option<std::thread::JoinHandle<Vec<crate::notify::hub::Delivered>>> {
+        self.0.fire(
+            event.kind.id(),
+            crate::notify::Occurrence {
+                figure: Some(format!("{}: {} percent", event.limit, event.permille / 10)),
+                ..crate::notify::Occurrence::default()
+            },
+        )
+    }
+}
+
+impl Announce for Notices {
+    fn raise(&self, event: &LimitEvent) {
+        drop(self.tell(event));
+    }
+}
+
 /// Where the host reads the limits from when canoa.cfg may have changed.
 pub(crate) type Source = Box<dyn Fn() -> Option<Table> + Send + Sync>;
 
@@ -187,13 +212,6 @@ impl Limits {
     }
 
     /// Events go to `sink` too, besides the host's log.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the seam a notifier is given; the host's log is the only listener until one is"
-        )
-    )]
     pub(crate) fn announce_to(&self, sink: Arc<dyn Announce>) {
         *lock(&self.sink) = Some(sink);
     }

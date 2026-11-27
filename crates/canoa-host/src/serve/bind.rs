@@ -1256,6 +1256,9 @@ impl Serving {
         );
         let environments = crate::environments::Environments::of(config);
         let (notices, run_record) = bind_notices(config, options, services.handle());
+        if let Some(rules) = usage_log.as_ref().and_then(|log| log.rules()) {
+            rules.announce_to(Arc::new(crate::limits::Notices(Arc::clone(&notices))));
+        }
         let control = build_control_hub(
             config,
             options,

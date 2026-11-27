@@ -199,6 +199,40 @@ fn told(hub: &Arc<Hub>, event: &str, occurrence: Occurrence) -> Vec<Delivered> {
 }
 
 #[test]
+fn a_limit_that_warns_or_stops_fires_the_usage_events_with_its_words() {
+    use crate::limits::{EventKind, LimitEvent, Notices};
+
+    let hub = hub(
+        "limits",
+        &[("usage_warn", &["rec"]), ("usage_stop", &["rec"])],
+    );
+    let sink = Notices(Arc::clone(&hub));
+    for (kind, text) in [
+        (EventKind::Warn, "Limit week_work is at 82 percent"),
+        (EventKind::Stop, "Limit week_work is at 100 percent"),
+    ] {
+        let done = sink
+            .tell(&LimitEvent {
+                kind,
+                limit: "week_work".to_owned(),
+                scope: "work".to_owned(),
+                permille: 820,
+                text: text.to_owned(),
+            })
+            .expect("the event is in the catalog")
+            .join()
+            .expect("the thread ends");
+        assert_eq!(done.len(), 1, "{done:?}");
+        assert!(done[0].outcome.is_ok(), "{done:?}");
+    }
+    let seen = recorded("limits");
+    let events: Vec<&str> = seen.iter().map(|notice| notice.event.as_str()).collect();
+    assert_eq!(events, ["usage_warn", "usage_stop"]);
+    assert_eq!(seen[0].body, "A usage limit is near week_work: 82 percent");
+    assert_eq!(seen[1].body, "A usage limit was reached");
+}
+
+#[test]
 fn each_event_goes_to_the_notifiers_its_route_names_and_to_none_when_the_list_is_empty() {
     let hub = hub(
         "routes",
