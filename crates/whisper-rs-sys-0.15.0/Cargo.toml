@@ -1,0 +1,42 @@
+# whisper-rs-sys/. at 3cd0b0d54371c2fdf8768169d1a8ec46995b48d1, with what it inherits written out.
+[package]
+edition = "2021"
+rust-version = "1.88.0"
+name = "whisper-rs-sys"
+version = "0.15.0"
+build = "build.rs"
+links = "whisper"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Rust bindings for whisper.cpp (FFI bindings)"
+documentation = "https://docs.rs/whisper-rs-sys"
+readme = false
+license = "Unlicense"
+repository = "https://codeberg.org/tazz4843/whisper-rs"
+[features]
+coreml = []
+cuda = []
+force-debug = []
+hipblas = []
+intel-sycl = []
+metal = []
+openblas = []
+openmp = []
+vulkan = []
+[lib]
+name = "whisper_rs_sys"
+path = "src/lib.rs"
+[build-dependencies]
+[build-dependencies.bindgen]
+version = "0.72"
+[build-dependencies.cfg-if]
+version = "1"
+[build-dependencies.cmake]
+version = "0.1"
+[build-dependencies.fs_extra]
+version = "1.3"
+[build-dependencies.semver]
+version = "1.0"
