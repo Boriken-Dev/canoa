@@ -1910,7 +1910,7 @@ fn a_brand_file_changes_the_name_the_mark_and_the_accent() {
     let css = call(rig.addr, "GET", "/portal/login.css", &[], "");
     assert!(css.body.contains("--mark: #aa2200") && css.body.contains("--mark: #ffb09a"));
     assert!(css.body.contains("[fill=\"#aa2200\" i]"));
-    assert!(!css.body.contains("[fill=\"#9a5b1e\" i]"));
+    assert!(!css.body.contains("[fill=\"#9A5B1E\" i]"));
     let icon = call(rig.addr, "GET", "/portal/icon.svg", &[], "");
     assert!(icon.body.contains("<rect"));
     let cookie = signed_in(&rig, "canoatesta");
