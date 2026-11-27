@@ -322,6 +322,7 @@ fn bind_notices(
     config: &Config,
     options: &ServeOptions,
     services: String,
+    telemetry: &Arc<crate::telemetry::Telemetry>,
 ) -> (Arc<crate::notify::Hub>, Option<crate::notify::run::Record>) {
     let store: Option<Arc<dyn canoa::config_store::ConfigStore>> =
         match (&options.account_layers, &options.config_file) {
@@ -334,6 +335,7 @@ fn bind_notices(
         None => crate::notify::fixed(config, options.state_dir.clone()),
     };
     let hub = crate::notify::Hub::new(source, Some(services));
+    hub.telling(Arc::clone(telemetry));
     let record = options.state_dir.as_ref().map(|home| {
         let (record, start) = crate::notify::run::Record::begin(home, env!("CARGO_PKG_VERSION"));
         let event = match start {
@@ -341,6 +343,9 @@ fn bind_notices(
             crate::notify::run::Start::Restarted => Some("host_restarted"),
             crate::notify::run::Start::Updated => Some("host_updated"),
         };
+        if start == crate::notify::run::Start::Updated {
+            telemetry.host_updated();
+        }
         if let Some(event) = event {
             drop(hub.fire(
                 event,
@@ -1291,7 +1296,7 @@ impl Serving {
                 .zip(options.state_dir.as_deref()),
         );
         let environments = crate::environments::Environments::of(config);
-        let (notices, run_record) = bind_notices(config, options, services.handle());
+        let (notices, run_record) = bind_notices(config, options, services.handle(), &telemetry);
         if let Some(rules) = usage_log.as_ref().and_then(|log| log.rules()) {
             rules.announce_to(Arc::new(crate::limits::Notices(Arc::clone(&notices))));
         }

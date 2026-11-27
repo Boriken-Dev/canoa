@@ -823,6 +823,7 @@ fn is_apply(line: &[u8]) -> bool {
 impl Control {
     /// An install or an update ended in failure: the person is told when canoa.cfg says so.
     pub(crate) fn update_failed(&self) {
+        self.telemetry.update_failed();
         if let Some(hub) = &self.notices {
             drop(hub.fire("update_failed", crate::notify::Occurrence::default()));
         }

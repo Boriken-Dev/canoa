@@ -832,6 +832,35 @@ fn a_session_is_sampled_whole_by_its_key_and_only_spans_are_sampled() {
 
 // ---- what is watched ----
 
+#[test]
+fn a_notice_an_update_failure_and_a_start_after_an_update_are_exported_by_name_and_result() {
+    let standin = Arc::new(Standin::default());
+    let hub = hub_of(&standin, lane(1000, Duration::from_secs(600), 1.0), all());
+    let telemetry = Telemetry::over(Arc::clone(&hub));
+    telemetry.notice_told("permission", "desktop", false);
+    telemetry.notice_told("finished", "phone", true);
+    telemetry.update_failed();
+    telemetry.host_updated();
+    hub.stop(Duration::from_secs(10));
+    let text = format!("{:?}", delivered(&standin));
+    for wanted in [
+        "canoa.notifications",
+        "permission",
+        "phone",
+        "failed",
+        "update.failed",
+        "host.restarted",
+        "updated",
+    ] {
+        assert!(text.contains(wanted), "{wanted} in {text}");
+    }
+    // A host that exports nothing tells nothing and does not fail.
+    let off = Telemetry::off(None);
+    off.notice_told("permission", "desktop", false);
+    off.update_failed();
+    off.host_updated();
+}
+
 fn leaks(batches: &[Batch], canaries: &[&str]) -> Vec<String> {
     let text = format!("{batches:?}");
     canaries

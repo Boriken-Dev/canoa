@@ -58,6 +58,8 @@ pub(crate) struct Hub {
     source: Source,
     /// The handle of this host's session services, for a provider that reaches what they hold.
     services: Option<String>,
+    /// What tells the host's telemetry how each notice went, once the host has any.
+    telemetry: Mutex<Option<Arc<crate::telemetry::Telemetry>>>,
 }
 
 impl core::fmt::Debug for Hub {
@@ -90,7 +92,16 @@ impl Hub {
             sequence: AtomicU64::new(0),
             source,
             services,
+            telemetry: Mutex::new(None),
         })
+    }
+
+    /// Has this hub tell `telemetry` how each notice went.
+    pub(crate) fn telling(&self, telemetry: Arc<crate::telemetry::Telemetry>) {
+        *self
+            .telemetry
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(telemetry);
     }
 
     /// A hub over one directory that never changes.
@@ -287,6 +298,16 @@ impl Hub {
                 .join()
                 .unwrap_or_else(|_| Err("the notifier panicked".to_owned()));
             done.push(Delivered { notifier, outcome });
+        }
+        let telemetry = self
+            .telemetry
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(telemetry) = telemetry {
+            for each in &done {
+                telemetry.notice_told(&notice.event, &each.notifier, each.outcome.is_err());
+            }
         }
         done
     }

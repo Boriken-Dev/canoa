@@ -250,6 +250,15 @@ impl Telemetry {
         this
     }
 
+    /// Export that runs through `hub`.
+    #[cfg(test)]
+    pub(crate) fn over(hub: Arc<Hub>) -> Self {
+        let this = Self::off(None);
+        *this.running.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((hub, Duration::from_secs(10)));
+        this
+    }
+
     /// The hub, while export runs.
     pub(crate) fn hub(&self) -> Option<Arc<Hub>> {
         self.running
@@ -262,6 +271,42 @@ impl Telemetry {
     /// A watch on a connection of `harness`, when export runs.
     pub(crate) fn watch(&self, harness: &str) -> Option<watch::Watch> {
         self.hub().map(|hub| watch::Watch::with_hub(hub, harness))
+    }
+
+    /// A notice of `event` was delivered to `notifier`, or `failed`.
+    pub(crate) fn notice_told(&self, event: &str, notifier: &str, failed: bool) {
+        self.emit(|at| Signal::Notifications {
+            event: signal::Text::new(event),
+            notifier: signal::Text::new(notifier),
+            result: if failed {
+                signal::NoticeResult::Failed
+            } else {
+                signal::NoticeResult::Sent
+            },
+            at,
+        });
+    }
+
+    /// The host started again after an update.
+    pub(crate) fn host_updated(&self) {
+        self.emit(|at| Signal::HostRestarted {
+            reason: signal::RestartReason::Updated,
+            at,
+        });
+    }
+
+    /// An install or an update failed. The reason is not told apart where it is noticed, so it is `other`.
+    pub(crate) fn update_failed(&self) {
+        self.emit(|at| Signal::UpdateFailed {
+            reason: signal::FailReason::Other,
+            at,
+        });
+    }
+
+    fn emit(&self, signal: impl FnOnce(i64) -> Signal) {
+        if let Some(hub) = self.hub() {
+            hub.emit(signal(now_ns()));
+        }
     }
 
     /// Ends export: what waits is delivered once and the exporters are asked to finish, for as long as `stop_wait_seconds` allows.
