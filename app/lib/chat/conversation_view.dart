@@ -45,6 +45,7 @@ import 'inspector.dart' show changeTotals;
 import 'inspector_surfaces.dart' show DetailsSurface;
 import 'new_session_view.dart';
 import 'presence.dart';
+import '../roles/role_ask.dart';
 import '../roles/role_served_line.dart';
 import 'reply_voice.dart';
 import 'run_in_terminal.dart';
@@ -516,6 +517,8 @@ class _ConversationViewState extends State<ConversationView> {
         if (session.accountOffer != null) SessionAccountOffer(store: widget.store, session: session),
         if (widget.kit.roles case final roles?)
           SessionServedLine(session: session, roles: roles, sources: widget.kit.sourcesFor(session)),
+        if (session.roleAsk != null && widget.kit.roles != null)
+          SessionRoleAsk(store: widget.store, session: session, roles: widget.kit.roles!, sources: widget.kit.sourcesFor(session)),
         if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session, toComposer: _queuedToComposer),
         if (widget.store.limitStop(session) case final stop?)
           Padding(
