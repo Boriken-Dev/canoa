@@ -23,7 +23,7 @@ abstract final class Brand {
   static const String homeDir = String.fromEnvironment('BRAND_HOME_DIR', defaultValue: '.canoa');
 
   /// The accent the build's icons are drawn in, `#RRGGBB`.
-  static const String accentHex = String.fromEnvironment('BRAND_ACCENT', defaultValue: '#3DAFA1');
+  static const String accentHex = String.fromEnvironment('BRAND_ACCENT', defaultValue: '#9A5B1E');
 
   /// The mark's paths as the build read them from its SVG (a JSON object), or empty for Canoa's own.
   static const String markJson = String.fromEnvironment('BRAND_MARK');
