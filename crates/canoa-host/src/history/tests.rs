@@ -465,6 +465,7 @@ fn a_served_turn_writes_its_properties_into_the_columns_of_its_row() {
         .map(str::to_owned)
         .to_vec();
     let rows = db.select(select).expect("select");
+    assert_eq!(
         rows.rows[0][0],
         canoa::history_store::Cell::int(120),
         "{rows:?}"
@@ -487,6 +488,7 @@ fn a_turn_noted_before_the_session_has_any_lines_goes_to_its_latest_turn_when_th
     record.role = Some("planner".to_owned());
     record.member = Some("Claude/work///".to_owned());
     store.note_turn("Claude", ID, &record).expect("kept");
+    assert!(matches!(
         store.served("Claude", ID),
         Err(StoreError::Missing)
     ));
