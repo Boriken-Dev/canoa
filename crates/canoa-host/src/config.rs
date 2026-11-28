@@ -55,7 +55,8 @@ use profiles::{
 };
 use raw::{
     RawAccount, RawAgent, RawAsks, RawCommon, RawDelegate, RawEnvironment, RawExtension, RawFile,
-    RawHost, RawKb, RawLines, RawPool, RawProvider, RawRole, RawTelemetry, assist_of, network_of, schedules_of,
+    RawHost, RawKb, RawLines, RawPool, RawProvider, RawRole, RawTelemetry, assist_of, network_of,
+    schedules_of,
 };
 use sections::{
     account_of, check_title, config_error, control_of, directory_of, history_of, invalid,
