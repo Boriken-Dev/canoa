@@ -1446,6 +1446,33 @@ class StoreExtension(KindProtocol, Protocol, kind="store_extension", floor_hash=
         ...
 
 
+class TelemetryExporter(KindProtocol, Protocol, kind="telemetry_exporter", floor_hash=3167970647):
+    """Somewhere signals are delivered. One instance is one configuration of one provider (a folder, an address and its headers).
+
+    `describe` answers the same on every call with nothing run. `export` returns when the batch is delivered or fails with an
+    [`ExporterError`]; the host calls it from one thread at a time and keeps a batch the exporter could not take until it can.
+    `flush` is called once when the host stops, with the host's wait for it: an exporter that holds nothing answers at once.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this exporter is."""
+        ...
+
+    @required
+    @fallible
+    def export(self, batch: Ref) -> None:
+        """Delivers a batch."""
+        ...
+
+    @required
+    @fallible
+    def flush(self) -> None:
+        """Finishes what the exporter holds, when the host stops."""
+        ...
+
+
 class ProcessMembers(KindProtocol, Protocol, kind="process_members", floor_hash=1125452186, is_object=True):
     """The processes that belong to an agent, which the host finds from the operating system's process table."""
 
@@ -1633,4 +1660,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=883587
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "Approver", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "FileViewer", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "RouteLease", "NetworkRoute", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "LoginPrompter", "AccountKeeper", "AccountWatch", "AccountProvider", "AccountSpeech", "AccountSpeechOutput", "Approver", "ContentHost", "CatalogGenerator", "SourceFetch", "CatalogSource", "ConfigStore", "ContentSource", "Environment", "FileViewer", "GatewayLease", "ModelGateway", "HistoryDb", "HistoryStore", "ModelStore", "RouteLease", "NetworkRoute", "Notifier", "PanelTab", "ProfileItem", "LentHttp", "Sdk", "SdkProvider", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "TelemetryExporter", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
