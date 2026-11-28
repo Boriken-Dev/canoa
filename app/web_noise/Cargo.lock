@@ -119,7 +119,7 @@ dependencies = [
 [[package]]
 name = "coqui-peer"
 version = "0.0.0-alpha.1"
-source = "git+https://github.com/Boriken-Dev/coqui-peer?rev=984db3d54b73de10c7892b06fe269a259de2d1c5#984db3d54b73de10c7892b06fe269a259de2d1c5"
+source = "git+https://github.com/Boriken-Dev/coqui-peer?rev=be72492c89a5a657deb8027aee3c6db27ac14b2f#be72492c89a5a657deb8027aee3c6db27ac14b2f"
 dependencies = [
  "coqui-builder",
  "data-encoding",
@@ -136,7 +136,7 @@ dependencies = [
 [[package]]
 name = "coqui-peer-noise"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-peer-noise?rev=518dd9f5693161d74af7b2ddb27ac0c4061b35b9#518dd9f5693161d74af7b2ddb27ac0c4061b35b9"
+source = "git+https://github.com/Boriken-Dev/coqui-peer-noise?rev=ed93715e900b68b040db6e8f8dcdf1a60a38b182#ed93715e900b68b040db6e8f8dcdf1a60a38b182"
 dependencies = [
  "aes-gcm",
  "coqui-builder",

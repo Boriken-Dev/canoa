@@ -10,12 +10,12 @@ dependencies:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
       path: bindings/dart/coqui_acp
-      ref: 5edddef2176e66ddb3c978a2b44d4008fb2b5b8f
+      ref: 171e08ec92af4044377bcae77e9fb6aa391ca499
   coqui_acp_chat:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
       path: bindings/dart/coqui_acp_chat
-      ref: 5edddef2176e66ddb3c978a2b44d4008fb2b5b8f
+      ref: 171e08ec92af4044377bcae77e9fb6aa391ca499
   web: ^1.1.1
 
 dev_dependencies:

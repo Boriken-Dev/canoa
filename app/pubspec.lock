@@ -68,8 +68,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: "0244aca97b7d779fc00bc0f8103e4f73fcc25640"
-      resolved-ref: "0244aca97b7d779fc00bc0f8103e4f73fcc25640"
+      ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
+      resolved-ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: "0244aca97b7d779fc00bc0f8103e4f73fcc25640"
-      resolved-ref: "0244aca97b7d779fc00bc0f8103e4f73fcc25640"
+      ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
+      resolved-ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -86,8 +86,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: "0244aca97b7d779fc00bc0f8103e4f73fcc25640"
-      resolved-ref: "0244aca97b7d779fc00bc0f8103e4f73fcc25640"
+      ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
+      resolved-ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -95,8 +95,8 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: "169125d3bfcb1b2cb1c3b33b297e373f2930c54a"
-      resolved-ref: "169125d3bfcb1b2cb1c3b33b297e373f2930c54a"
+      ref: "7a52139a057713a7f74f0cfb0c02627fa6fc7b17"
+      resolved-ref: "7a52139a057713a7f74f0cfb0c02627fa6fc7b17"
       url: "https://github.com/Boriken-Dev/coqui-aos.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -104,8 +104,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_transport_web"
-      ref: "1e19611126472e8dc47c0e640bae2b86a7e6d713"
-      resolved-ref: "1e19611126472e8dc47c0e640bae2b86a7e6d713"
+      ref: "51ec0f127dbba5100ea709d36724e49c4829c351"
+      resolved-ref: "51ec0f127dbba5100ea709d36724e49c4829c351"
       url: "https://github.com/Boriken-Dev/coqui-transport-web.git"
     source: git
     version: "0.0.0-alpha.0"
