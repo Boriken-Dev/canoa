@@ -38,3 +38,8 @@ if [ -f macos/Runner/Configs/AppInfo.xcconfig ]; then
   grep -q "^EXECUTABLE_NAME = $EXECUTABLE" macos/Runner/Configs/AppInfo.xcconfig ||
     echo "EXECUTABLE_NAME = $EXECUTABLE" >> macos/Runner/Configs/AppInfo.xcconfig
 fi
+# The window's, taskbar's and notifications' icon is the runner's own resource, which a direct `flutter build` or `flutter run`
+# compiles in: it gets the default brand's mark here, and app/tool/build.py writes another brand's over it.
+if [ -d windows/runner/resources ] && [ -f assets/icons/canoa.ico ]; then
+  cp assets/icons/canoa.ico windows/runner/resources/app_icon.ico
+fi
