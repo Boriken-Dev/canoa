@@ -13,19 +13,19 @@ mod support;
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 use linked::{Hosted, next, send};
 use serde_json::{Value, json};
 use sha2::Digest as _;
-use support::{Scratch, cwd, example, host_binary, quoted};
+use support::{Scratch, cwd, example, host_command, quoted};
 
 const SESSION: &str = "6f2c1b0e-0000-4000-8000-00000000c0de";
 const ASKED: &str = "Fix the failing build";
 const ANSWERED: &str = "the-answer-that-must-follow-the-conversation";
 
 fn canoa(scratch: &Scratch, args: &[&str], input: &str) -> Output {
-    let mut child = Command::new(host_binary())
+    let mut child = host_command()
         .args(args)
         .arg("--config")
         .arg(scratch.0.join("canoa.cfg"))

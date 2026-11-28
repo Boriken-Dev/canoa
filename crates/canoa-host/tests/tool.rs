@@ -484,7 +484,7 @@ fn a_batch_tool_finds_no_program_in_the_sessions_directory() {
         "unasked": "x",
         "prompt": {"type": "prompt", "message": "{prompt}"},
     });
-    let mut child = std::process::Command::new(support::host_binary())
+    let mut child = support::host_command()
         .args(["tool", "--name", "wrapped", "--spec", &spec.to_string()])
         .env_remove("NoDefaultCurrentDirectoryInExePath")
         .stdin(std::process::Stdio::piped())
@@ -689,7 +689,7 @@ fn check_lists_a_tool_entry() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, pi_config(&["--mode", "rpc"], "")).expect("written");
-    let output = std::process::Command::new(support::host_binary())
+    let output = support::host_command()
         .args(["check", "--format", "json", "--config"])
         .arg(&path)
         .output()

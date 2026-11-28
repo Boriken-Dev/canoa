@@ -12,7 +12,7 @@ mod support;
 use std::path::Path;
 
 use serde_json::Value;
-use support::{Scratch, host_binary};
+use support::{Scratch, host_command};
 
 /// A stand-in for `agy` in `folder`: `agy models` lists one model.
 fn install(folder: &Path) {
@@ -55,7 +55,7 @@ fn options(scratch: &Scratch, local: &Path) -> Value {
     } else {
         "/bin:/usr/bin".to_owned()
     };
-    let output = std::process::Command::new(host_binary())
+    let output = host_command()
         .args(["options", "Antigravity", "--entry", "--config"])
         .arg(&config)
         .args(["--format", "json"])

@@ -17,7 +17,8 @@ use canoa_host::profile::PROFILE_META;
 use canoa_host::{Config, Home, ServeOptions, Serving};
 use serde_json::{Value, json};
 use support::{
-    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, with_link,
+    Host, Scratch, cwd, example, host_binary, host_command, line_saying, log_holding, quoted,
+    with_link,
 };
 
 const SECRET: &str = "a-secret-the-client-never-sees";
@@ -1049,7 +1050,7 @@ fn options_of(args: &[&str], scratch: &Scratch) -> Value {
 /// [`options_of`] with more variables in the environment of `canoa options`, which its stand-in program inherits.
 fn options_with(args: &[&str], scratch: &Scratch, more: &[(&str, &str)]) -> Value {
     let (record, env) = env_of(scratch);
-    let output = std::process::Command::new(host_binary())
+    let output = host_command()
         .arg("options")
         .args(args)
         .args(["--format", "json"])

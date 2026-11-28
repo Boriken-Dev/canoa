@@ -11,7 +11,7 @@ mod support;
 use std::process::Command;
 
 use serde_json::{Value, json};
-use support::{Host, WAIT, host_binary, key, with_link};
+use support::{Host, WAIT, host_command, key, with_link};
 
 fn control_config(admin: &str, other: &str) -> String {
     format!(
@@ -30,7 +30,7 @@ fn call(host: &Host, who: &cabuya::auth::Identity, method: &str, params: Value) 
 }
 
 fn joiner_command(home: &std::path::Path) -> Command {
-    let mut command = Command::new(host_binary());
+    let mut command = host_command();
     command
         .env("COQUI_AGENTIC_PEER_HOME", home)
         .env("COQUI_ACP_DESCRIPTORS", home.join("descriptors"))

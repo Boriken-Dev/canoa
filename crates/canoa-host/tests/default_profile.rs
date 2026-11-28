@@ -308,7 +308,7 @@ harness = \"claude\"
     )
     .expect("written");
     let run = |path: &Path| {
-        let checked = std::process::Command::new(support::host_binary())
+        let checked = support::host_command()
             .args([
                 "check",
                 "--format",

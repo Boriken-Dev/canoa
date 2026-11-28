@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 use cabuya::auth::Identity;
 use serde_json::{Value, json};
 use support::{
-    Host, Scratch, cwd, example, host_binary, line_saying, log_holding, quoted, with_link,
+    Host, Scratch, cwd, example, host_binary, host_command, line_saying, log_holding, quoted,
+    with_link,
 };
 
 fn agent_entry(name: &str, extra: &str) -> String {
@@ -269,7 +270,7 @@ fn check_names_a_removed_key_and_what_replaced_it() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, "[host]\naccount_store = \"file\"\n").expect("written");
-    let checked = std::process::Command::new(host_binary())
+    let checked = host_command()
         .args(["check", "--config", &path.to_string_lossy()])
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
         .output()
@@ -285,7 +286,7 @@ fn check_prints_entries_and_a_bad_configuration_exits_2() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     let run = |args: &[&str]| {
-        std::process::Command::new(host_binary())
+        host_command()
             .args(args)
             .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
             .output()
@@ -331,7 +332,7 @@ fn the_config_comes_from_the_flag_then_canoa_config() {
     std::fs::write(&flag, agent_entry("from_flag", "")).expect("written");
     std::fs::write(&env, agent_entry("from_env", "")).expect("written");
     let check = |with_flag: bool| {
-        let mut command = std::process::Command::new(host_binary());
+        let mut command = host_command();
         command.arg("check").env("CANOA_CONFIG", &env);
         if with_flag {
             command.arg("--config").arg(&flag);
@@ -665,7 +666,7 @@ fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
         .find(|method| *method != support::method())
         .expect("another method");
     // Its host is running, so the method is changed only when forced.
-    let theirs = std::process::Command::new(host_binary())
+    let theirs = host_command()
         .args(["id", "--force", "--method", other.name()])
         .env("COQUI_AGENTIC_PEER_HOME", host.home())
         .output()
@@ -676,7 +677,7 @@ fn a_home_with_an_identity_of_each_method_uses_the_one_named_last() {
         String::from_utf8_lossy(&theirs.stdout).trim(),
         host.peer.to_string()
     );
-    let neither = std::process::Command::new(host_binary())
+    let neither = host_command()
         .arg("id")
         .env("COQUI_AGENTIC_PEER_HOME", host.home())
         .output()
@@ -700,7 +701,7 @@ fn a_fresh_home_serves_by_the_default_method() {
     let scratch = Scratch::new();
     let config = scratch.0.join("canoa.cfg");
     std::fs::write(&config, agent_entry("fixture", "")).expect("canoa.cfg is written");
-    let mut child = std::process::Command::new(host_binary())
+    let mut child = host_command()
         .args(["serve", "--config"])
         .arg(&config)
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
@@ -1325,7 +1326,7 @@ fn check_accepts_a_title_on_an_agent_and_refuses_it_elsewhere_or_blank() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     let run = || {
-        std::process::Command::new(host_binary())
+        host_command()
             .args(["check", "--config", &path.to_string_lossy()])
             .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
             .output()
@@ -1346,7 +1347,7 @@ fn an_entry_naming_a_usage_reader_nobody_offers_stops_the_host_and_says_which() 
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, agent_entry("fixture", "usage = \"nobody\"")).expect("written");
-    let output = std::process::Command::new(host_binary())
+    let output = host_command()
         .args([
             "serve",
             "--config",

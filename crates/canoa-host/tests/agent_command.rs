@@ -9,13 +9,13 @@
 mod support;
 
 use std::io::{BufRead as _, BufReader, Write as _};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde_json::{Value, json};
 
 /// Runs `canoa agent ARGS`, sends it `initialize` and returns what it answered, and how it ended.
 fn initialize(args: &[&str]) -> (Option<Value>, std::process::ExitStatus, String) {
-    let mut child = Command::new(support::host_binary())
+    let mut child = support::host_command()
         .arg("agent")
         .args(args)
         .stdin(Stdio::piped())

@@ -10,10 +10,10 @@ mod support;
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 use serde_json::Value;
-use support::{Scratch, host_binary};
+use support::{Scratch, host_command};
 
 const PASSWORD: &str = "CANARY-mail-pw-7d3f";
 
@@ -37,7 +37,7 @@ impl Fixture {
 
     /// `canoa ARGS --config canoa.cfg` on this fixture's home, with `input` on its standard input.
     fn canoa(&self, args: &[&str], input: &str) -> Output {
-        let mut child = Command::new(host_binary())
+        let mut child = host_command()
             .args(args)
             .arg("--config")
             .arg(&self.config)

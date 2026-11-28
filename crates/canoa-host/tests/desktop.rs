@@ -9,7 +9,7 @@
 mod support;
 
 use std::io::{BufRead as _, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -22,7 +22,9 @@ use coqui_transport_web::Dialer as _;
 use coqui_transport_web::Kind;
 use coqui_transport_web::websocket::{self, Frames};
 use serde_json::{Value, json};
-use support::{Host, Scratch, WAIT, example, host_binary, max_message, quoted, running, with_link};
+use support::{
+    Host, Scratch, WAIT, example, host_command, max_message, quoted, running, with_link,
+};
 
 fn agent_entry() -> String {
     format!(
@@ -179,7 +181,7 @@ fn start_pairing(
     home: &std::path::Path,
     args: &[&str],
 ) -> (Value, std::process::Child, mpsc::Receiver<String>) {
-    let mut child = Command::new(host_binary())
+    let mut child = host_command()
         .arg("pair")
         .args(args)
         .args(["--method", support::method().name()])
@@ -224,7 +226,7 @@ fn join(url: &str, identity: &Identity, pin: &str, store: &TrustStore) -> Result
 }
 
 fn accepted(home: &std::path::Path) -> Vec<String> {
-    let listed = Command::new(host_binary())
+    let listed = host_command()
         .args(["peers", "--format", "json"])
         .env("COQUI_AGENTIC_PEER_HOME", home)
         .output()
@@ -325,7 +327,7 @@ fn a_web_page_cannot_reach_pair_and_costs_the_pin_nothing() {
 #[test]
 fn pair_tied_to_its_input_ends_when_it_closes() {
     let scratch = Scratch::new();
-    let mut child = Command::new(host_binary())
+    let mut child = host_command()
         .args(["pair", "--until-stdin-closes"])
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
         .stdin(Stdio::piped())
@@ -352,7 +354,7 @@ fn pair_tied_to_its_input_ends_when_it_closes() {
 #[test]
 fn pair_listens_beyond_loopback_when_told_to_and_says_so_as_configuration() {
     let scratch = Scratch::new();
-    let mut child = Command::new(host_binary())
+    let mut child = host_command()
         .args(["pair", "--listen", "0.0.0.0:0", "--until-stdin-closes"])
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
         .stdin(Stdio::piped())

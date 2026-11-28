@@ -9,11 +9,11 @@
 mod support;
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 use cabuya::auth::Method;
 use canoa_host::Home;
-use support::{Host, Scratch, example, host_binary, quoted};
+use support::{Host, Scratch, example, host_command, quoted};
 
 fn agent_entry() -> String {
     format!(
@@ -31,7 +31,7 @@ fn other() -> Method {
 
 /// `canoa <args>` on `home`, to its end.
 fn canoa(home: &Path, args: &[&str]) -> Output {
-    Command::new(host_binary())
+    host_command()
         .args(args)
         .env("COQUI_AGENTIC_PEER_HOME", home)
         .output()

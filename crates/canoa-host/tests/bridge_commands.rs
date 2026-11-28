@@ -17,7 +17,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use support::{Scratch, WAIT, example, host_binary};
+use support::{Scratch, WAIT, example, host_command};
 
 fn canoa(home: &Path) -> Command {
     // The program reads no canoa.cfg of the person's who runs the test: it is given an empty one of its own.
@@ -25,7 +25,7 @@ fn canoa(home: &Path) -> Command {
     if !config.exists() {
         std::fs::write(&config, "").expect("an empty canoa.cfg");
     }
-    let mut command = Command::new(host_binary());
+    let mut command = host_command();
     command
         .env("COQUI_AGENTIC_PEER_HOME", home)
         .env("COQUI_ACP_DESCRIPTORS", home.join("descriptors"))
@@ -364,7 +364,7 @@ fn the_commands_keep_their_files_in_this_hosts_own_home_when_none_is_named() {
     let elsewhere = scratch.0.join("elsewhere");
     std::fs::create_dir_all(&person).expect("a folder");
     let peer = format!("sha256:{}", "ef".repeat(32));
-    let mut command = Command::new(host_binary());
+    let mut command = host_command();
     command
         .env_remove("COQUI_AGENTIC_PEER_HOME")
         .env_remove("CANOA_CONFIG")
@@ -613,7 +613,7 @@ fn mcp_shim_looks_for_its_door_in_this_hosts_home() {
         std::fs::set_permissions(&offers, std::fs::Permissions::from_mode(0o700)).expect("mode");
         std::fs::set_permissions(&door, std::fs::Permissions::from_mode(0o600)).expect("mode");
     }
-    let mut command = Command::new(host_binary());
+    let mut command = host_command();
     command
         .env_remove("COQUI_AGENTIC_PEER_HOME")
         .env("HOME", &person)

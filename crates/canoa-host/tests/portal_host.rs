@@ -17,7 +17,7 @@ use std::time::Duration;
 use canoa_host::pipe::{PipeName, Stream};
 use coqui_transport_pipe::ReadTimeout as _;
 use serde_json::{Value, json};
-use support::{Host, Scratch, cwd, example, host_binary, quoted, with_pipe_link};
+use support::{Host, Scratch, cwd, example, host_command, quoted, with_pipe_link};
 
 /// A group this test's user is in, which a host for a portal needs to be told may have one.
 fn my_group() -> String {
@@ -213,7 +213,7 @@ fn refused_with(user: &str, extra: &[String]) -> (Option<i32>, bool) {
     let config = scratch.0.join("canoa.cfg");
     std::fs::write(&config, "").expect("a file");
     let uid = my_uid().to_string();
-    let output = Command::new(host_binary())
+    let output = host_command()
         .args(["serve", "--allow-empty", "--config"])
         .arg(&config)
         .arg("--portal")
@@ -252,7 +252,7 @@ fn a_portal_user_that_is_not_an_account_is_a_usage_error_and_binds_nothing() {
     let scratch = Scratch::new();
     let config = scratch.0.join("canoa.cfg");
     std::fs::write(&config, "").expect("a file");
-    let output = Command::new(host_binary())
+    let output = host_command()
         .args(["serve", "--allow-empty", "--config"])
         .arg(&config)
         .args(["--portal"])

@@ -11,7 +11,7 @@ mod support;
 use std::path::Path;
 
 use serde_json::Value;
-use support::{Scratch, example, host_binary, quoted};
+use support::{Scratch, example, host_binary, host_command, quoted};
 
 fn config(scratch: &Scratch, program: &Path, args: &[&str]) -> String {
     let list = args
@@ -32,7 +32,7 @@ fn config(scratch: &Scratch, program: &Path, args: &[&str]) -> String {
 }
 
 fn options(scratch: &Scratch, config: &str, more: &[&str]) -> Value {
-    let output = std::process::Command::new(host_binary())
+    let output = host_command()
         .args([
             "options", "Probe", "--entry", "--config", config, "--format", "json",
         ])

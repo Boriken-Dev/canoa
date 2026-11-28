@@ -440,7 +440,7 @@ mod with_source {
 
         use canoa_host::ACCOUNT_META;
 
-        use crate::support::{Host, Scratch, cwd, host_binary, with_link};
+        use crate::support::{Host, Scratch, cwd, host_command, with_link};
 
         const KEY: &str = "sk-standin-gateway";
         let scratch = Scratch::new();
@@ -463,7 +463,7 @@ mod with_source {
         .expect("canoa.cfg");
         let home = scratch.0.join("home");
         let canoa = |args: &[&str], input: &str| {
-            let mut child = std::process::Command::new(host_binary())
+            let mut child = host_command()
                 .args(args)
                 .arg("--config")
                 .arg(&config)

@@ -9,13 +9,15 @@
 mod support;
 
 use std::io::{BufRead as _, BufReader};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use canoa_host::{Config, Home, ServeOptions, Serving};
 use serde_json::{Value, json};
-use support::{Host, Scratch, WAIT, example, host_binary, quoted, running, with_link};
+use support::{
+    Host, Scratch, WAIT, example, host_binary, host_command, quoted, running, with_link,
+};
 
 fn agent_entry() -> String {
     format!(
@@ -26,7 +28,7 @@ fn agent_entry() -> String {
 
 /// `canoa serve` on `host`'s configuration and home, to its end.
 fn second_serve(host: &Host) -> Output {
-    let mut command = Command::new(host_binary());
+    let mut command = host_command();
     command
         .args(["serve", "--config"])
         .arg(host.scratch.0.join("canoa.cfg"))
@@ -65,7 +67,7 @@ fn a_dead_holders_lock_is_taken_over() {
     let mut first = Host::start(&agent_entry(), 1);
     first.kill();
     let path = first.scratch.0.join("canoa.cfg");
-    let mut next = Command::new(host_binary())
+    let mut next = host_command()
         .args(["serve", "--config"])
         .arg(path)
         .args(["--method", support::method().name()])
@@ -94,7 +96,7 @@ fn with_nothing_to_serve_it_ends_unless_told_to_stay() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, "").expect("written");
-    let refused = Command::new(host_binary())
+    let refused = host_command()
         .args(["serve", "--config"])
         .arg(&path)
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
@@ -102,7 +104,7 @@ fn with_nothing_to_serve_it_ends_unless_told_to_stay() {
         .expect("it runs");
     assert_eq!(refused.status.code(), Some(2), "{refused:?}");
 
-    let mut stays = Command::new(host_binary())
+    let mut stays = host_command()
         .args(["serve", "--allow-empty", "--until-stdin-closes", "--config"])
         .arg(&path)
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
@@ -134,7 +136,7 @@ fn with_nothing_to_serve_it_ends_unless_told_to_stay() {
 fn with_no_canoa_cfg_at_all_it_stays_only_when_told_to() {
     let scratch = Scratch::new();
     let path = scratch.0.join("never-written").join("canoa.cfg");
-    let refused = Command::new(host_binary())
+    let refused = host_command()
         .args(["serve", "--config"])
         .arg(&path)
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
@@ -142,7 +144,7 @@ fn with_no_canoa_cfg_at_all_it_stays_only_when_told_to() {
         .expect("it runs");
     assert_eq!(refused.status.code(), Some(2), "{refused:?}");
 
-    let mut stays = Command::new(host_binary())
+    let mut stays = host_command()
         .args(["serve", "--allow-empty", "--until-stdin-closes", "--config"])
         .arg(&path)
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
@@ -170,7 +172,7 @@ fn with_no_canoa_cfg_at_all_it_stays_only_when_told_to() {
 #[test]
 fn allow_empty_does_not_excuse_a_canoa_cfg_that_cannot_be_read() {
     let scratch = Scratch::new();
-    let refused = Command::new(host_binary())
+    let refused = host_command()
         .args(["serve", "--allow-empty", "--config"])
         .arg(&scratch.0)
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
@@ -275,7 +277,7 @@ fn a_fixed_address_is_free_once_stop_returns_from_run() {
 
 /// `canoa id` with `base` as every place the system could name for a user's data, and no home variable.
 fn id_with_base(base: &std::path::Path) -> Output {
-    Command::new(host_binary())
+    host_command()
         .args(["id", "--method", support::method().name()])
         .env_remove("COQUI_AGENTIC_PEER_HOME")
         .env("LOCALAPPDATA", base)

@@ -14,14 +14,14 @@ mod support;
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use canoa_host::Link;
 use linked::{Hosted, next, send};
 use sealed::{App, Typed, forms, found_in};
 use serde_json::{Value, json};
-use support::{WAIT, antigravity_entry, example, host_binary, quoted};
+use support::{WAIT, antigravity_entry, example, host_command, quoted};
 
 const KEY: &str = "sk-ant-CANARY/+=q\"\\z-0123456789";
 
@@ -555,7 +555,7 @@ fn the_list_reads_canoa_cfg_again_so_an_account_the_command_line_added_shows() {
     let link = host.local.open("@control").expect("a link");
     let listed = plain_call(&link, 1, "accounts/list", json!({})).expect("listed");
     assert_eq!(configured(&listed), 0, "{listed}");
-    let mut child = Command::new(host_binary())
+    let mut child = host_command()
         .args([
             "accounts",
             "add",

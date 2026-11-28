@@ -10,7 +10,6 @@
 mod linked;
 mod support;
 
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use coqui_transport::Channel;
@@ -19,7 +18,7 @@ use coqui_transport_guatiao::pipe::{PipeDriver, PipeSettings};
 use coqui_transport_guatiao::websocket::{WebSocketDriver, WebSocketSettings};
 use coqui_transport_web::websocket::Frames;
 use serde_json::{Value, json};
-use support::{Host, Scratch, cwd, example, host_binary, quoted, with_channel};
+use support::{Host, Scratch, cwd, example, host_command, quoted, with_channel};
 
 /// A pipe or socket name no other test run uses: a pipe name on Windows is global, and a socket's path on Unix is under the
 /// test's own directory.
@@ -65,7 +64,7 @@ fn bind_refused(config: &str) -> String {
     let scratch = Scratch::new();
     let file = scratch.0.join("canoa.cfg");
     std::fs::write(&file, config).expect("written");
-    let output = Command::new(host_binary())
+    let output = host_command()
         .args(["serve", "--config"])
         .arg(&file)
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))

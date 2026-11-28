@@ -12,12 +12,12 @@ mod support;
 use std::io::{Read as _, Write as _};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
 
 use canoa_host::ACCOUNT_META;
 use serde_json::{Value, json};
-use support::{Host, Scratch, cwd, example, host_binary, quoted, with_link};
+use support::{Host, Scratch, cwd, example, host_command, quoted, with_link};
 
 const CANARY: &str = "CANARY-gateway-key-0001";
 
@@ -123,7 +123,7 @@ impl Fixture {
     }
 
     fn canoa(&self, args: &[&str], input: Option<&str>) -> Output {
-        let mut child = Command::new(host_binary())
+        let mut child = host_command()
             .args(args)
             .arg("--config")
             .arg(&self.config)

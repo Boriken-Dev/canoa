@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use canoa_host::ACCOUNT_META;
 use serde_json::{Value, json};
 use standin::{Proxy, VIRTUAL_KEY};
-use support::{Host, Scratch, cwd, example, host_binary, quoted, with_link};
+use support::{Host, Scratch, cwd, example, host_command, quoted, with_link};
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
@@ -85,7 +85,7 @@ impl Fixture {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(host_binary());
+        let mut command = host_command();
         command
             .args(args)
             .arg("--config")

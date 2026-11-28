@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use support::{Host, Scratch, cwd, example, host_binary, quoted, with_link, with_pipe_link};
+use support::{Host, Scratch, cwd, example, host_command, quoted, with_link, with_pipe_link};
 
 /// A name for an entry's pipe that no other test run uses: a pipe name on Windows is global, and a socket's path on Unix is
 /// under the test's own directory.
@@ -189,7 +189,7 @@ fn check_prints_a_pipe_entry_and_refuses_a_pipe_it_cannot_use() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     let run = |args: &[&str]| {
-        std::process::Command::new(host_binary())
+        host_command()
             .args(args)
             .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
             .output()
@@ -228,7 +228,7 @@ fn a_name_that_is_taken_stops_the_host_before_it_serves() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, agent_entry("fixture", &listen, "")).expect("written");
-    let second = std::process::Command::new(host_binary())
+    let second = host_command()
         .arg("serve")
         .arg("--config")
         .arg(&path)

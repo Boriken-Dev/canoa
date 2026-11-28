@@ -20,7 +20,7 @@ use coqui_transport::{Channel, Failure};
 use coqui_transport_web::frame;
 use data_encoding::BASE64;
 use serde_json::{Value, json};
-use support::{Host, Scratch, WAIT, cwd, example, host_binary, quoted};
+use support::{Host, Scratch, WAIT, cwd, example, host_binary, host_command, quoted};
 
 const ORIGIN: &str = "chrome-extension://lpppofcphpjkedfnpbpabhmiamaicaed/";
 const MAX: usize = 16 * 1024 * 1024;
@@ -40,7 +40,7 @@ impl Relay {
     }
 
     fn start_with(home: &Path, origin: &str, env: &[(&str, &Path)]) -> Self {
-        let mut child = Command::new(host_binary())
+        let mut child = host_command()
             .arg(origin)
             .envs(env.iter().copied())
             .env("COQUI_AGENTIC_PEER_HOME", home)
@@ -465,7 +465,7 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
     let config = scratch.0.join("canoa.cfg");
     std::fs::write(&config, "").expect("a configuration");
     // The program a person registered: this same canoa, serving nothing.
-    let install = Command::new(host_binary())
+    let install = host_command()
         .args([
             "native",
             "install",
@@ -489,7 +489,7 @@ fn start_runs_the_recorded_program_only_when_no_host_holds_the_home() {
         .expect("native install runs");
     let name = format!("dev.boriken.canoa_test_{}", std::process::id());
     let cleanup = || {
-        Command::new(host_binary())
+        host_command()
             .args(["native", "uninstall", "--name", &name, "--profile"])
             .arg(scratch.0.join("profile"))
             .env("COQUI_AGENTIC_PEER_HOME", &home)
@@ -575,7 +575,7 @@ fn install_status_and_uninstall_leave_nothing_behind() {
     let config = scratch.0.join("canoa.cfg");
     std::fs::write(&config, "# mine\n").expect("a configuration");
     let run = |args: &[&str]| {
-        Command::new(host_binary())
+        host_command()
             .arg("native")
             .args(args)
             .args(["--name", &name, "--profile"])
@@ -593,7 +593,7 @@ fn install_status_and_uninstall_leave_nothing_behind() {
         );
         serde_json::from_slice(&output.stdout).expect("a JSON object")
     };
-    let mut installed = Command::new(host_binary());
+    let mut installed = host_command();
     installed
         .args([
             "native",
@@ -667,7 +667,7 @@ fn install_status_and_uninstall_leave_nothing_behind() {
 /// `canoa pair --native` on the host's home: its first line is the PIN it shows.
 fn pairing_door(home: &Path) -> (Child, Value) {
     use std::io::BufRead as _;
-    let mut child = Command::new(host_binary())
+    let mut child = host_command()
         .args([
             "pair",
             "--native",

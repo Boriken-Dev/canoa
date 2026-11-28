@@ -11,11 +11,10 @@ mod support;
 use std::io::{Read as _, Write as _};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
 use serde_json::Value;
-use support::{Host, Scratch, example, host_binary, line_saying, log_holding, method, quoted};
+use support::{Host, Scratch, example, host_command, line_saying, log_holding, method, quoted};
 
 fn site() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -166,7 +165,7 @@ fn serve_refused(config: &str, args: &[&str]) -> (Option<i32>, String) {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, config).expect("canoa.cfg is written");
-    let output = Command::new(host_binary())
+    let output = host_command()
         .arg("serve")
         .arg("--config")
         .arg(&path)
@@ -219,7 +218,7 @@ fn a_site_holding_canoa_cfg_is_refused() {
     std::fs::copy(site().join("index.html"), scratch.0.join("index.html")).expect("an index");
     let path = scratch.0.join("canoa.cfg");
     std::fs::write(&path, agents(1)).expect("canoa.cfg is written");
-    let output = Command::new(host_binary())
+    let output = host_command()
         .arg("serve")
         .arg("--config")
         .arg(&path)

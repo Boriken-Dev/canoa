@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use canoa_host::{Link, LinkError};
 use linked::Hosted;
 use serde_json::{Value, json};
-use support::{Host, Scratch, WAIT, example, host_binary, quoted, running};
+use support::{Host, Scratch, WAIT, example, host_command, quoted, running};
 
 const META: &str = "dev.boriken.canoa/delegate";
 
@@ -1397,7 +1397,7 @@ struct Bridge {
 
 impl Bridge {
     fn start(url: Option<&str>, token: Option<&str>) -> Self {
-        let mut command = Command::new(host_binary());
+        let mut command = host_command();
         command
             .arg("mcp-bridge")
             .env_remove("CANOA_DELEGATE_URL")

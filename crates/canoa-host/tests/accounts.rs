@@ -11,14 +11,14 @@ mod support;
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use canoa_host::{ACCOUNT_META, MODEL_META};
 use serde_json::{Value, json};
 use support::{
-    Host, Scratch, WAIT, antigravity_entry, cwd, example, host_binary, quoted, with_link,
+    Host, Scratch, WAIT, antigravity_entry, cwd, example, host_command, quoted, with_link,
 };
 
 const CANARY: &str = "CANARY";
@@ -124,7 +124,7 @@ impl Fixture {
         busless: bool,
         set: &[(&str, &str)],
     ) -> Output {
-        let mut command = Command::new(host_binary());
+        let mut command = host_command();
         for name in KEYS {
             command.env_remove(name);
         }
@@ -1095,7 +1095,7 @@ fn a_rotated_login_is_stored_and_a_deleted_one_marks_the_account_for_a_sign_in()
     host.pair(&client);
     let dir = cwd(&host.scratch);
     let list = || -> Value {
-        let out = Command::new(host_binary())
+        let out = host_command()
             .args(["accounts", "list", "--format", "json", "--config"])
             .arg(&cfg)
             .env("COQUI_AGENTIC_PEER_HOME", host.home())
@@ -1203,7 +1203,7 @@ fn a_canary_credential_is_in_no_configuration_log_argument_or_message() {
         !login_file(&host.home()).is_some_and(|f| f.exists())
     });
     let log = std::fs::read_to_string(&log).expect("the host's log");
-    let listed = Command::new(host_binary())
+    let listed = host_command()
         .args(["accounts", "list", "--config"])
         .arg(&cfg)
         .env("COQUI_AGENTIC_PEER_HOME", host.home())
@@ -1279,7 +1279,7 @@ fn a_credential_written_in_canoa_cfg_is_refused_naming_its_key() {
         format!("{cfg}\n[host.accounts.work]\nkind = \"anthropic-api-key\"\nid = \"x\"\nsettings = {{ api_key = \"CANARY-in-clear\" }}\n"),
     )
     .expect("written");
-    let served = Command::new(host_binary())
+    let served = host_command()
         .args(["serve", "--config"])
         .arg(&fixture.config)
         .env("COQUI_AGENTIC_PEER_HOME", fixture.home())
