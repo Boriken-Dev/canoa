@@ -14,6 +14,10 @@ A first pull request needs a one-time signature. The bot will comment with the e
 reply with; read [`CLA.md`](CLA.md) first. It exists so the project can be relicensed later without
 tracking down every past contributor. You keep the copyright in everything you write.
 
+## Set up your clone
+
+Start with `python tools/dev.py setup`: it installs the SDK the builds use, writes your `.env` and resolves the app's packages. In each new shell run `eval "$(python tools/dev.py env)"` (PowerShell: `python tools/dev.py env | Invoke-Expression`), and `python tools/dev.py check` says what is missing.
+
 ## Before you open a pull request
 
 Run the checks for what you changed:

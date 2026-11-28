@@ -84,6 +84,10 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 ## Commands
 
 ```sh
+python tools/dev.py setup [--prefix DIR] [--platforms web,windows] [--agents]   # first: the pinned SDK (build.py sdk install), .env, the Flutter tool, flutter pub get --enforce-lockfile; --agents writes .mcp.json, .codex/config.toml and .claude/skills (ignored)
+eval "$(python tools/dev.py env)"      # --shell pwsh|cmd: the SDK first on PATH, FLUTTER_ROOT and the two variables just below
+python tools/dev.py check              # exit 1 when the SDK, the Flutter tool, .env or the agent files are missing or stale
+(cd tools && python -m unittest test_dev)
 export CANOA_WEB_DIST="$PWD/crates/canoa-host/tests/site"   # --all-features builds canoa's web feature, which needs a site
 export CANOA_DEPS=<a checkout of the deps branch>           # the host carries Office.js from its cdn/office-js/; CANOA_OFFICE_JS=cdn instead names Microsoft's address and needs none
 cargo fmt --all --check

@@ -69,6 +69,18 @@ The [developer documentation](https://boriken-dev.github.io/canoa/developers/) c
 | `clients/office/` | Office add-in manifests and task pane pages served by the host (`[host.web] office = true`) |
 | `docs/` | Architecture, protocols, browser support and developer guides |
 
+### Set up
+
+One script installs the SDK every build uses (the Rust toolchains, the wasm target and the pinned Flutter, under `~/.canoa-sdk`), records it in the repository's `.env`, builds the Flutter tool and resolves the app's packages. Python 3.11 or newer and Git are all it needs first.
+
+```sh
+python tools/dev.py setup [--platforms web,windows] [--agents]   # once, online
+eval "$(python tools/dev.py env)"                                 # each shell; PowerShell: python tools/dev.py env | Invoke-Expression
+python tools/dev.py check                                        # what is missing or stale
+```
+
+`--agents` also writes the (ignored) configuration that gives Claude Code and Codex the Dart and Flutter tools and a few Flutter and Dart skills.
+
 ### Checks
 
 Rust 1.89+:
