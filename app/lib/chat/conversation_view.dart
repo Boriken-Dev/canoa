@@ -51,6 +51,10 @@ import 'session_views.dart';
 import 'session_watch.dart' show SessionWatches;
 import 'turn_actions.dart';
 
+/// Below this header width the actions fold into a menu and the state chip into an icon: the full row of buttons, the Bypass mark and the
+/// state chip need about this much.
+const _headerTightWidth = 780.0;
+
 /// The conversation view: header, transcript, permission/question/secret prompts, composer, and optional work panels.
 class ConversationView extends StatefulWidget {
   const ConversationView({
@@ -416,7 +420,7 @@ class _ConversationViewState extends State<ConversationView> {
                   _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
               if (!start && session != null && session.others.isNotEmpty) PresenceMark(others: session.others, narrow: widget.narrow),
               if (!start && session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
-              if (!start) ..._headerActions(session, tight: headerBox.maxWidth < 680),
+              if (!start) ..._headerActions(session, tight: headerBox.maxWidth < _headerTightWidth),
               if (session != null && !start)
                 IconButton(
                   tooltip: 'Close conversation',
@@ -425,7 +429,7 @@ class _ConversationViewState extends State<ConversationView> {
                 ),
               if (session == null || start)
                 const SizedBox.shrink()
-              else if (widget.narrow || headerBox.maxWidth < 680)
+              else if (widget.narrow || headerBox.maxWidth < _headerTightWidth)
                 Tooltip(message: _state(session), child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.hub_outlined, size: 18)))
               else
                 Chip(key: const Key('session-state-chip'), avatar: const Icon(Icons.hub_outlined, size: 16), label: Text(_state(session)), visualDensity: VisualDensity.compact),
