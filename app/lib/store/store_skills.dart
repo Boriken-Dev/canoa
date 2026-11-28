@@ -13,6 +13,7 @@ import '../profile/profiles_panel.dart' show visible;
 import '../profile/skill_copies.dart';
 import '../selectable.dart';
 import 'overlay_page.dart' show SkillRows, oneLine;
+import 'skill_page.dart';
 import 'skill_sources.dart';
 import 'skills.dart';
 import 'store_banner.dart';
@@ -109,13 +110,16 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
       title: name,
       listenable: c,
       present: () => c.overlaySkills().any((each) => each.name == name),
-      builder: (context) => LoadoutCard(
-        key: Key('skill-detail-${skillKey(name)}'),
-        leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
-        title: name,
-        lines: ['Comes with $overlay'],
-        provenance: 'comes with the overlay $overlay; remove the overlay to remove it',
-      ),
+      builder: (context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        LoadoutCard(
+          key: Key('skill-detail-${skillKey(name)}'),
+          leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
+          title: name,
+          lines: ['Comes with $overlay'],
+          provenance: 'comes with the overlay $overlay; remove the overlay to remove it',
+        ),
+        ReadSkillDocument(read: () => c.overlaySkillDocument(name, overlay)),
+      ]),
     )),
   );
 
@@ -146,7 +150,9 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     final removable = copy.chosen || copy.overlays.isEmpty;
     final text = Theme.of(context).textTheme;
     final on = copy.chosen ? c.skillIsOn(copy.name) : copy.overlays.isNotEmpty;
-    return LoadoutCard(
+    final known = c.knownSourceOf(copy);
+    final document = c.skillDocumentOf(copy);
+    final card = LoadoutCard(
       key: Key('skill-detail-${skillKey(copy.name)}'),
       leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
       title: copy.name,
@@ -175,6 +181,12 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
             )
           : null,
     );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      card,
+      // The Store's entry when the skill came from a source it knows; its SKILL.md either way.
+      if (known != null) SkillStoreEntry(copy: copy, source: known, shown: shown, document: document),
+      SkillDocument(text: document),
+    ]);
   }
 
   static String _sourceShown(String key) {
@@ -546,6 +558,15 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     if (chosenSource == skillsSearchSource && c.skillsSearch != null) return _fromSearch(context, head);
     if (chosenSource != null && c.skillSources.containsKey(chosenSource)) return _fromSource(context, head, chosenSource);
     if (chosenSource != null && c.generatedSkillSources.contains(chosenSource)) return _fromGenerated(context, head, chosenSource);
+    // The source Canoa itself offers is read when Discover is first shown, and what it holds is listed here until another is chosen.
+    final offered = c.offeredSkillSource;
+    final offeredScan = offered == null ? null : c.skillScans[offered];
+    final offeredProblem = offered == null ? null : c.skillScanProblems[offered];
+    final offeredShown = [
+      if (offeredScan != null)
+        for (final skill in offeredScan.skills)
+          if (view.matches('${skill.name}\n${skill.description}')) skill,
+    ];
     return CardList(
       header: [
         ...head,
@@ -555,8 +576,19 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
           'Choose a source to read which skills it holds. A skill that comes in an overlay is installed with the overlay, from Overlays.',
           key: Key('skills-choose-source'),
         ),
+        if (offered != null && c.scanningSource == offered) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+        if (offeredProblem != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(visible(offeredProblem), key: const Key('skills-offered-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        if (offeredScan != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(context.t('store.skills_offered_title', {'source': c.skillSources[offered]!.shown}), key: const Key('skills-offered-title'), style: Theme.of(context).textTheme.titleMedium),
+          ),
       ],
-      cards: const [],
+      cards: [for (final skill in offeredShown) _scannedTile(offered!, c.skillSources[offered]!, offeredScan!, skill, false)],
       footer: [
         const SizedBox(height: 16),
         Text('Paste a skill', style: Theme.of(context).textTheme.titleSmall),

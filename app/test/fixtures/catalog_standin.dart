@@ -20,14 +20,16 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 /// The official MCP registry, as the host's own is, which the app learns from the host's `store/catalogs`.
 const officialRegistry = 'https://registry.modelcontextprotocol.io';
 
-/// The one Store type a controller needs to find the official registry: the MCP servers type, whose fixed row is that registry,
-/// as `store/catalogs` answers it.
+/// The one Store type a controller needs to find the official registry: the MCP servers type, whose default is that registry,
+/// as `store/catalogs` answers it (a default, which canoa.cfg can replace or turn off, not a fixed row).
 Future<List<CatalogType>> standInCatalogTypes() async => [
   CatalogType(
     id: 'mcps',
     title: 'MCP servers',
     words: const CatalogWords(noun: 'registry', plural: 'registries', lists: 'MCP servers'),
-    rows: [CatalogRow(label: 'official', spec: CatalogSpec.read(officialRegistry), isDefault: true, fixed: true)],
+    defaultLabel: 'official',
+    defaultSpec: officialRegistry,
+    rows: [CatalogRow(label: 'official', spec: CatalogSpec.read(officialRegistry), isDefault: true)],
   ),
 ];
 

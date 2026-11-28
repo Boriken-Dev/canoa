@@ -173,6 +173,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   StoreView viewOf(String id) => views.putIfAbsent(id, () {
     final made = StoreView(id)..addListener(_viewChanged);
     if (selection != null && (id == StoreType.overlays.id || id == StoreType.skills.id)) made.discover = true;
+    if (id == StoreType.skills.id && made.discover) scheduleMicrotask(_offerSkills);
     return made;
   });
 
@@ -294,10 +295,24 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     setState(() {});
   }
 
-  /// A switch to Discover on the MCP servers type reads the registry the first time.
+  /// Reads the source Canoa offers the first time the Skills type shows Discover.
+  void _offerSkills() {
+    final skills = views[StoreType.skills.id];
+    if (!mounted || skills == null || !skills.discover || skills.source != null || _skillsOffered) return;
+    _skillsOffered = true;
+    if (controller.offeredSkillSource case final label? when !controller.skillScans.containsKey(label)) {
+      unawaited(controller.scanSkillSource(label));
+    }
+  }
+
+  /// Whether Discover on the Skills type has already asked for the source Canoa offers.
+  bool _skillsOffered = false;
+
+  /// A switch to Discover on the MCP servers type reads the registry the first time, and on the Skills type the source Canoa offers.
   void _viewChanged() {
-    final mcps = viewOf(StoreType.mcps.id);
-    if (mcps.discover && !controller.registryRead && !controller.loadingRegistry) unawaited(controller.loadRegistry());
+    final mcps = views[StoreType.mcps.id];
+    if (mcps != null && mcps.discover && !controller.registryRead && !controller.loadingRegistry) unawaited(controller.loadRegistry());
+    _offerSkills();
     _changed();
   }
 
@@ -475,66 +490,70 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) Navigator.of(context).pop(controller.config);
       },
-      child: Scaffold(
-        appBar: AppBar(
-          leading: widget.embedded ? ShellScope.menuButton(context) : null,
-          automaticallyImplyLeading: !widget.embedded,
-          title: Text(indexed ? _labelOf(current) : 'Store', key: const Key('store-title')),
-          actions: [?_layoutControls(context)],
-          // With the index beside it the type is chosen there; a Store on its own page has these tabs instead.
-          bottom: indexed
-              ? null
-              : TabBar(
-                  key: const Key('store-tabs'),
-                  controller: tabs,
-                  tabs: [
-                    for (final each in types)
-                      if (each == StoreType.agents.id)
-                        Tab(
-                          key: const Key('store-tab-agents'),
-                          child: Badge(
-                            key: const Key('store-updates-badge'),
-                            isLabelVisible: _updates > 0,
-                            label: Text('$_updates'),
-                            offset: const Offset(10, -6),
-                            child: Text('Agents ${_installedCount(each)}'),
-                          ),
-                        )
-                      else if (each == StoreType.overlays.id && controller.updatable.isNotEmpty)
-                        Tab(
-                          key: Key('store-tab-$each'),
-                          child: Badge(
-                            key: const Key('overlays-updates-badge'),
-                            label: Text('${controller.updatable.length}'),
-                            offset: const Offset(10, -6),
-                            child: Text('${_labelOf(each)} ${_installedCount(each)}'),
-                          ),
-                        )
-                      else
-                        Tab(key: Key('store-tab-$each'), text: '${_labelOf(each)} ${_installedCount(each)}'),
-                  ],
-                ),
-        ),
-        body: Column(children: [
-          _toolbar(context, current),
-          if (controller.busy != null) const LinearProgressIndicator(),
-          Expanded(
-            child: TabBarView(
-              controller: tabs,
-              physics: indexed ? const NeverScrollableScrollPhysics() : null,
-              children: [
-                for (final each in types)
-                  switch (_builtin(each)) {
-                    StoreType.agents => AgentsBody(programs: widget.programs!, view: viewOf(each)),
-                    StoreType.overlays => OverlaysBody(controller: controller, view: viewOf(each), showType: _showType, runtimes: widget.runtimes),
-                    StoreType.skills => SkillsBody(controller: controller, view: viewOf(each)),
-                    StoreType.mcps => McpsBody(controller: controller, view: viewOf(each)),
-                    null => ExtensionBody(type: _extension(each)!, view: viewOf(each), config: controller.config),
-                  },
-              ],
-            ),
+      // The page is one selection area: every name, description, address and version in it can be selected and copied, while its
+      // buttons, switches and fields work as they do.
+      child: Selectable(
+        child: Scaffold(
+          appBar: AppBar(
+            leading: widget.embedded ? ShellScope.menuButton(context) : null,
+            automaticallyImplyLeading: !widget.embedded,
+            title: Text(indexed ? _labelOf(current) : 'Store', key: const Key('store-title')),
+            actions: [?_layoutControls(context)],
+            // With the index beside it the type is chosen there; a Store on its own page has these tabs instead.
+            bottom: indexed
+                ? null
+                : TabBar(
+                    key: const Key('store-tabs'),
+                    controller: tabs,
+                    tabs: [
+                      for (final each in types)
+                        if (each == StoreType.agents.id)
+                          Tab(
+                            key: const Key('store-tab-agents'),
+                            child: Badge(
+                              key: const Key('store-updates-badge'),
+                              isLabelVisible: _updates > 0,
+                              label: Text('$_updates'),
+                              offset: const Offset(10, -6),
+                              child: Text('Agents ${_installedCount(each)}'),
+                            ),
+                          )
+                        else if (each == StoreType.overlays.id && controller.updatable.isNotEmpty)
+                          Tab(
+                            key: Key('store-tab-$each'),
+                            child: Badge(
+                              key: const Key('overlays-updates-badge'),
+                              label: Text('${controller.updatable.length}'),
+                              offset: const Offset(10, -6),
+                              child: Text('${_labelOf(each)} ${_installedCount(each)}'),
+                            ),
+                          )
+                        else
+                          Tab(key: Key('store-tab-$each'), text: '${_labelOf(each)} ${_installedCount(each)}'),
+                    ],
+                  ),
           ),
-        ]),
+          body: Column(children: [
+            _toolbar(context, current),
+            if (controller.busy != null) const LinearProgressIndicator(),
+            Expanded(
+              child: TabBarView(
+                controller: tabs,
+                physics: indexed ? const NeverScrollableScrollPhysics() : null,
+                children: [
+                  for (final each in types)
+                    switch (_builtin(each)) {
+                      StoreType.agents => AgentsBody(programs: widget.programs!, view: viewOf(each)),
+                      StoreType.overlays => OverlaysBody(controller: controller, view: viewOf(each), showType: _showType, runtimes: widget.runtimes),
+                      StoreType.skills => SkillsBody(controller: controller, view: viewOf(each)),
+                      StoreType.mcps => McpsBody(controller: controller, view: viewOf(each)),
+                      null => ExtensionBody(type: _extension(each)!, view: viewOf(each), config: controller.config),
+                    },
+                ],
+              ),
+            ),
+          ]),
+        ),
       ),
     );
   }

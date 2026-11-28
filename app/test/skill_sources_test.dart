@@ -184,23 +184,33 @@ void main() {
       await tapKey(tester, 'skills-discover');
     }
 
-    testWidgets('the default source is listed, and nothing is fetched until it is chosen', (tester) async {
+    testWidgets('the default source is read when Discover is first shown and its skills are listed, and nothing is installed', (tester) async {
       await open(tester);
       expect(find.byKey(const Key('skills-source-anthropics')), findsOneWidget);
       expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'a skill an overlay names comes with its overlay');
       expect(find.byKey(const Key('skills-from-catalogs')), findsNothing);
-      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
-      expect(overlays.scanned, isEmpty);
-
-      await tapKey(tester, 'skills-source-anthropics');
-      expect(overlays.scanned, ['$anthropics@HEAD#']);
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget, reason: 'another source can still be chosen');
+      expect(overlays.scanned, ['$anthropics@HEAD#'], reason: 'the source Canoa offers is read once, on the first showing');
       expect(overlays.scannedOwn, [false], reason: 'the default source is fetched with none of the person\'s git settings');
+      expect(find.byKey(const Key('skills-offered-title')), findsOneWidget);
       expect(find.byKey(const Key('store-source-skill-anthropics-pdf')), findsOneWidget);
       expect(find.byKey(const Key('store-source-skill-anthropics-docx')), findsOneWidget);
+      expect(overlays.skillFetches, isEmpty, reason: 'reading a source installs nothing');
+
+      await tapKey(tester, 'skills-source-anthropics');
+      expect(overlays.scanned, ['$anthropics@HEAD#'], reason: 'choosing it shows what was read');
+      expect(find.byKey(const Key('store-source-skill-anthropics-pdf')), findsOneWidget);
       expect(find.textContaining('none of your git settings'), findsOneWidget);
       expect(find.textContaining('Read at commit $commit'), findsOneWidget);
       expect(find.byKey(const Key('skills-source-left-out')), findsOneWidget);
-      expect(overlays.skillFetches, isEmpty, reason: 'reading a source installs nothing');
+      expect(overlays.skillFetches, isEmpty);
+    });
+
+    testWidgets('a source the person replaced the default with is not read until chosen', (tester) async {
+      await open(tester, text: '$withCatalog\n[store.skills.catalogs]\nanthropics = "$typed"\n');
+      expect(overlays.scanned, isEmpty, reason: 'a source the person typed is read only when they choose it');
+      expect(find.byKey(const Key('skills-offered-title')), findsNothing);
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
     });
 
     testWidgets('a skill of a source is reviewed with the commit that was read, and fetched only on a yes', (tester) async {
@@ -222,6 +232,10 @@ void main() {
       expect(find.byKey(const Key('skill-installed-pdf')), findsOneWidget);
       await tapKey(tester, 'skill-installed-pdf');
       expect(find.textContaining('from a source you named'), findsOneWidget);
+      // The source is one the Store knows, so the page shows its entry, and the SKILL.md is rendered, not shown as plain text.
+      expect(find.byKey(const Key('skill-entry')), findsOneWidget);
+      expect(find.textContaining('Pin'), findsWidgets);
+      expect(find.byKey(const Key('skill-document')), findsOneWidget);
     });
 
     testWidgets('a source the person adds is kept in canoa.cfg, read with their own settings and removable', (tester) async {
@@ -235,11 +249,11 @@ void main() {
       await tapKey(tester, 'skills-source-add');
       expect(saved.last.skillSources.keys, ['anthropics', 'addyosmani-web-quality-skills']);
       expect(CanoaConfig.parse(saved.last.encode()).skillSources.keys, ['anthropics', 'addyosmani-web-quality-skills'], reason: 'it is kept in the file');
-      expect(overlays.scanned, isEmpty, reason: 'adding a source does not read it');
+      expect(overlays.scanned, ['$anthropics@HEAD#'], reason: 'adding a source does not read it: only the default was, when Discover was shown');
 
       await tapKey(tester, 'skills-source-addyosmani-web-quality-skills');
-      expect(overlays.scanned, ['$typed@HEAD#']);
-      expect(overlays.scannedOwn, [true]);
+      expect(overlays.scanned, ['$anthropics@HEAD#', '$typed@HEAD#']);
+      expect(overlays.scannedOwn, [false, true]);
       expect(find.textContaining('You typed this source'), findsOneWidget);
       expect(find.byKey(const Key('store-source-skill-addyosmani-web-quality-skills-performance')), findsOneWidget);
 

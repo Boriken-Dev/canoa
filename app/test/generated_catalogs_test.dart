@@ -123,10 +123,10 @@ void main() {
   testWidgets('a generated skills catalog is a source the page reads through the host, and a listed skill is installed from the source it names', (tester) async {
     await open(tester, 'skills');
     expect(find.byKey(const Key('skills-source-made')), findsOneWidget);
-    expect(asked, isEmpty, reason: 'listing a source reads nothing');
+    expect(asked, ['skills/anthropics//'], reason: 'Discover reads the source Canoa offers, and listing the others reads nothing');
 
     await tapKey(tester, 'skills-source-made');
-    expect(asked, ['skills/made//']);
+    expect(asked, ['skills/anthropics//', 'skills/made//']);
     expect(find.byKey(const Key('store-source-skill-made-pdf')), findsOneWidget);
     expect(find.textContaining('Cannot be installed: x is no source'), findsOneWidget);
     expect(find.byKey(const Key('skills-source-left-out')), findsOneWidget);
@@ -171,7 +171,7 @@ void main() {
 
   testWidgets('a read skills source is listed through the host too, and installing a skill from it reads no scan of its own', (tester) async {
     await open(tester, 'skills');
-    expect(asked, isEmpty);
+    expect(asked, ['skills/anthropics//'], reason: 'Discover read the source Canoa offers when it was first shown');
     await tapKey(tester, 'skills-source-anthropics');
     expect(asked, ['skills/anthropics//']);
     expect(overlays.scanned, isEmpty, reason: 'the host scanned the source; the page asks nothing of skill/scan to list it');

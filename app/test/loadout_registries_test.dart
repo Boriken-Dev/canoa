@@ -48,7 +48,9 @@ void main() {
           id: 'mcps',
           title: 'MCP servers',
           words: CatalogWords.generic,
-          rows: [CatalogRow(label: 'official', spec: CatalogSpec.read('https://registry.host-says.test'), fixed: true)],
+          defaultLabel: 'official',
+          defaultSpec: 'https://registry.host-says.test',
+          rows: [CatalogRow(label: 'official', spec: CatalogSpec.read('https://registry.host-says.test'), isDefault: true)],
         ),
       ],
     );
@@ -57,6 +59,28 @@ void main() {
     await controller.loadTypes();
     expect(controller.registries, ['https://registry.host-says.test']);
     expect(controller.selectedRegistry, 'https://registry.host-says.test');
+  });
+
+  test('Discover reads the registry the host offers by default when none was added, and lists its servers', () async {
+    final asked = <Uri>[];
+    late final LoadoutController controller;
+    controller = LoadoutController(
+      config: CanoaConfig.parse(''),
+      home: null,
+      save: (changed) async => changed,
+      catalogTypes: standInCatalogTypes,
+      readCatalog: standInCatalogRead(MemoryOverlays(), () => controller.config, registry: (uri) async {
+        asked.add(uri);
+        return page([teamServer()]);
+      }),
+    );
+    addTearDown(controller.dispose);
+    expect(controller.selectedRegistry, isEmpty, reason: 'nothing is known before the host has said');
+    await controller.loadRegistry();
+    expect(controller.registryProblem, isNull);
+    expect(controller.selectedRegistry, officialRegistry);
+    expect(asked.single.toString(), startsWith('$officialRegistry/v0.1/servers'));
+    expect(controller.registryEntries.map((entry) => entry.name), ['dev.team/tracker']);
   });
 
   test('registries are the catalogs of the MCP servers type, in the order added, that the file keeps', () {

@@ -162,7 +162,7 @@ void main() {
       expect(find.textContaining('231770 installs'), findsOneWidget);
       expect(find.textContaining('anthropics/skills/pdf'), findsWidgets);
       expect(find.byKey(const Key('store-search-skill-ana/gone/pdf-tools')), findsOneWidget);
-      expect(overlays.scanned, isEmpty, reason: 'listing a result reads no repository');
+      expect(overlays.scanned, ['$anthropics@HEAD#'], reason: 'listing a result reads no repository; only the default source was read, when Discover was shown');
 
       await search(tester, 'nothing here');
       expect(find.byKey(const Key('skills-search-nothing')), findsOneWidget);
@@ -187,8 +187,8 @@ void main() {
       await tapKey(tester, 'skills-from-search');
       await search(tester, 'pdf');
       await tapKey(tester, 'store-search-skill-install-anthropics/skills/pdf');
-      expect(overlays.scanned, ['$anthropics@HEAD#'], reason: 'the repository itself is read, not anything the directory sent');
-      expect(overlays.scannedOwn, [false], reason: 'a directory\'s result is fetched with none of the person\'s git settings');
+      expect(overlays.scanned, ['$anthropics@HEAD#', '$anthropics@HEAD#'], reason: 'the repository itself is read, not anything the directory sent');
+      expect(overlays.scannedOwn, [false, false], reason: 'a directory\'s result is fetched with none of the person\'s git settings');
       expect(find.byKey(const Key('store-skill-review')), findsOneWidget);
       expect(find.textContaining('$commit#skills/pdf'), findsWidgets);
       expect(overlays.skillFetches, isEmpty);

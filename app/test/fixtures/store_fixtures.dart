@@ -362,7 +362,16 @@ final class MemoryHome implements ProfileHome {
   @override
   Future<String?> canonicalDirectory(String directory) async => directory;
   @override
-  Future<List<int>?> readBytes(String path) async => null;
+  Future<List<int>?> readBytes(String path) async {
+    // A file inside an installed overlay's folder, which is named by the overlay.
+    for (final MapEntry(:key, :value) in overlays.installedFiles.entries) {
+      final marker = '/$key/';
+      final at = path.indexOf(marker);
+      if (at >= 0) return value[path.substring(at + marker.length)];
+    }
+    return null;
+  }
+
   @override
   Future<String?> readSecret(String path, {String? within}) async => null;
   @override

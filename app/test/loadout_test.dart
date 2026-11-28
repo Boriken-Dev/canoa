@@ -373,6 +373,7 @@ void main() {
     expect(skill, findsOneWidget, reason: 'the overlay\'s skill is installed with it');
     expect(find.descendant(of: skill, matching: find.text('Comes with review')), findsOneWidget);
     expect(find.byKey(const Key('skill-remove-helper')), findsNothing, reason: 'it goes only with its overlay');
+    expect(find.byKey(const Key('skill-document')), findsOneWidget, reason: 'its SKILL.md is shown, rendered, from where the overlay is installed');
     expect(find.byKey(const Key('skills-none')), findsNothing);
     await tester.pageBack();
     await tester.pumpAndSettle();

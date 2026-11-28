@@ -155,10 +155,6 @@ class LoadoutController extends ChangeNotifier {
 
   /// The agents the app offers, which an MCP server is allowed or turned off for.
   final List<String> agents;
-  /// The official registry, which is always offered first: the fixed catalog of the MCP servers type, as the host says it. Empty
-  /// until the host has answered; the host reads it by its label, so a read before then still reaches it.
-  String get registry =>
-      typeOf('mcps')?.rows.where((row) => row.fixed).map((row) => row.spec?.source).whereType<String>().firstOrNull ?? '';
   final FindProgram? findProgram;
 
   /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
@@ -183,13 +179,14 @@ class LoadoutController extends ChangeNotifier {
   /// Each installed overlay's layer and why one is missing.
   ProfileLayers? layers;
 
-  /// The registry the Discover list reads: [registry] or one the person added.
-  String get selectedRegistry => _selectedRegistry ?? registry;
+  /// The registry the Discover list reads: the one chosen, else the first one offered (the official one unless the person turned it
+  /// off or replaced it). Empty until the host has said which registries there are.
+  String get selectedRegistry => _selectedRegistry ?? registries.firstOrNull ?? '';
   String? _selectedRegistry;
 
   /// The default MCP registry label and address (from the host's `store/catalogs` once read, else the standalone fallback).
   String get defaultRegistryLabel => typeOf('mcps')?.defaultLabel ?? officialRegistryLabel;
-  String get defaultRegistry => typeOf('mcps')?.defaultSpec ?? registry;
+  String get defaultRegistry => typeOf('mcps')?.defaultSpec ?? '';
 
   /// Whether `[store.mcps.catalogs]` explicitly names [defaultRegistryLabel] (either replacing it or turning it off with `false`).
   bool get officialRegistryNamed {
@@ -569,6 +566,52 @@ class LoadoutController extends ChangeNotifier {
     return source != null && !(aos.normalizeName(label) == aos.normalizeName(defaultSkillSourceLabel) && source.spec == defaultSkillSourceSpec);
   }
 
+  /// The label of the source Canoa itself offers, while canoa.cfg still has it as offered; null once the person replaced or removed
+  /// it. Discover reads it on its first showing, since it is fetched with none of the person's git settings.
+  String? get offeredSkillSource => [
+    for (final label in skillSources.keys)
+      if (aos.normalizeName(label) == aos.normalizeName(defaultSkillSourceLabel) && !skillSourceIsOwn(label)) label,
+  ].firstOrNull;
+
+  /// The label of the source or catalog the Store knows [copy] by: the catalog that gave its source while it is still offered, else
+  /// the skill source that holds it. Null for a skill from an address the Store holds no entry for.
+  String? knownSourceOf(SkillCopy copy) {
+    final named = copy.catalog;
+    if (named != null && (skillSources.containsKey(named) || generatedSkillSources.contains(named) || loaded.any((each) => each.label == named))) {
+      return named;
+    }
+    final location = copy.source.split(RegExp('[@#]')).first;
+    for (final MapEntry(:key, :value) in skillSources.entries) {
+      if (value.repo == location || value.spec == location) return key;
+    }
+    return null;
+  }
+
+  /// The text of [copy]'s `SKILL.md`, from the files its digest covers; null when it has none.
+  String? skillDocumentOf(SkillCopy copy) {
+    for (final MapEntry(:key, :value) in copy.files.entries) {
+      if (key.toLowerCase() == 'skill.md') return utf8.decode(value, allowMalformed: true);
+    }
+    return null;
+  }
+
+  /// The text of the `SKILL.md` of the skill [name] that the installed overlay [overlay] provides, read where the overlay is
+  /// installed; null when it cannot be read.
+  Future<String?> overlaySkillDocument(String name, String overlay) async {
+    final home = this.home;
+    if (home == null) return null;
+    for (final layer in layers?.layers ?? const <Layer>[]) {
+      if (layer.id.kind != LayerKind.overlay || layer.id.name != overlay) continue;
+      final skill = layer.profile.skills[name];
+      final dir = layer.dir;
+      if (skill == null || dir == null) return null;
+      final folder = home.join(dir, skill.path);
+      final bytes = await home.readBytes(home.join(folder, 'SKILL.md')) ?? await home.readBytes(folder);
+      return bytes == null ? null : utf8.decode(bytes, allowMalformed: true);
+    }
+    return null;
+  }
+
   /// The labels of the skill catalogs a program or an extension generates: the host asks it for a listing, which names where each skill is.
   List<String> get generatedSkillSources => [
     for (final MapEntry(:key, :value) in config.catalogSpecs('skills').entries)
@@ -869,8 +912,8 @@ class LoadoutController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    if (registry.isEmpty) await loadTypes();
-    if (registry.isEmpty) {
+    if (selectedRegistry.isEmpty) await loadTypes();
+    if (selectedRegistry.isEmpty) {
       registryProblem = 'The host has not said which registry is the official one';
       registryRead = true;
       notifyListeners();

@@ -7,6 +7,7 @@ library;
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/profile/overlays.dart' show ScannedSkill, SkillScan;
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:material_ui/material_ui.dart';
@@ -92,7 +93,11 @@ void main() {
         await golden(tester, 'empty');
       });
 
-      testWidgets('Skills Discover: the sources to read, and a skill to paste', (tester) async {
+      testWidgets('Skills Discover: the sources to read, what the one Canoa offers lists, and a skill to paste', (tester) async {
+        overlays.scans['https://github.com/anthropics/skills.git'] = const SkillScan(commit: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', skills: [
+          ScannedSkill(name: 'docx', description: 'Makes Word documents.', path: 'skills/docx'),
+          ScannedSkill(name: 'pdf', description: 'Reads and fills PDFs.', path: 'skills/pdf'),
+        ]);
         await open(tester);
         await tester.tap(find.byKey(const Key('store-tab-skills')));
         await tester.pumpAndSettle();
