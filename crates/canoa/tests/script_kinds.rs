@@ -28,7 +28,7 @@ use std::path::PathBuf;
 
 use canoa::approver::{
     Answer as ApproverAnswer, ApproverInfo, ApproverVtable, Authority, Choice, OptionRef,
-    Request as ApproverRequest, SessionRef, Step, Ticket, Tool as ApproverTool,
+    Request as ApproverRequest, SessionRef as ApproverSession, Step, Ticket, Tool as ApproverTool,
 };
 use canoa::config_store::{
     Changed, Changes, ConfigStoreVtable, Held as ConfigHeld, Key as ConfigKey, Layer, LayerInfo,
@@ -608,7 +608,7 @@ fn the_committed_approver_schemas_are_what_this_build_describes() {
         &schemas(vec![
             ("ApproverInfo", schema_of::<ApproverInfo>()),
             ("Request", schema_of::<ApproverRequest>()),
-            ("SessionRef", schema_of::<SessionRef>()),
+            ("SessionRef", schema_of::<ApproverSession>()),
             ("Tool", schema_of::<ApproverTool>()),
             ("OptionRef", schema_of::<OptionRef>()),
             ("Answer", schema_of::<ApproverAnswer>()),
