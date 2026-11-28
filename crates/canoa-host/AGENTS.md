@@ -227,6 +227,8 @@ A setting is a key of canoa.cfg, read and written through the configuration stor
 | `ca.pem`, `client.pem`, `session-ca.pem`, `session-roots.pem` | what one session's proxy made | per session, removed with it |
 | `session-proxy.url` | the address and credentials of the proxy one session runs, beside its CA files, for tools outside the session | per session, removed with it |
 | `daemon.json` | Foundry Local's own record of its service | another program's file |
+| `schedules.json` | when each scheduled task last ran and what came of it | a record of runs, read back at start |
+| `settings.json`, `settings.local.json` | Claude Code's own settings, read for the person's deny and ask rules | another program's files, never written |
 | `config.json`, `tokenizer.json` | a speech model's files as its publisher ships them | content of the model, checked by digest |
 | `package.json`, `package-lock.json` | a profile's npm install of its tools | made by npm |
 | `launcher.log`, `office-addin.log` | what the Office launcher and add-in did | a log |

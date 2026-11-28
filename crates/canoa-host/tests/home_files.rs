@@ -114,13 +114,13 @@ fn every_file_the_host_names_is_written_down_with_why_it_is_data() {
 #[test]
 fn a_new_file_is_found_and_a_test_module_is_not_read() {
     let names = joined(
-        "let a = dir.join(\"settings.json\");\nlet b = dir.join(\"canoa.cfg\");\n#[cfg(test)]\nmod tests { fn t() { dir.join(\"only-in-a-test.json\"); } }",
+        "let a = dir.join(\"not-written-down.json\");\nlet b = dir.join(\"canoa.cfg\");\n#[cfg(test)]\nmod tests { fn t() { dir.join(\"only-in-a-test.json\"); } }",
     );
     assert_eq!(
         names.into_iter().collect::<Vec<_>>(),
-        ["canoa.cfg", "settings.json"]
+        ["canoa.cfg", "not-written-down.json"]
     );
-    assert!(!listed().contains("settings.json"));
+    assert!(!listed().contains("not-written-down.json"));
 }
 
 /// Nothing listed is a file of settings: the files that held settings before they were tables of canoa.cfg are not kept.
