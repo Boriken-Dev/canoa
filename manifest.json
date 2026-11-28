@@ -4550,7 +4550,7 @@
       "libxi-dev"
     ]
   },
-  "sourceCommit": "ec8acb2779805dec455e1a0c98aae2fd361b0780",
+  "sourceCommit": "bfcdd00b30dac2daf14809c6291c00a87d12fe2e",
   "trees": {
     "office-js": {
       "commit": "498e88261bc578243d40dd79083953d86f84e7f6",
@@ -8425,7 +8425,7 @@
       "crates": 696,
       "gitSources": 23,
       "lock": "Cargo.lock",
-      "lockSha256": "c91323fdc40e318823dea98b90b622de448518943d04633e887ea656a5dd01a3"
+      "lockSha256": "89c5c22b29c448b7e57950b155ed8c56e76d4c15b83e4f7240c327f112fc70a6"
     },
     "crates-wasm-bindgen-cli": {
       "crates": 254,
