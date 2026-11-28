@@ -244,12 +244,7 @@ def write_agents(root: Path, sdk: Path, run: Run, fetch: bool = True) -> list[st
     if fetch:
         names = fetch_skills(rows, root / ".claude" / "skills", run)
         notes.append(f"copied {len(names)} skills into .claude/skills: {', '.join(names)}")
-        if (root / ".agents").exists():
-            notes.append(".agents/ exists here, so the skills are not copied into .agents/skills, which Codex reads: "
-                         "copy them there yourself if you want them in Codex")
-        else:
-            fetch_skills(rows, root / ".agents" / "skills", run)
-            notes.append("copied the same skills into .agents/skills for Codex")
+        notes.append("Codex keeps skills in its own skills folder: copy the ones in .claude/skills there if you want them")
     return notes
 
 
