@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../brand.dart';
 import '../desktop/host_control.dart';
 import '../ledger/session_ledger.dart' show LedgerBackend;
 import 'permission_rules.dart' show LockableBackend;
@@ -20,7 +21,7 @@ final class ConfigRulesBackend implements LedgerBackend, LockableBackend {
   String? _lastSettings;
 
   @override
-  String get location => 'canoa.cfg [permissions.rules] and ${_use.location}';
+  String get location => '${Brand.configFile} [permissions.rules] and ${_use.location}';
 
   @override
   Future<T> exclusively<T>(Future<T> Function() body, {Duration timeout = const Duration(seconds: 2)}) {
