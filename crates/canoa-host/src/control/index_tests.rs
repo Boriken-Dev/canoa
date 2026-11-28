@@ -626,5 +626,11 @@ fn the_renewal_asks_a_kept_source_again_with_no_request_and_a_failed_one_is_stal
     assert_eq!(failed.source["stale"], true, "{}", failed.source);
     assert!(failed.source["problem"].as_str().is_some());
     assert_eq!(failed.source["checked"], renewed.source["checked"]);
-    assert_eq!(failed.source["refreshing"], false, "{}", failed.source);
+    // A refresh slower than the time to live is due again by the time it is asked about, and runs in the background: wait for it
+    // and the answer is still the stale one, which keeps when the source last worked.
+    settle(&index);
+    let after = rig.ask(&index, false);
+    assert_eq!(after.source["stale"], true, "{}", after.source);
+    assert!(after.source["problem"].as_str().is_some());
+    assert_eq!(after.source["checked"], renewed.source["checked"]);
 }
