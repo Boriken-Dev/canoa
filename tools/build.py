@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/build.py, at commit f5bca04762d3c9ee7a6077871b1abc162d5c350f.
+# From Boriken-Dev/agent-overlays, overlays/release/repo/tools/build.py, at commit 89237d1225996b042ddaffef4d1b4ab78fb5c188.
 # Copyright (c) 2026 Jose A.
 """One build tool for a repository: vendored crates, scans, SDK lock, offline and release builds.
 
@@ -2624,7 +2624,8 @@ def pub_check(ctx: Ctx, view: Any, lock: Lock) -> tuple[list[str], list[str]]:
             where = f"pub/hosted/{package.host}/{package.key}"
             have = view.exists(where)
         elif package.source == "git" and cfg.git == "checkout":
-            where = f"pub/git/{package.key}/{package.path}/pubspec.yaml".replace("//", "/")
+            folder = pub_folder(package.path)
+            where = f"pub/git/{package.key}/pubspec.yaml" if folder == "." else f"pub/git/{package.key}/{folder}/pubspec.yaml"
             have = view.exists(where)
         elif package.source == "git":
             where = f"{MANIFEST} gitDependencies"
