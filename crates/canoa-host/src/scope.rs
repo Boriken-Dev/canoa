@@ -161,7 +161,7 @@ impl Scope {
     pub(crate) fn splice(&self) -> Splice {
         let splice = Splice::new(Arc::clone(&self.usage), self.account.clone());
         let splice = match (&self.harness, &self.telemetry) {
-            (Some(harness), Some(telemetry)) => splice.watching(telemetry, harness),
+            (Some(harness), Some(telemetry)) => splice.reporting_to(telemetry, harness),
             _ => splice,
         };
         // A session with no profile of its own runs on the host's own sources.

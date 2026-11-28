@@ -460,7 +460,7 @@ impl Splice {
 
     /// This connection telling `telemetry` of its sessions, turns, tool calls and permissions, as the agent `harness`.
     #[must_use]
-    pub(crate) fn watching(
+    pub(crate) fn reporting_to(
         mut self,
         telemetry: &crate::telemetry::Telemetry,
         harness: &str,
