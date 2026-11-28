@@ -4369,11 +4369,12 @@
   "pub": {
     "dropped": {
       "counts": {
+        ".github": 2,
         "benchmark": 43,
         "benchmarks": 4,
         "doc": 307,
-        "example": 2382,
-        "test": 2353
+        "example": 2390,
+        "test": 2356
       },
       "deletedFlaggedFiles": [],
       "directories": [
@@ -4423,6 +4424,13 @@
         "path": "bindings/dart/coqui_transport_web",
         "ref": "1e19611126472e8dc47c0e640bae2b86a7e6d713",
         "url": "https://github.com/Boriken-Dev/coqui-transport-web.git"
+      },
+      {
+        "mode": "checkout",
+        "package": "xterm2",
+        "path": ".",
+        "ref": "eaa4b8b103f740a2745a9ec43dd7c7446dcd72e6",
+        "url": "https://github.com/SoFluffyOS/xterm2.git"
       }
     ],
     "packages": [
@@ -4521,7 +4529,6 @@
       "webdriver-3.2.0",
       "window_manager-0.5.2",
       "xml-7.0.1",
-      "xterm2-5.4.0",
       "xterm2_core-1.1.0",
       "yaml-3.1.4",
       "zmodem-0.0.6"
@@ -4543,7 +4550,7 @@
       "libxi-dev"
     ]
   },
-  "sourceCommit": "0a18b20f63dce0e4b28e5ffbcb91ba331bfb3384",
+  "sourceCommit": "21efaf33bc0e23184f879bb5c82a000c20cc8902",
   "trees": {
     "office-js": {
       "commit": "498e88261bc578243d40dd79083953d86f84e7f6",
