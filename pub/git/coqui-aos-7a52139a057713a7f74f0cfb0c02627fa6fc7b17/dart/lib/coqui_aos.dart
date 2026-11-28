@@ -24,6 +24,7 @@ export 'src/knowledge_mustache.dart'
 export 'src/limits.dart';
 export 'src/names.dart';
 export 'src/overlay.dart';
+export 'src/project_context.dart';
 export 'src/prepare.dart';
 export 'src/read.dart';
 export 'src/skills.dart';

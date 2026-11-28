@@ -51,7 +51,7 @@ impl PipeName {
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidName`] for a `name` as in [`named`](Self::named), or a path too long for a
+    /// [`Error::InvalidName`] for a `name` as in [`named`](Self::named); [`Error::PathTooLong`] for a path too long for a
     /// socket.
     pub fn named_in(directory: impl AsRef<Path>, name: &str) -> Result<Self, Error> {
         check_name(name)?;
@@ -67,8 +67,8 @@ impl PipeName {
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidName`] for anything else. On Unix that is an empty path, a path with no file
-    /// name, or one too long for a socket.
+    /// [`Error::InvalidName`] for anything else. On Unix that is an empty path or a path with no file
+    /// name; [`Error::PathTooLong`], naming the length and the limit, for one too long for a socket.
     pub fn at(path: impl AsRef<Path>) -> Result<Self, Error> {
         Self::from_path(path.as_ref())
     }
@@ -146,11 +146,31 @@ impl PipeName {
         // Binding goes through a private directory beside the socket, whose name adds this much.
         let mut longest = path.to_path_buf();
         longest.set_file_name(format!(".{:08x}/s", 0));
-        SocketAddr::from_pathname(path).map_err(|_| Error::InvalidName)?;
-        SocketAddr::from_pathname(&longest).map_err(|_| Error::InvalidName)?;
+        for checked in [path, longest.as_path()] {
+            if SocketAddr::from_pathname(checked).is_err() {
+                return Err(too_long_or_invalid(checked));
+            }
+        }
         Ok(Self {
             path: path.to_path_buf(),
         })
+    }
+}
+
+/// The error for a path `SocketAddr` refused: its length when that is why, else an invalid name (an interior NUL).
+#[cfg(unix)]
+fn too_long_or_invalid(path: &Path) -> Error {
+    use std::os::unix::ffi::OsStrExt;
+
+    // `sun_path` must also hold the terminating NUL.
+    let limit = core::mem::size_of::<libc::sockaddr_un>()
+        - core::mem::offset_of!(libc::sockaddr_un, sun_path)
+        - 1;
+    let length = path.as_os_str().as_bytes().len();
+    if length > limit {
+        Error::PathTooLong { length, limit }
+    } else {
+        Error::InvalidName
     }
 }
 

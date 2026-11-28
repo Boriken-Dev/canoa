@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `Error::PathTooLong { length, limit }`: a Unix socket path over `sun_path` is no longer reported as `InvalidName`; the error names the path's byte length and the limit. `PipeName::at` and `named_in` return it; callers matching `InvalidName` for that case match this instead.
+
 - **Builders and settings.** `Listener::builder()` and `Stream::builder()` set a bind or a connection up by the
   setting's name (`remote_clients`, `security_descriptor`, `first_instance`, `max_instances`, `buffer_size`, `socket_mode`,
   `socket_group`, `shared_directory`, `remove_stale`, `backlog`, `timeout`, `impersonation`, `read_timeout`,

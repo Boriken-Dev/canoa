@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-hub at 40196b12573f062cda1d6d3995d6afb905fe7ea9, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-hub at 171e08ec92af4044377bcae77e9fb6aa391ca499, with what it inherits written out.
 [package]
 name = "coqui-acp-hub"
 description = "One live Agent Client Protocol session served to any number of attached clients: attach, replay, queued prompts and shared permission requests, with no I/O of its own"

@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-secrets at 40196b12573f062cda1d6d3995d6afb905fe7ea9, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-secrets at 171e08ec92af4044377bcae77e9fb6aa391ca499, with what it inherits written out.
 [package]
 name = "coqui-acp-secrets"
 description = "The host side of secret prompts for an Agent Client Protocol agent: a handle store, the MCP tools that request, use and show a secret, the person's approval of every use, and output scrubbing"

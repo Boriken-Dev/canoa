@@ -107,6 +107,16 @@ String currentOs()                                     // package:coqui_aos/io.d
 
 The core joins a root and a name with `/` (`joinPath`). `treeDigest` checks every entry with `metadata` before it reads or descends, and refuses a listed name that is empty, `.`, `..` or holds `/`, `\` or NUL, and a name that is not Unicode (`non-utf8-name`). `IoFileSystem.read` and `list` open through links: a link swapped in between `metadata` and `read` is followed, so read only trees no one else can write.
 
+## A project's context files (`contextFiles`)
+
+```dart
+Future<ContextFiles> contextFiles(FileSystem fs, {String? root, required String cwd, String? agentsDir,
+    String? agentsContext, String separator = ':', List<String> native = const [], List<String> delivered = const []})
+class ContextFiles { List<String> files, skipped, ignored, levels }
+```
+
+The specification's *Project context files*: `AGENTS.md` and `AGENTS.*.md` (the value of `AGENTS_CONTEXT`) in each level's directory and in each `AGENTS_DIR` directory inside it (`.agents` by default), from `root` down to `cwd`, local files last. Paths are absolute and written with `/`; the two variables' values are passed in. `native` is the paths, relative to a level, that the harness loads itself (`skipped`); `delivered` the levels already received. An invalid entry is in `ignored`.
+
 ## What an overlay's files contribute
 
 ```dart

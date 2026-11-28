@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Built against guatiao 1cf0f67f, coqui-transport-pipe 08f0e4d2 (a too-long pipe path is `Error::PathTooLong`, refused as an endpoint like `InvalidName`) and coqui-transport-web 51ec0f12.
+
 ### Fixed
 
 - The WebSocket provider runs each upgrade on a thread of its own, at most `max_handshakes` at once (default 64, a setting). A peer that connected and said nothing held the listener's only thread for up to `listen.limits.handshake`, delaying every other peer and a stop; closing the listener now abandons upgrades under way. The pipe provider has no such step: it takes a stream and starts its channel at once.

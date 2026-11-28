@@ -11,8 +11,8 @@ package and is self-contained. Development documentation lives with the source a
 | `channel` | nothing | `Stream: coqui_transport::Split`, with `ReadHalf` and `WriteHalf`, so `StreamChannel::start` runs on a stream | off |
 
 MSRV Rust 1.89. A default build depends on `coqui-builder` (by git revision, with its `derive` feature: the settings types,
-their builders and `NonDefault`), `coqui-peer` (by git revision, `984db3d`), `coqui-transport` (by git
-revision, `1283116`, no features), `tracing`, on Windows `windows-sys`, and on Unix `socket2` and `libc`. Version
+their builders and `NonDefault`), `coqui-peer` (by git revision, `be72492`), `coqui-transport` (by git
+revision, `2601da5`, no features), `tracing`, on Windows `windows-sys`, and on Unix `socket2` and `libc`. Version
 `0.0.0-alpha.0`, unreleased: depend on a git revision, and name the same `coqui-builder`, `coqui-peer` and `coqui-transport`
 revisions if you use them directly. This is a transport of `coqui-peer` and of `coqui-transport`, not a method: it
 proves no key, and a method runs over it.
@@ -51,7 +51,7 @@ impl PipeName {
 `name` is one or more of `A-Z a-z 0-9 . _ -` and does not start with a dot. `at` on Windows takes a `NAME`
 that may group with `\`, without `/`, a control character, a `.` or `..` part, or a part ending in a dot or a
 space (which Win32 would drop, giving one pipe two names), and a `HOST` that is `.` or holds only
-`A-Z a-z 0-9 . - : _ [ ] %`; anything else is `Error::InvalidName`. `at` on Unix refuses an empty path, one with no file name, or one too long for `sun_path`, counting
+`A-Z a-z 0-9 . - : _ [ ] %`; anything else is `Error::InvalidName`. `at` on Unix refuses an empty path or one with no file name (`InvalidName`), or one too long for `sun_path` (`Error::PathTooLong { length, limit }`, the bytes of the path that did not fit and the most a socket path holds), counting
 the 11 bytes a bind's private directory adds. On Windows a name is held in ASCII lower case, since the system
 compares them without case: two cases are one equal value.
 
@@ -305,7 +305,7 @@ to `start`: the channel does not expose it.
 
 ## Errors
 
-`Error` (non-exhaustive): `InvalidName`, `Unsupported`, `NoRuntimeDirectory`, `InvalidOptions`, `NameTaken`,
+`Error` (non-exhaustive): `InvalidName`, `PathTooLong { length, limit }`, `Unsupported`, `NoRuntimeDirectory`, `InvalidOptions`, `NameTaken`,
 `NotASocket`, `SharedDirectory`, `ForeignDirectory`, `InvalidDescriptor`, `UnknownGroup`, `GroupDenied`, `NotListening`, `AccessDenied`, `TimedOut`,
 `Io(io::Error)`. `Display` is one lowercase clause and quotes nothing. `From<io::Error>`, and `From<Error> for io::Error`
 with a matching kind.

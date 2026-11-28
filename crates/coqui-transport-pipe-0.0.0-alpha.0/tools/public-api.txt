@@ -63,6 +63,9 @@ pub coqui_transport_pipe::Error::NameTaken
 pub coqui_transport_pipe::Error::NoRuntimeDirectory
 pub coqui_transport_pipe::Error::NotASocket
 pub coqui_transport_pipe::Error::NotListening
+pub coqui_transport_pipe::Error::PathTooLong
+pub coqui_transport_pipe::Error::PathTooLong::length: usize
+pub coqui_transport_pipe::Error::PathTooLong::limit: usize
 pub coqui_transport_pipe::Error::SharedDirectory
 pub coqui_transport_pipe::Error::TimedOut
 pub coqui_transport_pipe::Error::UnknownGroup

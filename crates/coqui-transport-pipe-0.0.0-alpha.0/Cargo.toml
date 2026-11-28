@@ -1,4 +1,4 @@
-# coqui-transport-pipe/. at 76d97671d87372be5d29263a98198a08fea5eaed, with what it inherits written out.
+# coqui-transport-pipe/. at 08f0e4d27cb714557a926f57e67bfff8dee18c5f, with what it inherits written out.
 test = [{ name = "asynch", required-features = ["tokio"] }, { name = "channel", required-features = ["channel"] }]
 [package]
 name = "coqui-transport-pipe"
@@ -30,7 +30,7 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive"]
 [dependencies.coqui-peer]
 git = "https://github.com/Boriken-Dev/coqui-peer"
-rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
+rev = "be72492c89a5a657deb8027aee3c6db27ac14b2f"
 [dependencies.tracing]
 version = "0.1"
 default-features = false
@@ -73,10 +73,10 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive", "serde"]
 [dev-dependencies.coqui-peer-noise]
 git = "https://github.com/Boriken-Dev/coqui-peer-noise"
-rev = "3a5b30689780a6e6291af565ff6abbaae515973c"
+rev = "ed93715e900b68b040db6e8f8dcdf1a60a38b182"
 [dev-dependencies.coqui-peer-tls]
 git = "https://github.com/Boriken-Dev/coqui-peer-tls"
-rev = "7cbd7ee208595c055d74eed79a4dafcd0175883d"
+rev = "124f700c3d5ce8c335e838aacd2d1d1b42947214"
 features = ["generate", "tokio"]
 [dev-dependencies.proptest]
 version = "1"

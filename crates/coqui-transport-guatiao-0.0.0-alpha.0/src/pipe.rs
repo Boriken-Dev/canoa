@@ -54,7 +54,10 @@ fn name(endpoint: &str) -> Result<PipeName, DriverError> {
 
 fn refusal(error: &Error) -> DriverError {
     let kind = match error {
-        Error::InvalidName | Error::InvalidOptions | Error::NoRuntimeDirectory => Refusal::Endpoint,
+        Error::InvalidName
+        | Error::PathTooLong { .. }
+        | Error::InvalidOptions
+        | Error::NoRuntimeDirectory => Refusal::Endpoint,
         Error::Unsupported => Refusal::Unsupported,
         Error::NameTaken
         | Error::NotListening

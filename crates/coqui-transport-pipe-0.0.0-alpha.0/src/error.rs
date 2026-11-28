@@ -10,6 +10,17 @@ use std::io;
 pub enum Error {
     /// The name is not one this platform can use. A caller's mistake.
     InvalidName,
+    /// A Unix socket path is longer than `sun_path` holds. A caller's mistake, apart from
+    /// [`InvalidName`](Self::InvalidName) so the cause is plain.
+    ///
+    /// `length` is the bytes of the path that did not fit: the path itself, or, when it fits but a bind's private directory
+    /// (see `PipeName::at`) would not, that longer form. `limit` is the most bytes this platform's `sun_path` holds.
+    PathTooLong {
+        /// The bytes of the path that did not fit.
+        length: usize,
+        /// The most bytes a socket path may have on this platform.
+        limit: usize,
+    },
     /// This platform has no such thing: a Unix path on Windows, or a pipe on another host on Unix.
     Unsupported,
     /// Neither `XDG_RUNTIME_DIR` nor `TMPDIR` names an absolute directory.
@@ -46,8 +57,15 @@ pub enum Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Self::PathTooLong { length, limit } = self {
+            return write!(
+                f,
+                "the socket path is {length} bytes, over the limit of {limit}"
+            );
+        }
         f.write_str(match self {
             Self::InvalidName => "the name is not valid on this platform",
+            Self::PathTooLong { .. } => unreachable!("written above"),
             Self::Unsupported => "this platform has no such name",
             Self::NoRuntimeDirectory => "no runtime directory is set",
             Self::InvalidOptions => "a setting is not meaningful",
@@ -86,6 +104,7 @@ impl From<Error> for io::Error {
         let kind = match &error {
             Error::Io(inner) => inner.kind(),
             Error::InvalidName
+            | Error::PathTooLong { .. }
             | Error::InvalidOptions
             | Error::InvalidDescriptor
             | Error::UnknownGroup => io::ErrorKind::InvalidInput,

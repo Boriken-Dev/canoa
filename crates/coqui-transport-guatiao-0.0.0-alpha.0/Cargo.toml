@@ -1,4 +1,4 @@
-# coqui-transport-guatiao/. at 14dd18900a2d623803bf76189821b16ad7bda3cc, with what it inherits written out.
+# coqui-transport-guatiao/. at 31c488781163816f65235e01531bb99b7737bfd7, with what it inherits written out.
 example = [{ name = "pipe_library", crate-type = ["cdylib"], required-features = ["pipe"] }]
 test = [{ name = "macro", required-features = ["contract"] }, { name = "pipe", required-features = ["pipe", "contract"] }, { name = "library", required-features = ["pipe", "contract"] }, { name = "websocket", required-features = ["websocket", "contract"] }]
 [package]
@@ -28,14 +28,14 @@ websocket = ["dep:coqui-transport-web", "coqui-transport-web/websocket", "dep:ur
 [dependencies]
 [dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 features = ["provider"]
 [dependencies.guatiao-channel]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 [dependencies.guatiao-builder]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 [dependencies.coqui-builder]
 git = "https://github.com/Boriken-Dev/coqui-builder"
 rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
@@ -46,12 +46,12 @@ rev = "2601da58de9cac8f635060e4746864e9b238c6c5"
 default-features = false
 [dependencies.coqui-transport-pipe]
 git = "https://github.com/Boriken-Dev/coqui-transport-pipe"
-rev = "76d97671d87372be5d29263a98198a08fea5eaed"
+rev = "08f0e4d27cb714557a926f57e67bfff8dee18c5f"
 features = ["channel"]
 optional = true
 [dependencies.coqui-transport-web]
 git = "https://github.com/Boriken-Dev/coqui-transport-web"
-rev = "c24a35d19df3867e222cb458bce2ad782d98c1eb"
+rev = "51ec0f127dbba5100ea709d36724e49c4829c351"
 optional = true
 [dependencies.url]
 version = "2.5"
@@ -61,11 +61,11 @@ serde_json = "1"
 tempfile = "3"
 [dev-dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 features = ["provider", "load"]
 [dev-dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 features = ["json"]
 [lints]
 [lints.rust]

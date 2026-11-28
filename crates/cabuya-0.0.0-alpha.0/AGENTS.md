@@ -1,4 +1,4 @@
-# `cabuya` — API header
+# `cabuya` â€” API header
 
 Header-file-style reference for the `cabuya` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/cabuya>.
 
@@ -6,6 +6,7 @@ Header-file-style reference for the `cabuya` crate: every public item with its s
 | --- | --- | --- |
 | `sealed` | `auth` and `pairing`; `coqui-peer`, `coqui-peer-noise` and `coqui-peer-webcrypto` (each with `pin`), `coqui-builder` | no |
 | `forward` | `forward`; `socket2`, `coqui-net-acl` | no |
+| `cli` | the `cabuya` program (`sealed`, `forward`, `clap`); no library item | no |
 
 MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published. A default build depends on `coqui-transport` (by revision, no default features; its `Channel` and `Failure` are what every link and stream is generic over) and `serde_json`. Nothing is re-exported at the root but `Error`; the public modules are `mux`, `link` and `peers`, with `auth` and `pairing` under `sealed` and `forward` under `forward`. No `unsafe` code.
 
@@ -52,7 +53,7 @@ pub fn Stream::finished_by_peer(&self) -> bool                            // the
 - A long message is cut into frames of `max_frame`, so another stream's message passes between its parts. Only the first part can be taken back: past that, a link that will not take the rest is lost.
 - A stream delivers in order or fails, and never skips. Nothing is ordered across streams. Nothing replays: to survive a drop, reopen with your own cursor in `metadata`. Either side opens streams, whoever connected.
 - `Limits::heartbeat` is off by default, and a zero interval or zero misses turns it off too. It loses a link only when nothing at all is heard, so a stream silent for hours is fine. `link_state` says when a link went; what that means is the host's to decide.
-- `Limits::window` is the credit both sides assume at a stream's start (not negotiated), so keep it the same on both. A receiver that wants more on one stream grants it with `Stream::grant`: credit past what was read is already accepted by every sender (Rust, Dart, JavaScript, `coqui-agentic-peer`), so no peer needs to change. `max_window` bounds it (below `window` means `window`, so nothing grows by default). `auto_window` (off) grows a stream by itself: while data arrives it sends one `ping` at a time, and a stream that received over two thirds of its window before the `pong` doubles, up to `max_window`; it never shrinks. A grown stream can hold `max_window` unread, so set it to what each stream may cost in memory. Dart and JavaScript have `grant` and `maxWindow` (`stream.window`), not `auto_window`.
+- `Limits::window` is the credit both sides assume at a stream's start (not negotiated), so keep it the same on both. A receiver that wants more on one stream grants it with `Stream::grant`: credit past what was read is already accepted by every sender (Rust, Dart, JavaScript, `agentic-peer`), so no peer needs to change. `max_window` bounds it (below `window` means `window`, so nothing grows by default). `auto_window` (off) grows a stream by itself: while data arrives it sends one `ping` at a time, and a stream that received over two thirds of its window before the `pong` doubles, up to `max_window`; it never shrinks. A grown stream can hold `max_window` unread, so set it to what each stream may cost in memory. Dart and JavaScript have `grant` and `maxWindow` (`stream.window`), not `auto_window`.
 - What one stream does wrong ends that stream. What no peer may send ends the link.
 - A channel whose `receive` answers `Failure::Permission` (what `Sealed::with_check` does) says its peer may no longer be on the link: the mux closes every stream still open with `CloseReason::Revoked` before the link is lost, so the peer reads `StreamEnd::Revoked` and not a lost link. The owner closes the channel afterwards.
 - A proof admits a peer to the link and grants no protocol. Deciding who may open what is the caller's: `accept`, then serve, or `close_with(CloseReason::Refused, why)`. `metadata` is kept nowhere, and is not a credential of the link's.
@@ -71,6 +72,7 @@ pub struct Options { pub limits: Limits, pub recheck: Duration }  // non_exhaust
 pub type Admission = Box<dyn Fn(&PeerRecord, &[u8]) -> Result<(), &'static str> + Send + Sync>;   // asked at open and while running
 Services::with_admission(self, protocol: &str, handler: Handler, admission: Admission) -> Self
 pub fn serve_with<'c, C: Channel>(channel: &'c C, side: Side, options: Options, first: Option<Vec<u8>>, peer: &str, host: &Host<'_>, opener: impl FnOnce(&Mux<'c, C>) + Send)
+pub fn serve_with_terminal<'c, C: Channel>(channel: &'c C, side: Side, options: Options, first: Option<Vec<u8>>, peer: &str, host: &Host<'_>, opener: impl FnOnce(&Mux<'c, C>) + Send, terminal: impl FnOnce())   // serve_with, and terminal() once when the mux is terminal, before the wait for running handlers
 pub struct Host<'a> { pub store: &'a dyn PeerStore, pub services: &'a Services, pub events: &'a dyn Events }
 pub fn serve<C: Channel>(channel: &C, side: Side, options: Options, first: Option<Vec<u8>>, peer: &str, host: &Host<'_>)
 pub struct Capabilities { pub instance: String, pub offers: Vec<String>, pub window: Option<u32>, pub max_frame: Option<usize> }  // non_exhaustive; window and max_frame are the other side's `Limits`, None from an older peer: a host reports a difference in `window`
@@ -204,6 +206,24 @@ A stream ended any way but in order resets the connection, so a cut-short transf
 
 Gotchas: whoever can connect to a `listen`er gets what this peer was granted, so bind it to loopback. `Limits::max_message` has to allow 16 KiB. A name is resolved by the side connecting, each time, so a grant on a name trusts that name's DNS.
 
+## The `cabuya` program (feature `cli`)
+
+`cargo install --git https://github.com/Boriken-Dev/cabuya --features cli`; the binary adds no library item. Global options: `--home DIR` (else `CABUYA_HOME`, else `%APPDATA%\cabuya` on Windows, `$XDG_CONFIG_HOME/cabuya` or `~/.config/cabuya`), `--method noise|webcrypto` (only for an identity that does not exist yet), `--grants FILE` (for `serve`, `pair`, `grant` and `revoke`; default `grants.json` in the folder). The folder holds `identity`, `served/` and `dialed/` (coqui-peer trust stores), `grants.json` (`FilePeers`) and `hosts.json`.
+
+```text
+cabuya id                                           # prints "<peer id> <method>"; creates the identity
+cabuya pair [--listen ADDR=0.0.0.0:7710] [--grant TOKEN]...    # prints listening/peer/pin lines, pairs one joiner, "paired <id>", exits 0
+cabuya pair --join ADDR --name NAME [--pin PIN] [--at SERVE_ADDR]   # no --pin: one line of stdin; prints "paired NAME <host id>", "this-peer <id>"
+cabuya serve [--listen ADDR=0.0.0.0:7711] [--pair [--grant TOKEN]...]   # runs until stopped; events and refusals on stderr
+cabuya grant PEER TOKEN...      # TOKEN: a protocol, or tcp/1:HOST:PORT (a Rule); the latter also grants tcp/1
+cabuya revoke PEER [TOKEN...]   # no TOKEN: drops the peer's record and its key
+cabuya connect HOST (TARGET | --stream PROTOCOL [--metadata TEXT])   # one stream on stdin/stdout; an ssh ProxyCommand
+cabuya forward HOST --local [ADDR:]PORT=TARGET ...                   # prints "listening ADDR TARGET"; ends when the link does
+cabuya hosts | cabuya forget NAME
+```
+
+Gotchas: a link is `u32` little-endian length-prefixed messages over TCP, proved with the pinned key of the named host (`dialed/`), so a host that presents another key is refused. `serve` re-reads the grants file on every question and re-checks running streams each second, and a revoked key ends them (`Revoked`). A PIN lasts ten minutes and one attempt. Exit codes: 0 done, 2 any failure with its reason on stderr. One identity has one method, so a host of the other method needs another `--home`. The program does not reconnect.
+
 ## Errors
 
 `cabuya::Error` (`#[non_exhaustive]`): `Channel(Failure)`, `Proof(String)`, `Identity(String)` and, with `sealed`, `OtherMethod { peer: Method, ours: Method }` (a responder seeing the other method's first message: report it as a method mismatch, never as a key to accept). A message never quotes a key file.
@@ -213,4 +233,4 @@ Gotchas: whoever can connect to a `listen`er gets what this peer was granted, so
 - A frame adds 5 bytes, so the link's own limit has to be at least `max_frame + 5`. `Mux` blocks a thread: on Tokio, run it on `spawn_blocking`.
 - A browser takes a self-signed certificate only for WebTransport with `serverCertificateHashes`.
 - A key file's permissions are set only on Unix; elsewhere it takes its directory's. Nothing checks them on reading.
-- A link of `cabuya` and one of `coqui-agentic-peer` talk to each other: the protocol names (`link/1`, `tcp/1`) and every frame byte are the same.
+- A link of `cabuya` and one of `agentic-peer` talk to each other: the protocol names (`link/1`, `tcp/1`) and every frame byte are the same.

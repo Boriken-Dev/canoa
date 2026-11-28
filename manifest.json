@@ -4374,7 +4374,7 @@
         "benchmarks": 4,
         "doc": 307,
         "example": 2390,
-        "test": 2356
+        "test": 2358
       },
       "deletedFlaggedFiles": [],
       "directories": [
@@ -4394,35 +4394,35 @@
         "mode": "checkout",
         "package": "coqui_acp",
         "path": "bindings/dart/coqui_acp",
-        "ref": "0244aca97b7d779fc00bc0f8103e4f73fcc25640",
+        "ref": "171e08ec92af4044377bcae77e9fb6aa391ca499",
         "url": "https://github.com/Boriken-Dev/coqui-acp.git"
       },
       {
         "mode": "checkout",
         "package": "coqui_acp_chat",
         "path": "bindings/dart/coqui_acp_chat",
-        "ref": "0244aca97b7d779fc00bc0f8103e4f73fcc25640",
+        "ref": "171e08ec92af4044377bcae77e9fb6aa391ca499",
         "url": "https://github.com/Boriken-Dev/coqui-acp.git"
       },
       {
         "mode": "checkout",
         "package": "coqui_acp_chat_ui",
         "path": "bindings/dart/coqui_acp_chat_ui",
-        "ref": "0244aca97b7d779fc00bc0f8103e4f73fcc25640",
+        "ref": "171e08ec92af4044377bcae77e9fb6aa391ca499",
         "url": "https://github.com/Boriken-Dev/coqui-acp.git"
       },
       {
         "mode": "checkout",
         "package": "coqui_aos",
         "path": "dart",
-        "ref": "169125d3bfcb1b2cb1c3b33b297e373f2930c54a",
+        "ref": "7a52139a057713a7f74f0cfb0c02627fa6fc7b17",
         "url": "https://github.com/Boriken-Dev/coqui-aos.git"
       },
       {
         "mode": "checkout",
         "package": "coqui_transport_web",
         "path": "bindings/dart/coqui_transport_web",
-        "ref": "1e19611126472e8dc47c0e640bae2b86a7e6d713",
+        "ref": "51ec0f127dbba5100ea709d36724e49c4829c351",
         "url": "https://github.com/Boriken-Dev/coqui-transport-web.git"
       },
       {
@@ -4550,7 +4550,7 @@
       "libxi-dev"
     ]
   },
-  "sourceCommit": "bfcdd00b30dac2daf14809c6291c00a87d12fe2e",
+  "sourceCommit": "2a02e95a50510481757a46686f4e217bd3d9302e",
   "trees": {
     "office-js": {
       "commit": "498e88261bc578243d40dd79083953d86f84e7f6",
@@ -8425,7 +8425,7 @@
       "crates": 696,
       "gitSources": 23,
       "lock": "Cargo.lock",
-      "lockSha256": "89c5c22b29c448b7e57950b155ed8c56e76d4c15b83e4f7240c327f112fc70a6"
+      "lockSha256": "4a955405797185b9d3a11c2fdc15bbcb3d8fe5804d18aed76218e40c7eaaf540"
     },
     "crates-wasm-bindgen-cli": {
       "crates": 254,
@@ -8437,7 +8437,7 @@
       "crates": 66,
       "gitSources": 3,
       "lock": "app/web_noise/Cargo.lock",
-      "lockSha256": "f918539af3c41217231cc041a8bfe448c150f3c8f1bd219029cba73500d4e23b"
+      "lockSha256": "d92c33bde1a56bad1dbb54d3464e884556952cac7e8c363aa1490242199dab3a"
     },
     "crates-web_whisper": {
       "crates": 164,

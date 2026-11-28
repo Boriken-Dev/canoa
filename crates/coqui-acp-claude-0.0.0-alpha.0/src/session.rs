@@ -15,7 +15,9 @@ use std::thread;
 use coqui_acp_harness::event::{Content, Event, Severity, context_block};
 use coqui_acp_harness::lines::{self, Tail};
 use coqui_acp_harness::stream::Waiting;
-use coqui_acp_harness::{LineHook, Process, Spawn, Step, Stream, exit_text, line_writer, version};
+use coqui_acp_harness::{
+    LineHook, Process, Spawn, Step, Stream, WarmPolicy, exit_text, line_writer, version,
+};
 use serde_json::{Value, json};
 
 use crate::launch::ClaudeLaunch;
@@ -59,6 +61,9 @@ pub struct ClaudeSettings {
     pub version_bytes: u64,
     /// The host's check of each line Claude Code writes, before anything reads it; `false` ends Claude Code.
     pub on_line: Option<LineHook>,
+    /// How many Claude Code processes to keep started ahead of `session/new`, and for how long. Default none. A process
+    /// taken from those keeps the settings and the spawner of the agent that started it.
+    pub warm: WarmPolicy,
 }
 
 impl fmt::Debug for ClaudeSettings {
@@ -80,6 +85,7 @@ impl fmt::Debug for ClaudeSettings {
             .field("version_wait", &self.version_wait)
             .field("version_bytes", &self.version_bytes)
             .field("on_line", &self.on_line.is_some())
+            .field("warm", &self.warm)
             .finish()
     }
 }
@@ -105,6 +111,7 @@ impl ClaudeSettings {
             version_wait: Duration::from_secs(10),
             version_bytes: 4096,
             on_line: None,
+            warm: WarmPolicy::new(0, Duration::from_secs(300)),
         }
     }
 }
@@ -364,7 +371,10 @@ impl ClaudeSession {
             let reading = Arc::clone(&parser);
             let ending = Arc::clone(&parser);
             let watching = Arc::clone(&modes);
-            let expected = launch.session_id().map(str::to_string);
+            let mut expected = launch.session_id().map(str::to_string);
+            // Set by a `/clear` (`conversation_reset`), which gives the same process a new session id: the next id reported is
+            // the session's, and any other change of id is still another session's.
+            let mut cleared = false;
             stream
                 .read(
                     spawned.stdout,
@@ -380,15 +390,24 @@ impl ClaudeSession {
                             line.0 = false;
                             core::mem::take(&mut line.1)
                         };
+                        if value.get("type").and_then(Value::as_str) == Some("conversation_reset")
+                            && value.get("trigger").and_then(Value::as_str) == Some("clear")
+                        {
+                            cleared = true;
+                        }
                         let mut told = Vec::with_capacity(events.len());
                         for event in events {
                             let wrong = match (&event, &expected) {
-                                (Event::SessionId(reported), Some(expected))
-                                    if reported != expected =>
-                                {
-                                    Some(format!(
-                                        "Claude Code reported session {reported}, not the one requested"
-                                    ))
+                                (Event::SessionId(reported), Some(known)) if reported != known => {
+                                    if cleared {
+                                        cleared = false;
+                                        expected = Some(reported.clone());
+                                        None
+                                    } else {
+                                        Some(format!(
+                                            "Claude Code reported session {reported}, not the one requested"
+                                        ))
+                                    }
                                 }
                                 _ => None,
                             };
@@ -458,12 +477,20 @@ impl ClaudeSession {
         Ok(session)
     }
 
-    /// The session's id: the one asked for, or the one Claude Code chose, once it has said it.
+    /// The session's id: the one Claude Code last reported (a `/clear` gives the process a new one), else the one asked for.
     #[must_use]
     pub fn id(&self) -> Option<String> {
-        self.id
-            .clone()
-            .or_else(|| locked(&self.parser).session().map(str::to_string))
+        locked(&self.parser)
+            .session()
+            .map(str::to_string)
+            .or_else(|| self.id.clone())
+    }
+
+    /// Whether Claude Code is still running and the session not closed: a warm process that is not is never handed out.
+    pub(crate) fn alive(&self) -> bool {
+        !self.closed.load(Ordering::SeqCst)
+            && self.ended.get().is_none()
+            && self.process.try_wait().is_ok_and(|exit| exit.is_none())
     }
 
     /// Claude Code's version, from its answer to `initialize`.
