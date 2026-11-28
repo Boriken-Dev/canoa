@@ -68,6 +68,27 @@ pub fn host_binary() -> &'static str {
     env!("CARGO_BIN_EXE_canoa")
 }
 
+/// The host program as a command whose agents' login folders (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`,
+/// `GROK_HOME`, `HOME`, `USERPROFILE`) are an empty folder of this test run's own, so a test never reads the person's login; a
+/// test that needs a login sets the variable after this.
+pub fn host_command() -> Command {
+    let logins = std::env::temp_dir().join(format!("ct-logins-{}", std::process::id()));
+    let mut command = Command::new(host_binary());
+    for name in [
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "PI_CODING_AGENT_DIR",
+        "GROK_HOME",
+        "HOME",
+        "USERPROFILE",
+    ] {
+        let folder = logins.join(name);
+        std::fs::create_dir_all(&folder).expect("a folder for logins");
+        command.env(name, folder);
+    }
+    command
+}
+
 /// A fixture `cargo test` built into `target/<profile>/examples`.
 pub fn example(name: &str, library: bool) -> PathBuf {
     let tests = std::env::current_exe().expect("the test knows where it is");
@@ -126,11 +147,12 @@ impl Scratch {
     pub fn new() -> Self {
         memory_credentials();
         static NEXT: AtomicU64 = AtomicU64::new(0);
+        // A unix socket path holds about 100 bytes and tests put `run/entries/<name>.sock` under this folder, so its name stays short.
         let stamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
+            .map_or(0, |since| since.as_micros());
         let dir = std::env::temp_dir().join(format!(
-            "canoa-test-{}-{stamp}-{}",
+            "ct{}-{stamp:x}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
