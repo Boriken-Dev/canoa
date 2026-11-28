@@ -370,7 +370,9 @@ fn a_link_is_followed_wherever_it_goes() {
     fs::write(place.elsewhere.join("secret.txt"), "there").expect("file");
     let (out, dir_out) = (place.work.join("out.txt"), place.work.join("outdir"));
     if !link(&place.elsewhere.join("secret.txt"), &out) || !link(&place.elsewhere, &dir_out) {
-        eprintln!("skipped: this account cannot make links here (Windows needs Developer Mode or elevation)");
+        eprintln!(
+            "skipped: this account cannot make links here (Windows needs Developer Mode or elevation)"
+        );
         let _ = fs::remove_dir_all(&place.tmp);
         return;
     }

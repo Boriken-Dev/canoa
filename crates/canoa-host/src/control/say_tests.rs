@@ -704,7 +704,7 @@ fn only_an_account_offer_loses_the_keys_the_host_wrote_and_a_table_the_person_wr
 }
 
 /// A Store whose fetches go through `transport`, as a host that reads documents for the voice providers does.
-fn stores_over(
+pub(super) fn stores_over(
     root: &Path,
     transport: std::sync::Arc<dyn crate::store::tools::Transport>,
 ) -> Stores {
@@ -720,9 +720,9 @@ fn stores_over(
 
 /// What OpenAI's API description answers (trimmed), counting the requests, or what the network says when it cannot.
 #[derive(Debug)]
-struct Description {
-    answer: Result<&'static str, &'static str>,
-    asked: std::sync::Arc<core::sync::atomic::AtomicUsize>,
+pub(super) struct Description {
+    pub(super) answer: Result<&'static str, &'static str>,
+    pub(super) asked: std::sync::Arc<core::sync::atomic::AtomicUsize>,
 }
 
 impl crate::store::tools::Transport for Description {

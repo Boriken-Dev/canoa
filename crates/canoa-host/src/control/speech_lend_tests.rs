@@ -1181,7 +1181,15 @@ fn ask_control(control: &super::Control, method: &str, params: Value) -> Value {
 #[test]
 fn openai_key_account_lists_openai_voices_while_moved_or_other_standard_offers_none() {
     let home = home("say-openai", &ACCOUNTS, Some("sk-secret-key"), "");
-    let control = say_control(&home);
+    let control = say_control(&home).with_stores(super::say_tests::stores_over(
+        &home.root,
+        Arc::new(super::say_tests::Description {
+            answer: Ok(include_str!(
+                "../../../../extensions/canoa-openai/tests/fixtures/openapi.json"
+            )),
+            asked: Arc::default(),
+        }),
+    ));
     let listed = ask_control(&control, "speech/voices", json!({}));
     let providers = listed["result"]["providers"].as_array().expect("providers");
     let offered = providers
