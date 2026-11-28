@@ -31,12 +31,6 @@ abstract final class Brand {
   /// The prefix of the environment variables the app and its host read, without the underscore.
   static const String envPrefix = String.fromEnvironment('BRAND_ENV_PREFIX', defaultValue: 'CANOA');
 
-  /// The name of the configuration file (`canoa.cfg`), which also names a project's profile file.
-  static const String configFile = String.fromEnvironment('BRAND_CONFIG_FILE', defaultValue: 'canoa.cfg');
-
-  /// The folder a project and the user's home keep this program's files in (`.canoa`).
-  static const String homeDir = String.fromEnvironment('BRAND_HOME_DIR', defaultValue: '.canoa');
-
   /// The accent the build's icons are drawn in, `#RRGGBB`.
   static const String accentHex = String.fromEnvironment('BRAND_ACCENT', defaultValue: '#9A5B1E');
 
