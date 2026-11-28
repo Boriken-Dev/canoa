@@ -303,7 +303,7 @@ class ExtensionCatalogs extends ChangeNotifier {
     if (confirmed != true || !context.mounted) return;
     final navigator = Navigator.of(context, rootNavigator: true);
     unawaited(
-      showDialog<void>(
+      showSelectableDialog<void>(
         context: context,
         barrierDismissible: false,
         builder: (_) => _Working(title: 'Installing ${extension.name}'),

@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../config/catalog_specs.dart';
 import '../desktop/control_client.dart' show ControlFailed;
 import '../forms/schema_fields.dart';
+import '../selectable.dart';
 import '../l10n/app_text.dart';
 import '../settings/off_switch.dart';
 import '../settings/settings_row.dart';
@@ -160,7 +161,7 @@ class _CatalogSourcesSectionState extends State<CatalogSourcesSection> {
     },
   );
 
-  Future<void> _edit(BuildContext context, CatalogType type, CatalogRow? row) => showDialog<void>(
+  Future<void> _edit(BuildContext context, CatalogType type, CatalogRow? row) => showSelectableDialog<void>(
     context: context,
     builder: (dialog) => CatalogEntryDialog(sources: widget.sources, type: type, replacing: row),
   );
