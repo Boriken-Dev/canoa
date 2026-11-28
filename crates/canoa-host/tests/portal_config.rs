@@ -144,3 +144,34 @@ fn a_portal_table_in_the_accounts_own_file_is_ignored_with_a_word() {
         String::from_utf8_lossy(&said.stderr)
     );
 }
+
+#[test]
+fn get_refuses_a_table_the_portal_would_not_start_with() {
+    let dir = Folder::new("get-refused");
+    let file = dir.0.join("canoa.cfg");
+    std::fs::write(
+        &file,
+        "[portal]
+idle_seconds = 5
+[portal.instances]
+x = 1
+",
+    )
+    .unwrap();
+    let said = run(file.to_str().unwrap(), &dir.0, &["config", "get"]);
+    assert!(!said.status.success());
+    let stderr = String::from_utf8_lossy(&said.stderr);
+    assert!(stderr.contains("instances"), "{stderr}");
+    assert!(stderr.contains("would refuse to start"), "{stderr}");
+    // The key can still be removed.
+    let gone = run(
+        file.to_str().unwrap(),
+        &dir.0,
+        &["config", "unset", "instances"],
+    );
+    assert!(gone.status.success());
+    assert_eq!(
+        json(&run(file.to_str().unwrap(), &dir.0, &["config", "get"])),
+        serde_json::json!({"idle_seconds": 5})
+    );
+}

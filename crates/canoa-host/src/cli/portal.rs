@@ -242,6 +242,13 @@ fn portal_config(
     };
     match action {
         ConfigAction::Get { key } => {
+            // A table the portal would refuse to start with is not printed as if it were one it runs.
+            let settings = crate::portal::Settings::from_table(&merged).map_err(|why| {
+                Failed::usage(format!("[portal] {why}: the portal would refuse to start"))
+            })?;
+            settings
+                .check_helper()
+                .map_err(|why| Failed::usage(format!("{why}: the portal would refuse to start")))?;
             let mut here = serde_json::to_value(&merged).map_err(Failed::run)?;
             if let Some(key) = key {
                 for word in path_of(key)? {
@@ -461,7 +468,7 @@ fn portal_passkeys(
 
 pub(super) fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
     use crate::portal::{Portal, Systemd};
-    // `config` writes the table and reads it as it is, so it does not need it to be one the portal would run with.
+    // `config set` and `unset` change the table as it is, so they do not need it to be one the portal would run with.
     if let Some(PortalAction::Config { action }) = &args.action {
         return portal_config(args, action, front);
     }
