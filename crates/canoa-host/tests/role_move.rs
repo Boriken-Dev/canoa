@@ -23,7 +23,7 @@ use canoa_host::Link;
 use linked::{Hosted, ask, next, send};
 use serde_json::{Value, json};
 use sha2::Digest as _;
-use support::{Scratch, WAIT, cwd, example, host_binary, quoted};
+use support::{Scratch, WAIT, antigravity_entry, cwd, example, host_binary, quoted};
 
 const ASKED: &str = "Fix the failing build";
 const CONTINUATION: &str = "Carry on with what was asked.";
@@ -363,11 +363,12 @@ fn scenario(earlier_limit: bool) {
     std::fs::write(
         scratch.0.join("canoa.cfg"),
         format!(
-            "[secrets]\naccounts = \"file\"\n{}{}{}{}",
+            "[secrets]\naccounts = \"file\"\n{}{}{}{}{}",
             entry("Claude1", "claude", &claude, usage),
             entry("Claude2", "claude", &claude, usage),
             entry("Codex1", "codex", &codex, ""),
             entry("Codex2", "codex", &codex, ""),
+            antigravity_entry(&scratch.0, Path::new(&claude)),
         ),
     )
     .expect("canoa.cfg is written");
