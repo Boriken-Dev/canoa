@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:canoa/brand.dart';
 import 'package:canoa/theme/canoa_mark.dart';
 import 'package:canoa/theme/look.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 
 void main() {
   final file = jsonDecode(File('brand.json').readAsStringSync()) as Map<String, dynamic>;
