@@ -1584,7 +1584,7 @@ final class CanoaConfig {
     final viewers = {for (final MapEntry(:key, :value) in rawViewers.entries) '$key': value as String};
     final zoom = appearance['zoom'] ?? 1;
     if (zoom is! num || !zoom.isFinite || zoom < minZoom || zoom > maxZoom) {
-      throw FormatException('canoa.cfg: appearance.zoom must be a number from $minZoom to $maxZoom');
+      throw FormatException('${Brand.configFile}: appearance.zoom must be a number from $minZoom to $maxZoom');
     }
     final agents = <AgentCommand>[];
     final agentProfiles = <String, Profile>{};

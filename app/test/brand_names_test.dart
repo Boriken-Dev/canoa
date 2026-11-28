@@ -23,6 +23,8 @@ const _wire = [
   'canoa_config_io.dart', // a conditional import
   '{"canoa"', // the Office pane's messages
   'canoa.components', // a variable of the A2UI catalog
+  'canoaMultiView', 'canoaFlutterApp', 'canoaMainView', // the globals web/flutter_bootstrap.js sets for the app's windows
+  'canoa-window-', // the name of a browser window the app opens
 ];
 
 /// Whole literals that are an id, not a name: the default look, a rule's marker, the value a connection's kind takes.
