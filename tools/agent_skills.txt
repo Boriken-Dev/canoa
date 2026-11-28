@@ -1,0 +1,10 @@
+# Agent skills `python tools/dev.py setup --agents` copies into .claude/skills, and into the folder Codex reads.
+# One per line: GitHub owner/repository, branch, the skill's folder under skills/. The head of the branch is fetched;
+# nothing is pinned to a commit.
+flutter/agent-plugins main flutter-add-widget-test
+flutter/agent-plugins main flutter-add-integration-test
+flutter/agent-plugins main flutter-fix-layout-issues
+dart-lang/skills main dart-run-static-analysis
+dart-lang/skills main dart-fix-runtime-errors
+dart-lang/skills main dart-resolve-package-conflicts
+dart-lang/skills main dart-add-unit-test
