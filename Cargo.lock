@@ -1988,7 +1988,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-pool"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=6d9aee38c8d7caa5741a10f6b3ae34ecc81b7393#6d9aee38c8d7caa5741a10f6b3ae34ecc81b7393"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
 dependencies = [
  "coqui-acp-api",
  "coqui-acp-history",
