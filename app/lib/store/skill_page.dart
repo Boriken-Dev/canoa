@@ -31,12 +31,12 @@ class SkillStoreEntry extends StatelessWidget {
       key: const Key('skill-entry'),
       title: context.t('store.skill_entry'),
       children: [
-        if (description != null && description.trim().isNotEmpty) DetailField(label: 'Description', value: description.trim()),
-        DetailField(label: 'Source', value: source),
-        DetailField(label: 'Address', value: shown),
-        DetailField(label: 'Version', value: copy.ref ?? copy.digest),
+        if (description != null && description.trim().isNotEmpty) DetailField(label: context.t('store.skill_field_description'), value: description.trim()),
+        DetailField(label: context.t('store.skill_field_source'), value: source),
+        DetailField(label: context.t('store.skill_field_address'), value: shown),
+        DetailField(label: context.t('store.skill_field_version'), value: copy.ref ?? copy.digest),
         DetailField(
-          label: 'Pin',
+          label: context.t('store.skill_field_pin'),
           value: copy.pin == null
               ? context.t('store.skill_entry_unpinned', {'digest': copy.digest})
               : context.t('store.skill_entry_pin', {'pin': copy.pin}),
