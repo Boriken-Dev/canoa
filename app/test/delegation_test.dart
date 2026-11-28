@@ -120,7 +120,8 @@ void main() {
     });
 
     testWidgets('the session list reads Waiting while a turn runs with a working child, and not after', (tester) async {
-      final scene = await openScene(tester);
+      // Wide enough that the header, beside the list, still draws its state as a word.
+      final scene = await openScene(tester, size: const Size(1400, 900));
       await scene.fourChildren();
       expect(rowStateOf(scene.session), isNot(RowState.waiting), reason: 'no turn runs');
       await scene.turn();
