@@ -258,6 +258,19 @@ impl Schedules {
         Config::load_layers(&self.layers).map_err(|error| error.to_string())
     }
 
+    /// The tasks the runner checks: none when no configuration file exists, which is a host with nothing scheduled.
+    fn read_tasks(&self) -> Result<Option<Config>, String> {
+        match Config::load_layers(&self.layers) {
+            Ok(config) => Ok(Some(config)),
+            Err(crate::config::ConfigError::Read { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     fn watch(self: &Arc<Self>, stopped: &Arc<AtomicBool>) {
         // A repeating task is not made up for: the first check looks forward from when the host started.
         let mut previous = now_ms();
@@ -270,10 +283,10 @@ impl Schedules {
                 return;
             }
             let now = now_ms();
-            match self.tasks() {
+            match self.read_tasks() {
                 Ok(config) => {
                     lock(&self.inner).complained = None;
-                    for (id, task) in &config.schedules {
+                    for (id, task) in config.iter().flat_map(|config| &config.schedules) {
                         if !task.enabled {
                             continue;
                         }

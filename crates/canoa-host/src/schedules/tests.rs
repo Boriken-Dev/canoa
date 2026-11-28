@@ -240,3 +240,20 @@ fn a_note_is_one_line_cut_to_what_it_holds() {
     assert!(long.ends_with('…'));
     assert_eq!(long.chars().count(), super::NOTE_CHARS + 1);
 }
+
+#[test]
+fn a_home_with_no_configuration_file_has_no_tasks_and_nothing_to_complain_of() {
+    let dir = std::env::temp_dir().join(format!("canoa-schedules-absent-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let schedules = super::Schedules::new(crate::config::Layers::only(dir.join("canoa.cfg")), None);
+    assert!(schedules.read_tasks().unwrap().is_none());
+
+    std::fs::write(
+        dir.join("canoa.cfg"),
+        "[schedules.t
+",
+    )
+    .unwrap();
+    assert!(schedules.read_tasks().is_err());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
