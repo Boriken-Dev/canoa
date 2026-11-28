@@ -225,6 +225,7 @@ A setting is a key of canoa.cfg, read and written through the configuration stor
 | `origins.json` | the extension origins the native host admitted | a record of pairing, read back at start |
 | `admitted.json` | the page keys the Office add-in admitted | a record of pairing, read back at start |
 | `ca.pem`, `client.pem`, `session-ca.pem`, `session-roots.pem` | what one session's proxy made | per session, removed with it |
+| `session-proxy.url` | the address and credentials of the proxy one session runs, beside its CA files, for tools outside the session | per session, removed with it |
 | `daemon.json` | Foundry Local's own record of its service | another program's file |
 | `config.json`, `tokenizer.json` | a speech model's files as its publisher ships them | content of the model, checked by digest |
 | `package.json`, `package-lock.json` | a profile's npm install of its tools | made by npm |

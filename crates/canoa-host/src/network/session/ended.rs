@@ -512,10 +512,16 @@ fn what_a_session_is_given_to_trust_holds_the_authoritys_certificate_and_never_i
     let kept = files_under(&private.0);
     assert_eq!(
         kept.len(),
-        2,
-        "the session's directory holds the two bundles: {kept:?}"
+        3,
+        "the session's directory holds the two bundles and the proxy's address: {kept:?}"
     );
-    for file in &kept {
+    let address = fs::read_to_string(private.0.join("session-proxy.url")).expect("the address");
+    assert_eq!(
+        Some(address),
+        value("HTTPS_PROXY"),
+        "the file names the address the session's programs are given"
+    );
+    for file in kept.iter().filter(|file| file.ends_with(".pem")) {
         let text = fs::read_to_string(file).expect("text");
         let blocks = text.matches("-----BEGIN ").count();
         assert_eq!(blocks, text.matches("-----BEGIN CERTIFICATE-----").count());

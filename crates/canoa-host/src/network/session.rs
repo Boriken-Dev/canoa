@@ -486,16 +486,15 @@ fn middleman(
         })
     })?;
     let running = &lease.running;
-    let mut variables = loopback_variables(
-        &format!(
-            "http://{PROXY_USER}:{}@{}",
-            running.token, running.proxy.addr
-        ),
-        &effect.bypass,
+    let address = format!(
+        "http://{PROXY_USER}:{}@{}",
+        running.token, running.proxy.addr
     );
+    let mut variables = loopback_variables(&address, &effect.bypass);
     let ends = match (&running.intercept, private) {
         (Some(intercept), Some(private)) => {
             variables.extend(trust_files(&intercept.ca, private)?);
+            write_address(&address, private)?;
             format!(
                 ", which ends TLS for {} to present a client certificate to them (a program that pins the certificates it trusts will refuse the one it is given)",
                 intercept.describe()
@@ -537,6 +536,13 @@ fn trust_files(ca: &ProxyCa, private: &Path) -> Result<Vec<(String, String)>, St
         variables.push((name.to_owned(), roots.clone()));
     }
     Ok(variables)
+}
+
+/// Writes the address the session's proxy listens on, with its credentials, to `session-proxy.url` beside the authority's files, so
+/// a tool that is not a child of the session can find a port that is chosen when the proxy starts. It goes with the directory.
+fn write_address(address: &str, private: &Path) -> Result<(), String> {
+    std::fs::write(private.join("session-proxy.url"), address)
+        .map_err(|error| format!("the proxy's address could not be written: {error}"))
 }
 
 /// One destination pattern and the certificate its destinations are given.
