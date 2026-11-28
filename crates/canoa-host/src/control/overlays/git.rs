@@ -656,6 +656,10 @@ impl Overlays {
         if !remotes.is_empty() {
             command.reaches(remotes);
         }
+        #[cfg(test)]
+        for (address, repository) in &self.rewrites {
+            command.args(["-c", &format!("url.{repository}.insteadOf={address}")]);
+        }
         command.args(["-c", "protocol.allow=never"]);
         for scheme in ["https", "http", "ssh", "git", "file"] {
             command.args(["-c", &format!("protocol.{scheme}.allow=always")]);

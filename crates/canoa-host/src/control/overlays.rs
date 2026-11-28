@@ -114,6 +114,9 @@ pub(crate) struct Overlays {
     /// The environment a test makes this host's git runs inherit: a person's home, ssh agent and programs.
     #[cfg(test)]
     person: Vec<(OsString, OsString)>,
+    /// Addresses a test sends to a repository of its own, as `(address, repository)`: git's `url.<repository>.insteadOf`.
+    #[cfg(test)]
+    rewrites: Vec<(String, String)>,
 }
 
 fn refused(what: impl Into<String>) -> (i32, String) {
@@ -145,6 +148,14 @@ impl Overlays {
             .iter()
             .map(|(name, value)| (OsString::from(name), value.clone()))
             .collect();
+        self
+    }
+
+    /// This host, whose git runs fetch `repository` where they are asked for `address`.
+    #[cfg(test)]
+    pub(crate) fn with_rewrite(mut self, address: &str, repository: &str) -> Self {
+        self.rewrites
+            .push((address.to_owned(), repository.to_owned()));
         self
     }
 

@@ -43,6 +43,8 @@ struct Rig {
     tmp: PathBuf,
     config: PathBuf,
     transport: Arc<Canned>,
+    /// `(address, repository)` pairs git is told to fetch from the repository when asked for the address.
+    rewrites: Vec<(String, String)>,
 }
 
 impl Rig {
@@ -54,6 +56,7 @@ impl Rig {
             tmp,
             config,
             transport: Arc::new(Canned::default()),
+            rewrites: Vec::new(),
         }
     }
 
@@ -90,9 +93,12 @@ impl Rig {
             None,
             UploadLimits::default(),
         ))
-        .with_overlays(Overlays::new(
-            Some(self.tmp.join("cfg").join("overlays")),
-            OverlayLimits::default(),
+        .with_overlays(self.rewrites.iter().fold(
+            Overlays::new(
+                Some(self.tmp.join("cfg").join("overlays")),
+                OverlayLimits::default(),
+            ),
+            |overlays, (address, repository)| overlays.with_rewrite(address, repository),
         ))
         .with_index(StoreIndex::new(
             Some(self.tmp.join("home").join("cache").join("store")),
@@ -297,6 +303,59 @@ fn the_read_source_scans_a_repository_for_its_skills() {
     assert_eq!(all["result"]["provider"], "read");
     assert_eq!(all["result"]["skills"][0]["source"], url);
     assert_eq!(all["result"]["skills"][0]["path"], "skills/docx");
+}
+
+#[test]
+fn a_host_with_no_catalog_settings_lists_what_each_default_source_holds() {
+    let mut rig = Rig::new("read-defaults");
+    let upstream = repo(
+        &rig.tmp,
+        "anthropics-skills",
+        &[
+            ("skills/pdf/SKILL.md", &skill_md("pdf")),
+            ("skills/docx/SKILL.md", &skill_md("docx")),
+        ],
+    );
+    rig.rewrites.push((
+        crate::store::catalogs::DEFAULT_SKILL_SOURCE.to_owned(),
+        file_url(&upstream),
+    ));
+    let control = rig.control("");
+
+    // The types say which catalog each offers first, with no canoa.cfg entry for either.
+    let types = ask(&control, &Caller::Owner, "store/catalogs", json!({}));
+    let offered = |kind: &str| {
+        types["result"]["types"]
+            .as_array()
+            .and_then(|all| all.iter().find(|each| each["type"] == kind))
+            .map(|each| each["default"].clone())
+            .unwrap_or_else(|| panic!("no type {kind} in {types}"))
+    };
+    assert_eq!(offered("skills")["label"], "anthropics", "{types}");
+    assert_eq!(
+        offered("skills")["source"],
+        crate::store::catalogs::DEFAULT_SKILL_SOURCE
+    );
+    assert_eq!(offered("mcps")["label"], "official", "{types}");
+    assert_eq!(
+        offered("mcps")["source"],
+        crate::control::registry::OFFICIAL
+    );
+
+    // Each is read by its label and lists its entries: the skills from the repository the address was sent to, the servers from
+    // the registry's list endpoint, which the stand-in answers.
+    let skills = rig.catalog(&control, "skills", "anthropics", json!({}));
+    assert_eq!(names(&skills, "skills"), ["docx", "pdf"], "{skills}");
+    let servers = rig.catalog(&control, "mcps", "official", json!({}));
+    assert_eq!(
+        names(&servers, "servers"),
+        ["io.example/files", "io.example/mail"],
+        "{servers}"
+    );
+    assert_eq!(
+        *rig.transport.asked.lock().expect("lock"),
+        ["https://registry.modelcontextprotocol.io/v0.1/servers?limit=30"]
+    );
 }
 
 #[test]
