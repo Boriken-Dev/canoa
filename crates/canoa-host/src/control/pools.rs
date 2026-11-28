@@ -66,7 +66,9 @@ pub(super) fn set(
             }
             PoolIssue::NameTaken(name) => (
                 REFUSED,
-                format!("the name {name} is an account's, and a pool and an account do not share one"),
+                format!(
+                    "the name {name} is an account's, and a pool and an account do not share one"
+                ),
             ),
             PoolIssue::AutomaticPool(_) => (REFUSED, issue.to_string()),
             PoolIssue::UnknownMember(member) => (NOT_FOUND, format!("no account called {member}")),
