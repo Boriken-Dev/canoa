@@ -38,8 +38,6 @@ pub(crate) enum Kind {
     Lines,
     /// Free-form: a table or a list the host reads whatever its keys, shown and edited as JSON.
     Json,
-    /// A number that need not be whole.
-    Number,
 }
 
 /// One table the generic editor offers.
