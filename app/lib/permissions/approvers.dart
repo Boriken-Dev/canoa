@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../brand.dart';
+
 /// The name of the entry that stands for the window a session runs in: it takes a timeout and nothing else.
 const String windowApprover = 'window';
 
@@ -91,12 +93,12 @@ final class Approvers {
   /// Reads the table [raw]; throws [FormatException] naming the entry and never a value.
   factory Approvers.parse(Object? raw) {
     if (raw == null) return const Approvers();
-    if (raw is! Map) throw const FormatException('canoa.cfg: permissions.approvers must be a table');
+    if (raw is! Map) throw const FormatException('${Brand.configFile}: permissions.approvers must be a table');
     int? seconds(String name, Map<dynamic, dynamic> table) {
       final value = table['timeout_seconds'];
       if (value == null) return null;
       if (value is! int || value < 1) {
-        throw FormatException('canoa.cfg: permissions.approvers.$name.timeout_seconds must be a whole number of at least 1');
+        throw FormatException('${Brand.configFile}: permissions.approvers.$name.timeout_seconds must be a whole number of at least 1');
       }
       return value;
     }
@@ -105,26 +107,26 @@ final class Approvers {
     int? window;
     for (final MapEntry(key: name, value: table) in raw.entries) {
       if (name is! String || table is! Map) {
-        throw const FormatException('canoa.cfg: each permissions.approvers entry must be a table');
+        throw const FormatException('${Brand.configFile}: each permissions.approvers entry must be a table');
       }
       if (name == windowApprover) {
         window = seconds(name, table);
         continue;
       }
       if (!approverNameOk(name)) {
-        throw FormatException('canoa.cfg: permissions.approvers.$name: a name is 1 to 32 lower-case letters, digits, - and _');
+        throw FormatException('${Brand.configFile}: permissions.approvers.$name: a name is 1 to 32 lower-case letters, digits, - and _');
       }
       final provider = table['provider'];
       if (provider is! String || provider.trim().isEmpty) {
-        throw FormatException('canoa.cfg: permissions.approvers.$name.provider must name a provider');
+        throw FormatException('${Brand.configFile}: permissions.approvers.$name.provider must name a provider');
       }
       final detail = table['detail'] ?? 'tool';
       if (detail != 'tool' && detail != 'command') {
-        throw FormatException('canoa.cfg: permissions.approvers.$name.detail must be "tool" or "command"');
+        throw FormatException('${Brand.configFile}: permissions.approvers.$name.detail must be "tool" or "command"');
       }
       final settings = table['settings'];
       if (settings != null && settings is! Map) {
-        throw FormatException('canoa.cfg: permissions.approvers.$name.settings must be a table');
+        throw FormatException('${Brand.configFile}: permissions.approvers.$name.settings must be a table');
       }
       final notifier = table['notifier'];
       entries.add(ApproverEntry(
