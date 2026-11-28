@@ -64,7 +64,11 @@ pub(super) fn set(
             PoolIssue::InvalidLabel { .. } | PoolIssue::InvalidStandard => {
                 (BAD_PARAMS, issue.to_string())
             }
-            PoolIssue::NameTaken(_) | PoolIssue::AutomaticPool(_) => (REFUSED, issue.to_string()),
+            PoolIssue::NameTaken(name) => (
+                REFUSED,
+                format!("the name {name} is an account's, and a pool and an account do not share one"),
+            ),
+            PoolIssue::AutomaticPool(_) => (REFUSED, issue.to_string()),
             PoolIssue::UnknownMember(member) => (NOT_FOUND, format!("no account called {member}")),
             PoolIssue::DuplicateMember(member) => (BAD_PARAMS, format!("{member} is listed twice")),
             other => (BAD_PARAMS, other.to_string()),
